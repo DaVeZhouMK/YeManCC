@@ -1,0 +1,855 @@
+{
+  "schemaVersion": 1,
+  "sourceApproval": false,
+  "baselineManifestSha256": "ac2b6a9b2ca2c69b8be36b0d37c3b0be66a38e64046624619271f8031babc18f",
+  "baseline": "B43 manifest selected original bytes",
+  "sources": [
+    {
+      "path": "PowerControl/GameTitlePolicy.json",
+      "sha256": "82a1c3ec6c62a746cafbb1b7b85533036c17ac61b8645d30360545bc3f533dc4"
+    },
+    {
+      "path": "decky-plugin/src/performanceModel.ts",
+      "sha256": "bf69c588f1cf5b71fd80f91b09c07685225a723349c287b487d5e908ac525ab4"
+    },
+    {
+      "path": "package.json",
+      "sha256": "d674fca2e2699011912e086ece46af6b8aafd44e43d8d11d6b8a5ee50de985e7"
+    },
+    {
+      "path": "src/bridge/aiFanMock.ts",
+      "sha256": "7d6d250039f78b44200f524ba9a085ab9789348c192b179294b25d7448100ac7"
+    },
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+    },
+    {
+      "path": "src/bridge/autofloat.ts",
+      "sha256": "c81b3b8ae4565145f31353befc62232462b16085e945e9e3f3a89d1c79b6e237"
+    },
+    {
+      "path": "src/bridge/background.ts",
+      "sha256": "3180bdda5e6614242ac70a830d831c05c233cee1b767b1e9fcfb9e28a16f1319"
+    },
+    {
+      "path": "src/bridge/controllerPersona.ts",
+      "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+    },
+    {
+      "path": "src/bridge/controllerShortcutRules.ts",
+      "sha256": "cb850b5828df07bb0fbeae017d147b828639b70f91c4e7e0d7a095b6b62d2dfc"
+    },
+    {
+      "path": "src/bridge/cpuProfiles.ts",
+      "sha256": "be7d197a7655ca6a01e8ad9fca9776f7548a15c83eef2bdfb16e6a0df9056784"
+    },
+    {
+      "path": "src/bridge/deckyFanActions.ts",
+      "sha256": "c1e379e63c6a075558ab4dc1f386ba79f3af9b65b888e8b33ff34814d13c27a6"
+    },
+    {
+      "path": "src/bridge/deckyFanDisplay.ts",
+      "sha256": "5910f6019f4385c6fdc2871a3d4fe501ee3a2e9050095586fe0c76b86a6dcf9a"
+    },
+    {
+      "path": "src/bridge/deckyGameActions.ts",
+      "sha256": "1e50889a3f7259d1cab93499ad9e81cb697822a1c23bdf52bcaba2ca7ac39e14"
+    },
+    {
+      "path": "src/bridge/deckyGlobalActions.ts",
+      "sha256": "1c833c9c5e49d91ae0d525eeaff05a8c8a15fdc9ab71ed1c7626299c13ee3216"
+    },
+    {
+      "path": "src/bridge/deckyGyroDefaults.ts",
+      "sha256": "caeba2244d219e89b341573f88c19e3a480318b5bdc8e64a2856d8c4e0da9ba7"
+    },
+    {
+      "path": "src/bridge/deckyInputOptions.ts",
+      "sha256": "8951412cc04ea4df2c1ad4360139ef8c124e587a4060a2ad30ef6cd60972a571"
+    },
+    {
+      "path": "src/bridge/deckyPerformanceActions.ts",
+      "sha256": "506e36be9beb5cacfa56d82eb58221c3902ba0765a5387e2d30f9320f1aa65b9"
+    },
+    {
+      "path": "src/bridge/deckySidebar.ts",
+      "sha256": "4ceb16a62376749f1a2e3dc6c2031a1b57e4e587c7ddbdca02891e05fec89d73"
+    },
+    {
+      "path": "src/bridge/diagnosticLogMaintenance.ts",
+      "sha256": "373abdfd6d4ddbe4a90243a1ae470a15bb78b677fed165942ac5d92c4a4b7608"
+    },
+    {
+      "path": "src/bridge/dynamicBackground.ts",
+      "sha256": "eb63729714f9eed75a8bbf697a2d8022e6a49b629dfdd514b29211bf24321dd2"
+    },
+    {
+      "path": "src/bridge/fanApi.ts",
+      "sha256": "2f8c1de17935b9ff016a2deaefb041cf52e5a763aacaea194593da120e8a59a2"
+    },
+    {
+      "path": "src/bridge/fanCurve.ts",
+      "sha256": "a5679d7a7024101932ede8daef756a625d254bae44200a3a0c708000aaaa9d9a"
+    },
+    {
+      "path": "src/bridge/fanDiagnostics.ts",
+      "sha256": "427617ae42ae7d5474631fdf034ce2fe80694dbc92c1b16868c1a5ded04d8918"
+    },
+    {
+      "path": "src/bridge/fanFeature.ts",
+      "sha256": "17f447f88957db8bce18db66fdcf095d8309159202fac27a94cf8caad4d1cfe7"
+    },
+    {
+      "path": "src/bridge/fanHost.ts",
+      "sha256": "b4fede80ba42ee19c7a2d6e86a12d1206335bdde6ac2f0a5667fd00da53146f4"
+    },
+    {
+      "path": "src/bridge/fanHost/capabilityAdmission.ts",
+      "sha256": "f1f64c14a03f3b233ec3004c04f42e51fcc1a345c86dbc8c378ccdc8480ee8ef"
+    },
+    {
+      "path": "src/bridge/fanHost/deployment.ts",
+      "sha256": "2524655a2cb6e4a1bc05f8771718621cc8a0b9af295c81a1413195f11a6f8eb1"
+    },
+    {
+      "path": "src/bridge/fanHost/startupConfiguration.ts",
+      "sha256": "6afaa2666057245295bae56a563524b0ce839394ab36fca0e02ee71bf6cfc919"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerAsset.json",
+      "sha256": "26c84052d51d29bcf27789652f79c000ba3cbd8c77d995717e9688b38c641936"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerRepair.ts",
+      "sha256": "7890e2ac4d246fe9bc30edb3d391b74aec1202c618aff3b7fbfcabd8c0668145"
+    },
+    {
+      "path": "src/bridge/fanSessionEvidence.ts",
+      "sha256": "1f64ca84057429cfef1e4f297d632e24c0f74685034a0cb3cc07ff161a266827"
+    },
+    {
+      "path": "src/bridge/frameRateLimits.ts",
+      "sha256": "c4554ac2064f422c604244a6ff4465f731e3055e54163e4b70d458c93ac58d27"
+    },
+    {
+      "path": "src/bridge/frameRateModel.ts",
+      "sha256": "e8494c827db9f5d86661ff4ec366e019c0b93e79475e6de21f863d4490111f3f"
+    },
+    {
+      "path": "src/bridge/gameCorePolicy.ts",
+      "sha256": "07c76a6447c213f4b9b87759b7d06c5ac9967ef73fe57bee366daada828bf838"
+    },
+    {
+      "path": "src/bridge/gameInputOverride.ts",
+      "sha256": "b6611088996f80e2cb963fbc89f3f74262b1cacdc98985ce5cccd43d10d356b6"
+    },
+    {
+      "path": "src/bridge/gameMediaDownloads.ts",
+      "sha256": "7607e015513e3d646143eb8e99d2cbcff31f08313c922313483c860af9474df3"
+    },
+    {
+      "path": "src/bridge/gameMediaPreparationPolicy.ts",
+      "sha256": "4d43610f0ce966077c391176b7d28a92a2bb70b2c1162fb2e6886a36aa92fe55"
+    },
+    {
+      "path": "src/bridge/gameMediaRevisionFence.ts",
+      "sha256": "0ad38b2fa6c3d64bd2dc44426142d19c3e7f1d46da49ecb7f8b1696c1eacf9d8"
+    },
+    {
+      "path": "src/bridge/gamePolicyHysteresis.ts",
+      "sha256": "adadbee7224b36e725e71bcf787e6c21864e8cfcf6e0a673ca041c5934382701"
+    },
+    {
+      "path": "src/bridge/gamePolicyTarget.ts",
+      "sha256": "6f4651aab3231de59daf48d6cb6a11c5188885e3dc68d5c9fa4901acef39df83"
+    },
+    {
+      "path": "src/bridge/gamedetect.ts",
+      "sha256": "6e137e758786ae47df7936dc2de9544219acb38bc7db1e13994cf136256903a1"
+    },
+    {
+      "path": "src/bridge/gameproc.ts",
+      "sha256": "fe0e59998d67f038a4a6cefd2fce8e8dcfd9a73048a06cc37d46f1d8bbb69d40"
+    },
+    {
+      "path": "src/bridge/gamingHomePolicy.ts",
+      "sha256": "5a55fb0f37f5a5bb64123a6eb2a7bd4c4fa6c159643cc6e456e01b52b2301acd"
+    },
+    {
+      "path": "src/bridge/gyroPresetModel.ts",
+      "sha256": "05e394418832d0083a9dc482414e38cada0a9e3c97fa73066735efe2fa715b55"
+    },
+    {
+      "path": "src/bridge/gyroVirtualFeature.ts",
+      "sha256": "5dc221efcc4e0d54d19d6cf62df1fe99a9adf3dc535f7711c3af194528fd6a9a"
+    },
+    {
+      "path": "src/bridge/hardwareCoordinator.ts",
+      "sha256": "98e4bee792e3d98c57b449657a174738c7ef19cdf1efa2b8fec2bb6c7212cba0"
+    },
+    {
+      "path": "src/bridge/hcInputUtils.ts",
+      "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+    },
+    {
+      "path": "src/bridge/inputConfigHash.ts",
+      "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+    },
+    {
+      "path": "src/bridge/inputDiagnostics.ts",
+      "sha256": "4b6a7c852b01b1e2429138e3d17204fbc4a199f52ad2569650147eeb8504dcf6"
+    },
+    {
+      "path": "src/bridge/inputDiagnosticsUi.ts",
+      "sha256": "9a51d5bd829d53f01959ceb7a9234e681d0159e82408e26b8cb97c4852fb4f46"
+    },
+    {
+      "path": "src/bridge/inputOwnerRuntime.ts",
+      "sha256": "0a5fb1a480a523bc16de767d0d54bf4a63f317ee62476984060993ecbc5b7748"
+    },
+    {
+      "path": "src/bridge/inputStartupPolicy.ts",
+      "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+    },
+    {
+      "path": "src/bridge/ipc.ts",
+      "sha256": "78a2a5c370b2d11312b7cade48402b001456bcbe0d39a2faffb7c26c71fa52b6"
+    },
+    {
+      "path": "src/bridge/monitorAppliedTdp.ts",
+      "sha256": "09ca9e6801bfcf3933cf10a74f51a674531c8a60a6d7d42d4a33d66c3061f3b2"
+    },
+    {
+      "path": "src/bridge/monitorCoreTiles.ts",
+      "sha256": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e"
+    },
+    {
+      "path": "src/bridge/monitorData.ts",
+      "sha256": "a33b814e52baa2a43e7aa64b6fe99ff47759d674021cfa0b4eac703be3aede6e"
+    },
+    {
+      "path": "src/bridge/monitorDisplayFeed.ts",
+      "sha256": "fbd20173626d2a94f62255b5502f0ded49f51774799db26bb9ad464af35edfa8"
+    },
+    {
+      "path": "src/bridge/monitorFpsHardware.ts",
+      "sha256": "9e0e9e35178fd428f4f1e6d9348b2db4614395d7c0c497077161cdddc0554692"
+    },
+    {
+      "path": "src/bridge/monitorFrameTime.ts",
+      "sha256": "5a07e28a7013e787d6cf4d735bd604230cf5747537423c03bb27c035ddc598dc"
+    },
+    {
+      "path": "src/bridge/monitorHudDrag.ts",
+      "sha256": "29649aaf488f0b3b10c053d3f577a7e362da16ede83481e19dde353fdbf33308"
+    },
+    {
+      "path": "src/bridge/monitorHudFpsVisibility.ts",
+      "sha256": "4fb6c95c02fe56bf310a65bc323039a78994092b4cb536da6d2c3d41d4212db4"
+    },
+    {
+      "path": "src/bridge/monitorHudFreshness.ts",
+      "sha256": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee"
+    },
+    {
+      "path": "src/bridge/monitorHudModel.ts",
+      "sha256": "6665173a531153d1c8427e758153c09616aa74873ee49d53b16d587045ef985f"
+    },
+    {
+      "path": "src/bridge/monitorNativeDemand.ts",
+      "sha256": "8e2cc37ff20d17f05856c0d8b22ec000099c44b39da4ff9c2a4184a4b334c6b5"
+    },
+    {
+      "path": "src/bridge/monitorOutput.ts",
+      "sha256": "8fd91fafdf0ae3424241c1183cdba70a33e671305a17ee359f2d7749b26068eb"
+    },
+    {
+      "path": "src/bridge/monitorOutputCoordinator.ts",
+      "sha256": "8c24738640427e81ad580560415e85c8f95b0f91fd29eced84928bd6bf550a51"
+    },
+    {
+      "path": "src/bridge/monitorPayloadDecoder.ts",
+      "sha256": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotBudget.ts",
+      "sha256": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotSignals.ts",
+      "sha256": "68a9b98d765b563721ee5045fbaa6f4034c6174102319cf57eea18ed4beec976"
+    },
+    {
+      "path": "src/bridge/monitorTopProjection.ts",
+      "sha256": "e3d741e5bd88760c457c8e37e520674281042112a2c7bef344fa2712c6b81a84"
+    },
+    {
+      "path": "src/bridge/performanceControls.ts",
+      "sha256": "6e576f791dc903402ca11dd19f96a3d622672f87f8d04eaa86ec7bf00b5cddc9"
+    },
+    {
+      "path": "src/bridge/performanceSchedule.ts",
+      "sha256": "2b5422dca7095c678ab3f115089f605a2c1820341d07901141f1a17939501883"
+    },
+    {
+      "path": "src/bridge/powerSource.ts",
+      "sha256": "32c052caa385e033c6d0f0a959a87125cd2ec8319679fb19eaf7e34d15f6a30d"
+    },
+    {
+      "path": "src/bridge/quickActionLock.ts",
+      "sha256": "ac29e28c658bda93264e5389459fc843459cb8632d1ca60db224ae40c0821535"
+    },
+    {
+      "path": "src/bridge/quickAppDefaults.ts",
+      "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+    },
+    {
+      "path": "src/bridge/residentNavigation.ts",
+      "sha256": "b2c2770c7ad60613841afd91d0f538358f8fa4099e5c1f504075c6eb41dc7d71"
+    },
+    {
+      "path": "src/bridge/rtssOverlay.ts",
+      "sha256": "2d3e7fb809eeabecd3055ed1c1c1f5e443ff8e1ad7577c36337ae00dce5493a9"
+    },
+    {
+      "path": "src/bridge/settingsRepository.ts",
+      "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+    },
+    {
+      "path": "src/bridge/settingsSnapshot.ts",
+      "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+    },
+    {
+      "path": "src/bridge/sharedGameMedia.ts",
+      "sha256": "8eaef9fa97b4783009e9c990e47f145957688f9b133b993281addb9bacc69893"
+    },
+    {
+      "path": "src/bridge/sleepRecovery.ts",
+      "sha256": "b0b2976f032b34f683b262dd8ce51c98ec968fd6c360c181639c82c44ff03f64"
+    },
+    {
+      "path": "src/bridge/steamGameLink.ts",
+      "sha256": "c7e32a60997bff42eb49f797bd8cf4f1f83bfc468ec05abc99184cfc351b776d"
+    },
+    {
+      "path": "src/bridge/steamHttp.ts",
+      "sha256": "01e0daabeccce59727d3322efe58e779e49412fe27b20d9c7f8449146820e85c"
+    },
+    {
+      "path": "src/bridge/steamMediaPlaylist.ts",
+      "sha256": "26f8e2859256a983a414335099855d7877c7b10777a2296b81e2d3bb9aa92741"
+    },
+    {
+      "path": "src/bridge/steamMediaSource.ts",
+      "sha256": "f5378efd7139fa3bcde3a7c0a23b1063e865f611f0ddaa494dc77a6a2de8fa00"
+    },
+    {
+      "path": "src/bridge/steamSettings.ts",
+      "sha256": "36eae6ce4f450e0b85524f66920dc6e6a5ee7818d3b7d46a0ef0f336c65f7472"
+    },
+    {
+      "path": "src/bridge/steamUi.ts",
+      "sha256": "164dd4e8354e845ed9034f3bc28370ec65cc8b014d562c2498b9ca058795f4c8"
+    },
+    {
+      "path": "src/bridge/tdpCircuitBreaker.ts",
+      "sha256": "e0e181771869c411576746e15f19a8c4515fcd2043c5735f8c189a5e2f913e00"
+    },
+    {
+      "path": "src/bridge/tdpRuntimeState.ts",
+      "sha256": "c021f00359d3887abfb31aca707def2555ba1fbebfcb318a0fc44959072f0860"
+    },
+    {
+      "path": "src/bridge/tdpStaticDiagnostics.ts",
+      "sha256": "4e3a576453ae1bef5e9f1b4ee86314566e0d02a9bdce5fc0e190604629e039ee"
+    },
+    {
+      "path": "src/bridge/theme.ts",
+      "sha256": "04531df1d352f992742f3842168aed3aa7b840bd312dfad397a8a1854f7fe5cd"
+    },
+    {
+      "path": "src/bridge/topmon.ts",
+      "sha256": "5936cc3610c75478721ed32d3f08ef8afa9a822e28024562cca6c89ad4242244"
+    },
+    {
+      "path": "src/bridge/uiLifecycle.ts",
+      "sha256": "4358563359424025d2c8a8688ab3c658f3eaa412b4cf0260a0c3f151517a9443"
+    },
+    {
+      "path": "src/bridge/uiSettings.ts",
+      "sha256": "90e436bf71fabb430fc5b2c33914ade952773563bff16bde68d272d244cb440f"
+    },
+    {
+      "path": "src/bridge/updateManager.ts",
+      "sha256": "7e01d625ac2c38c0e89fe6a88d4dc28fed8990e76d4de117cd64897b690469a2"
+    },
+    {
+      "path": "src/bridge/updatePredownload.ts",
+      "sha256": "a32715e868160afd3fec871f13668972fb96f201ed600549ccab1eed728432f4"
+    },
+    {
+      "path": "src/bridge/virtualTargetPolicy.ts",
+      "sha256": "2880c56808a56324fa906860b6e72702db0ba329b1a50f27b59096f570d423d0"
+    },
+    {
+      "path": "src/bridge/virtualTargetPolicyState.ts",
+      "sha256": "bae2446425e2ecffea6febbc92febec863375d5256811669581f0375e8150b7c"
+    },
+    {
+      "path": "src/bridge/yeman.ts",
+      "sha256": "98cd76060a4ae7183b6e6ef918773c1e0fbb8b09a27b6b112c3341a6ff0e3e4e"
+    },
+    {
+      "path": "src/components/AppIcon.vue",
+      "sha256": "e65cf67cd652d4fe72c812c57931e307177b455fa464698f2a2a99e1f3723639"
+    },
+    {
+      "path": "src/components/BackgroundEffectPreview.vue",
+      "sha256": "87d30df75450414e498eed03c4acb7d124c581a16edc9e43f8103f156a662ff0"
+    },
+    {
+      "path": "src/components/ContinuousPerformancePanel.vue",
+      "sha256": "b5bf6ce4b63c5443ee0870561cca49deb33c16f1b6bf7346d51485829310df1e"
+    },
+    {
+      "path": "src/components/DiagnosticLogPauseClearButton.vue",
+      "sha256": "559411aeef0451fd1b0cf887e770a84dee81d2eee344e1a04e063e0addb2fc20"
+    },
+    {
+      "path": "src/components/Dropdown.vue",
+      "sha256": "221f676d372b4e46462ef281fcaa898710fdcb511ed756ea05843824286cad9e"
+    },
+    {
+      "path": "src/components/GameProfileModeBanner.vue",
+      "sha256": "0423cbf0d60d8c9179ffeb1ceb3eebe301403cab8b11dc1b391962a17a6cd4cc"
+    },
+    {
+      "path": "src/components/GameProfileRemoveDialog.vue",
+      "sha256": "cb4b87fb950f6d738fcfe7808730cfd8c10168ba8f2d998b7c53b6663b0b998e"
+    },
+    {
+      "path": "src/components/InlineIcon.vue",
+      "sha256": "bf3f94052bd2774dc9e2d3f684bd049f025f32d83b4eb4c25bbcd089890a8af5"
+    },
+    {
+      "path": "src/components/IntegratedPage.vue",
+      "sha256": "1bf9c04dbd79fb8acd49c26f4259328ce2c40aaf80d80ac5aafd9f7f68d0786d"
+    },
+    {
+      "path": "src/components/NavRail.vue",
+      "sha256": "d73a84a7310aa315515876e3b4539a1c0bb44edbae3a86624bf07fe289255ed8"
+    },
+    {
+      "path": "src/components/OverflowGameName.vue",
+      "sha256": "5c83b3afe4a5d8626dbd9d4af43c4d415fc8b1b91dde0c5533e21ddb957c4fe9"
+    },
+    {
+      "path": "src/components/SegButton.vue",
+      "sha256": "9e0cffbe3754245dd8649518c4c9c987bc0be1cb2dbd6c123ec904d85df4a88b"
+    },
+    {
+      "path": "src/components/SettingsSectionIcon.vue",
+      "sha256": "170d9fcea7209a849e889c1084411892c3fb3b8738ff04dbd82ec9505a34ac89"
+    },
+    {
+      "path": "src/components/SettingsSections.vue",
+      "sha256": "05f6c752a1f97efb9c56dafa223c443bc52476d1fce0fb3ceb962fa3f205d758"
+    },
+    {
+      "path": "src/components/SleepRecoveryPanel.vue",
+      "sha256": "61f1b186549cb6622ba51f3ab6a0c3482e51d5e1175e7209cac140562450f49b"
+    },
+    {
+      "path": "src/components/Slider.vue",
+      "sha256": "57ca3cd3da0aa14055c4ab842c137948ad4ebf8153a62dfb385fadd1d33fb227"
+    },
+    {
+      "path": "src/components/SteamRecoveryDiagnostics.vue",
+      "sha256": "2ba8ac7d3845ab4292ab676286e9e40c1a24b30b9a53ebb2e891eaa3a9fc0720"
+    },
+    {
+      "path": "src/components/SwitchControl.vue",
+      "sha256": "4e3f4e5d244486dceb03c471aeef6b9cdf132a36b6ff9b1d49c448d8c574c080"
+    },
+    {
+      "path": "src/components/Toggle.vue",
+      "sha256": "7dbd393653dc2175593ae7c1993f15dbbdfd6ba0436e23be51040c91b9efdfee"
+    },
+    {
+      "path": "src/gamepad/activationEvidence.ts",
+      "sha256": "80bfa251cec34a2e6e487dbe7156c03cc3a964ce87e32edf5fde6c18d52474f9"
+    },
+    {
+      "path": "src/gamepad/engine.ts",
+      "sha256": "556cf81d48624c6f42f4f767388bf4ed9c0187082269e0e78736bae5d813f819"
+    },
+    {
+      "path": "src/gamepad/focus.ts",
+      "sha256": "2e9bace4568ce018f9ce6d3bf44c277ee585549d97fd3288e8d89ab832c36f55"
+    },
+    {
+      "path": "src/gamepad/performanceNavigation.ts",
+      "sha256": "cceaddd996b2580754177e4a15e83f062a577761906987d14313fa1b4029a7ea"
+    },
+    {
+      "path": "src/gamepad/serial.ts",
+      "sha256": "e34bd77ae587263c6cafb89b9f1f8b3ac0828c35a07d8312a8da15270f533ae0"
+    },
+    {
+      "path": "src/gamepad/spatial.ts",
+      "sha256": "2b00c5c8bf21d07a833d962d3ffba2fdcd6eb2b82b7b935f3adf336f644b428f"
+    },
+    {
+      "path": "src/icons.json",
+      "sha256": "f0ab4c673721c56b7fff3293ab5cffa8a8fe91eca0fcaec8e1bd3b6621372d07"
+    },
+    {
+      "path": "src/icons.ts",
+      "sha256": "e9d76c604ab5deefe6048ccea91be6952a969c6ce258d025062f36a174e0b86c"
+    },
+    {
+      "path": "src/radial/availability.ts",
+      "sha256": "1b873833125c8727bab698793e8d83367d639baca64b42a294975176f9eecfd4"
+    },
+    {
+      "path": "src/radial/fan.ts",
+      "sha256": "685b058f007090b03569552f7342ffa8107b4ff0059cdf7967a27a9f6bd67a26"
+    },
+    {
+      "path": "src/radial/fanActions.ts",
+      "sha256": "c1804c97abea5f6742e7cb995ae08fcfc2acea879ee037adec0e8ded69c24e24"
+    },
+    {
+      "path": "src/radial/fanHost.ts",
+      "sha256": "afea7db0eba54fb2a58e626b3e863e40fd9867af6e33dd2e0181567b6e9a20cb"
+    },
+    {
+      "path": "src/radial/host.ts",
+      "sha256": "a8661a83beae3af43ec3f9b88f494db2035c38b8aa3e0252f30930e7d4043f9f"
+    },
+    {
+      "path": "src/radial/input.ts",
+      "sha256": "72e7960ad53fa5d30ba370d23093b75497a85d1532eab22d49bdea48f2691014"
+    },
+    {
+      "path": "src/radial/inputActions.ts",
+      "sha256": "b97c3b2defc4ebf679d37721abb1cb970d876dc5a7a4eebda2ba3ab9e12b5838"
+    },
+    {
+      "path": "src/radial/inputHost.ts",
+      "sha256": "46e958a0e276431b449a01233fa0f6f9242b75bd786b877cc172ac6ae101fd4d"
+    },
+    {
+      "path": "src/radial/model.ts",
+      "sha256": "7a630b83e34c29039696e5034621c3be3293d32e87d154164fcec51a032ba30a"
+    },
+    {
+      "path": "src/radial/performance.ts",
+      "sha256": "f16cfd1242771f9ef212303206103893044f92f8f75b64f2fbe51ee4082c9d87"
+    },
+    {
+      "path": "src/radial/settings.ts",
+      "sha256": "b9831eb25e9fdb0726131ce18b9fb5e0242b8b495cf2a811de1d01bcc322f3e3"
+    },
+    {
+      "path": "src/radial/testing.ts",
+      "sha256": "d890afec9cedb8c5f25463922284cb8ea4b80abd86d3849dfd749b06c74f57b4"
+    },
+    {
+      "path": "src/radial/testingState.ts",
+      "sha256": "bcd59a9cf78056887b88f7dfcd729d00e8dc93b54ab4acffef4578a67a5ecf88"
+    },
+    {
+      "path": "src/radial/utilities.ts",
+      "sha256": "79c869b247053f30611ab5b2c883ca482f17c377fe659918d0a429a38c4ec5b7"
+    },
+    {
+      "path": "src/radial/utilitiesHost.ts",
+      "sha256": "3a7b49462d4ffe91d23464e23468f4a1cca814c214bf93232d5dd4ae5f2fa45c"
+    },
+    {
+      "path": "src/radial/utilityActions.ts",
+      "sha256": "502bc2f5127b0954c41fc58592087b1cd118e931c8023a3ee46356cc6c9c47bd"
+    },
+    {
+      "path": "src/robust/frontendDiagnostics.ts",
+      "sha256": "4b6b6b9ba9272919a13964d1452e2faa79246c9d2faa5f0ee404b7b5a5b3a1a9"
+    },
+    {
+      "path": "src/robust/repairModel.ts",
+      "sha256": "a9b2a1267074dac35513d9ed342d43c9cfe3736a17ef87d4dd177190c0934a65"
+    },
+    {
+      "path": "src/scheduler.ts",
+      "sha256": "5e5d4c31e641a3bdfe0cfa4a403047a6ac723e3ae1e398e6aba8a243a80a95f4"
+    },
+    {
+      "path": "src/styles/gamepad.css",
+      "sha256": "be013174b069e92ba6940633f38ad18f1e26a0db75856d24acfb3e0790e34633"
+    },
+    {
+      "path": "src/styles/integratedConsole.css",
+      "sha256": "7d2e9af43f25d40ac1db4382bd5396ed6c96f0e96a245940dd8066129d0b0a99"
+    },
+    {
+      "path": "src/styles/tokens.css",
+      "sha256": "4909488c688e5230c67e3a86bbc1b6ddd89133a54187e67fd593527993bbd0d7"
+    },
+    {
+      "path": "src/version.ts",
+      "sha256": "f8a3e426394e5b2e7b56724ccd455f778dee67bce07875d082d29531243b72de"
+    },
+    {
+      "path": "src/views/SettingsView.vue",
+      "sha256": "6618e11f47a3bcff8263a13e940adce310b9059456b6f3654df5d143039986a3"
+    },
+    {
+      "path": "tools/fixtures/battery_ui_native_recovery/snapshot-node-binding.mjs",
+      "sha256": "80e67a366ecec19b1e754294dddfcdbbede48eb7e4c6d775cbc4376c2f283d7a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/bundled-node-tool-authority.mjs",
+      "sha256": "df4dc4b3b8b410315bb85c38efe73f46a8567497f2d7b22ccb7feb825ce37c46"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-device-diagram-consumer/contract.mjs",
+      "sha256": "0a1cc68fab6f6c768a48d4ebbfb58b5384f15217b0ac476d7c1c54aed50b394c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/execution-completion/index.mjs",
+      "sha256": "d79eb3dbe5eae5a8944fb9d706262d1cef1de0e62f8ab69284da45bef6cf7d5b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/runner.mjs",
+      "sha256": "324cc2abc5a8f6cf9ca1541589af3ad37e84b8092f8a9db488bdded9c6ec6b50"
+    },
+    {
+      "path": "tools/ymcc_sim/global/snapshot-node-tools.mjs",
+      "sha256": "563521308628c61bacef7377bb2b9ba49c045f5f43f568ce948ba829cca84a1a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/source-snapshot.mjs",
+      "sha256": "3e64a9103a30de5769b7ca500e3123fffec0f6f4f0111bbac8c358be12a26b47"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/templates/engineAudit.ts",
+      "sha256": "61c8483fda05fb0d94ec6b2b8bd82d7f2162099612f77b9f5acfacb2d8f21624"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/templates/memoryIpc.ts",
+      "sha256": "1c77a1fb61b64b62e23816c88a9abefa0a8ed58bc862884f95fee13226f84598"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/tool-inputs.mjs",
+      "sha256": "0cd051fadda048fa302341815365bc8b479f268303dcf49e758158249027d6cb"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/toolchain-inputs.json",
+      "sha256": "f1e6a6693758a9d6751653c0af8ac15bbef4842c14bc0eb4f456515512ad61d9"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "3914d1b26bf7beff106ec3a249e214be0b0979015bd4465572e7347897f1531b"
+    }
+  ],
+  "moduleFiles": [
+    "contract.mjs",
+    "adapter.mjs",
+    "build.mjs",
+    "memory-ports.ts",
+    "browser-entry.ts",
+    "browser-cases.mjs",
+    "run.mjs",
+    "spec.json",
+    "README.md",
+    "contract.test.mjs"
+  ],
+  "scopeGaps": [
+    {
+      "id": "fan-independent-ui",
+      "status": "DORMANT_NOT_RENDERED",
+      "functions": [
+        "toggleFanDiagnosticLogging",
+        "exportFanLogs",
+        "clearFanLogs"
+      ],
+      "evidence": "Functions remain in script; no template binding/control/status rendering in B43 SettingsView."
+    },
+    {
+      "id": "input-independent-ui",
+      "status": "DORMANT_NOT_RENDERED",
+      "functions": [
+        "toggleInputDiagnosticLogging",
+        "exportInputLogs",
+        "clearInputLogs"
+      ],
+      "evidence": "Functions remain in script; no template binding/control/status rendering in B43 SettingsView."
+    }
+  ],
+  "requestedFullScopeAccepted": false,
+  "compiledSourceClosureIsRecordedSeparately": true,
+  "actualCompiledBaselineSourcePaths": [
+    "PowerControl/GameTitlePolicy.json",
+    "decky-plugin/src/performanceModel.ts",
+    "src/bridge/aiFanMock.ts",
+    "src/bridge/api.ts",
+    "src/bridge/autofloat.ts",
+    "src/bridge/background.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/controllerShortcutRules.ts",
+    "src/bridge/cpuProfiles.ts",
+    "src/bridge/deckyFanActions.ts",
+    "src/bridge/deckyFanDisplay.ts",
+    "src/bridge/deckyGameActions.ts",
+    "src/bridge/deckyGlobalActions.ts",
+    "src/bridge/deckyGyroDefaults.ts",
+    "src/bridge/deckyInputOptions.ts",
+    "src/bridge/deckyPerformanceActions.ts",
+    "src/bridge/deckySidebar.ts",
+    "src/bridge/diagnosticLogMaintenance.ts",
+    "src/bridge/dynamicBackground.ts",
+    "src/bridge/fanApi.ts",
+    "src/bridge/fanCurve.ts",
+    "src/bridge/fanDiagnostics.ts",
+    "src/bridge/fanFeature.ts",
+    "src/bridge/fanHost.ts",
+    "src/bridge/fanHost/capabilityAdmission.ts",
+    "src/bridge/fanHost/deployment.ts",
+    "src/bridge/fanHost/startupConfiguration.ts",
+    "src/bridge/fanHostInstallerAsset.json",
+    "src/bridge/fanHostInstallerRepair.ts",
+    "src/bridge/fanSessionEvidence.ts",
+    "src/bridge/frameRateLimits.ts",
+    "src/bridge/frameRateModel.ts",
+    "src/bridge/gameCorePolicy.ts",
+    "src/bridge/gameInputOverride.ts",
+    "src/bridge/gameMediaDownloads.ts",
+    "src/bridge/gameMediaPreparationPolicy.ts",
+    "src/bridge/gameMediaRevisionFence.ts",
+    "src/bridge/gamePolicyHysteresis.ts",
+    "src/bridge/gamePolicyTarget.ts",
+    "src/bridge/gamedetect.ts",
+    "src/bridge/gameproc.ts",
+    "src/bridge/gamingHomePolicy.ts",
+    "src/bridge/gyroPresetModel.ts",
+    "src/bridge/gyroVirtualFeature.ts",
+    "src/bridge/hardwareCoordinator.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputDiagnostics.ts",
+    "src/bridge/inputDiagnosticsUi.ts",
+    "src/bridge/inputOwnerRuntime.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/monitorAppliedTdp.ts",
+    "src/bridge/monitorCoreTiles.ts",
+    "src/bridge/monitorData.ts",
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorFpsHardware.ts",
+    "src/bridge/monitorFrameTime.ts",
+    "src/bridge/monitorHudDrag.ts",
+    "src/bridge/monitorHudFpsVisibility.ts",
+    "src/bridge/monitorHudFreshness.ts",
+    "src/bridge/monitorHudModel.ts",
+    "src/bridge/monitorNativeDemand.ts",
+    "src/bridge/monitorOutput.ts",
+    "src/bridge/monitorOutputCoordinator.ts",
+    "src/bridge/monitorPayloadDecoder.ts",
+    "src/bridge/monitorSnapshotBudget.ts",
+    "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/monitorTopProjection.ts",
+    "src/bridge/performanceControls.ts",
+    "src/bridge/performanceSchedule.ts",
+    "src/bridge/powerSource.ts",
+    "src/bridge/quickActionLock.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/residentNavigation.ts",
+    "src/bridge/rtssOverlay.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/bridge/sharedGameMedia.ts",
+    "src/bridge/sleepRecovery.ts",
+    "src/bridge/steamGameLink.ts",
+    "src/bridge/steamHttp.ts",
+    "src/bridge/steamMediaPlaylist.ts",
+    "src/bridge/steamMediaSource.ts",
+    "src/bridge/steamSettings.ts",
+    "src/bridge/steamUi.ts",
+    "src/bridge/tdpCircuitBreaker.ts",
+    "src/bridge/tdpRuntimeState.ts",
+    "src/bridge/tdpStaticDiagnostics.ts",
+    "src/bridge/theme.ts",
+    "src/bridge/topmon.ts",
+    "src/bridge/uiLifecycle.ts",
+    "src/bridge/uiSettings.ts",
+    "src/bridge/updateManager.ts",
+    "src/bridge/updatePredownload.ts",
+    "src/bridge/virtualTargetPolicy.ts",
+    "src/bridge/virtualTargetPolicyState.ts",
+    "src/bridge/yeman.ts",
+    "src/components/AppIcon.vue",
+    "src/components/BackgroundEffectPreview.vue",
+    "src/components/ContinuousPerformancePanel.vue",
+    "src/components/DiagnosticLogPauseClearButton.vue",
+    "src/components/Dropdown.vue",
+    "src/components/GameProfileModeBanner.vue",
+    "src/components/GameProfileRemoveDialog.vue",
+    "src/components/InlineIcon.vue",
+    "src/components/IntegratedPage.vue",
+    "src/components/NavRail.vue",
+    "src/components/OverflowGameName.vue",
+    "src/components/SegButton.vue",
+    "src/components/SettingsSectionIcon.vue",
+    "src/components/SettingsSections.vue",
+    "src/components/SleepRecoveryPanel.vue",
+    "src/components/Slider.vue",
+    "src/components/SteamRecoveryDiagnostics.vue",
+    "src/components/SwitchControl.vue",
+    "src/components/Toggle.vue",
+    "src/gamepad/activationEvidence.ts",
+    "src/gamepad/engine.ts",
+    "src/gamepad/focus.ts",
+    "src/gamepad/performanceNavigation.ts",
+    "src/gamepad/serial.ts",
+    "src/gamepad/spatial.ts",
+    "src/icons.json",
+    "src/icons.ts",
+    "src/radial/availability.ts",
+    "src/radial/fan.ts",
+    "src/radial/fanActions.ts",
+    "src/radial/fanHost.ts",
+    "src/radial/host.ts",
+    "src/radial/input.ts",
+    "src/radial/inputActions.ts",
+    "src/radial/inputHost.ts",
+    "src/radial/model.ts",
+    "src/radial/performance.ts",
+    "src/radial/settings.ts",
+    "src/radial/testing.ts",
+    "src/radial/testingState.ts",
+    "src/radial/utilities.ts",
+    "src/radial/utilitiesHost.ts",
+    "src/radial/utilityActions.ts",
+    "src/robust/frontendDiagnostics.ts",
+    "src/robust/repairModel.ts",
+    "src/scheduler.ts",
+    "src/styles/gamepad.css",
+    "src/styles/integratedConsole.css",
+    "src/styles/tokens.css",
+    "src/version.ts",
+    "src/views/SettingsView.vue",
+    "tools/ymcc_sim/global/ui-navigation/templates/engineAudit.ts",
+    "tools/ymcc_sim/global/ui-navigation/templates/memoryIpc.ts"
+  ],
+  "baselineUiCaseCountPerViewport": 12,
+  "viewports": [
+    {
+      "width": 1280,
+      "height": 720
+    },
+    {
+      "width": 1280,
+      "height": 800
+    }
+  ]
+}

@@ -1,0 +1,27 @@
+{
+  "schema": "ymcc.monitor-clock-baseline.v1",
+  "sourceKind": "source-derived-fixture",
+  "meaning": "Retained real source before demand-aware clock change, never hardware/runtime state",
+  "files": {
+    "src/bridge/monitorData.ts": "c4ff30b94cd16f1d18192535453a8e086043cb6ee033fd745c500d86251fe3ee",
+    "src/bridge/monitorDisplayFeed.ts": "5edc94fa0ec4bcf745ca7dc6611f25786ab76a08c0ca5da8cff84f1c38e0322b",
+    "src/bridge/monitorHudSampleSource.ts": "12d57572898d836f7b684b856572450eeaf666abc8a72a75e5c031fddd596ad1",
+    "src/bridge/monitorHudFreshness.ts": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee",
+    "src/bridge/monitorHudModel.ts": "bd7de1b91368623b9fef44bd4e8f305451ac5aa5c317579e217e0d0c0d542344",
+    "src/bridge/monitorFrameTime.ts": "38e9253c1b76943cb563009571cae34bc78c8171577a13f1c4727e40757e1509",
+    "src/bridge/monitorCoreTiles.ts": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e",
+    "src/bridge/monitorHudFpsVisibility.ts": "ffefb5bb90254f80791175ef2354986bb1bd02c5362e62e212c17898f3963f9b",
+    "src/bridge/monitorPayloadDecoder.ts": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b",
+    "src/bridge/monitorSnapshotBudget.ts": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9",
+    "src/bridge/monitorTopProjection.ts": "990952a47bd41ddd8a7204250d7871c0c807151c651a8d299e3ffa992736407c",
+    "src/bridge/monitorHudPreview.ts": "3f9542db1257e2db52065b2c2bf88ad7e109e708abeaddcda816c423a3b05173",
+    "src/bridge/monitorHudHost.ts": "4ef3ce712bf810b08bf396a1305cc7a6ba78eb782c4aaa0bd129c76714a31088",
+    "src/bridge/steamHudRelay.ts": "cad6a7712a05cc30c2bcab6ada0ad22de013cf16767af60cb74eff0759af18e1",
+    "src/bridge/monitorHudProtocol.ts": "6108ec68f437d6f892b8843786469aaab5c9a935b4b2a4be14c4418fa469e5d1"
+  },
+  "fixtureRoot": "tools/ymcc_sim/global/monitor-signals/fixtures/clock-before",
+  "provenance": {
+    "originalSourceRoot": "G:/YeManCC-Work/Build/Tasks/YMCC-Steam-HUD-Probe/monitor-clock-demand-20261016/before",
+    "meaning": "Original source provenance only; no runtime dependency on this historical absolute path"
+  }
+}

@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-complete-host-selftest-v1",
+  "hostArguments": [
+    "--self-test"
+  ],
+  "hostTimeoutMs": 180000,
+  "maxLogBytes": 16777216,
+  "expectedTuple": {
+    "hostDllSha256": "149042f482b122adc85a19a905c8579c75cfbc881cd78d85c221aac1fe5cb424",
+    "backendSha256": "73c0070366a0907ac8ee908f4c2c73d1b495faab7edacab339027191f855ccb5",
+    "apphostSha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab",
+    "manifestSha256": "989c0b1ddf8f795f5a5fd10bbb053d945d272f6dac613560c023e599215fe795"
+  },
+  "payloadFiles": [
+    {
+      "name": "install-fan-host-payload.ps1",
+      "sha256": "5a6d68f5ae5573f78cc77f147b295af802cc757d1855d0996239b14af6f3fbdf"
+    },
+    {
+      "name": "run-emergency-fan-restore.ps1",
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6"
+    },
+    {
+      "name": "YeManFanBackend.dll",
+      "sha256": "73c0070366a0907ac8ee908f4c2c73d1b495faab7edacab339027191f855ccb5"
+    },
+    {
+      "name": "YeManFanHost.authorization.md",
+      "sha256": "9c040400a5611a697cc9c21282e02aacce6d7e0b668a579ca7f654aacaf67ac1"
+    },
+    {
+      "name": "YeManFanHost.deps.json",
+      "sha256": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec"
+    },
+    {
+      "name": "YeManFanHost.dll",
+      "sha256": "149042f482b122adc85a19a905c8579c75cfbc881cd78d85c221aac1fe5cb424"
+    },
+    {
+      "name": "YeManFanHost.exe",
+      "sha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab"
+    },
+    {
+      "name": "YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "name": "YeManFanHost.payload.json",
+      "sha256": "989c0b1ddf8f795f5a5fd10bbb053d945d272f6dac613560c023e599215fe795"
+    },
+    {
+      "name": "YeManFanHost.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    }
+  ],
+  "tools": {
+    "nodeSha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b",
+    "jobHelperSha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+  }
+}

@@ -14,7 +14,15 @@ using json=nlohmann::json;
 /* FAMILY_ENUM */
 static constexpr uint64_t kOemBitCc=1ull<<22,kOemBitAc=1ull<<23,kOemBitLib=1ull<<24,kOemBitClaw=1ull<<25,kOemBitQs=1ull<<26,kOemBitZotac=1ull<<47,kOemBitDots=1ull<<48,kOemBitLegionFrontL=1ull<<61,kOemBitLegionFrontR=1ull<<62;
 static struct {YmccFamily family=YmccFamily::AsusRogAlly;std::string deviceClass="HandheldCompanion.Devices.ROGAlly";} g_machineIdentity;
+static bool msiClawKnownBoardAuthority(){return g_machineIdentity.family==YmccFamily::MsiClaw;}
 static std::atomic<bool> g_exitRequested{false};
+enum class PowerLifecycle { Ready, Suspending, Suspended, Resuming };
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<unsigned long long> g_powerGeneration{1};
+static unsigned long long currentPowerGeneration() { return g_powerGeneration.load(); }
+static unsigned wakeInputResumes = 0;
+static void inputCaptureResumeSensorsForPower(bool) { ++wakeInputResumes; }
+static void sgRecordFact(const char*, const json&) {}
 static std::string W2U(const std::wstring& s){return std::string(s.begin(),s.end());}
 static std::wstring U2W(const std::string& s){return std::wstring(s.begin(),s.end());}
 static const std::wstring POWER_CONTROL_DIR=L"memory";
@@ -29,6 +37,7 @@ static bool processFail=false,scmFail=false,queueFail=false,journalFail=false,jo
 static std::string journal;
 static std::vector<std::function<void()>> jobs;
 static std::function<void()> onPersist;
+static int taskQueries=0;
 static int mutationCount=0,stops=0,starts=0,taskMutations=0,taskStarts=0,processCalls=0;
 static ULONGLONG tick=1;
 static SC_HANDLE fakeScm(LPCWSTR,LPCWSTR,DWORD){if(scmFail){SetLastError(ERROR_ACCESS_DENIED);return nullptr;}return reinterpret_cast<SC_HANDLE>(1);}

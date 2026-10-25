@@ -1,0 +1,172 @@
+// Inert lifecycle environment. Production fragments are inserted below.
+// Handles are symbolic; no Host, driver, SDK or OS device operations execute.
+using DWORD=unsigned long;using ULONGLONG=unsigned long long;using HANDLE=void*;
+constexpr DWORD WAIT_OBJECT_0=0,WAIT_TIMEOUT=258,WAIT_FAILED=0xffffffffUL;
+using InputHostMutex=std::mutex;
+InputHostMutex g_inputHostMx;
+struct Model {bool endpointAbsent=false,queuedQuarantine=false;unsigned restores=0,now=100;bool alive=true,ownsTarget=true,terminationConfirms=true,cleanupCanComplete=false,eofRequested=false,shutdownRequested=false,quiesce=true,neutral=true,release=false,shutdown=true,msi=false,fenceAck=true,recreate=false,restore=true;unsigned kills=0,creates=0,overwrites=0,waits=0,afterRetireCommands=0;std::vector<std::string> trace;};
+Model model;
+HANDLE g_inputHostProcess=nullptr,g_inputHostServerPipe=nullptr;
+bool g_inputHostPrepared=false,g_inputHostNeutralized=false,g_inputHostActive=false,g_inputHostTransportFault=false,g_inputHostHello=false,g_inputHostPipeRetired=false,g_inputHostPipeConnected=false,g_inputHostMsiStageRequested=false,g_inputHostHidHideStateQuery=false,g_inputHostReleaseQuarantined=false,g_inputHostStartBlocked=false;
+std::string g_inputHostRunId,g_inputHostStartupNonce,g_inputHostHostInstanceId,g_inputHostBoundPersona,g_inputHostLifecycle,g_inputHostReleaseDisposition;
+std::wstring g_inputHostPipeName;
+std::string wantedPersona="steamdeck";
+ULONGLONG g_inputHostEpoch=0,g_inputHostBoundPowerGeneration=0,g_inputHostSequence=0,g_inputHostSampleSequence=0,g_inputHostLastKeepAliveTick=0;
+std::atomic<ULONGLONG> g_inputHostHealthySinceTick{0},g_inputHostEpochMirror{0},g_inputHostEpochCounter{50},g_inputHostLastKeepAliveRequestTick{0},g_powerGeneration{7};
+std::atomic<bool> g_wakeHoldPhysicalUnhide{false},g_msiVirtualReleaseRearmEligible{false},g_externalPriorityVirtualSuspended{false},g_gmSessionResetRequested{false},g_inputHostFaultHoldsStart{false};
+std::atomic<const char*> g_gmSessionResetReason{nullptr};
+bool g_inputHostFreshNeutralAdmitted=false,g_inputHostAnalogAnchorInitialized=false,g_inputHostSourceCandidateLogged=false;
+int g_inputHostFreshNeutralFrames=0,g_inputHostFreshNeutralMask=0,g_inputHostAnalogAnchor=0,g_inputHostAnalogStableFrames=0;
+ULONGLONG g_inputHostLastPhysicalIdentityCheckTick=0,g_inputHostLastQuarantineProbeTick=0;
+bool g_xinputPhysicalSourceLocked=false,g_xinputReconfirmRejectLogged=false;
+unsigned g_xinputPhysicalSourceMask=0,g_xinputPreTargetSlots=0,g_xinputAdmittedMask=0,g_xinputLoggedAdmittedMask=0,g_xinputReconfirmMsiGeneration=0,g_xinputConnectedMask=1;
+std::atomic<unsigned> g_xinputSourceReconfirmMask{0};std::atomic<bool> g_xinputPreTargetBoundaryScanned{false};std::string g_xinputReconfirmIdentity;
+struct Identity{std::string deviceInstanceId="physical",baseContainerDeviceInstanceId="physical-root";};
+struct Journal {bool active=false;std::vector<std::string> hiddenByUs,ownedApplications;Identity physical;int before=0,transactionId=1;bool applicationAdded=false,cloakChanged=false,preReleaseCycleAttempted=false,preReleaseCycleOk=false,ownedApplicationResponsibilityUnknown=false;};
+Journal g_hidHideVisibilityJournal;bool carriedDebt=false;
+struct Fence{bool enabled=false,pinned=false;void clear(){enabled=false;pinned=false;}bool required()const{return enabled;}bool currentPinned(const std::string&,ULONGLONG)const{return pinned;}bool acceptRelease(const json&){return model.fenceAck;}bool verified(const std::string&,ULONGLONG)const{return model.endpointAbsent;}std::string run()const{return "accepted-run";}ULONGLONG epoch()const{return 41;}json ownedTargets()const{return json::array({"owned"});}std::string reason()const{return "modeled";}};
+Fence g_msiSteamDeckReleaseFence,g_msiSteamDeckReleaseDebt;
+namespace ymcc::screenpads {inline void observeNativeTransport(ULONGLONG,bool){}}
+enum class InputHostPublicationStage{Unknown};inline void inputHostNotePublicationStage(InputHostPublicationStage){}
+inline void appendNativeLifecycleLog(const char*,const json&){}
+inline void writeLog(const char*,const std::string&){}
+inline void hidHideInvalidateRawInputIdentityCache(){}
+inline json hidHideIdentityJson(const Identity&){return json::object();}
+inline void xinputSlotsMarkDiscoveryDirty(){}
+inline void inputHostClearBoundPersona(){g_inputHostBoundPersona.clear();}
+inline std::string inputHostBoundPersonaValue(){return g_inputHostBoundPersona;}
+inline const char* inputHostPersona(){return wantedPersona.c_str();}
+inline bool ymStartSeamActive(){return false;}
+inline void ymStartSeamTrace(const std::string&){}
+inline void ymStartEnsureRoute(const char*){}
+inline bool ymStartAssetsPresent(){return true;}
+inline bool ymStartAdmitSource(){return true;}
+inline bool inputHostCanCreateDs4TargetWithoutPhysicalSource(){return false;}
+inline std::wstring inputHostExecutablePath(){return L"inert-host";}
+inline bool ymStartExecutablePresent(const std::wstring&){return true;}
+inline bool msiClawKnownBoardAuthority(){return model.msi;}
+inline void msiQuarantineDiagnosticReceipt(){}
+inline void inputHostSwitchAuditRejected(const char*){}
+inline void inputHostSwitchAuditSkipped(const char*){}
+inline ULONGLONG GetTickCount64(){return model.now;}
+inline DWORD GetProcessId(HANDLE){return 11;}
+inline std::string W2U(const std::wstring&){return "symbolic";}
+inline std::string inputHostNewId(){return "new-run";}
+inline bool msiPersonaModeResumeOnNewTuple(){return true;}
+inline void completeCleanup(){if(model.eofRequested&&model.cleanupCanComplete&&model.alive){model.trace.push_back("EOF-cleanup");model.alive=false;model.ownsTarget=false;}}
+inline void inputHostPipeCloseOwned(HANDLE){model.trace.push_back("owned-close");model.eofRequested=true;}
+inline DWORD ymStartHostExitWait(HANDLE){++model.waits;model.trace.push_back("wait");completeCleanup();if(model.shutdownRequested&&model.cleanupCanComplete){model.alive=false;model.ownsTarget=false;}return model.alive?WAIT_TIMEOUT:WAIT_OBJECT_0;}
+inline DWORD WaitForSingleObject(HANDLE,DWORD){return model.alive?WAIT_TIMEOUT:WAIT_OBJECT_0;}
+inline bool TerminateProcess(HANDLE,int){++model.kills;model.trace.push_back("startup-kill");if(model.terminationConfirms){model.alive=false;model.ownsTarget=false;}return true;}
+inline void CloseHandle(HANDLE){model.trace.push_back("process-handle-close");}
+inline bool inputHostRequestLocked(const char* command,const json&,const char*,unsigned,json* receipt=nullptr){
+ if(!g_inputHostServerPipe||g_inputHostPipeRetired){++model.afterRetireCommands;return false;}
+ const std::string c=command;model.trace.push_back(c);if(receipt)*receipt=json::object();
+ if(c=="QUIESCE")return model.quiesce;if(c=="SUBMIT_NEUTRAL")return model.neutral;
+ if(c=="RELEASE_TARGET"){if(model.release)model.ownsTarget=false;return model.release;}
+ if(c=="SHUTDOWN"){model.shutdownRequested=true;return model.shutdown;}
+ if(c=="RECREATE_TARGET")return model.recreate;return false;
+}
+inline void inputStopSignalPhaseLocked(unsigned,const char*,const char*,int){}
+inline void inputHostRestoreVisibilityViaPipeLocked(){}
+struct HidHideVisibilitySnapshot{std::vector<std::string> hidden;bool cloaking=true;};
+inline bool hidHideCaptureVisibilitySnapshot(HidHideVisibilitySnapshot&){return true;}
+inline bool hidHideContainsPath(const std::vector<std::string>&,const std::string&){return false;}
+inline bool hidHideRestorePhysicalTransaction(const char*){++model.restores;if(model.restore)g_hidHideVisibilityJournal.active=false;return model.restore;}
+template<class...A>inline void hidHideCarriedMerge(A&&...){carriedDebt=true;}
+template<class...A>inline void inputHostLogRecreateResult(A&&...){}
+constexpr unsigned kWakeRecreateTimeoutMs=100;
+struct StopObservation{bool target=false,startup=false,localAck=false,shutdownAck=false,exit=false,release=false,held=false;};StopObservation lastStop;
+@@POLICIES@@
+@@HOLD@@
+@@CLEAR@@
+@@TRANSITION@@
+@@RECREATE@@
+inline bool inputHostQueueLifecycleWork(const char* reason){if(std::string(reason)=="quarantine-endpoint-absent")model.queuedQuarantine=true;return true;}
+inline bool msiSteamDeckRecheckOwnedRemovalDebt(){return model.endpointAbsent;}
+inline bool msiExplicitRearmRestoredLocked(){return false;}
+@@QUARANTINE_AUTO@@
+@@QUARANTINE_PROBE@@
+@@QUARANTINE_CLEAR@@
+inline void explicitSettingRearm(bool virtualTargetChanged,bool targetEnabled){@@EXPLICIT_REARM@@}
+
+inline void inputHostStopLocked(const char* reason){
+ const unsigned stopSignalId=1;const json keyboardModifiersAtStopBegin=nullptr;
+ @@STOP_DECLS@@
+ @@STOP_TRANSPORT_DECLS@@
+ (void)transportIdentityReady;
+ @@STOP_ORDERED_AND_WAIT@@
+ @@STOP_RELEASE@@
+ bool visibilityRestored=false,visibilityHeld=false;const char* visibilityDecision="unknown";
+ @@STOP_VISIBILITY@@
+ (void)visibilityRestored;(void)visibilityDecision;
+ lastStop={targetMayExist,startupUnacknowledged,localReleaseAck,shutdownAck,hostExitConfirmed,releaseProven,visibilityHeld};
+ inputHostClearLocked();
+}
+inline bool inputHostStart(){
+ @@START_QUARANTINE@@
+ @@START_OLD_PROCESS@@
+ @@START_POST_OLD@@
+ @@START_TUPLE@@
+ const auto old=g_inputHostProcess;++model.creates;if(old&&model.alive)++model.overwrites;
+ struct{HANDLE hProcess;}pi{reinterpret_cast<HANDLE>(2)};
+ @@START_ASSIGN@@
+ model.alive=true;model.ownsTarget=true;g_inputHostHello=true;g_inputHostPrepared=true;g_inputHostNeutralized=true;g_inputHostActive=false;g_inputHostTransportFault=false;g_inputHostPipeRetired=false;g_inputHostServerPipe=reinterpret_cast<HANDLE>(4);g_inputHostPipeConnected=true;g_inputHostBoundPersona=wantedPersona;
+ return true;
+}
+inline void reset(){
+ model={};wantedPersona="steamdeck";g_inputHostProcess=reinterpret_cast<HANDLE>(1);g_inputHostServerPipe=reinterpret_cast<HANDLE>(3);g_inputHostRunId="accepted-run";g_inputHostStartupNonce="accepted-nonce";g_inputHostHostInstanceId="old-host";g_inputHostPipeName=L"accepted-pipe";g_inputHostBoundPersona="dualshock4";g_inputHostEpoch=41;g_inputHostEpochMirror=41;g_inputHostBoundPowerGeneration=7;g_inputHostHello=true;g_inputHostPrepared=true;g_inputHostNeutralized=true;g_inputHostActive=true;g_inputHostTransportFault=false;g_inputHostPipeRetired=false;g_inputHostPipeConnected=true;g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;g_wakeHoldPhysicalUnhide=false;g_inputHostLastQuarantineProbeTick=0;g_inputHostLifecycle="host-active";g_inputHostReleaseDisposition="active";g_msiSteamDeckReleaseFence={};g_msiSteamDeckReleaseDebt={};g_hidHideVisibilityJournal={};g_hidHideVisibilityJournal.active=true;g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputPreTargetSlots=1;carriedDebt=false;lastStop={};
+}
+inline bool writerReady(){@@WRITER_READY@@ return hostFrameReady;}
+inline json runSuite(){json rows=json::array();unsigned checks=0;const auto expect=[&](const char* name,bool ok,const json& facts=json::object()){++checks;rows.push_back({{"name",name},{"pass",ok},{"facts",facts}});};
+ reset();model.cleanupCanComplete=true;inputHostStopLocked("persona-changed");
+ const auto closeAt=std::find(model.trace.begin(),model.trace.end(),"owned-close"),waitAt=std::find(model.trace.begin(),model.trace.end(),"wait");
+ expect("release-refused-owned-close-before-wait",closeAt<waitAt,{{"trace",model.trace}});
+ expect("EOF-cleanup-can-confirm-exit",lastStop.exit&&!g_inputHostProcess,{{"exit",lastStop.exit},{"trace",model.trace}});
+ expect("EOF-does-not-forge-ACK-or-release",!lastStop.localAck&&!lastStop.shutdownAck&&!lastStop.release);
+ expect("retirement-no-later-ordered-commands",model.afterRetireCommands==0);
+ reset();model.cleanupCanComplete=false;const bool firstStart=inputHostStart();
+ expect("held-live-oldHost-cannot-be-overwritten",!firstStart&&model.overwrites==0&&model.creates==0,{{"created",model.creates},{"overwrites",model.overwrites},{"quarantine",g_inputHostReleaseQuarantined},{"blocked",g_inputHostStartBlocked}});
+ expect("retained-session-history-and-source",g_inputHostProcess&&g_inputHostRunId=="accepted-run"&&g_inputHostEpoch==41&&g_inputHostBoundPersona=="dualshock4"&&g_inputHostHello&&g_inputHostPrepared&&g_xinputPhysicalSourceLocked&&g_xinputPhysicalSourceMask==1);
+ expect("retained-session-writer-revoked",!writerReady()&&!g_inputHostNeutralized&&!g_inputHostActive&&g_inputHostTransportFault&&g_inputHostPipeRetired);
+ expect("no-permanent-persona-fault-or-start-block",!g_inputHostStartBlocked&&!g_inputHostReleaseQuarantined);
+ const bool queued= inputHostPersonaTransitionPending();expect("original-persona-request-remains-pending",queued);
+ model.cleanupCanComplete=true;completeCleanup();const bool afterExitStart=inputHostStart();
+ expect("old-exit-without-endpoint-proof-remains-blocked",!afterExitStart&&model.creates==0&&g_inputHostReleaseQuarantined,{{"pendingBefore",queued},{"start",afterExitStart},{"creates",model.creates},{"quarantine",g_inputHostReleaseQuarantined},{"blocked",g_inputHostStartBlocked},{"trace",model.trace}});
+ g_xinputConnectedMask=3;const auto restoresBefore=model.restores;inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();
+ expect("missing-endpoint-proof-cannot-clear-or-restore",g_inputHostReleaseQuarantined&&g_inputHostPrepared&&model.restores==restoresBefore&&!model.queuedQuarantine);
+ model.now+=1001;g_xinputConnectedMask=1;model.restore=false;inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();
+ expect("failed-physical-restore-cannot-clear-history",model.queuedQuarantine&&g_inputHostReleaseQuarantined&&g_inputHostPrepared&&g_inputHostRunId=="accepted-run");
+ model.restore=true;const bool autoRequired=inputHostQuarantineAutoRecoveryRequired();inputHostReconcileQuarantineOnLifecycleThread();
+ expect("full-endpoint-and-physical-proof-clears-quarantine",!g_inputHostReleaseQuarantined&&!g_inputHostProcess&&g_inputHostRunId.empty()&&!g_inputHostPrepared&&!g_inputHostHello&&!g_inputHostTransportFault&&!g_msiSteamDeckReleaseDebt.required());
+ const auto createsBeforeRearm=model.creates;const bool proofOnlyStart=inputHostStart();
+ expect("existing-rearm-policy-honored-after-clear",autoRequired?proofOnlyStart:(!proofOnlyStart&&g_inputHostStartBlocked&&model.creates==createsBeforeRearm),{{"autoHelperPresent",@@AUTO_HELPER_PRESENT@@},{"autoRequired",autoRequired},{"start",proofOnlyStart},{"blocked",g_inputHostStartBlocked}});
+ if(!autoRequired)explicitSettingRearm(true,true);
+ const bool afterFullEvidenceAndRearm=autoRequired?proofOnlyStart:inputHostStart();
+ expect("same-requested-persona-builds-after-full-proof-and-real-explicit-rearm",afterFullEvidenceAndRearm&&model.creates==1&&model.overwrites==0&&g_inputHostBoundPersona==wantedPersona);
+
+ reset();inputHostStopLocked("persona-changed");inputHostStopLocked("persona-changed");
+ expect("second-Stop-retains-accepted-target",lastStop.target&&!lastStop.startup&&!lastStop.release&&model.kills==0&&g_inputHostHello&&g_inputHostPrepared,{{"target",lastStop.target},{"startup",lastStop.startup},{"release",lastStop.release},{"kills",model.kills}});
+ reset();g_msiSteamDeckReleaseFence={true,true};g_msiSteamDeckReleaseDebt={true,true};inputHostClearLocked();
+ expect("live-Clear-preserves-run-fence-and-debt",g_inputHostRunId=="accepted-run"&&g_inputHostEpoch==41&&g_inputHostBoundPersona=="dualshock4"&&g_inputHostHello&&g_inputHostPrepared&&g_msiSteamDeckReleaseFence.pinned&&g_msiSteamDeckReleaseDebt.pinned&&g_xinputPhysicalSourceMask==1);
+ reset();g_inputHostProcess=nullptr;model.alive=false;model.ownsTarget=false;g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;g_hidHideVisibilityJournal.active=false;g_msiSteamDeckReleaseFence={true,true};g_msiSteamDeckReleaseDebt={true,true};inputHostClearLocked();
+ expect("null-process-quarantine-retains-history-source-debt",g_inputHostRunId=="accepted-run"&&g_inputHostEpoch==41&&g_inputHostBoundPersona=="dualshock4"&&g_inputHostHello&&g_inputHostPrepared&&g_xinputPhysicalSourceMask==1&&g_msiSteamDeckReleaseFence.pinned&&g_msiSteamDeckReleaseDebt.pinned&&g_inputHostTransportFault&&g_inputHostPipeRetired&&!writerReady());
+ inputHostStopLocked("persona-changed");expect("null-process-quarantine-second-Stop-keeps-proof-debt",lastStop.target&&!lastStop.startup&&!lastStop.release&&!lastStop.localAck&&!lastStop.shutdownAck&&model.kills==0&&g_inputHostHello&&g_inputHostPrepared&&g_msiSteamDeckReleaseDebt.pinned);
+ reset();g_inputHostProcess=nullptr;model.alive=false;model.ownsTarget=false;g_hidHideVisibilityJournal.active=false;inputHostClearLocked();expect("confirmed-exit-no-quarantine-original-full-Clear",g_inputHostRunId.empty()&&g_inputHostEpoch==0&&g_inputHostBoundPersona.empty()&&!g_inputHostHello&&!g_inputHostPrepared&&!g_inputHostTransportFault&&!g_inputHostPipeRetired&&!g_xinputPhysicalSourceLocked);
+ const bool alreadyStoppedStart=inputHostStart();expect("already-closed-session-can-build",alreadyStoppedStart&&model.creates==1&&model.overwrites==0);
+ reset();model.recreate=false;const bool recreateFail=inputHostRecreatePreparedTarget();
+ expect("RECREATE-failure-retains-accepted-ownership",!recreateFail&&g_inputHostPrepared&&!g_inputHostNeutralized&&!g_inputHostActive);
+ reset();g_inputHostPrepared=false;model.recreate=false;inputHostRecreatePreparedTarget();expect("RECREATE-failure-does-not-invent-ownership",!g_inputHostPrepared);
+ reset();g_inputHostPrepared=false;model.recreate=true;const bool recreated=inputHostRecreatePreparedTarget();expect("RECREATE-success-prepares-and-neutralizes",recreated&&g_inputHostPrepared&&g_inputHostNeutralized&&!g_inputHostActive);
+ reset();model.recreate=true;model.neutral=false;inputHostRecreatePreparedTarget();expect("RECREATE-neutral-failure-keeps-ownership",g_inputHostPrepared&&!g_inputHostNeutralized&&!g_inputHostActive,{{"prepared",g_inputHostPrepared},{"neutralized",g_inputHostNeutralized},{"active",g_inputHostActive},{"writer",writerReady()}});
+ reset();g_inputHostHello=false;g_inputHostPrepared=false;model.ownsTarget=false;inputHostStopLocked("persona-changed");
+ expect("confirmed-startup-kill-updates-exit-result",model.kills==1&&lastStop.exit&&!g_inputHostProcess,{{"kills",model.kills},{"exit",lastStop.exit},{"trace",model.trace}});
+ reset();g_inputHostHello=false;g_inputHostPrepared=false;model.terminationConfirms=false;inputHostStopLocked("persona-changed");expect("unconfirmed-startup-kill-does-not-invent-exit",model.kills==1&&!lastStop.exit&&g_inputHostProcess!=nullptr);
+ for(bool msi:{false,true}){reset();model.msi=msi;model.release=true;model.shutdown=true;model.cleanupCanComplete=true;g_msiSteamDeckReleaseFence={msi,msi};const bool ok=inputHostStart();expect(msi?"healthy-MSI-switch-control":"healthy-common-switch-control",ok&&lastStop.localAck&&lastStop.shutdownAck&&lastStop.exit&&lastStop.release&&model.kills==0&&model.overwrites==0&&model.creates==1&&!g_inputHostStartBlocked&&!g_inputHostReleaseQuarantined,{{"trace",model.trace}});}
+ reset();model.msi=true;g_msiSteamDeckReleaseFence={true,true};inputHostStopLocked("persona-changed");expect("MSI-unproven-release-fence-unchanged",g_inputHostReleaseQuarantined&&g_inputHostStartBlocked&&g_msiSteamDeckReleaseDebt.pinned&&!lastStop.release);
+ reset();model.alive=false;g_inputHostProcess=nullptr;g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;g_msiSteamDeckReleaseDebt={true,true};model.endpointAbsent=false;inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();expect("MSI-owned-absence-required-before-quarantine-clear",g_inputHostReleaseQuarantined&&g_msiSteamDeckReleaseDebt.required()&&model.restores==0);
+ model.endpointAbsent=true;g_wakeHoldPhysicalUnhide=true;inputHostReconcileQuarantineOnLifecycleThread();expect("wake-hold-blocks-proven-endpoint-restore",g_inputHostReleaseQuarantined&&model.restores==0);
+ g_wakeHoldPhysicalUnhide=false;inputHostReconcileQuarantineOnLifecycleThread();expect("MSI-owned-absence-and-restore-clear-debt",!g_inputHostReleaseQuarantined&&!g_msiSteamDeckReleaseDebt.required()&&!g_inputHostPrepared&&g_inputHostStartBlocked);
+ unsigned failures=0;for(const auto& r:rows)if(!r.at("pass").get<bool>())++failures;
+ return {{"cases",rows.size()},{"checks",checks},{"failures",failures},{"rows",rows},{"realHostOrSdkExecuted",false},{"modeledEOFAndCleanup",true}};
+}

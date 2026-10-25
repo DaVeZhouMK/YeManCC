@@ -1,0 +1,6 @@
+{
+  "target": "tools/ymcc_sim/global/runner.mjs",
+  "beforeSha256": "a48a817539126ba71ead990bc298a70313080cd4de9339ace8d0c8b4ee50cb7a",
+  "reason": "Node runtime fixture preflight returns explicit BLOCKED/exit10; opt-in descriptor mapping preserves existing adapters",
+  "owner": "parent chat"
+}

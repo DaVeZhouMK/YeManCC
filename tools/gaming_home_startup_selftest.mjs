@@ -21,17 +21,21 @@ function evaluate(source, imports = {}, globals = {}) {
   return module.exports;
 }
 const policy = evaluate(fs.readFileSync(path.join(root, 'src/bridge/gamingHomePolicy.ts'), 'utf8'));
+const frameRateModel = evaluate(fs.readFileSync(path.join(root, 'src/bridge/frameRateModel.ts'), 'utf8'));
+const tdpRuntimeState = evaluate(fs.readFileSync(path.join(root, 'src/bridge/tdpRuntimeState.ts'), 'utf8'));
+const BIOS = 'HARDWARE\\DESCRIPTION\\System\\BIOS';
 const { GAMING_OEM_KEY: OEM, GAMING_CONFIG_KEY: CFG } = policy;
 const key = (r, p, n) => [r, p, n].join('|');
 function fixture({ device = null, startup = 0, home = 'Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App', manufacturer = 'ASUSTeK COMPUTER INC.', product = 'ROG Ally RC71L_RC71L' } = {}) {
-  const values = new Map(), writes = [], removed = [], backups = [], events = [];
+  const values = new Map(), reads = [], writes = [], removed = [], backups = [], events = [];
   const set = (r, p, n, v) => v == null ? values.delete(key(r,p,n)) : values.set(key(r,p,n),v);
   set('HKLM',OEM,'DeviceForm',device); set('HKCU',CFG,'StartupToGamingHome',startup); set('HKCU',CFG,'GamingHomeApp',home);
   set('HKLM','HARDWARE\\DESCRIPTION\\System\\BIOS','SystemManufacturer',manufacturer);
   set('HKLM','HARDWARE\\DESCRIPTION\\System\\BIOS','SystemProductName',product);
-  const f = { values, writes, removed, backups, events, failBackup: false, writeHook: null };
+  const f = { values, reads, writes, removed, backups, events, failBackup: false, writeHook: null };
   f.port = {
-    async read(r,p,n) { return values.has(key(r,p,n)) ? values.get(key(r,p,n)) : null; },
+    async read(r,p,n) { reads.push([r,p,n]); if (p === BIOS) throw Error('BIOS identity must not be queried');
+      return values.has(key(r,p,n)) ? values.get(key(r,p,n)) : null; },
     async write(r,p,n,v) { writes.push([r,p,n,v]); events.push('write:' + n);
       if (f.writeHook) { const result = f.writeHook(r,p,n,v,set); if (result !== undefined) return result; }
       set(r,p,n,v); return true; },
@@ -44,14 +48,12 @@ function fixture({ device = null, startup = 0, home = 'Microsoft.GamingApp_8weky
 }
 await check('verified defaults are DeviceForm=46 and StartupToGamingHome=1', () => {
   assert.equal(policy.GAMING_HOME_DEFAULTS.deviceForm,46); assert.equal(policy.GAMING_HOME_DEFAULTS.startup,1);
-  assert(policy.isRogGamingHandheld('ASUSTeK COMPUTER INC.','ROG Xbox ALLY RC73YA_RC73YA'));
-  assert(!policy.isRogGamingHandheld('ASUS','System Product Name'));
 });
 await check('read-only snapshots preserve an enabled startup without a legacy task', async () => {
   const f=fixture({device:46,startup:1}); for(let i=0;i<3;i++)assert((await policy.readGamingHomeState(f.port)).startupEnabled);
   assert.equal(f.writes.length,0); assert.equal(f.backups.length,0);
 });
-await check('missing ROG identity is repaired to 46/1, backed up first, Xbox home unchanged', async () => {
+await check('missing DeviceForm is configured to 46/1, backed up first, Xbox home unchanged', async () => {
   const f=fixture(), home=await f.get('HKCU',CFG,'GamingHomeApp'), state=await policy.setGamingHomeStartup(f.port,true);
   assert.equal(state.deviceForm,46); assert.equal(state.startupValue,1); assert.equal(state.homeApp,home);
   assert.equal(f.events[0],'backup'); assert.equal(f.backups[0].deviceForm,null); assert.equal(f.backups[0].startupValue,0);
@@ -68,9 +70,35 @@ await check('correct configuration is idempotent and other OEM-classified handhe
   f.set('HKCU',CFG,'StartupToGamingHome',0);await policy.setGamingHomeStartup(f.port,true);
   assert.equal(f.writes.length,1);assert.equal(f.writes[0][2],'StartupToGamingHome');
 });
-await check('desktop identity is never converted into handheld identity', async () => {
-  const f=fixture({product:'System Product Name'});await assert.rejects(policy.setGamingHomeStartup(f.port,true),/拒绝/);
-  assert.equal(f.writes.length,0);assert.equal(f.backups.length,0);
+for (const [label, manufacturer, product] of [
+  ['ASUS desktop', 'ASUSTeK COMPUTER INC.', 'System Product Name'],
+  ['Lenovo handheld', 'LENOVO', 'Legion Go'],
+  ['MSI handheld', 'Micro-Star International Co., Ltd.', 'Claw'],
+  ['Valve handheld', 'Valve', 'Steam Deck'],
+  ['ordinary desktop', 'Dell Inc.', 'Desktop PC'],
+  ['missing BIOS identity', null, null],
+  ['invalid BIOS identity', 123, {}],
+]) {
+  await check(label + ' can enable startup with missing/existing DeviceForm and no BIOS access', async () => {
+    for (const device of [null, 3]) {
+      const f=fixture({device,manufacturer,product}), home=await f.get('HKCU',CFG,'GamingHomeApp');
+      const state=await policy.setGamingHomeStartup(f.port,true);
+      assert.equal(state.deviceForm,46);assert.equal(state.startupValue,1);assert.equal(state.homeApp,home);
+      assert.equal(f.events[0],'backup');assert.equal(f.backups[0].deviceForm,device);
+      assert.deepEqual(f.writes.map(w=>w[2]),['DeviceForm','StartupToGamingHome']);
+      assert(!f.reads.some(([,p])=>p===BIOS));
+    }
+  });
+}
+await check('observing an unconfigured desktop never changes configuration', async () => {
+  const f=fixture({device:3,manufacturer:'Dell Inc.',product:'Desktop PC'});
+  const state=await policy.readGamingHomeState(f.port);assert.equal(state.deviceForm,3);assert(!state.startupEnabled);
+  assert.equal(f.writes.length,0);assert.equal(f.backups.length,0);assert(!f.reads.some(([,p])=>p===BIOS));
+});
+await check('disabling on an unconfigured desktop leaves DeviceForm untouched', async () => {
+  const f=fixture({device:3,startup:1,manufacturer:'Dell Inc.',product:'Desktop PC'});
+  const state=await policy.setGamingHomeStartup(f.port,false);assert.equal(state.deviceForm,3);assert.equal(state.startupValue,0);
+  assert.deepEqual(f.writes.map(w=>w[2]),['StartupToGamingHome']);assert(!f.reads.some(([,p])=>p===BIOS));
 });
 await check('backup failure aborts before any mutation', async () => {
   const f=fixture();f.failBackup=true;await assert.rejects(policy.setGamingHomeStartup(f.port,true),/backup failed/);assert.equal(f.writes.length,0);
@@ -158,8 +186,11 @@ await check('page read failure does not disable startup or change tray / Steam s
   const f=await pageFixture();f.readFailure=true;await f.refresh();assert.equal(f.registryFixture.writes.length,0);
   assert(f.container.textContent.includes('读取全屏启动配置失败'));f.unmount();
 });
-await check('real page enable applies 46/1 without Steam or tray coupling; disable retains identity',async()=>{
-  const f=await pageFixture(fixture());f.toggle('开机进入Xbox全屏游戏模式',true);await flush();
+await check('real page enables an ordinary non-ROG desktop without Steam or tray coupling; disable retains DeviceForm',async()=>{
+  const f=await pageFixture(fixture({device:3,manufacturer:'Dell Inc.',product:'Desktop PC'}));
+  f.toggle('开机进入Xbox全屏游戏模式',true);await flush();
+  const startup=descendants(f.container).find(n=>n.props['data-label']==='开机进入Xbox全屏游戏模式');
+  assert.equal(startup.props['data-model'],true);assert(!f.container.textContent.includes('全屏游戏模式设置失败'));
   assert.equal(await f.registryFixture.get('HKLM',OEM,'DeviceForm'),46);assert.equal(await f.registryFixture.get('HKCU',CFG,'StartupToGamingHome'),1);
   assert(!f.actions.some(([name])=>['steamMasterSet','setTrayResident'].includes(name)));
   f.toggle('开机进入Xbox全屏游戏模式',false);await flush();assert.equal(await f.registryFixture.get('HKLM',OEM,'DeviceForm'),46);
@@ -177,6 +208,9 @@ await check('legacy task is never recreated, replacement XML is safe and Steam n
   assert(xml.includes('Repair-GamingHandheld.ps1'));assert(xml.includes('S-1-5-18'));
   const ps=fs.readFileSync(path.join(root,'PowerControl/Repair-GamingHandheld.ps1'),'utf8');
   assert(ps.includes('-Name DeviceForm -PropertyType DWord -Value 46'));assert(!ps.includes('HKCU:'));
+  assert(!/\$isRog|SystemManufacturer|SystemProductName|recognized ROG|\\System\\BIOS/.test(ps));
+  assert(ps.includes('$Inspect -or $current -eq 46'));assert(ps.includes('Administrator permission is required'));
+  assert(ps.indexOf('Set-Content -LiteralPath $backup') < ps.indexOf('New-ItemProperty -LiteralPath $oemPath'));
   const steam=fs.readFileSync(path.join(root,'PowerControl/YeManSteam2.bat'),'utf8');assert(!/taskkill[^\r\n]*Xbox/i.test(steam));
 });
 
@@ -200,7 +234,7 @@ function bridgeFixture(registryFixture=fixture(),legacy=false){
   }}};
   const imports={'./api':api,'./ipc':{invoke:async(name,a)=>{
     assert.equal(name,'registry.delete');assert(a.name);return registryFixture.port.remove(a.root,a.path,a.name);
-  }},'./gamingHomePolicy':policy,'./rtssOverlay':{},'./settingsRepository':{},'./tdpCircuitBreaker':{},'./controllerShortcutRules':{OEM_EMPTY_SNAPSHOT:{}}};
+  }},'./gamingHomePolicy':policy,'./frameRateModel':frameRateModel,'./tdpRuntimeState':tdpRuntimeState,'./rtssOverlay':{},'./settingsRepository':{},'./tdpCircuitBreaker':{},'./controllerShortcutRules':{OEM_EMPTY_SNAPSHOT:{}}};
   const bridge=evaluate(fs.readFileSync(path.join(root,'src/bridge/yeman.ts'),'utf8'),imports,{window:{addEventListener(){},removeEventListener(){}}});
   return{bridge,tasks,files,calls,registryFixture,set exportFails(v){exportFails=v;}};
 }
@@ -219,7 +253,8 @@ await check('failed legacy task export never deletes the task and reports partia
   await assert.rejects(f.bridge.writeGamingHomeStartup(true),/未删除/);assert.equal(f.tasks.size,1);assert(!f.calls.some(a=>a.includes('/Delete')));
 });
 await check('actual bridge serializes explicit enable/disable, keeps home and backs up both changes',async()=>{
-  const f=bridgeFixture();await Promise.all([f.bridge.writeGamingHomeStartup(true),f.bridge.writeGamingHomeStartup(false)]);
+  const f=bridgeFixture(fixture({device:3,manufacturer:'LENOVO',product:'Legion Go'}));
+  await Promise.all([f.bridge.writeGamingHomeStartup(true),f.bridge.writeGamingHomeStartup(false)]);
   assert.equal(await f.registryFixture.get('HKLM',OEM,'DeviceForm'),46);assert.equal(await f.registryFixture.get('HKCU',CFG,'StartupToGamingHome'),0);
   assert.equal([...f.files.keys()].filter(p=>p.endsWith('.json')).length,2);assert(!f.calls.some(a=>a.includes('/Create')));
 });

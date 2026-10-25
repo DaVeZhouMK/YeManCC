@@ -1,0 +1,329 @@
+{
+  "formatVersion": 1,
+  "id": "ymcc-settings",
+  "revision": 1,
+  "created": "2026-10-23",
+  "documentSchemaVersion": 1,
+  "stampKey": "configurationBaseline",
+  "defaultsFile": "settings-defaults-v1.json",
+  "document": {
+    "path": "yeman-settings.json",
+    "backup": "yeman-settings.json.bak",
+    "maxBytes": 4194304,
+    "writer": "settingsStore/native SettingsFileGuard",
+    "policy": "atomic-delta-preserve-unknown"
+  },
+  "sections": [
+    {
+      "name": "ui",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "background",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "music",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "gamepad",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "performanceSchedule",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "gameCustom",
+      "shape": "object",
+      "policy": "compatibility-section-standalone-file-authoritative"
+    },
+    {
+      "name": "tdp",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "rtss",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "cpu",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "sleep",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "quickApps",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "startupDesired",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "power",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "tray",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "autoclose",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "fan",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    },
+    {
+      "name": "input",
+      "shape": "object",
+      "policy": "preserve-cas-and-host-receipts"
+    },
+    {
+      "name": "extensions",
+      "shape": "object",
+      "policy": "preserve-user-fill-missing"
+    }
+  ],
+  "nativeOwnedSections": [
+    "domainLogs",
+    "steamDeckMouse"
+  ],
+  "legacyImports": [
+    {
+      "path": "ui-settings.json",
+      "section": "ui",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "summon.json",
+      "section": "gamepad",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "music_player.json",
+      "section": "music",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "performance-schedule.json",
+      "section": "performanceSchedule",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "control-config.json",
+      "section": "tdp",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "tdp.txt",
+      "section": "tdp",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "FPS-ac.txt",
+      "section": "tdp",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "autofloat.json",
+      "section": "tdp",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "tdp-auto-apply.json",
+      "section": "tdp",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "cpu_profiles.json",
+      "section": "cpu",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "cpu_autostart.json",
+      "section": "cpu",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "cpu_auto_enable.json",
+      "section": "cpu",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "cpu_lock.json",
+      "section": "cpu",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "Sleep/sleepguard.json",
+      "section": "sleep",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "launch_apps.json",
+      "section": "quickApps",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "boot_config.json",
+      "section": "startupDesired",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "yeman-power-scheme.json",
+      "section": "power",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "tray_resident.json",
+      "section": "tray",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "autoclose.json",
+      "section": "autoclose",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "ui-background/background.json",
+      "section": "background",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    },
+    {
+      "path": "ui-background/dynamic-online.json",
+      "section": "background",
+      "read": "only-before-baseline",
+      "cleanup": "retain-live-compatibility-file"
+    }
+  ],
+  "independentUserFiles": [
+    {
+      "path": "game-custom.json",
+      "backup": "game-custom.json.bak",
+      "owner": "performanceSchedule standalone per-game settings",
+      "policy": "preserve"
+    },
+    {
+      "path": "ui-background/dynamic.json",
+      "owner": "native media asset selection",
+      "policy": "preserve"
+    }
+  ],
+  "resourceGroups": [
+    {
+      "root": "feature-assets",
+      "owner": "input module",
+      "policy": "module-manifest-and-shared-maintenance-lock"
+    },
+    {
+      "root": "fan-host-v2",
+      "owner": "fan module",
+      "policy": "module-manifest-and-shared-maintenance-lock"
+    },
+    {
+      "root": "handheldcompanion-runtime",
+      "owner": "HC runtime",
+      "policy": "exact-incoming-runtime-existing-HC-updater"
+    },
+    {
+      "root": "decky",
+      "owner": "Decky",
+      "policy": "managed-manifest-preserve-user-state"
+    },
+    {
+      "root": "steam-appearance",
+      "owner": "Steam appearance",
+      "policy": "shipped-resources-only-preserve-external-user-config"
+    }
+  ],
+  "outsideBaseline": [
+    "installed drivers and BUS reboot continuation",
+    "Steam/userdata and external config_USER.json",
+    "OptiscalerClient and LosslessScaling user settings",
+    "runtime sessions, leases, update recovery receipts, logs and caches"
+  ],
+  "retiredFields": [
+    {
+      "path": "sleep.steamOverlayOffFix",
+      "policy": "force-disabled-retain-key-for-legacy-readers"
+    }
+  ],
+  "cleanupPolicy": {
+    "unknownPaths": "preserve",
+    "legacyFiles": "retain-until-no-live-consumers",
+    "userSettings": "never-package-or-delete-on-upgrade",
+    "resources": "replace-by-owning-module-manifest",
+    "explicitRecovery": "archive-originals-and-reset-owned-application-sections-only"
+  },
+  "moduleOwnedSections": [
+    {
+      "name": "radialMenu",
+      "owner": "src/radial/model.ts",
+      "policy": "preserve-owner-schema-and-revision"
+    },
+    {
+      "name": "screenTouchpads",
+      "owner": "native/main.cpp screen touchpad settings",
+      "policy": "preserve-owner-schema"
+    },
+    {
+      "name": "steamMonitor",
+      "owner": "native/steam_monitor_settings.h",
+      "policy": "preserve-owner-schema"
+    }
+  ],
+  "managedResources": [
+    {
+      "path": "settings-baseline.json",
+      "role": "storage-contract",
+      "update": "replace"
+    },
+    {
+      "path": "settings-defaults-v1.json",
+      "role": "factory-defaults",
+      "update": "replace"
+    }
+  ],
+  "retiredManagedResources": []
+}

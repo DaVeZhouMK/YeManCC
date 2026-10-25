@@ -1,0 +1,16 @@
+// Execute the real frontend bridge, with only IPC replaced. Test notification dedup and teardown.
+import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import {createRequire} from 'node:module';
+const root=path.resolve(import.meta.dirname,'..'),req=createRequire(path.join(root,'package.json')),{transformSync}=req('esbuild'),listeners=new Set(),calls=[],cases=[];
+const module={exports:{}};vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/deckySidebar.ts'),'utf8'),{loader:'ts',format:'cjs'}).code,{module,exports:module.exports,Error,require:name=>{assert.equal(name,'./ipc');return {invoke:(...v)=>{calls.push(v);return Promise.resolve(true);},on:(event,fn)=>{assert.equal(event,'deckySidebar.updated');listeners.add(fn);return()=>listeners.delete(fn);}};}});
+const api=module.exports,emit=s=>{for(const f of listeners)f(s);},check=(name,fn)=>{fn();cases.push(name);};let stop;
+check('notification observer starts without checking versions, launching or changing settings',()=>{stop=api.startDeckySafetyNotifications();assert.equal(calls.length,0);assert.equal(listeners.size,1);});
+check('network/plugin/unknown reasons cannot show global safety closure',()=>{for(const reason of ['HTTP-429','plugin-error','live-debug-unavailable',undefined])emit({enabled:false,reason});assert.equal(calls.length,0);});
+check('actual fatal disabled state sends existing notification with reason and YMCC upgrade action',()=>{emit({enabled:false,reason:'decky-render-failed'});assert.equal(calls.length,1);assert.equal(calls[0][0],'notification.show');assert.match(calls[0][1].body,/致命渲染错误.*已自动关闭.*更新 YMCC/);});
+check('same disabled fault repeated by backend is displayed once',()=>{emit({enabled:false,reason:'decky-render-failed'});assert.equal(calls.length,1);});
+check('disabled state description retains reason when opening settings later',()=>assert.match(api.deckySidebarDescription({enabled:false,reason:'decky-render-failed'}),/已自动关闭/));
+check('explicit enable renews notification ownership for a later new fault',()=>{emit({enabled:true});emit({enabled:false,reason:'decky-render-failed'});assert.equal(calls.length,2);});
+check('startup error reports possible Steam incompatibility without claiming proof',()=>assert.match(api.deckySidebarSafetyReason('decky-frontend-incompatible'),/可能与当前 Steam 不兼容/));
+check('repeated process crashes advise inspecting plugins as well as updating YMCC',()=>assert.match(api.deckySidebarSafetyReason('loader-crash-loop'),/最近安装的插件.*更新 YMCC/));
+check('explicit off without fault keeps normal opt-in description',()=>assert.match(api.deckySidebarDescription({enabled:false}),/^开启后/));
+check('App shutdown removes observer and no later notification can be emitted',()=>{stop();assert.equal(listeners.size,0);const n=calls.length;emit({enabled:false,reason:'loader-crash-loop'});assert.equal(calls.length,n);});
+const out=path.resolve(process.env.YMCC_DECKY_ARTIFACT_ROOT||'work/decky-health');fs.mkdirSync(out,{recursive:true});fs.writeFileSync(path.join(out,'SAFETY-NOTIFICATION.json'),JSON.stringify({passed:true,cases:cases.length,results:cases,nativeSettingsWrites:0,realSteam:false},null,2));console.log('Decky safety notification tests passed: '+cases.length);

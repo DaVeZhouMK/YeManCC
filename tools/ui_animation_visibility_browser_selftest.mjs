@@ -35,14 +35,16 @@ for(const file of ['src/components/NavRail.vue','src/components/TopMonitorBar.vu
 // Same root attribute and lifecycle wiring; no normal App startup or API mocks.
 const fixture=`<script setup lang="ts">
 import {ref,onMounted,onUnmounted,nextTick} from 'vue';
-import {isUiVisible,onUiVisibilityChange} from './src/bridge/uiLifecycle';
+import {isUiVisible,onUiVisibilityChange,startUiPowerReconciliation} from './src/bridge/uiLifecycle';
 const uiVisible=ref(isUiVisible());
 const scalerStyle={width:'720px',height:'420px',zoom:1,position:'static'};
 let stopUiVisibility: (()=>void)|null=null;
 window.__listenerUpdates=0;
 onMounted(()=>{stopUiVisibility=onUiVisibilityChange(({visible})=>{uiVisible.value=visible;window.__listenerUpdates++;});});
 onUnmounted(()=>{stopUiVisibility?.();stopUiVisibility=null;});
-window.__fixture={flush:nextTick};
+let powerReader=null;
+window.__fixture={flush:nextTick,startReadTest:()=>{window.__powerSnapshot={phase:'ready',generation:1,inputReady:true,hardwareWritesAllowed:true};powerReader=startUiPowerReconciliation(async()=>({...window.__powerSnapshot}));}};
+onUnmounted(()=>powerReader?.stop());
 </script><template>${rootTag}
  <span class="nav-icon"><svg class="spinning" width="24" height="24"><path d="M2 2L20 20"/></svg></span>
  <div class="pseudo-test"></div>
@@ -56,7 +58,7 @@ const html=`<!doctype html><meta charset="utf-8"><style>${css.join('\n')}</style
 const server=createServer((request,response)=>{response.setHeader('Content-Type',request.url==='/fixture.js'?'text/javascript':'text/html');response.end(request.url==='/fixture.js'?bundle.outputFiles[0].text:html);});
 await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
 const checks=[],errors=[];let browser;
-const output=resolve(repo,'Build/Validation/CPU-Frontend-20261003');mkdirSync(output,{recursive:true});
+const output=resolve(process.env.YMCC_UI_ANIMATION_OUT || resolve(repo,'Build/Validation/CPU-Frontend-20261003'));mkdirSync(output,{recursive:true});
 try{
  browser=await chromium.launch({headless:true,executablePath:process.env.CPU_BROWSER_EXE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
  const page=await browser.newPage();page.on('pageerror',e=>errors.push(String(e)));
@@ -71,6 +73,12 @@ try{
  await send('ipc:power.suspending');assert.equal((await read()).icon,'paused');await send('ipc:window.shown');assert.equal((await read()).icon,'paused');await send('ipc:power.resuming');assert.equal((await read()).icon,'paused');await send('ipc:power.resumed');assert.equal((await read()).icon,'running');checks.push('power-not-ready-cannot-resume-from-window-shown');
  await page.evaluate(async()=>{Object.defineProperty(document,'visibilityState',{configurable:true,get:()=>window.__docVisibility});window.__docVisibility='hidden';document.dispatchEvent(new Event('visibilitychange'));await window.__fixture.flush();});assert.equal((await read()).icon,'paused');
  await page.evaluate(async()=>{window.__docVisibility='visible';document.dispatchEvent(new Event('visibilitychange'));await window.__fixture.flush();});assert.equal((await read()).icon,'running');checks.push('document-hidden-and-visible');
+ // Same native-Ready/frontend-closed split observed in the G3E export.
+ await page.evaluate(()=>window.__fixture.startReadTest());await page.waitForTimeout(30);
+ await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:2}})));assert.equal((await read()).icon,'paused');
+ await page.evaluate(()=>{window.__powerSnapshot={phase:'ready',generation:2,inputReady:true,hardwareWritesAllowed:true};window.dispatchEvent(new Event('ipc:window.shown'));});
+ await page.waitForFunction(()=>document.querySelector('.app-stage').dataset.uiVisible==='true');state=await read();assert.equal(state.icon,'running');assert.equal(state.pseudo,'running');checks.push('G3E-missed-final-commit-read-resumes-production-fan-and-pseudo-animations');
+ await page.evaluate(()=>{window.__powerSnapshot={phase:'suspended',generation:3,inputReady:false,hardwareWritesAllowed:false};window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation:3}}));window.dispatchEvent(new Event('ipc:window.shown'));});await page.waitForTimeout(40);assert.equal((await read()).icon,'paused');checks.push('G3E-next-real-sleep-keeps-fan-animations-paused');
  await page.evaluate(()=>window.__app.unmount());const updates=await page.evaluate(()=>window.__listenerUpdates);await send('ipc:window.hidden');await send('ipc:window.shown');assert.equal(await page.evaluate(()=>window.__listenerUpdates),updates);checks.push('disposed-component-does-not-receive-visibility-updates');assert.deepEqual(errors,[]);
  const evidence={status:'PASS',capturedAtUtc:new Date().toISOString(),scope:'real uiLifecycle + production App/NavRail CSS + source wiring checks in a minimal Vue fixture; not whole YMCC or CPU measurement',browserVersion:browser.version(),appSha256:createHash('sha256').update(app).digest('hex'),checks,errors};
  writeFileSync(resolve(output,'ui-animation-visibility-evidence.json'),JSON.stringify(evidence,null,2));console.log(JSON.stringify(evidence,null,2));

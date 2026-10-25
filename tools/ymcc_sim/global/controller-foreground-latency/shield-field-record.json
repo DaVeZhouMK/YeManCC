@@ -1,0 +1,30 @@
+{
+  "schema": 1,
+  "archive": "YeManCC-logs-20261023-083438-ROGX.zip",
+  "sha256": "9421ba1a7405eff0c5657d7970388262666d4bf24abd3d39f29181bd46f3dc0e",
+  "observations": {
+    "nativeForegroundDeferrals": 13,
+    "reason": "xusb-same-root-instance-not-admitted",
+    "root": "USB\\VID_0B05&PID_1B4C\\6&A61A827&0&4",
+    "xusbClassPath": "\\\\?\\hid#vid_0b05&pid_1b4c&mi_05&ig_00#8&2be06c40&0&0000#{ec87f1e3-c13b-4100-b5f7-8b84d54260cb}",
+    "nativeLifecycleXusbWitnessLine": 2801,
+    "managedMsiJournalBoundary": "R29 G3E 021009 native-lifecycle.log:624 journalActive=false, primary admission :650 69ms later"
+  },
+  "fixtureBoundary": "Ancestry, active class and source facts are source-derived inputs at inert IO seams. The archive is not a live authority for device writes.",
+  "externalGameLeakProven": false,
+  "physicalAcceptance": false,
+  "afternoonRegression": {
+    "archive": "YeManCC-logs-20261023-133711-ROG大失败-手柄直接干没了.zip",
+    "sha256": "33c3ef3dde7c7a6b7a44794707947cf0a39e704ec376f437d8078be076387af2",
+    "sessionPid": 16320,
+    "nativeSha256": "0b9134870e1e812fa1f90489e1ee0ad62f2d35d2a6590dfd608b392dbeaa1783",
+    "effectivePersona": "disabled",
+    "refreshStart": "2026-10-23T13:35:50.704",
+    "xinputOneToZero": "2026-10-23T13:35:50.824",
+    "helperExitCode": 6,
+    "helperDiagnostic": "record-missing",
+    "claim": "new destructive foreground refresh coincides with physical loss; exact CM failing call remains unproven",
+    "requiredRegression": "recognize PID1B4C HID XUSB, but native/OFF may not hide then stop/start this node; no SDK/PnP/physical success invented",
+    "physicalAcceptance": false
+  }
+}

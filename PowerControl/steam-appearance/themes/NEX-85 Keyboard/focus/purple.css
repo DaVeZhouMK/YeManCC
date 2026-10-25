@@ -1,0 +1,16 @@
+.DefaultTheme {
+	--key-pointer-background-color: #a97b9d;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN {
+	background: linear-gradient(180deg, #a97b9d, #7a586e);
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before {
+	background: linear-gradient(85deg, #a97fa1, #8d7483);
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-d0f0ce813f75d780: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-2d5aa6f6f62fd1a4: 1; }

@@ -1,0 +1,21 @@
+<Project>
+  <Target Name="YmccCurrentCompileBefore" BeforeTargets="CoreCompile" DependsOnTargets="AddGlobalAnalyzerConfigForPackage_MicrosoftCodeAnalysisNetAnalyzers">
+    <ItemGroup>
+      <_YmccCompileInput Include="@(Compile);@(ReferencePath);@(ReferencePathWithRefAssemblies);@(Analyzer);@(AdditionalFiles);@(EditorConfigFiles);@(EmbeddedFiles);@(_CoreCompileResourceInputs);@(Content);$(MSBuildAllProjects);$(MSBuildProjectFullPath);$(ProjectAssetsFile);$(GeneratedMSBuildEditorConfigFile);$(ApplicationIcon);$(Win32Resource);$(Win32Manifest);$(ResolvedCodeAnalysisRuleSet);$(SourceLink)" />
+      <_YmccCompileInput Remove="@(_YmccCompileInput)" Condition="!Exists('%(Identity)')" />
+    </ItemGroup>
+    <GetFileHash Files="@(_YmccCompileInput)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_YmccHashedBefore" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(YmccInputAuditDir)/$(MSBuildProjectName).before.tsv" Lines="@(_YmccHashedBefore->'%(FullPath)|%(FileHash)')" Overwrite="true" Encoding="UTF-8" />
+    <WriteLinesToFile File="$(YmccInputAuditDir)/$(MSBuildProjectName).compile-items.txt" Lines="@(Compile->'%(FullPath)')" Overwrite="true" Encoding="UTF-8" />
+  </Target>
+  <Target Name="YmccCurrentCompileAfter" AfterTargets="CoreCompile">
+    <GetFileHash Files="@(_YmccCompileInput)" Algorithm="SHA256">
+      <Output TaskParameter="Items" ItemName="_YmccHashedAfter" />
+    </GetFileHash>
+    <WriteLinesToFile File="$(YmccInputAuditDir)/$(MSBuildProjectName).after.tsv" Lines="@(_YmccHashedAfter->'%(FullPath)|%(FileHash)')" Overwrite="true" Encoding="UTF-8" />
+    <WriteLinesToFile File="$(YmccInputAuditDir)/$(MSBuildProjectName).csc-args.txt" Lines="@(CscCommandLineArgs)" Overwrite="true" Encoding="UTF-8" />
+  </Target>
+</Project>
+

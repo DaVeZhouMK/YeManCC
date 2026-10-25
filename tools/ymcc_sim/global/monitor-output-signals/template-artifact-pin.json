@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-monitor-static-release-template",
+  "relative": "PowerControl/RTSS-Overlays/YeManOBS-W-1.ovl",
+  "sha256": "b8558bc179c7f4383512c4ce86c266df0e9b117f9917311db85fe98999d88a6f",
+  "bytes": 23703,
+  "role": "static-release-overlay-template"
+}

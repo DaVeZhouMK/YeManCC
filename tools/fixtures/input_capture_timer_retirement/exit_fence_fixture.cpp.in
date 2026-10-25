@@ -1,0 +1,168 @@
+// Actual production exit-fence functions with in-memory queue/log leaves.
+// All fixture threads join; no OS input, Host, device or timer runs.
+#include <json.hpp>
+#include "input_startup_policy.h"
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <deque>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+using json=nlohmann::json;
+@GLOBALS@
+static std::mutex g_inputHostLifecycleWorkMx,logMx;
+static std::deque<std::string> g_inputHostLifecycleWorkQueue;
+static std::atomic<bool> g_inputHostLifecycleWorkRequested{false};
+static std::string g_exitSessionId="fixture-only";
+static std::vector<json> rows;
+static void appendNativeLifecycleLog(const char* event,json row){std::lock_guard<std::mutex>lock(logMx);row["event"]=event;rows.push_back(std::move(row));}
+@IS_CLEANUP@
+@BLOCKS@
+@IS_RAISED@
+@RAISE@
+@RESET@
+static unsigned checks=0,failures=0,threadsStarted=0,threadsJoined=0;
+static std::vector<std::string> failedChecks;
+static void check(bool value,const char* name){++checks;if(!value){++failures;failedChecks.push_back(name);std::cerr<<"CHECK_FAILED "<<name<<'\n';}}
+static void freshFixture(){g_inputHostExitFence=false;g_inputHostExitFenceRefusals=0;g_inputHostExitFenceRefusalRows=0;g_inputHostLifecycleWorkQueue.clear();g_inputHostLifecycleWorkRequested=false;rows.clear();}
+struct JoinedGroup{
+ std::mutex mutex;std::condition_variable cv;bool released=false;std::vector<std::thread> workers;std::atomic<unsigned> errors{0};
+ void release(){std::lock_guard<std::mutex>lock(mutex);released=true;cv.notify_all();}
+ template<class F>void add(F f){workers.emplace_back([this,f]{try{std::unique_lock<std::mutex>lock(mutex);const bool opened=cv.wait_for(lock,std::chrono::seconds(5),[this]{return released;});lock.unlock();if(!opened){++errors;return;}f();}catch(...){++errors;}});++threadsStarted;}
+ void join(){release();for(auto&t:workers)if(t.joinable()){t.join();++threadsJoined;}}
+ ~JoinedGroup(){join();}
+};
+static json run(const std::string& name){
+ @SELFTEST_RESET@
+ freshFixture();const auto before=failures;bool raised=false;std::size_t kept=0;unsigned concurrentErrors=0;
+ if(name=="fresh-process-diagnostic-init"){
+  g_inputHostExitFenceRefusals=11;g_inputHostExitFenceRefusalRows=7;inputHostResetExitFence("capture-init");
+  check(!inputHostExitFenceRaised(),"fresh-init-keeps-default-open-state");
+  check(g_inputHostExitFenceRefusals==0&&g_inputHostExitFenceRefusalRows==0,"fresh-init-resets-only-diagnostics");
+ }else if(name=="init-then-exit"){
+  g_inputHostLifecycleWorkQueue={"persona-transition","virtual-target-disabled","slot0-handoff-step"};g_inputHostLifecycleWorkRequested=true;
+  inputHostResetExitFence("capture-init");inputHostRaiseExitFence("fixture-exit");
+  check(inputHostExitFenceRaised(),"exit-after-init-stays-raised");
+  check(g_inputHostLifecycleWorkQueue==std::deque<std::string>({"virtual-target-disabled","slot0-handoff-step"}),"actual-raise-retains-cleanup-and-slot-cancellation-only");
+  check(g_inputHostLifecycleWorkRequested.load(),"kept-cleanup-remains-requested");
+  check(rows.size()==2&&rows.back().value("droppedQueued",0)==1&&
+    rows.back().value("keptCleanupQueued",0)==1&&rows.back().value("keptSlotCancellationQueued",0)==1,
+    "actual-raise-memory-log-matches-queue-retirement");
+ }else if(name=="exit-then-late-init"){
+  inputHostRaiseExitFence("fixture-exit");g_inputHostExitFenceRefusals=11;g_inputHostExitFenceRefusalRows=7;
+  inputHostResetExitFence("capture-init");
+  check(inputHostExitFenceRaised(),"late-init-must-not-clear-terminal-fence");
+  check(g_inputHostExitFenceRefusals==11&&g_inputHostExitFenceRefusalRows==7,"late-init-must-not-reset-refusal-budget");
+ }else if(name=="repeated-exit-after-late-init"){
+  inputHostRaiseExitFence("fixture-exit");inputHostResetExitFence("capture-init");inputHostRaiseExitFence("repeated-exit");
+  unsigned raisedRows=0;for(auto&r:rows)if(r.value("phase","")=="raised")++raisedRows;
+  check(raisedRows==1,"late-init-must-not-rearm-raise-side-effects");
+  check(inputHostExitFenceRaised(),"repeated-exit-remains-terminal");
+ }else if(name=="native-selftest-fixture-restoration"){
+  inputHostRaiseExitFence("fixture-exit");resetExitFenceFixture("isolated-selftest-restore");
+  check(!inputHostExitFenceRaised(),"native-selftest-helper-explicitly-restores-its-own-fixture");
+  check(g_inputHostExitFenceRefusals==0&&g_inputHostExitFenceRefusalRows==0,"native-selftest-helper-restores-diagnostics");
+  inputHostRaiseExitFence("fixture-exit-again");inputHostResetExitFence("capture-init");
+  check(inputHostExitFenceRaised(),"production-init-remains-terminal-after-test-only-restore");
+ }else if(name=="concurrent-init-and-exit"){
+  JoinedGroup group;for(unsigned i=0;i<8;++i)group.add([]{for(unsigned j=0;j<8;++j)inputHostResetExitFence("capture-init");});
+  group.add([]{inputHostRaiseExitFence("concurrent-exit");});group.join();concurrentErrors=group.errors.load();
+  check(concurrentErrors==0,"all-concurrent-production-calls-completed");
+  // The extra actual init is deterministic, irrespective of the race schedule.
+  inputHostResetExitFence("capture-init");
+  check(inputHostExitFenceRaised(),"concurrent-exit-cannot-be-reopened-by-final-init");
+ }else throw std::logic_error("unknown case");
+ raised=inputHostExitFenceRaised();kept=g_inputHostLifecycleWorkQueue.size();
+ if(name!="fresh-process-diagnostic-init"){
+  check(inputHostExitFenceBlocks(raised,"persona-transition"),"terminal-rejects-persona-work");
+  check(inputHostExitFenceBlocks(raised,"late-hide-after-source-return"),"terminal-rejects-late-hide-work");
+  check(!inputHostExitFenceBlocks(raised,"virtual-target-disabled"),"terminal-preserves-cleanup-allowlist");
+  for(const char* denied:{"keepalive","wake-ready","tuple-update","persona-transition","initial-target-admission",
+      "late-hide-after-source-return","power-resume","physical-source-reconcile","debug-start","slot0-handoff-step",
+      "unknown-new-owner","virtual-target-disabled-extra","startup-owned-return-extra","fault-stop"})
+    check(inputHostExitFenceBlocks(raised,denied),"terminal-rejects-every-owner-and-unknown-reason");
+  for(const char* cleanup:{"virtual-target-disabled","startup-owned-return","quarantine-endpoint-absent",
+      "frame-receipt-fault","fault-stop:timeout"})
+    check(!inputHostExitFenceBlocks(raised,cleanup),"terminal-preserves-exact-cleanup-contract");
+ }
+ return {{"name",name},{"safetyPass",failures==before},{"fenceRaised",raised},{"keptQueueSize",kept},{"concurrentErrors",concurrentErrors}};
+}
+// These calls execute the real pinned policy/transitive headers. They prepare JSON
+// only; saved intent does not acquire Host/device ownership or bypass the fence.
+static json startupPolicyTerminalCase(){
+ freshFixture();const auto before=failures;inputHostRaiseExitFence("policy-terminal");
+ g_inputHostExitFenceRefusals=11;g_inputHostExitFenceRefusalRows=7;
+ g_inputHostLifecycleWorkQueue={"startup-owned-return"};g_inputHostLifecycleWorkRequested=true;
+ const auto logBefore=rows.size();const auto queueBefore=g_inputHostLifecycleWorkQueue;
+ const json saved={{"revision",3},{"outputTarget",{{"persona","disabled"}}},{"gameOverride",{{"owner","old-host"}}},
+   {"appliedRevision",3},{"appliedConfigHash","old"},{"pendingConfigHash","old"},
+   {"hostAcknowledgedRevision",3},{"hostAcknowledgedConfigHash","old"}};
+ const json desired={{"virtualGamepadPersona","elite"},{"gyroPreset","fps"}};
+ auto prepared=ymcc::initializeInputStartup(saved,desired,"fixture-session");
+ check(prepared["revision"]==4&&prepared["startupAppliedSession"]=="fixture-session","real-policy-prepares-one-session");
+ check(prepared["outputTarget"]["persona"]=="elite"&&prepared["gyroMotion"]["enabled"]==true,
+   "real-policy-prepares-desired-json-without-owners");
+ check(saved["revision"]==3&&saved["outputTarget"]["persona"]=="disabled","policy-does-not-mutate-saved-input");
+ check(prepared["gameOverride"].is_null()&&prepared["applyStatus"]=="unknown","policy-retires-stale-owner-claims");
+ for(const char* field:{"appliedRevision","appliedConfigHash","pendingConfigHash","hostAcknowledgedRevision","hostAcknowledgedConfigHash"})
+   check(prepared[field].is_null(),"policy-cannot-mint-applied-or-host-ack-proof");
+ check(ymcc::initializeInputStartup(prepared,json{{"virtualGamepadPersona","disabled"}},"fixture-session")==prepared,
+   "same-session-wake-and-renderer-reload-cannot-replay-startup-intent");
+ auto off=ymcc::initializeInputStartup(prepared,json::object(),"fixture-next-session");
+ check(off["outputTarget"]["persona"]=="disabled"&&off["gyroMotion"]["enabled"]==false,"real-policy-default-is-off");
+ bool emptySessionRejected=false;try{(void)ymcc::initializeInputStartup(saved,desired,"");}
+ catch(const std::runtime_error&){emptySessionRejected=true;}
+ check(emptySessionRejected,"real-policy-rejects-unknown-session");
+ check(inputHostExitFenceRaised()&&g_inputHostExitFenceRefusals==11&&g_inputHostExitFenceRefusalRows==7,
+   "policy-cannot-reopen-fence-or-clear-terminal-refusal-budget");
+ check(rows.size()==logBefore&&g_inputHostLifecycleWorkQueue==queueBefore&&g_inputHostLifecycleWorkRequested,
+   "policy-has-no-queue-or-log-side-effects");
+ check(inputHostExitFenceBlocks(inputHostExitFenceRaised(),"initial-target-admission")&&
+   inputHostExitFenceBlocks(inputHostExitFenceRaised(),"persona-transition")&&
+   inputHostExitFenceBlocks(inputHostExitFenceRaised(),"late-hide-after-source-return"),
+   "prepared-startup-intent-cannot-revive-terminal-owners");
+ return {{"name","real-startup-policy-terminal-purity"},{"safetyPass",failures==before},{"fenceRaised",inputHostExitFenceRaised()}};
+}
+static json startupBootBoundaryCase(){
+ freshFixture();const auto before=failures;inputHostRaiseExitFence("policy-boot-terminal");
+ const auto logBefore=rows.size();
+ json document={{"input",{{"revision",0},{"startupAppliedSession","previous-session"},{"startupAppliedBoot","boot-a"},
+   {"outputTarget",{{"persona","disabled"}}},{"gyroMotion",{{"enabled",false}}}}},
+   {"startupDesired",{{"virtualGamepadPersona","elite"},{"gyroPreset","fps"}}},
+   {"extensions",{{"bootModes",{{"schema",1}}}}}};
+ auto same=ymcc::initializeBootModeInputStartup(document,"new-process","boot-a");
+ check(same["input"]["outputTarget"]["persona"]=="disabled","same-boot-process-restart-preserves-off");
+ auto unknown=ymcc::initializeBootModeInputStartup(document,"unknown-boot-process","");
+ check(unknown["input"]["outputTarget"]["persona"]=="disabled","unknown-boot-does-not-consume-intent");
+ auto next=ymcc::initializeBootModeInputStartup(document,"new-boot-process","boot-b");
+ check(next["input"]["outputTarget"]["persona"]=="elite"&&next["input"]["startupAppliedBoot"]=="boot-b",
+   "new-confirmed-boot-prepares-desired-json");
+ auto migration=document;migration["input"].erase("startupAppliedBoot");
+ auto migrated=ymcc::initializeBootModeInputStartup(migration,"upgrade-process","boot-b");
+ check(migrated["input"]["outputTarget"]["persona"]=="disabled"&&
+   migrated["extensions"]["bootModesAppliedBoot"]=="boot-b","legacy-session-migration-does-not-enable-output");
+ migration["input"]["startupAppliedBoot"]="";
+ auto emptyBoot=ymcc::initializeBootModeInputStartup(migration,"empty-boot-upgrade","boot-b");
+ check(emptyBoot["input"]["outputTarget"]["persona"]=="disabled","empty-prior-boot-migration-preserves-off");
+ auto claimed=document;claimed["extensions"]["bootModesAppliedBoot"]="boot-b";
+ check(ymcc::initializeBootModeInputStartup(claimed,"claimed-boot-process","boot-b")["input"]["outputTarget"]["persona"]=="disabled",
+   "already-claimed-boot-does-not-replay-intent");
+ check(inputHostExitFenceRaised()&&rows.size()==logBefore&&g_inputHostLifecycleWorkQueue.empty()&&
+   !g_inputHostLifecycleWorkRequested,"boot-policy-cannot-revive-terminal-queue-or-log");
+ return {{"name","real-startup-policy-boot-boundary"},{"safetyPass",failures==before},{"fenceRaised",inputHostExitFenceRaised()}};
+}
+int main(){json cases=json::array(),dependencyCases=json::array();try{
+ for(const char*n:{"fresh-process-diagnostic-init","init-then-exit","exit-then-late-init","repeated-exit-after-late-init",
+     "concurrent-init-and-exit","native-selftest-fixture-restoration"})cases.push_back(run(n));
+ dependencyCases.push_back(startupPolicyTerminalCase());dependencyCases.push_back(startupBootBoundaryCase());
+ }catch(const std::exception&e){std::cerr<<e.what()<<'\n';check(false,"fixture-exception");}
+ check(threadsStarted==threadsJoined,"all-owned-fixture-threads-explicitly-joined");
+ std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"failedChecks",failedChecks},{"cases",cases},
+ {"dependencyCases",dependencyCases},{"realStartupPolicyExecuted",true},
+ {"threadsStarted",threadsStarted},{"threadsJoined",threadsJoined},{"allThreadsExplicitlyJoined",threadsStarted==threadsJoined},
+ {"fakeQueue",true},{"memoryLog",true},{"realControlIO",false},{"wholeLifecycleAcceptance",false},{"wholeMainAcceptance",false}}).dump()<<'\n';
+ return failures?1:0;}

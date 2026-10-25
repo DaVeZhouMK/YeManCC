@@ -1,0 +1,47 @@
+// Fixture-only enabled diagnostic memory configuration. No observer I/O runtime is included.
+#define YMCC_MSI_VISIBILITY_DIAGNOSTIC 1
+#define YMCC_MSI_VISIBILITY_WAKE_DIAGNOSTIC 1
+#include "msi_visibility_wake_diagnostics.h"
+static_assert(ymcc::msi::visibility::wake::buildEnabled);
+static ymcc::msi::visibility::wake::Policy g_msiVisibilityWakePolicy;
+static std::atomic<bool> g_exitRequested{false};
+namespace gameMsiMemory {
+static bool exitFence=false, knownBoard=false, virtualLog=false;
+}
+// Explicit external inputs; eligibility and resume-clock policy remain product definitions.
+static bool inputHostExitFenceRaised(){return gameMsiMemory::exitFence;}
+static bool msiClawKnownBoardAuthority(){return gameMsiMemory::knownBoard;}
+static bool domainLogEnabled(const char* domain){return gameMsiMemory::virtualLog&&domain&&std::strcmp(domain,"virtual")==0;}
+@@PRODUCT_ELIGIBILITY@@
+@@PRODUCT_NOTE_RESUME@@
+namespace gameMsiMemory {
+static int checkContext(){
+    const auto oldPolicy=g_msiVisibilityWakePolicy.snapshot();
+    const auto oldLifecycle=g_powerLifecycle.load();const auto oldClock=nowTick;
+    const bool oldExit=g_exitRequested.load();unsigned checks=0;
+    auto check=[&](bool value){assert(value);++checks;};
+    auto empty=[](){g_msiVisibilityWakePolicy.restore({});};
+    auto unobserved=[](){const auto s=g_msiVisibilityWakePolicy.snapshot();return s.observedGeneration==0&&s.observedTick==0;};
+    empty();knownBoard=false;virtualLog=true;nowTick=10000;
+    msiVisibilityObserverNoteResume(71);check(unobserved());
+    knownBoard=true;virtualLog=false;msiVisibilityObserverNoteResume(71);check(unobserved());
+    virtualLog=true;g_powerLifecycle.store(PowerLifecycle::Resuming);
+    check(msiVisibilityWakeDiagnosticEligible(false)&&!msiVisibilityWakeDiagnosticEligible(true));
+    msiVisibilityObserverNoteResume(71);
+    check(g_msiVisibilityWakePolicy.snapshot().observedGeneration==71&&g_msiVisibilityWakePolicy.snapshot().observedTick==10000);
+    nowTick=11000;msiVisibilityObserverNoteResume(71);check(g_msiVisibilityWakePolicy.snapshot().observedTick==10000);
+    g_powerLifecycle.store(PowerLifecycle::Ready);check(msiVisibilityWakeDiagnosticEligible(true));
+    empty();msiVisibilityObserverNoteResume(0);check(unobserved());
+    nowTick=0;msiVisibilityObserverNoteResume(72);check(unobserved());nowTick=12000;
+    exitFence=true;msiVisibilityObserverNoteResume(72);check(unobserved());exitFence=false;
+    g_exitRequested.store(true);msiVisibilityObserverNoteResume(72);check(unobserved());g_exitRequested.store(false);
+    msiVisibilityObserverNoteResume(72);check(g_msiVisibilityWakePolicy.snapshot().observedGeneration==72&&g_msiVisibilityWakePolicy.snapshot().observedTick==12000);
+    const auto state=g_msiVisibilityWakePolicy.snapshot();
+    check(!state.pending&&!state.startupAttempted&&state.wakeAttempts==0&&state.pendingGeneration==0&&state.offeredGeneration==0);
+    g_msiVisibilityWakePolicy.restore(oldPolicy);g_powerLifecycle.store(oldLifecycle);nowTick=oldClock;g_exitRequested.store(oldExit);
+    exitFence=false;knownBoard=false;virtualLog=false;
+    std::cout<<"YMCC_GAME_MSI_CONTEXT: "<<checks<<" checks PASS"<<std::endl;
+    return 0;
+}
+static const int checkedContext=checkContext();
+}

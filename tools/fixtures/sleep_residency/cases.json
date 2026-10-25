@@ -1,0 +1,300 @@
+{
+  "origin": "Synthetic boundary values using locally verified Microsoft507schema; not hardware sleep test logs",
+  "cases": [
+    {
+      "name": "ordinary hardware residency",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedHardwarePercent": 90.0
+      }
+    },
+    {
+      "name": "low hardware residency",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">60000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "low-recorded-hardware-residency",
+      "expected": {
+        "expectedHardwarePercent": 10.0
+      }
+    },
+    {
+      "name": "hardware zero cannot prove physical failure",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-zero-validity-unverified",
+      "expected": {
+        "expectedHardwarePercent": 0.0
+      }
+    },
+    {
+      "name": "software no residency",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">false</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {
+        "expectedWindowsSleepStage": "not-entered"
+      }
+    },
+    {
+      "name": "software no residency hardware absent",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {}
+    },
+    {
+      "name": "missing hardware on old event version",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "software-residency-only",
+      "expected": {
+        "expectedWindowsSleepStage": "unavailable",
+        "hardwarePercentAbsent": true
+      }
+    },
+    {
+      "name": "missing software must not become zero",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {}
+    },
+    {
+      "name": "missing total duration",
+      "xml": "<Event><EventData><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {}
+    },
+    {
+      "name": "empty event data",
+      "xml": "<Event><EventData></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {}
+    },
+    {
+      "name": "short session no alarm",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">1000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "short-session",
+      "expected": {}
+    },
+    {
+      "name": "two minute diagnostic observation boundary",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">120000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {}
+    },
+    {
+      "name": "nineteen hour counters are not int32",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">68400000000</Data><Data Name=\"DripsResidencyInUs\">65000000000</Data><Data Name=\"HwDripsResidencyInUs\">61560000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedHardwarePercent": 90.0,
+        "expectedDurationUs": 68400000000
+      }
+    },
+    {
+      "name": "unsigned sentinel hardware",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">18446744073709551615</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "software-residency-only",
+      "expected": {
+        "invalidField": "HwDripsResidencyInUs",
+        "hardwarePercentAbsent": true
+      }
+    },
+    {
+      "name": "unsigned overflow",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">18446744073709551616</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {
+        "invalidField": "DurationInUs"
+      }
+    },
+    {
+      "name": "negative counter",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">-1</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {
+        "invalidField": "DripsResidencyInUs"
+      }
+    },
+    {
+      "name": "trailing junk",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0junk</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {
+        "invalidField": "DripsResidencyInUs"
+      }
+    },
+    {
+      "name": "hardware exceeds observed duration",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">600000001</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "inconsistent-counters",
+      "expected": {
+        "hardwarePercentAbsent": true
+      }
+    },
+    {
+      "name": "software exceeds observed duration",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">600000001</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "inconsistent-counters",
+      "expected": {}
+    },
+    {
+      "name": "positive hardware contradicts zero software",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "inconsistent-counters",
+      "expected": {}
+    },
+    {
+      "name": "transition count contradicts zero duration",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "inconsistent-counters",
+      "expected": {}
+    },
+    {
+      "name": "invalid boolean is explicit",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">unknown</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "invalidField": "SleepEntered",
+        "expectedWindowsSleepStage": "unavailable"
+      }
+    },
+    {
+      "name": "Sleep stage and hardware residency are independent",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">false</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedWindowsSleepStage": "not-entered"
+      }
+    },
+    {
+      "name": "boolean event flags",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"PowerStateAc\">true</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedFlagFields": true
+      }
+    },
+    {
+      "name": "duplicate must not choose first",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data><Data Name=\"DurationInUs\">1</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {
+        "invalidField": "DurationInUs"
+      }
+    },
+    {
+      "name": "duplicate hardware unavailable",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data><Data Name=\"HwDripsResidencyInUs\">0</Data></EventData></Event>",
+      "expectedAssessment": "software-residency-only",
+      "expected": {
+        "invalidField": "HwDripsResidencyInUs"
+      }
+    },
+    {
+      "name": "zero duration cannot divide",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">0</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {}
+    },
+    {
+      "name": "counter whitespace trims",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\"> 600000000 \t</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">540000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\"> 1 </Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedWindowsSleepStage": "entered"
+      }
+    },
+    {
+      "name": "eighty percent diagnostic hint boundary",
+      "xml": "<Event><EventData><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">570000000</Data><Data Name=\"HwDripsResidencyInUs\">480000000</Data><Data Name=\"DripsTransitions\">20</Data><Data Name=\"FirstDripsEntryInUs\">30000000</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"BootId\">72</Data><Data Name=\"ScenarioInstanceIdV2\">5000000021</Data></EventData></Event>",
+      "expectedAssessment": "hardware-residency-recorded",
+      "expected": {
+        "expectedHardwarePercent": 80.0
+      }
+    },
+    {
+      "name": "single quotes and whitespace attribute",
+      "xml": "<Event><EventData><Data Name = 'DurationInUs'>600000000</Data><Data Name='DripsResidencyInUs'>0</Data><Data Name='DripsTransitions'>0</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {}
+    },
+    {
+      "name": "fields outside EventData are not counters",
+      "xml": "<Event><Data Name=\"DurationInUs\">600000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><EventData></EventData></Event>",
+      "expectedAssessment": "insufficient-evidence",
+      "expected": {}
+    },
+    {
+      "name": "AMD ROG RC73XA actual delayed DRIPS203seconds; manual wake wins",
+      "id": "sleep.abnormal.amd-rog-delayed-drips-20261024",
+      "fieldClassification": {
+        "category": "异常睡眠类",
+        "platformTag": "AMD常见问题",
+        "platformScope": "ROG Xbox Ally X RC73XA; single field sample, not AMD-wide prevalence proof",
+        "archiveSha256": "421b6b2f03e6e98291335338b26a9f96d04ba440b3c12f99cabed61e6d2b630a",
+        "member": "sleep-facts.log",
+        "line": 169,
+        "rawEventXmlAvailable": false,
+        "reconstructedEventDataFromExportedRawValues": true,
+        "livePeriodAt30SecondsAvailable": false
+      },
+      "xml": "<Event><EventData><Data Name=\"ActiveResidencyInUs\">205292086</Data><Data Name=\"BootId\">1</Data><Data Name=\"DripsResidencyInUs\">12601243</Data><Data Name=\"DripsTransitions\">1</Data><Data Name=\"DurationInUs\">217893329</Data><Data Name=\"DwmSyncFlushTime\">0</Data><Data Name=\"EnergyDrain\">0</Data><Data Name=\"FirstDripsEntryInUs\">203714124</Data><Data Name=\"GdiOnTime\">0</Data><Data Name=\"HwDripsResidencyInUs\">11962341</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"MonitorPowerOnTime\">643067</Data><Data Name=\"NonActivatedCpuInUs\">3666305</Data><Data Name=\"NonAttributedCpuInUs\">4875</Data><Data Name=\"NonDripsTimeActivatedInUs\">1900245967</Data><Data Name=\"NonResiliencyTimeInUs\">18446744071819304990</Data><Data Name=\"PowerStateAc\">false</Data><Data Name=\"ResiliencyDripsTimeInUs\">12601243</Data><Data Name=\"ResiliencyHwDripsTimeInUs\">11962341</Data><Data Name=\"ScenarioInstanceId\">9</Data><Data Name=\"ScenarioInstanceIdV2\">7</Data><Data Name=\"ScreenOffDurationInUs\">1064030</Data><Data Name=\"ScreenOffHwDripsResidencyInUs\">0</Data><Data Name=\"ScreenOffSwDripsResidencyInUs\">0</Data><Data Name=\"SleepDurationInUs\">216828032</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"SleepHwDripsResidencyInUs\">11962341</Data><Data Name=\"SleepSwDripsResidencyInUs\">12601243</Data></EventData></Event>",
+      "expectedAssessment": "low-recorded-hardware-residency",
+      "expected": {
+        "expectedDurationUs": 217893329,
+        "expectedHardwarePercent": 5.489998732361375,
+        "expectedWindowsSleepStage": "entered"
+      },
+      "historicalReplay": {
+        "sleepEventLocal": "2026-10-24T10:40:01.872+08:00",
+        "powerButtonWakeElapsedMs": 217893.329,
+        "wakeEventLocal": "2026-10-24T10:43:39.764+08:00",
+        "firstDripsEntryUs": 203714124,
+        "liveFailureEvents": []
+      }
+    },
+    {
+      "name": "ROG owned resleep repeated black-screen activity 20261025",
+      "archive": {
+        "source": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SleepOptimizationsAssessment-20261024\\ROG-AutoWake-20261025-152731\\sleep-facts.log",
+        "sha256": "118ee8df2b851dca4c98ffbca07917314876b93016ffb671ce7d42fbdf302833",
+        "line": 156,
+        "rawEventXmlAvailable": false,
+        "reconstructedEventDataFromExportedRawValues": true,
+        "liveFailureEventsAvailable": false,
+        "repairOutcome": "UNKNOWN; archival507 does not authorize any automatic action"
+      },
+      "xml": "<Event><EventData><Data Name=\"ActiveResidencyInUs\">46991064</Data><Data Name=\"BootId\">1</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"DurationInUs\">46991064</Data><Data Name=\"DwmSyncFlushTime\">0</Data><Data Name=\"EnergyDrain\">6128</Data><Data Name=\"FirstDripsEntryInUs\">0</Data><Data Name=\"GdiOnTime\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"MonitorPowerOnTime\">889559</Data><Data Name=\"NonActivatedCpuInUs\">704506</Data><Data Name=\"NonAttributedCpuInUs\">0</Data><Data Name=\"NonDripsTimeActivatedInUs\">278593989</Data><Data Name=\"NonResiliencyTimeInUs\">18446744073449399480</Data><Data Name=\"PowerStateAc\">false</Data><Data Name=\"ResiliencyDripsTimeInUs\">0</Data><Data Name=\"ResiliencyHwDripsTimeInUs\">0</Data><Data Name=\"ScenarioInstanceId\">10</Data><Data Name=\"ScenarioInstanceIdV2\">8</Data><Data Name=\"ScreenOffDurationInUs\">10025240</Data><Data Name=\"ScreenOffHwDripsResidencyInUs\">0</Data><Data Name=\"ScreenOffSwDripsResidencyInUs\">0</Data><Data Name=\"SleepDurationInUs\">36966691</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"SleepHwDripsResidencyInUs\">0</Data><Data Name=\"SleepSwDripsResidencyInUs\">0</Data></EventData></Event>",
+      "expectedAssessment": "short-session",
+      "expected": {
+        "expectedDurationUs": 46991064,
+        "expectedWindowsSleepStage": "entered"
+      },
+      "historicalReplay": {
+        "sleepEventLocal": "2026-10-25T15:26:29.865507+08:00",
+        "wakeEventLocal": "2026-10-25T15:27:16.856+08:00",
+        "liveFailureEvents": []
+      }
+    },
+    {
+      "name": "ROG manual sleep352seconds zero DRIPS 20261025",
+      "archive": {
+        "source": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SleepOptimizationsAssessment-20261024\\ROG-LongEntry-20261025-153603\\sleep-facts.log",
+        "sha256": "01a461cbd5e092e910cf42b600c8e372643ed9bceeb227e4ab1f1e6124a40685",
+        "line": 229,
+        "rawEventXmlAvailable": false,
+        "reconstructedEventDataFromExportedRawValues": true,
+        "liveFailureEventsAvailable": false,
+        "repairOutcome": "UNKNOWN; archival507 does not authorize any automatic action"
+      },
+      "xml": "<Event><EventData><Data Name=\"ActiveResidencyInUs\">352691540</Data><Data Name=\"BootId\">1</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"DurationInUs\">352691540</Data><Data Name=\"DwmSyncFlushTime\">0</Data><Data Name=\"EnergyDrain\">3603</Data><Data Name=\"FirstDripsEntryInUs\">0</Data><Data Name=\"GdiOnTime\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"MonitorPowerOnTime\">638648</Data><Data Name=\"NonActivatedCpuInUs\">11746603</Data><Data Name=\"NonAttributedCpuInUs\">0</Data><Data Name=\"NonDripsTimeActivatedInUs\">3110797318</Data><Data Name=\"NonResiliencyTimeInUs\">18446744070608804751</Data><Data Name=\"PowerStateAc\">false</Data><Data Name=\"ResiliencyDripsTimeInUs\">0</Data><Data Name=\"ResiliencyHwDripsTimeInUs\">0</Data><Data Name=\"ScenarioInstanceId\">13</Data><Data Name=\"ScenarioInstanceIdV2\">11</Data><Data Name=\"ScreenOffDurationInUs\">1064338</Data><Data Name=\"ScreenOffHwDripsResidencyInUs\">0</Data><Data Name=\"ScreenOffSwDripsResidencyInUs\">0</Data><Data Name=\"SleepDurationInUs\">351626886</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"SleepHwDripsResidencyInUs\">0</Data><Data Name=\"SleepSwDripsResidencyInUs\">0</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {
+        "expectedDurationUs": 352691540,
+        "expectedWindowsSleepStage": "entered"
+      },
+      "historicalReplay": {
+        "sleepEventLocal": "2026-10-25T15:30:02.172+08:00",
+        "wakeEventLocal": "2026-10-25T15:35:54.863+08:00",
+        "liveFailureEvents": []
+      }
+    }
+  ]
+}

@@ -1,0 +1,50 @@
+{
+  "schema": 1,
+  "baseRoute": "msi-claw-wmi",
+  "route": "msi-claw-cg3em-ap",
+  "boardProducts": [
+    "MS-1T91"
+  ],
+  "selector": 0,
+  "valueByte": 5,
+  "packetBytes": 32,
+  "min": 20,
+  "encoding": "0x80 | percent, including 100",
+  "source": {
+    "repository": "Stev3FrencH/ClawConfigurator",
+    "commit": "fdb2e3acfbafe94a584425f1185a616d0e329c42",
+    "observedBoard": "MS-1T91",
+    "observedBios": "E1T91IMS.10A",
+    "upstreamHardwareVerificationDate": "2026-08-12",
+    "files": {
+      "src/Hardware/Windows/WmiChargeLimitProvider.cs": "f1e552553224147c23ea0b80b74c390f5d6adbb40c51367285e269ffc0afd7f2",
+      "src/Probe/Commands/ChargeLimit.cs": "c65abbae2c72ce652e317d358e7be802f615918e8d722f07ba33323b30a5d99b",
+      "docs/hardware-notes.md": "41d3247df9b16332dd1839dca90fd2e85f1c36f56394b811e83cc1d361a766aa"
+    }
+  },
+  "ymccFieldEvidence": {
+    "date": "2026-10-14",
+    "board": "MS-1T91",
+    "bios": "E1T91IMS.105",
+    "legacyGetData215": {
+      "flag": 1,
+      "raw": 128
+    },
+    "apHardwareValidated": false,
+    "apGet0": {
+      "archive": "YeManCC-logs-20261014-082309-微星G3E.zip",
+      "archiveSha256": "209e916c2871f35219f47f54ba56b11a3950afa518ebccc35c98341c9d2d1605",
+      "firstObservedLocal": "2026-10-14T08:15:39+08:00",
+      "replyHex": "010000C680800000000000000000000000000000000000000000000000000000",
+      "currentLimit": null,
+      "writeObserved": false
+    }
+  },
+  "requirements": [
+    "real Get_AP(0) read with 32-byte successful response and encoded value; flag-only 0x80 is unknown, never 0 or 100 percent",
+    "fresh read-modify-write; preserve all bytes except selector and threshold",
+    "Set_AP status is not readback; independent Get_AP must match target",
+    "do not fall back to legacy Get_Data/Set_Data on this board",
+    "0x80 allows explicit Apply only; no automatic replay while current limit is unknown; unchanged 0x80 after Set_AP is failure"
+  ]
+}

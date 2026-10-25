@@ -1,0 +1,124 @@
+{
+  "schemaVersion": 1,
+  "meaning": "Reuse existing registered test IDs; minimum is explicitly partial coverage, not acceptance",
+  "aliases": {
+    "gamepad": "controller",
+    "input": "controller",
+    "decky": "plugins"
+  },
+  "modules": {
+    "controller": {
+      "minimum": [
+        "controller.persona",
+        "controller.virtual-output-status"
+      ],
+      "description": "输入身份与虚拟输出状态模型；不包含native/设备完整周期"
+    },
+    "fan": {
+      "minimum": [
+        "fan.curve"
+      ],
+      "description": "风扇曲线纯软件算法；Host/睡眠/实机独立"
+    },
+    "sleep": {
+      "minimum": [
+        "lifecycle.ui-power-transport",
+        "lifecycle.ui-power-recovery"
+      ],
+      "description": "软件电源消息与恢复；不执行真实睡眠"
+    },
+    "lifecycle": {
+      "minimum": [
+        "lifecycle.ui-power-transport",
+        "lifecycle.ui-power-recovery"
+      ],
+      "description": "通用电源周期消费；不代表全部持续功能退出"
+    },
+    "gyro": {
+      "minimum": [
+        "gyro.motion-mapper",
+        "gyro.presentation"
+      ],
+      "description": "陀螺仪映射与表现模型"
+    },
+    "touch": {
+      "minimum": [
+        "touch.screen-touchpads"
+      ],
+      "description": "触摸板纯软件状态模型"
+    },
+    "lighting": {
+      "minimum": [
+        "lighting.ui-feedback-ordering-consumer"
+      ],
+      "description": "既有灯光反馈顺序消费者；不是所有机型灯光验收"
+    },
+    "performance": {
+      "minimum": [
+        "performance.cpu-state",
+        "performance.core-tiles"
+      ],
+      "description": "CPU状态与核心展示消费"
+    },
+    "monitor": {
+      "minimum": [
+        "sensor.extended-metrics"
+      ],
+      "domains": [
+        "sensor"
+      ],
+      "description": "监控数值消费；native通知销毁独立"
+    },
+    "sensor": {
+      "minimum": [
+        "sensor.extended-metrics",
+        "sensor.input-contracts"
+      ],
+      "description": "传感器快照与输入协议"
+    },
+    "battery": {
+      "minimum": [
+        "battery.publication-consumer"
+      ],
+      "description": "电量发布消费；充电上限/硬件独立"
+    },
+    "audio": {
+      "minimum": [
+        "audio.music-player"
+      ],
+      "description": "既有音乐消费软件夹具"
+    },
+    "steam": {
+      "minimum": [
+        "steam.shared-mode-source",
+        "steam.contact-source"
+      ],
+      "description": "共享模式/联系入口源码合同，不代表Steam实机验收"
+    },
+    "plugins": {
+      "minimum": [
+        "plugins.wallpaper-background"
+      ],
+      "description": "壁纸后台状态模型；Decky整套单独显式运行"
+    },
+    "settings": {
+      "minimum": [
+        "settings.cas",
+        "settings.reactivity"
+      ],
+      "description": "配置写入代次与反应式消费"
+    },
+    "display": {
+      "minimum": [
+        "screen.standalone-actions"
+      ],
+      "description": "屏幕动作纯软件消费"
+    },
+    "game-library": {
+      "minimum": [
+        "game-library.account-status"
+      ],
+      "description": "游戏库账号状态模型"
+    }
+  }
+}

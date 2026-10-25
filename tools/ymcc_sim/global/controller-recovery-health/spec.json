@@ -1,0 +1,97 @@
+{
+  "schemaVersion": 1,
+  "caseCount": 47,
+  "checkCount": 68,
+  "caseNames": [
+    "single-ACK-source-none-no-new-ACK",
+    "one-ACK-wall-clock-only",
+    "long-ACK-source-read-horizon",
+    "source-none-neutral-cleanup",
+    "stale-source-power",
+    "stale-source-topology",
+    "stale-source-identity",
+    "stale-source-unstable",
+    "stale-source-missing-read",
+    "new-context-host",
+    "new-context-power",
+    "new-context-intent",
+    "new-context-topology",
+    "new-context-identity",
+    "maintenance-context-off",
+    "maintenance-context-persona",
+    "maintenance-context-power-revoked",
+    "maintenance-context-host-not-ready",
+    "idle-same-payload-valid-read-and-ACK",
+    "source-return-new-window",
+    "dedup-or-sparse-ACK-no-disconnect",
+    "reused-read-no-fabricated-progress",
+    "stale-cached-live-source",
+    "stale-cached-source-with-new-ACK",
+    "reader-long-stop-and-recovery",
+    "long-blocked-canonical-read",
+    "existing-fault-reset-synchronizes-window",
+    "power-revoked-during-receipt",
+    "semantic-neutral-remains-deliverable",
+    "pending-recovery-retains-budget",
+    "pending-tuple-retains-budget",
+    "MSI-canonical-zero-slot-mask",
+    "MSI-republish-cannot-settle-old-episode",
+    "MSI-unauthorized-board",
+    "MSI-route-not-armed",
+    "MSI-main-not-eligible",
+    "XInput-zero-mask",
+    "virtual-loop-zero-mask",
+    "unknown-source-name",
+    "real-source-none",
+    "XInput-normal-canonical",
+    "ROG-normal-canonical",
+    "GPD-normal-canonical",
+    "legacy-XInput-fallback-normal-canonical",
+    "no-recovery-lightweight-dedupe",
+    "episode-first-frame-tracks",
+    "terminal-first-frame-tracks"
+  ],
+  "negative": {
+    "file": "native/input_host_recovery_health.h",
+    "function": "ymcc::input::recoveryHealth::fresh",
+    "before": "now,power,topology);",
+    "after": "(now>=s.completed?s.completed:now),power,topology);",
+    "meaning": "Clamp observation time to cached read completion: old source age ceases to expire. One private source mutation; original assertions and fixture unchanged.",
+    "failedCases": [
+      "reused-read-no-fabricated-progress",
+      "stale-cached-live-source",
+      "stale-cached-source-with-new-ACK",
+      "reader-long-stop-and-recovery"
+    ],
+    "failedChecks": [
+      {
+        "case": "reused-read-no-fabricated-progress",
+        "actual": 100,
+        "expected": 0,
+        "name": "expired reader evidence clears health",
+        "passed": false
+      },
+      {
+        "case": "stale-cached-live-source",
+        "actual": 100,
+        "expected": 0,
+        "name": "cached live snapshot expires without a live=false write",
+        "passed": false
+      },
+      {
+        "case": "stale-cached-source-with-new-ACK",
+        "actual": 100,
+        "expected": 0,
+        "name": "ACK cannot refresh cached source",
+        "passed": false
+      },
+      {
+        "case": "reader-long-stop-and-recovery",
+        "actual": 0,
+        "expected": 2,
+        "name": "long reader stop is not healthy coverage",
+        "passed": false
+      }
+    ]
+  }
+}

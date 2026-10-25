@@ -1,0 +1,331 @@
+{
+  "schemaVersion": 1,
+  "kind": "literal-field-evidence-data",
+  "timestampBasis": "Original log local timestamps; no timezone conversion inferred",
+  "scope": "Data fixture for later classification/reproduction work; not an executable product regression or physical sleep acceptance",
+  "case": "fan_recovery_failures_across_retries_20261015",
+  "sourceArchive": "C:\\Users\\DaVe\\Desktop\\日志-侧边栏全开后\\YeManCC-logs-20261015-001924-风扇有卡死了睡眠.zip",
+  "sourceArchiveSha256": "c95ba73edb41f5c38691e64d4b1950efa9085eb7d9ea7abae04d4b9c6a6fd940",
+  "expected": {
+    "classification": "fan-control-recovery-failure-episode",
+    "start": "2026-10-15T00:10:48.439000",
+    "end": "2026-10-15T00:17:24.631000",
+    "episodeSpanMs": 396192,
+    "singleContinuousBlockForEntireSpan": false,
+    "deadlineFailureCount": 3,
+    "loggedWaitElapsedMs": [
+      14998,
+      14988,
+      14987
+    ],
+    "cancelledWaitElapsedMs": 6582,
+    "hostClientGenerationMismatchAtEnd": true,
+    "readyAloneMustNotAuthorizeControl": true,
+    "physicalFanRpmKnown": false,
+    "physicalLowPowerEntryFailureProven": false
+  },
+  "lifecycleRecords": [
+    {
+      "member": "fan-lifecycle.log",
+      "line": 29,
+      "action": "rearm-after-wake",
+      "caller": "fanHost-lifecycle",
+      "deadlineMs": 15000,
+      "event": "lifecycle.resume-wait-started",
+      "generation": 6,
+      "pid": 10024,
+      "session": "[redacted]",
+      "state": "suspended",
+      "time": "2026-10-15T00:10:48.439"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 30,
+      "action": "rearm-after-wake",
+      "caller": "fanHost-lifecycle",
+      "detail": "AwaitingControl",
+      "elapsedMs": 14998,
+      "event": "lifecycle.resume-wait-terminal-failed",
+      "generation": 6,
+      "ok": false,
+      "pid": 10024,
+      "probes": 60,
+      "reason": "deadline",
+      "retryable": true,
+      "session": "[redacted]",
+      "state": "suspended",
+      "time": "2026-10-15T00:11:03.436"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 31,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "event": "lifecycle.resume-admission-accepting",
+      "generation": 6,
+      "intentRevision": 12,
+      "pid": 10024,
+      "time": "2026-10-15T00:11:24.291"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 32,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "currentGeneration": 6,
+      "detail": "Stopped",
+      "event": "lifecycle.resume-admission-rejected",
+      "generation": 6,
+      "intentRevision": 13,
+      "pid": 10024,
+      "reason": "superseded",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:11:24.309",
+      "wakeContext": true
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 33,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "deadlineMs": 15000,
+      "event": "lifecycle.resume-wait-started",
+      "generation": 6,
+      "pid": 10024,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:11:29.804"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 34,
+      "action": "revoke",
+      "active": false,
+      "event": "fan-activity-update",
+      "path": "/api/restore",
+      "pid": 10024,
+      "time": "2026-10-15T00:11:36.279"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 35,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "detail": "disable",
+      "elapsedMs": 6582,
+      "event": "lifecycle.resume-wait-cancelled",
+      "generation": 6,
+      "ok": false,
+      "pid": 10024,
+      "probes": 26,
+      "reason": "cancelled",
+      "retryable": false,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:11:36.382"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 36,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "deadlineMs": 15000,
+      "event": "lifecycle.resume-wait-started",
+      "generation": 6,
+      "pid": 10024,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:16:11.310"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 37,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "detail": "Ready",
+      "elapsedMs": 14988,
+      "event": "lifecycle.resume-wait-terminal-failed",
+      "generation": 6,
+      "ok": false,
+      "pid": 10024,
+      "probes": 59,
+      "reason": "deadline",
+      "retryable": true,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:16:26.281"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 38,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "deadlineMs": 15000,
+      "event": "lifecycle.resume-wait-started",
+      "generation": 6,
+      "pid": 10024,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:17:09.661"
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "line": 39,
+      "action": "apply",
+      "caller": "fanHost-lifecycle",
+      "detail": "Ready",
+      "elapsedMs": 14987,
+      "event": "lifecycle.resume-wait-terminal-failed",
+      "generation": 6,
+      "ok": false,
+      "pid": 10024,
+      "probes": 59,
+      "reason": "deadline",
+      "retryable": true,
+      "session": "[redacted]",
+      "state": "awaiting-control",
+      "time": "2026-10-15T00:17:24.631"
+    }
+  ],
+  "stateSnapshots": [
+    {
+      "member": "fan-api.log",
+      "line": 80,
+      "time": "2026-10-15T00:10:48.440",
+      "event": "api.response",
+      "details": {
+        "generation": 6,
+        "path": "/api/state",
+        "status": 200,
+        "response": {
+          "state": "AwaitingControl",
+          "powerState": "On",
+          "controlAccepting": true,
+          "openCalled": false,
+          "openEventsCalled": false,
+          "leaseGeneration": null,
+          "resumePhase": "AwaitingControl",
+          "resumePhaseGeneration": 6,
+          "powerOperationGeneration": 6,
+          "powerOperationAttempt": 1,
+          "powerOperationStatus": "completed",
+          "unknownState": false,
+          "fanRouteWriteReady": true,
+          "hardwareWritesEnabled": false,
+          "hardwareWritesObserved": false
+        }
+      }
+    },
+    {
+      "member": "fan-api.log",
+      "line": 533,
+      "time": "2026-10-15T00:17:24.461",
+      "event": "api.response",
+      "details": {
+        "generation": 6,
+        "path": "/api/state",
+        "status": 200,
+        "response": {
+          "state": "Ready",
+          "powerState": "Unknown",
+          "controlAccepting": true,
+          "openCalled": true,
+          "openEventsCalled": false,
+          "leaseGeneration": null,
+          "resumePhase": "Ready",
+          "resumePhaseGeneration": 0,
+          "powerOperationGeneration": 0,
+          "powerOperationAttempt": 0,
+          "unknownState": false,
+          "fanRouteWriteReady": true,
+          "hardwareWritesEnabled": false,
+          "hardwareWritesObserved": true
+        }
+      }
+    }
+  ],
+  "activitySummary": [
+    {
+      "member": "sleep-facts.log",
+      "rows": 0,
+      "first": null,
+      "last": null,
+      "largestGapMs": 0,
+      "events": {}
+    },
+    {
+      "member": "fan-lifecycle.log",
+      "rows": 11,
+      "first": "2026-10-15T00:10:48.439000",
+      "last": "2026-10-15T00:17:24.631000",
+      "largestGapMs": 274928,
+      "events": {
+        "lifecycle.resume-wait-started": 4,
+        "lifecycle.resume-wait-terminal-failed": 3,
+        "lifecycle.resume-admission-accepting": 1,
+        "lifecycle.resume-admission-rejected": 1,
+        "fan-activity-update": 1,
+        "lifecycle.resume-wait-cancelled": 1
+      }
+    },
+    {
+      "member": "fan-api.log",
+      "rows": 455,
+      "first": "2026-10-15T00:10:48.440000",
+      "last": "2026-10-15T00:17:24.471000",
+      "largestGapMs": 198144,
+      "events": {
+        "api.response": 234,
+        "lifecycle.session-snapshot-untrusted-ignored": 153,
+        "lifecycle.state": 8,
+        "lifecycle.power-snapshot-synchronized": 7,
+        "lifecycle.start-stage": 7,
+        "ui.control-enable-begin": 6
+      }
+    },
+    {
+      "member": "native-detail.log",
+      "rows": 1404,
+      "first": "2026-10-15T00:10:49.311000",
+      "last": "2026-10-15T00:17:24.105000",
+      "largestGapMs": 1009,
+      "events": {
+        "gamepad-xinput-input": 616,
+        "input-capture-bus-rate-sample": 394,
+        "gamepad-ui-input-emitted": 365,
+        "screen-touchpads-state": 12,
+        "gamepad.feedbackCaps": 12,
+        "oem-key-catalog-query": 5
+      }
+    },
+    {
+      "member": "native-detail.log.1",
+      "rows": 0,
+      "first": null,
+      "last": null,
+      "largestGapMs": 0,
+      "events": {}
+    },
+    {
+      "member": "native-lifecycle.log",
+      "rows": 0,
+      "first": null,
+      "last": null,
+      "largestGapMs": 0,
+      "events": {}
+    },
+    {
+      "member": "native-lifecycle.log.1",
+      "rows": 462,
+      "first": "2026-10-15T00:10:49.103000",
+      "last": "2026-10-15T00:17:24.097000",
+      "largestGapMs": 1002,
+      "events": {
+        "input-host-frame-evidence": 396,
+        "system-xinput-readback": 57,
+        "http-request-failed": 9
+      }
+    }
+  ],
+  "boundedRawEvidence": "G:\\YeManCC-Work\\Build\\Tasks\\GyroSleep-20261021\\SleepEntryAnalysis\\ArchiveSearch-20261021\\oct15-fan-long-recovery-records.json"
+}

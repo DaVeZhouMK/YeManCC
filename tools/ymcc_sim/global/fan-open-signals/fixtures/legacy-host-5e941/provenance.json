@@ -1,0 +1,25 @@
+{
+  "schemaVersion": 1,
+  "kind": "fan-open-fixed-pre-fix-baseline",
+  "id": "host-5e941-backend-3b2d",
+  "purpose": "Negative control: actual pre-fix Host dispatches complete MSI virtual Open with non-fan side effects. Never use the current candidate as this baseline.",
+  "capturedDate": "2026-10-19",
+  "provenance": {
+    "origin": "Formal fan-host-v2 payload from 2026-10-18, retained before the MSI fan-only lifecycle fix",
+    "retainedEvidence": "fan-open-implementation-20261019/round-8/legacy-host",
+    "originalHostMvid": "2022e206-0400-4892-af5c-64bcd065652d",
+    "preFixHostSourceSha256": "c0ec0f5578abe8251c2584d6ff713c0c4559c6e62e6e8dbb9d11ab846d3d0bfb",
+    "contents": "Only the two unchanged product DLLs; no settings, tokens, authorization files, or user data",
+    "executionBoundary": "Loaded by the test harness against source-derived complete MSI parent model with inert leaf IO; never launch the Host entry point"
+  },
+  "files": [
+    {
+      "path": "YeManFanHost.dll",
+      "sha256": "5e94170105c65bb0503751460082db2a0827061b075c55afe92f7ef9b3b91993"
+    },
+    {
+      "path": "YeManFanBackend.dll",
+      "sha256": "3b2d584d66dff1d50b7dc07e09de95608f4241a15953de5ccc392b6678c9691c"
+    }
+  ]
+}

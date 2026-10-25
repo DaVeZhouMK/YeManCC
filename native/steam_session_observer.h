@@ -8,8 +8,10 @@
 #include <cwctype>
 #include <functional>
 #include <mutex>
+#include <map>
 #include <string>
 #include <thread>
+#include "steam_window_event_budget.h"
 
 namespace ymcc::steamsession {
 struct Session {
@@ -94,6 +96,12 @@ class Observer {
     std::thread thread;
     std::atomic<bool> openWindow{false};
     std::atomic<int> presence{-1};
+    mutable std::mutex sessionMutex;
+    Session cachedSession; // Shared verified PID/birth identity for addon lifecycle consumers.
+    WindowProcessCache windowPids; std::wstring windowRoot;
+    WindowHintWindow uiHints;
+    ULONGLONG windowPokedAt = 0; bool windowPoked = false;
+    std::function<void()> uiChanged; // Lightweight notification only; never CDP on this observer thread.
     using Changed = std::function<void(bool)>; // true=session change, false=bounded retry
     // Some Steam starts keep ActiveProcess.pid at zero and never change the
     // account/root values. A verified top-level window event is a startup wake,
@@ -101,23 +109,42 @@ class Observer {
     inline static thread_local Observer* windowObserver = nullptr;
     static void CALLBACK windowEvent(HWINEVENTHOOK, DWORD event, HWND window, LONG object, LONG child, DWORD, DWORD) {
         auto* self = windowObserver;
-        if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF ||
-            (event != EVENT_OBJECT_CREATE && event != EVENT_OBJECT_SHOW)) return;
-        DWORD pid = 0; GetWindowThreadProcessId(window, &pid);
-        ULONGLONG birth = 0;
-        const HANDLE candidate = verifiedProcess(pid, steamRoot(self->registryPath), &birth);
-        if (!candidate) return;
-        CloseHandle(candidate);
-        if (self->pokeEvent) SetEvent(self->pokeEvent);
+        if (!self || !window || object != OBJID_WINDOW || child != CHILDID_SELF || GetAncestor(window, GA_ROOT) != window) return;
+        const auto session = self->sessionSnapshot();
+        const auto& root = session.root;
+        if (root.empty()) return; // Registry subscription initializes root; no per-window registry search.
+        if (root != self->windowRoot) { self->windowRoot = root; self->windowPids.clear(); self->windowPoked = false; }
+        DWORD pid = 0; GetWindowThreadProcessId(window, &pid); if (!pid) return;
+        const auto now = GetTickCount64(); unsigned kind = pid == session.pid ? 1 : 0;
+        if (!kind) kind = self->windowPids.classify(pid, now, [&](std::wstring path) -> unsigned {
+            std::replace(path.begin(), path.end(), L'/', L'\\');
+            std::transform(path.begin(), path.end(), path.begin(), [](wchar_t c) { return std::towlower(c); });
+            if (path == root + L"\\steam.exe") {
+                ULONGLONG birth = 0; const auto process = verifiedProcess(pid, root, &birth);
+                if (process) { CloseHandle(process); return 1; }
+            } else if (self->uiChanged && path.starts_with(root + L"\\bin\\cef\\") && path.ends_with(L"\\steamwebhelper.exe")) return 2;
+            return 0;
+        });
+        // This cache admits NOTIFICATIONS only. All actions still verify the
+        // session/process birth/owner. No token/image query for every name event.
+        if (!kind) return;
+        if (kind == 1 && (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) && self->pokeEvent &&
+            (!self->windowPoked || now - self->windowPokedAt >= 1000)) {
+            self->windowPoked = true; self->windowPokedAt = now; SetEvent(self->pokeEvent);
+        }
+        if (self->uiChanged) self->uiHints.request(now);
     }
     struct WindowSubscription {
-        HWINEVENTHOOK hook = nullptr;
-        explicit WindowSubscription(Observer* owner) {
-            windowObserver = owner;
-            hook = SetWinEventHook(EVENT_OBJECT_CREATE, EVENT_OBJECT_SHOW, nullptr, windowEvent,
+        HWINEVENTHOOK hook = nullptr, names = nullptr;
+        Observer* owner;
+        explicit WindowSubscription(Observer* value) : owner(value) {
+            windowObserver = owner; owner->uiHints.clear(); owner->windowPids.clear();
+            hook = SetWinEventHook(EVENT_OBJECT_CREATE, owner->uiChanged ? EVENT_OBJECT_HIDE : EVENT_OBJECT_SHOW, nullptr, windowEvent,
                 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
+            if (owner->uiChanged) names = SetWinEventHook(EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE,
+                nullptr, windowEvent, 0, 0, WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS);
         }
-        ~WindowSubscription() { if (hook) UnhookWinEvent(hook); windowObserver = nullptr; }
+        ~WindowSubscription() { if (names) UnhookWinEvent(names); if (hook) UnhookWinEvent(hook); owner->uiHints.clear(); owner->windowPids.clear(); windowObserver = nullptr; }
     };
     void run(const Changed& changed, const std::function<bool()>& needsRetry) {
         HANDLE notify = CreateEventW(nullptr, FALSE, FALSE, nullptr);
@@ -184,6 +211,7 @@ class Observer {
             presence.store(process ? 1 : probeSteamPresence(), std::memory_order_release);
             if (!havePrevious || !(next == previous)) {
                 previous = next; havePrevious = true;
+                { std::lock_guard lock(sessionMutex); cachedSession = next; }
                 retries.begin(GetTickCount64());
                 try { changed(true); } catch (...) {}
                 return true;
@@ -194,27 +222,28 @@ class Observer {
         armed = arm(); // Subscribe BEFORE reading, so startup changes cannot be lost.
         inspect(true);
         for (;;) {
+            // A busy message stream must not starve stop, pending hints or retries.
+            if (WaitForSingleObject(stopEvent, 0) != WAIT_TIMEOUT) break;
+            if (uiHints.take(GetTickCount64()) && uiChanged) { try { uiChanged(); } catch (...) {} }
+            if (retries.take(GetTickCount64()) && needsRetry()) {
+                // Re-probe once even if Windows messages keep the queue busy.
+                if (!inspect(true)) { try { changed(false); } catch (...) {} }
+            }
             HANDLE handles[4]{stopEvent, pokeEvent}; DWORD count = 2;
             const DWORD registryIndex = armed ? count++ : MAXDWORD;
             if (armed) handles[registryIndex] = notify;
             const DWORD processIndex = process ? count++ : MAXDWORD;
             if (process) handles[processIndex] = process;
-            const DWORD result = MsgWaitForMultipleObjectsEx(count, handles, retries.timeout(GetTickCount64()), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
+            const DWORD result = MsgWaitForMultipleObjectsEx(count, handles, (std::min)(retries.timeout(GetTickCount64()), uiHints.timeout(GetTickCount64())), QS_ALLINPUT, MWMO_INPUTAVAILABLE);
             if (result == WAIT_OBJECT_0 + count) {
                 MSG message{};
-                while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
+                for (unsigned dispatched = 0; dispatched < 64 && PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE); ++dispatched) {
                     TranslateMessage(&message); DispatchMessageW(&message);
                 }
                 continue; // A verified Steam callback signals pokeEvent; inspect on that handle.
             }
             if (result == WAIT_OBJECT_0 || result == WAIT_FAILED) break;
-            if (result == WAIT_TIMEOUT) {
-                if (retries.take(GetTickCount64()) && needsRetry()) {
-                    // Re-probe once: PID/ActiveUser can become valid during bounded startup.
-                    if (!inspect(true)) { try { changed(false); } catch (...) {} }
-                }
-                continue;
-            }
+            if (result == WAIT_TIMEOUT) continue;
             if (result == WAIT_OBJECT_0 + registryIndex) armed = arm(); // One-shot: rearm before reading.
             if (result == WAIT_OBJECT_0 + 1 && openWindow.exchange(false)) retries.begin(GetTickCount64());
             inspect(result == WAIT_OBJECT_0 + 1);
@@ -226,10 +255,11 @@ class Observer {
 public:
     explicit Observer(std::wstring keyPath = L"Software\\Valve\\Steam") : registryPath(std::move(keyPath)) {}
     ~Observer() { stop(); }
-    bool start(Changed changed, std::function<bool()> needsRetry) {
+    bool start(Changed changed, std::function<bool()> needsRetry, std::function<void()> onUiChanged = {}) {
         std::lock_guard<std::mutex> lock(lifecycle);
         if (thread.joinable()) return true;
         presence.store(-1, std::memory_order_release);
+        uiChanged = std::move(onUiChanged);
         stopEvent = CreateEventW(nullptr, TRUE, FALSE, nullptr);
         pokeEvent = CreateEventW(nullptr, FALSE, FALSE, nullptr);
         if (!stopEvent || !pokeEvent) {
@@ -240,12 +270,14 @@ public:
         try { thread = std::thread([this, changed = std::move(changed), needsRetry = std::move(needsRetry)] {
             try { run(changed, needsRetry); } catch (...) {}
             presence.store(-1, std::memory_order_release);
+            { std::lock_guard lock(sessionMutex); cachedSession = {}; }
         }); }
         catch (...) { CloseHandle(stopEvent); CloseHandle(pokeEvent); stopEvent = pokeEvent = nullptr; return false; }
         return true;
     }
     // Unknown before startup/after stop or an observer failure. No scan or locks here.
     int steamPresence() const { return presence.load(std::memory_order_acquire); }
+    Session sessionSnapshot() const { std::lock_guard lock(sessionMutex); return cachedSession; }
     void beginWindow() { // Explicit request, not called from retries.
         std::lock_guard<std::mutex> lock(lifecycle);
         openWindow.store(true);
@@ -258,6 +290,7 @@ public:
         if (stopEvent) CloseHandle(stopEvent);
         if (pokeEvent) CloseHandle(pokeEvent);
         stopEvent = pokeEvent = nullptr; openWindow.store(false);
+        { std::lock_guard sessionLock(sessionMutex); cachedSession = {}; }
         presence.store(-1, std::memory_order_release);
     }
 };

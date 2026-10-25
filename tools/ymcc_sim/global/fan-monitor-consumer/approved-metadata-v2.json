@@ -1,0 +1,460 @@
+{
+  "schemaVersion": 2,
+  "defaultPreset": "simple",
+  "order": [
+    {
+      "value": "minimal",
+      "label": "精简"
+    },
+    {
+      "value": "simple",
+      "label": "简约"
+    },
+    {
+      "value": "standard",
+      "label": "标准"
+    },
+    {
+      "value": "detailed",
+      "label": "详细"
+    }
+  ],
+  "metrics": [
+    {
+      "id": "fps",
+      "group": "帧率",
+      "label": "FPS",
+      "unit": "FPS",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "fpsLimit",
+      "group": "帧率",
+      "label": "帧率上限",
+      "unit": "FPS",
+      "digits": 2,
+      "ready": true
+    },
+    {
+      "id": "fps1",
+      "group": "帧率",
+      "label": "1% Low",
+      "unit": "FPS",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "frametime",
+      "group": "帧率",
+      "label": "帧时间",
+      "unit": "ms",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "frametimeGraph",
+      "group": "帧率",
+      "label": "帧时间曲线",
+      "unit": "ms",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "tdpLimit",
+      "group": "CPU",
+      "label": "TDP 上限",
+      "unit": "W",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "cpuPower",
+      "group": "CPU",
+      "label": "功耗",
+      "unit": "W",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "cpuTemp",
+      "group": "CPU",
+      "label": "温度",
+      "unit": "°C",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "cpuUsage",
+      "group": "CPU",
+      "label": "总占用",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "cpuUsageBar",
+      "group": "CPU",
+      "label": "总占用图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "cpuPeakBar",
+      "group": "CPU",
+      "label": "最高核心负载图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": false
+    },
+    {
+      "id": "cpuClock",
+      "group": "CPU",
+      "label": "频率",
+      "unit": "GHz",
+      "digits": 2,
+      "ready": true
+    },
+    {
+      "id": "cpuVoltage",
+      "group": "CPU",
+      "label": "电压",
+      "unit": "V",
+      "digits": 3,
+      "ready": true
+    },
+    {
+      "id": "fanSpeed",
+      "group": "CPU",
+      "label": "风扇转速",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "fanSpeedBar",
+      "group": "CPU",
+      "label": "风扇转速图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "cpuCores",
+      "group": "CPU",
+      "label": "核心负载图块（最多16项）",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "gpuUsage",
+      "group": "GPU",
+      "label": "利用率",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "gpuBar",
+      "group": "GPU",
+      "label": "利用率图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "gpuPower",
+      "group": "GPU",
+      "label": "功耗",
+      "unit": "W",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "gpuTemp",
+      "group": "GPU",
+      "label": "温度",
+      "unit": "°C",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "gpuClock",
+      "group": "GPU",
+      "label": "频率",
+      "unit": "GHz",
+      "digits": 2,
+      "ready": true
+    },
+    {
+      "id": "gpuVoltage",
+      "group": "GPU",
+      "label": "电压",
+      "unit": "V",
+      "digits": 3,
+      "ready": true
+    },
+    {
+      "id": "vramUsed",
+      "group": "内存",
+      "label": "显存已用",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "vramTotal",
+      "group": "内存",
+      "label": "显存总量",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "vramAvailable",
+      "group": "内存",
+      "label": "显存可用",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "vramUsage",
+      "group": "内存",
+      "label": "显存使用率",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "vramUsageBar",
+      "group": "内存",
+      "label": "显存使用率图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "ramUsed",
+      "group": "内存",
+      "label": "内存已用",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "ramTotal",
+      "group": "内存",
+      "label": "内存总量",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "ramAvailable",
+      "group": "内存",
+      "label": "内存可用",
+      "unit": "GB",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "ramUsage",
+      "group": "内存",
+      "label": "内存使用率",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "ramUsageBar",
+      "group": "内存",
+      "label": "内存使用率图形",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "netDown",
+      "group": "读写",
+      "label": "下载速率",
+      "unit": "MB/s",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "netUp",
+      "group": "读写",
+      "label": "上传速率",
+      "unit": "MB/s",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "diskRead",
+      "group": "读写",
+      "label": "文件读取",
+      "unit": "MB/s",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "diskWrite",
+      "group": "读写",
+      "label": "文件写入",
+      "unit": "MB/s",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "batteryPercent",
+      "group": "电池",
+      "label": "剩余电量",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "batteryBar",
+      "group": "电池",
+      "label": "电量图块",
+      "unit": "%",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "batteryPower",
+      "group": "电池",
+      "label": "功率",
+      "unit": "W",
+      "digits": 1,
+      "ready": true
+    },
+    {
+      "id": "batteryTime",
+      "group": "电池",
+      "label": "时长",
+      "unit": "min",
+      "digits": 0,
+      "ready": true
+    },
+    {
+      "id": "clock",
+      "group": "附加",
+      "label": "当前时间",
+      "unit": "",
+      "digits": 0,
+      "ready": true
+    }
+  ],
+  "presets": {
+    "minimal": [
+      "fps",
+      "cpuPower",
+      "cpuTemp"
+    ],
+    "simple": [
+      "fps",
+      "fpsLimit",
+      "fps1",
+      "frametimeGraph",
+      "tdpLimit",
+      "cpuPower",
+      "cpuTemp",
+      "cpuClock",
+      "cpuCores",
+      "gpuUsage",
+      "gpuBar",
+      "gpuPower",
+      "gpuClock",
+      "vramUsage",
+      "vramUsageBar",
+      "ramUsage",
+      "ramUsageBar",
+      "batteryPercent",
+      "batteryBar",
+      "batteryPower",
+      "batteryTime"
+    ],
+    "standard": [
+      "fps",
+      "fpsLimit",
+      "fps1",
+      "frametimeGraph",
+      "tdpLimit",
+      "cpuPower",
+      "cpuTemp",
+      "cpuUsage",
+      "cpuClock",
+      "cpuVoltage",
+      "cpuCores",
+      "gpuUsage",
+      "gpuBar",
+      "gpuPower",
+      "gpuTemp",
+      "gpuClock",
+      "vramUsed",
+      "ramUsed",
+      "vramUsageBar",
+      "ramUsageBar",
+      "batteryPercent",
+      "batteryBar",
+      "batteryPower",
+      "batteryTime"
+    ],
+    "detailed": [
+      "fps",
+      "fpsLimit",
+      "fps1",
+      "frametime",
+      "frametimeGraph",
+      "tdpLimit",
+      "cpuPower",
+      "cpuTemp",
+      "cpuUsage",
+      "cpuUsageBar",
+      "cpuClock",
+      "cpuVoltage",
+      "fanSpeed",
+      "fanSpeedBar",
+      "cpuCores",
+      "gpuUsage",
+      "gpuBar",
+      "gpuPower",
+      "gpuTemp",
+      "gpuClock",
+      "gpuVoltage",
+      "vramUsed",
+      "vramTotal",
+      "vramAvailable",
+      "vramUsage",
+      "vramUsageBar",
+      "ramUsed",
+      "ramTotal",
+      "ramAvailable",
+      "ramUsage",
+      "ramUsageBar",
+      "netDown",
+      "netUp",
+      "diskRead",
+      "diskWrite",
+      "batteryPercent",
+      "batteryBar",
+      "batteryPower",
+      "batteryTime"
+    ]
+  },
+  "excludedDetailed": [
+    "cpuPeakBar",
+    "clock"
+  ],
+  "provenance": {
+    "modelPath": "src/bridge/monitorHudModel.ts",
+    "modelSha256": "e1e1fd1c4eb8be5dcf5a69d14e11d2c6efe343d409f9be30767d1e6396759df0",
+    "approvedGuardPath": "tools/ymcc_sim/global/monitor-output-signals/preset-contract.mjs",
+    "approvedGuardSha256": "b03382b7dd5da30b2990208941aa96e22a689992a6b01ea8f33df19a07d782a9",
+    "meaning": "Reviewed source metadata under existing default/order/ready-only contract. Policy frozen once; never derived from observed runtime output during acceptance."
+  }
+}

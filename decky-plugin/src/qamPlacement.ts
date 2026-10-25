@@ -1,3 +1,4 @@
+import { installConsoleDefault } from './qamDefaultTab';
 // Dedicated, direct-to-controls console tab. Original Decky home is left intact.
 export const YMCC_CONSOLE_TAB_ID = 100019;
 export function installConsoleTab(dfl: any, host: any, content: any, icon: any): { active: boolean; dispose(): void } {
@@ -7,12 +8,13 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
     typeof hook?.render!=='function'||typeof hook.add!=='function'||typeof hook.removeById!=='function'||
     !Array.isArray(hook.tabs)||!hook.tabs.some((t:any)=>t.id===999)||hook.tabs.some((t:any)=>t.id===id)||
     dfl.QuickAccessTab?.Decky!==999||dfl.QuickAccessTab?.Notifications!==0||typeof WeakRef!=='function')return {active:false,dispose(){}};
-  const registration={id,title:'YMCC 控制台',content,icon};
+  const registration={id,title:'',content,icon};
   const owns=()=>hook.tabs.includes(registration);
   const isConsole=(tab:any)=>String(tab?.key)===String(id)&&tab?.decky===true;
   const panelContent=(tab:any)=>tab?.panel?.props?.children?.props?.children;
   const seen=new WeakSet<any[]>(), receipts:WeakRef<any[]>[]=[];
   let stopped=false,patch:any,before:any;
+  let defaultSelection:{active:boolean;dispose():void}|undefined;
   const remove=(tabs:any[])=>{if(Object.isFrozen(tabs))return;for(let i=tabs.length-1;i>=0;i--)if(isConsole(tabs[i])&&panelContent(tabs[i])===content)tabs.splice(i,1);};
   try {
     hook.add(registration);
@@ -42,8 +44,9 @@ export function installConsoleTab(dfl: any, host: any, content: any, icon: any):
       }catch{/* Unknown Steam layout must not break native QAM. */}
       return result;
     });
-  }catch{try{patch?.unpatch();before?.unpatch();if(owns())hook.removeById(id);}catch{}return {active:false,dispose(){}};}
-  function dispose(){if(stopped)return;stopped=true;try{patch?.unpatch();before?.unpatch();}catch{}
+    defaultSelection=installConsoleDefault(dfl,host,id,owns);
+  }catch{try{defaultSelection?.dispose();patch?.unpatch();before?.unpatch();if(owns())hook.removeById(id);}catch{}return {active:false,dispose(){}};}
+  function dispose(){if(stopped)return;stopped=true;defaultSelection?.dispose();try{patch?.unpatch();before?.unpatch();}catch{}
     // A late previous onDismount must not unregister a newer module with our id.
     try{if(owns())hook.removeById(id);}catch{}
     for(const receipt of receipts){const tabs=receipt.deref();if(tabs)try{remove(tabs);}catch{}}receipts.length=0;

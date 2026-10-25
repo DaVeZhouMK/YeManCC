@@ -18,4 +18,12 @@ check('permanent non-focusable native group owns both trigger and options withou
 check('native cancellation before passive option focus consumes the open menu and does not select a value',()=>{props.opened=true;const before=cancelled,changeCount=changes.length;const tree=render();let consumed=0;assert.equal(tree.props.onCancel({preventDefault(){consumed++;},stopPropagation(){consumed++;}}),true);assert.equal(cancelled,before+1);assert.equal(consumed,2);assert.equal(changes.length,changeCount);});
 check('the already registered native callback sees fresh immutable open/closed props',()=>{props.opened=false;const before=cancelled,callback=render().props.onCancel;assert.equal(callback(),false);props.opened=true;const tree=render();assert.equal(tree.props.onCancel,callback);assert.equal(callback(),true);assert.equal(cancelled,before+1);props.opened=false;render();assert.equal(callback(),false);assert.equal(cancelled,before+1);});
 check('closed native scope does not consume Steam back/cancel or steal QAM focus',()=>{props.opened=false;const before=cancelled,tree=render();let consumed=0;assert.equal(tree.props.onCancel({preventDefault(){consumed++;},stopPropagation(){consumed++;}}),false);assert.equal(consumed,0);assert.equal(cancelled,before);});
+check('native trigger owns focus styling without a second highlight around its label',()=>{for(const opened of [false,true]){props.opened=opened;const tree=render(),trigger=tree.children[0];assert.equal(trigger.type,'DropdownItem');assert.equal(trigger.props.highlightOnFocus,false);assert.equal(trigger.props.controlled,true);assert.equal(trigger.props.dropDownControlRef,refs[1]);assert.equal(tree.props.focusable,false);}});
+check('selected pending menu defers trigger focus while disabled and restores it exactly once after acknowledgement',()=>{
+ props.opened=true;props.disabled=false;render();effects.forEach(fn=>fn());const before=triggerFocus;
+ props.opened=false;props.disabled=true;render();effects.forEach(fn=>fn());assert.equal(triggerFocus,before);
+ render();effects.forEach(fn=>fn());assert.equal(triggerFocus,before);
+ props.disabled=false;render();effects.forEach(fn=>fn());assert.equal(triggerFocus,before+1);
+ render();effects.forEach(fn=>fn());assert.equal(triggerFocus,before+1);assert.equal(props.opened,false);
+});
 fs.writeFileSync(path.join(task,'validation/MAINLINE22-ANCHORED-DROPDOWN.json'),JSON.stringify({cases:cases.length,results:cases,productionComponent:true,actualSteamFocus:false,hardwareWrites:0},null,2));console.log('Anchored dropdown PASS '+cases.length);

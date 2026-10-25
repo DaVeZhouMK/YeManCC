@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "kind": "exact-complete-product-helper-context",
+  "sources": [
+    {
+      "path": "native/msi_visibility_wake_runtime.h",
+      "sha256": "153cca798f2e3c66fb99f0eccb3359c8c5b8da11124dda01e793b3fc8e202aa6"
+    },
+    {
+      "path": "native/msi_visibility_wake_diagnostics.h",
+      "sha256": "4e229beb29e327f68ff919a734a092ece528b6424179c54f0d05546f145ab3d8"
+    },
+    {
+      "path": "tools/sleep_game_pause_selftest.py",
+      "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d"
+    }
+  ],
+  "definitions": [
+    {
+      "path": "native/msi_visibility_wake_runtime.h",
+      "signature": "static bool msiVisibilityWakeDiagnosticEligible(bool requireReady) {",
+      "token": "@@PRODUCT_ELIGIBILITY@@",
+      "completeLfSha256": "be53d223f8bcbe854926395fd417ec1e519df66d0472abb75200c1d768b18229"
+    },
+    {
+      "path": "native/msi_visibility_wake_runtime.h",
+      "signature": "static void msiVisibilityObserverNoteResume(unsigned long long generation) noexcept {",
+      "token": "@@PRODUCT_NOTE_RESUME@@",
+      "completeLfSha256": "28e83f77a835e672af74cf5ef060a6facf4fafaf3ea173694dccc4ac35d76996"
+    },
+    {
+      "path": "native/main.cpp",
+      "signature": "static void handlePowerResumeNotification(SgWork work, const char* reason) {",
+      "completeLfSha256": "ccbf08ef757e6aafff56e98bfc17c4e4d5cd2a59cd0302ab07f82ca07e3bcf1f"
+    }
+  ],
+  "templateSha256": "af6cb511b90597c36b63a5852a25a9e0971eed1a241d4d30a6297bd9e4732198",
+  "insertion": {
+    "anchor": "static bool sgShouldKeepInputDuringStandby() {",
+    "include": "#include \"msi-observer-context.h\"\n"
+  },
+  "originalScript": {
+    "path": "tools/sleep_game_pause_selftest.py",
+    "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d"
+  },
+  "changesReviewed": {
+    "cause": "Complete product resume handler now calls diagnostic receipt helper; original generated memory preamble lacked that context.",
+    "actualDependencyClosure": "Complete eligibility + noexcept note helper; real mutex Policy::noteResume/snapshot/restore from full diagnostics header; original clock/lifecycle inputs. All raw helper/policy/script bytes and complete normalized definitions must match.",
+    "memoryInputs": [
+      "inputHostExitFenceRaised",
+      "g_exitRequested",
+      "msiClawKnownBoardAuthority",
+      "domainLogEnabled(\"virtual\")"
+    ],
+    "diagnosticBuild": "Both diagnostic macros enabled only inside generated software fixture to execute actual product policy. This is not a statement about shipped build flags or hardware eligibility.",
+    "noLaunch": "Runtime launch/poll/process headers are not included; noteResume does not arm/start an observer. Six original OS refusals remain required.",
+    "generator": "Exact original Python bytes, all extracted complete definitions, original worker block/48 assertions/28 groups and original identity negative retained. Removing the exact single include restores original generated C++ text.",
+    "acceptance": false
+  }
+}

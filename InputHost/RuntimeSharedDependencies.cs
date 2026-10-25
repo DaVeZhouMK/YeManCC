@@ -4,17 +4,20 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-// HC-SLIM-01: content-identical utility DLLs have one authoritative shared copy.
+// Content-identical third-party DLLs have an HC-independent shared location.
 // No driver/HIDMaestro binaries or APIs are replaced. Normal (non-thin) builds
 // retain the local copy and never reach this resolver. No environment override,
 // download, installer, device operation or repair write is permitted here.
 internal static class RuntimeSharedDependencies
 {
+    // Historical provenance only; never used to resolve an assembly.
     internal const string RuntimeId = "HC-CANDIDATE-0.32.4.0-06c0b954-20260902";
+    internal const string SharedDirectoryName = "ymcc-shared-runtime";
     private static readonly (string Name, string Sha256)[] Libraries =
     [
         ("Newtonsoft.Json", "A28C251DFE36D881E9E2462E171441B8B0EC156FE3F452602C9149B1B9EFE05B"),
-        ("Nefarius.Utilities.DeviceManagement", "B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C")
+        ("Nefarius.Utilities.DeviceManagement", "B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C"),
+        ("Nefarius.Drivers.HidHide", "0A59C8A7C5D921A8561B47B2D9D2657A998676EFE1A3E8E31991E9721AB0D88F")
     ];
 
     [ModuleInitializer]
@@ -42,7 +45,7 @@ internal static class RuntimeSharedDependencies
             !string.Equals(features?.Name, "feature-assets", StringComparison.OrdinalIgnoreCase) ||
             !string.Equals(power?.Name, "PowerControl", StringComparison.OrdinalIgnoreCase))
             throw new FileNotFoundException("Shared dependency fallback is restricted to the production PowerControl/feature-assets/virtual-gamepad layout.", requested.Name);
-        string path = Path.Combine(power!.FullName, "handheldcompanion-runtime", RuntimeId, requested.Name + ".dll");
+        string path = Path.Combine(power!.FullName, SharedDirectoryName, requested.Name + ".dll");
         string runtimeRoot = Path.GetDirectoryName(path)!;
         if (!File.Exists(path)) throw new FileNotFoundException("Pinned shared runtime dependency is missing; restore the candidate's original DLL copy or shared runtime.", path);
         for (DirectoryInfo? at = new(runtimeRoot); at is not null && at.FullName.Length >= power.FullName.Length; at = at.Parent)
@@ -68,7 +71,7 @@ internal static class RuntimeSharedDependencies
             var receipts = new List<object>();
             foreach (var spec in Libraries)
             {
-                string expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", "handheldcompanion-runtime", RuntimeId, spec.Name + ".dll"));
+                string expectedPath = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "..", SharedDirectoryName, spec.Name + ".dll"));
                 var requestedIdentity = AssemblyName.GetAssemblyName(expectedPath);
                 var assembly = Assembly.Load(requestedIdentity);
                 if (!Path.GetFullPath(assembly.Location).Equals(expectedPath, StringComparison.OrdinalIgnoreCase))

@@ -30,4 +30,9 @@
     -->
     <ProjectReference Include="..\fan-backend\YeManFanBackend.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+    <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+  </ItemGroup>
 </Project>

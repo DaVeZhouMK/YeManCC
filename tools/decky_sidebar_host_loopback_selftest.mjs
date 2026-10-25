@@ -5,6 +5,20 @@ import assert from 'node:assert/strict';import fs from 'node:fs';import path fro
 import {root,load,main} from './fixtures/decky_game_memory_store.mjs';import {createMirrorHostFixture} from './fixtures/decky_mirror_host_fixture.mjs';import {SocketAdapter,awaitState,deferred,bounded} from './fixtures/decky_native_transport.mjs';
 const steam=load(fs.readFileSync(path.join(root,'decky-plugin/src/steamRunningContext.ts'),'utf8'));
 const {MirrorClient}=load(fs.readFileSync(path.join(root,'decky-plugin/src/mirrorClient.ts'),'utf8'),{'./steamRunningContext':steam});
+// Real audio is explicit opt-in; the ordinary fixture remains memory-only.
+const fxArg=process.argv.indexOf('--fxsound-native');
+const fxExecutable=fxArg>=0?path.resolve(process.argv[fxArg+1]??''):null;
+if(fxExecutable&&!fs.statSync(fxExecutable).isFile())throw Error('FxSound native test consumer missing');
+const fxPublic=state=>Object.fromEntries(['known','installed','running','enabled','selected','preset','output','reason'].map(key=>[key,state[key]]));
+async function fxCall(command){
+ if(!fxExecutable)throw Error('Real FxSound consumer not opted in');
+ const proc=spawn(fxExecutable,[command],{windowsHide:true,stdio:['ignore','pipe','pipe']});let output='',errors='';
+ proc.stdout.on('data',chunk=>output+=String(chunk));proc.stderr.on('data',chunk=>errors+=String(chunk));
+ const exit=await new Promise((resolve,reject)=>{const deadline=setTimeout(()=>{proc.kill();reject(Error('Native FxSound test consumer deadline; application is never force-killed'));},35000);proc.once('error',error=>{clearTimeout(deadline);reject(error);});proc.once('exit',code=>{clearTimeout(deadline);resolve(code);});});
+ if(exit!==0)throw Error('Native FxSound test failed: '+output+' '+errors);
+ return JSON.parse(output);
+}
+const liveAudio={};
 const file=path.resolve(task,'Build/decky-sidebar-broker-test.exe');
 const child=spawn(file,['--serve-relay-fixture'],{windowsHide:true,stdio:['pipe','pipe','pipe']});let stderr='',buffer='',host,client,attachWait=null,requested=0;const sockets=[],cases=[];
 child.stderr.on('data',data=>stderr+=String(data));const terminal=new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',(code,signal)=>resolve({code,signal}));});const boot=deferred(),summary=deferred();
@@ -13,10 +27,33 @@ const flush=async()=>{for(let i=0;i<80;i++)await Promise.resolve();};
 async function waitObserverGone(){const until=Date.now()+1500;while(Date.now()<until){if(host.observerStats().watchers===0)return;await new Promise(resolve=>setTimeout(resolve,15));}throw new Error('Host observer detach deadline');}
 try{
  const bootstrap=await bounded(boot.promise,'native bootstrap');
- host=await createMirrorHostFixture({invoke:async(command,args)=>{if(command==='deckySidebar.mirrorReply'){child.stdin.write(JSON.stringify(args)+'\n');return true;}if(command==='deckySidebar.mirrorAttach'){attachWait=deferred();child.stdin.write('attach\n');const task=attachWait;return bounded(task.promise,'native host attach').finally(()=>{if(attachWait===task)attachWait=null;});}throw new Error('Unexpected native operation '+command);}});
+ if(fxExecutable){liveAudio.before=await fxCall('status');assert.equal(liveAudio.before.running,false,'Live audio case starts with FxSound stopped');}
+ host=await createMirrorHostFixture({fxSoundNative:fxExecutable?{read:async()=>fxPublic(await fxCall('status')),set:async enabled=>{const result=await fxCall(enabled?'on':'off');return {...result,state:fxPublic(result.state)};}}:null,invoke:async(command,args)=>{if(command==='deckySidebar.mirrorReply'){child.stdin.write(JSON.stringify(args)+'\n');return true;}if(command==='deckySidebar.mirrorAttach'){attachWait=deferred();child.stdin.write('attach\n');const task=attachWait;return bounded(task.promise,'native host attach').finally(()=>{if(attachWait===task)attachWait=null;});}throw new Error('Unexpected native operation '+command);}});
  host.ready();await flush();
  client=new MirrorClient({bootstrap:()=>bootstrap,socket:url=>{const socket=new SocketAdapter(url);sockets.push(socket);return socket;},schedule:(fn,delay)=>setTimeout(fn,delay),cancel:clearTimeout,clientId:'actual-host-pipeline',steam:()=>({availability:'observed',appId:'480',runningCount:1})});
  client.setVisible(true);const first=await awaitState(client,state=>state.connected&&state.snapshot?.ready);
+ if(fxExecutable){
+  assert.equal(first.snapshot.actions.audioOptimization,true);assert.equal(first.snapshot.audioOptimization.enabled,false);
+  const originalStore=JSON.stringify(host.memory.raw());
+  cases.push('authenticated Windows broker and exact production client/host/owner read real FxSound OFF state');
+  const on=await client.mutate('audioOptimization.setEnabled',{enabled:true});assert.equal(on.applied,true);
+  await awaitState(client,state=>state.snapshot?.audioOptimization?.enabled===true);
+  liveAudio.on=await fxCall('status');assert(liveAudio.on.running&&liveAudio.on.enabled&&liveAudio.on.selected);
+  assert.equal(liveAudio.on.preset,'移动端通用音频优化');
+  cases.push('authenticated ON request crosses actual broker and production owner into real native FxSound controller');
+  const repeated=await client.mutate('audioOptimization.setEnabled',{enabled:true});assert.equal(repeated.applied,true);
+  liveAudio.repeatedOn=await fxCall('status');assert.equal(liveAudio.repeatedOn.pid,liveAudio.on.pid);
+  cases.push('a second authenticated ON reuses the same real FxSound PID');
+  liveAudio.enabledSignal=await fxCall('signal');assert.equal(liveAudio.enabledSignal.ok,true);
+  const off=await client.mutate('audioOptimization.setEnabled',{enabled:false});assert.equal(off.applied,true);
+  await awaitState(client,state=>state.snapshot?.audioOptimization?.enabled===false);
+  liveAudio.off=await fxCall('status');assert.equal(liveAudio.off.running,false);assert.match(liveAudio.off.output,/A100/);
+  liveAudio.disabledSignal=await fxCall('signal');assert.equal(liveAudio.disabledSignal.ok,true);
+  cases.push('authenticated OFF normally quits real FxSound and original native Recovery restores A100 with output signal');
+  const repeatOff=await client.mutate('audioOptimization.setEnabled',{enabled:false});assert.equal(repeatOff.applied,true);
+  assert.equal(JSON.stringify(host.memory.raw()),originalStore);assert.equal(host.counts.saves,0);assert.equal(host.counts.inputSaves,0);assert.equal(host.counts.fxSoundWrites,4);
+  cases.push('repeated authenticated OFF succeeds while all game/global memory settings remain unchanged');
+ }else{
  assert.equal(first.snapshot.actions.game,true);assert.equal(first.snapshot.game.fields.corePolicyMode.value,'big-small');assert.equal(first.snapshot.game.fields.acMode.value,'follow');assert.equal(first.snapshot.steam.appId,'480');assert.ok(!first.notice.includes('默认核心'));assert.equal(host.counts.saves,0);assert.equal(host.counts.power,1);assert.equal(host.counts.capabilities,1);cases.push('real Windows native broker and production Client consume exact production host snapshot/defaults with zero saves');
  const edits=[['acMode','performance'],['dcMode','extreme'],['corePolicyMode','only-small'],['hyperThreadPolicy','off'],['padPersona','elite'],['gyroOverride','fps']];
  let firstPacket;
@@ -34,6 +71,8 @@ try{
  host.stop();host.start();host.ready();const remounted=await awaitState(client,state=>state.snapshot?.revision>reopened.snapshot.revision);assert.equal(remounted.snapshot.game.fields.gyroOverride.value,'fps');assert.equal(sockets.length,2);cases.push('host renderer remount uses actual native mirrorAttach revision without opening another socket or losing EXE memory');
  host.state.game={...host.state.game,pid:202,processCreated:'987654321',name:'Offline.exe',title:'Offline',path:'D:/GOG/Offline.exe'};host.gameChanged();const nonSteam=await awaitState(client,state=>state.snapshot?.game?.label==='Offline');assert.match(nonSteam.snapshot.game.identity,/offline\.exe/);assert.equal(nonSteam.snapshot.game.fields.acMode.value,'follow');await client.mutate('game.setField',{field:'acMode',value:'balanced'});await awaitState(client,state=>state.snapshot?.game?.fields.acMode.value==='balanced');assert.equal(host.memory.raw().entries['offline.exe'].enabled,true);assert.equal(host.memory.raw().entries['game.exe'].acMode,'eco');assert.ok(!Object.hasOwn(host.memory.raw().entries['offline.exe'],'steamAppId'));cases.push('new non-Steam EXE uses same host map even when Steam AppID observation remains present');
  host.state.game=null;host.gameChanged();await awaitState(client,state=>state.connected&&state.snapshot?.game===null);assert.equal(client.snapshot().snapshot.actions.game,false);assert.equal(client.snapshot().snapshot.actions.fan,true);cases.push('no confirmed game closes game actions without shutting down the global fan mirror');
+
+ }
  client.setVisible(false);await waitObserverGone();client.dispose();host.stop();child.stdin.end('stop\n');const native=await bounded(summary.promise,'native stop summary'),exit=await bounded(terminal,'native broker exit');assert.equal(exit.code,0);assert.equal(native.activeAfterStop,false);assert.equal(native.endpointReleased,true);assert.deepEqual(host.observerStats(),{ipc:0,game:0,schedule:0,fan:0,watchers:0});cases.push('all original host observers, client sockets and native broker handles released on shutdown');
- const report={project:'YMCC Decky 侧边栏',stage:process.argv.includes('--stage14')?'Implementation14':process.argv.includes('--stage13')?'Implementation13':process.argv.includes('--stage12')?'Implementation12':process.argv.includes('--stage11')?'Implementation11':'Implementation10',dateHongKong:'2026-10-09',cases:cases.length,results:cases,platform:process.platform,status:'passed',actualNativeBroker:true,productionClient:true,exactProductionHost:true,productionRelayAndAdapters:true,originalStoreAndLock:true,hostCounts:host.counts,memoryStoreStats:host.memory.stats(),nativeSummary:native,requested,actualWebView:false,actualSteam:false,physicalHardwareWrites:0,realBusinessConfigWrites:0,actualJoyxoffOperations:0};fs.writeFileSync(path.resolve(task,process.argv.includes('--stage14')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION14.json':process.argv.includes('--stage13')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION13.json':process.argv.includes('--stage12')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION12.json':process.argv.includes('--stage11')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION11.json':'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION10.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
-}catch(error){client?.dispose();host?.stop();for(const socket of sockets)socket.close();if(!child.stdin.destroyed)child.stdin.end('stop\n');await bounded(terminal,'failure broker cleanup').catch(()=>child.kill());throw new Error(`${error.stack}; stderr=${stderr}; counts=${JSON.stringify(host?.counts)}`);}
+ const report={project:'YMCC Decky 侧边栏',stage:process.argv.includes('--stage14')?'Implementation14':process.argv.includes('--stage13')?'Implementation13':process.argv.includes('--stage12')?'Implementation12':process.argv.includes('--stage11')?'Implementation11':'Implementation10',dateHongKong:fxExecutable?'2026-10-24':'2026-10-09',cases:cases.length,results:cases,platform:process.platform,status:'passed',actualNativeBroker:true,productionClient:true,exactProductionHost:true,productionRelayAndAdapters:true,originalStoreAndLock:true,hostCounts:host.counts,memoryStoreStats:host.memory.stats(),nativeSummary:native,requested,actualWebView:false,actualSteam:false,physicalHardwareWrites:fxExecutable?null:0,realBusinessConfigWrites:fxExecutable?'FxSound settings and Windows audio defaults':0,actualJoyxoffOperations:0,realFxSoundController:!!fxExecutable,liveAudio,fxObservationTimersAfterStop:host.fxTimerCount()};assert.equal(host.fxTimerCount(),0);fs.writeFileSync(path.resolve(task,fxExecutable?'validation/FXSOUND-NATIVE-PIPELINE.json':process.argv.includes('--stage14')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION14.json':process.argv.includes('--stage13')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION13.json':process.argv.includes('--stage12')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION12.json':process.argv.includes('--stage11')?'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION11.json':'validation/MIRROR-HOST-NATIVE-PIPELINE-IMPLEMENTATION10.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
+}catch(error){if(fxExecutable)await fxCall('off').catch(()=>{});client?.dispose();host?.stop();for(const socket of sockets)socket.close();if(!child.stdin.destroyed)child.stdin.end('stop\n');await bounded(terminal,'failure broker cleanup').catch(()=>child.kill());throw new Error(`${error.stack}; stderr=${stderr}; counts=${JSON.stringify(host?.counts)}`);}

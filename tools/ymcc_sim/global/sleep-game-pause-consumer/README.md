@@ -1,0 +1,15 @@
+# Single-PID game pause original consumer
+
+The reviewed original Python fixture extracts11 production functions, the actual suspend worker gate and production machine-family enum. The real single-PID NT suspend helper is a static contract; actual pause/resume/process-open operations remain original memory functions. A real test-owned cancellation thread,25ms wait and join are preserved under the existing Windows Job. No other game or user process is operated.
+
+References the frozen short-root ownership/archive, output-path gate, compiler input/environment evaluator and Python audit composition. A dedicated portable forced-include header is required because the original fixture intentionally defines memory HANDLE/DWORD types and must not include windows.h. It audits the generated executable's actual imports before main, rejects imported real process/power/network operations, and denies absent external APIs at their compile/runtime ports. The original fake OpenProcess function remains intact.
+
+Initial original compatibility failure must be retained. Maintain only source-exact extraction/pure context, preserve all previous family/capability/option assertions, and add the newly introduced ValveSteamMachine desktop as a distinct caps0/1 case. Private source faults count only after successful compile and execution when an original opened-handle PID identity assertion fails. OS sleep,actual process suspension,USB4,Steam,Host and devices remain unverified.
+
+## Resume observer context repair (2026-10-23)
+
+The previous MSVC C3861 failure is retained in core Evidence/SleepFinalConsumers-20261023. The complete current handlePowerResumeNotification calls msiVisibilityObserverNoteResume; the original fixture preamble lacked its context. observer-context-review.json binds the complete resume handler, complete eligibility/helper definitions, raw runtime header and real diagnostics Policy header, plus unchanged original generator and the local memory template. A mismatch refuses execution; there is no hash fallback.
+
+The module writes a context header into each owned output. Its Python composition adds one include to the exact original generated C++ at one unique anchor; the audit records original/generated text and file hashes. The worker proves that deleting this include restores the exact original generated text. The original generator, extracted functions, assertions, positive28/identity negative, six OS refusals,180s adapter budget and owned Job rules remain in force. No shared file or product source changes.
+
+Both diagnostic macros are enabled only in this software fixture so the real Policy and helper execute. Exit fence, exit request, trusted-board eligibility and virtual log switch are explicit memory inputs. Twelve supplementary checks cover qualification/refusal, lifecycle readiness, duplicate clock, zero generation/time and absence of pending/launch intent; original fixture inputs/state are restored before its28 groups. This validates the called receipt helper, not the hardware eligibility detector, observer launch/poll/child lifecycle, Host, Steam, game, devices or real sleep.

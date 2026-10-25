@@ -1,0 +1,55 @@
+// Pure source/JSON controls. MODEL frames are never actual execution evidence.
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
+import {read,checkedPin} from './default-case-contract.mjs';
+import {validatePositiveCurrentFrame,projectCurrentFramePolicy,productId} from './original-constructor-native-current-frame-contract.mjs';
+import {nativeFaultConsumerPrepareForProfile,prepareNativeFaultCurrentFrame,readExplicitPositiveCurrentFrame} from './prepare-original-constructor-native-current-frame.mjs';
+import {prepareNativeFaultReplay} from './prepare-original-constructor-native-fault.mjs';
+import {assessOriginalConstructorResult} from './prepare-original-constructors.mjs';
+import basis from './original-constructor-native-fault-basis.json' with {type:'json'};
+export function runCurrentFrameNativeFaultControls({modelInputsPin}){
+ const input=read(checkedPin(modelInputsPin).path),frames=input.models.map(m=>read(checkedPin(m.frame).path)),tests=[],clone=structuredClone;
+ const test=(name,fn)=>{try{fn();tests.push({name,passed:true});}catch(e){tests.push({name,passed:false,error:e.message});}};
+ const valid=f=>validatePositiveCurrentFrame(f,{modelOnly:true});
+ const refuse=(name,edit,{schema=4,sync=false}={})=>test(name,()=>{const f=clone(frames.find(x=>x.policy.schemaVersion===schema));edit(f);if(sync)f.provenance.retainedPolicy=clone(f.policy);assert.throws(()=>valid(f));});
+ for(const frame of frames)test('schema'+frame.policy.schemaVersion+' complete MODEL frame accepted only in MODEL domain',()=>{const r=valid(frame);assert.equal(r.modelOnly,true);assert.equal(r.executionApproved,false);assert.equal(r.defaultManaged,frame.policy.contexts[0].managed.length);});
+ test('MODEL positive cannot pass actual admission',()=>assert.throws(()=>validatePositiveCurrentFrame(frames[0])));
+ test('changing only MODEL provenance label cannot promote a model to actual',()=>{const f=clone(frames[0]);f.provenance.evidenceKind='ACTUAL_PARENT_POSITIVE';assert.throws(()=>validatePositiveCurrentFrame(f));});
+ test('actual reader rejects model evidence before output creation',()=>{const f=frames[0];assert.throws(()=>readExplicitPositiveCurrentFrame({positivePlanPin:f.positivePlanPin,positiveResultPin:f.positiveResultPin,provenancePin:f.provenancePin}));});
+ test('source prepare rejects model and does not create fresh root',()=>{const f=frames[0],outDir=path.join(path.dirname(modelInputsPin.path),'MODEL-MUST-NOT-BE-CREATED');assert(!fs.existsSync(outDir));assert.throws(()=>prepareNativeFaultCurrentFrame({profile:'validated-current-frame-schema4-5',mode:'prepare-only',positivePlanPin:f.positivePlanPin,positiveResultPin:f.positiveResultPin,provenancePin:f.provenancePin,outDir}));assert(!fs.existsSync(outDir));});
+ test('default and explicit schema2 keep exact original function reference',()=>{assert.equal(nativeFaultConsumerPrepareForProfile(),prepareNativeFaultReplay);assert.equal(nativeFaultConsumerPrepareForProfile('schema2-original47'),prepareNativeFaultReplay);});
+ test('unknown profile never falls back to schema2 or current frame',()=>assert.throws(()=>nativeFaultConsumerPrepareForProfile('schema5-auto')));
+ const actualFail=read(checkedPin(input.sourceFrame.actualFailureResult).path);
+ test('current actual86FAIL aggregate is refused as positive',()=>{assert.equal(actualFail.status,'FAIL');assert.equal(actualFail.cases.filter(c=>c.status==='FAIL').length,86);assert.throws(()=>assessOriginalConstructorResult(actualFail,{hcSha256:basis.images.hc,hostSha256:basis.images.host}));const f=clone(frames[0]);f.result=clone(actualFail);assert.throws(()=>valid(f));});
+ refuse('single failure cannot be admitted',f=>{f.result.status='FAIL';f.result.cases[0].status='FAIL';});
+ refuse('reordered original89 refused',f=>f.result.cases.reverse());
+ refuse('dropped case refused',f=>f.result.cases.pop());
+ refuse('duplicate case refused',f=>f.result.cases[1].id=f.result.cases[0].id);
+ for(const key of ['hardwareIo','hostMainStarted','managerStartCalled','actualDeviceOpenBodyExecuted'])refuse(key+' true refused',f=>f.result[key]=true);
+ refuse('wrong HC image refused',f=>f.result.hcSha256='1'.repeat(64));refuse('wrong clean Host refused',f=>f.result.candidateHostSha256='2'.repeat(64));
+ refuse('cleanup debt refused',f=>f.result.nativeMathFaultCleanup=1);
+ refuse('positive process exit2 refused',f=>f.process.code=2);refuse('timed-out positive refused',f=>f.process.expired=true);refuse('native budget extension refused',f=>f.provenance.budgets.native=60001);refuse('parent budget extension refused',f=>f.plan.parentBudgetMs=360001);
+ refuse('non-all mode refused',f=>f.plan.args[7]='ROGAlly');refuse('runtime path substitution refused',f=>f.plan.args[2]='D:/MODEL_ONLY/foreign-runtime');
+ refuse('same-count Default pin drift refused',f=>f.policy.contexts[0].managed[0].sha256='0'.repeat(64));
+ refuse('Default pin drift refused even if inventory declaration is rewritten',f=>f.policy.contexts[0].managed[0].sha256='0'.repeat(64),{sync:true});
+ refuse('arbitrary extra Default member refused without exact extension provenance',f=>f.policy.contexts[0].managed.push({...f.policy.contexts[0].managed[0],path:'D:/MODEL_ONLY/extra.dll'}),{sync:true});
+ refuse('Constructor9 pin drift refused even with rewritten inventory',f=>f.policy.contexts[1].managed[0].sha256='e'.repeat(64),{sync:true});
+ refuse('Product registration identity substituted refused',f=>f.policy.contexts[2].registrationAssembly.sha256='e'.repeat(64),{sync:true});
+ refuse('Product same-SHA foreign backend path refused',f=>f.policy.contexts[2].managed.find(m=>m.sha256===basis.images.backend).path='D:/MODEL_ONLY/foreign/YeManFanBackend.dll',{sync:true});
+ refuse('registration same-name identity drift refused',f=>f.policy.contexts[2].registrationAssembly.identity='OneXFanCoexistence, Version=2.0.0.0, Culture=neutral, PublicKeyToken=null',{sync:true});
+ refuse('third ProductContext target request refused',f=>f.policy.contexts[2].requests.push(clone(f.policy.contexts[2].requests[0])),{sync:true});
+ refuse('incomplete37 refused',f=>f.plan.outputs.pop());refuse('extra38 output refused',f=>f.plan.outputs.push({...f.plan.outputs[0],path:path.join(f.plan.ownedRoot,'extra.dll')}));
+ refuse('non-authority37 replacement refused',f=>{const p=f.plan.outputs.find(p=>p.path.endsWith('OneXFanCoexistence.dll'));p.sha256='a'.repeat(64);const o=f.provenance.outputOrigins.find(x=>x.relative===path.relative(f.plan.ownedRoot,p.path).replaceAll('\\','/'));o.source.sha256=p.sha256;});
+ refuse('origin37 missing refused',f=>f.provenance.outputOrigins.pop());refuse('base44 computed inverse drift refused',f=>f.derivedDefault44.context.managed[0].identity='wrong');
+ refuse('alias provider drift refused',f=>f.policy.exactAliases[0].provider.sha256='1'.repeat(64),{sync:true});
+ refuse('alias oldProduct missing refused',f=>f.policy.exactAliases[0].requestingContexts.pop(),{sync:true});
+ refuse('alias duplicate oldProduct refused',f=>f.policy.exactAliases[0].requestingContexts.push(f.policy.contexts[2].id),{sync:true});
+ refuse('alias foreign requestingContext refused',f=>f.policy.exactAliases[0].requestingContexts.push('Foreign'),{sync:true});
+ refuse('unknown target request refused',f=>f.policy.contexts[1].requests.push({requestedIdentity:'Unknown, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null',targetContext:'Default',targetPath:'D:/MODEL_ONLY/foreign.dll'}),{sync:true});
+ refuse('metadata different policy vector refused',f=>f.metadataProcess.args[3]='f'.repeat(64));refuse('metadata target load refused',f=>f.metadataReceipt.productLoaded=true);refuse('preload wrong plan refused',f=>f.preload.plan.sha256='f'.repeat(64));refuse('preload count-only cannot hide absent pin',f=>f.preload.defaultPins++);
+ for(const f of frames){const schema=f.policy.schemaVersion,newRoot=path.resolve('D:/MODEL_ONLY/fresh-frame-'+schema),mapping=f.plan.outputs.map(before=>({before,after:{path:path.join(newRoot,path.relative(f.plan.ownedRoot,before.path)),sha256:before.sha256}}));const hostBefore={path:f.plan.args[9],sha256:basis.images.host},hostAfter={path:path.join(newRoot,'native-fault-payload/YeManFanHost.dll'),sha256:'f'.repeat(64)},backend=f.policy.contexts[2].managed.find(p=>p.sha256===basis.images.backend);mapping.push({before:hostBefore,after:hostAfter},{before:backend,after:{path:path.join(newRoot,'native-fault-payload/YeManFanBackend.dll'),sha256:backend.sha256}});
+ test('schema'+schema+' migration preserves complete policy and exact inverse',()=>{const r=projectCurrentFramePolicy({policy:f.policy,plan:f.plan,newRoot,mapping});assert.equal(r.inverseEqualsSource,true);assert.equal(r.aliasReplacements,f.policy.exactAliases.length);assert.equal(r.policy.contexts[2].id,productId(hostAfter.path));assert.deepEqual(r.policy.contexts.map(c=>c.managed.length),f.policy.contexts.map(c=>c.managed.length));const expected=clone(f.plan.args);expected[6]=path.join(newRoot,'Build/original-constructors/result.json');expected[9]=hostAfter.path;assert.deepEqual(r.args,expected);for(let i=0;i<r.policy.exactAliases.length;i++){const a=r.policy.exactAliases[i],old=f.policy.exactAliases[i];assert.deepEqual(a.provider,old.provider);assert.equal(a.requestedIdentity,old.requestedIdentity);assert.equal(a.targetContext,old.targetContext);assert.deepEqual(a.requestingContexts,old.requestingContexts.map(x=>x===r.oldProductId?r.newProductId:x));}if(schema===5)assert.deepEqual(r.policy.modelOpaqueExtension,f.policy.modelOpaqueExtension);});
+ test('schema'+schema+' projected request exact Host/backend pins and registration are retained',()=>{const r=projectCurrentFramePolicy({policy:f.policy,plan:f.plan,newRoot,mapping}),c=r.policy.contexts[2];assert.equal(c.registrationAssembly.sha256,basis.images.producer);assert.equal(c.registrationType,'Harness+ProductContext');assert(c.managed.some(x=>x.path===hostAfter.path&&x.sha256===hostAfter.sha256));assert(c.requests.filter(x=>x.targetContext===r.newProductId).length===2);assert(!JSON.stringify(r.policy).includes(r.oldProductId));});
+ test('schema'+schema+' incomplete duplicate alias projection refused',()=>{const p=clone(f.policy);p.exactAliases[0].requestingContexts.push(p.contexts[2].id);assert.throws(()=>projectCurrentFramePolicy({policy:p,plan:f.plan,newRoot,mapping}));});
+ }
+ return {schemaVersion:1,status:tests.every(t=>t.passed)?'PASS_MODEL_CONTROLS_NOT_CURRENT_POSITIVE_ADMISSION':'FAIL_MODEL_CONTROLS',passed:tests.filter(t=>t.passed).length,total:tests.length,tests,modelsOnly:true,actualPositiveAdmitted:false,actualCurrentFailureCount:86,compilers:0,producerExecutions:0,targetExecutions:0,generatedFaultImages:0};
+}

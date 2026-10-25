@@ -14,9 +14,20 @@
 #pragma comment(lib,"winhttp.lib")
 namespace ymcc::deckymirror {
 class CancelToken {
-    HANDLE event_ = CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    HANDLE event_ = nullptr;
 public:
-    CancelToken(){if(!event_)throw std::runtime_error("mirror-cancel-event-failed");}
+    CancelToken():event_(CreateEventW(nullptr,TRUE,FALSE,nullptr)){
+        if(!event_)throw std::runtime_error("mirror-cancel-event-failed");
+    }
+    // A binding worker duplicates its owner's inherited manual-reset event.
+    // This wakes the existing WinHTTP wait directly; no relay thread or poller.
+    // The caller retains its handle; this token closes only its own duplicate.
+    explicit CancelToken(HANDLE externalEvent){
+        if(!externalEvent || externalEvent==INVALID_HANDLE_VALUE ||
+           !DuplicateHandle(GetCurrentProcess(),externalEvent,GetCurrentProcess(),&event_,
+               SYNCHRONIZE|EVENT_MODIFY_STATE,FALSE,0))
+            throw std::runtime_error("mirror-cancel-event-duplicate-failed");
+    }
     ~CancelToken(){CloseHandle(event_);}
     CancelToken(const CancelToken&)=delete;
     HANDLE event() const{return event_;}
@@ -27,9 +38,15 @@ class CancelSignal {
     std::mutex mutex_;
     std::shared_ptr<CancelToken> token_;
 public:
-    void renew(){auto token=std::make_shared<CancelToken>();std::lock_guard lock(mutex_);token_=std::move(token);}
+    void renew(){
+        auto next=std::make_shared<CancelToken>();std::shared_ptr<CancelToken> previous;
+        {std::lock_guard lock(mutex_);previous=std::move(token_);token_=std::move(next);}
+        // A watcher may still own the previous generation. Dropping our shared
+        // reference is not cancellation: wake its actual WinHTTP wait as well.
+        if(previous)previous->cancel();
+    }
     std::shared_ptr<CancelToken> current(){std::lock_guard lock(mutex_);return token_;}
-    void cancel(){auto token=current();if(token)token->cancel();}
+    void cancel(){std::lock_guard lock(mutex_);if(token_)token_->cancel();}
 };
 struct AsyncState {
     std::mutex mutex;
@@ -136,6 +153,7 @@ public:
             if(error!=NO_ERROR&&error!=ERROR_IO_PENDING)throw std::runtime_error("mirror-bootstrap-ws-receive-failed");wait(WINHTTP_CALLBACK_STATUS_READ_COMPLETE);
             DWORD length;WINHTTP_WEB_SOCKET_BUFFER_TYPE kind;
             {std::lock_guard lock(state_->mutex);length=state_->length;kind=state_->kind;}
+            if(kind==WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)throw std::runtime_error("mirror-bootstrap-ws-closed");
             if(length>state_->buffer.size()||kind!=WINHTTP_WEB_SOCKET_UTF8_FRAGMENT_BUFFER_TYPE&&kind!=WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)throw std::runtime_error("mirror-bootstrap-ws-invalid");
             text.append(state_->buffer.data(),length);if(text.size()>maximum)throw std::runtime_error("mirror-bootstrap-reply-limit");
             if(kind==WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE)return text;

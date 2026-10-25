@@ -1,0 +1,166 @@
+{
+  "name": "Darken Unfocused Games",
+  "author": "TheRensei",
+  "version": "v1.1-ymcc.1",
+  "manifest_version": 5,
+  "inject": {
+    "shared.css": [
+      "SP"
+    ]
+  },
+  "dependencies": {},
+  "patches": {
+    "Brighntess": {
+      "type": "slider",
+      "default": "0.5",
+      "values": {
+        "0.1": {
+          "--ren-game-tile-brightness": [
+            "0.1",
+            "SP"
+          ]
+        },
+        "0.2": {
+          "--ren-game-tile-brightness": [
+            "0.2",
+            "SP"
+          ]
+        },
+        "0.3": {
+          "--ren-game-tile-brightness": [
+            "0.3",
+            "SP"
+          ]
+        },
+        "0.4": {
+          "--ren-game-tile-brightness": [
+            "0.4",
+            "SP"
+          ]
+        },
+        "0.5": {
+          "--ren-game-tile-brightness": [
+            "0.5",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "--ren-game-tile-brightness": [
+            "0.6",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "--ren-game-tile-brightness": [
+            "0.7",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "--ren-game-tile-brightness": [
+            "0.8",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "--ren-game-tile-brightness": [
+            "0.9",
+            "SP"
+          ]
+        },
+        "1.0": {
+          "--ren-game-tile-brightness": [
+            "1.0",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Saturation": {
+      "type": "slider",
+      "default": "0.5",
+      "values": {
+        "0.1": {
+          "--ren-game-tile-saturate": [
+            "0.1",
+            "SP"
+          ]
+        },
+        "0.2": {
+          "--ren-game-tile-saturate": [
+            "0.2",
+            "SP"
+          ]
+        },
+        "0.3": {
+          "--ren-game-tile-saturate": [
+            "0.3",
+            "SP"
+          ]
+        },
+        "0.4": {
+          "--ren-game-tile-saturate": [
+            "0.4",
+            "SP"
+          ]
+        },
+        "0.5": {
+          "--ren-game-tile-saturate": [
+            "0.5",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "--ren-game-tile-saturate": [
+            "0.6",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "--ren-game-tile-saturate": [
+            "0.7",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "--ren-game-tile-saturate": [
+            "0.8",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "--ren-game-tile-saturate": [
+            "0.9",
+            "SP"
+          ]
+        },
+        "1.0": {
+          "--ren-game-tile-saturate": [
+            "1.0",
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    },
+    "Apply": {
+      "type": "dropdown",
+      "default": "Globally",
+      "values": {
+        "Globally": {
+          "global.css": [
+            "SP"
+          ]
+        },
+        "Recent Only": {
+          "recent-games.css": [
+            "SP"
+          ]
+        }
+      },
+      "components": []
+    }
+  },
+  "id": "2933071b-5c8d-4c01-9835-33b992719118"
+}

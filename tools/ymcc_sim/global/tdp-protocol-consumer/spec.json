@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "groups": [
+    "check_families",
+    "check_amd_routes",
+    "check_intel_encoding",
+    "check_intel_single_targets",
+    "check_daemon_client_allowlist"
+  ],
+  "expectedFailedGroup": "check_intel_single_targets",
+  "expectedAssertText": "calls[-1]",
+  "fault": {
+    "before": "return pl1, pl1 + max(1, int(intel_delta))",
+    "after": "return pl1, pl1 + max(2, int(intel_delta))"
+  }
+}

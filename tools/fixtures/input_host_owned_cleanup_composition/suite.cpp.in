@@ -1,0 +1,155 @@
+// The prefix below is extracted from the existing pipe memory API fixture.
+// It calls real private Win32 event/duplicate/close leaves and injects IO faults.
+@@PIPE_LEAVES@@
+using json=nlohmann::json;
+namespace tr=ymcc::inputHost::pipeTransport;
+static unsigned checks=0,negativeOnlyRawSalvage=0;
+static json failures=json::array(),rows=json::array();
+static void check(bool value,const char* text){++checks;if(!value)failures.push_back(text);}
+static void require(bool value,const char* text){if(!value)throw std::runtime_error(text);}
+// Production declarations; primary is a no-operation null port in every original scene.
+@@HOST_GLOBALS@@
+static bool g_inputHostHello=false,g_inputHostPrepared=false,g_inputHostPrepareMayHaveReachedHost=false;
+static bool g_inputHostNeutralized=false,g_inputHostActive=false,g_inputHostReleaseQuarantined=false;
+static struct {bool active=false;} g_hidHideVisibilityJournal;
+static struct {bool owed=false;bool required()const{return owed;}} g_msiSteamDeckReleaseDebt;
+static struct {bool owed=false;bool retirementRequired()const{return owed;}} g_psEndpointOwnership;
+static std::atomic<bool> g_msiDinputReturnOwed{false};
+static struct {bool virtualTargetEnabled=false;} g_realStickTest;
+static bool knownMsi=false,historySettled=true;
+static bool msiClawKnownBoardAuthority(){return knownMsi;}
+static bool inputHostTargetReturnHistorySettledLocked(){return historySettled;}
+@@RAW_SLOT@@
+// Log leaf only; primary ownership/failure scenarios are in the parent fixture.
+static void appendNativeLifecycleLog(const char*,const json&){}
+#define CloseHandle memoryApi::close
+#include "input_host_process_retirement.h"
+@@PRIMARY_HELPER@@
+@@WRAPPER@@
+#undef CloseHandle
+@@PREDICATES@@
+static json snapshot(tr::Runtime& owner){const auto s=owner.snapshot();return {
+ {"available",s.available},{"pending",s.pending},{"active",s.activeLeases},{"retained",s.retainedLeases},
+ {"cached",s.cachedOperations},{"originals",s.ownedOriginals},{"duplicates",s.ownedDuplicates},
+ {"events",s.ownedEvents},{"failedCloseDebt",s.failedCloseDebt},{"historicalCloseFailures",s.closeFailures},
+ {"sealed",s.sealed},{"stopped",s.stopped}};}
+static void resetFacts(){g_inputHostProcess=nullptr;g_inputHostServerPipe=nullptr;g_inputHostHello=false;
+ g_inputHostPrepared=false;g_inputHostPrepareMayHaveReachedHost=false;g_inputHostNeutralized=false;
+ g_inputHostActive=false;g_inputHostReleaseQuarantined=false;g_hidHideVisibilityJournal.active=false;
+ g_msiSteamDeckReleaseDebt.owed=false;g_psEndpointOwnership.owed=false;g_msiDinputReturnOwed=false;
+ g_realStickTest.virtualTargetEnabled=false;knownMsi=false;historySettled=true;}
+static void expectBlocked(const char* name){check(!inputHostOwnedCleanupProvenLocked(),name);check(!inputHostDisabledCleanupProvenLocked(),name);}
+static void expectSettled(const char* name){check(inputHostOwnedCleanupProvenLocked(),name);check(inputHostDisabledCleanupProvenLocked(),name);}
+static void memoryLeavesEmpty(){require(memoryApi::live.empty(),"private pipe handles still owned");memoryApi::clear();}
+static void drain(tr::Runtime& owner){for(unsigned i=0;i<6&&!owner.stopped();++i)owner.maintenance();require(owner.stopped(),"explicit conditional close did not settle");memoryLeavesEmpty();}
+static HANDLE adopt(tr::Runtime& owner,const wchar_t* name){const auto h=memoryApi::source();DWORD error=0;bool taken=false;
+ require(owner.adopt(h,name,error,&taken)&&taken,"private lease admission");return h;}
+static void independentDebts(){
+ resetFacts();expectSettled("no-owner-all-facts-clear");
+ g_realStickTest.virtualTargetEnabled=true;
+ check(inputHostOwnedCleanupProvenLocked(),"saved ON does not change resource completion");
+ check(!inputHostDisabledCleanupProvenLocked(),"Disabled requires explicit OFF");g_realStickTest.virtualTargetEnabled=false;
+ const auto owned=::CreateEventW(nullptr,TRUE,FALSE,nullptr);require(owned!=nullptr,"process-memory-fact private event");
+ g_inputHostProcess=owned;expectBlocked("process handle remains");g_inputHostProcess=nullptr;
+ g_inputHostServerPipe=owned;expectBlocked("server handle remains");g_inputHostServerPipe=nullptr;
+ require(::CloseHandle(owned)!=FALSE,"memory-fact private handle returned");
+ for(auto* flag:{&g_inputHostHello,&g_inputHostPrepared,&g_inputHostPrepareMayHaveReachedHost,&g_inputHostNeutralized,
+  &g_inputHostActive,&g_inputHostReleaseQuarantined,&g_hidHideVisibilityJournal.active,&g_msiSteamDeckReleaseDebt.owed,
+  &g_psEndpointOwnership.owed}){*flag=true;expectBlocked("separate session endpoint or visibility obligation remains");*flag=false;}
+ historySettled=false;expectBlocked("durable history remains");historySettled=true;
+ knownMsi=true;g_msiDinputReturnOwed=true;expectBlocked("known MSI physical-mode return owed");
+ knownMsi=false;expectSettled("MSI-specific debt does not bind non-MSI model");g_msiDinputReturnOwed=false;
+ expectSettled("all separate facts cleared");rows.push_back({{"case","independent-host-endpoint-physical-history-facts"}});
+}
+static void rawSlotCloseFailure(const char* context){
+ const auto source=memoryApi::source();g_inputHostUnadoptedPipe=source;memoryApi::failRoles=memoryApi::Original;
+ const bool returned=inputHostPipeRetirementProvenLocked();
+ check(!returned,"raw pre-adoption close failure blocks actual wrapper");
+ check(g_inputHostUnadoptedPipe==source,"raw pre-adoption close failure retains exact sole owner");
+ check(memoryApi::live.count(source)==1,"raw pre-adoption failed close remains independently live");
+ expectBlocked("raw pre-adoption close failure blocks actual upper predicates");
+ memoryApi::failRoles=0;
+ if(g_inputHostUnadoptedPipe){
+  const bool resumed=inputHostPipeRetirementProvenLocked();
+  check(resumed,"raw close fault clearance resumes actual wrapper");
+  check(g_inputHostUnadoptedPipe==nullptr,"successful raw close clears exactly one owner");
+ }else{
+  ++negativeOnlyRawSalvage;require(memoryApi::close(source)!=FALSE,"negative-only raw owner salvage");
+ }
+ check(memoryApi::live.count(source)==0,"raw slot real kernel handle closed before completion");
+ expectSettled("raw slot close succeeded and all other obligations clear");
+ memoryLeavesEmpty();rows.push_back({{"case",context},{"negativeOnlySalvage",negativeOnlyRawSalvage}});
+}
+static void activeAndCloseDebt(tr::Runtime& owner){
+ const auto h=adopt(owner,L"composition-active-cache");g_inputHostServerPipe=h;
+ expectBlocked("active server pipe fact");g_inputHostServerPipe=nullptr;
+ auto active=snapshot(owner);check(active["pending"]==0&&active["active"]==1,"active lease has zero pending IO");
+ expectBlocked("zero pending does not retire active lease");
+ unsigned char data[16]{};auto r=owner.run(h,tr::Kind::Read,data,sizeof(data),1,0);
+ require(r.ok&&r.terminal,"terminal controlled IO");
+ const auto cached=snapshot(owner);check(cached["pending"]==0&&cached["cached"]==1,"terminal cached event remains owned");
+ expectBlocked("zero pending does not retire terminal cache");
+ memoryApi::failRoles=memoryApi::Original|memoryApi::Duplicate|memoryApi::Event;
+ owner.close(h);const auto debt=snapshot(owner);
+ check(debt["pending"]==0&&debt["failedCloseDebt"]==3,"failed-close-only debt with zero pending");
+ expectBlocked("failed close debt blocks upper completion");
+ memoryApi::failRoles=memoryApi::Original|memoryApi::Duplicate;owner.maintenance();
+ check(owner.snapshot().ownedEvents==0,"event can retire independently");expectBlocked("original and duplicate still block");
+ memoryApi::failRoles=memoryApi::Duplicate;owner.maintenance();
+ check(owner.snapshot().ownedOriginals==0,"original can retire independently");expectBlocked("last duplicate still blocks");
+ memoryApi::failRoles=0;drain(owner);
+ check(owner.snapshot().closeFailures>0,"historical close failures retained as diagnostic");
+ expectSettled("historical failure count does not block successfully retired owner");
+ rows.push_back({{"case","actual-upper-predicates-active-cache-close-debt"},{"active",active},{"cached",cached},{"closeDebt",debt},{"settled",snapshot(owner)}});
+}
+static void pendingAndLateCompletion(tr::Runtime& owner){
+ const auto h=adopt(owner,L"composition-pending");memoryApi::startPending=true;
+ unsigned char data[16];std::memset(data,0xA5,sizeof(data));const auto result=owner.run(h,tr::Kind::Read,data,sizeof(data),1,0);
+ require(result.retired&&!result.terminal&&result.error==WAIT_TIMEOUT,"controlled pending remains unproven");
+ owner.close(h);const auto pending=snapshot(owner);
+ check(pending["pending"]==1&&pending["duplicates"]==1,"late query retains issuing lease");
+ expectBlocked("pending cancellation failure blocks upper completion");
+ memoryApi::complete();drain(owner);
+ check(result.retired&&!result.terminal&&result.error==WAIT_TIMEOUT&&data[0]==0xA5,"late completion does not rewrite original caller receipt or buffer");
+ expectSettled("late proven completion and explicit retirement clear completion gate");
+ rows.push_back({{"case","pending-io-and-late-completion"},{"pending",pending},{"settled",snapshot(owner)}});
+}
+static void contendedObservation(tr::Runtime& owner){
+ const auto h=adopt(owner,L"composition-snapshot-contention");
+ memoryApi::entered=::CreateEventW(nullptr,TRUE,FALSE,nullptr);memoryApi::release=::CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ require(memoryApi::entered&&memoryApi::release,"private contention controls");
+ tr::Result completed;std::thread thread([&]{unsigned char data[8]{};completed=owner.run(h,tr::Kind::Read,data,8,1,0);});
+ const auto entered=::WaitForSingleObject(memoryApi::entered,2000);
+ if(entered!=WAIT_OBJECT_0){::SetEvent(memoryApi::release);thread.join();throw std::runtime_error("fixture issue did not enter");}
+ const auto unknown=snapshot(owner);const auto began=std::chrono::steady_clock::now();
+ expectBlocked("contended pipe observation remains unknown");
+ const auto elapsed=std::chrono::steady_clock::now()-began;
+ check(!unknown["available"].get<bool>(),"contended snapshot unavailable");
+ check(elapsed<std::chrono::milliseconds(500),"upper completion observation does not wait for pipe mutex");
+ require(::SetEvent(memoryApi::release)!=FALSE,"release issue helper");thread.join();require(completed.ok,"issue helper completed");
+ require(::CloseHandle(memoryApi::entered)&&::CloseHandle(memoryApi::release),"contention controls closed");memoryApi::entered=memoryApi::release=nullptr;
+ owner.close(h);drain(owner);expectSettled("contention ended and lease retired");
+ rows.push_back({{"case","actual-wrapper-unavailable-snapshot"},{"unknown",unknown},{"settled",snapshot(owner)}});
+}
+static void sealedWithDebt(tr::Runtime& owner){
+ const auto h=adopt(owner,L"composition-sealed");(void)h;memoryApi::failRoles=memoryApi::Original;
+ owner.sealAndReap();const auto sealed=snapshot(owner);
+ check(sealed["sealed"]==true&&sealed["stopped"]==false&&sealed["failedCloseDebt"]==1,"seal fence does not prove resource return");
+ expectBlocked("sealed owner with close debt remains incomplete");memoryApi::failRoles=0;drain(owner);
+ expectSettled("sealed and actually retired owner completes");
+ DWORD error=0;check(!owner.canCreate(L"composition-after-seal",error)&&error==ERROR_SHUTDOWN_IN_PROGRESS,"late admission stays fenced after completed retirement");
+ rows.push_back({{"case","sealed-with-retained-close-debt"},{"sealed",sealed},{"settled",snapshot(owner)}});
+}
+int main(){try{
+ DWORD before=0,after=0;require(::GetProcessHandleCount(::GetCurrentProcess(),&before)!=FALSE,"process handle census before");
+ independentDebts();rawSlotCloseFailure("raw-slot-before-first-runtime");
+ auto& owner=tr::processRuntime();expectSettled("created-but-empty process owner");
+ rawSlotCloseFailure("raw-slot-with-existing-empty-runtime");
+ activeAndCloseDebt(owner);pendingAndLateCompletion(owner);contendedObservation(owner);sealedWithDebt(owner);
+ require(memoryApi::live.empty(),"zero owned handles before process exit");
+ require(::GetProcessHandleCount(::GetCurrentProcess(),&after)!=FALSE,"process handle census after");
+ check(before==after,"all private kernel handles returned before exit");
+ const bool pass=failures.empty();std::cout<<json({{"pass",pass},{"checks",checks},{"failures",failures},{"cases",rows},
+ {"negativeOnlyRawSalvage",negativeOnlyRawSalvage},{"oracleLiveBeforeExit",memoryApi::live.size()},{"handlesBefore",before},{"handlesAfter",after},
+ {"primaryThreadPort","actual global/helper compiled; null owner throughout original cases; no primary acceptance"},{"productionOrDevicesExecuted",false},{"physicalAndEndpointFacts","explicit memory ports; not real Host, SDK or physical proof"}}).dump(2)<<'\n';return pass?0:2;
+ }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 3;}}

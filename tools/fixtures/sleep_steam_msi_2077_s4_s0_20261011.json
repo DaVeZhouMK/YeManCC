@@ -1,0 +1,122 @@
+{
+  "source": "YeManCC-logs-20261011-230726-G3E风扇基本成功.zip",
+  "sourceSha256": "156e58c61772a1fc9f08e73ec9e3d3e2bc60f15781f0960be0c7e27826dbab13",
+  "game": {
+    "created": "134362044485066103",
+    "exe": "cyberpunk2077",
+    "identityMatches": true,
+    "pid": 4284,
+    "powerGenerationMatches": true,
+    "recoveryBindingMatches": true
+  },
+  "steamClient": {
+    "pid": 13172,
+    "created": "134362044226596103"
+  },
+  "trackerLine": "[2026-10-11 23:00:48] AppID 14259554480910499840 adding PID 4284 as a tracked process \"\"E:\\GAME\\Cyberpunk 2077\\bin\\x64\\Cyberpunk2077.exe\"\"",
+  "s4": {
+    "details": {
+      "appid": 3320061248,
+      "foregroundRole": "original-game",
+      "generation": 2,
+      "healthVerified": false,
+      "inputFocus": {
+        "appid": 413080,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "inputReturnBasis": "current-association",
+      "originalWindowFocused": true,
+      "overview": {
+        "appType": 1073741824,
+        "appid": 3320061248,
+        "canonicalInRunningList": true,
+        "gameidString": "14259554480910499840",
+        "gameidValueType": "string",
+        "inRunningList": true,
+        "localDisplayStatus": 4,
+        "localRunning": true,
+        "mostAvailableDisplayStatus": 4,
+        "name": "Cyberpunk 2077",
+        "overviewAvailable": true,
+        "overviewKey": 3320061248,
+        "overviewSource": "steam-ui-native-overview-store",
+        "runningAliasMismatch": false,
+        "selectedDisplayStatus": 4,
+        "windowIDs": [
+          "0"
+        ]
+      },
+      "pid": 4284,
+      "reason": "steam-association-current",
+      "requireOriginalWindowReturn": false,
+      "scope": "steam",
+      "status": "current"
+    },
+    "event": "sleep-steam-inspected",
+    "time": "2026-10-11 23:03:52.143"
+  },
+  "s0": {
+    "details": {
+      "appid": 3320061248,
+      "foregroundRole": "yeman-ui",
+      "generation": 3,
+      "healthVerified": false,
+      "inputFocus": {
+        "appid": 413080,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "inputReturnBasis": "captured-original-tracker",
+      "originalWindowFocused": false,
+      "overview": {
+        "appType": 1073741824,
+        "appid": 3320061248,
+        "canonicalInRunningList": false,
+        "gameidString": "14259554480910499840",
+        "gameidValueType": "string",
+        "inRunningList": false,
+        "localDisplayStatus": 11,
+        "localRunning": false,
+        "mostAvailableDisplayStatus": 11,
+        "name": "Cyberpunk 2077",
+        "overviewAvailable": true,
+        "overviewKey": 3320061248,
+        "overviewSource": "steam-ui-native-overview-store",
+        "runningAliasMismatch": false,
+        "selectedDisplayStatus": 11,
+        "windowIDs": [
+          "0"
+        ]
+      },
+      "pid": 4284,
+      "reason": "steam-backend-not-running",
+      "requireOriginalWindowReturn": false,
+      "scope": "steam",
+      "status": "blocked"
+    },
+    "event": "sleep-steam-inspected",
+    "time": "2026-10-11 23:06:31.211"
+  },
+  "s0OldReceipt": {
+    "accepted": false,
+    "foregroundWaitMs": 0,
+    "foregroundWaitReads": 0,
+    "gameInput": "not-tested",
+    "healthVerified": false,
+    "mutated": true,
+    "ok": false,
+    "originalWindowFocused": true,
+    "originalWindowReturn": false,
+    "reason": "live-readback-failed",
+    "returnBasis": "captured-original-tracker",
+    "scope": "steam-input",
+    "stage": "sleep-input-resume"
+  },
+  "s0NativeInputFocusLine": "[2026-10-11 23:06:31] OnFocusWindowChanged to game window type: AppID 3320061248, cyberpunk 2077",
+  "assertionBoundary": "UI cache/native log disagreement is not proof of actual game input; S4 had no authorized automatic repair; no R17 real-device run"
+}

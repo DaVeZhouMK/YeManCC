@@ -28,6 +28,7 @@ if (!(Test-Path -LiteralPath $FactorySource -PathType Leaf)) { throw "HC factory
 if (!(Test-Path -LiteralPath $HostSource -PathType Leaf)) { throw "Fan Host source missing: $HostSource" }
 
 $classes = @{}
+$fullNames = @{}
 $fanDeclarations = @{}
 foreach ($file in Get-ChildItem -LiteralPath $HcDevicesRoot -Recurse -Filter '*.cs') {
   $text = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
@@ -38,6 +39,9 @@ foreach ($file in Get-ChildItem -LiteralPath $HcDevicesRoot -Recurse -Filter '*.
   $source = [regex]::Replace($source, '(?m)//.*$', '')
   foreach ($match in [regex]::Matches($source, '(?m)\b(?:public\s+|internal\s+|private\s+|protected\s+)?(?:abstract\s+|partial\s+)?class\s+(\w+)(?:\s*:\s*([\w\.]+))?')) {
     $name = $match.Groups[1].Value
+    $ns = [regex]::Match($source, '(?m)^\s*namespace\s+([\w.]+)').Groups[1].Value
+    if (!$ns) { throw "HC class namespace missing: $name" }
+    $fullNames[$name] = "$ns.$name"
     $baseName = if ($match.Groups[2].Success) { ($match.Groups[2].Value -split '\.')[-1] } else { '' }
     $classes[$name] = $baseName
   }
@@ -74,7 +78,7 @@ $routeRegistry = $hostText.Substring($buildStart, $loadStart - $buildStart)
 # both bare class names and fully-qualified literal keys; account for both.
 $unmapped = @($fanFactoryClasses | Where-Object {
   $bare = '"' + [regex]::Escape($_) + '"'
-  $qualified = '"HandheldCompanion\.Devices\.' + [regex]::Escape($_) + '"'
+  $qualified = '"' + [regex]::Escape($fullNames[$_]) + '"'
   $routeRegistry -notmatch $bare -and $routeRegistry -notmatch $qualified
 })
 
@@ -85,9 +89,9 @@ $bareRouteClassNames = @(
     Where-Object { $knownClassNames -contains $_ }
 )
 $qualifiedRouteClassNames = @(
-  [regex]::Matches($routeRegistry, 'HandheldCompanion\.Devices\.([A-Za-z][A-Za-z0-9_]*)') |
-    ForEach-Object { $_.Groups[1].Value } |
-    Where-Object { $knownClassNames -contains $_ }
+  foreach ($className in $knownClassNames) {
+    if ($routeRegistry.Contains('"' + $fullNames[$className] + '"')) { $className }
+  }
 )
 $routeClassNames = @($bareRouteClassNames + $qualifiedRouteClassNames | Sort-Object -Unique)
 $unexpected = @($routeClassNames | Where-Object { $fanFactoryClasses -notcontains $_ })

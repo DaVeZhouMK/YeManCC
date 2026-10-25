@@ -1,5 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { createRequire } from 'node:module';
+import type * as TypeScript from 'typescript';
+
+// Resolve the existing compiler at the workspace root; keep the ESM test bundle
+// compatible with TypeScript's Node-side requires without adding product code.
+const ts: typeof TypeScript = createRequire(resolve(process.cwd(), 'package.json'))('typescript');
 
 type Owner = 'oem' | 'yeman' | 'external' | 'unknown';
 type State = 'ready' | 'suspending' | 'suspended' | 'awaiting-control' | 'fault-locked' | 'conflict-locked';
@@ -137,6 +143,80 @@ class ResumeAdoptionModel {
   }
 }
 
+/** Static production-source contract, separate from the event-order model below.
+ * Follow AST scope and statement order rather than one declaration's spelling.
+ * A nested callback cannot stand in for work performed by the queued writer. */
+function assertSerializedRecoverySettlement(source: string): void {
+  const tree = ts.createSourceFile('fanHost.ts', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+  const executors: TypeScript.MethodDeclaration[] = [];
+  const findExecutor = (node: TypeScript.Node): void => {
+    if (ts.isClassDeclaration(node) && node.name?.text === 'FanHostLifecycle') {
+      for (const member of node.members) {
+        if (ts.isMethodDeclaration(member) && ts.isIdentifier(member.name)
+            && member.name.text === 'mutateWithBoundedRetry') executors.push(member);
+      }
+    }
+    ts.forEachChild(node, findExecutor);
+  };
+  findExecutor(tree);
+  assert(executors.length === 1 && executors[0].body,
+    'the production lifecycle must contain exactly one bounded mutation executor');
+  const isThisCall = (node: TypeScript.Node, name: string): node is TypeScript.CallExpression =>
+    ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+      && node.expression.expression.kind === ts.SyntaxKind.ThisKeyword
+      && node.expression.name.text === name;
+  const callbacks: TypeScript.ArrowFunction[] = [];
+  const findQueue = (node: TypeScript.Node): void => {
+    if (isThisCall(node, 'enqueue') && node.arguments.length === 1
+        && ts.isAwaitExpression(node.parent) && node.parent.expression === node) {
+      const callback = node.arguments[0];
+      if (ts.isArrowFunction(callback) && ts.isBlock(callback.body)
+          && callback.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.AsyncKeyword)) {
+        callbacks.push(callback);
+      }
+    }
+    ts.forEachChild(node, findQueue);
+  };
+  findQueue(executors[0].body);
+  const serialized = callbacks.filter(callback => {
+    const nodes: TypeScript.Node[] = [];
+    const visitScope = (node: TypeScript.Node): void => {
+      // Delayed/nested functions are a different execution scope, even when
+      // their source text happens to sit inside this enqueue callback.
+      if (ts.isFunctionLike(node)) return;
+      nodes.push(node);
+      ts.forEachChild(node, visitScope);
+    };
+    visitScope(callback.body);
+    const writes = nodes.filter((node): node is TypeScript.AwaitExpression =>
+      ts.isAwaitExpression(node) && ts.isCallExpression(node.expression)
+        && ts.isIdentifier(node.expression.expression) && node.expression.expression.text === 'mutate'
+        && node.expression.arguments.length === 0);
+    if (writes.length !== 1) return false;
+    const write = writes[0];
+    const parent = write.parent;
+    const written = ts.isVariableDeclaration(parent) && ts.isIdentifier(parent.name)
+      ? parent.name.text
+      : ts.isBinaryExpression(parent) && parent.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isIdentifier(parent.left) ? parent.left.text : null;
+    if (!written) return false;
+    const confirmations = nodes.filter(node => isThisCall(node, 'assertControlWriteCompletionCurrent')
+      && node.arguments.length === 1 && ts.isIdentifier(node.arguments[0])
+      && node.arguments[0].text === written);
+    const settlements = nodes.filter(node => isThisCall(node, 'settleRecoveryTaskIfAny')
+      && node.arguments.length === 1 && ts.isStringLiteral(node.arguments[0])
+      && node.arguments[0].text === 'curve-written-by-control');
+    const returns = nodes.filter(node => ts.isReturnStatement(node) && node.expression
+      && ts.isIdentifier(node.expression) && node.expression.text === written);
+    return confirmations.length === 1 && settlements.length === 1 && returns.length === 1
+      && write.getStart(tree) < confirmations[0].getStart(tree)
+      && confirmations[0].getStart(tree) < settlements[0].getStart(tree)
+      && settlements[0].getStart(tree) < returns[0].getStart(tree);
+  });
+  assert(serialized.length === 1,
+    'curve write, receipt confirmation and recovery settlement must execute in order within the same awaited lifecycle queue callback');
+}
+
 function sourceChecks(): number {
   const workspaceRoot = process.cwd();
   const nativePath = resolve(workspaceRoot, 'native', 'main.cpp');
@@ -162,7 +242,8 @@ function sourceChecks(): number {
     'confirmed/bare suspend must only enqueue native Fan cleanup');
   assert(!suspendBody.includes('fanHostEmergencySuspend(') && !suspendBody.includes('WinHttpOpen('),
     'suspend callback must not perform synchronous HTTP cleanup');
-  assert(native.includes('SetSuspendState(FALSE, FALSE, FALSE)') &&
+  assert(native.includes('SetSuspendState(mode==Mode::Hibernate ? TRUE : FALSE,FALSE,FALSE)') &&
+    native.includes('SendMessageTimeoutW(g_hwnd,WM_SYSCOMMAND,SC_MONITORPOWER,2,') &&
     native.includes('sgMarkInternalSleepRequest') && native.includes('sgInternalSleepRequestMatches506'),
     'programmatic sleep request must use the existing internal marker path');
   const powerStart = native.indexOf('case WM_POWERBROADCAST:');
@@ -174,15 +255,9 @@ function sourceChecks(): number {
   // `mutateWithBoundedRetry`（先准入、再入队执行一次），入队动作落在该唯一执行器里
   // apply 本身不再是 async 的入队壳。R9 将成功写入与 owner 收敛放在同一队列
   // 操作内，避免 await 的微任务间隙让另一个 owner 重写。断言仍要求真实写入在队列内。
-  const executorStart = lifecycle.indexOf('private async mutateWithBoundedRetry<T>(');
-  const executorEnd = lifecycle.indexOf('private async applyMutation(', executorStart);
-  const executor = lifecycle.slice(executorStart, executorEnd);
-  assert(lifecycle.includes('apply(nodes: readonly FanNode[]): Promise<FanState>') &&
-    executorStart >= 0 && executorEnd > executorStart &&
-    executor.includes('await this.enqueue(async () => {') &&
-    executor.includes('const written = await mutate();') &&
-    executor.includes("this.settleRecoveryTaskIfAny('curve-written-by-control');"),
-    'curve apply and successful recovery settlement must be serialized through the lifecycle queue');
+  assert(lifecycle.includes('apply(nodes: readonly FanNode[]): Promise<FanState>'),
+    'the explicit curve apply entry must retain its Promise contract');
+  assertSerializedRecoverySettlement(lifecycle);
   // G7 同上：applyPreset 与 apply 一样改为非 async 的准入执行壳（签名保持显式 Promise）。
   assert(lifecycle.includes('applyPreset(name:') && lifecycle.includes('async suspend()') &&
     lifecycle.includes('async resume()') && lifecycle.includes('async close()'),

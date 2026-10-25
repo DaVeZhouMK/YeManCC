@@ -11,6 +11,7 @@ for name in names:
  parts.append(m.group())
 head=r'''
 #include <atomic>
+#include <memory>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -20,11 +21,15 @@ head=r'''
 #include <cstdlib>
 #include "@ROOT@/deps/json/json.hpp"
 #include "@ROOT@/native/startup_readiness.h"
+#include "@ROOT@/native/virtual_start_protection.h"
 #include "@ROOT@/native/game_input_override.h"
 #include "@ROOT@/native/input_shortcut_toggle.h"
 using json = nlohmann::json;
 using ULONGLONG = unsigned long long;
 using S = ymcc::StartupInputState;
+using InputHostMutex = std::mutex;
+static bool msiTargetIntentEvidenceEnabled() { return false; }
+static void msiTargetIntentObserveInput(const json&,const json&,bool,bool) {}
 static ULONGLONG tick = 100;
 static ULONGLONG GetTickCount64() { return tick; }
 static int g_hwnd = 1, messages = 0;
@@ -45,6 +50,13 @@ static std::string trim_ascii(std::string s) {
 static std::string ascii_lower(std::string s) {
     std::transform(s.begin(),s.end(),s.begin(),[](unsigned char c){return static_cast<char>(std::tolower(c));}); return s;
 }
+static std::unique_ptr<ymcc::VirtualStartProtection> startupProtection = std::make_unique<ymcc::VirtualStartProtection>();
+#define g_virtualStartProtection (*startupProtection)
+static std::atomic<bool> g_externalPriorityVirtualSuspended{false}, g_inputHostSwitchRecoveryPending{false}, g_inputHostSwitchExecutionReturnPending{false};
+static std::uint64_t g_inputHostStartProtectionBoundTicket=0;
+static std::uint64_t inputHostStartProtectionNow() { return tick; }
+static void inputHostStartProtectionFinish(std::uint64_t, const char*, const char*) {}
+static json startupInputDiagnosticSnapshot() { return json::object(); }
 static std::atomic<S> g_startupInputState{S::Initializing};
 static ULONGLONG g_startupInputSince = 0;
 static bool g_startupInputAttempted = false, g_startupInputStartSucceeded = false;
@@ -76,6 +88,8 @@ foot=r'''
 static int checks = 0;
 static void check(bool ok, const char* why) { ++checks; if (!ok) { std::fprintf(stderr,"FAIL: %s\n",why); std::exit(1); } }
 static void reset() {
+    startupProtection = std::make_unique<ymcc::VirtualStartProtection>();
+    g_externalPriorityVirtualSuspended=g_inputHostSwitchRecoveryPending=g_inputHostSwitchExecutionReturnPending=false;
     g_startupInputState = S::Initializing; g_startupInputSince = 0;
     g_startupInputAttempted = g_startupInputStartSucceeded = false;
     g_inputCaptureStop = g_inputHostFaultHoldsStart = false;
@@ -113,8 +127,34 @@ int main() {
     check(g_startupInputState == S::Skipped,"disabled persona ignores retained switches");
     reset(); settings = json::array(); skipDisabledStartupInputGate();
     check(g_startupInputState == S::Initializing,"unreadable config is not interpreted as disabled");
-    reset(); initializeStartupInputGate(); tick += 14999; observeStartupInputGate();
-    check(g_startupInputState == S::Waiting && messages == 0,"source wait is not early failure");
+    // Full-screen logon may expose the physical pad after the old 15s observer.
+    // Execute the actual observer against the production request authority.
+    for (const char* persona : {"elite","steamdeck","dualsense-edge"}) {
+        reset(); g_realStickTest.persona=persona;
+        auto admitted=g_virtualStartProtection.consume(persona,tick);
+        initializeStartupInputGate(); tick += 16000; observeStartupInputGate();
+        check(g_startupInputState == S::Waiting && !g_inputHostFaultHoldsStart && messages == 0,
+              "late physical source remains admissible inside original 30s request");
+        check(g_virtualStartProtection.view(tick).requestId==admitted.requestId,
+              "waiting never creates or renews the request");
+        recordStartupInputAttempt(true); alive=g_inputHostHello=g_inputHostPrepared=true;
+        observeStartupInputGate();
+        check(g_startupInputState == S::Ready && messages==1,
+              "same cold-start request can finish after a late source");
+    }
+    reset(); auto original=g_virtualStartProtection.consume("elite",tick);
+    tick += 12000; initializeStartupInputGate(); tick += 17999; observeStartupInputGate();
+    check(g_startupInputState==S::Waiting,"startup observer does not shorten original deadline");
+    tick++; observeStartupInputGate();
+    check(g_startupInputState==S::Failed && g_inputHostFaultHoldsStart,
+          "startup observer honors original deadline, never its own renewed 30s");
+    check(g_virtualStartProtection.view(tick).requestId==original.requestId,
+          "expiration preserves original request identity");
+    reset(); g_virtualStartProtection.consume("elite",tick); initializeStartupInputGate();
+    g_virtualStartProtection.cancel(tick+1); tick+=2; observeStartupInputGate();
+    check(g_startupInputState==S::Failed,"cancelled original startup cannot be revived");
+    reset(); initializeStartupInputGate(); tick += 29999; observeStartupInputGate();
+    check(g_startupInputState == S::Waiting && messages == 0,"unbound startup source wait remains bounded by 30s");
     tick++; observeStartupInputGate();
     check(g_startupInputState == S::Failed && g_inputHostFaultHoldsStart && g_inputHostAttemptPersona == "elite","missing source freezes exact startup intent before fail-open UI");
     const auto failedLogs = logs.size(); observeStartupInputGate(); publishStartupInputState(S::Ready,"late");

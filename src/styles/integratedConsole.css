@@ -1,0 +1,68 @@
+/* [AI:UI:LAYOUT] 以1280×720、1280×800检查最低布局；控件/弹窗须可见或可滚动到达，手柄焦点完整可见。
+ * 公共页面提醒见 src/components/IntegratedPage.vue [AI:UI:PAGE]；样式改变须考虑实际视觉位置对手柄方向导航的影响。 */
+/* 一体控制台默认外观。只处理表面、排版与控件尺寸，不修改比例或调度。 */
+:root{--console-surface:color-mix(in srgb,var(--bg-panel) 90%,transparent);--console-surface-alt:color-mix(in srgb,var(--bg-input) 86%,transparent);--console-line:color-mix(in srgb,var(--text) 12%,transparent);--console-faint:color-mix(in srgb,var(--accent) 7%,var(--console-surface))}
+.app-root .app-content{font-size:14px;padding:12px 12px calc(var(--gamepad-safe-bottom,24px) + var(--gamepad-clip-bottom,0px));color:var(--text)}
+.app-root .integrated-page-body> :is(.page,.fan-page){display:grid;gap:12px;padding:0;min-width:0}
+.app-root .integrated-page-body> :is(.page,.fan-page)>h1,.app-root .fan-header{display:none}
+.console-heading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 1px 12px}.console-heading h1{font-size:20px;line-height:1.2;margin:3px 0 0;font-weight:650;letter-spacing:.2px}.console-eyebrow{font-size:11px;color:var(--text-dim);letter-spacing:1px}.console-status{display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-dim);white-space:nowrap}.console-status i{width:6px;height:6px;border-radius:50%;background:var(--accent)}
+.app-root .integrated-page-body :is(.card,.fan-card),.app-root .dedicated-popup{min-width:0;background:var(--console-surface);border:1px solid var(--console-line);border-radius:12px;box-shadow:0 4px 16px #00000015;backdrop-filter:blur(12px)}
+.app-root .integrated-page-body :is(.card,.fan-card){padding:13px;margin:0}
+.app-root .integrated-page-body :is(.card .card,.card .state-card,.node-card,.row-card,.usbip-prompt-card){background:var(--console-surface-alt);border-color:var(--console-line);border-radius:9px;box-shadow:none;min-width:0}
+.app-root .integrated-page-body :is(.card-title,h3){color:var(--text);font-size:16px;font-weight:650;line-height:1.35;margin:0 0 12px;display:flex;align-items:center;gap:7px}
+.app-root .integrated-page-body h2{font-size:17px}.app-root .integrated-page-body :is(p,.toggle-label,.row-label,.state-card,.btn,.seg-btn,.action-btn,.control-button,.dd-trigger){font-size:14px;line-height:1.45}
+.app-root .integrated-page-body :is(.muted,.hint,.desc,.description,.toggle-desc,.seg-detail,.card-subtitle,.small-note){font-size:12px;line-height:1.5;color:var(--text-dim)}
+.app-root .integrated-page-body :is(button:not(.switch):not(.dd-item):not(.gp-dpad-key),select){min-height:33px;border-radius:8px}
+.app-root .integrated-page-body :is(.btn,.action-btn,.control-button,.state-card button,.seg-btn,.dd-trigger){background:var(--console-surface-alt);border:1px solid var(--console-line);color:var(--text);padding:7px 10px}
+.app-root .integrated-page-body :is(.seg-btn.active,.btn.active,.control-button[aria-pressed="true"]){background:color-mix(in srgb,var(--accent) 16%,var(--bg-input));border-color:color-mix(in srgb,var(--accent) 58%,transparent);color:var(--accent)}
+.app-root .integrated-page-body .toggle-row{padding:10px 0;gap:12px}.app-root .integrated-page-body .toggle-row+.toggle-row{border-top:1px solid color-mix(in srgb,var(--text) 7%,transparent)}.app-root .integrated-page-body .toggle-label{font-size:14px}.app-root .integrated-page-body .switch{min-width:40px;flex-shrink:0}
+.app-root .integrated-page-body :is(.card-head,.card-header-row,.row,.control-line){gap:10px;min-width:0}.app-root .integrated-page-body :is(input[type=text],input[type=number],select,textarea){color:var(--text);background:var(--bg-input);border-color:var(--console-line);font-size:14px;min-height:33px;max-width:100%}
+body .app-root .continuous-performance{font-size:14px}body .app-root .continuous-performance :is(.control-bubble,.performance-tabs){background:var(--console-surface);border:1px solid var(--console-line);box-shadow:0 3px 12px #00000016;backdrop-filter:blur(12px)}body .app-root .continuous-performance .parameter-summary{background:var(--console-faint)}body .app-root .continuous-performance :is(.manual-bubble,.auto-bubble){background:var(--console-surface)}body .app-root .continuous-performance :is(.saving-section,.core-section){border-color:var(--console-line)}
+
+.app-root .integrated-page-body> :is(.page,.fan-page){gap:10px}.app-root .integrated-page-body :is(.card,.fan-card){border-radius:10px}.app-root .integrated-page-body .card-title{padding-bottom:10px;border-bottom:1px solid var(--console-line)}
+
+.app-root [data-gp-game-quick-menu] .custom-top-shell{background:color-mix(in srgb,var(--bg-panel) 95%,transparent);border:1px solid color-mix(in srgb,var(--text) 12%,transparent)}
+
+/* Teleported menus keep a visible surface over animated backgrounds. */
+body :is(.dd-menu.dd-menu,.editor-dialog.editor-dialog,.game-quick-menu.game-quick-menu){background:color-mix(in srgb,var(--bg-panel) 96%,transparent);border-color:color-mix(in srgb,var(--text) 14%,transparent);backdrop-filter:blur(12px)}
+body .editor-dialog.editor-dialog :is(.editor-bubble,.status-bubble){background:color-mix(in srgb,var(--bg-input) 90%,transparent);border-color:color-mix(in srgb,var(--text) 12%,transparent)}
+body .editor-dialog :is(.field-label,.field-hint,.status-bubble){font-size:12px;line-height:1.5}
+
+/* The full Y menu uses the same console surfaces, text sizes and controls. */
+body .app-root .game-recognition-popover{width:451px;max-width:calc(100vw - 24px);padding:12px;border:1px solid var(--console-line);border-radius:12px;background:color-mix(in srgb,var(--bg-panel) 98%,transparent);backdrop-filter:blur(16px);box-shadow:0 16px 44px #0006;scroll-padding-block:16px;overscroll-behavior:contain}
+body .game-quick-menu.integrated-game-menu{gap:10px;font-size:14px;line-height:1.4;background:transparent;backdrop-filter:none}
+body .integrated-game-menu .game-quick-header{gap:9px;padding:0 0 10px;border-bottom:1px solid var(--console-line)}
+body .integrated-game-menu .game-quick-target{font-size:14px;font-weight:600;gap:7px;min-width:0}
+body .integrated-game-menu .quick-game-controls{gap:8px;grid-template-columns:repeat(4,minmax(0,1fr))}
+body .integrated-game-menu .quick-game-controls button{display:flex;flex-direction:column;justify-content:center;gap:4px;min-height:68px;padding:7px 4px;white-space:normal;text-align:center;overflow-wrap:anywhere;font-size:12px;line-height:1.25;border:1px solid var(--console-line);border-radius:8px;background:var(--console-surface-alt)}
+body .integrated-game-menu .quick-game-controls button svg{width:17px;height:17px}
+body .integrated-game-menu .quick-control-state{font-size:11px;color:var(--text-dim)}
+body .integrated-game-menu :is(.custom-top-head,.game-rules-head){min-height:43px;padding:9px 11px;border:1px solid var(--console-line);border-radius:9px;background:var(--console-surface-alt);box-shadow:none}
+body .integrated-game-menu :is(.custom-top-head.active,.game-rules-head.active){border-color:var(--accent-border);background:var(--accent-surface)}
+body .integrated-game-menu :is(.custom-top-label strong,.game-rules-head strong){font-size:14px;font-weight:650;color:var(--text)}
+body .integrated-game-menu .custom-top-label small{font-size:12px}
+body .integrated-game-menu :is(.custom-top-body,.game-rules-body){padding:9px;margin-top:8px;gap:10px;border:1px solid var(--console-line);border-radius:10px;background:var(--console-surface);box-shadow:none}
+body .integrated-game-menu .game-setting-bubble{background:var(--console-surface-alt);padding:9px;border:1px solid var(--console-line);border-radius:9px}
+body .integrated-game-menu .game-setting-field>small{font-size:12px;color:var(--text-dim)}
+body .integrated-game-menu :is(.quick-action,.quick-speed){min-height:59px;padding:10px;border:1px solid var(--console-line);border-radius:9px;background:var(--console-surface-alt);gap:8px}
+body .integrated-game-menu .game-quick-actions{gap:8px}
+body .integrated-game-menu .quick-action strong{font-size:13px;line-height:1.4;font-weight:600;overflow-wrap:anywhere}
+body .integrated-game-menu .quick-action small{font-size:12px;line-height:1.4;color:var(--text-dim)}
+body .integrated-game-menu .quick-speed{grid-template-columns:minmax(0,1fr) 80px}
+body .integrated-game-menu .quick-speed-title{font-size:13px;line-height:1.4}
+body .integrated-game-menu :is(.game-quick-footer button,.custom-top-actions button,.game-rule-actions button,.game-rules-bottom-actions button){font-size:13px;line-height:1.35;min-height:34px;padding:7px 9px;border-color:var(--console-line);border-radius:8px;background:var(--console-surface-alt)}
+body .integrated-game-menu .game-quick-footer{gap:8px;border-top:1px solid var(--console-line);padding-top:10px;margin-top:0}
+body .integrated-game-menu .game-rules-body :is(p,.game-rules-message,.game-rule-empty){font-size:12px;line-height:1.5}
+body .integrated-game-menu .game-rule-item{font-size:13px}
+body .integrated-game-menu :is(button:focus-visible,.dd-trigger:focus-visible){outline:2px solid var(--accent);outline-offset:2px}
+body .app-root .game-recognition-status.recognized{border-color:var(--accent-border);background:var(--console-surface-alt);color:var(--text)}
+body :is(.quick-dialog,.trainer-menu){border-color:var(--console-line);background:color-mix(in srgb,var(--bg-panel) 98%,transparent);border-radius:12px}
+
+.game-recognition-popover .custom-top-entry-row .custom-top-head{width:0;flex:3}.game-recognition-popover .custom-top-entry-row .custom-remove-entry{flex:1;font-size:13px}
+
+.game-recognition-popover .game-quick-target .overflow-game-name{flex:1;min-width:0;font-size:14px;font-weight:650;overflow-x:auto;overflow-y:hidden;text-overflow:clip}.custom-top-entry-row .custom-entry-game-name{flex:1;min-width:0}.game-recognition-status .game-recognition-label{flex:1;min-width:0;overflow-x:auto;overflow-y:hidden;text-overflow:clip}
+
+/* Keep section headers and their actions on one baseline across inner pages. */
+.app-root .integrated-page-body .card-header-row{align-items:center;padding-bottom:10px;margin-bottom:10px;border-bottom:1px solid var(--console-line)}
+.app-root .integrated-page-body .card-header-row>.card-title{margin:0;padding-bottom:0;border-bottom:0;min-width:0}
+.app-root .integrated-page-body .card-header-row>.toggle-row{padding:0;min-height:32px;flex:0 0 auto}

@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\HostOutput",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts",
+  "metadataToolSha256": "98935f3f00ba05a24b0c353c0ed61a215f2761fdfee0e99c556280f8685b246a",
+  "preparationToolSha256": "7c221307162baaeca0eb0d09ba7893121c39fb4d31d4f58775b335cffa9e0b60",
+  "isolatedBuildTargetsSha256": "14a709d1fc8dfa9bfb45043a860cc76bda2d5d111668c862bc024d96d0e1feb5",
+  "projectSourceRebuildReproducibilityProven": false
+}

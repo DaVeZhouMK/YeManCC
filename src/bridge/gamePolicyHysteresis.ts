@@ -1,8 +1,11 @@
 import type { DetectedGame } from './gamedetect';
 
-export const GAME_POLICY_RELEASE_DELAY_MS = 10_000;
+// Kept for compatibility; the unique game target has no independent grace PID.
+export const GAME_POLICY_RELEASE_DELAY_MS = 0;
 export function samePolicyGame(a: DetectedGame | null, b: DetectedGame | null): boolean {
-  return a === b || !!a && !!b && a.pid === b.pid && a.processCreated === b.processCreated;
+  return a === b || !!a && !!b && a.pid === b.pid && a.processCreated === b.processCreated &&
+    (a.identityGeneration === undefined || b.identityGeneration === undefined || a.identityGeneration === b.identityGeneration) &&
+    (!a.path || !b.path || a.path.toLowerCase() === b.path.toLowerCase());
 }
 export function gamePolicyKey(game: DetectedGame | null): string {
   const raw = game?.path?.split(/[\\/]/).pop() || game?.name || '';
@@ -10,31 +13,16 @@ export function gamePolicyKey(game: DetectedGame | null): string {
   return key ? (key.endsWith('.exe') ? key : `${key}.exe`) : '';
 }
 
-/** A single grace period for ALL policy owners, not a debounce per candidate. */
+/** Legacy model API retained for consumers/tests; observations now project immediately. */
 export class GamePolicyHysteresis {
   current: DetectedGame | null = null;
   initialized = false;
   missingSince: number | null = null;
-  observe(game: DetectedGame | null, now: number): boolean {
-    if (!this.initialized) {
-      this.initialized = true;
-      this.current = game;
-      return true;
-    }
-    if (samePolicyGame(this.current, game)) {
-      this.current = game; // title/source changes are NOT a policy switch.
-      this.missingSince = null;
-      return false;
-    }
-    if (!this.current) {
-      this.current = game; // first entry is immediate.
-      this.missingSince = null;
-      return true;
-    }
-    if (this.missingSince === null) this.missingSince = now;
-    if (now - this.missingSince < GAME_POLICY_RELEASE_DELAY_MS) return false;
-    this.current = game; // choose the latest confirmed candidate, including null.
+  observe(game: DetectedGame | null, _now: number): boolean {
+    const changed = !this.initialized || !samePolicyGame(this.current, game);
+    this.initialized = true;
+    this.current = game ? { ...game } : null;
     this.missingSince = null;
-    return true;
+    return changed;
   }
 }

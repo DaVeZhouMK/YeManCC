@@ -1,0 +1,562 @@
+{
+  "schemaVersion": 1,
+  "source": "Literal ordinary YMCC export; original application and Windows event clocks retained",
+  "archive": "YeManCC-logs-20261021-224432-G3E.zip",
+  "archiveSha256": "46428815d1559a2d44aae3eb7a011b521cbe75bf941a428e0f23c824d45a36a3",
+  "sourceMember": "sleep-facts.log",
+  "expectedWakeCycles": 0,
+  "scope": "Three power-button entries each exited after 70/71/71 ms; actual logs separately show OFF/ON flashes and the same active transaction. Existing replay covers the retry policy only, not the full window/fan pipeline.",
+  "physicalSleepVerified": false,
+  "expectedExistingPolicy": "No automatic re-sleep for these short or user-ended sessions; PASS does not mean effective low-power entry was detected",
+  "clockNormalization": {
+    "origin": "2026-10-21T20:51:24.090",
+    "atMs": "application record time minus origin",
+    "eventAtMs": "Windows event fileTime minus origin"
+  },
+  "events": [
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "time": "2026-10-21 20:51:35.092",
+      "eventTime": "2026-10-21 20:51:34.090",
+      "sourceLine": 144,
+      "atMs": 11002,
+      "eventAtMs": 10000
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 32,
+      "time": "2026-10-21 20:51:35.094",
+      "eventTime": "2026-10-21 20:51:34.160",
+      "sourceLine": 146,
+      "atMs": 11004,
+      "eventAtMs": 10070
+    },
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "time": "2026-10-21 20:51:42.496",
+      "eventTime": "2026-10-21 20:51:42.109",
+      "sourceLine": 158,
+      "atMs": 18406,
+      "eventAtMs": 18019
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 32,
+      "time": "2026-10-21 20:51:42.498",
+      "eventTime": "2026-10-21 20:51:42.180",
+      "sourceLine": 162,
+      "atMs": 18408,
+      "eventAtMs": 18090
+    },
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "time": "2026-10-21 20:51:47.491",
+      "eventTime": "2026-10-21 20:51:46.534",
+      "sourceLine": 167,
+      "atMs": 23401,
+      "eventAtMs": 22444
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 32,
+      "time": "2026-10-21 20:51:47.493",
+      "eventTime": "2026-10-21 20:51:46.605",
+      "sourceLine": 171,
+      "atMs": 23403,
+      "eventAtMs": 22515
+    }
+  ],
+  "literalSourceRecords": [
+    {
+      "line": 143,
+      "details": {
+        "fileTime": "2026-10-21 20:51:34.090",
+        "reason": 1,
+        "reason1Accepted": true,
+        "reasonName": "power-button",
+        "targetState": -1,
+        "userInitiatedSleep": true
+      },
+      "event": "kernel-power-506",
+      "time": "2026-10-21 20:51:35.091"
+    },
+    {
+      "line": 144,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-21 20:51:34.090",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:35.092"
+    },
+    {
+      "line": 145,
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134370606940903033",
+        "generation": 3,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-21 20:51:35.093"
+    },
+    {
+      "line": 146,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-21 20:51:34.160",
+        "reason": 32,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:35.094"
+    },
+    {
+      "line": 147,
+      "details": {
+        "fileTime": "2026-10-21 20:51:34.090",
+        "label": "主动按键睡眠",
+        "reason": 1,
+        "source": "kernel-power-506-user-initiated"
+      },
+      "event": "user-standby",
+      "time": "2026-10-21 20:51:35.094"
+    },
+    {
+      "line": 148,
+      "details": {
+        "evidence": "Kernel-Power EventID=506 Reason=1 or Reason=3",
+        "fileTime": "2026-10-21 20:51:34.090",
+        "label": "主动按键睡眠",
+        "reason": 1
+      },
+      "event": "user-initiated-sleep",
+      "time": "2026-10-21 20:51:35.095"
+    },
+    {
+      "line": 149,
+      "details": {
+        "generation": 4
+      },
+      "event": "s0-intent-keep-writer",
+      "time": "2026-10-21 20:51:35.108"
+    },
+    {
+      "line": 150,
+      "details": {
+        "reason": "s0-intent"
+      },
+      "event": "handheld-sleep-sensors-only",
+      "time": "2026-10-21 20:51:35.112"
+    },
+    {
+      "line": 151,
+      "details": {
+        "source": "sleep-trigger"
+      },
+      "event": "non-user-wake-armed",
+      "time": "2026-10-21 20:51:35.113"
+    },
+    {
+      "line": 152,
+      "details": {
+        "boundary": "queued-suspend",
+        "created": "0",
+        "generation": 4,
+        "healthVerified": false,
+        "identityAvailable": false,
+        "nativeRecordIdentityBound": false,
+        "nativeRecordIdentityReason": "native-record-pre-capture-identity-unavailable",
+        "originalRetainedForRepeatedSuspend": false,
+        "pid": 0,
+        "steamClient": {
+          "accountKnown": true,
+          "accountPinned": true,
+          "accountSource": "verified-active-process-capture",
+          "created": "134370582273496819",
+          "foreignRegistryAccountIgnored": false,
+          "identityToken": "9300272186800313911",
+          "integrityRid": 8192,
+          "liveAccountPinned": false,
+          "pid": 1952,
+          "processVerified": true,
+          "reason": "steam-native-session-current",
+          "registeredPid": 1952,
+          "registeredPidMatchesVerified": true,
+          "source": "verified-active-process"
+        },
+        "targetSelection": {
+          "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+          "captureReadBudget": {
+            "checkpoints": [
+              {
+                "elapsedMs": 0,
+                "stage": "ymcc-rules-snapshot",
+                "stageElapsedMs": 0
+              },
+              {
+                "elapsedMs": 0,
+                "stage": "tracker-read",
+                "stageElapsedMs": 0
+              },
+              {
+                "elapsedMs": 0,
+                "stage": "tracker-parse",
+                "stageElapsedMs": 0
+              },
+              {
+                "elapsedMs": 0,
+                "stage": "native-primary-read-and-parse",
+                "stageElapsedMs": 0
+              }
+            ],
+            "clock": "GetTickCount64",
+            "clockRegressed": false,
+            "elapsedMs": 0,
+            "maximumMs": 1000,
+            "stage": "native-primary-read-and-parse",
+            "stageElapsedMs": 0
+          },
+          "eligibleCandidateCount": 0,
+          "eligibleCandidates": [],
+          "jointBindingVerified": false,
+          "nativePrimaryLog": {
+            "available": true,
+            "copiedBytes": 2097152,
+            "limitBytes": 2097152,
+            "originalBytes": 2345936,
+            "truncated": true
+          },
+          "nativePrimaryRejectedCandidates": [
+            {
+              "appid": 2399932135,
+              "expectedPid": 14908,
+              "log": {
+                "available": true,
+                "copiedBytes": 2097152,
+                "limitBytes": 2097152,
+                "originalBytes": 2345936,
+                "truncated": true
+              },
+              "nativePrimaryVerified": false,
+              "originalAllowed": false,
+              "reason": "steam-native-primary-log-truncated",
+              "source": "steam-local-native-procid-diagnostic",
+              "status": "unverifiable",
+              "trackedMemberCount": 1
+            }
+          ],
+          "nativePrimaryRejectedCount": 1,
+          "physicalPreSleepVerified": false,
+          "postWakeRetargetAllowed": false,
+          "preferredCreated": "134370600490990925",
+          "preferredExe": "tmnt",
+          "preferredNativePrimary": {
+            "appid": 2399932135,
+            "expectedPid": 14908,
+            "log": {
+              "available": true,
+              "copiedBytes": 2097152,
+              "limitBytes": 2097152,
+              "originalBytes": 2345936,
+              "truncated": true
+            },
+            "nativePrimaryVerified": false,
+            "originalAllowed": false,
+            "reason": "steam-native-primary-log-truncated",
+            "source": "steam-local-native-procid-diagnostic",
+            "status": "unverifiable",
+            "trackedMemberCount": 1
+          },
+          "preferredPid": 14908,
+          "preferredTrackerStatus": "tracked",
+          "readOnly": true,
+          "reason": "steam-original-target-native-primary-unverifiable",
+          "selectedAppid": 0,
+          "selectedPid": 0,
+          "sharedCandidateMatched": false,
+          "sharedCandidateModified": false,
+          "sharedCandidateStatus": "not-yet-joined",
+          "source": "none",
+          "status": "unbound",
+          "trackerLog": {
+            "available": true,
+            "copiedBytes": 54449,
+            "limitBytes": 2097152,
+            "originalBytes": 54449,
+            "truncated": false
+          },
+          "unresolvedOwnWindowCount": 0,
+          "ymccRejectedCandidates": [],
+          "ymccRulesEpoch": "1"
+        }
+      },
+      "event": "sleep-steam-original-captured",
+      "time": "2026-10-21 20:51:35.134"
+    },
+    {
+      "line": 153,
+      "details": {
+        "generation": 4,
+        "guardEnabled": true,
+        "mode": "S0/S3"
+      },
+      "event": "s0-intent-accepted",
+      "time": "2026-10-21 20:51:35.135"
+    },
+    {
+      "line": 154,
+      "details": {
+        "acceptedUserWake": false,
+        "entryFailure": false,
+        "reason": 32,
+        "reason7EntryFailure": false,
+        "reason8EntryFailure": false
+      },
+      "event": "s0-wake-message",
+      "time": "2026-10-21 20:51:35.136"
+    },
+    {
+      "line": 155,
+      "details": {
+        "delayMs": 120000,
+        "intentAgeMs": 1047,
+        "source": "kernel-power-507-non-power-button"
+      },
+      "event": "external-device-wake-suppressed",
+      "time": "2026-10-21 20:51:35.137"
+    },
+    {
+      "line": 156,
+      "details": {
+        "generation": 4,
+        "pauseEnabled": true,
+        "paused": true,
+        "pid": 14908,
+        "workingSetBytes": 0
+      },
+      "event": "sleep-game-pause",
+      "time": "2026-10-21 20:51:35.157"
+    },
+    {
+      "line": 157,
+      "details": {
+        "fileTime": "2026-10-21 20:51:42.109",
+        "reason": 1,
+        "reason1Accepted": true,
+        "reasonName": "power-button",
+        "targetState": -1,
+        "userInitiatedSleep": true
+      },
+      "event": "kernel-power-506",
+      "time": "2026-10-21 20:51:42.495"
+    },
+    {
+      "line": 158,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-21 20:51:42.109",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:42.496"
+    },
+    {
+      "line": 159,
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134370607021094502",
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-21 20:51:42.496"
+    },
+    {
+      "line": 160,
+      "details": {
+        "fileTime": "2026-10-21 20:51:42.109",
+        "label": "主动按键睡眠",
+        "reason": 1,
+        "source": "kernel-power-506-user-initiated"
+      },
+      "event": "user-standby",
+      "time": "2026-10-21 20:51:42.497"
+    },
+    {
+      "line": 161,
+      "details": {
+        "evidence": "Kernel-Power EventID=506 Reason=1 or Reason=3",
+        "fileTime": "2026-10-21 20:51:42.109",
+        "label": "主动按键睡眠",
+        "reason": 1
+      },
+      "event": "user-initiated-sleep",
+      "time": "2026-10-21 20:51:42.497"
+    },
+    {
+      "line": 162,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-21 20:51:42.180",
+        "reason": 32,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:42.498"
+    },
+    {
+      "line": 163,
+      "details": {
+        "generation": 4,
+        "lifecycle": "suspended",
+        "reason": "active-transaction"
+      },
+      "event": "s0-intent-ignored",
+      "time": "2026-10-21 20:51:42.498"
+    },
+    {
+      "line": 164,
+      "details": {
+        "acceptedUserWake": false,
+        "entryFailure": false,
+        "reason": 32,
+        "reason7EntryFailure": false,
+        "reason8EntryFailure": false
+      },
+      "event": "s0-wake-message",
+      "time": "2026-10-21 20:51:42.499"
+    },
+    {
+      "line": 165,
+      "details": {
+        "delayMs": 120000,
+        "intentAgeMs": 390,
+        "source": "kernel-power-507-non-power-button"
+      },
+      "event": "external-device-wake-suppressed",
+      "time": "2026-10-21 20:51:42.500"
+    },
+    {
+      "line": 166,
+      "details": {
+        "fileTime": "2026-10-21 20:51:46.534",
+        "reason": 1,
+        "reason1Accepted": true,
+        "reasonName": "power-button",
+        "targetState": -1,
+        "userInitiatedSleep": true
+      },
+      "event": "kernel-power-506",
+      "time": "2026-10-21 20:51:47.490"
+    },
+    {
+      "line": 167,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-21 20:51:46.534",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:47.491"
+    },
+    {
+      "line": 168,
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134370607065348155",
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-21 20:51:47.491"
+    },
+    {
+      "line": 169,
+      "details": {
+        "fileTime": "2026-10-21 20:51:46.534",
+        "label": "主动按键睡眠",
+        "reason": 1,
+        "source": "kernel-power-506-user-initiated"
+      },
+      "event": "user-standby",
+      "time": "2026-10-21 20:51:47.492"
+    },
+    {
+      "line": 170,
+      "details": {
+        "evidence": "Kernel-Power EventID=506 Reason=1 or Reason=3",
+        "fileTime": "2026-10-21 20:51:46.534",
+        "label": "主动按键睡眠",
+        "reason": 1
+      },
+      "event": "user-initiated-sleep",
+      "time": "2026-10-21 20:51:47.493"
+    },
+    {
+      "line": 171,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-21 20:51:46.605",
+        "reason": 32,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 20:51:47.493"
+    },
+    {
+      "line": 172,
+      "details": {
+        "generation": 4,
+        "lifecycle": "suspended",
+        "reason": "active-transaction"
+      },
+      "event": "s0-intent-ignored",
+      "time": "2026-10-21 20:51:47.493"
+    },
+    {
+      "line": 173,
+      "details": {
+        "acceptedUserWake": false,
+        "entryFailure": false,
+        "reason": 32,
+        "reason7EntryFailure": false,
+        "reason8EntryFailure": false
+      },
+      "event": "s0-wake-message",
+      "time": "2026-10-21 20:51:47.494"
+    },
+    {
+      "line": 174,
+      "details": {
+        "delayMs": 120000,
+        "intentAgeMs": 959,
+        "source": "kernel-power-507-non-power-button"
+      },
+      "event": "external-device-wake-suppressed",
+      "time": "2026-10-21 20:51:47.494"
+    }
+  ]
+}

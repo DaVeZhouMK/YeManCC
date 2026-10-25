@@ -1,3 +1,9 @@
+// [AI:UI:GAMEPAD] UI修改须考虑1280×720与1280×800；方向按视觉同行/相邻行自然移动，内容边缘停止，不混入左侧导航。
+// 启用控件可到达、可返回，滚动后焦点完整可见；隐藏/禁用项不抢焦点，下拉/滑块/弹窗沿既有确认与返回动作。
+// 这里是实际导航实现；用户行为说明只提醒检查目标，不替代寻路算法。相关现有夹具见 tools/ymcc_sim/global/ui-navigation/。
+import { performancePanelTarget } from './performanceNavigation';
+import { EDIT_REPEAT_BASE_MS, editRepeatInterval } from './sliderRepeat';
+import { emitNativeEvent } from '@/bridge/ipc';
 // gamepad/engine.ts — 手柄全量导航引擎（对齐 PLAN §五）
 //
 // Native Raw Input/XInput supplies page actions; this module maps those
@@ -10,20 +16,22 @@
 //   B(1)           → 取消/blur
 //   Y(3)           → 全局编辑游戏识别名单
 //   X(2)           → 不参与 YeManCC 统一页面调度
-//   Start(9)       → 调试面板
+//   Start(9)       → 仅当前页面明确接管的动作（无全局调试面板绑定）
 //   D-pad/左摇杆   → 页面内焦点移动（空间导航）
 //   LT(6)/RT(7)/←→ → 滑块微调（仅 A 进入“编辑模式”后；未进入时方向键只移动焦点）
 import { ROUTES } from '@/router';
+import { isRadialTestingEnabled } from '@/radial/testingState';
 import type { Router } from 'vue-router';
 import { loadPerformanceSchedule } from '@/bridge/performanceSchedule';
 import { summonGet, type GamepadSettings } from '@/bridge/yeman';
 import { isUiVisible, onUiVisibilityChange, getUiVisibilityState } from '@/bridge/uiLifecycle';
-import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
+import { focusGamepadElement, setGamepadFocused, recoverGamepadFocus } from '@/gamepad/focus';
 import { enqueueGamepadTaskDetached, gamepadSerialPending } from '@/gamepad/serial';
-import { reportFrontendError } from '@/robust/frontendDiagnostics';
+import { reportFrontendTrace } from '@/robust/frontendDiagnostics';
 import { residentNavigationRoutes } from '@/bridge/residentNavigation';
 import { spatialNavigationTarget } from '@/gamepad/spatial';
 import { InputOwnerRuntime, type RuntimeStopReason } from '@/bridge/inputOwnerRuntime';
+import { withGamepadActivation } from '@/gamepad/activationEvidence';
 
 export interface GamepadEngineOptions {
   router: Router;
@@ -44,9 +52,11 @@ let lastNav = 0;
 let lastPageSwitch = -Infinity; // 切页冷却（防止连按卡顿）
 const PAGE_SWITCH_COOLDOWN = 100; // ms，原 400ms 过严致连按 LB/RB 丢按；降到 100ms 使快速切页（含切到 TDP）每次都生效
 const NAV_REPEAT_BASE = 220; // ms：普通空间导航重复间隔
-const FAN_NODE_EDIT_REPEAT = Math.max(5, Math.round(NAV_REPEAT_BASE / 4)); // ms：风扇节点固定为全局导航的 4 倍速度（220 / 4 = 55）
+const FAN_NODE_EDIT_REPEAT = EDIT_REPEAT_BASE_MS; // Armed nodes repeat one edit step, with a linearly shorter interval.
 // 滑块线性加速：按住越久步长越大、间隔越短
 let sliderAccelStart = 0;  // 本次按住起始时间（用于线性加速）
+let sliderRepeatInput: HTMLInputElement | null = null, nativeSliderEditInput: HTMLInputElement | null = null;
+let sliderRepeatDirection = 0;
 let sliderLastApply = 0;   // 上次应用加速步进的时间
 const SLIDER_REPEAT_BASE = 150; // ms：基础重复间隔（原 45，放慢 30%+，短按只调 1 次）
 const SLIDER_REPEAT_MIN  = 40;  // ms：最快重复间隔（原 16，放慢）
@@ -63,7 +73,7 @@ const TEST_B_HOLD_MS = 3000;
 let gpSettings: GamepadSettings = {
   enabled: true,
   bDoubleMinimize: true,
-  startDoubleF7: true,
+  startDoubleF7: false,
   tdpShortcut: true,
   fpsShortcut: true,
   killGame: true,
@@ -80,11 +90,13 @@ export function isMouseModeSuppressed(): boolean {
 }
 let startUsedAsModifier = false; // Start 键是否在本轮按住中被用作快捷调节修饰键
 
+let inlineEditElement: HTMLElement | null = null;
 let inlineEditDirectionKey = '';
 let inlineEditStartedAt = 0;
 let inlineEditLastRepeatAt = 0;
 
 function resetInlineEditCadence(): void {
+  inlineEditElement = null;
   inlineEditDirectionKey = '';
   inlineEditStartedAt = 0;
   inlineEditLastRepeatAt = 0;
@@ -118,15 +130,14 @@ function fanNodeEditRepeatInterval(element: HTMLElement | null, now: number, dir
     resetInlineEditCadence();
     return FAN_NODE_EDIT_REPEAT;
   }
-  if (directionKey !== inlineEditDirectionKey) {
+  if (element !== inlineEditElement || directionKey !== inlineEditDirectionKey) {
+    inlineEditElement = element;
     inlineEditDirectionKey = directionKey;
     inlineEditStartedAt = now;
     inlineEditLastRepeatAt = now;
   }
   const configured = Number(element.dataset.gpInlineEditRepeatMs);
-  return Number.isFinite(configured)
-    ? Math.max(5, Math.floor(configured))
-    : FAN_NODE_EDIT_REPEAT;
+  return editRepeatInterval(now - inlineEditStartedAt, configured > 0 ? configured : FAN_NODE_EDIT_REPEAT);
 }
 
 // ── LB/RB 切页防误触（LB+RB 呼出组合）──
@@ -169,7 +180,7 @@ function publishOwnerTrace(): void {
 // ── 手柄准入链取证（2026-09-16 用户批准「先稳固证据」）──
 // 目的：定位"开启 YMCC 后手柄卡住（鼠标正常）"的静默丢弃/排队点。只读诊断，
 // 不改任何准入/行为：入口门、执行门、切页 push 前后各留一行，走现成
-// reportFrontendError → native diagnostics.frontendError → frontend-errors.log
+// reportFrontendTrace → native diagnostics.frontendTrace → frontend-trace(.detail).log
 // （含 native 侧 time/gpuMode/nativeGeneration）。与 fan-api.log 的阶段时间可直接对拍。
 let gamepadTraceSeq = 0;
 function gamepadGateSnapshot(): Record<string, unknown> {
@@ -195,7 +206,7 @@ function gamepadGateSnapshot(): Record<string, unknown> {
 }
 function traceGamepadAdmission(stage: string, action: string, detail: Record<string, unknown> = {}): void {
   try {
-    reportFrontendError('gamepad-admission', JSON.stringify({ stage, action, ...gamepadGateSnapshot(), ...detail }));
+    reportFrontendTrace('gamepad-admission', { stage, action, ...gamepadGateSnapshot(), ...detail });
   } catch {
     // 诊断绝不能成为新的失败源。
   }
@@ -239,6 +250,10 @@ function ensureLoop(_opts: GamepadEngineOptions) {
 
 // 监听手柄连接/断开事件（某些 WebView2 版本需要此触发轮询）
 if (typeof window !== 'undefined') {
+  window.addEventListener('gp:slider-edit-start', syncNativeSliderEdit);
+  window.addEventListener('gp:slider-edit-end', endNativeSliderEdit);
+  window.addEventListener('gp:slider-edit-cancel', endNativeSliderEdit);
+  window.addEventListener('gp:slider-edit-invalidated', invalidateSliderEdit);
   // Native publishes one coherent XInput/ROG snapshot.  This is only a
   // renderer-side readiness mirror; it does not read the device or create a
   // second input loop.  It also provides the missing restart/stop signal for
@@ -290,11 +305,11 @@ if (typeof window !== 'undefined') {
     window.setTimeout(() => {
       if (!engineOpts || !browserLoopAllowed()) return;
       const active = document.activeElement as HTMLElement | null;
-      if (!active || !focusables().includes(active)) focusFirst();
+      if (!active || !focusables().includes(active)) recoverGamepadFocus(focusables());
     }, 120);
   });
   window.addEventListener('ipc:gamepad.ui-input', ((e: CustomEvent<{
-    action?: string; uiSeq?: number; provenance?: Record<string, unknown>;
+    action?: string; uiSeq?: number; repeat?: boolean; heldMs?: number; provenance?: Record<string, unknown>;
   }>) => {
     const action = e.detail?.action as NativeUiAction | undefined;
     const uiSeq = typeof e.detail?.uiSeq === 'number' ? e.detail.uiSeq : 0;
@@ -341,7 +356,8 @@ if (typeof window !== 'undefined') {
         return;
       }
       if (traceable) traceGamepadAdmission('exec-run', action, { admissionEpoch: admission.epoch });
-      dispatchNativeUiAction(engineOpts, action);
+      dispatchNativeUiAction(engineOpts, action, typeof e.detail.repeat==='boolean'
+        ? {repeat:e.detail.repeat,heldMs:typeof e.detail.heldMs==='number'?e.detail.heldMs:0} : undefined);
     });
   }) as EventListener);
   window.addEventListener('ipc:gamepad.input-owner', ((e: CustomEvent<{ owner?: string }>) => {
@@ -410,6 +426,8 @@ if (typeof window !== 'undefined') {
     // otherwise a post-blur edge could be compared against a pre-blur pad
     // snapshot or leave modifier/edit state latched into the next epoch.
     restartGamepadState();
+    stopNativeSliderEdit();
+    resetSliderCadence();
     sliderEditMode = false;
     startUsedAsModifier = false;
     testBHoldStart = 0;
@@ -502,7 +520,7 @@ let performanceScheduleEnabled = false;
 
 function setVisibleRoutes(enabled: boolean) {
   performanceScheduleEnabled = enabled;
-  const visible = residentNavigationRoutes(ROUTES, enabled);
+  const visible = residentNavigationRoutes(ROUTES, enabled, isRadialTestingEnabled());
   visibleRoutePaths = visible.map((r) => r.path);
   visibleRouteTitles = visible.map((r) => r.title);
 }
@@ -513,11 +531,40 @@ async function refreshVisibleRoutes() {
 }
 
 // ── 页面切换 ──
-function navigate(opts: GamepadEngineOptions, dir: -1 | 1) {
+/** A mounted full-window page may consume admitted controller commands. */
+function offerPageCommand(action: string): boolean {
+  const event = new CustomEvent('gp:page-command', { cancelable: true, detail: { action } });
+  window.dispatchEvent(event);
+  return event.defaultPrevented;
+}
+// Start is page-scoped; it must never fall back to opening global diagnostics.
+function handleGamepadStart(_opts: GamepadEngineOptions): void {
+  if (offerPageCommand('debug')) {
+    cancelPerformanceSliderEdit();
+    sliderEditMode = false;
+    resetInlineEditCadence();
+    return;
+  }
+}
+function handleBrowserStartRelease(opts: GamepadEngineOptions, held: boolean, previouslyHeld: boolean, usedAsModifier: boolean): void {
+  if (!held && previouslyHeld && !usedAsModifier) handleGamepadStart(opts);
+}
+function navigationModalOpen(): boolean {
+  return [...document.querySelectorAll<HTMLElement>('[data-gp-modal]')].some(el => {
+    const r=el.getBoundingClientRect(),style=getComputedStyle(el);
+    return r.width>0 && r.height>0 && style.display!=='none' && style.visibility!=='hidden';
+  });
+}
+function navigate(opts: GamepadEngineOptions, dir: -1 | 1): boolean {
+  if (offerPageCommand(dir < 0 ? 'page-prev' : 'page-next')) return false;
+  if (navigationModalOpen() || document.querySelector('[data-gp-page-lock]')) return false;
   enqueueGamepadTaskDetached(() => navigateNow(opts, dir));
+  return true;
 }
 
 async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1) {
+  // Fullscreen editors retain controller ownership; LB/RB must not change the underlying page.
+  if (navigationModalOpen() || document.querySelector('[data-gp-page-lock]')) return;
   // Reconcile quick-mode navigation without a handshake or asset probe.
   setVisibleRoutes(performanceScheduleEnabled);
   const order = visibleRoutePaths;
@@ -552,14 +599,13 @@ async function navigateNow(opts: GamepadEngineOptions, dir: -1 | 1) {
 
 // 自动聚焦页面内首个可见可聚焦元素（手柄初值光标位置）
 function focusFirst(): boolean {
+  // Page entry only selects a control. A is always required to edit a slider.
+  sliderEditMode = false;
   const els = focusables();
   if (els.length === 0) return false;
-  const el = els[0];
+  const el = els.find(el => el.dataset.gpInitialFocus === 'true') ?? els[0];
   try {
-    if (!focusGamepadElement(el)) {
-      el.focus({ preventScroll: false });
-      setGamepadFocused(el);
-    }
+    focusGamepadElement(el);
     return document.activeElement === el;
   } catch {
     // A transient WebView2 repaint can invalidate the element between the
@@ -601,7 +647,7 @@ function scheduleSummonFocus(): void {
     // without a usable controller target.
     const active = document.activeElement as HTMLElement | null;
     if (active && focusables().includes(active)) return;
-    focusFirst();
+    recoverGamepadFocus(focusables());
   };
   requestAnimationFrame(attempt);
   // Native show/restore, WebView2 paint, and Vue route rendering can complete
@@ -643,6 +689,8 @@ function focusables(): HTMLElement[] {
       if (el.getAttribute('aria-hidden') === 'true') return false;
       if (el.closest('[aria-hidden="true"]')) return false;
       if (el.closest('[hidden], [inert]')) return false;
+      const closedDetails = el.closest('details:not([open])');
+      if (closedDetails && !(el.tagName === 'SUMMARY' && el.parentElement === closedDetails)) return false;
       if (el.getAttribute('aria-disabled') === 'true') return false;
       // Vue Transition 会在离场动画期间保留二级菜单 DOM。父气泡状态
       // 已经折叠时，即使旧按钮仍有尺寸，也绝不能进入手柄候选列表。
@@ -816,7 +864,6 @@ function moveGameCorePolicyFocus(menu: HTMLElement, base: HTMLElement, dx: numbe
   const rowKey = row?.dataset.gpGameRow || '';
   // 专属配置里的两列平行设置行：核心/超线程一行，手柄/陀螺仪一行。
   const pairRows = [
-    ['custom-core-big-picker', 'custom-core-smt-picker'],
     ['custom-input-pad', 'custom-input-gyro'],
   ];
   if (!body || !pairRows.some((keys) => keys.includes(rowKey))) return undefined;
@@ -861,10 +908,8 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   const customPanel = menu.querySelector<HTMLElement>('[data-gp-custom-panel][data-gp-expanded="true"]');
   if (customPanel) {
     const customIndex = rows.indexOf('custom-entry') + 1;
-    const customRows = ['custom-ac', '专用frame-ac', 'custom-dc', '专用frame-dc'];
-    // 语义行序 == 视觉行序：核心/超线程一行，手柄/陀螺仪一行，最后操作行。
-    if (customPanel.querySelector('[data-gp-game-row="custom-core-big-picker"]')) customRows.push('custom-core-big-picker');
-    if (customPanel.querySelector('[data-gp-game-row="custom-core-smt-picker"]')) customRows.push('custom-core-smt-picker');
+    // ContinuousPerformancePanel owns its internal rows; only real input/actions remain in the outer menu.
+    const customRows: string[] = [];
     if (customPanel.querySelector('[data-gp-game-row="custom-input-pad"]')) customRows.push('custom-input-pad');
     if (customPanel.querySelector('[data-gp-game-row="custom-input-gyro"]')) customRows.push('custom-input-gyro');
     if (customPanel.querySelector('[data-gp-game-row="custom-actions"]')) customRows.push('custom-actions');
@@ -877,8 +922,6 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
   // another vertical stop. At a pair's top/bottom edge continue to the next
   // actual row while still allowing either enabled column to be entered.
   const pairSibling = ({
-    'custom-core-big-picker': 'custom-core-smt-picker',
-    'custom-core-smt-picker': 'custom-core-big-picker',
     'custom-input-pad': 'custom-input-gyro',
     'custom-input-gyro': 'custom-input-pad',
   } as Record<string, string>)[currentRow];
@@ -893,34 +936,43 @@ function moveGameMenuFocus(menu: HTMLElement, base: HTMLElement, dy: number): HT
       menu.contains(el) && el.dataset.gpCol === base.dataset.gpCol &&
       el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === rows[i],
     ) : null;
-    const target = sameColumn || gameMenuControlForRow(menu, rows[i]);
+    const bx = base.getBoundingClientRect();
+    const x = bx.left + bx.width / 2;
+    const candidates = focusables().filter(el => menu.contains(el) &&
+      el.closest<HTMLElement>('[data-gp-game-row]')?.dataset.gpGameRow === rows[i]);
+    candidates.sort((a,b) => {
+      const ar=a.getBoundingClientRect(),br=b.getBoundingClientRect();
+      return Math.abs(ar.left+ar.width/2-x)-Math.abs(br.left+br.width/2-x);
+    });
+    const target = sameColumn || candidates[0] || gameMenuControlForRow(menu, rows[i]);
     if (target && target !== base) return target;
   }
   return null;
 }
 
 function moveFocus(dx: number, dy: number) {
+  if (offerPageCommand(dx < 0 ? 'nav-left' : dx > 0 ? 'nav-right' : dy < 0 ? 'nav-up' : 'nav-down')) return;
   const els = focusables();
   if (els.length === 0) return;
   const activeGameMenu = document.querySelector<HTMLElement>('[data-gp-game-quick-menu]');
-  const customPanel = activeGameMenu?.querySelector<HTMLElement>('[data-gp-custom-body]');
-  const customExpanded = !!customPanel;
-  // The dedicated-profile editor is a self-contained controller region. Once
-  // expanded, do not let spatial navigation land on its hidden/colliding
-  // header or its action row. AC-with-frame and DC-with-frame stay grouped
-  // between the top control row and the blacklist/whitelist entry.
-  // The collapsed/expanded header is a visual container, not a second
-  // controller stop. The action buttons remain in the list when expanded so A
-  // can still activate them, but the header itself is excluded to prevent the
-  // first profile row from becoming a duplicate/overlapping focus target.
-  const rulesExpanded = !!activeGameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-body]');
+  // The expanded header, performance rows and trailing input/action rows remain real focus targets.
   // 可见的入口和可见的独立气泡内容都是真实焦点目标；只有 v-if 已移除、
   // inert/aria-hidden 或不可见的内容才由 focusables() 排除。
   const navEls = els;
   const cur = activeFanNodeEditor() || document.activeElement as HTMLElement | null;
   // 当前焦点元素必须在列表中，否则从第一个开始
   const baseIdx = cur ? navEls.indexOf(cur) : -1;
-  const base = baseIdx >= 0 ? navEls[baseIdx] : navEls[0];
+  if (baseIdx < 0) { sliderEditMode = false; recoverGamepadFocus(navEls); return; }
+  const base = navEls[baseIdx];
+
+  // Performance editors share a scoped row map even inside the top game menu.
+  const performanceTarget = performancePanelTarget(navEls, base, {
+    dx: dx < 0 ? -1 : dx > 0 ? 1 : 0, dy: dy < 0 ? -1 : dy > 0 ? 1 : 0,
+  });
+  if (performanceTarget !== undefined) {
+    if (performanceTarget) focusGamepadElement(performanceTarget);
+    return;
+  }
 
   const coreTarget = moveGameCorePolicyFocus(activeGameMenu || document.body, base, dx, dy);
   if (coreTarget) {
@@ -990,10 +1042,7 @@ function moveFocus(dx: number, dy: number) {
   if (explicitTarget !== undefined) {
     if (explicitTarget) {
       try {
-        if (!focusGamepadElement(explicitTarget)) {
-          explicitTarget.focus({ preventScroll: false });
-          setGamepadFocused(explicitTarget);
-        }
+        focusGamepadElement(explicitTarget);
       } catch {
         // Ignore transient DOM changes during route transitions.
       }
@@ -1088,9 +1137,7 @@ function moveFocus(dx: number, dy: number) {
       if (style.display === 'none' || style.visibility === 'hidden' || rect.width <= 0 || rect.height <= 0) return null;
       return target;
     };
-    // 专属配置展开后，标题本身会主动从焦点列表移除，避免标题和第一
-    // 个 AC 下拉重叠。因此跨气泡导航必须把目标改成展开内容的第一个
-    // 可用控件，而不是硬跳到被 data-gp-ignore 排除的标题。
+    // Fallback for content without a declared row: use a visible input or the dedicated entry.
     const customBodyTarget = customBody?.querySelector<HTMLElement>(
       // Dropdown 的外层只是事件容器，不能接收 DOM focus；必须命中真正
       // 可聚焦的 trigger button。此前命中外层 div 后 focus 失败，因此
@@ -1207,10 +1254,7 @@ function moveFocus(dx: number, dy: number) {
 
   if (best) {
     try {
-      if (!focusGamepadElement(best)) {
-        best.focus({ preventScroll: false });
-        setGamepadFocused(best);
-      }
+      focusGamepadElement(best);
     } catch {
       // Ignore transient DOM changes during route transitions.
     }
@@ -1223,6 +1267,7 @@ function isRangeInput(el: HTMLElement | null): el is HTMLInputElement {
 
 // ── 激活当前焦点 ──
 function activate(opts: GamepadEngineOptions) {
+  if (offerPageCommand('confirm')) return;
   const el = document.activeElement as HTMLElement | null;
   if (!el) return;
   // Vue 的离场动画会短暂保留已经折叠的二级菜单 DOM。即使组件已经
@@ -1238,7 +1283,7 @@ function activate(opts: GamepadEngineOptions) {
       : el.closest('[data-gp-game-rules-body]')
         ? gameMenu?.querySelector<HTMLElement>('[data-gp-game-rules-entry]')
         : null;
-    if (!recovery || !focusGamepadElement(recovery)) focusFirst();
+    if (!recovery || !focusGamepadElement(recovery)) recoverGamepadFocus(focusables());
     return;
   }
   // 滑块：A 进入/退出编辑模式
@@ -1249,6 +1294,8 @@ function activate(opts: GamepadEngineOptions) {
       log(opts, 'A · 应用并退出滑块编辑');
     } else {
       sliderEditMode = true;
+      resetSliderCadence();
+      el.dispatchEvent(new CustomEvent('gp:slider-edit-start',{bubbles:true}));
       log(opts, 'A · 进入滑块编辑模式');
     }
     return;
@@ -1275,7 +1322,11 @@ function activate(opts: GamepadEngineOptions) {
   }
   // 其他可点击元素 → click
   if (typeof (el as any).click === 'function') {
-    (el as any).click();
+    if (el.dataset.gpGameControl === 'switch-program') {
+      withGamepadActivation(el, () => (el as any).click());
+    } else {
+      (el as any).click();
+    }
   }
 }
 
@@ -1309,16 +1360,77 @@ function commitSlider() {
   }
 }
 
-// ── 滑块微调（线性加速）：按住越久，单步跨度越大、触发越密 ──
+function resetSliderCadence(): void {
+  sliderRepeatInput = null; sliderRepeatDirection = 0;
+  sliderAccelStart = 0; sliderLastApply = 0;
+}
+function stopNativeSliderEdit(): void {
+  if (!nativeSliderEditInput) return;
+  nativeSliderEditInput = null;
+  emitNativeEvent('gamepad.slider-edit', { active: false });
+}
+/** Change cadence at edit boundaries; never send an IPC message for each step. */
+function syncNativeSliderEdit(event: Event): void {
+  const input = event.target;
+  if (!(input instanceof HTMLInputElement) || input.type !== 'range' ||
+      !(Number(input.dataset.gpRepeatIntervalMs) > 0) || nativeSliderEditInput === input) return;
+  stopNativeSliderEdit(); resetSliderCadence();
+  nativeSliderEditInput = input;
+  emitNativeEvent('gamepad.slider-edit', { active: true });
+}
+function endNativeSliderEdit(event: Event): void {
+  if (event.target !== nativeSliderEditInput) return;
+  stopNativeSliderEdit(); resetSliderCadence();
+}
+
+/** A panel context change cancels its edit without confirming the old value. */
+function invalidateSliderEdit(event: Event): void {
+  const detail = (event as CustomEvent<{panel?: HTMLElement; input?: HTMLInputElement}>).detail;
+  const panel = detail?.panel ?? event.target;
+  if (!(panel instanceof HTMLElement)) return;
+  if (nativeSliderEditInput && panel.contains(nativeSliderEditInput)) stopNativeSliderEdit();
+  resetSliderCadence();
+  if (panel.contains(document.activeElement) || (detail?.input && panel.contains(detail.input))) sliderEditMode = false;
+  for (const input of panel.querySelectorAll<HTMLInputElement>('input[type="range"]')) {
+    input.dispatchEvent(new CustomEvent('gp:slider-edit-reset'));
+  }
+}
+
+/** Cancel an explicitly owned slider draft; legacy ranges keep their existing behaviour. */
+function cancelPerformanceSliderEdit(): boolean {
+  const input = document.activeElement as HTMLElement | null;
+  const panel = input?.closest<HTMLElement>('[data-gp-performance-panel],[data-gp-slider-draft]');
+  if (!sliderEditMode || !isRangeInput(input) || !panel) return false;
+  sliderEditMode = false;
+  stopNativeSliderEdit(); resetSliderCadence();
+  input.dispatchEvent(new CustomEvent('gp:slider-edit-reset'));
+  panel.dispatchEvent(new CustomEvent(panel.matches('[data-gp-slider-draft]') ? 'gp:slider-edit-cancel' : 'gp:performance-edit-cancel'));
+  return true;
+}
+
+// Performance edits keep a fixed grid step and shorten only the held repeat interval.
 // 仅当焦点在滑块（engine 调用前已判定）时由调用方传入左右/LT/RT 状态。
 function microAdjustSlider(now: number, heldL: boolean, heldR: boolean, lt: boolean, rt: boolean) {
-  if (!(heldL || heldR || lt || rt)) { sliderAccelStart = 0; sliderLastApply = 0; return; }
+  if (!(heldL || heldR || lt || rt)) { resetSliderCadence(); return; }
   const dir = heldR || rt ? 1 : -1;
+  const input = document.activeElement as HTMLInputElement | null;
+  const configured = Number(input?.dataset.gpRepeatIntervalMs);
+  const accelerated = input?.dataset.gpAccelerate !== 'false';
+  if (input && configured > 0) {
+    if (sliderRepeatInput !== input || sliderRepeatDirection !== dir) {
+      sliderRepeatInput = input; sliderRepeatDirection = dir;
+      sliderAccelStart = sliderLastApply = now;
+      adjustSlider(dir); // first/reversed press is immediate and exactly one step
+    } else if (now - sliderLastApply >= editRepeatInterval(now - sliderAccelStart, configured, accelerated)) {
+      adjustSlider(dir);
+      sliderLastApply = now; // no catch-up burst after a stalled frame
+    }
+    return;
+  }
+  // Other pages retain their existing repeat policy.
   if (sliderAccelStart === 0) sliderAccelStart = now;
   const held = now - sliderAccelStart;
-  let step = 1;
-  let interval = SLIDER_REPEAT_BASE;
-  const accelerated = (document.activeElement as HTMLElement | null)?.dataset.gpAccelerate !== 'false';
+  let step = 1, interval = SLIDER_REPEAT_BASE;
   if (accelerated && held > SLIDER_ACCEL_DELAY) {
     step = Math.min(1 + Math.floor((held - SLIDER_ACCEL_DELAY) / SLIDER_ACCEL_STEP), SLIDER_ACCEL_CAP);
     interval = Math.max(SLIDER_REPEAT_MIN, SLIDER_REPEAT_BASE - Math.floor(held / 400) * 15);
@@ -1332,6 +1444,14 @@ function microAdjustSlider(now: number, heldL: boolean, heldR: boolean, lt: bool
 // These two actions are global controller commands. They must remain usable
 // even while simulated-mouse mode intentionally suppresses page controls.
 function handleGamepadBack(opts: GamepadEngineOptions): void {
+  if (cancelPerformanceSliderEdit()) { log(opts, 'B · 取消性能参数编辑'); return; }
+  // The first B exits an active slider before its enclosing modal handles B.
+  // Otherwise a simulation/settings modal could close while leaving edit mode armed.
+  if (sliderEditMode) {
+    sliderEditMode = false;
+    if (isRangeInput(document.activeElement as HTMLElement | null)) { log(opts, 'B · 退出滑块编辑'); return; }
+  }
+  if (offerPageCommand('back')) return;
   const backEvent = new CustomEvent('ipc:gamepad-back', { cancelable: true });
   window.dispatchEvent(backEvent);
   if (backEvent.defaultPrevented) {
@@ -1348,6 +1468,9 @@ function handleGamepadBack(opts: GamepadEngineOptions): void {
 }
 
 function handleGamepadEditGame(opts: GamepadEngineOptions): void {
+  if (offerPageCommand('edit-game')) return;
+  const modal = [...document.querySelectorAll<HTMLElement>('[data-gp-modal]')].filter(el=>el.getBoundingClientRect().height>0).pop();
+  if ((modal && !modal.matches('[data-gp-game-quick-menu]') && !modal.querySelector('[data-gp-game-quick-menu]')) || document.querySelector('[data-gp-page-lock]')) return;
   const editGameEvent = new CustomEvent('ipc:gamepad-edit-game', { cancelable: true });
   window.dispatchEvent(editGameEvent);
   if (editGameEvent.defaultPrevented) {
@@ -1357,15 +1480,13 @@ function handleGamepadEditGame(opts: GamepadEngineOptions): void {
   }
 }
 
-function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiAction): void {
+function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiAction, repeat?: {repeat:boolean;heldMs:number}): void {
   if (action === 'page-prev') {
-    navigate(opts, -1);
-    setGamepadFocused(null);
+    if (navigate(opts, -1)) setGamepadFocused(null);
     return;
   }
   if (action === 'page-next') {
-    navigate(opts, 1);
-    setGamepadFocused(null);
+    if (navigate(opts, 1)) setGamepadFocused(null);
     return;
   }
   if (action === 'back') {
@@ -1379,8 +1500,7 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
   const gameMenuOpen = !!document.querySelector('[data-gp-game-quick-menu]');
   if (mouseModeSuppress && !gameMenuOpen) return;
   if (action === 'debug') {
-    window.dispatchEvent(new CustomEvent('ipc:gamepad-start'));
-    log(opts, 'Start -> debug');
+    handleGamepadStart(opts);
     return;
   }
   if (action === 'confirm') {
@@ -1389,6 +1509,7 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
     return;
   }
   if (action === 'slider-decrease' || action === 'slider-increase') {
+    if (offerPageCommand(action)) return;
     if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
       adjustSlider(action === 'slider-increase' ? 1 : -1);
     }
@@ -1412,7 +1533,7 @@ function dispatchNativeUiAction(opts: GamepadEngineOptions, action: NativeUiActi
   }
   if (sliderEditMode && isRangeInput(document.activeElement as HTMLElement)) {
     if (dx !== 0) adjustSlider(dx);
-    else if (dy !== 0) sliderEditMode = false;
+    else if (dy !== 0) { cancelPerformanceSliderEdit(); sliderEditMode = false; }
     return;
   }
   const ddTrigger = openDropdownTrigger();
@@ -1519,12 +1640,12 @@ function tick(opts: GamepadEngineOptions) {
     // 裁决上一帧挂起的切页：另一键也已按下（呼出组合）→ 取消；否则执行切页。
     if (lbNavPending) {
       if (rbDown || suppressPage) lbNavPending = false; // 组合/呼出中：丢弃
-      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, -1); lastPageSwitch = now; setGamepadFocused(null); lbNavPending = false; } // LB → 上一页
+      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { if(navigate(opts, -1)) { lastPageSwitch = now; setGamepadFocused(null); } lbNavPending = false; } // LB → 上一页
       else lbNavPending = false; // 冷却中：丢弃
     }
     if (rbNavPending) {
       if (lbDown || suppressPage) rbNavPending = false; // 组合/呼出中：丢弃
-      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { navigate(opts, 1); lastPageSwitch = now; setGamepadFocused(null); rbNavPending = false; } // RB → 下一页
+      else if (now - lastPageSwitch > PAGE_SWITCH_COOLDOWN) { if(navigate(opts, 1)) { lastPageSwitch = now; setGamepadFocused(null); } rbNavPending = false; } // RB → 下一页
       else rbNavPending = false; // 冷却中：丢弃
     }
     // 新按下边沿：先挂起待裁决（若另一键已按下则视为组合，直接不切页）
@@ -1547,14 +1668,11 @@ function tick(opts: GamepadEngineOptions) {
       return;
     }
 
-    // ── Start → 调试面板（释放时才触发；若本轮被用作修饰键则屏蔽，避免和快捷调节冲突）──
+    // ── Start → 页面局部动作（释放时触发；修饰键组合不重复触发）──
     if (pressed(9)) {
       startUsedAsModifier = false;
     }
-    if (!b[9] && prevButtons[9] && !startUsedAsModifier) {
-      window.dispatchEvent(new CustomEvent('ipc:gamepad-start'));
-      log(opts, 'Start · 调试面板');
-    }
+    handleBrowserStartRelease(opts, b[9], prevButtons[9], startUsedAsModifier);
 
     // ── 面包按钮 ──
     if (pressed(0)) {
@@ -1568,7 +1686,7 @@ function tick(opts: GamepadEngineOptions) {
     // ── Start 键作为修饰键：Start + 方向键快捷调节 ──
     // ⚠️ 实际调节逻辑已移到 native Raw Input 回调（仅在有输入时被唤醒），
     //    这样在游戏内全屏、窗口未聚焦时也能生效且零延迟。前端只负责：
-    //    ① 按住期间屏蔽方向键的焦点移动/滑块微调；② 抑制调试面板（startUsedAsModifier）。
+    //    ① 按住期间屏蔽方向键的焦点移动/滑块微调；② 抑制页面局部 Start 动作（startUsedAsModifier）。
     const startHeld = b[9];
     if (startHeld) {
       startUsedAsModifier = gpSettings.tdpShortcut || gpSettings.fpsShortcut;
@@ -1577,6 +1695,7 @@ function tick(opts: GamepadEngineOptions) {
       // 滑块编辑模式：左右调整数值（线性加速），上下/B退出（B 在上方处理）
       microAdjustSlider(now, heldLeft, heldRight, b[6], b[7]);
       if (pressed(12) || pressed(13)) {
+        cancelPerformanceSliderEdit();
         sliderEditMode = false;
         log(opts, '方向键 · 退出滑块编辑');
       }

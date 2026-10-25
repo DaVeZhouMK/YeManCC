@@ -14,11 +14,16 @@
 # Exit code 0 = no gaps.
 
 param(
-    [string]$HcDevicesRoot = 'g:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Devices',
-    [string]$HcDeviceBase  = 'g:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Devices\IDevice.cs',
-    [string]$MainCpp       = 'g:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\native\main.cpp'
+    [string]$HcDevicesRoot = '',
+    [string]$HcDeviceBase  = '',
+    [string]$MainCpp       = ''
 )
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $HcDevicesRoot) { $HcDevicesRoot = Join-Path $repoRoot 'deps\handheldcompanion-runtime\source\Devices' }
+if (-not $HcDeviceBase) { $HcDeviceBase = Join-Path $HcDevicesRoot 'IDevice.cs' }
+if (-not $MainCpp) { $MainCpp = Join-Path $repoRoot 'native\main.cpp' }
+Write-Output ("HC_SOURCE_ROOT={0}" -f (Resolve-Path -LiteralPath $HcDevicesRoot).Path)
 foreach ($p in @($HcDevicesRoot, $HcDeviceBase, $MainCpp)) { if (-not (Test-Path -LiteralPath $p)) { throw "missing input: $p" } }
 
 $ledBitNames = @{ 'SolidColor' = 'solid'; 'Breathing' = 'breathing'; 'Rainbow' = 'rainbow'; 'Wave' = 'wave'

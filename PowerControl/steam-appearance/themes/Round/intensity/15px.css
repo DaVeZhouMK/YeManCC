@@ -1,0 +1,8 @@
+:root {
+  --round-radius-size: 15px !important;
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-fb8efaa44e47184e: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-24a5da63cb43728f: 1; }

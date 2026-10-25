@@ -1,0 +1,609 @@
+{
+  "schemaVersion": 1,
+  "original": "tools/fan_pending_lease_acquisition_selftest.ts",
+  "sources": [
+    "PowerControl/GameTitlePolicy.json",
+    "package.json",
+    "src/bridge/aiFanMock.ts",
+    "src/bridge/api.ts",
+    "src/bridge/autofloat.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/controllerShortcutRules.ts",
+    "src/bridge/cpuProfiles.ts",
+    "src/bridge/fanApi.ts",
+    "src/bridge/fanCurve.ts",
+    "src/bridge/fanDiagnostics.ts",
+    "src/bridge/fanFeature.ts",
+    "src/bridge/fanHost.ts",
+    "src/bridge/fanHost/capabilityAdmission.ts",
+    "src/bridge/fanHost/deployment.ts",
+    "src/bridge/fanHost/startupConfiguration.ts",
+    "src/bridge/fanHostInstallerAsset.json",
+    "src/bridge/fanHostInstallerRepair.ts",
+    "src/bridge/fanSessionEvidence.ts",
+    "src/bridge/frameRateLimits.ts",
+    "src/bridge/frameRateModel.ts",
+    "src/bridge/gameCorePolicy.ts",
+    "src/bridge/gamePolicyHysteresis.ts",
+    "src/bridge/gamePolicyTarget.ts",
+    "src/bridge/gamedetect.ts",
+    "src/bridge/gamingHomePolicy.ts",
+    "src/bridge/hardwareCoordinator.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/ipc.ts",
+    "src/bridge/monitorAppliedTdp.ts",
+    "src/bridge/monitorCoreTiles.ts",
+    "src/bridge/monitorData.ts",
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorFpsHardware.ts",
+    "src/bridge/monitorFrameTime.ts",
+    "src/bridge/monitorHudFreshness.ts",
+    "src/bridge/monitorNativeDemand.ts",
+    "src/bridge/monitorPayloadDecoder.ts",
+    "src/bridge/monitorSnapshotBudget.ts",
+    "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/monitorTopProjection.ts",
+    "src/bridge/performanceControls.ts",
+    "src/bridge/performanceSchedule.ts",
+    "src/bridge/powerSource.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/rtssOverlay.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/bridge/tdpCircuitBreaker.ts",
+    "src/bridge/tdpRuntimeState.ts",
+    "src/bridge/tdpStaticDiagnostics.ts",
+    "src/bridge/topmon.ts",
+    "src/bridge/uiLifecycle.ts",
+    "src/bridge/yeman.ts",
+    "src/radial/availability.ts",
+    "src/radial/testingState.ts",
+    "src/robust/repairModel.ts",
+    "src/scheduler.ts",
+    "tools/fan_pending_lease_acquisition_selftest.ts",
+    "tools/fixtures/fan_no_io_host.ts",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tsconfig.json",
+    "tsconfig.node.json"
+  ],
+  "buildInputs": [
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@babel+parser@7.29.8/node_modules/@babel/parser/lib/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-core@3.5.41/node_modules/@vue/compiler-core/dist/compiler-core.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-core@3.5.41/node_modules/@vue/compiler-core/dist/compiler-core.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-core@3.5.41/node_modules/@vue/compiler-core/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-dom@3.5.41/node_modules/@vue/compiler-dom/dist/compiler-dom.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-dom@3.5.41/node_modules/@vue/compiler-dom/dist/compiler-dom.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+compiler-dom@3.5.41/node_modules/@vue/compiler-dom/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+reactivity@3.5.41/node_modules/@vue/reactivity/dist/reactivity.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+reactivity@3.5.41/node_modules/@vue/reactivity/dist/reactivity.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+reactivity@3.5.41/node_modules/@vue/reactivity/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-core@3.5.41/node_modules/@vue/runtime-core/dist/runtime-core.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-core@3.5.41/node_modules/@vue/runtime-core/dist/runtime-core.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-core@3.5.41/node_modules/@vue/runtime-core/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-dom@3.5.41/node_modules/@vue/runtime-dom/dist/runtime-dom.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-dom@3.5.41/node_modules/@vue/runtime-dom/dist/runtime-dom.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-dom@3.5.41/node_modules/@vue/runtime-dom/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+shared@3.5.41/node_modules/@vue/shared/dist/shared.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+shared@3.5.41/node_modules/@vue/shared/dist/shared.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+shared@3.5.41/node_modules/@vue/shared/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode-codepoint.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/decode.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-html.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/generated/decode-data-xml.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/bin-trie-flags.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/entities@7.0.1/node_modules/entities/dist/commonjs/internal/decode-shared.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/estree-walker@2.0.2/node_modules/estree-walker/dist/umd/estree-walker.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/array-set.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/base64-vlq.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/base64.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/binary-search.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/mapping-list.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/quick-sort.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/source-map-consumer.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/source-map-generator.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/source-node.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/lib/util.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/source-map-js@1.2.1/node_modules/source-map-js/source-map.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/dist/vue.cjs.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/dist/vue.cjs.prod.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/index.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/index.mjs",
+    "PowerControl/GameTitlePolicy.json",
+    "src/bridge/aiFanMock.ts",
+    "src/bridge/api.ts",
+    "src/bridge/autofloat.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/controllerShortcutRules.ts",
+    "src/bridge/cpuProfiles.ts",
+    "src/bridge/fanApi.ts",
+    "src/bridge/fanCurve.ts",
+    "src/bridge/fanDiagnostics.ts",
+    "src/bridge/fanFeature.ts",
+    "src/bridge/fanHost.ts",
+    "src/bridge/fanHost/capabilityAdmission.ts",
+    "src/bridge/fanHost/deployment.ts",
+    "src/bridge/fanHost/startupConfiguration.ts",
+    "src/bridge/fanHostInstallerAsset.json",
+    "src/bridge/fanHostInstallerRepair.ts",
+    "src/bridge/fanSessionEvidence.ts",
+    "src/bridge/frameRateLimits.ts",
+    "src/bridge/frameRateModel.ts",
+    "src/bridge/gameCorePolicy.ts",
+    "src/bridge/gamePolicyHysteresis.ts",
+    "src/bridge/gamePolicyTarget.ts",
+    "src/bridge/gamedetect.ts",
+    "src/bridge/gamingHomePolicy.ts",
+    "src/bridge/hardwareCoordinator.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/ipc.ts",
+    "src/bridge/monitorAppliedTdp.ts",
+    "src/bridge/monitorCoreTiles.ts",
+    "src/bridge/monitorData.ts",
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorFpsHardware.ts",
+    "src/bridge/monitorFrameTime.ts",
+    "src/bridge/monitorHudFreshness.ts",
+    "src/bridge/monitorNativeDemand.ts",
+    "src/bridge/monitorPayloadDecoder.ts",
+    "src/bridge/monitorSnapshotBudget.ts",
+    "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/monitorTopProjection.ts",
+    "src/bridge/performanceControls.ts",
+    "src/bridge/performanceSchedule.ts",
+    "src/bridge/powerSource.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/rtssOverlay.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/bridge/tdpCircuitBreaker.ts",
+    "src/bridge/tdpRuntimeState.ts",
+    "src/bridge/tdpStaticDiagnostics.ts",
+    "src/bridge/topmon.ts",
+    "src/bridge/uiLifecycle.ts",
+    "src/bridge/yeman.ts",
+    "src/radial/availability.ts",
+    "src/radial/testingState.ts",
+    "src/robust/repairModel.ts",
+    "src/scheduler.ts",
+    "tools/fan_pending_lease_acquisition_selftest.ts",
+    "tools/fixtures/fan_no_io_host.ts"
+  ],
+  "allowedExternalImports": [
+    "node:assert/strict"
+  ],
+  "originalScope": "real public apply/preset/OFF/Close and queue; virtual clock, inert Host/native/process; family labels are not hardware proof; no CPU benchmark",
+  "expectedRows": [
+    {
+      "family": "ROG",
+      "name": "apply pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "ROG",
+      "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "ROG",
+      "name": "preset pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "ROG",
+      "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "GPD",
+      "name": "apply pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "GPD",
+      "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "GPD",
+      "name": "preset pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "GPD",
+      "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "OneX",
+      "name": "apply pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "OneX",
+      "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "OneX",
+      "name": "preset pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "OneX",
+      "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "Lenovo",
+      "name": "apply pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "Lenovo",
+      "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "Lenovo",
+      "name": "preset pending lease after resuming: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "Lenovo",
+      "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease with pure off: keep receipt for ordered cleanup without maintenance"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease with pure close: keep receipt for ordered cleanup without maintenance"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease with pure off: keep receipt for ordered cleanup without maintenance"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease with pure close: keep receipt for ordered cleanup without maintenance"
+    },
+    {
+      "family": "MSI",
+      "name": "apply ordinary pending acquisition still starts control once"
+    },
+    {
+      "family": "MSI",
+      "name": "preset ordinary pending acquisition still starts control once"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease mixed power-off: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease mixed off-power: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease mixed off-power-off: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease mixed power-close: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease mixed close-power: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease mixed power-off: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease mixed off-power: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease mixed off-power-off: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease mixed power-close: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease mixed close-power: cleanup cannot revive a pre-power receipt"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease retired by generation: next manual remains reachable"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease retired by same-generation-sleep: next manual remains reachable"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease retired by generation: next manual remains reachable"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease retired by same-generation-sleep: next manual remains reachable"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease with a newer curve: preserve one live receipt for the latest user intent"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease with a newer curve: preserve one live receipt for the latest user intent"
+    },
+    {
+      "family": "MSI",
+      "name": "apply pending lease with repeated pure OFF: cleanup receipt remains usable"
+    },
+    {
+      "family": "MSI",
+      "name": "preset pending lease with repeated pure OFF: cleanup receipt remains usable"
+    }
+  ],
+  "faults": [
+    {
+      "id": "power-acquisition",
+      "path": "src/bridge/fanHost.ts",
+      "before": "if (this.acquisitionBoundaryEpoch > epoch) {",
+      "after": "if (false && this.acquisitionBoundaryEpoch > epoch) {",
+      "expectedFailures": [
+        {
+          "index": 0,
+          "family": "ROG",
+          "name": "apply pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 1,
+          "family": "ROG",
+          "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 2,
+          "family": "ROG",
+          "name": "preset pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 3,
+          "family": "ROG",
+          "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 4,
+          "family": "MSI",
+          "name": "apply pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 5,
+          "family": "MSI",
+          "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 6,
+          "family": "MSI",
+          "name": "preset pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 7,
+          "family": "MSI",
+          "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 8,
+          "family": "GPD",
+          "name": "apply pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 9,
+          "family": "GPD",
+          "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 10,
+          "family": "GPD",
+          "name": "preset pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 11,
+          "family": "GPD",
+          "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 12,
+          "family": "OneX",
+          "name": "apply pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 13,
+          "family": "OneX",
+          "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 14,
+          "family": "OneX",
+          "name": "preset pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 15,
+          "family": "OneX",
+          "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 16,
+          "family": "Lenovo",
+          "name": "apply pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 17,
+          "family": "Lenovo",
+          "name": "apply pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 18,
+          "family": "Lenovo",
+          "name": "preset pending lease after resuming: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 19,
+          "family": "Lenovo",
+          "name": "preset pending lease after resuming-ready: retire old receipt and finish the same user request",
+          "error": "AssertionError [ERR_ASSERTION]: pre-wake lease was adopted after the wake boundary"
+        },
+        {
+          "index": 26,
+          "family": "MSI",
+          "name": "apply pending lease mixed power-off: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 27,
+          "family": "MSI",
+          "name": "apply pending lease mixed off-power: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 28,
+          "family": "MSI",
+          "name": "apply pending lease mixed off-power-off: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 29,
+          "family": "MSI",
+          "name": "apply pending lease mixed power-close: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 30,
+          "family": "MSI",
+          "name": "apply pending lease mixed close-power: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 31,
+          "family": "MSI",
+          "name": "preset pending lease mixed power-off: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 32,
+          "family": "MSI",
+          "name": "preset pending lease mixed off-power: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 33,
+          "family": "MSI",
+          "name": "preset pending lease mixed off-power-off: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 34,
+          "family": "MSI",
+          "name": "preset pending lease mixed power-close: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 35,
+          "family": "MSI",
+          "name": "preset pending lease mixed close-power: cleanup cannot revive a pre-power receipt",
+          "error": "AssertionError [ERR_ASSERTION]: OFF exception masked the crossed power boundary"
+        },
+        {
+          "index": 37,
+          "family": "MSI",
+          "name": "apply pending lease retired by same-generation-sleep: next manual remains reachable",
+          "error": "AssertionError [ERR_ASSERTION]: false == true"
+        },
+        {
+          "index": 39,
+          "family": "MSI",
+          "name": "preset pending lease retired by same-generation-sleep: next manual remains reachable",
+          "error": "AssertionError [ERR_ASSERTION]: false == true"
+        }
+      ],
+      "failureOracle": "Unchanged original assertions; first20 pre-wake adoption,10 mixed power/OFF and2 same-generation-sleep errors pinned from real private-source prototype; not a historical failure."
+    },
+    {
+      "id": "cleanup-acquisition",
+      "path": "src/bridge/fanHost.ts",
+      "before": "this.lease = acquired;\n    this.assertIntentStillCurrent(admittedIntentRevision, 'lease-acquired-before-renewal');",
+      "after": "if (admittedIntentRevision === this.controlIntentRevisionValue) this.lease = acquired;\n    this.assertIntentStillCurrent(admittedIntentRevision, 'lease-acquired-before-renewal');",
+      "expectedFailures": [
+        {
+          "index": 20,
+          "family": "MSI",
+          "name": "apply pending lease with pure off: keep receipt for ordered cleanup without maintenance",
+          "error": "AssertionError [ERR_ASSERTION]: OFF did not release the exact acquired token"
+        },
+        {
+          "index": 21,
+          "family": "MSI",
+          "name": "apply pending lease with pure close: keep receipt for ordered cleanup without maintenance",
+          "error": "AssertionError [ERR_ASSERTION]: same-session cleanup lost the committed lease receipt"
+        },
+        {
+          "index": 22,
+          "family": "MSI",
+          "name": "preset pending lease with pure off: keep receipt for ordered cleanup without maintenance",
+          "error": "AssertionError [ERR_ASSERTION]: OFF did not release the exact acquired token"
+        },
+        {
+          "index": 23,
+          "family": "MSI",
+          "name": "preset pending lease with pure close: keep receipt for ordered cleanup without maintenance",
+          "error": "AssertionError [ERR_ASSERTION]: same-session cleanup lost the committed lease receipt"
+        },
+        {
+          "index": 40,
+          "family": "MSI",
+          "name": "apply pending lease with a newer curve: preserve one live receipt for the latest user intent",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'lease-2'\n- 'lease-1'\n         ^\n"
+        },
+        {
+          "index": 41,
+          "family": "MSI",
+          "name": "preset pending lease with a newer curve: preserve one live receipt for the latest user intent",
+          "error": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'lease-2'\n- 'lease-1'\n         ^\n"
+        }
+      ],
+      "failureOracle": "Unchanged original exact OFF/Close receipt and newer-intent lease assertions; pinned real private-source prototype, not a historical failure."
+    }
+  ],
+  "guard": "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+  "productChanges": 0,
+  "mainDependency": false
+}

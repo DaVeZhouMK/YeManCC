@@ -39,30 +39,13 @@ if($UiController){
   Invoke-Checked 'cl.exe' ($common+@('/DNOMINMAX')+$includes+@((Join-Path $workspace 'tools\decky_sidebar_real_ui_controller.cpp'),"/Fo$obj","/Fe$exe",'/link','/SUBSYSTEM:CONSOLE','/MACHINE:x64','advapi32.lib','ws2_32.lib','bcrypt.lib','winhttp.lib','user32.lib')) $log
 }
 if($Native){
-  $out=Join-Path $build 'App\Native'
-  New-Item -ItemType Directory -Path $out -Force | Out-Null
-  $log=Join-Path $evidence 'native-link-mainline15.txt'
-  "YMCC Decky 侧边栏 — task-local compile/link only, EXE not launched; $(Get-Date -Format o)" | Set-Content -LiteralPath $log -Encoding utf8
-  Push-Location (Join-Path $workspace 'native')
-  try{
-    Invoke-Checked 'rc.exe' @('/nologo','/fo',(Join-Path $out 'app.res'),'app.rc') $log
-    Invoke-Checked 'cl.exe' ($common+$includes+@('/c','main.cpp',('/Fo'+(Join-Path $out 'main.obj')))) $log
-    Invoke-Checked 'cl.exe' ($common+$includes+@('/c','dsu_server.cpp',('/Fo'+(Join-Path $out 'dsu.obj')))) $log
-    $exe=Join-Path $out 'YeManCC.exe'
-    $libraries=@((Join-Path $mainline 'deps\webview2\build\native\x64\WebView2LoaderStatic.lib'),(Join-Path $sdk "Lib\$version\um\x64\WindowsApp.lib"),'user32.lib','gdi32.lib','shell32.lib','shlwapi.lib','ole32.lib','oleaut32.lib','dwmapi.lib','winhttp.lib','advapi32.lib','shcore.lib','version.lib','psapi.lib','PowrProf.lib','ws2_32.lib')
-    Invoke-Checked 'cl.exe' ($common+@((Join-Path $out 'main.obj'),(Join-Path $out 'dsu.obj'),(Join-Path $out 'app.res'),"/Fe$exe",'/link','/SUBSYSTEM:WINDOWS','/MACHINE:x64')+$libraries) $log
-    Invoke-Checked 'mt.exe' @('-manifest','app.manifest',"-outputresource:$exe;#1") $log
-    'NATIVE_LINK_EXIT=0; CANDIDATE_EXECUTED=false' | Add-Content -LiteralPath $log -Encoding utf8;Write-Output 'NATIVE_LINK_EXIT=0; CANDIDATE_EXECUTED=false'
-  }finally{Pop-Location}
+  # Use the authoritative application recipe: do not duplicate its feature defines here.
+  # This remains a task-only build and never launches or deploys the resulting program.
+  $log=Join-Path $evidence 'native-link-official-loader.txt'
+  $priorWorkspace=$env:YEMAN_WORKSPACE_ROOT
+  try {
+    $env:YEMAN_WORKSPACE_ROOT=$task
+    Invoke-Checked $env:ComSpec @('/d','/c',(Join-Path $workspace 'native\build_native.bat')) $log
+    'NATIVE_LINK_EXIT=0; CANDIDATE_EXECUTED=false' | Add-Content -LiteralPath $log -Encoding utf8
+  } finally { $env:YEMAN_WORKSPACE_ROOT=$priorWorkspace }
 }
-
-
-
-
-
-
-
-
-
-
-

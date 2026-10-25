@@ -1,0 +1,2 @@
+#include <iostream>
+int main(int argc,char** argv){if(argc!=2)return 2;const std::string mode=argv[1];if(mode=="power")SetSuspendState(0,0,0);if(mode=="process")OpenProcess(0,0,100);if(mode=="thread")OpenThread(0,0,100);if(mode=="snapshot")CreateToolhelp32Snapshot(0,0);if(mode=="resume")NtResumeProcess(0);if(mode=="network")WinHttpOpen(0,0,0,0,0);if(mode=="imports"){std::cout<<"PORTABLE_NO_EXTERNAL_PROCESS_IMPORTS\n";return 0;}return 3;}

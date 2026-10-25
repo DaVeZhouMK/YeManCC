@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "timezone": "Asia/Hong_Kong",
+  "archive": "日志/微星G3E/YeManCC-logs-20261022-135631-Xbox全屏-启动bug.zip",
+  "events": [
+    {
+      "time": "13:53:09.531",
+      "file": "steam-launch.log",
+      "event": "ymcc-start-failed",
+      "detail": "requested operation requires elevation"
+    },
+    {
+      "time": "13:53:09.549",
+      "file": "steam-launch.log",
+      "event": "steam-request",
+      "mode": "bigpicture"
+    },
+    {
+      "time": "13:53:13.608",
+      "file": "decky-sidebar.log",
+      "line": 843,
+      "event": "runtime",
+      "phase": "waiting-manual-steam",
+      "reason": "ymcc-startup-observation-only"
+    },
+    {
+      "time": "13:53:14.226",
+      "file": "decky-sidebar.log",
+      "line": 844,
+      "event": "steam-mode-signal",
+      "mode": "bigpicture",
+      "steamPid": 8172,
+      "steamBirth": "134371219895508968"
+    },
+    {
+      "time": "13:53:20.880",
+      "file": "decky-sidebar.log",
+      "line": 851,
+      "event": "mirror-host-attach",
+      "connected": false
+    }
+  ],
+  "mediaReadyCount": 32,
+  "noPostFailureWallpaperPlaybackReceipt": true,
+  "rootCause": "No independent Xbox Full Screen consent for Steam already present when YMCC starts",
+  "correction": "input.startupAppliedSession is generated input-policy timestamp, not process birth; do not claim 3166.9547ms process birth ordering",
+  "support": "Only live system FSE + verified same-session Steam BPM + ON + native Ready grants missing Decky; ordinary startup remains closed",
+  "noActualXboxOrSteamLaunchInTests": true
+}

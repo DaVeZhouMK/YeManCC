@@ -4,8 +4,10 @@ import {
   type ConsumerReceipt,
   type GamepadControlCoordinatorCommand,
   type PhysicalSourceIdentity,
+  type VirtualPersona,
 } from '../src/bridge/gamepadControlContract';
 import { HardwareCoordinatorPlan } from '../src/bridge/hardwareCoordinator';
+import { VIRTUAL_OUTPUT_PERSONAS } from '../src/bridge/controllerPersona';
 
 const command: GamepadControlCoordinatorCommand = {
   runId: 'stage1-run',
@@ -138,7 +140,7 @@ if (suppressed.sources.find((source) => source.identity === external.identity)?.
 // 4. Virtual transition has one endpoint, same S, neutral barrier and anti-echo.
 const virtual = new GamepadControl();
 openWithSource(virtual, external);
-virtual.prepareVirtualEndpoint('dualshock4', 'virtual-ds4-0');
+virtual.prepareVirtualEndpoint('dualsense-edge', 'mock-virtual-edge-0');
 neutral(virtual, external);
 evidence(virtual);
 virtual.admit();
@@ -150,12 +152,12 @@ const virtualFrame = virtual.submitFrame({
   buttons: { east: true },
 });
 if (!virtualFrame.accepted || virtualFrame.disposition !== 'virtual-public-write') throw new Error('virtual output did not use the single endpoint');
-if (virtual.snapshot().endpoint?.identity !== 'virtual-ds4-0' || virtual.snapshot().endpoint?.sourceIdentity !== external.identity) throw new Error('virtual endpoint identity mismatch');
+if (virtual.snapshot().endpoint?.identity !== 'mock-virtual-edge-0' || virtual.snapshot().endpoint?.sourceIdentity !== external.identity) throw new Error('virtual endpoint identity mismatch');
 
 // 5. Missing consumer evidence fails closed; YMCC projection never becomes game output.
 const missingConsumer = new GamepadControl();
 openWithSource(missingConsumer);
-missingConsumer.prepareVirtualEndpoint('xbox360', 'virtual-x360-0');
+missingConsumer.prepareVirtualEndpoint('elite', 'mock-virtual-elite-0');
 neutral(missingConsumer);
 missingConsumer.recordConsumerEvidence({
   kind: 'ymcc-normal', path: 'normal-os', observed: true,
@@ -168,7 +170,7 @@ if (missingConsumer.snapshot().mode !== 'hold' || missingConsumer.snapshot().fai
 // 6. Lease keeps B alive, suppresses public virtual writes, and separates counters.
 const lease = new GamepadControl();
 openWithSource(lease);
-lease.prepareVirtualEndpoint('xbox360', 'virtual-x360-lease');
+lease.prepareVirtualEndpoint('elite', 'mock-virtual-elite-lease');
 neutral(lease);
 evidence(lease);
 lease.admit();
@@ -185,7 +187,7 @@ if (lease.snapshot().projectPublishCount !== 1 || lease.snapshot().externalConsu
 // 7. Anti-echo failure closes the valve and never reads virtual E as S.
 const antiEcho = new GamepadControl();
 openWithSource(antiEcho);
-antiEcho.prepareVirtualEndpoint('xbox360', 'virtual-echo');
+antiEcho.prepareVirtualEndpoint('elite', 'virtual-echo');
 neutral(antiEcho);
 evidence(antiEcho);
 antiEcho.admit();
@@ -196,7 +198,7 @@ if (echoResult.accepted || antiEcho.snapshot().mode !== 'hold' || antiEcho.snaps
 // 8. Releasing virtual output restores physical pass-through in a fresh endpoint epoch.
 const restore = new GamepadControl();
 openWithSource(restore);
-restore.prepareVirtualEndpoint('dualshock4', 'virtual-restore');
+restore.prepareVirtualEndpoint('dualsense-edge', 'virtual-restore');
 neutral(restore);
 evidence(restore);
 restore.admit();
@@ -215,5 +217,49 @@ const restoredFrame = restore.submitFrame({
   buttons: { north: true },
 });
 if (!restoredFrame.accepted || restoredFrame.disposition !== 'no-write' || restore.snapshot().mode !== 'physical-pass-through') throw new Error('restored physical endpoint did not resume pass-through');
+
+// Current personas retain the same neutral/evidence/admission/release gates.
+for (const persona of VIRTUAL_OUTPUT_PERSONAS) {
+  const current = new GamepadControl();
+  openWithSource(current);
+  const prepared = current.prepareVirtualEndpoint(persona, `mock-virtual-${persona}`);
+  if (prepared.endpoint?.persona !== persona || prepared.mode !== 'hold' || prepared.phase !== 'opening') throw new Error(`current endpoint prepare failed: ${persona}`);
+  neutral(current);
+  evidence(current);
+  current.admit();
+  const active = current.activate();
+  if (active.mode !== `virtual-${persona}` || active.phase !== 'active') throw new Error(`current persona admission failed: ${persona}`);
+  const publication = current.submitFrame({ frameId: 2, sourceIdentity: local.identity, sourceGeneration: local.generation, buttons: { south: true } });
+  if (!publication.accepted || publication.disposition !== 'virtual-public-write') throw new Error(`current persona publication failed: ${persona}`);
+  const released = current.disableVirtual(neutral(current, local, 3));
+  if (released.endpoint?.kind !== 'physical' || released.endpoint.writer !== 'none' || released.pendingPersona !== null) throw new Error(`current persona release failed: ${persona}`);
+}
+
+// Deliberately bypass TS: retired/unknown wire identities never create E.
+for (const persona of ['xbox360', 'dualshock4', 'dualsense', 'disabled', 'physical', 'unknown', null, undefined, 0, true, {}, ['elite']] as unknown[]) {
+  const rejectedControl = new GamepadControl();
+  openWithSource(rejectedControl);
+  const before = rejectedControl.snapshot();
+  const rejected = rejectedControl.prepareVirtualEndpoint(persona as VirtualPersona, 'mock-invalid-endpoint');
+  if (rejected.failClosedReason !== 'virtual-persona-unsupported' || rejected.endpoint !== null || rejected.pendingPersona !== null || rejected.mode !== 'hold' || rejected.phase !== before.phase || rejected.epoch !== before.epoch) throw new Error(`unsupported runtime persona created endpoint: ${String(persona)}`);
+  const recovered = rejectedControl.prepareVirtualEndpoint('elite', 'mock-current-after-rejection');
+  if (recovered.endpoint?.persona !== 'elite' || recovered.endpoint.endpointEpoch !== 1) throw new Error('rejected persona consumed endpoint epoch or blocked current creation');
+}
+
+// Physical model names remain opaque source identities, never virtual personas.
+for (const model of ['dualshock4', 'dualsense', 'xbox360']) {
+  const physicalSource: PhysicalSourceIdentity = { identity: `physical-${model}`, kind: 'external', physicalEndpointIdentity: `hid-physical-${model}`, generation: 1 };
+  const physical = new GamepadControl();
+  physical.beginTransaction(command);
+  physical.discoverSources([physicalSource]);
+  physical.selectPhysicalSource(physicalSource.identity);
+  physical.preparePhysicalPassThrough();
+  neutral(physical, physicalSource);
+  evidence(physical);
+  physical.admit();
+  physical.activate();
+  const publication = physical.submitFrame({ frameId: 2, sourceIdentity: physicalSource.identity, sourceGeneration: physicalSource.generation, buttons: { south: true } });
+  if (!publication.accepted || publication.disposition !== 'no-write' || physical.snapshot().endpoint?.persona !== 'physical') throw new Error(`physical source model was blocked: ${model}`);
+}
 
 console.log('gamepad control contract selftest: PASS');

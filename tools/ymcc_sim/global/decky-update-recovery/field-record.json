@@ -1,0 +1,27 @@
+{
+  "id": "decky-update-disconnect-20261020",
+  "observedDate": "2026-10-20",
+  "source": "Local read-only process/listener/log/side-effect-forbidden CDP observation",
+  "timeline": [
+    {"time":"2026-10-20T14:57:14.952+08:00","event":"old-bootstrap-watch-stopped"},
+    {"time":"2026-10-20T14:57:15.035+08:00","event":"old-mirror-peer-disconnected"},
+    {"time":"2026-10-20T14:59:45.217+08:00","event":"new-runtime-waiting-manual-steam","reason":"ymcc-startup-observation-only"},
+    {"time":"2026-10-20T14:59:45.529+08:00","event":"new-mirror-inactive"}
+  ],
+  "observed": {
+    "sameSteamSession": true,
+    "mode": "bigpicture",
+    "loaderProcessPresent": false,
+    "loaderPortListening": false,
+    "oldBrokerPortListening": false,
+    "oldUiStillActive": true,
+    "oldFrontendBuildId": "0feab8a4fcb040b0e649d90cbfa7f2f32be4d08acf1430dc3d7116bf5452cf55",
+    "installedFrontendBuildId": "20c8b0896c10e29fec6ad292b7cce2996f3a4453b9570629e7793d5f8afa0fb8",
+    "loaderSha256": "51c7f3b9cdf6d6b8132273ca4cbc145595f2e36b556332b7c911de846ef914b7",
+    "safetyStopRecorded": false
+  },
+  "failure": "Graceful old host shutdown removes owned Loader/broker. The new host treats existing Steam as observation-only, leaving an old visible UI attached to a dead broker.",
+  "expected": "Enabled update continuation in the same verified Steam Big Picture session launches owned Loader/broker, refreshes bootstrap and module, restores snapshots, never replays stale edits. User/safety off, other Steam identity and ordinary same-version startup must not be auto-admitted.",
+  "localEvidence": "D:/Codex/2026-10-18/d/work/decky-local-disconnect-20261020",
+  "sensitiveValuesOmitted": ["bootstrap token","runId","account","game identity"]
+}

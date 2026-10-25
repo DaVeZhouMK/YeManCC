@@ -1,11 +1,18 @@
 import { invoke } from './ipc';
+import { normalizeBackgroundPosition, type BackgroundPosition } from './backgroundPosition';
 import { getUiSetting, setUiSettings } from './uiSettings';
 
 export const DEFAULT_BACKGROUND_VIDEO_PATH = 'C:\\SOFT\\YeMan\\Demo\\MP4\\SteamDeck.mp4';
 
 export type BackgroundKind = 'image' | 'video';
 
+export interface MediaPlayback {start:number;end:number;fit:'cover'|'contain';}
 export interface BackgroundState {
+  mediaKey?:string;
+  mediaReadEpoch?:number;
+  mediaAssetId?:string;
+  mediaBindingRevision?:number;
+  playback?:MediaPlayback;
   enabled: boolean;
   kind?: BackgroundKind;
   file?: string;
@@ -17,6 +24,11 @@ export interface BackgroundState {
 }
 
 export interface DynamicBackgroundState {
+  mediaKey?:string;
+  mediaReadEpoch?:number;
+  mediaAssetId?:string;
+  mediaBindingRevision?:number;
+  playback?:MediaPlayback;
   enabled: boolean;
   kind?: BackgroundKind;
   url: string;
@@ -128,6 +140,22 @@ export async function setBackgroundBlur(value: number): Promise<number> {
   const blur = normalizeBackgroundBlur(value);
   await setUiSettings({ backgroundBlur: blur });
   return previewBackgroundBlur(blur);
+}
+
+export function getBackgroundPosition(): BackgroundPosition {
+  return normalizeBackgroundPosition({ x: getUiSetting('backgroundPositionX'), y: getUiSetting('backgroundPositionY') });
+}
+
+export function previewBackgroundPosition(value: BackgroundPosition): BackgroundPosition {
+  const position = normalizeBackgroundPosition(value);
+  window.dispatchEvent(new CustomEvent('background:position-changed', { detail: position }));
+  return position;
+}
+
+export async function setBackgroundPosition(value: BackgroundPosition): Promise<BackgroundPosition> {
+  const position = normalizeBackgroundPosition(value);
+  await setUiSettings({ backgroundPositionX: position.x, backgroundPositionY: position.y });
+  return previewBackgroundPosition(position);
 }
 
 export function notifyBackgroundChanged(state: BackgroundState): void {

@@ -32,11 +32,16 @@ function Get-CustomSteamLibrarySourceIndex {
     "tools/build-custom-steam-library-$Kind.ps1",
     'tools/custom_steam_library_build_guard.ps1',
     'CustomSteamLibrary/assets/custom-steam-library.ico',
+    'native/game_detection_blacklist_entries.h',
+    'native/process_efficiency.h',
     'deps/json/json.hpp'
   )
   $paths += @(Get-ChildItem -LiteralPath $native -Filter '*.h' -File | ForEach-Object { 'native/custom-steam-library/' + $_.Name })
   if ($Kind -eq 'host') {
-    $paths += @('deps/webview2/build/native/include/WebView2.h',
+    $paths += @('native/opti_catalog_startup.h','native/webview_process_efficiency.h','native/shared_game_media.h','native/shared_game_media_capacity.h',
+      'native/shared_game_media_download_queue.h','native/shared_game_media_download_worker.h','native/shared_game_media_download_resources.h',
+      'native/shared_game_media_shortcut.h','native/shared_game_media_identity_worker.h',
+      'deps/webview2/build/native/include/WebView2.h',
       'deps/webview2/build/native/include/WebView2EnvironmentOptions.h',
       'deps/webview2/build/native/x64/WebView2LoaderStatic.lib')
   }
@@ -86,6 +91,7 @@ function Assert-CustomSteamLibrarySourceFreshness {
   param([string]$ProjectRoot, [string]$PackageRoot)
   $manifestPath = Join-Path $PackageRoot 'package-manifest.json'
   $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ([int]$manifest.backgroundMediaProtocol -ne 1 -or [int]$manifest.backgroundCatalogProtocol -ne 1 -or [int]$manifest.backgroundIdentityProtocol -ne 1 -or [int]$manifest.backgroundVideoQualityPolicy -lt 3 -or [int]$manifest.backgroundManualProtocol -ne 1 -or [int]$manifest.backgroundVideoSelectionProtocol -ne 1) { throw 'Child download/catalog/shortcut-identity capability is missing; rebuild the current library host before export' }
   $version = Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json
   if ([string]$manifest.packageVersion -ne [string]$version.version) { throw 'Child package version differs from current mainline' }
   foreach ($kind in @('host','worker')) {

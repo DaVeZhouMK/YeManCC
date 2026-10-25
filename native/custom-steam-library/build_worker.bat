@@ -34,4 +34,9 @@ cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE
   /FC "..\..\tools\custom_steam_library_worker_lifecycle_selftest.cpp" /I"..\..\deps\json" ^
   /Fo"%OUTDIR%\custom_steam_library_worker_lifecycle_selftest.obj" /Fe"%OUTDIR%\custom_steam_library_worker_lifecycle_selftest.exe" ^
   /link /SUBSYSTEM:CONSOLE /MACHINE:x64 winhttp.lib iphlpapi.lib version.lib bcrypt.lib advapi32.lib shell32.lib user32.lib gdiplus.lib ole32.lib ws2_32.lib
+if errorlevel 1 exit /b 1
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE ^
+  /FC "..\..\tools\custom_steam_library_http_transport_selftest.cpp" /I"..\..\deps\json" ^
+  /Fo"%OUTDIR%\custom_steam_library_http_transport_selftest.obj" /Fe"%OUTDIR%\custom_steam_library_http_transport_selftest.exe" ^
+  /link /SUBSYSTEM:CONSOLE /MACHINE:x64 winhttp.lib iphlpapi.lib version.lib bcrypt.lib advapi32.lib shell32.lib user32.lib gdiplus.lib ole32.lib ws2_32.lib
 exit /b %errorlevel%

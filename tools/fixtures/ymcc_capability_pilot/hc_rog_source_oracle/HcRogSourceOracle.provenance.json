@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "HC-BINARY-BATCH12-20260831",
+  "upstreamProjectVersion": "0.32.3.2",
+  "sourceFilesIndexSha256": "9105B05655C280F99FFFFDB214C165955CED5EF3463719D681E7ABECF7E904D1",
+  "generatorSha256": "827B1E9BD5B7B95C0C5373CC5FAD6035FDEAB25E9EBD17B65C3440DF69656360",
+  "generatedPath": "Generated/HcRogSourceOracle.g.cs",
+  "generatedSha256": "7105DB427328251FD89A52C08356C3434057C7D34FA6F090D958E8303550844C",
+  "captureBoundary": "AsusACPI.SetFanCurve arguments; no ACPI clamping, wire packing, device IO or HC factory",
+  "editsToExtractedDeclarations": [],
+  "scaffolding": [
+    "Enclosing namespace and partial class replace the device class container; declarations remain byte-identical.",
+    "An inert base supplies only IsOpen state and abstract override signatures.",
+    "PowerProfile/FanProfile are data-only shells; no HC constructors are executed.",
+    "AsusACPI.SetFanCurve is an in-memory recorder and returns a documented synthetic integer."
+  ],
+  "ranges": [
+    {
+      "symbol": "defaultCPUFan",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+      "sourceStartLine": 218,
+      "sourceEndLine": 218,
+      "sourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "excerptSha256": "278D83FD8AA9148A934AF5354B57680A0F56419B30647C6B8E59ECB6653E834D",
+      "generatedStartLine": 13,
+      "generatedEndLine": 13,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "defaultGPUFan",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+      "sourceStartLine": 219,
+      "sourceEndLine": 219,
+      "sourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "excerptSha256": "846C35453554740D7473408B6893A8373166C953DD2E28143B1269DAB8FEFC55",
+      "generatedStartLine": 17,
+      "generatedEndLine": 17,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "ToAsusCurve(double[])",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+      "sourceStartLine": 221,
+      "sourceEndLine": 244,
+      "sourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "excerptSha256": "6668665D472331B6CDE515FD9B3AE05CFC4BFCB0A0788EC5ACA974ECAC392851",
+      "generatedStartLine": 21,
+      "generatedEndLine": 44,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "PowerProfileManager_Applied(PowerProfile, UpdateSource)",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+      "sourceStartLine": 246,
+      "sourceEndLine": 260,
+      "sourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "excerptSha256": "F64E9C3716954E7BECF7167DB9C1D2B8506A6A07D64B8DBCB5435F7837E531BC",
+      "generatedStartLine": 48,
+      "generatedEndLine": 62,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "SetFanControl(bool, int)",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+      "sourceStartLine": 392,
+      "sourceEndLine": 406,
+      "sourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+      "excerptSha256": "14788A89E9235DDBB938D0B57E713EDE5E88CCBA5ECE28A2A11E5E6100F44032",
+      "generatedStartLine": 66,
+      "generatedEndLine": 80,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "AsusFan",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Devices/ASUS/AsusACPI.cs",
+      "sourceStartLine": 5,
+      "sourceEndLine": 11,
+      "sourceSha256": "C8186CEEEC817830D756FB5D78EAD44E7D6BB16A615A90F3358B85EC143BD34A",
+      "excerptSha256": "DED92D35E4F86039ECA71E2119C4EE6BADBE62633973DC0954ECA4A752F9A596",
+      "generatedStartLine": 86,
+      "generatedEndLine": 92,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "FanMode",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Misc/FanProfile.cs",
+      "sourceStartLine": 8,
+      "sourceEndLine": 12,
+      "sourceSha256": "A8C8921B324020940FAC42D4284C94F74139844B676D6D6BEB1ABB5FD1CCE8A5",
+      "excerptSha256": "2F44FF15BAC147DFDF3C0FCCFB8A728DBFC7C6804A0442106279BA9E1438D89E",
+      "generatedStartLine": 96,
+      "generatedEndLine": 100,
+      "verbatimIncludingLineEndings": true
+    },
+    {
+      "symbol": "UpdateSource",
+      "sourcePath": "deps/handheldcompanion-runtime/source/Misc/Profile.cs",
+      "sourceStartLine": 34,
+      "sourceEndLine": 46,
+      "sourceSha256": "34A1F734D1C90C2D0A78DF102A306D185AD3DA128C61D3BF1ECC870BB58DC1E4",
+      "excerptSha256": "DBFD7133DC0737490D83B8466D0D992E8D2DFD26013E26018F54553E0AA3355A",
+      "generatedStartLine": 104,
+      "generatedEndLine": 116,
+      "verbatimIncludingLineEndings": true
+    }
+  ]
+}

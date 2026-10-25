@@ -1,0 +1,705 @@
+{
+  "denied": [],
+  "sourceReads": [
+    "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\browsers.json",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\index.js",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\bootstrap.js",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\coreBundle.js",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\utilsBundle.js",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\package.json",
+    "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\index.js",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright-artifacts-8Edz99",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Ad Blocking",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Ad Blocking\\blocklist",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad\\attachments",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad\\metadata",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad\\reports",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad\\settings.dat",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Crashpad\\throttle_store.dat",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Affiliation Database",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Affiliation Database-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillAiModelCache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillAiModelCache\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillAiModelCache\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillStrikeDatabase",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillStrikeDatabase\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\AutofillStrikeDatabase\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Blueprints",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Blueprints\\blueprint_presence_index.json",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\BookmarkMergedSurfaceOrdering",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\BudgetDatabase",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\BudgetDatabase\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\BudgetDatabase\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data\\data_0",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data\\data_1",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data\\data_2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data\\data_3",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\Cache_Data\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\No_Vary_Search",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\No_Vary_Search\\journal.baj",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Cache\\No_Vary_Search\\snapshot.baf",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ClientCertificates",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ClientCertificates\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ClientCertificates\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\js",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\js\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\js\\index-dir",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\js\\index-dir\\the-real-index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\wasm",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\wasm\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\wasm\\index-dir",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Code Cache\\wasm\\index-dir\\the-real-index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Collections",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Collections\\collectionsSQLite",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Collections\\collectionsSQLite-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\DualEngine",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\DualEngine\\SiteList-Consumer.json",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\DualEngine\\SiteList-Enterprise.json",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Edge Profile Picture.png",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeCoupons\\coupons_data.db\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgePushStorageWithConnectTokenAndKey",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgePushStorageWithConnectTokenAndKey\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgePushStorageWithConnectTokenAndKey\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgePushStorageWithConnectTokenAndKey\\LOG.old",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeSessions",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeSessions\\SessionRestoreLog",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EdgeWallet",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\EntityExtraction",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Rules\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension Scripts\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Extension State\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ExtensionActivityEdge",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ExtensionActivityEdge-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Favicons",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Favicons-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\AvailabilityDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\AvailabilityDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\AvailabilityDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\EventDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\EventDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Feature Engagement Tracker\\EventDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\History",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\History-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\JumpListIconsRecentWorkspacesV2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Local Storage\\leveldb\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Login Data",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Login Data For Account",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Login Data For Account-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Login Data-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network Action Predictor",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network Action Predictor-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Cookies",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Cookies-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Device Bound Sessions",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Device Bound Sessions-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Network Persistent State",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\NetworkDataMigrated",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Reporting and NEL",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Reporting and NEL-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\SCT Auditing Pending Reports",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Sdch Dictionaries",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\TransportSecurity",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Trust Tokens",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Network\\Trust Tokens-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Nurturing",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Nurturing\\campaign_history",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Nurturing\\campaign_history-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\PersistentOriginTrials",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\PersistentOriginTrials\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\PersistentOriginTrials\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Preferences",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\PreferredApps",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\README",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Secure Preferences",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SegmentInfoDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SegmentInfoDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SegmentInfoDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalStorageConfigDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalStorageConfigDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Segmentation Platform\\SignalStorageConfigDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ServerCertificate",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\ServerCertificate-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\cache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\cache\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\cache\\index-dir",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\cache\\index-dir\\the-real-index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shared Dictionary\\db-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shortcuts",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Shortcuts-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Site Characteristics Database\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Sync Data\\LevelDB\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Top Sites",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Top Sites-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Vpn Tokens",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Vpn Tokens-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Web Data",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Web Data-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Workspaces",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Workspaces\\Logs",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Workspaces\\Logs\\Workspaces Diagnostic Log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\Workspaces\\Logs\\Workspaces Internals Logs",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\arbitration_service_config.json",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\blob_storage",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\blob_storage\\b72fd573-f5b7-499a-ab61-f25717602b1e",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\commerce_subscription_db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\commerce_subscription_db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\commerce_subscription_db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\declarative_performance_observer.db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\declarative_performance_observer.db-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discount_infos_db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discount_infos_db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discount_infos_db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discounts_db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discounts_db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\discounts_db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\favorites_diagnostic.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\heavy_ad_intervention_opt_out.db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\heavy_ad_intervention_opt_out.db-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\parcel_tracking_db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\parcel_tracking_db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\parcel_tracking_db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\settings_diagnostic.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata\\000003.log",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata\\CURRENT",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata\\LOCK",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata\\LOG",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Default\\shared_proto_db\\metadata\\MANIFEST-000001",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\EdgeOptimizationGuideModelsManifest",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\FirstLaunchAfterInstallation",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache\\DawnGraphiteCache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\\cache.db",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\\cache.db-wal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GPUPersistentCache\\DawnGraphiteCache\\NR2GNA44OGQUBFRRNDBXIX2VC7JXKYAS\\cache.journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache\\data_0",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache\\data_1",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache\\data_2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache\\data_3",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\GrShaderCache\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Last Browser",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Last Version",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Local State",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Nurturing",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Nurturing\\campaign_history",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Nurturing\\campaign_history-journal",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache\\data_0",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache\\data_1",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache\\data_2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache\\data_3",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\ShaderCache\\index",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\Variations",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\VariationsRuntimeSeedV2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\VariationsSafeSeedV2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\VariationsSeedV2",
+    "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz\\component_crx_cache",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\input-sources\\tools\\ymcc_sim\\global\\fan-monitor-browser-consumer\\io.cjs",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\AppIcon.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\Dropdown.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\InlineIcon.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\IntegratedPage.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\SettingsSectionIcon.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\SettingsSections.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\SleepRecoveryPanel.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\Slider.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\SwitchControl.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\components\\Toggle.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\styles\\tokens.css",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\src\\views\\SleepGuardView.vue",
+    "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\source-repo\\tools\\sleep_recovery_ui_browser_selftest.mjs",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@babel+parser@7.29.8\\node_modules\\@babel\\parser\\lib\\index.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@jridgewell+sourcemap-codec@1.5.5\\node_modules\\@jridgewell\\sourcemap-codec\\dist\\sourcemap-codec.umd.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\dist\\compiler-core.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\index.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\dist\\compiler-dom.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\index.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-sfc@3.5.41\\node_modules\\@vue\\compiler-sfc\\dist\\compiler-sfc.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-ssr@3.5.41\\node_modules\\@vue\\compiler-ssr\\dist\\compiler-ssr.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\index.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode-codepoint.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-html.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-xml.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\bin-trie-flags.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\decode-shared.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\estree-walker@2.0.2\\node_modules\\estree-walker\\dist\\umd\\estree-walker.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\magic-string@0.30.21\\node_modules\\magic-string\\dist\\magic-string.cjs.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\nanoid@3.3.17\\node_modules\\nanoid\\non-secure\\index.cjs",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\picocolors@1.1.1\\node_modules\\picocolors\\picocolors.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\at-rule.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\comment.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\container.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\css-syntax-error.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\declaration.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\document.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\fromJSON.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\input.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\lazy-result.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\list.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\map-generator.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\no-work-result.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\node.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parse.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parser.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\postcss.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\previous-map.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\processor.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\result.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\root.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\rule.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringifier.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringify.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\symbols.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\terminal-highlight.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\tokenize.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warn-once.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warning.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\array-set.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64-vlq.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\binary-search.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\mapping-list.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\quick-sort.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-consumer.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-generator.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-node.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\util.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\source-map.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\index.js",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\register-ts.js"
+  ],
+  "processes": [
+    {
+      "program": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+      "args": [
+        "--service=0.21.5",
+        "--ping"
+      ],
+      "compiler": true,
+      "browser": false
+    },
+    {
+      "program": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+      "args": [
+        "--disable-field-trial-config",
+        "--disable-background-networking",
+        "--disable-background-timer-throttling",
+        "--disable-backgrounding-occluded-windows",
+        "--disable-back-forward-cache",
+        "--disable-breakpad",
+        "--disable-client-side-phishing-detection",
+        "--disable-component-extensions-with-background-pages",
+        "--disable-component-update",
+        "--no-default-browser-check",
+        "--disable-default-apps",
+        "--disable-dev-shm-usage",
+        "--disable-edgeupdater",
+        "--disable-extensions",
+        "--disable-features=AvoidUnnecessaryBeforeUnloadCheckSync,BoundaryEventDispatchTracksNodeRemoval,DestroyProfileOnBrowserClose,DialMediaRouteProvider,GlobalMediaControls,HttpsUpgrades,LensOverlay,MediaRouter,PaintHolding,ThirdPartyStoragePartitioning,BlockOriginHeaderModificationOnRedirect,Translate,AutoDeElevate,OptimizationHints,msForceBrowserSignIn,msEdgeUpdateLaunchServicesPreferredVersion",
+        "--enable-features=CDPScreenshotNewSurface",
+        "--allow-pre-commit-input",
+        "--disable-hang-monitor",
+        "--disable-ipc-flooding-protection",
+        "--disable-popup-blocking",
+        "--disable-prompt-on-repost",
+        "--disable-renderer-backgrounding",
+        "--disable-updater-scheduler",
+        "--force-color-profile=srgb",
+        "--metrics-recording-only",
+        "--no-first-run",
+        "--password-store=basic",
+        "--use-mock-keychain",
+        "--no-service-autorun",
+        "--export-tagged-pdf",
+        "--disable-search-engine-choice-screen",
+        "--unsafely-disable-devtools-self-xss-warnings",
+        "--edge-skip-compat-layer-relaunch",
+        "--disable-infobars",
+        "--disable-search-engine-choice-screen",
+        "--disable-sync",
+        "--enable-unsafe-swiftshader",
+        "--headless",
+        "--hide-scrollbars",
+        "--mute-audio",
+        "--blink-settings=primaryHoverType=2,availableHoverTypes=2,primaryPointerType=4,availablePointerTypes=4",
+        "--no-sandbox",
+        "--disable-background-networking",
+        "--user-data-dir=C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p\\t\\playwright_chromiumdev_profile-8OSnGz",
+        "--remote-debugging-pipe",
+        "--no-startup-window"
+      ],
+      "compiler": false,
+      "browser": true
+    }
+  ],
+  "browserRequests": [
+    {
+      "url": "http://127.0.0.1:8114/",
+      "allowed": true
+    },
+    {
+      "url": "http://127.0.0.1:8114/fixture.js",
+      "allowed": true
+    }
+  ],
+  "port": 8114,
+  "serversCreated": 1,
+  "browserLaunched": 1,
+  "browserClosed": 1,
+  "pagesCreated": 1,
+  "builds": [
+    {
+      "outputs": 1,
+      "observerPreservedProgramBytes": true,
+      "rebuildExecuted": false
+    }
+  ],
+  "runtimeFiles": [
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+      "sha256": "ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\index.js",
+      "sha256": "a2226c3eedb827ce90fabd18413c8b6d4008a99269f403f86f160b733c546970"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-sfc@3.5.41\\node_modules\\@vue\\compiler-sfc\\dist\\compiler-sfc.cjs.js",
+      "sha256": "dcc1f6e35275e74f926372c6f546ee2780d3dd3db7d5415958ef0b6496d584a6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\index.js",
+      "sha256": "ccc969ede88026f2168f8a6ca482913664ac12b2e0cfe1e34cd211767e521a60"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\dist\\compiler-core.cjs.js",
+      "sha256": "8f566fcdf8be11f6070e895f87d29767d626c7cb7a814c9c0e0fc965977d0187"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\index.js",
+      "sha256": "22aeabedc1f2782f67b05c54df4382d4e52a0e0c384ff02349372e2acd9974ed"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.cjs.js",
+      "sha256": "cb8b5c2d5930cb40d6a3b028266cf8bbf0dd99cced447acb55416ffdbd8e2774"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode.js",
+      "sha256": "e318cd751279428b7d7e6e9e4c0dc7cc8a4c78e8c2bd00d42da9f8e7b3ef5c07"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode-codepoint.js",
+      "sha256": "98d97fd43e4db015e5afa7c69b1055cd1ade8114530ea01734add86184125271"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-html.js",
+      "sha256": "80b85ad02696af10d597c1353db7eb01fbbe4db5b922ac8693c29cbe18d53ac4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\decode-shared.js",
+      "sha256": "e68061084a578fa4f95bd96407f2a4e272bb38615ae1b1076d1181981ce95549"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-xml.js",
+      "sha256": "07e89fa83ca837b188e4cc52a8d6d2b6983fc5a63b15abad789da9be2ea777b6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\bin-trie-flags.js",
+      "sha256": "ddb6a8fcaab3a1fb6d60c576bf10302a554d71869b6466a14fc11a800264559a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@babel+parser@7.29.8\\node_modules\\@babel\\parser\\lib\\index.js",
+      "sha256": "6969920ae0610df927b6b3e675d1309372c268e36d391652af8e3e0183cbe8f8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\estree-walker@2.0.2\\node_modules\\estree-walker\\dist\\umd\\estree-walker.js",
+      "sha256": "183597c40a43d2a2ebda3dc85ae2dd70e107b3e5cec305b02a5bffa54e0f4b9b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\source-map.js",
+      "sha256": "dc098456c2d9ab90a4c0a17cca9be16665b9813df20906553a98b0088a157be7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-generator.js",
+      "sha256": "645482e8d23fd49cd025a0ad07c2e2beb173995138370d6a73e596e18e889bd8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64-vlq.js",
+      "sha256": "f3407e528f54ec0787bd0a71eeac0c99fffd98445916fcbe116dc69ca3be928b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64.js",
+      "sha256": "651bf433cf05e9ec8cee0b94639483236a605d48279e83d3d5c5de81c21d6599"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\util.js",
+      "sha256": "0629f3ae2f3049cda3a2e87ea651dcf0cc71108f4681795ab989a8ac1573fc03"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\array-set.js",
+      "sha256": "163bb3055aaea7140167740036a83161fd912c344b14f992754b80f21477d754"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\mapping-list.js",
+      "sha256": "35ddb82861f11a70ab84cb47d620fcb28d7f884bb444644e06bde815b836ef9e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-consumer.js",
+      "sha256": "78f7a8f6d20f51a99a9cbd8d552321b1a72de9b9fb9c39dbeb27dc84eb2eade5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\binary-search.js",
+      "sha256": "c7f4a47a125af0bd860443dfd71d2f412d1a97dcb53ab7038189d63b91dc32bd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\quick-sort.js",
+      "sha256": "72ed4911cdc72232cac53cac995e28e865cd4302186173bba74ff6436c089915"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-node.js",
+      "sha256": "b45db8183550ca1e6259976f6ceee89f6764360c56cf206701bd2f7471144e31"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\index.js",
+      "sha256": "21407fc5cebe255208627dd039f2284156be88abbd9123281a79581d349b48c1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\dist\\compiler-dom.cjs.js",
+      "sha256": "982dcfb9dd576ca1d72a36b7e6c9850da761c857efa334653954c85e6653867a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-ssr@3.5.41\\node_modules\\@vue\\compiler-ssr\\dist\\compiler-ssr.cjs.js",
+      "sha256": "e6c17aa487e77f3be1d33847ab1260bc265b0602401324819e70864cb5f33bf8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\postcss.js",
+      "sha256": "8314c843f5dfa922e6f3fb9b8d8bf3e4b0be0d94b08075e1b4f3599f4276fb67"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\at-rule.js",
+      "sha256": "33b932bda8f304e9838a70232673326b6c0fd5fa030df35071bf36c127042a0b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\container.js",
+      "sha256": "e2fc6a559238ac8186ef56d13d340b7c62c04ba9551e2edc027e761eb393ddd0"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\comment.js",
+      "sha256": "674385438f42526f2c05c19dfb66fcc521f5cf180ccc85b3215ad5c07ac21a40"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\node.js",
+      "sha256": "1cc8d56d0c77783fa7fecf702321129936efa3dc504eb4528042a103fe54770d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\css-syntax-error.js",
+      "sha256": "904b4bb371539a6303e4e211f0a8991fde7bc94d8674253d627389ff291d0ec1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\picocolors@1.1.1\\node_modules\\picocolors\\picocolors.js",
+      "sha256": "213bb870fcaad4def0215fe34fbb0f529836cc4d2462e02f14f1a49d09781625"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\terminal-highlight.js",
+      "sha256": "27f1eb6cc633f3947e053c96f16b1754bcffcda2742ecc9a1e11cc2a75d70d9b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\tokenize.js",
+      "sha256": "ddfcaaa01f5eac9e4e8652044df1401ce6cc70295fd3f9fbb214ca66fb2bec72"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringifier.js",
+      "sha256": "76094d7547be325f5155759fa1c6b979b3fd576ab686715ddce51b8efa0de2d7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringify.js",
+      "sha256": "99229cdda200513f88f7fee46004d5c39c1492a73451509e66164d26dff34abc"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\symbols.js",
+      "sha256": "eb8ab8b9648d400ec3e8e37e75dc159734b97ba21137f12da11b4afc2547a1b4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\declaration.js",
+      "sha256": "2ccb78406c7a45aab26fc463a0fe5e3e855caf3ab1ba283616ae867046aa3b54"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\document.js",
+      "sha256": "f66f02fde48389fe1a361a8f71da7ee0236a49c94cf22378e70ba6a2e9f4fab1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\fromJSON.js",
+      "sha256": "2d9efb16f305c45f05d30e6727ad3d475c89e08ef893d913c3839f5ce899db17"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\input.js",
+      "sha256": "52358502e6ea455d421d21a98fc0a3be3b974ca624b96f43b318780f3e150bc2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\nanoid@3.3.17\\node_modules\\nanoid\\non-secure\\index.cjs",
+      "sha256": "73b3dc5bf17d98fc9b9894748907e338c536f47412ae495a5f8052565381ddb2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\previous-map.js",
+      "sha256": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\root.js",
+      "sha256": "872a512fa232b23f5231070bd981d3eb390316d8776ba5ccb64f723e4b7088bb"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\rule.js",
+      "sha256": "216ca23a33b1a0145c7925daa442a34e33a9ea41c6f3bb58fca7c4fb355e0166"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\list.js",
+      "sha256": "22794f519e19b280abf5eedd084a53da4f41905e1bf8a880a53291d4c905d2ea"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\lazy-result.js",
+      "sha256": "2d716dea3a99836276c67e6d74dc587571a8b7498683044ba3ddc57e3db87104"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\map-generator.js",
+      "sha256": "feccbc87472d5d1cc660c2bfd4958cbe5442173f03cbfa518808725f684a313c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parse.js",
+      "sha256": "7662c5ad1fd5f97a7c1615f0e5e7bc268e762916bcf6fb7bf9dda45537493764"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parser.js",
+      "sha256": "5ac73eb5da16ec8f998a1a5aac28b15815c892c2a3957ab06ee8333f8718be6e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\result.js",
+      "sha256": "b4239438538d41187fc9a572c83bb89b09524301764ebd4f46c71fe31edd04dd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warning.js",
+      "sha256": "eb7656e1b8501c7b7c3b925b3875363e30b5d23477424bc444dc6289993c16b7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warn-once.js",
+      "sha256": "5683ff69eeb8e77373a4bd0e0b9da611c7575ee434ba3c458c0552ab4806464a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\processor.js",
+      "sha256": "9a5280f122b51defbd812007f994f9fe8510e7421f146a14b3a013844e0ec9ac"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\no-work-result.js",
+      "sha256": "11e06a9b30ab844b877f489ad7870e2a319507aed4554a58a757b7dfd7699505"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\magic-string@0.30.21\\node_modules\\magic-string\\dist\\magic-string.cjs.js",
+      "sha256": "15e180b8bbb5a3fa6a945951b5802dfb75a0967e82f9beeec520cb1ea0fa9ee2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@jridgewell+sourcemap-codec@1.5.5\\node_modules\\@jridgewell\\sourcemap-codec\\dist\\sourcemap-codec.umd.js",
+      "sha256": "25f02490d5179a4c28d6799e2c290be162be1010e6a101d77f5511683ccd0ca3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\register-ts.js",
+      "sha256": "4244727c942ef8afefa2969ea9e4179d885ffb53d91f962812fcb18a405a6ec9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\index.js",
+      "sha256": "4e98f65f0a9d9bcab8cffc0c5cfdd87fd3f5b0be74fc494ff166a466b204cd44"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\index.js",
+      "sha256": "a58fb2cec4293e7dcf73c58a179898a4f3986666451a19da4e731fa3af63265b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\bootstrap.js",
+      "sha256": "4637f4dbfef9cfc01baeb5f5d2cb63fa0901522c96915ea2227290558d27123e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\coreBundle.js",
+      "sha256": "9393fa79e1c67c74edc26b610d65a4f7ed73d345a762465cc88340a33a2454ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\utilsBundle.js",
+      "sha256": "580f571bf063e2256b51b3946a035bc452fc0e22808d5547b198baea39923a32"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\package.json",
+      "sha256": "07c47543631fef9508760365dee9fbe958c562093ec8d122543949ed231f233f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\browsers.json",
+      "sha256": "f306eed529599b1eaf2f8a85db9de2b23e1a3fe36c2b66434b7c9434fb627a99"
+    }
+  ],
+  "exitCode": 1,
+  "caseRoot": "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original",
+  "scratchRoot": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-ChYhre\\p"
+}

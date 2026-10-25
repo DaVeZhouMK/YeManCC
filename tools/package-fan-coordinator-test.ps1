@@ -15,6 +15,8 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
 
 function Get-FullPath([string]$Path) {
   return [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -49,28 +51,32 @@ function Get-ZipEntrySha256([System.IO.Compression.ZipArchiveEntry]$Entry) {
 # HC-SLIM-01 size-order export policy (2026-10-07). This diagnostic ZIP uses the
 # same standard runtime authority as package-release.ps1. It may include a
 # diagnostic FanHost, but it must never reintroduce the two shared DLL copies.
-$hcRuntimeName = 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+$hcRuntimeName = 'YMCC-DEVICECORE-20261018-v1'
 $hcSlimSharedFallbackHashes = [ordered]@{
   'Nefarius.Utilities.DeviceManagement.dll' = 'B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C'
   'Newtonsoft.Json.dll' = 'A28C251DFE36D881E9E2462E171441B8B0EC156FE3F452602C9149B1B9EFE05B'
 }
 $hcSlimSizeOrderRetainedHashes = [ordered]@{
-  'Microsoft.Windows.SDK.NET.dll' = '0EC371D93798852E36461C8ADDDBEADCE0F963A04752F0B64E54FE19C1C834A7'
-  'HandheldCompanion.dll' = '0C5132A9D13AEBFC5ADD2AA7C9AC54E8DAAA8EBC816A0C68D099BB9685DC2E49'
-  'iNKORE.UI.WPF.Modern.dll' = '7650B744E0ADD04549593F680EBF1C8FE40125F36EB8C86445113B974EE25D6C'
-  'libVIIPER.dll' = 'E2802542C7FB632914384AC3DBD4A09FA378A9BE91D04EBE822648B15E4960F7'
-}
-$hcSlimHidMaestroSha256 = 'BD42A99BCB260435CE25796C54A4B792F8A2CED6AB78659C0CF926011663938E'
+  'Microsoft.Windows.SDK.NET.dll' = 'C37D2E6B66889551D7DE218AA726E90DE6E6DD5B794069485F3B23524028E102'
+  'HandheldCompanion.dll' = '08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583'
+  'iNKORE.UI.WPF.Modern.dll' = '12BC0A3E060D57B24FCFB2C9C17660929EC903EB993D943051A8A849C83BD331'
 
-function Assert-HcSlimSourcePolicy([string]$PowerControlRoot) {
+}
+$hcSlimHidMaestroSha256 = '8FE7BDB21EC497591F527B7B87C4BC7B41B45C35A06CC211A7A0DCE48838ED2C'
+
+function Assert-HcSlimSourcePolicy([string]$PowerControlRoot, [ValidateSet('source','staged')][string]$SharedLayout = 'source') {
+  Assert-YmccSharedRuntimeSource $ProjectRoot
+  $sharedRuntime = Join-Path $PowerControlRoot 'ymcc-shared-runtime'
+  if ($SharedLayout -eq 'staged') { Assert-YmccSharedRuntimeStaged $ProjectRoot $sharedRuntime }
   $virtualGamepad = Join-Path $PowerControlRoot 'feature-assets\virtual-gamepad'
   $runtime = Join-Path $PowerControlRoot "handheldcompanion-runtime\$hcRuntimeName"
+  Assert-YmccDeviceCoreRuntime -ProjectRoot $ProjectRoot -RuntimeRoot $runtime | Out-Null
   foreach ($name in $hcSlimSharedFallbackHashes.Keys) {
     $local = Join-Path $virtualGamepad $name
     if (Test-Path -LiteralPath $local) {
       throw "HC-SLIM-01 source policy violation: local virtual-gamepad duplicate must not be exported: $local"
     }
-    $authority = Join-Path $runtime $name
+    $authority = if ($SharedLayout -eq 'staged') { Join-Path $sharedRuntime $name } else { Get-YmccSharedRuntimeSourceFile $ProjectRoot $name }
     if (-not (Test-Path -LiteralPath $authority -PathType Leaf) -or
         (Get-Sha256 $authority) -ne $hcSlimSharedFallbackHashes[$name]) {
       throw "HC-SLIM-01 shared authority missing or changed: $name"
@@ -94,7 +100,7 @@ function Assert-HcSlimSourcePolicy([string]$PowerControlRoot) {
 }
 
 function Assert-HcSlimStagedPolicy([string]$PowerControlRoot) {
-  Assert-HcSlimSourcePolicy $PowerControlRoot
+  Assert-HcSlimSourcePolicy $PowerControlRoot -SharedLayout staged
   $hid = Join-Path $PowerControlRoot 'feature-assets\virtual-gamepad\HIDMaestro.Core.dll'
   if (-not (Test-Path -LiteralPath $hid -PathType Leaf) -or
       (Get-Sha256 $hid) -ne $hcSlimHidMaestroSha256) {
@@ -174,7 +180,7 @@ $nativeBuild = Join-Path $WorkspaceRoot 'Build\App\Native'
 $sourcePowerControl = Join-Path $projectRoot 'PowerControl'
 Assert-HcSlimSourcePolicy $sourcePowerControl
 $sourceFanHost = Join-Path $sourcePowerControl 'fan-host'
-$sourceHcRuntime = Join-Path $sourcePowerControl 'handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+$sourceHcRuntime = Join-Path $sourcePowerControl 'handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1'
 $sourceManifest = Join-Path $sourceFanHost 'YeManFanHost.payload.json'
 $evidenceWorkspaceRoot = Split-Path -Parent $WorkspaceRoot
 $evidenceRoot = Join-Path $evidenceWorkspaceRoot 'Docs\Research\HC'
@@ -245,7 +251,7 @@ foreach ($target in @($hostDeps.targets.PSObject.Properties)) {
     if ($null -eq $pkg.Value.runtime) { continue }
     foreach ($runtimeFile in @($pkg.Value.runtime.PSObject.Properties.Name)) {
       $path = if ($hcSlimSharedFallbackHashes.Keys -contains $runtimeFile) {
-        Join-Path (Join-Path $stagePowerControl "handheldcompanion-runtime\$hcRuntimeName") $runtimeFile
+        Join-Path (Join-Path $stagePowerControl 'ymcc-shared-runtime') $runtimeFile
       } else { Join-Path $stageVirtualGamepad $runtimeFile }
       if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Test ZIP InputHost dependency missing at approved location: $runtimeFile" }
     }
@@ -285,8 +291,8 @@ $actualFanFiles = @(Get-ChildItem -LiteralPath $stageFanHost -Recurse -File -For
 $allowedFanFiles = @($payloadPaths.Keys + 'yemanfanhost.payload.json' | Sort-Object -Unique)
 $unexpectedFanFiles = @($actualFanFiles | Where-Object { $_ -notin $allowedFanFiles })
 if ($unexpectedFanFiles.Count -gt 0) { throw "Staged FanHost has files outside its manifest: $($unexpectedFanFiles -join ', ')" }
-$runtimeManifest = (Get-Content (Join-Path $stagePowerControl 'handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902\HandheldCompanion.runtime.json') -Raw | ConvertFrom-Json)
-foreach ($entry in @($runtimeManifest.files)) { $rp=[string]$entry.path; $rpath=Join-Path $stagePowerControl "handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902\$rp"; if(!(Test-Path $rpath) -or (Get-Sha256 $rpath) -ne ([string]$entry.sha256).ToUpperInvariant()){throw "Staged HC runtime mismatch: $rp"} }
+$runtimeManifest = (Get-Content (Join-Path $stagePowerControl 'handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1\HandheldCompanion.runtime.json') -Raw | ConvertFrom-Json)
+foreach ($entry in @($runtimeManifest.files)) { $rp=[string]$entry.path; $rpath=Join-Path $stagePowerControl "handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1\$rp"; if(!(Test-Path $rpath) -or (Get-Sha256 $rpath) -ne ([string]$entry.sha256).ToUpperInvariant()){throw "Staged HC runtime mismatch: $rp"} }
 if (-not (Test-Path -LiteralPath $testLauncher -PathType Leaf)) { throw 'Test package launcher is missing' }
 $testLauncherText = Get-Content -LiteralPath $testLauncher -Raw -Encoding Ascii
 if ($testLauncherText -notmatch 'YEMAN_POWER_CONTROL_DIR' -or $testLauncherText -notmatch 'PowerControl') {
@@ -335,7 +341,7 @@ try {
     $forbidden = "PowerControl/feature-assets/virtual-gamepad/$name"
     $hits = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $forbidden })
     if ($hits.Count -ne 0) { throw "HC-SLIM-01 test ZIP contains forbidden local duplicate: $forbidden" }
-    $authority = "PowerControl/handheldcompanion-runtime/$hcRuntimeName/$name"
+    $authority = "PowerControl/ymcc-shared-runtime/$name"
     $authorityHits = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $authority })
     if ($authorityHits.Count -ne 1 -or (Get-ZipEntrySha256 $authorityHits[0]) -ne $hcSlimSharedFallbackHashes[$name]) { throw "HC-SLIM-01 test ZIP shared authority mismatch: $authority" }
   }

@@ -1,8 +1,12 @@
 <script setup lang="ts">
+// [AI:USER:QUICK] 添加/重命名/删除自定义应用→改变快捷入口；启动→打开所选程序，删除入口不代表卸载程序。
+// 游戏工具只对已确认目标执行相应动作；取消不误操作其他游戏，导入与“卸载并还原”分别说明结果，不能把请求当完成。
+import IntegratedPage from '@/components/IntegratedPage.vue';
 import { ref, computed, nextTick, onMounted, onUnmounted, onActivated, onDeactivated } from 'vue';
+import { OPTI_OFFLINE_GUIDE, optiAntiCheatWarning, optiMayOfferLaunch } from '@/bridge/optiImportPolicy';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import {
-  getLosslessGameState, setLosslessScalingEnabled,
+  setLosslessScalingEnabled,
   oneClickOptiScaler,
   dirnameOf,
   LS_PRIMARY,
@@ -81,9 +85,10 @@ interface FsrDialogOptions {
   confirmLabel?: string;
   cancelLabel?: string;
   confirmFirst?: boolean;
+  trigger?: HTMLElement | null;
 }
 
-// FSR 操作使用页面内弹窗，保持与性能调度“配置重制”一致；原生 dialog 只保留给文件选择器。
+// 页面操作复用与性能调度“配置重制”一致的确认弹窗；原生 dialog 只保留给文件选择器。
 const fsrDialogOpen = ref(false);
 const fsrDialogKind = ref<FsrDialogKind>('message');
 const fsrDialogTone = ref<FsrDialogTone>('info');
@@ -96,6 +101,7 @@ const fsrDialogStyle = ref<Record<string, string>>({ position: 'fixed' });
 const fsrDialogAbove = ref(false);
 const fsrTriggerEl = ref<HTMLElement | null>(null);
 const fsrPanelEl = ref<HTMLElement | null>(null);
+const fsrDialogTriggerEl = ref<HTMLElement | null>(null);
 const fsrMessageActionEl = ref<HTMLElement | null>(null);
 const fsrConfirmEl = ref<HTMLElement | null>(null);
 const fsrCancelEl = ref<HTMLElement | null>(null);
@@ -114,7 +120,7 @@ function backendLabel(value: OptiBackend | null | undefined): string {
   return value === 'xess' ? 'XeSS' : value === 'fsr' ? 'FSR4' : '未知';
 }
 
-// 只打开 OPT 客户端，不读取或关闭它的运行进程。
+// 打开前尝试同步暂存登记；不关闭客户端或游戏进程。
 async function onOpenOptiConsole() {
   errMsg.value = '';
   statusMsg.value = '';
@@ -134,8 +140,8 @@ async function onOpenOptiConsole() {
       }
       return;
     }
-    await openOptiConsole();
-    statusMsg.value = '已打开 OPT 客户端。';
+    const notice = await openOptiConsole();
+    statusMsg.value = `已打开 OPT 客户端。${notice ? `\n${notice}` : ''}`;
   } catch (e) {
     errMsg.value = 'OPT 客户端打开失败：' + (e as Error).message;
   } finally {
@@ -148,16 +154,15 @@ const fsrDialogIcon = computed(() => {
   return 'bolt';
 });
 
-function focusFsrTrigger() {
+function focusFsrTrigger(trigger = fsrTriggerEl.value) {
   nextTick(() => {
-    const trigger = fsrTriggerEl.value;
     if (!trigger || trigger.hasAttribute('disabled')) return;
     focusGamepadElement(trigger);
   });
 }
 
 function positionFsrDialog() {
-  const trigger = fsrTriggerEl.value;
+  const trigger = fsrDialogTriggerEl.value;
   const r = trigger?.getBoundingClientRect();
   const POP_W = Math.min(420, window.innerWidth - 16);
   const POP_H = 280;
@@ -204,6 +209,7 @@ function openFsrDialog(options: FsrDialogOptions): Promise<boolean> {
   fsrDialogConfirmLabel.value = options.confirmLabel || (options.kind === 'message' ? '知道了' : '确认');
   fsrDialogCancelLabel.value = options.cancelLabel || '取消';
   fsrDialogConfirmFirst.value = options.confirmFirst === true;
+  fsrDialogTriggerEl.value = options.trigger || fsrTriggerEl.value;
   positionFsrDialog();
   fsrDialogOpen.value = true;
   nextTick(() => {
@@ -224,7 +230,7 @@ function closeFsrDialog(result: boolean) {
   const resolve = fsrDialogResolve;
   fsrDialogResolve = null;
   resolve?.(result);
-  focusFsrTrigger();
+  focusFsrTrigger(fsrDialogTriggerEl.value);
 }
 
 function cancelFsrDialog() {
@@ -560,8 +566,7 @@ async function onLaunchLs() {
   }
   busy.value = true;
   try {
-    const state = await getLosslessGameState(game.value.path);
-    const result = await setLosslessScalingEnabled(game.value.path, state.enabled !== true);
+    const result = await setLosslessScalingEnabled(game.value.path, true, () => {}, game.value);
     statusMsg.value = result.notice;
   } catch (e) {
     errMsg.value = '插帧失败：' + (e as Error).message;
@@ -587,6 +592,7 @@ async function onOptiScalerCurrent() {
     const picked = await showOptiBackendPicker();
     if (!picked) { statusMsg.value = '已取消 OptiScaler 操作。'; return; }
     if (picked === 'client') { await onOpenOptiConsole(); return; }
+    if (picked === 'help') { await showFsrMessage('反作弊离线使用说明', OPTI_OFFLINE_GUIDE); return; }
     // A button click must use a fresh detection result. refreshGameStatus may
     // intentionally retain the last shared state after a transient poll error;
     // that is useful for the page, but unsafe for a destructive file operation.
@@ -634,10 +640,17 @@ async function onOptiScalerCurrent() {
     const selectedBackend: OptiBackend | 'auto' = uninstall ? 'auto' : picked as OptiBackend;
     const selectedBackendLabel = selectedBackend === 'auto' ? '当前配置' : backendLabel(selectedBackend);
 
+    let antiCheatAcknowledged = false;
     if (!uninstall) {
       const preflight = await optiscalerAnalyze(gamePath);
-      if (!preflight.ok || preflight.antiCheat || !preflight.availableBackends?.includes(selectedBackend as OptiBackend)) {
-        throw new Error(preflight.antiCheat ? '检测到反作弊，不进行自动注入。' : (preflight.missing?.join('；') || '所选模式缺少本地缓存，请先准备文件。'));
+      if (!preflight.ok || !preflight.scanComplete || !preflight.availableBackends?.includes(selectedBackend as OptiBackend)) {
+        throw new Error(preflight.missing?.join('；') || '分析未通过或所选模式缺少缓存，请检查文件/控制器版本。');
+      }
+      if (preflight.antiCheat) {
+        const accepted = await showFsrConfirm('检测到反作弊：仅允许风险确认后的文件导入',
+          optiAntiCheatWarning(gameName), '我了解风险，仍然导入', '取消');
+        if (!accepted) { statusMsg.value = '已取消导入，游戏文件未修改。'; return; }
+        antiCheatAcknowledged = true;
       }
     }
     if (current && gamePid > 0) {
@@ -668,20 +681,22 @@ async function onOptiScalerCurrent() {
     if (gamePid > 0 && game.value?.pid === gamePid) game.value = null;
 
     statusMsg.value = `${action}中，请稍候…`;
-    const result = await oneClickOptiScaler(gamePath, uninstall, selectedBackend);
+    const result = await oneClickOptiScaler(gamePath, uninstall, selectedBackend, { acknowledgeAntiCheatRisk: antiCheatAcknowledged });
     if (!result.ok) {
       errMsg.value = `${action}失败：${result.msgs?.join('；') || '未知错误'}`;
       await showFsrMessage(`OptiScaler ${action}失败`, errMsg.value, 'error');
       return;
     }
 
-    const detail = uninstall
+    let detail = uninstall
       ? `已卸载当前游戏的 OptiScaler。${result.restored ? `\n还原 ${result.restored} 个原文件。` : ''}${result.removed ? `\n清理 ${result.removed} 个文件。` : ''}`
       : `已为当前游戏安装 OptiScaler（${result.backend ? backendLabel(result.backend) : selectedBackendLabel}）。${result.written ? `\n写入 ${result.written} 个文件。` : ''}${result.version ? `\n版本：${result.version}` : ''}${result.warnings?.length ? `\n${result.warnings.join('\n')}` : ''}`;
+    if (result.clientSyncMessage) detail += `\n${result.clientSyncMessage}`;
+    if (antiCheatAcknowledged || result.antiCheat) detail += '\n未自动启动：请自行使用已确认的离线方式；未执行反作弊绕过。';
     statusMsg.value = detail.replace(/\n/g, '');
     await showFsrMessage(`OptiScaler ${action}成功`, detail, 'success');
 
-    if (!uninstall) {
+    if (!uninstall && optiMayOfferLaunch(antiCheatAcknowledged, result.antiCheat === true)) {
       const restart = await showFsrConfirm(
         '是否重启游戏',
         `「${gameName}」已安装完成。\n是否现在启动游戏？`,
@@ -788,8 +803,20 @@ async function saveLaunchApps(next: LaunchApp[]): Promise<boolean> {
   }
 }
 
-async function restoreDefaultLaunchApps() {
-  if (launchBusy.value || !launchAppsReady.value) return;
+async function restoreDefaultLaunchApps(event: MouseEvent) {
+  if (launchBusy.value || !launchAppsReady.value || fsrDialogOpen.value || optiPickerOpen.value) return;
+  const trigger = event.currentTarget as HTMLElement;
+  const confirmed = await openFsrDialog({
+    kind: 'confirm',
+    title: '确认恢复默认应用',
+    description: '将用默认的 5 个应用替换当前自定义应用列表。是否恢复？',
+    tone: 'error',
+    confirmLabel: '确认恢复',
+    cancelLabel: '取消',
+    confirmFirst: false,
+    trigger,
+  });
+  if (!confirmed || launchBusy.value || !launchAppsReady.value) return;
   launchBusy.value = true;
   errMsg.value = '';
   statusMsg.value = '';
@@ -800,6 +827,7 @@ async function restoreDefaultLaunchApps() {
     errMsg.value = '恢复默认应用失败：' + (e as Error).message;
   } finally {
     launchBusy.value = false;
+    focusFsrTrigger(trigger);
   }
 }
 
@@ -1004,6 +1032,7 @@ onUnmounted(() => {
 </script>
 
 <template>
+  <IntegratedPage title="快捷应用">
   <div class="page">
     <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
     <div v-if="statusMsg" class="ok-bar">{{ statusMsg }}</div>
@@ -1127,8 +1156,8 @@ onUnmounted(() => {
         <button class="quick-btn" :disabled="busy" @click="onLaunchLs">
           <InlineIcon name="rocket" />
           <span class="quick-btn-copy">
-            <span class="quick-main">LosslessScaling 插帧一键插帧</span>
-            <span class="quick-sub">写入 LS 插帧预设并启动</span>
+            <span class="quick-main">小黄鸭一键缩放</span>
+            <span class="quick-sub">当前游戏 EXE 联动 · 静默启动</span>
           </span>
         </button>
         <button
@@ -1180,7 +1209,7 @@ onUnmounted(() => {
           @keydown.esc.prevent="closeOptiBackendPicker(null)"
         >
           <div class="rc-title"><InlineIcon name="bolt" />选择 OptiScaler 方案</div>
-          <p class="rc-desc opti-picker-desc">FSR4 / XeSS 自动套用本地缓存与 Auto x2 配置；OPT 客户端只打开程序。</p>
+          <p class="rc-desc opti-picker-desc">FSR4 / XeSS 套用本地缓存并登记到 OPT 客户端；反作弊目标须确认风险，不执行绕过。</p>
           <div class="opti-picker-options" role="group" aria-label="OptiScaler 方案">
             <button
               v-for="backend in OPTI_BACKEND_CHOICES"
@@ -1192,6 +1221,10 @@ onUnmounted(() => {
               @click="optiPickerChoice = backend"
             >{{ backendLabel(backend) }}</button>
             <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'client' }" :aria-pressed="optiPickerChoice === 'client'" @click="optiPickerChoice = 'client'">OPT 客户端</button>
+          </div>
+          <div class="opti-picker-anticheat-actions" role="group" aria-label="反作弊说明与还原">
+            <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'help' }" :aria-pressed="optiPickerChoice === 'help'" @click="optiPickerChoice = 'help'">反作弊离线说明</button>
+            <button type="button" class="opti-option-btn" :class="{ selected: optiPickerChoice === 'uninstall' }" :aria-pressed="optiPickerChoice === 'uninstall'" @click="optiPickerChoice = 'uninstall'">还原</button>
           </div>
           <div class="opti-picker-maintenance">
             <button
@@ -1220,7 +1253,7 @@ onUnmounted(() => {
           :style="fsrDialogStyle"
           role="alertdialog"
           aria-modal="true"
-          aria-label="FSR4.1/Xess-OPT 自动导入操作确认"
+          :aria-label="fsrDialogTitle"
           data-gp-modal
           @pointerdown.stop
           @keydown.esc.prevent="cancelFsrDialog"
@@ -1245,6 +1278,8 @@ onUnmounted(() => {
     </Teleport>
 
   </div>
+
+  </IntegratedPage>
 </template>
 
 <style scoped>
@@ -1703,6 +1738,7 @@ onUnmounted(() => {
   margin-bottom: 10px;
   font-size: 12px;
 }
+.opti-picker-anticheat-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 7px; margin-top: 8px; }
 .opti-picker-maintenance { margin-top: 8px; }
 .opti-picker-maintenance .opti-option-btn { width: 100%; }
 .opti-picker-options {

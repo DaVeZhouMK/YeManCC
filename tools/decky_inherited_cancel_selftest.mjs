@@ -1,0 +1,40 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import crypto from 'node:crypto';
+import assert from 'node:assert/strict';
+import {spawnSync} from 'node:child_process';
+const repo=path.resolve(import.meta.dirname,'..');
+const out=path.resolve(process.argv[2]??'');
+assert(process.argv[2],'Provide a fresh evidence directory.');assert(!fs.existsSync(out),'Fresh evidence path required.');
+fs.mkdirSync(out,{recursive:true});
+const source=path.join(out,'source');
+const historical=JSON.parse(fs.readFileSync('D:/Codex/2026-10-21/steam-ai-steam-running-steam-api/work/steam-typed-failure-cleanup-20261023/FIXED-SOURCE-PINS.json','utf8').replace(/^\uFEFF/,''));
+const files=new Set(historical.files.map(f=>f.path));
+for(const file of ['native/decky_binding_worker.h','tools/decky_binding_worker_selftest.cpp','tools/decky_inherited_cancel_selftest.cpp','tools/decky_inherited_cancel_selftest.mjs','tools/decky_sidebar_bootstrap_selftest.cpp','tools/decky_sidebar_bootstrap_watch_selftest.cpp','tools/decky_binding_cancel_selftest.cpp'])files.add(file);
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex');const pins=[];
+for(const file of files){const p=path.join(repo,file),bytes=fs.readFileSync(p),target=path.join(source,file);fs.mkdirSync(path.dirname(target),{recursive:true});fs.writeFileSync(target,bytes);assert.equal(sha(fs.readFileSync(p)),sha(bytes),'Concurrent source change: '+file);pins.push({path:file,bytes:bytes.length,sha256:sha(bytes)});}
+fs.writeFileSync(path.join(out,'SOURCE-PINS.json'),JSON.stringify({repo,source,files:pins},null,2));
+const toolPath=path.join(repo,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json');
+const tools=JSON.parse(fs.readFileSync(toolPath,'utf8')).native;
+const env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));
+env.PATH=[path.dirname(tools.compiler),process.env.SystemRoot+'/System32'].join(';');env.INCLUDE=tools.include.join(';');env.LIB=tools.lib.join(';');env.CL='';env._CL_='';env.LINK='';env._LINK_='';env.TEMP=path.join(out,'tmp');env.TMP=env.TEMP;fs.mkdirSync(env.TEMP);
+const builds=[['worker-protocol','tools/decky_binding_worker_selftest.cpp',[],[path.join(out,'worker-protocol.json')],0],['positive','tools/decky_inherited_cancel_selftest.cpp',[],[path.join(out,'positive.json')],0],['negative-independent-event','tools/decky_inherited_cancel_selftest.cpp',['/DYMCC_INHERITED_CANCEL_NEGATIVE'],[path.join(out,'negative.json')],2],['existing-bootstrap','tools/decky_sidebar_bootstrap_selftest.cpp',[],[],0],['existing-watch','tools/decky_sidebar_bootstrap_watch_selftest.cpp',[],[],0],['existing-runtime-cancel','tools/decky_binding_cancel_selftest.cpp',[],[path.join(out,'runtime-cancel-fixtures')],0]];
+const receipts=[];
+for(const[name,file,extra,args,expected] of builds){
+ const exe=path.join(out,name+'.exe');const compilerArgs=['/nologo','/Bv','/std:c++20','/utf-8','/EHsc','/MT','/O2','/WX','/DNOMINMAX','/DUNICODE','/D_UNICODE',...extra,'/I'+path.join(source,'native'),'/I'+path.join(source,'deps/json'),path.join(source,file),'/sourceDependencies',path.join(out,name+'-deps.json'),'/Fo'+path.join(out,name+'.obj'),'/Fe'+exe,'/link','advapi32.lib','ws2_32.lib','bcrypt.lib','winhttp.lib','user32.lib','userenv.lib'];
+ const build=spawnSync(tools.compiler,compilerArgs,{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:8*1024*1024});
+ fs.writeFileSync(path.join(out,name+'-compile.log'),(build.stdout??'')+(build.stderr??''));
+ const receipt={name,compiler:tools.compiler,args:compilerArgs,compilerExit:build.status,compilerError:build.error?.message??null,expectedExit:expected};
+ fs.writeFileSync(path.join(out,name+'-BUILD.json'),JSON.stringify(receipt,null,2));
+ assert.equal(build.status,0,'Compile failed: '+name);
+ const started=Date.now(),run=spawnSync(exe,args,{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:45000,maxBuffer:8*1024*1024});
+ Object.assign(receipt,{exit:run.status,error:run.error?.message??null,elapsedMs:Date.now()-started,exeSha256:sha(fs.readFileSync(exe))});
+ fs.writeFileSync(path.join(out,name+'-run.log'),(run.stdout??'')+(run.stderr??''));fs.writeFileSync(path.join(out,name+'-RUN.json'),JSON.stringify(receipt,null,2));receipts.push(receipt);console.log(JSON.stringify({name,exit:run.status,expected,elapsedMs:receipt.elapsedMs}));assert.equal(run.status,expected,'Unexpected test exit: '+name);
+}
+const worker=JSON.parse(fs.readFileSync(path.join(out,'worker-protocol.json'),'utf8'));assert.equal(worker.passed,true);assert.equal(worker.tests,13);
+const positive=JSON.parse(fs.readFileSync(path.join(out,'positive.json'),'utf8'));assert.equal(positive.passed,true);assert.equal(positive.tests,6);
+const negative=JSON.parse(fs.readFileSync(path.join(out,'negative.json'),'utf8'));assert.equal(negative.passed,false);assert.deepEqual(negative.cases.filter(c=>!c.passed).map(c=>c.name).sort(),['duplicated-event-shares-owner-cancel','real-http-read-canceled-by-owner-event','real-websocket-read-canceled-by-owner-event'].sort());
+const changed=pins.filter(f=>sha(fs.readFileSync(path.join(repo,f.path)))!==f.sha256).map(f=>f.path);
+assert.deepEqual(changed,[],'Sources changed during validation.');
+const result={schema:'ymcc.binding-owner-event-validation.v1',status:'pass',at:new Date().toISOString(),sourceInputs:pins.length,workerProtocol:'13/13',positive:'6/6',negative:'3 expected independent-event failures; cleanup after measurement',productionRegressionSuites:3,receipts,sourceInputsUnchanged:true,oldUncooperativeCallbackGateResolved:false,hostReleasePassed:false,installed:false,fieldActions:0,sleepActions:0};
+fs.writeFileSync(path.join(out,'RESULT.json'),JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({status:result.status,positive:result.positive,existingSuites:3,oldCallbackGateResolved:false}));

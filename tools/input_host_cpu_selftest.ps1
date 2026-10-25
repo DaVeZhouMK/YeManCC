@@ -23,5 +23,5 @@ Run-Dotnet @('build',(Join-Path $repo 'InputHost\YeManInputHost.csproj'),'-c','R
 Run-Dotnet @('build',(Join-Path $repo 'tools\input_host_cpu_selftest\InputHostCpuSelftest.csproj'),'-c','Release','--artifacts-path',(Join-Path $OutDir 'runner-artifacts'),'--output',(Join-Path $OutDir 'runner'),'--nologo')
 $candidate=Join-Path $OutDir 'host\YeManInputHost.dll'
 Run-Dotnet @((Join-Path $OutDir 'runner\InputHostCpuSelftest.dll'),$BaselineAssembly,$candidate,(Join-Path $OutDir 'cpu-helper-ab-evidence.json'))
-foreach($flag in @('--selftest-protocol','--selftest-xbox360-state','--selftest-steamdeck-state','--selftest-ds-wire','--selftest-endpoint-fence','--selftest-backend-advisory')){Run-Dotnet @($candidate,$flag)}
-Write-Output ('PASS InputHost helper parity + lifecycle checks + six production selftest entries; output='+$OutDir)
+foreach($flag in @('--selftest-protocol','--selftest-virtual-output-admission','--selftest-elite-state','--selftest-steamdeck-state','--selftest-edge-wire','--selftest-endpoint-fence','--selftest-backend-advisory')){Run-Dotnet @($candidate,$flag)}
+Write-Output ('PASS InputHost helper parity + lifecycle checks + seven production selftest entries; output='+$OutDir)

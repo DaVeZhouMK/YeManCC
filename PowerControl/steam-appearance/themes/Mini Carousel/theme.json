@@ -1,0 +1,65 @@
+{
+  "name": "Mini Carousel",
+  "author": "seagrot",
+  "version": "v1.0",
+  "manifest_version": 8,
+  "inject": {
+    "shared.css": [
+      "SP"
+    ]
+  },
+  "patches": {
+    "Size": {
+      "default": "0.7",
+      "type": "slider",
+      "values": {
+        "0.5": {
+          "five.css": [
+            "SP"
+          ],
+          "--scale-value": [
+            "0.5",
+            "SP"
+          ]
+        },
+        "0.6": {
+          "six.css": [
+            "SP"
+          ],
+          "--scale-value": [
+            "0.6",
+            "SP"
+          ]
+        },
+        "0.7": {
+          "seven.css": [
+            "SP"
+          ],
+          "--scale-value": [
+            "0.7",
+            "SP"
+          ]
+        },
+        "0.8": {
+          "eight.css": [
+            "SP"
+          ],
+          "--scale-value": [
+            "0.8",
+            "SP"
+          ]
+        },
+        "0.9": {
+          "nine.css": [
+            "SP"
+          ],
+          "--scale-value": [
+            "0.9",
+            "SP"
+          ]
+        }
+      }
+    }
+  },
+  "id": "4788b3d9-f4f3-40f2-ae0e-a80afa9fce5b"
+}

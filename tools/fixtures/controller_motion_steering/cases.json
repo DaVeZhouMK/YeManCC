@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "origin": "Independent finite steering contract inputs; HC exact source produces expected values, never native helper output.",
+  "sources": ["Windows", "SerialUSBIMU", "Controller"],
+  "axes": ["roll", "yaw", "auto", "unknown"],
+  "gravity": [
+    [0.5, 1, 2], [0.5, -1, 2], [0.5, 1, -2], [0.5, -1, -2],
+    [-0.5, 2, 1], [-0.5, -2, 1], [-0.5, 2, -1], [-0.5, -2, -1],
+    [0, 1, 1], [0, -1, 1], [0, 1, -1], [0, -1, -1],
+    [1, 0, 0], [1, 0, 2], [1, 2, 0], [0, 0, 0]
+  ],
+  "accelerometerMultipliers": [-2, -1, -0.5, 0, 0.5, 1, 2],
+  "gyrometerMultipliers": [1, -2],
+  "calibratedGyro": [11, -22, 33],
+  "pinnedDecisions": [
+    {"source":"Windows","axis":"auto","gravity":[0,2,1],"am":0,"yaw":true},
+    {"source":"Controller","axis":"auto","gravity":[0,1,2],"am":1,"yaw":true},
+    {"source":"Controller","axis":"auto","gravity":[0,2,1],"am":1,"yaw":false},
+    {"source":"Controller","axis":"auto","gravity":[0,1,2],"am":0,"yaw":false},
+    {"source":"Controller","axis":"auto","gravity":[0,-1,-2],"am":-1,"yaw":true},
+    {"source":"Controller","axis":"auto","gravity":[0,-2,-1],"am":-1,"yaw":false},
+    {"source":"Controller","axis":"auto","gravity":[0,1,-1],"am":2,"yaw":false}
+  ]
+}

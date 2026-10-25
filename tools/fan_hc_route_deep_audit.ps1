@@ -52,11 +52,34 @@ function Get-Sha256([string]$path) {
   finally { $stream.Dispose(); $sha.Dispose() }
 }
 
+function Mask-CSharpLiteralsAndComments([string]$text) {
+  # Nested receipt classes must not truncate the enclosing device's methods.
+  # Mask strings before comments so braces and // inside literals are inert.
+  return [regex]::Replace($text, '(?s)@"(?:""|[^"])*"|"(?:\\.|[^"\\])*"|''(?:\\.|[^''\\])*''|/\*.*?\*/|//[^\r\n]*', {
+    param($m)
+    ($m.Value -replace '[^\r\n]', ' ')
+  })
+}
+
+function Get-ClassEnd([string]$text, [int]$start) {
+  $open = $text.IndexOf('{', $start)
+  if ($open -lt 0) { throw "Class opening brace missing at $start" }
+  $depth = 0
+  foreach ($brace in [regex]::Matches($text.Substring($open), '[{}]')) {
+    if ($brace.Value -eq '{') { $depth++ } else { $depth-- }
+    if ($depth -eq 0) { return $open + $brace.Index + 1 }
+  }
+  throw "Class closing brace missing at $start"
+}
+
 function Get-Methods([string]$source) {
   $names = @()
   foreach ($name in @('SetFanControl', 'SetFanDuty', 'PowerProfileManager_Applied', 'Close')) {
-    if ($source -match ("(?m)\b(?:public|internal|private|protected)?\s*(?:override\s+|virtual\s+)?(?:async\s+)?(?:void|bool|double|float|int|Task)\s+" + $name + '\s*\(')) {
-      $names += $name
+    $pattern = "(?m)\b(?:public|internal|private|protected)?\s*(?:override\s+|virtual\s+)?(?:async\s+)?(?:void|bool|double|float|int|Task)\s+" + $name + '\s*\('
+    foreach ($method in [regex]::Matches($source, $pattern)) {
+      $prefix = $source.Substring(0, $method.Index)
+      $depth = [regex]::Matches($prefix, '\{').Count - [regex]::Matches($prefix, '\}').Count
+      if ($depth -eq 1) { $names += $name; break }
     }
   }
   return @($names | Sort-Object -Unique)
@@ -72,16 +95,17 @@ $sourceRecords = @()
 foreach ($file in Get-ChildItem -LiteralPath $HcRoot -Recurse -Filter '*.cs' -File) {
   $raw = Get-Content -LiteralPath $file.FullName -Raw -Encoding UTF8
   $source = Strip-CommentsPreserveLength $raw
+  $structuralSource = Mask-CSharpLiteralsAndComments $raw
   foreach ($aliasMatch in [regex]::Matches($source, '(?m)^\s*using\s+(?<alias>\w+)\s*=\s*(?:[\w\.]+\.)?(?<target>\w+)\s*;')) {
     $typeAliases[$aliasMatch.Groups['alias'].Value] = $aliasMatch.Groups['target'].Value
   }
-  $matches = @([regex]::Matches($source, '(?m)\b(?:public|internal|private|protected)?\s*(?:abstract|partial)?\s*class\s+(?<name>\w+)(?:\s*:\s*(?<base>[\w\.]+))?'))
+  $matches = @([regex]::Matches($structuralSource, '(?m)\b(?:public|internal|private|protected)?\s*(?:abstract|partial)?\s*class\s+(?<name>\w+)(?:\s*:\s*(?<base>[\w\.]+))?'))
   for ($i = 0; $i -lt $matches.Count; $i++) {
     $match = $matches[$i]
     $name = $match.Groups['name'].Value
     $base = if ($match.Groups['base'].Success) { ($match.Groups['base'].Value -split '\.')[-1] } else { '' }
     if ($base -and $typeAliases.ContainsKey($base)) { $base = $typeAliases[$base] }
-    $end = if ($i + 1 -lt $matches.Count) { $matches[$i + 1].Index } else { $source.Length }
+    $end = Get-ClassEnd $structuralSource $match.Index
     $body = $source.Substring($match.Index, $end - $match.Index)
     $record = [pscustomobject]@{
       Name = $name
@@ -89,7 +113,7 @@ foreach ($file in Get-ChildItem -LiteralPath $HcRoot -Recurse -Filter '*.cs' -Fi
       File = $file.FullName
       Line = Get-LineNumber $raw $match.Index
       Source = $body
-      Methods = @(Get-Methods $body)
+      Methods = @(Get-Methods ($structuralSource.Substring($match.Index, $end - $match.Index)))
       FanDeclared = [bool]($body -match 'Capabilities\s*(?:\|=|=)\s*DeviceCapabilities\.FanControl')
     }
     $classMap[$name] = $record
@@ -148,65 +172,23 @@ $routeSource = $hostSource.Substring($routeStart, $routeEnd - $routeStart)
 # character window around each class name.  The old window parser could attach
 # a neighbouring route's kind/strategy and report write-ready entries as
 # missing metadata.
+# FAN-1069: share the current registry parser, including nested namespace aliases,
+# evidence/precondition arguments and record overrides. Keep HC method-owner
+# resolution below independent; source validation is not physical acceptance.
+$registryOutput = Join-Path $OutputRoot 'registry-source'
+$registryLog = Join-Path $OutputRoot 'registry-source.out'
+& (Join-Path $PSScriptRoot 'fan_route_coverage_audit.ps1') -HcDevicesRoot $HcDevicesRoot -HcDeviceBase $factoryPath -FanHostSource $hostPath -OutputRoot $registryOutput *> $registryLog
+$registryExitCode = $LASTEXITCODE
+$registry = Get-Content -LiteralPath (Join-Path $registryOutput 'fan-capability-matrix.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 $registryMetadata = @{}
-function Set-RegistryMetadata([string]$name, [string]$kind, [string]$strategy, [bool]$ready) {
-  if (!$name) { return }
-  $registryMetadata[$name] = [pscustomobject]@{
-    Kind = $kind
-    Strategy = $strategy
-    WriteReady = $ready
+foreach ($registeredRoute in $registry.routes) {
+  $registryMetadata[$registeredRoute.deviceClass] = [pscustomobject]@{
+    Kind = $registeredRoute.kind
+    Strategy = $registeredRoute.strategy
+    WriteReady = ($registeredRoute.writeReadyByDefault -and $registeredRoute.hcCallbackReady)
   }
 }
-
-$addPattern = '(?s)Add\(FanRouteKind\.(?<kind>\w+),.*?FanRestoreStrategy\.(?<strategy>\w+),\s*(?<classes>(?:"[A-Za-z_]\w*"\s*,?\s*)+)\);'
-foreach ($m in [regex]::Matches($routeSource, $addPattern)) {
-  $names = [regex]::Matches($m.Groups['classes'].Value, '"(?<name>[A-Za-z_]\w*)"')
-  foreach ($n in $names) {
-    Set-RegistryMetadata $n.Groups['name'].Value $m.Groups['kind'].Value $m.Groups['strategy'].Value $true
-  }
-}
-
-$directPattern = '(?s)routes\["HandheldCompanion\.Devices\.(?<name>[A-Za-z_]\w*)"\]\s*=\s*new\s+FanRoute\(FanRouteKind\.(?<kind>\w+),.*?\btrue\s*,\s*true\s*,\s*FanRestoreStrategy\.(?<strategy>\w+)'
-foreach ($m in [regex]::Matches($routeSource, $directPattern)) {
-  Set-RegistryMetadata $m.Groups['name'].Value $m.Groups['kind'].Value $m.Groups['strategy'].Value $true
-}
-
-$foreachPattern = '(?s)foreach\s*\(var\s+name\s+in\s+new\[\]\s*\{(?<classes>[^}]*)\}\)\s*\{?\s*routes\[\$"HandheldCompanion\.Devices\.\{name\}"\]\s*=\s*new\s+FanRoute\(FanRouteKind\.(?<kind>\w+),.*?\btrue\s*,\s*true\s*,\s*FanRestoreStrategy\.(?<strategy>\w+)'
-foreach ($m in [regex]::Matches($routeSource, $foreachPattern)) {
-  $names = [regex]::Matches($m.Groups['classes'].Value, '"(?<name>[A-Za-z_]\w*)"')
-  foreach ($n in $names) {
-    Set-RegistryMetadata $n.Groups['name'].Value $m.Groups['kind'].Value $m.Groups['strategy'].Value $true
-  }
-}
-
-# Preserve strategy-only overrides written with an interpolated foreach key,
-# for example the Lenovo block that changes the initial MSI family strategy
-# to LenovoHcDefaultTable without constructing a new FanRoute.
-$foreachOverridePattern = '(?s)foreach\s*\(var\s+name\s+in\s+new\[\]\s*\{(?<classes>[^}]*)\}\)\s*\{?\s*routes\[\$"HandheldCompanion\.Devices\.\{name\}"\]\s*=\s*routes\[\$"HandheldCompanion\.Devices\.\{name\}"\]\s*with\s*\{\s*RestoreStrategy\s*=\s*FanRestoreStrategy\.(?<strategy>\w+)'
-foreach ($m in [regex]::Matches($routeSource, $foreachOverridePattern)) {
-  $names = [regex]::Matches($m.Groups['classes'].Value, '"(?<name>[A-Za-z_]\w*)"')
-  foreach ($n in $names) {
-    $name = $n.Groups['name'].Value
-    if ($registryMetadata.ContainsKey($name)) {
-      $old = $registryMetadata[$name]
-      $registryMetadata[$name] = [pscustomobject]@{ Kind = $old.Kind; Strategy = $m.Groups['strategy'].Value; WriteReady = $true }
-    }
-  }
-}
-
-$overridePattern = 'routes\["HandheldCompanion\.Devices\.(?<name>[A-Za-z_]\w*)"\]\s*=\s*routes\["HandheldCompanion\.Devices\.[A-Za-z_]\w*"\]\s*with\s*\{\s*RestoreStrategy\s*=\s*FanRestoreStrategy\.(?<strategy>\w+)'
-foreach ($m in [regex]::Matches($routeSource, $overridePattern)) {
-  $name = $m.Groups['name'].Value
-  if ($registryMetadata.ContainsKey($name)) {
-    $old = $registryMetadata[$name]
-    $registryMetadata[$name] = [pscustomobject]@{ Kind = $old.Kind; Strategy = $m.Groups['strategy'].Value; WriteReady = $old.WriteReady }
-  }
-}
-
-$knownClassSet = @{}
-foreach ($name in $factoryFanClasses) { $knownClassSet[$name] = $true }
-$routeClasses = @([regex]::Matches($routeSource, '"(?:HandheldCompanion\.Devices\.)?(?<name>[A-Za-z_]\w*)"') |
-  ForEach-Object { $_.Groups['name'].Value } | Where-Object { $knownClassSet.ContainsKey($_) } | Sort-Object -Unique)
+$routeClasses = @($registry.routes | ForEach-Object { $_.deviceClass } | Sort-Object -Unique)
 
 function Get-NearbyMetadata([string]$name) {
   if ($registryMetadata.ContainsKey($name)) { return $registryMetadata[$name] }
@@ -261,13 +243,20 @@ $customProfileRows = @($routeRows | Where-Object { $_.ProfileCallbackOwner -ne '
 
 $fanProfilePath = Join-Path $HcRoot 'Misc\FanProfile.cs'
 $fanProfileSource = if (Test-Path -LiteralPath $fanProfilePath) { Strip-CommentsPreserveLength (Get-Content -LiteralPath $fanProfilePath -Raw -Encoding UTF8) } else { '' }
+# Validate both production entry points independently. A healthy engine copy
+# must not hide a broken backend copy (or vice versa).
+$curveValidators = @([regex]::Matches($hostSource, '(?ms)^    private static void ValidateCurve\([^)]*\)\s*\{(?<body>.*?)^    \}') | ForEach-Object { $_.Groups['body'].Value })
+$invalidCurveValidators = @($curveValidators | Where-Object {
+  $_ -notmatch 'nodes\.Count\s*!=\s*4' -or $_ -notmatch 'nodes\[0\]\.TempC\s*!=\s*0' -or
+  $_ -notmatch 'DutyPercent\s*<\s*nodes\[i\s*-\s*1\]\.DutyPercent' -or $_ -notmatch 'nodes\[3\]\.DutyPercent\s*<\s*50'
+})
 $curveChecks = [ordered]@{
   hcFanProfile11PointCurve = [bool]($fanProfileSource -match 'fanSpeeds\s*=\s*\{[^}]*\}')
   hcFanProfileLinearInterpolation = [bool]($fanProfileSource -match 'Math\.Floor\(temp\s*/\s*10\.0\)' -and $fanProfileSource -match 'Math\.Clamp\(y,\s*0\.0,\s*100\.0\)')
   yeman11PointExpansion = [bool]($hostSource -match 'Enumerable\.Range\(0,\s*11\)\s*\.Select\(temp\s*=>\s*Interpolate\(nodes,\s*temp\s*\*\s*10\)\)')
   yemanHcSetFanSpeed = [bool]($hostSource -match 'Invoke\(fan,\s*"SetFanSpeed",\s*duties\)')
   yemanHcProfileCallback = [bool]($hostSource -match 'Invoke\("PowerProfileManager_Applied"')
-  yemanFourNodeMonotonicValidation = [bool]($hostSource -match 'nodes\.Count\s*!=\s*4' -and $hostSource -match 'nodes\[0\]\.TempC\s*!=\s*0' -and $hostSource -match 'DutyPercent\s*<\s*nodes\[i\s*-\s*1\]\.DutyPercent' -and $hostSource -match 'nodes\[3\]\.DutyPercent\s*<\s*50')
+  yemanFourNodeMonotonicValidation = ($curveValidators.Count -eq 2 -and $invalidCurveValidators.Count -eq 0)
 }
 
 $semanticMismatches = @($routeRows | Where-Object {
@@ -424,3 +413,13 @@ $hashLines | Set-Content -LiteralPath (Join-Path $OutputRoot 'sha256.txt') -Enco
 
 Write-Output ("T2 HC route deep audit: EXECUTED (factoryFanClasses={0}; yemanRoutes={1}; exactCoverage={2}; unresolvedOwners={3}; hardwareWrites=false)" -f $factoryFanClasses.Count, $routeClasses.Count, $inventory.routeCoverageExact, $unresolvedRows.Count)
 Write-Output ("T2 disposition: needs-investigation (physicalOemAck=false; fullManagerFactory=unproven; output={0})" -f $OutputRoot)
+
+# Only source/contract failures affect this exit status. Physical OEM ownership
+# and the complete HC manager graph stay explicitly unverified in the report.
+$sourceFailures = @($diffs | Where-Object { $_.id -notin @('T2-PHYSICAL-OEM-ACK', 'T2-HC-FULL-MANAGER-GRAPH') })
+if ($registryExitCode -ne 0 -or $registry.failureCount -ne 0 -or $sourceFailures.Count -gt 0) {
+  Write-Output ('T2_SOURCE_AUDIT=FAIL (sourceDifferences={0}; registryExit={1})' -f $sourceFailures.Count, $registryExitCode)
+  exit 1
+}
+Write-Output 'T2_SOURCE_AUDIT=PASS (source-only; physical/manager equivalence unverified)'
+exit 0

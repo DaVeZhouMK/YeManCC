@@ -11,10 +11,25 @@ param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [ValidateSet('full', 'legacy-bridge', 'legacy-bootstrap')]
   [string]$ReleaseEnvelope = '',
-  [string]$CustomSteamLibrarySource = ''
+  [string]$CustomSteamLibrarySource = '',
+  [switch]$TestExport,
+  [switch]$FullAcceptance
 )
 
-$ErrorActionPreference = 'Stop'
+$ErrorActionPreference = 'Stop'
+# Export execution mode: ordinary export never implicitly runs fixtures.
+if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+$TestExport = -not [bool]$FullAcceptance
+$env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
+$fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
+# End export execution mode.
+. (Join-Path $PSScriptRoot '..\native\decky_package_maintenance.ps1')
+. (Join-Path $PSScriptRoot '..\native\module_package_maintenance.ps1')
+. (Join-Path $PSScriptRoot 'module_payload_packaging.ps1')
+. (Join-Path $PSScriptRoot 'settings-baseline-contract.ps1')
+. (Join-Path $PSScriptRoot 'hc-export-source-contract.ps1')
+. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
 
 # ---- module-path self-heal ----------------------------------------------------------
 # Same measured remedy as tools/ymcc_sim/lib/sim_core.ps1 (2026-09-22) and
@@ -121,6 +136,26 @@ function Assert-ExportIsFresh([string]$ProjectRoot, [string]$WorkspaceRoot) {
     if ($nativeLatest -gt (Get-Item -LiteralPath $binary).LastWriteTimeUtc.Add($tolerance)) {
       $stale += "RTSS build dependency is older than native sources: $binary"
     }
+  }
+  # The observer has a tools/ translation unit; native-directory freshness alone
+  # cannot detect a stale probe after that source changes.
+  $visibilityProbe = Join-Path $WorkspaceRoot 'Build\App\Native\YeManControllerVisibilityProbe.exe'
+  if (-not (Test-Path -LiteralPath $visibilityProbe -PathType Leaf)) { throw "Controller visibility build dependency missing: $visibilityProbe" }
+  $visibilityProbeLatest = Get-LatestFileTimeUtc @(
+    (Join-Path $ProjectRoot 'tools\controller_visibility_probe.cpp'),
+    (Join-Path $ProjectRoot 'native\msi_controller_visibility_diagnostics.h'),
+    (Join-Path $ProjectRoot 'native\msi_external_raw_receipts.h'),
+    (Join-Path $ProjectRoot 'native\msi_external_raw_receipts_windows.h'),
+    (Join-Path $ProjectRoot 'native\msi_external_gamepad_decode_windows.h'),
+    (Join-Path $ProjectRoot 'native\msi_usb_name_origin_context.h'),
+    (Join-Path $ProjectRoot 'native\msi_usb_name_origin_decode.h'),
+    (Join-Path $ProjectRoot 'native\msi_usb_name_origin_io.h'),
+    (Join-Path $ProjectRoot 'native\msi_usb_name_origin_windows.h'),
+    (Join-Path $ProjectRoot 'native\msi_usb_name_origin_join.h'),
+    (Join-Path $ProjectRoot 'native\build_native.bat'),
+    (Join-Path $ProjectRoot 'deps\json\json.hpp'))
+  if ($visibilityProbeLatest -gt (Get-Item -LiteralPath $visibilityProbe).LastWriteTimeUtc.Add($tolerance)) {
+    $stale += "Controller visibility build dependency is older than its sources: $visibilityProbe"
   }
   if ($inputHostLatest -gt $inputHostProduct.Add($tolerance)) {
     $stale += "InputHost 源码 ($($inputHostLatest.ToString('o')) UTC) 晚于 InputHost 产物 ($($inputHostProduct.ToString('o')) UTC) —— 产物未包含最新源码"
@@ -261,32 +296,36 @@ $installerName = 'HidHide_1.5.230_x64.exe'
 $installerSha256 = 'F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6'
 
 # HC-SLIM-01 size-order export policy (2026-10-07). These are retained
-# authority files, not deletion candidates. The two shared utility DLLs are
-# intentionally carried only by the HC runtime and resolved by the pinned
-# InputHost resolver; any local duplicate is a packaging error.
-$hcRuntimeName = 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+# authority files, not deletion candidates. The two shared utility DLLs use
+# the independent shared runtime authority; local thin-layout duplicates remain
+# packaging errors. The reviewed YMCC derivative profile governs runtime files and pins.
+$hcRuntimeName = 'YMCC-DEVICECORE-20261018-v1'
 $hcSlimSharedFallbackHashes = [ordered]@{
   'Nefarius.Utilities.DeviceManagement.dll' = 'B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C'
   'Newtonsoft.Json.dll' = 'A28C251DFE36D881E9E2462E171441B8B0EC156FE3F452602C9149B1B9EFE05B'
 }
 $hcSlimSizeOrderRetainedHashes = [ordered]@{
-  'Microsoft.Windows.SDK.NET.dll' = '0EC371D93798852E36461C8ADDDBEADCE0F963A04752F0B64E54FE19C1C834A7'
-  'HandheldCompanion.dll' = '0C5132A9D13AEBFC5ADD2AA7C9AC54E8DAAA8EBC816A0C68D099BB9685DC2E49'
-  'iNKORE.UI.WPF.Modern.dll' = '7650B744E0ADD04549593F680EBF1C8FE40125F36EB8C86445113B974EE25D6C'
-  'libVIIPER.dll' = 'E2802542C7FB632914384AC3DBD4A09FA378A9BE91D04EBE822648B15E4960F7'
+  'Microsoft.Windows.SDK.NET.dll' = 'C37D2E6B66889551D7DE218AA726E90DE6E6DD5B794069485F3B23524028E102'
+  'HandheldCompanion.dll' = '08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583'
+  'iNKORE.UI.WPF.Modern.dll' = '12BC0A3E060D57B24FCFB2C9C17660929EC903EB993D943051A8A849C83BD331'
+
 }
 
-$hcSlimHidMaestroSha256 = 'BD42A99BCB260435CE25796C54A4B792F8A2CED6AB78659C0CF926011663938E'
+$hcSlimHidMaestroSha256 = '8FE7BDB21EC497591F527B7B87C4BC7B41B45C35A06CC211A7A0DCE48838ED2C'
 
-function Assert-HcSlimSourcePolicy([string]$PowerControlRoot) {
+function Assert-HcSlimSourcePolicy([string]$PowerControlRoot, [ValidateSet('source','staged')][string]$SharedLayout = 'source') {
+  Assert-YmccSharedRuntimeSource $ProjectRoot
+  $sharedRuntime = Join-Path $PowerControlRoot 'ymcc-shared-runtime'
+  if ($SharedLayout -eq 'staged') { Assert-YmccSharedRuntimeStaged $ProjectRoot $sharedRuntime }
   $virtualGamepad = Join-Path $PowerControlRoot 'feature-assets\virtual-gamepad'
   $runtime = Join-Path $PowerControlRoot "handheldcompanion-runtime\$hcRuntimeName"
+  Assert-YmccDeviceCoreRuntime -ProjectRoot $ProjectRoot -RuntimeRoot $runtime | Out-Null
   foreach ($name in $hcSlimSharedFallbackHashes.Keys) {
     $local = Join-Path $virtualGamepad $name
     if (Test-Path -LiteralPath $local) {
       throw "HC-SLIM-01 source policy violation: local virtual-gamepad duplicate must not be exported: $local"
     }
-    $authority = Join-Path $runtime $name
+    $authority = if ($SharedLayout -eq 'staged') { Join-Path $sharedRuntime $name } else { Get-YmccSharedRuntimeSourceFile $ProjectRoot $name }
     if (-not (Test-Path -LiteralPath $authority -PathType Leaf) -or
         (Get-Sha256 $authority) -ne $hcSlimSharedFallbackHashes[$name]) {
       throw "HC-SLIM-01 shared authority missing or changed: $name"
@@ -310,7 +349,7 @@ function Assert-HcSlimSourcePolicy([string]$PowerControlRoot) {
 }
 
 function Assert-HcSlimStagedPolicy([string]$PowerControlRoot) {
-  Assert-HcSlimSourcePolicy $PowerControlRoot
+  Assert-HcSlimSourcePolicy $PowerControlRoot -SharedLayout staged
   $hid = Join-Path $PowerControlRoot 'feature-assets\virtual-gamepad\HIDMaestro.Core.dll'
   if (-not (Test-Path -LiteralPath $hid -PathType Leaf) -or
       (Get-Sha256 $hid) -ne $hcSlimHidMaestroSha256) {
@@ -320,6 +359,33 @@ function Assert-HcSlimStagedPolicy([string]$PowerControlRoot) {
 
 function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) {
   $r = $Relative.Replace('/', '\')
+  if ($r -match '^handheldcompanion-runtime\\([^\\]+)(?:\\|$)' -and $Matches[1] -cne $hcRuntimeName) { return $true }
+  # Shared binaries/licenses are staged only from the independent pinned manifest.
+  if ($r -match '^ymcc-shared-runtime(?:\\|$)') { return $true }
+  # Battery settings/journals are per-user state; ship only the built immutable helper payload.
+  if ($r -match '^battery-host(?:\\|$)') {
+    if ($IsDirectory) { return $r -ne 'battery-host' }
+    $batteryFiles=(Get-Content -LiteralPath (Join-Path $ProjectRoot 'native\BatteryHost\payload-files.json') -Raw | ConvertFrom-Json)
+    return $r.Substring('battery-host\'.Length) -notin $batteryFiles
+  }
+  # CE-only GameValueScan runtime: bind the adapter, Lua bridge and manifest.
+  # Runtime state, unknown JSON and other added payloads never enter this lane.
+  if ($r -match '^MemoryScan(?:\\|$)') {
+    if ($IsDirectory) { return $r -ine 'MemoryScan' }
+    if ($r -notin @('MemoryScan\MemoryScanHost.cs', 'MemoryScan\MemoryScanHost.exe', 'MemoryScan\MemoryScanHost.payload.json', 'MemoryScan\CeScanEngine.lua')) { return $true }
+    $memoryScanRoot = Join-Path $ProjectRoot 'PowerControl\MemoryScan'
+    $memoryScanManifest = Get-Content -LiteralPath (Join-Path $memoryScanRoot 'MemoryScanHost.payload.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($memoryScanManifest.schema -ne 2 -or $memoryScanManifest.engine -cne 'cheat-engine' -or $memoryScanManifest.source -cne 'MemoryScanHost.cs' -or
+        $memoryScanManifest.binary -cne 'MemoryScanHost.exe' -or $memoryScanManifest.runtime -cne 'Windows .NET Framework 4.8 x64') {
+      throw 'Invalid immutable MemoryScan payload manifest'
+    }
+    if ((Get-Sha256 (Join-Path $memoryScanRoot 'MemoryScanHost.cs')) -ine $memoryScanManifest.sourceSha256 -or
+        (Get-Sha256 (Join-Path $memoryScanRoot 'MemoryScanHost.exe')) -ine $memoryScanManifest.binarySha256 -or
+        (Get-Sha256 (Join-Path $memoryScanRoot 'CeScanEngine.lua')) -ine $memoryScanManifest.luaSha256) {
+      throw 'Unbound immutable MemoryScan payload source or binary'
+    }
+    return $false
+  }
   # YMCC Decky sidebar: exact immutable payload allowlist, before generic dist/JSON exclusions.
   # Never ship runtime settings/logs/temp, arbitrary plugins or added DLLs from this home.
   if ($r -match '^decky(?:\\|$)') {
@@ -332,7 +398,8 @@ function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) 
       'decky\plugins\ymcc-sidebar\dist\index.js',
       'decky\plugins\ymcc-sidebar\package.json',
       'decky\plugins\ymcc-sidebar\plugin.json',
-      'decky\plugins\ymcc-sidebar\LICENSE.decky-api'
+      'decky\plugins\ymcc-sidebar\LICENSE.decky-api',
+      'decky\plugins\ymcc-sidebar\LICENSE.vue'
     )
   }
   if ($r -match '^fan-host(?:-v2|-quarantine|\\|$)') { return $true }
@@ -351,6 +418,7 @@ function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) 
   }
   if ($r -match '(^|\\)(\.git|build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)') { return $true }
   if ($r -match '^(TPD|intel|ryzenadj|tools|pawnio|OpenSpeedy|RTSS-Overlays)(\\|$)') { return $true }
+  if (Test-YmccMutableSettingsPath -RelativePath $r -Contract $settingsBaselineContract) { return $true }
   if ($IsDirectory) { return $false }
   if ($r -match '\.bak(?:_|$)' -or $r -match '\.(obj|pdb|ilk|log|pid|hb|tmp)$') { return $true }
   # light-setter（L1 方案 B，2026-09-16）：一等产品运行时资产。native 直调
@@ -384,6 +452,24 @@ function Test-IsExcludedPowerControlPath([string]$Relative, [bool]$IsDirectory) 
   if ($r -like 'feature-assets\virtual-gamepad\input-capture.flag' -or $r -like 'feature-assets\gyro-motion\input-capture.flag') { return $false }
   if ($r -like 'feature-assets\virtual-gamepad\YeManInputHost.deps.json' -or $r -like 'feature-assets\virtual-gamepad\YeManInputHost.runtimeconfig.json') { return $false }
   if ($r -like 'feature-assets\virtual-gamepad\test-auto-install.flag') { return $true }
+  # Immutable resources from the current Steam appearance pack. Never include
+  # a user cache/state file merely because it has the same directory prefix.
+  if ($r -match '^steam-appearance\\' -and $r -match '\.json$') {
+    $pack = Join-Path $ProjectRoot 'PowerControl\steam-appearance'
+    $manifest = Get-Content -LiteralPath (Join-Path $pack 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($manifest.id -ne 'ymcc-steam-appearance' -or $manifest.version -ne 1) { throw 'Invalid bundled Steam appearance manifest' }
+    if ($r -ieq 'steam-appearance\manifest.json') { return $false }
+    $prefix = 'steam-appearance\themes\'
+    if (-not $r.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Unclassified Steam appearance JSON: $r" }
+    $relative = $r.Substring($prefix.Length).Replace('\', '/')
+    $matches = @($manifest.files | Where-Object { $_.path -ieq $relative })
+    $source = Join-Path (Join-Path $pack 'themes') $relative
+    if ($matches.Count -ne 1 -or (Get-Sha256 $source) -ine $matches[0].sha256) { throw "Unbound bundled Steam appearance resource: $r" }
+    return $false
+  }
+  # Shared immutable title rules: bundled by the frontend and read by Trainer.
+  if ($r -ieq 'GameTitlePolicy.json') { return $false }
+  if ($r -in @('settings-baseline.json','settings-defaults-v1.json')) { return $false }
   if ($r -match '\.json$' -and $r -notmatch '^(fan-host|handheldcompanion-runtime)\\') {
     throw "Unclassified PowerControl JSON must be added to the release policy: $r"
   }
@@ -417,6 +503,10 @@ function Move-ExistingReleaseItem([string]$Path, [string]$BackupRoot) {
 }
 
 $ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
+$settingsBaselineContract = Read-YmccSettingsBaselineContract -ProjectRoot $ProjectRoot
+# Reject unreviewed HC expansion/source drift before any packaging build or copy.
+$hcReferenceSource = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $ProjectRoot 'PowerControl\handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1')
+. (Join-Path $PSScriptRoot 'monitor-hud-export.ps1')
 # Read-only V2 path/payload preflight before staging/Release rotation.
 & (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
 & (Join-Path $PSScriptRoot 'verify-source-release-inputs.ps1') -ProjectRoot $ProjectRoot
@@ -518,10 +608,13 @@ if ((Get-FullPath $ReleaseCustomSteamLibrary) -ne (Get-FullPath (Join-Path $Work
 
 $requiredBuild = @(
   (Join-Path $BuildWeb 'index.html'),
+  (Join-Path $BuildWeb 'hud-output.html'),
+  (Join-Path $BuildWeb 'notice-output.html'),
   (Join-Path $BuildWeb 'assets'),
   (Join-Path $BuildWeb 'app.config.json'),
   (Join-Path $BuildNative 'YeManCC.exe'),
   (Join-Path $BuildNative 'YeManRecoveryService.exe'),
+  (Join-Path $BuildNative 'YeManControllerVisibilityProbe.exe'),
   (Join-Path $BuildNative 'YMCCRtssProfileHelper.exe'),
   (Join-Path $BuildNative 'YMCCOverlayBridge.dll')
 )
@@ -535,6 +628,8 @@ $exportBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -Wor
 & node (Join-Path $ProjectRoot 'tools\build-decky-sidebar-plugin.mjs') --out $BuildDecky --check
 if ($LASTEXITCODE -ne 0) { throw "Decky sidebar payload freshness rejected: exit=$LASTEXITCODE" }
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
+Assert-YmccProductWebExport $BuildWeb $ProjectRoot
+Assert-MonitorHudDeckyExport $BuildDecky | Out-Null
 
 # ================================================================
 # FanLab source baseline follows the batch (2026-09-27).
@@ -547,6 +642,10 @@ Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
 # values nested inside the baseline, and re-runs the read-only verifier as the cross-check. It is a
 # no-op when the baseline is already in step, and any failure aborts the export (terminating error).
 # ================================================================
+# Generated capability data must match the frozen sources before build/export mutates outputs.
+$capabilityCheckEvidence = Join-Path $WorkspaceRoot ('Build\Validation\CapabilityCatalog\package-' + [Guid]::NewGuid().ToString('N'))
+& (Join-Path $ProjectRoot 'tools\verify-unified-capability-catalog.ps1') -EvidenceDir $capabilityCheckEvidence
+
 $ensureSourceBaseline = Join-Path $ProjectRoot 'tools\ensure-fanhost-source-baseline.ps1'
 if (!(Test-Path -LiteralPath $ensureSourceBaseline -PathType Leaf)) {
   throw "FanLab source-baseline guard missing: $ensureSourceBaseline"
@@ -577,6 +676,7 @@ New-Item -ItemType Directory -Force -Path $StagingYeManCC, $StagingPowerControl,
 Copy-DirectoryContents $BuildWeb $StagingYeManCC
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManCC.exe') -Destination (Join-Path $StagingYeManCC 'YeManCC.exe') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManRecoveryService.exe') -Destination (Join-Path $StagingYeManCC 'YeManRecoveryService.exe') -Force
+Copy-Item -LiteralPath (Join-Path $BuildNative 'YeManControllerVisibilityProbe.exe') -Destination (Join-Path $StagingYeManCC 'YeManControllerVisibilityProbe.exe') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YMCCRtssProfileHelper.exe') -Destination (Join-Path $StagingYeManCC 'YMCCRtssProfileHelper.exe') -Force
 Copy-Item -LiteralPath (Join-Path $BuildNative 'YMCCOverlayBridge.dll') -Destination (Join-Path $StagingYeManCC 'YMCCOverlayBridge.dll') -Force
 # YeManCC/InputHost remains outside the mainline release lane.
@@ -603,7 +703,14 @@ function Assert-FanHostMainlinePayload([string]$payloadRoot) {
 if ($LASTEXITCODE -ne 0) { throw 'Gamepad prerequisites payload build failed.' }
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
 Assert-HcSlimSourcePolicy $sourcePowerControl
+. (Join-Path $PSScriptRoot 'lighting-build-contract.ps1')
+Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot (Join-Path $sourcePowerControl 'light-setter') | Out-Null
 Copy-PowerControlTemplates $sourcePowerControl $StagingPowerControl
+$hcReferenceStage = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $StagingPowerControl 'handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1')
+$settingsBaselineBinding = Assert-YmccSettingsBaseline -ProjectRoot $ProjectRoot -StagingPowerControl $StagingPowerControl
+Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot (Join-Path $StagingPowerControl 'light-setter') | Out-Null
+. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+Assert-SteamAppearanceExport $sourcePowerControl $StagingPowerControl | Out-Null
 # Use the plugin captured beside this build, never a cached source dist.
 Copy-DirectoryContents $BuildDecky (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar')
 # Keep the release/updater tree self-contained even when the installer exists
@@ -648,7 +755,7 @@ if ($embedCustomSteamLibrary) {
 # 注意：下面的 HC 目录名必须与后文 $hcRuntimeName 保持一致。
 $openXInputProxyName = 'Xinput1_4.dll'
 $openXInputProxySha256 = 'C89A11166ACD59AA27DADA45B9C64494221C04ACB0B0886EA393C5D36F9071EC'
-$openXInputProxySource = Join-Path $sourcePowerControl 'handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902\Xinput1_4.dll'
+$openXInputProxySource = Join-Path $sourcePowerControl 'handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1\Xinput1_4.dll'
 if (-not (Test-Path -LiteralPath $openXInputProxySource -PathType Leaf)) { throw "OpenXInput proxy is missing from HC runtime lock: $openXInputProxySource" }
 $openXInputProxySourceHash = Get-Sha256 $openXInputProxySource
 if ($openXInputProxySourceHash -ne $openXInputProxySha256) { throw "OpenXInput proxy hash is not the locked one: $openXInputProxySourceHash" }
@@ -675,6 +782,7 @@ $updateLayoutManifest = [ordered]@{
     fanHost = $fanHostUpdatePolicy
     fanHostV2 = $fanHostV2UpdatePolicy
     gyroVirtualAssets = 'include'
+    configurationBaseline = $settingsBaselineBinding
     fanHostPayload = [ordered]@{
       directory = 'fan-host-v2'
       schemaVersion = 2
@@ -685,6 +793,10 @@ $updateLayoutManifest = [ordered]@{
     }
   }
 }
+. (Join-Path $ProjectRoot 'native\decky_package_maintenance.ps1')
+$updateLayoutManifest['deckyManaged'] = New-YmccDeckyManifest (Join-Path $StagingPowerControl 'decky') (Join-Path $ProjectRoot 'decky-plugin\vendor\decky-loader.lock.json')
+# Kept in every envelope, including the historical bootstrap that omits update-manifest.json.
+$updateLayoutManifest['deckyManaged'] | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StagingYeManCC 'decky-package.json') -Encoding UTF8
 $updateLayoutManifest | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $StagingYeManCC 'update-manifest.json') -Encoding UTF8
 
 $lockPath = Join-Path $ProjectRoot 'tools\release-assets.lock.json'
@@ -713,7 +825,9 @@ foreach ($entry in $assetLock.files) {
   $assetSources[[string]$entry.component] = if ($useWorkspaceAssets) { 'workspace-assets' } else { 'verified-source-fallback' }
 }
 
-$requiredProgram = @('YeManCC.exe', 'YeManRecoveryService.exe', 'YMCCRtssProfileHelper.exe', 'YMCCOverlayBridge.dll', 'index.html', 'app.config.json', 'version.json', 'YeMan-Support.html', 'update-manifest.json')
+Assert-MonitorHudWebExport $StagingYeManCC $BuildWeb | Out-Null
+Assert-MonitorHudDeckyExport (Join-Path $StagingPowerControl 'decky\plugins\ymcc-sidebar') $BuildDecky | Out-Null
+$requiredProgram = @('YeManCC.exe', 'YeManRecoveryService.exe', 'YeManControllerVisibilityProbe.exe', 'YMCCRtssProfileHelper.exe', 'YMCCOverlayBridge.dll', 'index.html', 'hud-output.html', 'notice-output.html', 'app.config.json', 'version.json', 'YeMan-Support.html', 'update-manifest.json', 'decky-package.json')
 foreach ($name in $requiredProgram) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingYeManCC $name) -PathType Leaf)) { throw "Release program file is missing: $name" }
 }
@@ -751,7 +865,10 @@ $requiredPowerControl = @(
   # 正式包必须携带，否则更新后灯光功能静默降级为 light-setter-missing。
   'light-setter\YeManLightSetter.exe',
   'light-setter\YeManLightSetter.dll',
-  'light-setter\YeManLightSetter.runtimeconfig.json'
+  'light-setter\YeManLightSetter.runtimeconfig.json',
+  'light-setter\YeManLightSetter.deps.json',
+  'light-setter\YeManLightSetter.json',
+  'light-setter\YeManLightDeviceCore.dll'
 )
 foreach ($relative in $requiredPowerControl) {
   if (-not (Test-Path -LiteralPath (Join-Path $StagingPowerControl $relative))) { throw "Release PowerControl item is missing: $relative" }
@@ -778,7 +895,11 @@ foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File)
   if ($relative -match '^PowerControl\\(decky\\.+)$') {
     $isDeckyShippedPayload = -not (Test-IsExcludedPowerControlPath $Matches[1] $false)
   }
-  if (-not $isDeckyShippedPayload -and (
+  $isBatteryShippedPayload = $false
+  if ($relative -match '^PowerControl\\(battery-host\\.+)$') {
+    $isBatteryShippedPayload = -not (Test-IsExcludedPowerControlPath $Matches[1] $false)
+  }
+  if (-not $isDeckyShippedPayload -and -not $isBatteryShippedPayload -and (
     $relative -match '(^|\\)(\.git|node_modules|build|dist|testrun|outputs|__pycache__|\.workbuddy)(\\|$)' -or
     $relative -match '\.(bak(?:_|$)|obj$|pdb$|ilk$|log$|pid$|hb$|py$|spec$|ts$|vue$|cpp$)' -or
     ($relative -match '\.md$' -and -not $isFanHostManagedDocument -and -not $isCustomSteamLibraryManagedDocument -and -not $isHcRuntimeDocument) -or
@@ -790,7 +911,7 @@ foreach ($file in Get-ChildItem -LiteralPath $StagingRoot -Recurse -Force -File)
 if ($forbidden.Count -gt 0) { throw "Forbidden files entered Release staging: $($forbidden -join ', ')" }
 
 # Reject copy drift before touching the previous Release.
-Assert-ExportStagedBuild $StagingRoot $exportBuildIdentity
+Assert-ExportStagedBuild $StagingRoot $exportBuildIdentity -BeforeCompletePackage
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 $publishStarted = $false
 $releaseLedger = [Collections.Generic.List[object]]::new()
@@ -818,6 +939,11 @@ foreach ($root in $updateLayoutRoots) {
   Copy-DirectoryContents $source $destination
 }
 $UpdateYeManCC = Join-Path $UpdateRoot 'YeManCC'
+$updateVisibilityProbe = Join-Path $UpdateYeManCC 'YeManControllerVisibilityProbe.exe'
+if (-not (Test-Path -LiteralPath $updateVisibilityProbe -PathType Leaf) -or
+    (Get-Sha256 $updateVisibilityProbe) -ne (Get-Sha256 (Join-Path $BuildNative 'YeManControllerVisibilityProbe.exe'))) {
+  throw 'Update ZIP controller visibility probe is missing or differs from the build'
+}
 if ($isLegacyBootstrap) {
   Remove-Item -LiteralPath (Join-Path $UpdateYeManCC 'update-manifest.json') -Force
 }
@@ -875,13 +1001,13 @@ Copy-DirectoryContents $StagingPowerControl (Join-Path $completeStaging 'PowerCo
 $cliName = 'HidHideCLI.exe'
 $cliSha256 = '9DD283FEDFBD301E1A574A3D4B8663F6274CCB5C896F468ED55A6239F9ADE270'
 # 批111（2026-09-13 执行单）：HC 资源单一真值重构——共享 6 DLL 唯一真值
-# = HC 锁 handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902；
-# full 装配一律从 HC 锁拷贝 + hash 对拍，virtual-gamepad 不再携带 HC 副本。
+# = HC 锁 handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1；
+# full 装配从已审核设备核心拷贝并核对 profile；共享三方库另从独立清单交付。
 $hcRuntimeSource = Join-Path $sourcePowerControl "handheldcompanion-runtime\$hcRuntimeName"
 $hcRuntimeComplete = Join-Path $completeStaging "PowerControl\handheldcompanion-runtime\$hcRuntimeName"
 if (-not (Test-Path -LiteralPath $hcRuntimeSource -PathType Container)) { throw "Complete package is missing locked HC runtime $hcRuntimeName" }
-# The four size-order targets are retained byte-for-byte. A missing or changed
-# authority file aborts export; no volume target may override this rule.
+# Every retained target must match its reviewed derivative or original identity.
+# The exact device-core profile additionally rejects omitted or reintroduced files.
 foreach ($name in $hcSlimSizeOrderRetainedHashes.Keys) {
   $path = Join-Path $hcRuntimeSource $name
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "HC-SLIM-01 retained authority is missing: $name" }
@@ -892,12 +1018,15 @@ foreach ($name in $hcSlimSizeOrderRetainedHashes.Keys) {
 # 松散包装 DLL 会被重新带回完整包。相对路径以 $hcRuntimeSource 为根。
 $hcRuntimeLooseWrapperExclusions = @('Resources\xinput1_x64.dll', 'Resources\xinput1_x86.dll')
 Copy-DirectoryContents $hcRuntimeSource $hcRuntimeComplete $hcRuntimeLooseWrapperExclusions
+$sharedRuntimeComplete = Join-Path $completeStaging 'PowerControl\ymcc-shared-runtime'
+Copy-YmccSharedRuntime $ProjectRoot $sharedRuntimeComplete
+Assert-YmccBatteryHostCopies $ProjectRoot (Join-Path $completeStaging 'PowerControl\battery-host')
 # YMCC 自有 5 件（来源 = 构建产物 Build\App\Native\InputHost，不变）。
 $ymccHostFiles = @('YeManInputHost.exe', 'YeManInputHost.dll', 'YeManInputHost.deps.json', 'YeManInputHost.runtimeconfig.json', 'HIDMaestro.Core.dll')
-# 共享 4 件（来源 = HC 锁，拷后 SHA256 与锁内源逐件对拍；漂移即 throw）。
-# 两件内容完全相同的工具 DLL 由 RuntimeSharedDependencies 在生产
-# virtual-gamepad 目录缺失时从 HC 锁目录只读校验并加载，避免包内重复。
-# 不改 HC runtime 本体、不改 HIDMaestro/驱动；缺文件、路径、身份或 SHA
+# 共享支持 4 件来自独立三方锁，保留宿主本地副本并逐件校验。
+# 两件工具 DLL 从 PowerControl/ymcc-shared-runtime 只读校验并加载。
+# 三方权威来自 deps/ymcc-shared-runtime；设备核心按独立 derivative profile 校验。
+# HIDMaestro/驱动保持原身份；设备核心缺文件、路径、身份或 SHA
 # 不符均 fail-closed，不能下载/修复/静默回落。
 $sharedHostDlls = @(
   'Nefarius.Drivers.HidHide.dll',
@@ -912,16 +1041,17 @@ $sharedRuntimeFallbackHashes = @{
 }
 $sharedRuntimeFallbackDlls = @($sharedRuntimeFallbackHashes.Keys)
 $nativeInputHost = Join-Path $BuildNative 'InputHost'
+Assert-YmccInputHostBuild $ProjectRoot $nativeInputHost
 $vgComplete = Join-Path $completeStaging 'PowerControl\feature-assets\virtual-gamepad'
 New-Item -ItemType Directory -Force -Path $vgComplete | Out-Null
 foreach ($name in $ymccHostFiles) {
   Copy-Item -LiteralPath (Join-Path $nativeInputHost $name) -Destination (Join-Path $vgComplete $name) -Force
 }
 foreach ($name in $sharedHostDlls) {
-  $sharedSrc = Join-Path $hcRuntimeSource $name
-  if (-not (Test-Path -LiteralPath $sharedSrc -PathType Leaf)) { throw "HC shared DLL missing from lock: $name" }
+  $sharedSrc = Get-YmccSharedRuntimeSourceFile $ProjectRoot $name
+  if (-not (Test-Path -LiteralPath $sharedSrc -PathType Leaf)) { throw "Shared DLL missing from independent lock: $name" }
   Copy-Item -LiteralPath $sharedSrc -Destination (Join-Path $vgComplete $name) -Force
-  if ((Get-Sha256 $sharedSrc) -ne (Get-Sha256 (Join-Path $vgComplete $name))) { throw "HC shared DLL drift: $name" }
+  if ((Get-Sha256 $sharedSrc) -ne (Get-Sha256 (Join-Path $vgComplete $name))) { throw "Independent shared DLL drift: $name" }
 }
 # If the copied release template carried a legacy duplicate, remove only that
 # staging copy. The authoritative HC runtime copy is never touched.
@@ -963,11 +1093,11 @@ foreach ($name in $setupNames) {
 if (Test-Path -LiteralPath (Join-Path $completeStaging 'PowerControl\gamepad-prerequisites')) { throw 'Retired gamepad-prerequisites folder must not ship.' }
 
 # HC-SLIM-01：完整性断言 = YMCC 5 件 + 共享 4 件共 9 件随 virtual-gamepad，
-# 两件 fallback 只在 HC 锁目录存在；YeManInputHost.deps.json 声明的 runtime
+# 两件 fallback 位于独立共享目录；YeManInputHost.deps.json 声明的 runtime
 # 目标文件按实际落点逐一存在（防缺失引用 DLL 致 FileNotFoundException）。
 foreach ($name in $sharedRuntimeFallbackDlls) {
   if (Test-Path -LiteralPath (Join-Path $vgComplete $name)) { throw "Unexpected local shared fallback duplicate: $name" }
-  $sharedPath = Join-Path $hcRuntimeComplete $name
+  $sharedPath = Join-Path $sharedRuntimeComplete $name
   if (-not (Test-Path -LiteralPath $sharedPath -PathType Leaf) -or
       (Get-Sha256 $sharedPath) -ne $sharedRuntimeFallbackHashes[$name]) { throw "Pinned shared fallback missing or changed: $name" }
 }
@@ -985,7 +1115,7 @@ foreach ($target in @($hostDeps.targets.PSObject.Properties)) {
 $declaredRuntime = @($declaredRuntime | Sort-Object -Unique)
 foreach ($runtimeFile in $declaredRuntime) {
   $runtimePath = if ($sharedRuntimeFallbackDlls -contains $runtimeFile) {
-    Join-Path $hcRuntimeComplete $runtimeFile
+    Join-Path $sharedRuntimeComplete $runtimeFile
   } else {
     Join-Path $vgComplete $runtimeFile
   }
@@ -1000,12 +1130,20 @@ foreach ($runtimeFile in $declaredRuntime) {
 if (-not (Test-Path -LiteralPath (Join-Path $hcRuntimeComplete 'HandheldCompanion.runtime.json') -PathType Leaf)) { throw 'Complete package is missing locked HC runtime manifest' }
 Assert-HcSlimStagedPolicy (Join-Path $completeStaging 'PowerControl')
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+# Bind the completed input payload, after all host/shared runtime assembly.
+$inputModuleManifest = Write-YmccInputCompatibilityPayload $completeStaging $version
+if ($TestExport) {
+  # This marker is hashed into the complete package identity before ZIP assembly.
+  $testExportDeclaration = [ordered]@{schemaVersion=1;kind='mainline-local-test-export';formalReleaseAccepted=$false;fixtureValidation='NOT_RUN';skippedReleaseGates=@('Lighting consumer fixtures','Decky Build lifecycle regressions','Decky Package install and rollback regressions');retainedChecks=@('compiled payload identity','HC approved compact baseline','stage and ZIP payload identity','settings baseline');gitPublished=$false}
+  $testExportDeclaration | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $completeStaging 'YeManCC\test-export.json') -Encoding UTF8
+}
 $exportPackageIdentity = Write-ExportPackageIdentity -Root $completeStaging -BuildIdentity $exportBuildIdentity
 Compress-Archive -Path (Join-Path $completeStaging '*') -DestinationPath $packagePath -CompressionLevel Optimal -Force
 Write-Output "Complete package:    $packagePath"
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 $zipArchive = [IO.Compression.ZipFile]::OpenRead($packagePath)
 try {
+  Assert-YmccSharedRuntimeArchive $ProjectRoot $zipArchive
   # Final archive-level HC-SLIM-01 gate: staging checks are not enough if a
   # future archive assembly path changes. The two fallback DLLs must be absent
   # from virtual-gamepad, while the four size-order authority files must exist
@@ -1014,7 +1152,7 @@ try {
     $forbidden = "PowerControl/feature-assets/virtual-gamepad/$name"
     $hits = @($zipArchive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $forbidden })
     if ($hits.Count -ne 0) { throw "HC-SLIM-01 archive contains forbidden local duplicate: $forbidden" }
-    $authority = "PowerControl/handheldcompanion-runtime/$hcRuntimeName/$name"
+    $authority = "PowerControl/ymcc-shared-runtime/$name"
     $authorityHits = @($zipArchive.Entries | Where-Object { $_.FullName.Replace('\', '/') -eq $authority })
     if ($authorityHits.Count -ne 1 -or (Get-ZipEntrySha256 $authorityHits[0]) -ne $sharedRuntimeFallbackHashes[$name]) { throw "HC-SLIM-01 archive shared authority mismatch: $authority" }
   }
@@ -1127,19 +1265,29 @@ try {
   $zipArchive.Dispose()
 }
 # Verify the shipped ZIP itself, not only the source dist checked above.
-# Source -> complete staging -> final ZIP must carry exactly the same six Decky assets.
+# Locked loader source + compiled plugin -> staging -> ZIP must match all seven assets.
 . (Join-Path $PSScriptRoot 'decky-release-identity.ps1')
-$deckyExportReceipt = Assert-DeckyExportPayload -ReleaseZip $packagePath -SourcePowerControl $sourcePowerControl -StagedPowerControl (Join-Path $completeStaging 'PowerControl')
+$hcReferenceArchive = Assert-YmccMainlineHcExport -ProjectRoot $ProjectRoot -RuntimeRoot (Join-Path $completeStaging "PowerControl\handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1") -ArchivePath $packagePath
+$deckyExportReceipt = Assert-DeckyExportPayload -ReleaseZip $packagePath -SourcePowerControl $sourcePowerControl -BuiltPluginRoot $BuildDecky -StagedPowerControl (Join-Path $completeStaging 'PowerControl') -RequireManagedManifest
 $deckyReceiptDirectory = Join-Path $BuildRoot 'Validation\DeckyExport'
 New-Item -ItemType Directory -Path $deckyReceiptDirectory -Force | Out-Null
 $deckyExportReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $deckyReceiptDirectory 'FINAL-ZIP-IDENTITY.json') -Encoding UTF8
 $exportArchiveReceipt = Assert-ExportArchiveIdentity -Zip $packagePath -Root $completeStaging -BuildIdentity $exportBuildIdentity
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+# Required before publishing any candidate: validate Decky payload and complete
+# YMCC install/handshake/rollback in temporary directories. No live app operations.
+if ($TestExport) {
+  Write-Output 'TEST_EXPORT_PACKAGE: full Decky release regressions skipped; complete payload identity and HC checks remain required.'
+} else {
+  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Package -WorkspaceRoot $WorkspaceRoot -CandidatePackage $packagePath
+}
 # Every source/build/stage/archive check passed; now publish transactionally.
 foreach ($path in $releaseItems) { Backup-ExportReleaseItem -Path $path -BackupRoot $backupRoot -WorkspaceRoot $WorkspaceRoot -Ledger $releaseLedger }
-Move-Item -LiteralPath $StagingYeManCC -Destination $ReleaseYeManCC
-Move-Item -LiteralPath $StagingPowerControl -Destination $ReleasePowerControl
-Copy-Item -LiteralPath (Join-Path $completeStaging 'YeManCC\export-identity.json') -Destination (Join-Path $ReleaseYeManCC 'export-identity.json') -Force
+# Publish the complete verified product, including the InputHost and redist
+# files added after the preliminary staging phase. Keep CompleteRoot for gates.
+Copy-DirectoryContents (Join-Path $completeStaging 'YeManCC') $ReleaseYeManCC
+Copy-DirectoryContents (Join-Path $completeStaging 'PowerControl') $ReleasePowerControl
+Assert-ExportPublishedTree $ReleaseRoot $completeStaging $exportBuildIdentity
 New-Item -ItemType Directory -Force -Path $ReleasePackages | Out-Null
 $publishedPackagePath = Join-Path $ReleasePackages 'YeManCC.zip'
 Move-Item -LiteralPath $packagePath -Destination $publishedPackagePath
@@ -1224,8 +1372,13 @@ if ($LASTEXITCODE -ne 0) {
 
 # Archive lane/identity gate: no legacy path can receive PACKAGE_OK.
 & (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -ReleaseZip $packagePath | Out-Null
+# Compare the published ZIP directly with a fresh in-memory Decky compilation.
+# The gate also works when auditing an archive copied from a different workspace.
+$deckyCurrentSourceReceipt = Assert-DeckyCurrentSourceExport -ReleaseZip $packagePath -ProjectRoot $ProjectRoot
+$deckyCurrentSourceReceipt | ConvertTo-Json -Depth 6 | Set-Content -LiteralPath (Join-Path $deckyReceiptDirectory 'CURRENT-SOURCE-ZIP.json') -Encoding UTF8
 # Late edits cannot receive PACKAGE_OK or leave a mixed release.
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+& (Join-Path $PSScriptRoot 'write-battery-runtime-receipt.ps1') -ReleaseRoot (Split-Path -Parent $ReleaseYeManCC) -BuildId $exportBuildIdentity.buildId
 Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 Write-Output 'PACKAGE_OK'
 Write-Output "Release YeManCC:      $ReleaseYeManCC"

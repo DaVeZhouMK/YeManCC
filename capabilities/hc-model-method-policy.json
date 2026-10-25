@@ -1,0 +1,738 @@
+{
+  "schemaVersion": 1,
+  "scope": "All frozen Devices method declarations; offline classification and consumer obligation references only",
+  "evidenceLevel": "source-classification-only",
+  "runtimeAvailabilityAuthority": false,
+  "automaticExecution": false,
+  "physicalAcceptance": false,
+  "defaultForUnclassified": "reject",
+  "groups": [
+    {
+      "id": "fan.actions",
+      "domain": "fan",
+      "kind": "domain-action",
+      "names": [
+        "SetFanControl",
+        "SetFanDuty",
+        "ReadFanDuty",
+        "SetFanFullSpeed",
+        "GetFanFullSpeed",
+        "SetFanTable",
+        "GetFanTable",
+        "GetSmartFanMode",
+        "SetSmartFanMode",
+        "SetFanControlWMI",
+        "SetFanDutyWMI",
+        "ReadFanDutyWMI"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/real-host/Program.cs",
+          "anchor": "CapabilityRoutes.CreateTypeCache()",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
+          "anchor": "registeredRoutes",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "Use admitted FanRoute and its existing writer/return contract; a method declaration is not an available route.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan"
+      ]
+    },
+    {
+      "id": "fan.protocol-and-return",
+      "domain": "fan",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ReadMsiFanStateReadOnly",
+        "ReleaseMsiFanControl",
+        "IsReleaseStepAcceptable",
+        "SetControlBit",
+        "ClassifyMsiReadFailure",
+        "WriteMsiFanTableBlock",
+        "ToAsusCurve",
+        "SetGain",
+        "SetRampRate"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/real-host/Program.cs",
+          "anchor": "CapabilityRoutes.CreateTypeCache()",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
+          "anchor": "registeredRoutes",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "Retain actual protocol/return dependencies inside the fan consumer; no direct public helper invocation.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan"
+      ]
+    },
+    {
+      "id": "lighting.actions",
+      "domain": "lighting",
+      "kind": "domain-action",
+      "names": [
+        "SetLedBrightness",
+        "SetLedColor",
+        "SetLedStatus",
+        "SetLEDPreset"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/LightSetter/Program.cs",
+          "anchor": "ExecuteResolvedCatalogLedAction",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "ymcc::lighting::resolve(catalogDevice)",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Action eligibility comes from the reviewed lighting model/action catalog, including disabled actions.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "lighting.protocol",
+      "domain": "lighting",
+      "kind": "required-internal-dependency",
+      "names": [
+        "FindClosestColor",
+        "CalculateDistance",
+        "UpdateLED",
+        "CEcRgb_GlobalOn",
+        "CEcRgb_GlobalOff",
+        "CEcRgb_SetColorAll",
+        "CEcRgb_SetColorAya",
+        "CEcRgb_SetColorOne",
+        "CEcRgb_GetBrightness",
+        "MapColorValues",
+        "CEcRgb_I2cWrite",
+        "CEcControl_RgbI2cWrite",
+        "CEcControl_RgbHoldControl",
+        "CEcControl_RgbReleaseControl",
+        "CEiiEcHelper_RgbStart",
+        "CEiiEcHelper_RgbStop",
+        "SendLedCmd",
+        "SendLedRGB",
+        "ToSpectraRGB",
+        "CalcZotacCRC",
+        "CalcFast",
+        "ConvertToLightSpeed",
+        "ConvertToBrightnessID",
+        "BuildV1Command",
+        "SendV1Brightness",
+        "SendV1SolidColor",
+        "SendV1Rainbow",
+        "SendV2Brightness",
+        "SendV2SolidColor",
+        "SendV2Rainbow",
+        "RgbLoadProfile",
+        "RgbEnable",
+        "RgbSetProfile",
+        "SetLightProfileColors",
+        "RgbMultiLoadSettings",
+        "RgbMultiEnable",
+        "ApplyColor",
+        "ApplyColorFast",
+        "AuraMessage",
+        "GetRGB",
+        "SaveConfigData"
+      ],
+      "consumerReferences": [
+        {
+          "file": "FanLab/LightSetter/Program.cs",
+          "anchor": "ExecuteResolvedCatalogLedAction",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "ymcc::lighting::resolve(catalogDevice)",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Helpers remain implementation dependencies of admitted actions, with their original transport/lifecycle guards.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "battery.actions",
+      "domain": "battery",
+      "kind": "domain-action",
+      "names": [
+        "SetBatteryMaster",
+        "GetBatteryChargeLimit",
+        "SetBatteryChargeLimit",
+        "CheckIsBatteryProtectionSupported",
+        "IsBatteryProtectionSupported",
+        "SetBatteryBypassChargingMode",
+        "GetBattTemperature",
+        "GetMaxBatteryCharge",
+        "SetMaxBatteryCharge"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/BatteryHost/Controller.cs",
+          "anchor": "public Snapshot Apply(string fence,int target)",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcBatteryCapabilityCatalog.cs",
+          "anchor": "class HcBatteryCapabilityCatalog",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Exact reviewed identities and firmware/readback policies remain authoritative; SuiPlay is not enabled from inherited declarations.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "battery"
+      ]
+    },
+    {
+      "id": "battery.protocol",
+      "domain": "battery",
+      "kind": "required-internal-dependency",
+      "names": [
+        "CEcControl_BypassChargeOpen",
+        "CEcControl_BypassChargeClose"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/BatteryHost/Controller.cs",
+          "anchor": "public Snapshot Apply(string fence,int target)",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcBatteryCapabilityCatalog.cs",
+          "anchor": "class HcBatteryCapabilityCatalog",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Internal EC bypass dependency; never a second independent writer.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "battery"
+      ]
+    },
+    {
+      "id": "performance.source-reference",
+      "domain": "performance",
+      "kind": "metadata-only-by-user",
+      "names": [
+        "GetPhysicallyInstalledSystemMemory",
+        "set_long_limit",
+        "set_short_limit",
+        "SetCPUPowerLimit",
+        "set_min_gfxclk_freq",
+        "set_max_gfxclk_freq",
+        "set_gfx_clk",
+        "SetVRamSize",
+        "SetVRamSizeWMI",
+        "InitOverBoost",
+        "SetOverBoost",
+        "HasOverBoost",
+        "GetOverBoost",
+        "GetOverBoostSup",
+        "GetShiftValue",
+        "SetShiftValue",
+        "IsShiftSupported",
+        "GetShiftModeValue",
+        "SetShiftMode",
+        "GetMsiDCVarData",
+        "GetUEFIVariableEx",
+        "SetUEFIVariableEx"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/hc-performance-metadata.json",
+          "anchor": "takeOverDispatch",
+          "role": "consumer-contract"
+        },
+        {
+          "file": "capabilities/USER-SCOPE-DECISIONS.json",
+          "anchor": "CPU/GPU",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "User permits source/model/CPU metadata only; no CPU/TDP takeover or GPU consumer is authorized.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "performance"
+      ]
+    },
+    {
+      "id": "oem.capture-and-action",
+      "domain": "oem-input",
+      "kind": "domain-action",
+      "names": [
+        "KeyPress",
+        "KeyRelease",
+        "KeyPressAndRelease",
+        "HasKey",
+        "MapVendorButton",
+        "StartVendorHidListener",
+        "StopVendorHidListener",
+        "VendorHidMonitor_ButtonChanged",
+        "HandleEvent"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemBackMappingRefreshGate",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "namespace",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Reconcile vendor event authority with actual native OEM capture/action; source mention alone does not prove the transport.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "oem-input"
+      ]
+    },
+    {
+      "id": "controller.configuration",
+      "domain": "controller",
+      "kind": "domain-action",
+      "names": [
+        "SetMotionStatus",
+        "SwitchMode",
+        "SwitchToXInput",
+        "SwitchToDirectInput",
+        "SwitchToDesktop",
+        "ReadControllerFirmwareVersion",
+        "CycleController",
+        "RestoreProfileSet",
+        "RemapM1",
+        "RemapM1_CtrlWinF11",
+        "RemapM2_CtrlWinF12",
+        "UpdateBackButtonState",
+        "SetPassthrough",
+        "ControllerFactoryReset",
+        "EnableControllerGyro",
+        "DisableControllerGyro",
+        "SetSteamOSMode",
+        "ConfigureController",
+        "XBoxController"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "anchor": "runtimeBindings",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "Physical protocol configuration and controller identity/ownership require method-specific reconciliation; do not expose these methods as generic commands.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "controller.transport",
+      "domain": "controller",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ReadLoopAsync",
+        "HandleReport",
+        "StartWatching",
+        "StopWatching",
+        "onWMIEvent",
+        "GetHidDevices",
+        "WithReportID"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "anchor": "runtimeBindings",
+          "role": "consumer-contract"
+        }
+      ],
+      "note": "Preserve owned listener lifetime and transport/source identity; common method names do not imply interchangeable protocols.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "motion.source",
+      "domain": "motion",
+      "kind": "required-internal-dependency",
+      "names": [
+        "HasMotionSensor",
+        "PullSensors"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCapturePrivateHcMotionSelectorRecipe",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcControllerMotionCapabilityCatalog.h",
+          "anchor": "class ModelBindingCache",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Windows/controller source selection and sample authority stay in existing motion consumers.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "motion"
+      ]
+    },
+    {
+      "id": "device.lifecycle",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-lifecycle-dependency",
+      "names": [
+        "Open",
+        "Close",
+        "OpenEvents",
+        "IsReady",
+        "WaitUntilReady",
+        "SystemManager_Initialized",
+        "SystemManager_PowerLineStatusChanged_Handler",
+        "SystemManager_SessionLockChanged",
+        "PowerManager_RemainingChargePercentChanged",
+        "Device_Removed",
+        "Device_Inserted",
+        "QueryDevices",
+        "DeviceManager_HidDeviceRemoved",
+        "DeviceManager_HidDeviceArrived",
+        "DeviceManager_Initialized",
+        "GenericDeviceUpdated",
+        "GetCurrent"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Class-specific initialization, shared device ownership, event detach and release remain explicit review obligations; do not start HC managers from this registry.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "device.settings-dependency",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "mixed-settings-dependency-review",
+      "names": [
+        "QuerySettings",
+        "SettingsManager_SettingValueChanged",
+        "SettingsManager_Initialized",
+        "QueryPowerProfile",
+        "PowerProfileManager_Initialized",
+        "PowerProfileManager_Applied"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Handlers may mix hardware effects and HC application policy; port only necessary device dependencies, not the entire settings UI.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "device.initialization-policy",
+      "domain": "remaining-model-methods",
+      "kind": "scope-review-required",
+      "names": [
+        "Initialize"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Review each initializer: Flip display defaults include HC application preferences, which are not automatically a required hardware capability.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "remaining-model-methods"
+      ]
+    },
+    {
+      "id": "device.ec-transport",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ECRamDirectRead",
+        "ECRamDirectWrite",
+        "ECRamReadByte",
+        "ECRamWriteByte",
+        "ECRamDirectReadByte",
+        "ECRamDirectWriteByte",
+        "EcWriteByte",
+        "EcReadByte",
+        "ECReadUInt16",
+        "ECWriteUInt16",
+        "OpenLibSys",
+        "GetWMI",
+        "WriteToSerialPort"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Shared EC/WMI/driver/UEFI access must retain the actual owner and lifecycle; a helper is not a stand-alone admitted hardware action.",
+      "sideEffects": [
+        "hardware-or-firmware-access"
+      ],
+      "affectedDomains": [
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "device.setup-dependency",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "conditional-installation-dependency-review",
+      "names": [
+        "GetMsiApCfgTargetPath",
+        "CheckAndDeployWmiAcpi",
+        "CheckAndFixRegistry",
+        "MsiEventClassExists",
+        "RestartAcpiPnpDevice"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Installation/registry/device restart side effects are recorded only; this offline tool never performs them.",
+      "sideEffects": [
+        "installation",
+        "registry",
+        "device-restart"
+      ],
+      "affectedDomains": [
+        "fan",
+        "lighting",
+        "battery",
+        "motion",
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "device.power-context",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-internal-dependency",
+      "names": [
+        "GetOnlyTypeC"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Charger/power context may affect device behavior; retain source and require consumer-specific proof.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "fan",
+        "battery",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "oem.presentation-reference",
+      "domain": "oem-input",
+      "kind": "model-metadata-reference",
+      "names": [
+        "GetGlyph",
+        "GetButtonName",
+        "GetGlyphIconInfo",
+        "GetFontFamily"
+      ],
+      "consumerReferences": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemBackMappingRefreshGate",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "namespace",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Preserve per-model button metadata; this does not authorize importing HC UI or establish a runtime UI consumer.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "oem-input"
+      ]
+    },
+    {
+      "id": "model.secondary-display",
+      "domain": "remaining-model-methods",
+      "kind": "domain-action",
+      "names": [
+        "CEcControl_SetSecDispBrightness",
+        "CEcControl_GetSecDispBrightnessRaw",
+        "ControllerManager_InputsUpdated"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/HcSecondaryDisplayCapabilityCatalog.cs",
+          "anchor": "HcSecondaryDisplayCapabilityCatalog",
+          "role": "consumer-contract"
+        },
+        {
+          "file": "native/BatteryHost/SecondaryDisplayController.cs",
+          "anchor": "SecondaryDisplayController",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "native/BatteryHost/HostDomainRouter.cs",
+          "anchor": "secondaryDisplay.toggle",
+          "role": "existing-domain-implementation"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "nativeSecondaryDisplayKeyboardConsume",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Exact Flip DS and explicitly source-inherited Flip 1S DS ACPI EC secondary-display consumers are connected in this source candidate. No OverlayQuickTools/keyboard/trackpad UI import; runtime readiness, one-use read fences and source-pinned two-model registration remain authoritative. Mainline promotion, global software acceptance, package and physical effects are separate.",
+      "sideEffects": [
+        "ACPI EC byte-register latch0x4F=0 then brightness0x4E with readback; no SuperIO ports",
+        "Persistent display preference only after verified explicit operation; no automatic startup/resume/release brightness write"
+      ],
+      "affectedDomains": [
+        "remaining-model-methods",
+        "oem-input",
+        "battery",
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "protocol.numeric-helpers",
+      "domain": "lifecycle-and-dependencies",
+      "kind": "required-internal-dependency",
+      "names": [
+        "ClampByte",
+        "ConvertHex"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/EXECUTION-CHAINS.json",
+          "anchor": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+          "role": "open-obligation"
+        }
+      ],
+      "note": "Keep exact source utility provenance; determine sharing through actual callers rather than adding another public capability.",
+      "sideEffects": [],
+      "affectedDomains": [
+        "lifecycle-and-dependencies"
+      ]
+    },
+    {
+      "id": "controller.msi-rear-configuration",
+      "domain": "controller",
+      "kind": "required-internal-dependency",
+      "names": [
+        "SyncToROM",
+        "GetM12",
+        "ApplyM12Configuration"
+      ],
+      "consumerReferences": [
+        {
+          "file": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+          "anchor": "consumeRear",
+          "role": "consumer-contract"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "const auto rearBinding=ymcc::capabilities::configuration::bindRear",
+          "role": "existing-domain-implementation"
+        }
+      ],
+      "note": "Only the existing enabled MSI SD rear preparation consumer binds the same original report factory through total-library model/endpoint/firmware references. Native keyboard remains record-only with unchanged source and a false build lock. Shared profile fields and persistent sync are not physically accepted.",
+      "sideEffects": [
+        "Existing M1/M2 shared profile writes and SyncToROM only after original consumer admission; no new startup/mode/automatic retry/restore behavior"
+      ],
+      "affectedDomains": [
+        "controller",
+        "oem-input",
+        "lifecycle-and-dependencies"
+      ]
+    }
+  ],
+  "sourceUseReview": [
+    {
+      "methods": [
+        "GetRGB"
+      ],
+      "source": "Devices/MSI/ClawA1M.cs",
+      "meaning": "Lighting packet constructor called by SetLedBrightness/SetLedColor; does not select controller input."
+    },
+    {
+      "methods": [
+        "SaveConfigData"
+      ],
+      "source": "Devices/Zotac/GamingZone.cs",
+      "meaning": "HID SaveConfigData command called after lighting writes; not generic settings persistence."
+    },
+    {
+      "methods": [
+        "GetMsiDCVarData",
+        "GetUEFIVariableEx",
+        "SetUEFIVariableEx"
+      ],
+      "source": "Devices/MSI/ClawA1M.cs",
+      "meaning": "MsiDCVarData UEFI access used by OverBoost; retain only as user-scoped performance source metadata."
+    }
+  ]
+}

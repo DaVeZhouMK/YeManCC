@@ -1,0 +1,1 @@
+本夹具由现有 steam_original_recovery_authority_selftest.py 调用。当前nativeValveReadCurrentTarget、nativeValveTargetStillValid和实际名称匹配函数均从生产main.cpp提取；reader-before是有固定SHA的补丁前生产函数，不是重写模型。进程、会话、规则读取和快照为受控端口，监控调用次数是规则载入入口，非物理磁盘I/O；不会触碰现场进程。覆盖规则撤销、原进程身份及必要读取三个负例。离线差分通过不等于实机性能提升。

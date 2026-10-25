@@ -1,0 +1,23 @@
+# Registered Host SDK stop consumer: 2.0 current, frozen 1.12 negative
+
+The registered id is `controller.host-sdk-stop`. Use the standard front door:
+
+```powershell
+pwsh -NoProfile -File tools/ymcc_sim/ymcc_sim.ps1 -Domain global -Mode run -Tests controller.host-sdk-stop -EvidenceDir <ABS_BUILD_DIRECTORY>
+```
+
+`adapter.mjs` lists the actual Host helpers, ScreenPad/Program consumers, the pinned 2.0 method fixtures/binding, the immutable 1.12 historical helper/Dispose and this consumer's sources. Compiler/runtime and real SDK file bytes are artifact inputs. The runner fingerprints the originals and snapshots before and after execution. No catalog, production C#, prerequisite or USB/IP sources are changed here.
+
+The current executable compiles both actual production helpers unchanged. It inserts the pinned 2.0 `HMController.Dispose`, `StopThreads`, `StopWorkers`, `CloseOutputCts` and `OutputPollLoop`, plus `DeviceClock.Stop/Wake/Close`. The complete clock Loop is statically bound to its known method fixture; its BCL-only test replacement owns a real Thread and AutoResetEvent and closes that event in finally. The clock's timer pointer is always zero: native calls are forbidden. A PE/IL proof reads the SDK bytes, verifies assembly 2.0.0.0 and its MVID, the changed field signatures, constructor-only assignments/Start, output CTS ownership in the reader's finally, clock cleanup and the ignored Join results. No real SDK assembly is loaded or constructor invoked.
+
+The SDK file is exactly 63,076,352 bytes, SHA256 `8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c`, MVID `86aed9a3-c024-4596-b02c-650082ffb852`. `tools/fixtures/hidmaestro/2.0.0/binary-binding.json` and every selected method fixture are independently hash-bound. Assembly 1.12 and `_idleCts` are rejected as current contracts.
+
+Current Release and Debug run the same 32 assertions with real owned BCL CTS, Thread, cancellation callbacks, event handles, lock contention and Join. The actual ScreenPad handoff/release, Host idle wrapper, completion wrapper, RetainSdkDisposeFailure and the first prepare/release refusal guards are extracted from source. The only ScreenPad call-target substitution routes fake controller metadata through the real helper's IRuntime seam; it changes no consumer branch or helper source. Production metadata admission is separately checked to reject this fake assembly. Remaining preparation, context teardown, endpoint observation and mapping operations are explicit local fakes.
+
+Current assertions include both unchecked-Join counterexamples from 2.0: a blocked output reader or input clock remains alive when stock Dispose reaches fake context teardown. The actual Host barriers refuse that transition. Normal-return receipts cannot be inferred from `_disposed`; a thrown SDK Dispose leaves the original controller/receipt retained, subsequent release returns the stored failure, and prepare remains refused. A pending completion proof after normal return also blocks prepare and remains retryable. The 2.0 clock owns its event/timer; the obsolete local idle-CTS disposal patch is not resurrected.
+
+Historical negatives are separate executables containing only the frozen original helper and exact **1.12** Dispose. The helper remains SHA256 `ef4e54570bba0a55b357114573668e6f2f9f526f701c169854342c558a06fcf3`, assembly contract 1.12.0.0 and MVID `5f1d5fa1-a18d-44e5-aba0-a8dfb3fabdf8`; the old Dispose remains SHA256 `aa8d4088147e628041396827e4dc8471442e7c4abd770d74c742156982efb671`. They reproduce exactly two historical failures (unstarted reader and leaked idle CTS handle), while the identity assertion passes. The suite expects that failure pattern. This is historical source/semantics evidence, not a 2.0 compatibility execution of the old helper and not a frozen entire HostSession.
+
+Four variants of current sources/consumer snippets must compile and then fail their named assertions: cancelling a closed output CTS; accepting an unfinished clock; treating an early disposed flag as normal-return receipt; and bypassing the stored SDK-dispose-failure guard. Positive and negative current variants share the same assertions.
+
+Production/helper lock and Join budgets are never above **500 ms**, and smaller budgets remain smaller. The 2,000 ms startup/final cleanup deadlines belong only to test-created BCL workers; they do not modify or justify enlarging production waits. This validates bounded wait semantics and refusal behavior, not a hard real-time wall-clock guarantee. Real SDK report loops, USB/IP/device APIs, PnP, physical detach, sleep and CPU reduction remain outside this fixture.

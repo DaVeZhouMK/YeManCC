@@ -1,0 +1,912 @@
+{
+  "schemaVersion": 1,
+  "dateHongKong": "2026-10-20",
+  "role": "documentation-navigation-only",
+  "runtimeConsumer": false,
+  "registrationAuthority": false,
+  "newTestGate": false,
+  "pathBase": "repository-root",
+  "start": [
+    "capabilities/README.md",
+    "capabilities/AI-GUIDE.md",
+    "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+    "capabilities/USER-SCOPE-DECISIONS.json"
+  ],
+  "authoritativeStatus": [
+    "capabilities/INTEGRATION-STATUS.json",
+    "capabilities/EXECUTION-CHAINS.json"
+  ],
+  "countSnapshot": "capabilities/OVERVIEW-COUNTS.json",
+  "snapshotIsNotLiveAvailability": true,
+  "groups": [
+    {
+      "id": "scope",
+      "name": "范围与用户决定",
+      "purpose": "What may be changed or enabled",
+      "fileCount": 2
+    },
+    {
+      "id": "status",
+      "name": "接入状态与执行路线",
+      "purpose": "Source-qualified status, issues and consumer anchors",
+      "fileCount": 2
+    },
+    {
+      "id": "policy",
+      "name": "生成输入策略",
+      "purpose": "Reviewed allowlists and domain rules",
+      "fileCount": 8
+    },
+    {
+      "id": "generated-data",
+      "name": "派生数据快照",
+      "purpose": "Generated identities, metadata or method classification; not availability",
+      "fileCount": 3
+    },
+    {
+      "id": "generated-code",
+      "name": "生成代码",
+      "purpose": "Compiled tables; update through their generators",
+      "fileCount": 10
+    },
+    {
+      "id": "runtime-binding",
+      "name": "手写运行绑定",
+      "purpose": "Existing dispatch/binding/session code; preserve live consumer guards",
+      "fileCount": 12
+    },
+    {
+      "id": "consumption-contract",
+      "name": "消费与回执合同",
+      "purpose": "Protocol, ownership and evidence semantics",
+      "fileCount": 7
+    },
+    {
+      "id": "guide",
+      "name": "维护入口说明",
+      "purpose": "Human/AI navigation; not runtime input",
+      "fileCount": 4
+    },
+    {
+      "id": "documentation-snapshot",
+      "name": "文档数量快照",
+      "purpose": "Dated reporting data; not a new registry",
+      "fileCount": 1
+    }
+  ],
+  "files": [
+    {
+      "path": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+      "group": "scope",
+      "summary": "本轮8类已启用能力与停止规则",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/AI-GUIDE.md",
+      "group": "guide",
+      "summary": "按维护问题定位文件、符号与检查方式",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/AI-INDEX.json",
+      "group": "guide",
+      "summary": "可检索的文件分组、域入口与工作流；不是运行时分配表",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-CONSUMPTION.json",
+      "group": "consumption-contract",
+      "summary": "手柄输入/运动/配置/反馈/屏蔽的分阶段合同",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-GAME-MOTOR-RECEIPT.json",
+      "group": "consumption-contract",
+      "summary": "游戏电机请求到物理writer的软件回执",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-GAME-OUTPUT-OBSERVATION.json",
+      "group": "consumption-contract",
+      "summary": "Host原始游戏输出观察与归属",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
+      "group": "consumption-contract",
+      "summary": "既有SteamDeck经典震动回执",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT.json",
+      "group": "consumption-contract",
+      "summary": "既有Xbox/XInput震动回执",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "group": "status",
+      "summary": "实际消费者、锚点、生命周期、测试引用和路线问题",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/FAN-RETURN-CONSUMPTION.json",
+      "group": "consumption-contract",
+      "summary": "风扇归还、释放义务及历史/当前证据边界",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcBatteryCapabilityCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcBatteryCapabilityCatalog.generated.cs",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerConfigurationCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcControllerFeedbackCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerInputCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcControllerMotionCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcControllerMotionCapabilityCatalog.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcMotionCapabilityCatalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/HcMotionCapabilityCatalog.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcOemInputCapabilityBinding.h",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/HcSecondaryDisplayCapabilityCatalog.cs",
+      "group": "runtime-binding",
+      "summary": "手写运行绑定；查文件顶部AI-NAV与对应域",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "group": "status",
+      "summary": "按9域维护当前状态与来源限定证书",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/MODEL-METHOD-CONSUMPTION.json",
+      "group": "generated-data",
+      "summary": "397条Devices方法声明分类；不是逐方法执行证明",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_model_method_consumption.mjs"
+    },
+    {
+      "path": "capabilities/OVERVIEW-COUNTS.json",
+      "group": "documentation-snapshot",
+      "summary": "2026-10-20数量与来源哈希；数字更新需重读其sourcePins",
+      "editMode": "refresh-dated-facts-from-declared-sources"
+    },
+    {
+      "path": "capabilities/OVERVIEW.md",
+      "group": "guide",
+      "summary": "任务关系、类型数量和验收边界",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/README.md",
+      "group": "guide",
+      "summary": "总库入口和历史记录；先读顶部AI导航",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/SECONDARY-DISPLAY-CONSUMPTION.json",
+      "group": "consumption-contract",
+      "summary": "未启用副屏的保留入口与禁止激活边界",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/USER-SCOPE-DECISIONS.json",
+      "group": "scope",
+      "summary": "用户排除及性能/接线边界",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-battery-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for battery",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-configuration-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-configuration",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-feedback-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-feedback",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-input-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-input",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-controller-motion-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for controller-motion",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-device-catalog.generated.h",
+      "group": "generated-code",
+      "summary": "生成的编译表；经原生成器更新",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/hc-device-catalog.json",
+      "group": "generated-data",
+      "summary": "冻结机型事实、别名、声明与各域派生登记",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "path": "capabilities/hc-lighting-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for lighting",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-model-method-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for model-method",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-motion-policy.json",
+      "group": "policy",
+      "summary": "Reviewed generator input for motion",
+      "editMode": "maintained-source"
+    },
+    {
+      "path": "capabilities/hc-performance-metadata.json",
+      "group": "generated-data",
+      "summary": "CPU/GPU资料；当前运行消费保持独立",
+      "editMode": "review-input-then-regenerate",
+      "generator": "tools/hc_capability_catalog_generate.mjs"
+    }
+  ],
+  "domains": [
+    {
+      "id": "fan",
+      "bindings": [
+        "capabilities/FanCapabilityCatalog.cs",
+        "capabilities/AsusFanCapabilitySession.cs",
+        "capabilities/HcDeviceCapabilityCatalog.cs"
+      ],
+      "policy": [],
+      "contracts": [
+        "capabilities/FAN-RETURN-CONSUMPTION.json"
+      ],
+      "consumers": [
+        {
+          "file": "FanLab/real-host/Program.cs",
+          "anchor": "routeTypeCache ??= CapabilityRoutes.CreateTypeCache()"
+        },
+        {
+          "file": "capabilities/HcDeviceCapabilityCatalog.cs",
+          "anchor": "public sealed class HcCapabilityTypeCache<T>"
+        },
+        {
+          "file": "capabilities/AsusFanCapabilitySession.cs",
+          "anchor": "AsusFanCapabilitySession"
+        }
+      ],
+      "existingTestReferences": [
+        "fan.unified-capability-dispatch",
+        "fan.unified-capability-roundtrip",
+        "fan.explicit-off-host-chain-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "motion",
+      "bindings": [
+        "capabilities/HcMotionCapabilityCatalog.h"
+      ],
+      "policy": [
+        "capabilities/hc-motion-policy.json"
+      ],
+      "contracts": [],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "static thread_local CachedRecipe cached;"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureMotionSelectorBound()"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureProcessMotionContribution("
+        },
+        {
+          "file": "capabilities/HcMotionCapabilityCatalog.h",
+          "anchor": "inline const Recipe* consume("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "static const ymcc::hc_model_motion::Recipe* inputCapturePrivateHcMotionSelectorRecipe() noexcept"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "static void inputCaptureApplyHcMatrixCandidate(",
+          "role": "actual-high-frequency-matrix-consumer"
+        },
+        {
+          "file": "capabilities/HcMotionCapabilityCatalog.h",
+          "anchor": "primaryKind"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "switch(ymcc::capabilities::motion::primaryKind"
+        },
+        {
+          "file": "tools/lib/hc_motion_catalog.mjs",
+          "anchor": "row.primaryKind="
+        }
+      ],
+      "existingTestReferences": [
+        "gyro.machine-motion-consumers",
+        "gyro.recipe-dispatch-hotpath",
+        "gyro.unified-motion-bindings"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution.",
+      "historicalSoftwareEvidenceReference": {
+        "file": "capabilities/INTEGRATION-STATUS.json",
+        "pointer": "/domains/4/historicalSoftwareEvidence"
+      }
+    },
+    {
+      "id": "lighting",
+      "bindings": [
+        "capabilities/HcLightingCapabilityCatalog.cs"
+      ],
+      "policy": [
+        "capabilities/hc-lighting-policy.json"
+      ],
+      "contracts": [],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "const auto* lightingRoute = ymcc::lighting::resolve(catalogDevice);"
+        },
+        {
+          "file": "FanLab/LightSetter/Program.cs",
+          "anchor": "ExecuteResolvedCatalogLedAction"
+        },
+        {
+          "file": "FanLab/LightSetter/DeviceCoreConsumer.cs",
+          "anchor": "capabilityCatalogSha256"
+        },
+        {
+          "file": "src/components/ControllerFeedbackCapabilitiesCard.vue",
+          "anchor": "async function applyLed(): Promise<void> {"
+        }
+      ],
+      "existingTestReferences": [
+        "lighting.unified-capability-dispatch",
+        "lighting.signal-consumer",
+        "lighting.ui-feedback-ordering-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "battery",
+      "bindings": [
+        "capabilities/HcBatteryCapabilityCatalog.cs"
+      ],
+      "policy": [
+        "capabilities/hc-battery-policy.json"
+      ],
+      "contracts": [],
+      "consumers": [
+        {
+          "file": "native/BatteryHost/Policy.cs",
+          "anchor": "capabilityRoutes.Resolve("
+        },
+        {
+          "file": "capabilities/HcBatteryCapabilityCatalog.cs",
+          "anchor": "public static HcBatteryCapabilityDispatcher<T> Bind"
+        },
+        {
+          "file": "native/BatteryHost/Controller.cs",
+          "anchor": "capability=Policy.ResolveCapability(identity)"
+        },
+        {
+          "file": "native/BatteryHost/battery-routes.json",
+          "anchor": "asus-ally-acpi"
+        },
+        {
+          "file": "tools/battery-charge-contract.mjs",
+          "anchor": "project.matchAll(/<Compile"
+        }
+      ],
+      "existingTestReferences": [
+        "battery.charge-workflow",
+        "battery.native-host-roundtrip-consumer",
+        "battery.ui-native-recovery-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "controller",
+      "bindings": [
+        "capabilities/HcControllerInputCapabilityCatalog.h",
+        "capabilities/HcControllerMotionCapabilityCatalog.h",
+        "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+        "capabilities/HcControllerConfigurationCapabilityCatalog.h"
+      ],
+      "policy": [
+        "capabilities/hc-controller-input-policy.json",
+        "capabilities/hc-controller-motion-policy.json",
+        "capabilities/hc-controller-feedback-policy.json",
+        "capabilities/hc-controller-configuration-policy.json"
+      ],
+      "contracts": [
+        "capabilities/CONTROLLER-CONSUMPTION.json",
+        "capabilities/CONTROLLER-GAME-MOTOR-RECEIPT.json",
+        "capabilities/CONTROLLER-GAME-OUTPUT-OBSERVATION.json",
+        "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
+        "capabilities/CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT.json"
+      ],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideBuildSourceInterfaceInventory("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureOnGamepad("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "OemChordProfileId"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "legionMotionDecodeReport("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureLegionMotion("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureControllerCalibrationSourceKey("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionMayIssue("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionRequestCurrent("
+        },
+        {
+          "file": "InputHost/Program.cs",
+          "anchor": "TrySubmitFrame"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideApplyPhysicalTransaction("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideShouldReturnApplication("
+        },
+        {
+          "file": "src/bridge/controllerFeedbackCapabilities.ts",
+          "anchor": "outputCallbackBound: false"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "physicalFeedbackFinish("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "ymcc::capabilities::controller::bindStandardInput(sample->inputSource,sample->connectedMask)"
+        },
+        {
+          "file": "capabilities/HcControllerInputCapabilityCatalog.h",
+          "anchor": "inline InputBinding bindStandardInput("
+        },
+        {
+          "file": "capabilities/HcControllerMotionCapabilityCatalog.h",
+          "anchor": "class ModelBindingCache"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "static ymcc::legion_motion::Source legionMotionBoundSource("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "sample.source.capabilityToken==binding.token()"
+        },
+        {
+          "file": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+          "anchor": "inline PhysicalFeedbackBinding bindPhysicalFeedback("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "target.unifiedBinding=feedbackBinding;"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "result[\"unifiedCapabilityId\"]=capability?capability->capabilityId:std::string_view{};"
+        },
+        {
+          "file": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+          "anchor": "consumeRear"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "const auto rearBinding=ymcc::capabilities::configuration::bindRear"
+        }
+      ],
+      "existingTestReferences": [
+        "controller.unified-standard-input",
+        "controller.signal-consumer",
+        "controller.input-diagnostics",
+        "controller.persona",
+        "controller.inputhost-optional-trigger-protocol",
+        "controller.inputhost-cpu-cost-window",
+        "controller.feedback-capabilities",
+        "controller.unified-motion-providers",
+        "controller.xinput-feedback-lifecycle",
+        "controller.game-feedback-writer-consumer",
+        "controller.game-motor-private-pipe-consumer",
+        "controller.msi-sd-rear-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution.",
+      "physicalVisibilityEvidenceReferences": {
+        "source": {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "pointer": "/stages/0/consumerEvidence"
+        },
+        "applyAndApplicationReturn": {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "pointer": "/stages/5/consumerEvidence"
+        },
+        "evidenceMeaning": "Navigation to related software contracts or exact standalone source only. No exact global registration or bound D runtime receipt for these HidHide functions was located in the pinned review; retain UNKNOWN and physical acceptance separately."
+      }
+    },
+    {
+      "id": "oem-input",
+      "bindings": [
+        "capabilities/HcOemInputCapabilityBinding.h"
+      ],
+      "policy": [],
+      "contracts": [
+        "capabilities/CONTROLLER-CONSUMPTION.json"
+      ],
+      "consumers": [
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "class InputBindingCache"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemUnifiedInputBindingFor"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "const int profileId = oemBoundChordProfileIdFor(g_machineIdentity.family, g_machineIdentity.deviceClass);"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "const OemCatalogRef catalog = oemBoundCatalogForFamily(g_machineIdentity.family, g_machineIdentity.deviceClass);"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "const std::string consumerClass = binding.model ? std::string(binding.model->consumerClass) : g_machineIdentity.deviceClass;"
+        }
+      ],
+      "existingTestReferences": [
+        "controller.unified-oem-input-binding",
+        "controller.unified-oem-input-consumers",
+        "controller.machine-model-capabilities",
+        "controller.signal-consumer"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "performance",
+      "bindings": [],
+      "policy": [],
+      "contracts": [
+        "capabilities/hc-performance-metadata.json"
+      ],
+      "consumers": [],
+      "existingTestReferences": [],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "lifecycle-and-dependencies",
+      "bindings": [],
+      "policy": [],
+      "contracts": [
+        "capabilities/MODEL-METHOD-CONSUMPTION.json"
+      ],
+      "consumers": [
+        {
+          "file": "FanLab/DeviceCoreSharedDependencies.cs",
+          "anchor": "DeviceCoreSharedDependencies"
+        },
+        {
+          "file": "FanLab/RuntimeDependencyContract.cs",
+          "anchor": "RuntimeDependencyContract"
+        }
+      ],
+      "existingTestReferences": [
+        "fan.runtime-connection",
+        "fan.parent-exit-contract"
+      ],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    },
+    {
+      "id": "remaining-model-methods",
+      "bindings": [
+        "capabilities/HcSecondaryDisplayCapabilityCatalog.cs"
+      ],
+      "policy": [
+        "capabilities/hc-model-method-policy.json"
+      ],
+      "contracts": [
+        "capabilities/SECONDARY-DISPLAY-CONSUMPTION.json",
+        "capabilities/MODEL-METHOD-CONSUMPTION.json"
+      ],
+      "consumers": [
+        {
+          "file": "capabilities/hc-device-catalog.json",
+          "anchor": "method"
+        },
+        {
+          "file": "capabilities/HcSecondaryDisplayCapabilityCatalog.cs",
+          "anchor": "HcSecondaryDisplayCapabilityCatalog"
+        },
+        {
+          "file": "native/BatteryHost/SecondaryDisplayController.cs",
+          "anchor": "SecondaryDisplayController"
+        },
+        {
+          "file": "native/BatteryHost/HostDomainRouter.cs",
+          "anchor": "secondaryDisplay.toggle"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "nativeSecondaryDisplayKeyboardConsume"
+        }
+      ],
+      "existingTestReferences": [],
+      "testReferenceMeaning": "Navigation only; use current enabled-scope planner and original dependency triggers to choose execution."
+    }
+  ],
+  "workflows": [
+    {
+      "id": "scope-and-current-state",
+      "question": "这类能力能继续接线吗，完成到哪里？",
+      "read": [
+        "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+        "capabilities/USER-SCOPE-DECISIONS.json",
+        "capabilities/INTEGRATION-STATUS.json",
+        "capabilities/EXECUTION-CHAINS.json"
+      ],
+      "action": "Inspect enabled scope and source-qualified acceptance; dormant/excluded metadata does not authorize wiring."
+    },
+    {
+      "id": "model-or-alias",
+      "question": "新增/修正机型身份、别名、类继承",
+      "read": [
+        "capabilities/hc-device-catalog.json",
+        "capabilities/HcDeviceCapabilityCatalog.cs",
+        "capabilities/hc-device-catalog.generated.h",
+        "tools/hc_capability_catalog_generate.mjs"
+      ],
+      "action": "Trace frozen source and binary metadata separately; regenerate derived identities rather than adding UI-local model tables."
+    },
+    {
+      "id": "runtime-consumption",
+      "question": "功能已登记但没效果，谁实际执行？",
+      "read": [
+        "capabilities/EXECUTION-CHAINS.json",
+        "capabilities/CONTROLLER-CONSUMPTION.json"
+      ],
+      "action": "Find the domain consumer file+anchor; follow binding, actual writer/decoder, live admission and stop/release. Registration alone is not consumption."
+    },
+    {
+      "id": "source-upgrade",
+      "question": "HC升级后哪些既有消费需复验？",
+      "read": [
+        "tools/hc_capability_maintenance.mjs",
+        "tools/lib/hc_active_integration_scope.mjs",
+        "tools/ymcc_sim/HC-UPGRADE-REGRESSION.md"
+      ],
+      "action": "Compare candidate using the existing maintenance planner; review source/ABI/payload differences and preserve original failures. Do not execute all historical test references indiscriminately."
+    },
+    {
+      "id": "methods-and-dormant",
+      "question": "某个HC方法、初始化或副屏该归哪里？",
+      "read": [
+        "capabilities/hc-model-method-policy.json",
+        "capabilities/MODEL-METHOD-CONSUMPTION.json",
+        "capabilities/SECONDARY-DISPLAY-CONSUMPTION.json"
+      ],
+      "action": "Inspect source classification plus enabled scope; lifecycle is admitted only where required by an existing enabled consumer."
+    },
+    {
+      "id": "performance",
+      "question": "优化风扇、体感等高频调用",
+      "read": [
+        "capabilities/EXECUTION-CHAINS.json",
+        "capabilities/HcDeviceCapabilityCatalog.cs",
+        "capabilities/HcMotionCapabilityCatalog.h",
+        "capabilities/HcOemInputCapabilityBinding.h"
+      ],
+      "action": "Keep immutable binding caches, live ownership/freshness checks and equivalent processing workload. Do not add overview JSON lookups, logging or probe work per frame."
+    },
+    {
+      "id": "counts-and-reporting",
+      "question": "总能力类型、登记数量、验收数量怎么报？",
+      "read": [
+        "capabilities/OVERVIEW.md",
+        "capabilities/OVERVIEW-COUNTS.json"
+      ],
+      "action": "Read dated provenance and recompute changed source facts. Keep source classes, methods, routes, recipes and software test IDs as different units."
+    }
+  ],
+  "tools": [
+    {
+      "path": "tools/hc_capability_maintenance.mjs",
+      "purpose": "只读引用检查与已启用范围的升级计划",
+      "runsProduct": false,
+      "buildsExtractor": false,
+      "changesGeneratedFiles": false
+    },
+    {
+      "path": "tools/hc_capability_catalog_generate.mjs",
+      "purpose": "机型与域表生成或--check一致性；可能涉及本目录以外的生成输出",
+      "runsProduct": false,
+      "buildsExtractor": true,
+      "changesGeneratedFiles": "only-without---check"
+    },
+    {
+      "path": "tools/hc_model_method_consumption.mjs",
+      "purpose": "方法声明的Roslyn提取/分类；--check比对现有registry",
+      "runsProduct": false,
+      "buildsExtractor": true,
+      "changesGeneratedFiles": false
+    },
+    {
+      "path": "tools/verify-unified-capability-catalog.ps1",
+      "purpose": "现有标准生成一致性与维护引用门；证据放源码树外",
+      "runsProduct": false,
+      "buildsExtractor": true,
+      "changesGeneratedFiles": false
+    }
+  ],
+  "maintenanceRules": [
+    "Do not add AI-INDEX/OVERVIEW reads to runtime dispatch.",
+    "Do not hand-edit generated code or the generated catalog/method metadata.",
+    "Keep existing product responsibilities, shared-file ownership and physical/deployment authorization.",
+    "Source comments change source byte identity; retain prior receipts as their original evidence, not a new current-primary acceptance."
+  ]
+}

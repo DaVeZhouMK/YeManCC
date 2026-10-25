@@ -1,5 +1,5 @@
 import { isGyroPresetKey, gyroMotionParamsForPreset } from './gyroPresetModel';
-import { compareAndSwapInputSettings, loadSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
+import { compareAndSwapInputSettings, loadSettings, mergeSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
 import { subscribePolicyGameStatus, getPolicyGame, gamePolicyKey, isPolicyGameInitialized } from '@/bridge/gamePolicyTarget';
 import { invoke } from '@/bridge/ipc';
 import { registerScheduledTask } from '@/scheduler';
@@ -47,7 +47,7 @@ export function buildGameInputOverlay(input: InputSettingsSnapshot, profile: Gam
   const gyro = isGyroOverride(profile.gyroOverride) ? profile.gyroOverride : 'follow';
   if (pad === 'follow' && gyro === 'follow') return null;
   const target = structuredClone(input.outputTarget || {});
-  const motion = structuredClone(input.gyroMotion || {});
+  const motion = mergeSettings(structuredClone(input.gyroMotion || {}), gyro === 'follow' ? {} : profile.inputOverrides?.gyroMotion || {});
   if (pad !== 'follow') {
     target.persona = pad;
     target.buttonMappingEnabled = pad !== 'disabled';
@@ -57,7 +57,7 @@ export function buildGameInputOverlay(input: InputSettingsSnapshot, profile: Gam
   if (disabled || gyro === 'off') { target.gyroEnabled = false; motion.enabled = false; }
   else if (kind || gyro === 'on') { target.gyroEnabled = true; motion.enabled = true; motion.outputMode = 'virtual-stick'; }
   if (kind && !disabled) {
-    Object.assign(motion, gyroMotionParamsForPreset(kind, input.gyroMotion?.presets));
+    Object.assign(motion, gyroMotionParamsForPreset(kind, motion.presets));
     motion.enabled = true; motion.preset = kind; motion.activePreset = kind; motion.outputMode = 'virtual-stick';
   }
   return { identity, sessionId, outputTarget: target, gyroMotion: motion };
@@ -105,7 +105,7 @@ async function evaluate(): Promise<void> {
       const latestConfig = await loadGameCustomConfig();
       const game = getPolicyGame();
       const key = gamePolicyKey(game);
-      const identity = game ? game.pid + ':' + game.processCreated + ':' + key : '';
+      const identity = game ? game.pid + ':' + game.processCreated + ':' + key + (game.identityGeneration ? ':' + game.identityGeneration : '') : '';
       const input = (await loadSettings()).input;
       const overlay = buildGameInputOverlay(input, latestConfig.entries[key], identity, sessionId);
       if (!active || generation !== epoch) return;

@@ -1,0 +1,23 @@
+{
+  "upstreamRepository": "hifihedgehog/HIDMaestro",
+  "tag": "v2.0.0",
+  "commit": "30b8faf0f7de746f249edc5f1520eaa0440965cf",
+  "publishedAtUtc": "2026-10-21T02:15:51Z",
+  "officialZipSha256": "9678ca1e7d2b689af99d353677403f644f9948bd0553598c953f80e4333a8479",
+  "version": "2.0.0.0",
+  "bytes": 63076352,
+  "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+  "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+  "stockUnmodified": true,
+  "embeddedProfiles": 337,
+  "embeddedUsbipVersion": "0.9.8.1",
+  "disposeFixture": {
+    "path": "tools/fixtures/hidmaestro/2.0.0/HMController.Dispose.cs",
+    "sha256": "e7bc724fb505505db5e65cc38942ccfebd25bb7936864ccfd62073ae25d47c0c",
+    "origin": "decompiled by ilspycmd 11.0.0.9375 from the exact approved official HIDMaestro.Core.dll 2.0.0.0 (SHA256 8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c, MVID 86aed9a3-c024-4596-b02c-650082ffb852); isolated pure-fake release-order tests only; not linked into product",
+    "binaryBinding": "tools/fixtures/hidmaestro/2.0.0/binary-binding.json",
+    "reviewEvidence": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\field170350-backup1018\\official-upstream\\post112-sidecar\\EXIT_BARRIER200_FACTS.json"
+  },
+  "sourceReleaseSizeBytes": 219044427,
+  "previousSdkBackup": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\field170350-backup1018\\official-upstream\\pre-upgrade112"
+}

@@ -12,6 +12,7 @@
 #endif
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include "process_efficiency.h"
 #include <shellapi.h>
 #include <shlobj.h>
 #include <powrprof.h>
@@ -186,7 +187,7 @@ bool targetTerminationSettled(HANDLE process) {
 
 bool spawnTargetProcess(const Options& options, const std::wstring& log) {
     std::wstring commandLine = quoteArg(options.targetPath); STARTUPINFOW si{sizeof(si)}; PROCESS_INFORMATION pi{};
-    const BOOL created = CreateProcessW(options.targetPath.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
+    const BOOL created = ymcc::processEfficiency::createProcess(options.targetPath.c_str(), commandLine.data(), nullptr, nullptr, FALSE,
         CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi);
     if (!created) {
         writeLog(log, "restart-result", "\"ok\":false,\"error\":" + std::to_string(GetLastError()));
@@ -1249,6 +1250,7 @@ int runSnapshotReadOnce() {
 }
 
 int WINAPI wWinMain(HINSTANCE, HINSTANCE, LPWSTR, int) {
+    (void)ymcc::processEfficiency::applyCurrent();
     // GP-XBOX-2 离线入口（不依赖 --pid/--event/--target；无安装、无常驻、无睡眠动作）。
     if (wcsstr(GetCommandLineW(), L"--selftest")) return runRecoveryModelSelfTest();
     if (wcsstr(GetCommandLineW(), L"--snapshot-read-once")) return runSnapshotReadOnce();

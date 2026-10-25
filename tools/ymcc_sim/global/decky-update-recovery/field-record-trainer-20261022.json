@@ -1,0 +1,17 @@
+{
+  "schema": 1,
+  "id": "decky-external-trainer-fse-20261022",
+  "date": "2026-10-22",
+  "complaint": "An independent external trainer launched from Decky appears intercepted under Xbox full screen.",
+  "routeBefore": "Decky -> background YMCC -> hidden PowerShell -> Process.Start",
+  "trialRoute": "Decky -> existing verified trainer worker -> interactive desktop view Shell -> unmodified external EXE",
+  "installedTrial": true,
+  "installedNativeOrLoaderChanged": false,
+  "newExecutableFiles": 0,
+  "desktopExternalProcessStartVerified": true,
+  "singletonNoDuplicateVerified": true,
+  "foregroundGuaranteed": false,
+  "actualXboxFseAcceptance": false,
+  "observedForegroundDenied": "Actual independent GUI EXE visible and running; foreground can remain Steam. Report code trainer-window-unconfirmed; do not claim success or relaunch.",
+  "simulationBoundary": "Actual Start-TrainerLaunchPlan/Invoke-TrainerShellPlan and structured receipt run with inert process/Shell observation for 11 cases plus a swallowed-uncertainty negative. No fixture can stand in for real Xbox FSE."
+}

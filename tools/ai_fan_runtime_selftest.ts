@@ -42,6 +42,7 @@ async function invoke(cmd:string,a:Record<string,any>){
  case 'app.fanActivity':return {schemaVersion:1,active:false,recoverable:false,revision:0,curve:[]};
  case 'fs.exists':return fs.existsSync(localPath(a.path));
  case 'fs.mkdir':await fsp.mkdir(localPath(a.path),{recursive:true});return true;
+ case 'fs.readTextRange':{reads++;const b=await fsp.readFile(localPath(a.path));const offset=Math.min(b.length,Number(a.offset??0));return {content:b.subarray(offset,offset+Number(a.maxBytes)).toString('utf8'),offset,size:b.length};}
  case 'fs.readTextFile':{reads++;const b=await fsp.readFile(localPath(a.path));if(b.length>a.maxBytes)throw Error('TOO_LARGE');return b.toString('utf8');}
  case 'fs.writeTextFileAtomic':{writes++;const p=localPath(a.path);await fsp.mkdir(path.dirname(p),{recursive:true});await fsp.writeFile(p+'.tmp',a.content);await fsp.rename(p+'.tmp',p);return true;}
  case 'proc.findExact':assert.equal(path.resolve(a.path).toLowerCase(),hostExe.toLowerCase());return {found:ownedPid()>0,pid:ownedPid()};

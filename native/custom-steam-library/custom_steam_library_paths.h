@@ -3,6 +3,8 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <atomic>
+#include <stdexcept>
 #include <cwctype>
 #include <filesystem>
 #include <string>
@@ -67,15 +69,46 @@ inline fs::path configuredDataRoot() {
     return fs::absolute(fs::path(value));
 }
 
-inline fs::path defaultDataRoot(const fs::path& appRoot) {
-    const auto configured = configuredDataRoot();
-    if (!configured.empty()) return configured;
-
+// Probe only when choosing a fresh root. Existing data is never silently
+// abandoned after a permission/storage fault; its normal health/retry path owns
+// recovery. The file is uniquely created and deleted by its owning handle.
+inline bool canCreateDataRoot(const fs::path& root) {
+    if(root.empty()) return false;
+    std::error_code error; auto existing = root;
+    for(size_t n = 0; n < 64 && !existing.empty(); ++n) {
+        if(fs::exists(existing,error)) break;
+        if(error) return false;
+        const auto parent = existing.parent_path();
+        if(parent == existing) break;
+        existing = parent;
+    }
+    if(existing.empty() || !fs::is_directory(existing,error) || error) return false;
+    static std::atomic<unsigned long> sequence{0};
+    const auto file = existing / (L".ymcc-data-health-" + std::to_wstring(GetCurrentProcessId()) +
+        L"-" + std::to_wstring(GetTickCount64()) + L"-" + std::to_wstring(++sequence) + L".tmp");
+    const auto handle = CreateFileW(ioPath(file).c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        nullptr, CREATE_NEW, FILE_ATTRIBUTE_TEMPORARY | FILE_FLAG_DELETE_ON_CLOSE, nullptr);
+    if(handle == INVALID_HANDLE_VALUE) return false;
+    const char value = 0; DWORD written = 0;
+    const bool ok = WriteFile(handle,&value,1,&written,nullptr) && written == 1;
+    CloseHandle(handle); return ok;
+}
+inline fs::path userLibraryDataRoot() {
+    const auto needed = GetEnvironmentVariableW(L"LOCALAPPDATA",nullptr,0);
+    if(needed <= 1) return {};
+    std::wstring value(needed,L'\0');
+    const auto length = GetEnvironmentVariableW(L"LOCALAPPDATA",value.data(),needed);
+    if(!length || length >= needed) return {};
+    value.resize(length);
+    return fs::absolute(fs::path(value) / L"YeMan" / L"CustomSteamLibrary" / L"data");
+}
+// Explicit locations make single-volume/absent/blocked-drive policy testable
+// without changing any actual drive or publishing a runtime test option.
+inline fs::path selectDefaultDataRoot(const fs::path& appRoot, const fs::path& durableVolume,
+    const fs::path& dLibraryRoot, const fs::path& dLegacyRoot, const fs::path& userDataRoot) {
     std::error_code error;
-    const bool dDriveExists = fs::exists(L"D:\\", error);
+    const bool dDriveExists = fs::exists(durableVolume, error);
     error.clear();
-    const auto dLibraryRoot = fs::path(L"D:\\YeMan\\CustomSteamLibrary");
-    const auto dLegacyRoot = fs::path(L"D:\\YeMan\\Steam大屏");
     const auto localDataRoot = appRoot / L"data";
     const bool dDataExists = fs::is_directory(dLibraryRoot / L"data", error);
     error.clear();
@@ -108,19 +141,25 @@ inline fs::path defaultDataRoot(const fs::path& appRoot) {
         return dLibraryRoot / L"data";
     }
 
-    // D: is the durable location when its CustomSteamLibrary data already
-    // exists, when the old D: data can be migrated, or when no local copy is
-    // available yet. If the whole D: package was lost but appRoot\data is
-    // present, use the local copy instead of silently creating an empty D:
-    // library; the next explicit repair/migration can copy it back.
-    if (dDriveExists && (dDataExists || dLegacyExists || !localDataExists)) {
-        return fs::path(L"D:\\YeMan\\CustomSteamLibrary\\data");
+    // Retain existing selections. Do not create a second library when an
+    // established root is temporarily full, disconnected or read-only.
+    if(dDriveExists && (dDataExists || dLegacyExists || !localDataExists)) {
+        if(dDataExists) return dLibraryRoot / L"data";
+        if(!localDataExists && !userDataRoot.empty() && fs::is_directory(userDataRoot,error)) return userDataRoot;
+        if(canCreateDataRoot(dLibraryRoot / L"data")) return dLibraryRoot / L"data";
     }
-
-    // In the canonical installation this is
-    // C:\SOFT\YeMan\YeManCC\CustomSteamLibrary\data. Using appRoot keeps the package
-    // portable when the user copies it to another C: directory.
-    return appRoot / L"data";
+    if(localDataExists) return localDataRoot;
+    error.clear();
+    if(!userDataRoot.empty() && fs::is_directory(userDataRoot,error)) return userDataRoot;
+    if(canCreateDataRoot(localDataRoot)) return localDataRoot;
+    if(canCreateDataRoot(userDataRoot)) return userDataRoot;
+    throw std::runtime_error("library-data-root-unwritable");
+}
+inline fs::path defaultDataRoot(const fs::path& appRoot) {
+    const auto configured = configuredDataRoot();
+    if(!configured.empty()) return configured;
+    return selectDefaultDataRoot(appRoot,L"D:\\",L"D:\\YeMan\\CustomSteamLibrary",
+        L"D:\\YeMan\\Steam大屏",userLibraryDataRoot());
 }
 
 inline std::vector<fs::path> legacyDataRoots(const fs::path& appRoot) {

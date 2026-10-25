@@ -4,6 +4,15 @@ import { resetApplicationSettings } from '../bridge/settingsRepository';
 const FALLBACK_ID = 'yemancc-route-fallback';
 let inertRoot: HTMLElement | null = null;
 let previousInert = false;
+type RouteFallbackOwner = { node: HTMLElement; active: boolean };
+let currentFallbackOwner: RouteFallbackOwner | null = null;
+
+// One owner per rendered overlay. A removed or superseded button may still
+// receive a queued click or settle an async confirmation; it owns no effects.
+function ownsRouteFallback(owner: RouteFallbackOwner): boolean {
+  return owner.active && currentFallbackOwner === owner
+    && owner.node.isConnected && document.getElementById(FALLBACK_ID) === owner.node;
+}
 // Consume semantic actions only; never read or take ownership of controllers.
 function onFallbackAction(event: Event): void {
   const node = document.getElementById(FALLBACK_ID);
@@ -39,6 +48,9 @@ export function showRouteFallback(message: string, route = '', startupFailure = 
   }
   window.addEventListener('ipc:gamepad.ui-input', onFallbackAction, true);
   if (startupFailure) node.dataset.startupFailure = 'true';
+  if (currentFallbackOwner) currentFallbackOwner.active = false;
+  const owner: RouteFallbackOwner = { node, active: true };
+  currentFallbackOwner = owner;
   node.replaceChildren();
   const content = document.createElement('div');
   Object.assign(content.style, { maxWidth: '720px', lineHeight: '1.65' });
@@ -46,7 +58,7 @@ export function showRouteFallback(message: string, route = '', startupFailure = 
   text.textContent = `${message}${route ? `（${route}）` : ''}。原配置不会自动清空；可以重试，或手动备份后重置应用共享配置。`;
   const retry = document.createElement('button');
   retry.type = 'button'; retry.textContent = '重新加载';
-  retry.onclick = () => { retry.disabled = true; window.location.reload(); };
+  retry.onclick = () => { if (!ownsRouteFallback(owner) || retry.disabled) return; retry.disabled = true; window.location.reload(); };
   retry.setAttribute('data-gp', 'startup-retry');
   Object.assign(retry.style, { padding: '10px 20px', margin: '8px', cursor: 'pointer', font: 'inherit' });
   const recover = document.createElement('button');
@@ -60,20 +72,23 @@ export function showRouteFallback(message: string, route = '', startupFailure = 
   Object.assign(error.style, { textAlign: 'left', whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', fontSize: '13px' });
   const root = node;
   recover.onclick = async () => {
-    if (root.dataset.recoveryBusy === 'true') return;
+    if (!ownsRouteFallback(owner) || root.dataset.recoveryBusy === 'true') return;
     root.dataset.recoveryBusy = 'true'; retry.disabled = recover.disabled = true;
     try {
       const confirmed = await dialog.confirm('备份并重置应用配置',
         '共享应用设置（档位、界面、音乐等）会还原。可解析的风扇、手柄及原生专属设置保留；无法解析的原始文件也先完整备份。重置后关闭自动 TDP/CPU 档位应用。不会删除程序、媒体或模块文件。是否继续？');
+      if (!ownsRouteFallback(owner)) return;
       if (!confirmed) { status.textContent = '已取消，配置未修改。'; return; }
       status.textContent = '正在备份原配置；备份失败会取消重置……';
       const result = await resetApplicationSettings();
+      if (!ownsRouteFallback(owner)) return;
       status.textContent = `配置恢复成功，备份：${result.backups.join('；') || '原配置不存在'}。正在重新加载……`;
       window.location.reload();
     } catch (err) {
+      if (!ownsRouteFallback(owner)) return;
       status.textContent = `恢复失败：${err instanceof Error ? err.message : String(err)}。请重试；不要手动删除原配置。`;
     } finally {
-      root.dataset.recoveryBusy = 'false'; retry.disabled = recover.disabled = false;
+      if (ownsRouteFallback(owner)) { root.dataset.recoveryBusy = 'false'; retry.disabled = recover.disabled = false; }
     }
   };
   content.append(text, retry, recover, status, error);
@@ -84,6 +99,8 @@ export function showRouteFallback(message: string, route = '', startupFailure = 
 export function clearRouteFallback(): void {
   const node = document.getElementById(FALLBACK_ID);
   if (node?.dataset.startupFailure === 'true' || node?.dataset.recoveryBusy === 'true') return;
+  if (currentFallbackOwner) currentFallbackOwner.active = false;
+  currentFallbackOwner = null;
   node?.remove();
   window.removeEventListener('ipc:gamepad.ui-input', onFallbackAction, true);
   if (inertRoot) { inertRoot.inert = previousInert; inertRoot = null; }

@@ -22,6 +22,7 @@ namespace YeManFanHost;
 
 internal static class Program
 {
+    internal static bool IsSelfTestProcess { get; private set; }
     /**
      * 920 §8.0-B：区分三类证据，不互相冒充。
      * - assemblyMvid：加载进本进程的模块版本 id = **实际加载证据**；事后替换磁盘
@@ -98,6 +99,7 @@ internal static class Program
             assemblyMatchesPayload,
             // 显式声明该事件的证据范围，避免下游把磁盘哈希当成加载时哈希。
             evidenceScope = "assemblyMvid=load-time; assemblyFileSha256/payload*=startup-disk",
+            sharedDependencyBindings = YeMan.SharedRuntime.DeviceCoreSharedDependencies.Snapshot(),
         };
     }
 
@@ -115,6 +117,7 @@ internal static class Program
 
     public static async Task<int> Main(string[] args)
     {
+        YeManCC.ProcessEfficiency.ApplyCurrentProcessOnce();
         #if YEMAN_ASYNC_BOUNDARY_TEST
         // 920-v1.5 §17.1-5：故意崩溃的探针**只存在于测试专用构建**
         // （dotnet build -p:YemanAsyncBoundaryTest=true）。正式构建里这两个
@@ -135,26 +138,11 @@ internal static class Program
             ? args.Where(arg => !string.Equals(arg, "--async-boundary-strict", StringComparison.Ordinal)).ToArray()
             : args;
         var options = HostOptions.Parse(hostArgs);
+        IsSelfTestProcess = options.SelfTest;
         if (options.ShowHelp)
         {
             HostOptions.PrintHelp();
             return 0;
-        }
-
-        // FAN-936 §1：微星**只读**开机取证采样。必须处理在"取得生命周期互斥"与
-        // "自测日志隔离"**之前**：
-        //  ① 本条路径零硬件写入（只调用 HC 的只读采样，绝不调用会改变状态的 Open()），
-        //     因此不需要 owner 互斥，也不应因此拒停日常 Host；
-        //  ② 它要采集的正是"下次开机时硬件真实保留了哪些位/表"的现场，绝不能落进
-        //     自测隔离根污染生产账本。
-        // 失败不静默：异常由调用方以非零码暴露（失败也不得写成一次"成功采样"）。
-        if (options.MsiReadOnlySample)
-        {
-            using var msiProbe = new RealHcBackend(options);
-            var (msiSnapshot, msiExitCode) = msiProbe.CaptureMsiReadOnlySnapshot();
-            Console.WriteLine(JsonSerializer.Serialize(msiSnapshot, JsonDefaults.Options));
-            // 采样失败不得以 exit0 冒充成功：只有真正完成一次只读采样才返回 0。
-            return msiExitCode;
         }
 
         // 2026-09-24 裁决卡 §6-A（取证隔离）：自测 / 故障注入 / 模拟器一律落到
@@ -167,29 +155,19 @@ internal static class Program
         // can temporarily lose and recreate its listener while it still owns
         // an HC session. Keep an OS-owned lifetime handle so a second Host
         // never overlaps the first one's hardware lifecycle.
-        // §4.1（FAN-926 P2）：受控更换的**后继实例**改为有界等待（拿到互斥 = 旧实例确已退出，
-        // 那时才允许它开始 HC 操作）；其它启动保持"已有实例即退出 2"的既有语义不变。
-        // §4.1（FAN-926 P2）：后继实例等待旧实例释放互斥的有界预算（远小于 60 s 周期预算）。
-        const int SuccessorTakeoverWaitMs = 15000;
-        // D6（FAN-926R 裁决 §3）：前置停止、后继等待与接管恢复**共用同一个截止时间**。
-        // 前置实例按本周期剩余预算分配后经 `--successor-budget-ms` 传入；缺省（人工/其它启动）
-        // 保持旧常量语义。上限仍受旧常量约束，避免把余量全部花在等待上。
-        var successorWaitMs = options.SuccessorBudgetMs is int inheritedBudget and > 0
-            ? Math.Min(inheritedBudget, SuccessorTakeoverWaitMs)
-            : SuccessorTakeoverWaitMs;
+        // FAN-951: every invocation acquires the machine/process lifetime gate
+        // immediately. A neutral launcher waits; a second FanHost never does.
         // 仅沙箱：延后注入 UI-free 故障，使夹具能先通过真实 API 建立控制意图。
         const int MockUiFreeEscalationDelayMs = 8000;
-        var instance = options.SuccessorTakeover
-            ? HostInstanceLease.TryAcquireBounded(successorWaitMs)
-            : HostInstanceLease.TryAcquire();
+        var instance = HostInstanceLease.TryAcquire();
         if (instance is null)
         {
             Console.Error.WriteLine(options.SuccessorTakeover
-                ? "YeManFanHost successor takeover: the predecessor did not free the lifetime mutex within the bounded wait."
-                : "YeManFanHost is already running in this Windows session.");
+                ? "YeManFanHost successor takeover rejected: another Host still owns the machine lifetime gate."
+                : "YeManFanHost is already running, or machine ownership is unavailable.");
             return options.SuccessorTakeover ? 4 : 2;
         }
-        using var instanceScope = instance;
+        instance.HoldUntilProcessExit(); // retained even when foreground HC threads outlive Main
 
         if (options.MockZeroHardwareEvidence)
         {
@@ -206,6 +184,20 @@ internal static class Program
             Environment.SetEnvironmentVariable(HostDiagnosticLog.SelfTestLogRootEnvVar, Path.Combine(tokenDirectory, "logs"));
         }
         var diagnostics = new HostDiagnosticLog();
+        HostProcessLifetime.Initialize(diagnostics.Write, observeStopRequests: !options.SelfTest);
+        if (options.MsiReadOnlySample)
+        {
+            // Read-only probes also obey the one-process boundary and a deadline.
+            HostProcessLifetime.RequestStop("MSI-readonly-sample");
+            try
+            {
+                using var msiProbe = new RealHcBackend(options);
+                var (snapshot, code) = msiProbe.CaptureMsiReadOnlySnapshot();
+                Console.WriteLine(JsonSerializer.Serialize(snapshot, JsonDefaults.Options));
+                return code;
+            }
+            finally { HostProcessLifetime.RequestFinalization(); }
+        }
         // 仅沙箱负例构型（默认 false）：把 P-3 目标 A 的变异开关落到判定实现上（生产路径不变）。
         RealHcBackend.MockLoopStopSkipSettleForTest = options.MockLoopStopSkipSettle;
         RealHcBackend.MockLoopStopClaimVerifiedForTest = options.MockLoopStopClaimVerified;
@@ -224,7 +216,7 @@ internal static class Program
                 successorInstanceId = diagnostics.HostInstanceId,
                 proof = "lifetime-mutex-recreated-only-after-predecessor-handles-closed",
                 // D6：实际使用的等待预算 + 它是否来自前置实例的同周期剩余预算。
-                waitBudgetMs = successorWaitMs,
+                waitBudgetMs = 0, // predecessor wait was completed by the neutral launcher
                 waitBudgetSource = options.SuccessorBudgetMs is int b and > 0
                     ? $"inherited-from-predecessor-remaining-cycle;requested={b}"
                     : "legacy-default-no-inherited-budget",
@@ -262,9 +254,13 @@ internal static class Program
         using var engine = new FanHostEngine(options, diagnostics);
         if (options.SelfTest)
         {
-            var result = await FanHostSelfTest.RunAsync(engine);
-            Console.WriteLine(JsonSerializer.Serialize(result, JsonDefaults.Options));
-            return result.Ok ? 0 : 1;
+            try
+            {
+                var result = await FanHostSelfTest.RunAsync(engine);
+                Console.WriteLine(JsonSerializer.Serialize(result, JsonDefaults.Options));
+                return result.Ok ? 0 : 1;
+            }
+            finally { HostProcessLifetime.RequestFinalization(); }
         }
 
         using var host = new LocalFanHostServer(engine, options, diagnostics);
@@ -301,7 +297,8 @@ internal static class Program
             e.Cancel = true;
             host.Stop();
         };
-        AppDomain.CurrentDomain.ProcessExit += (_, _) => host.Stop();
+        // ProcessExit must not re-enter a blocked HC Close gate. Explicit stop
+        // and the exact parent watchdog own graceful recovery before final exit.
 
         try
         {
@@ -310,10 +307,12 @@ internal static class Program
         }
         catch (Exception ex)
         {
+            HostProcessLifetime.RequestFinalization();
             diagnostics.Write("host.fatal", new { error = ExceptionText(ex) });
             Console.Error.WriteLine($"YeManFanHost stopped: {ex.GetType().Name}: {ex.Message}");
             return 1;
         }
+        finally { HostProcessLifetime.RequestFinalization(); }
     }
 
     private static string ExceptionText(Exception ex) => string.Join(" -> ", Unwrap(ex).Select(e => e.GetType().Name + ": " + e.Message));
@@ -321,53 +320,6 @@ internal static class Program
     {
         for (Exception? current = ex; current is not null; current = current.InnerException) yield return current;
     }
-}
-
-/**
- * A named mutex is used only as a process-lifetime uniqueness handle.  It is
- * deliberately not acquired with WaitOne: async Main may resume on a
- * different thread, whereas the Windows object itself remains alive until
- * this process disposes its handle.  If a process crashes, Windows releases
- * the handle automatically and the next Host may start its recovery path.
- */
-internal sealed class HostInstanceLease : IDisposable
-{
-    private const string Name = "Local\\YeManFanHost-v2";
-    private readonly Mutex mutex;
-
-    private HostInstanceLease(Mutex mutex) => this.mutex = mutex;
-
-    public static HostInstanceLease? TryAcquire()
-    {
-        var candidate = new Mutex(initiallyOwned: false, Name, out var createdNew);
-        if (!createdNew)
-        {
-            candidate.Dispose();
-            return null;
-        }
-        return new HostInstanceLease(candidate);
-    }
-
-    /**
-     * §4.1（FAN-926 P2）：**有界等待**获取实例互斥——仅受控更换的后继实例使用。
-     * "能重建这个命名互斥" = 旧实例最后一个句柄已关闭 = **旧实例确已退出**；这是内核对象
-     * 生命周期给出的证据，**不是**端口空 / PID 查不到 / 超时的推断。到期仍拿不到 ⇒ null，
-     * 后继实例**不得**开始任何 HC 操作。
-     */
-    public static HostInstanceLease? TryAcquireBounded(int timeoutMs, int pollMs = 100)
-    {
-        var deadline = Environment.TickCount64 + Math.Max(0, timeoutMs);
-        while (true)
-        {
-            var candidate = new Mutex(initiallyOwned: false, Name, out var createdNew);
-            if (createdNew) return new HostInstanceLease(candidate);
-            candidate.Dispose();
-            if (Environment.TickCount64 >= deadline) return null;
-            Thread.Sleep(Math.Max(10, pollMs));
-        }
-    }
-
-    public void Dispose() => mutex.Dispose();
 }
 
 /**
@@ -1425,12 +1377,14 @@ internal sealed class HostDiagnosticLog
      */
     private static readonly HashSet<string> GateFreeFaultEvents = new(StringComparer.Ordinal)
     {
+        "oem.power-boundary", "oem.power-boundary-summary", "oem.power-hook-unavailable",
         "power.fault-locked",
         "power.awaiting-close-cleanup",
         "recovery.retry-terminal",
         // D1/D3（FAN-926R 裁决 §3·V5）：睡眠边界的**责任判定**必须常开——"是否发起默认模式
         // 恢复"与三轴分列是责任链本身，详细日志被关掉时不能整段失踪（每次睡眠一条，低频）。
         "power.suspend-preclose-release-decision",
+        "restore.close-hc-already-retired",
         "restore.release-unproven-no-live-session",
         "restore.not-applicable-no-write-history",
         // §5.1（FAN-925B）：**最小责任事件必须常开**。详细日志被显式关闭时，责任链
@@ -1438,7 +1392,20 @@ internal sealed class HostDiagnosticLog
         // 否则关闭详细日志会让整条交接与认证链在事后完全失踪。
         // 这些事件都是低频（每次进程生命周期几条），不构成日志开销。
         "host.instance-started",
+        // Initialization can fail before any control session exists.
+        "hc.initialization.failure",
+        "host.exit-forced",
         "auth.credential-loaded",
+        "open.msi-wmi-registration",
+        "enable.msi-family-fan-only",
+        "msi.firmware-mode-fan-replayed",
+        "msi.firmware-mode-fan-replay-failed",
+        "msi.firmware-mode-fan-replay-deferred",
+        "hc.fan-dispatch-failure-retired",
+        "hc.fan-dispatch-cancelled",
+        "hc-operation.write-cancelled",
+        "temperature.monitor-stale-retired",
+        "hc.timeout-returned-retired",
         "auth.rejected",
         "parent-exit-handoff.accepted",
         // §3/§5.1（FAN-926 P1）：CP-07 的**真实受理链**必须常开——受理建立/未绑定、
@@ -1475,6 +1442,8 @@ internal sealed class HostDiagnosticLog
         "recovery.control-intent-restored",
         "recovery.control-intent-unusable",
         "recovery.control-intent-read-failed",
+        "recovery.control-intent-cancel-failed",
+        "recovery.control-intent-rejected",
         "recovery.takeover-open-failed",
         "recovery.takeover-recovery-finished",
         // R1（FAN-926R 唤醒租约裁决 §3.2.9）：恢复 worker 的**临时租约**创建/撤销/保留，
@@ -1483,6 +1452,7 @@ internal sealed class HostDiagnosticLog
         "power.resume-placeholder-lease-created",
         "power.resume-placeholder-lease-revoked",
         "power.resume-placeholder-lease-kept",
+        "power.resume-intent-cancelled",
     };
 
     /**
@@ -1644,6 +1614,16 @@ internal sealed class HostDiagnosticLog
             string.Equals(enabledValue, "1", StringComparison.Ordinal);
     }
 
+    // Responsibility evidence is exempt from this flag. If its read fails,
+    // retain the fault ledger without assuming ordinary runtime logging is on.
+    // Other callers keep the original observable gate-read failure contract.
+    private bool ReadRuntimeGateForResponsibilityUnlocked()
+    {
+        try { return IsGateEnabledUnlocked(); }
+        catch (IOException) { return false; }
+        catch (UnauthorizedAccessException) { return false; }
+    }
+
     /**
      * FAN-931 P1.2：**普通成功/无变化**事件不再构造完整诊断上下文。
      * 现场实测（FAN-929B 轮转日志）：`hc-operation.begin/return`、`api.request-success`
@@ -1668,7 +1648,101 @@ internal sealed class HostDiagnosticLog
         lock (gate) return IsGateEnabledUnlocked();
     }
 
-    public void Write(string eventName, object? details = null)
+    /** FAN-991：仅在事件确实会被捕获/落盘时才执行 payload 工厂。
+     * 门关闭时不触碰 FanProfile 反射、曲线复制或 per-fan 诊断数组；
+     * self-test 捕获和免门责任事件仍完整保留原证据。 */
+    public void WriteLazy(string eventName, Func<object?> detailsFactory)
+    {
+        try
+        {
+            var gateFreeFault = GateFreeFaultEvents.Contains(eventName);
+            bool? gateEnabledHint = null;
+            if (!SelfTestCaptureEnabled)
+            {
+                lock (gate) gateEnabledHint = gateFreeFault
+                    ? ReadRuntimeGateForResponsibilityUnlocked() : IsGateEnabledUnlocked();
+                if (gateEnabledHint != true && !gateFreeFault) return;
+            }
+            WriteCore(eventName, detailsFactory(), gateEnabledHint);
+        }
+        catch { /* Diagnostics must never affect the hardware safety path. */ }
+    }
+
+    /** FAN-991：验证 lazy payload 只改变诊断对象物化时机，不改变日志门/自测捕获语义。 */
+    internal static IReadOnlyList<string> RunLazyWriteSelfTest()
+    {
+        var checks = new List<string>();
+        var root = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "fan991-lazy-log-" + Guid.NewGuid().ToString("N"));
+        var previousCapture = SelfTestCaptureEnabled;
+        try
+        {
+            SelfTestCaptureEnabled = false;
+            ResetSelfTestCapture();
+            var log = new HostDiagnosticLog(root);
+            var factoryCalls = 0;
+            object Payload()
+            {
+                factoryCalls++;
+                return new { phase = "self-test", requestedCurve = new[] { 100d, 100d } };
+            }
+
+            // 门关闭、非免门事件：工厂不能执行，也不能留下 runtime 记录。
+            log.WriteLazy("hc.fan-dispatch.begin", Payload);
+            if (factoryCalls != 0 || File.Exists(log.Path))
+                throw new InvalidOperationException(
+                    $"fan991: gate-off lazy dispatch materialized={factoryCalls} runtimeExists={File.Exists(log.Path)}");
+
+            File.WriteAllText(System.IO.Path.Combine(root, "fan-logging-enabled.flag"), "enabled");
+            log.WriteLazy("hc.fan-dispatch.begin", Payload);
+            if (factoryCalls != 1 || !File.Exists(log.Path) ||
+                !File.ReadAllText(log.Path).Contains("hc.fan-dispatch.begin", StringComparison.Ordinal))
+                throw new InvalidOperationException(
+                    $"fan991: gate-on lazy dispatch materialized={factoryCalls} runtimeExists={File.Exists(log.Path)}");
+
+            File.Delete(System.IO.Path.Combine(root, "fan-logging-enabled.flag"));
+            ResetSelfTestCapture();
+            SelfTestCaptureEnabled = true;
+            log.WriteLazy("hc.fan-dispatch.begin", Payload);
+            if (factoryCalls != 2 || !SelfTestCaptured.Any(entry => entry.Event == "hc.fan-dispatch.begin"))
+                throw new InvalidOperationException(
+                    $"fan991: self-test lazy dispatch materialized={factoryCalls} captured={SelfTestCaptured.Count}");
+
+            checks.Add("fan991-lazy-dispatch-gate-preserves-off-on-and-selftest-capture");
+        }
+        finally
+        {
+            SelfTestCaptureEnabled = previousCapture;
+            ResetSelfTestCapture();
+            try { if (Directory.Exists(root)) Directory.Delete(root, recursive: true); } catch { }
+        }
+        return checks;
+    }
+
+    // Trusted request-success shape: sample by its original fields before JSON
+    // materialization. Arbitrary diagnostic payloads keep the existing fallback.
+    private sealed record ApiRequestSuccessDetails(
+        string RequestId, string Method, string Path, string State, double DurationMs, int HttpStatus);
+
+    public void WriteApiRequestSuccess(string requestId, string method, string path, string state, double durationMs)
+    {
+        try
+        {
+            // The caller still publishes its current state before logging. Only
+            // skip this discarded detail object, never lease/snapshot work.
+            bool? gateEnabledHint = null;
+            if (!SelfTestCaptureEnabled)
+            {
+                lock (gate) gateEnabledHint = IsGateEnabledUnlocked();
+                if (gateEnabledHint != true) return;
+            }
+            WriteCore("api.request-success", new ApiRequestSuccessDetails(requestId, method, path, state, durationMs, 200), gateEnabledHint);
+        }
+        catch { /* Diagnostics must not affect a completed control request. */ }
+    }
+
+    public void Write(string eventName, object? details = null) => WriteCore(eventName, details, null);
+
+    private void WriteCore(string eventName, object? details, bool? gateEnabledHint)
     {
         try
         {
@@ -1681,15 +1755,19 @@ internal sealed class HostDiagnosticLog
             }
             lock (gate)
             {
-                var gateEnabled = IsGateEnabledUnlocked();
                 var gateFreeFault = GateFreeFaultEvents.Contains(eventName);
+                var gateEnabled = gateEnabledHint ?? (gateFreeFault
+                    ? ReadRuntimeGateForResponsibilityUnlocked() : IsGateEnabledUnlocked());
                 // 免门白名单：门关闭时也必须留下这一条；门开启时照常进 runtime 日志
                 // （同时留一份在故障账本，便于"卡死态"单独取证）。
                 if (!gateEnabled && !gateFreeFault) return;
                 // 裁决 P-4：高频幂等成功轮询降采样（仅作用于 runtime 详细日志；
                 // 免门故障账本不受影响，其余事件也不进入本判定）。
+                // Reuse the same serialized detail snapshot for sampling, evidence
+                // fields and the final record instead of reserializing the object.
+                JsonElement? detailElement = null;
                 if (gateEnabled && !gateFreeFault &&
-                    PollingSuccessDownsampleEnabled && ShouldSkipPollingSuccess(eventName, details))
+                    PollingSuccessDownsampleEnabled && ShouldSkipPollingSuccess(eventName, details, out detailElement))
                     return;
                 object? context = null;
                 // FAN-931 P1.2：例行成功事件跳过完整上下文构造（实测占这类记录约 80% 字节）。
@@ -1699,7 +1777,7 @@ internal sealed class HostDiagnosticLog
                     catch (Exception ex) { context = new { contextError = ex.GetType().Name }; }
                 }
                 var timestampUtc = DateTimeOffset.UtcNow;
-                var detailElement = details is null
+                detailElement ??= details is null
                     ? (JsonElement?)null
                     : JsonSerializer.SerializeToElement(details, JsonDefaults.Options);
                 static string Evidence(JsonElement? element, string name)
@@ -1764,7 +1842,7 @@ internal sealed class HostDiagnosticLog
                     error,
                     timeout,
                     context,
-                    details = details ?? new { },
+                    details = (object?)detailElement ?? new { },
                 };
                 var line = JsonSerializer.Serialize(record, JsonDefaults.Options) + Environment.NewLine;
                 if (gateFreeFault) File.AppendAllText(faultPath, line, Encoding.UTF8);
@@ -1779,27 +1857,39 @@ internal sealed class HostDiagnosticLog
      * 且距上次记录不足 PollingSuccessMinIntervalMs 才吞掉；首次/状态变化/超时后必记录。
      * 任何解析异常都按"不采样"处理（宁多写一条，绝不吞证据）。
      */
-    private bool ShouldSkipPollingSuccess(string eventName, object? details)
+    private bool ShouldSkipPollingSuccess(string eventName, object? details, out JsonElement? serializedDetails)
     {
+        serializedDetails = null;
         if (!string.Equals(eventName, "api.request-success", StringComparison.Ordinal)) return false;
         if (details is null) return false;
         string? endpoint = null;
         var status = "n/a";
         var state = "n/a";
-        try
+        if (details is ApiRequestSuccessDetails success && success.Path is not null &&
+            success.State is not null && double.IsFinite(success.DurationMs))
         {
-            var element = JsonSerializer.SerializeToElement(details, JsonDefaults.Options);
-            if (element.ValueKind != JsonValueKind.Object) return false;
-            if (element.TryGetProperty("path", out var pathProperty) && pathProperty.ValueKind == JsonValueKind.String)
-                endpoint = pathProperty.GetString();
-            if (element.TryGetProperty("httpStatus", out var statusProperty))
-                status = statusProperty.GetRawText();
-            if (element.TryGetProperty("state", out var stateProperty))
-                state = stateProperty.ValueKind == JsonValueKind.String
-                    ? stateProperty.GetString() ?? "n/a"
-                    : stateProperty.GetRawText();
+            endpoint = success.Path;
+            status = success.HttpStatus.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            state = success.State;
         }
-        catch { return false; }
+        else
+        {
+            try
+            {
+                var element = JsonSerializer.SerializeToElement(details, JsonDefaults.Options);
+                serializedDetails = element;
+                if (element.ValueKind != JsonValueKind.Object) return false;
+                if (element.TryGetProperty("path", out var pathProperty) && pathProperty.ValueKind == JsonValueKind.String)
+                    endpoint = pathProperty.GetString();
+                if (element.TryGetProperty("httpStatus", out var statusProperty))
+                    status = statusProperty.GetRawText();
+                if (element.TryGetProperty("state", out var stateProperty))
+                    state = stateProperty.ValueKind == JsonValueKind.String
+                        ? stateProperty.GetString() ?? "n/a"
+                        : stateProperty.GetRawText();
+            }
+            catch { return false; }
+        }
         if (endpoint is null || !PollingSuccessEndpoints.Contains(endpoint)) return false;
         var key = endpoint + "|" + status;
         var now = Environment.TickCount64;
@@ -1999,6 +2089,47 @@ internal static class FanPerfCounters
     }
 }
 
+// Per-engine JSON scratch space only. Every result is still a complete deep copy.
+// Only storage is reused; current facts are serialized again and parsed into new objects.
+internal sealed class HostStateJsonCopy
+{
+    private readonly object gate = new();
+    private readonly System.Buffers.ArrayBufferWriter<byte> buffer = new(4096);
+    private readonly Utf8JsonWriter writer;
+
+    public HostStateJsonCopy()
+    {
+        var options = JsonDefaults.Options;
+        writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+        {
+            Encoder = options.Encoder,
+            Indented = options.WriteIndented,
+            MaxDepth = options.MaxDepth == 0 ? 64 : options.MaxDepth,
+        });
+    }
+
+    public HostState Copy(HostState source)
+    {
+        lock (gate)
+        {
+            buffer.ResetWrittenCount();
+            writer.Reset(buffer);
+            try
+            {
+                JsonSerializer.Serialize(writer, source, JsonDefaults.Options);
+                writer.Flush();
+                return JsonSerializer.Deserialize<HostState>(buffer.WrittenSpan, JsonDefaults.Options)!;
+            }
+            finally
+            {
+                // A failed serialization must not poison the next manual/state read.
+                writer.Reset(buffer);
+                buffer.ResetWrittenCount();
+            }
+        }
+    }
+}
+
 internal sealed class HostState
 {
     public string State { get; set; } = "Stopped";
@@ -2118,6 +2249,7 @@ internal sealed class HostState
     public string? LastError { get; set; }
     public double? LastTemperatureC { get; set; }
     public double? CurrentDutyPercent { get; set; }
+    public FanMonitorDisplayReceipt? MonitorFan { get; set; }
     public IReadOnlyList<FanNode>? ActiveCurve { get; set; }
     public bool ApiSessionProtected { get; set; }
     public bool RecoveryReadbackRequired { get; set; }
@@ -2142,6 +2274,8 @@ internal sealed class HostState
 }
 
 internal sealed record FanNode(double TempC, double DutyPercent);
+// Not measured RPM: current YMCC target, published only after successful duty dispatch.
+internal sealed record FanMonitorDisplayReceipt(bool Enabled, double? Percent, long SampledAt, string Source = "ymcc-fan-target");
 
 /**
  * Version evidence is deliberately descriptive rather than a guessed scalar.
@@ -2281,14 +2415,14 @@ internal enum OemReleaseAction
 internal sealed partial class RealHcBackend : IDisposable
 {
     // 920 v1.15 §26.3（2026-09-21 裁决：隔离发布候选晋级）：锁定的 HC 程序集重基线到
-    // 候选 HandheldCompanion.dll（0c5132a9…，FAN-936 单一闭包：ASUS FAN-925B/S22-S23 + MSI FAN-936）。
+    // 候选 HandheldCompanion.dll（08a38660…，FAN-936 单一闭包：ASUS FAN-925B/S22-S23 + MSI FAN-936）。
     // 此处必须与发布载荷实际携带的 HC 一致
     // （PowerControl/fan-host/YeManFanHost.authorization.md 的 approvedHcSha256）。
     // FAN-927 §2.2（2026-09-27 用户批准）：这个内容哈希**不再**在每次 HC 加载时重算——
     // 完整文件校验归部署边界（安装/更新/回滚/修复），运行期只核对小"部署记录"。
     // 该常量保留为部署/修复与校验器（verify-r5v9-fan-host-payload.ps1、build-fan-host-payload.ps1）
     // 的权威锁定值，任何未获准的 HC 仍会在部署边界被拒绝。
-    private const string ExpectedHcSha256 = "0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49";
+    private const string ExpectedHcSha256 = "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583";
 
     /**
      * 920-v1.6 §18.2 的诊断覆盖保持不变：`--hc-expected-sha256` 只用于隔离/无硬件联调，
@@ -2312,7 +2446,14 @@ internal sealed partial class RealHcBackend : IDisposable
     // currently authorized write set: every mapped class may handshake and
     // report its route, while real writes remain separately authorized.
     private static readonly IReadOnlyDictionary<string, FanRoute> FanRoutes = BuildFanRoutes();
+    private static readonly YeManFanBackend.Capabilities.HcCapabilityDispatcher<FanRoute> CapabilityRoutes =
+        YeManFanBackend.Capabilities.HcDeviceCapabilityCatalog.Bind("fan", FanRoutes);
     private readonly HostOptions options;
+    // Reuse only the work identity; each invocation still reads live session state.
+    private readonly Func<bool> heartbeatVerificationWork;
+    // Cache immutable option encodings only; compare and authorize each call.
+    private readonly byte[]? writeConfirmationUtf8;
+    private readonly byte[]? writeSessionTokenUtf8;
     /**
      * HC-SLIM-01 R3 §6.2②：会话内固定的风扇写入 provider。
      * false ⇒ 现有 HC 回调路径（发布默认）；true ⇒ ASUS 曲线改由叶组件 backend 承担。
@@ -2321,6 +2462,7 @@ internal sealed partial class RealHcBackend : IDisposable
     private readonly bool useBackendFanWriter;
     /** backend ACPI 句柄是否已由本实例打开（决定 Dispose 是否归还，不得重复 Close）。 */
     private bool backendAsusAcpiOpened;
+    private YeManFanBackend.Capabilities.AsusFanCapabilitySession? backendFanCapability;
     private Assembly? assembly;
     private object? device;
     private Type? deviceType;
@@ -2329,6 +2471,21 @@ internal sealed partial class RealHcBackend : IDisposable
     private bool closed;
     private HWiNFOTemperatureMonitor? cpuTemperatureMonitor;
     private object? activeFanProfile;
+    // Temperature callbacks are serialized by hardwareGate. Reuse the small
+    // reflection argument arrays on this hot path instead of allocating a new
+    // params array for every changed sample.
+    private readonly object?[] temperatureDispatchArgs = new object?[1];
+    private readonly object?[] fanDutyDispatchArgs = new object?[1];
+    private static readonly object?[] noInvokeArguments = Array.Empty<object?>();
+    // hardwareGate-owned binding only; current values and target failures stay live.
+    private object? fanSpeedReaderProfile;
+    private Func<double>? fanSpeedReader;
+    private object? fanTemperatureWriterProfile;
+    private Action<double>? fanTemperatureWriter;
+    private object? fanDutyWriterDevice;
+    private Action<double>? fanDutyWriter;
+    private object? hcOpenMarkerDevice;
+    private Func<bool>? hcOpenMarkerReader;
     // Static curve routes such as ROG Xbox are written once and then managed
     // by firmware. Retain the points as session evidence. The ASUS release
     // boundary has an explicit HC-default readback; heartbeat still does not
@@ -2363,7 +2520,9 @@ internal sealed partial class RealHcBackend : IDisposable
     private Delegate? externalProfileDiscardedHandler;
     private string? lastExternalProfileSource;
     private long lastTemperatureTick;
+    private long temperatureHealthRevision;
     private bool temperatureStaleSignaled;
+    private int temperatureWatchdogInFlight;
     private const long TemperatureStaleTimeoutMs = 7000;
     private readonly object hardwareGate = new();
     // HC raises ProfileManager Applied/Discarded while holding its own
@@ -2374,13 +2533,56 @@ internal sealed partial class RealHcBackend : IDisposable
     private readonly ExternalProfilePendingQueue externalProfileQueue = new();
     private double? lastTemperatureC;
     private double? lastDutyPercent;
+    // Monitor consumes successful target receipts without acquiring hardwareGate.
+    // FAN-993: identity and duty are immutable; only the freshness timestamp
+    // changes on an unchanged temperature sample. Keep that timestamp atomic so
+    // the one-second health tick does not allocate a new record every time.
+    internal sealed class MonitorTarget
+    {
+        public MonitorTarget(FanDispatchOwner owner, double percent, long sampledAt)
+        {
+            Owner = owner;
+            Percent = percent;
+            sampledAt = Math.Max(0, sampledAt);
+            Volatile.Write(ref SampledAtStorage, sampledAt);
+        }
+
+        public FanDispatchOwner Owner { get; }
+        public double Percent { get; }
+        private long SampledAtStorage;
+        public long SampledAt => Volatile.Read(ref SampledAtStorage);
+        public void Refresh(long sampledAt) => Volatile.Write(ref SampledAtStorage, Math.Max(0, sampledAt));
+    }
+    private MonitorTarget? monitorTarget;
+    internal MonitorTarget? MonitorTargetForRead()
+    {
+        var value = Volatile.Read(ref monitorTarget);
+        return value is not null && IsFanDispatchOwnerCurrent(value.Owner) && !AreTemperatureWritesBlocked() ? value : null;
+    }
+    private void RefreshMonitorTarget()
+    {
+        var value = MonitorTargetForRead();
+        if (value is not null && activeFanProfile is not null && IsOpen && lastDispatchedTemperature is not null)
+            value.Refresh(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+    }
     private float? lastDispatchedTemperature;
+    private object? lastDispatchedFanProfile;
     private bool hcCoreInitialized;
+    private Assembly? hcInitializationAssembly;
+    private object? hcInitializationDevice;
+    private bool hcRuntimeConfigured, hcMotherboardCollected;
+    private bool hcDeviceInitializeReturned;
+    private bool hcDependencyResolverRegistered, hcInitializationInFlight;
+    private int hcFactoryDisposed;
     private string hcManagerFactoryLifecycle = ManagerFactoryUnknown;
     private bool managerFactoryObserved;
     private string hcDeviceManagerLifecycle = ManagerFactoryUnknown;
     private readonly Dictionary<string, string> managerStatusSnapshot = new(StringComparer.Ordinal);
     private bool hcOpenEventsInvoked = false;
+    // Raw HC callbacks can subscribe before Host finalization. A rejected
+    // publication must not replay those original subscriptions in this session.
+    private object? hcRawOpenEventsDevice;
+    private bool hcRawOpenEventsReturned;
     // Once HC has been allowed to enter Open(), recovery must remain possible
     // even if the call throws before HC reports IsOpen=true.  This flag is
     // deliberately independent from the current write authorization file.
@@ -2392,6 +2594,17 @@ internal sealed partial class RealHcBackend : IDisposable
     private bool hcOpenInvocationStarted;
     private object? sessionDeviceReference;
     private string? sessionRouteMarker;
+    // Cached route components keep the diagnostic marker string for export,
+    // while heartbeat validation compares the components without allocating a
+    // new interpolated marker on every HC session check.
+    private string? sessionRouteFactoryType;
+    private FanRouteKind? sessionRouteKind;
+    private FanRestoreStrategy sessionRouteBaselineStrategy;
+    // FanRoutes is an immutable registry. Once the production session binding
+    // is captured, reuse the exact route object on the temperature hot path;
+    // self-test route overrides still use dynamic resolution below.
+    private FanRoute? sessionRoute;
+    private bool sessionRouteBindingCaptured;
     // Set by the bounded STA caller and observed by the monitor/timer paths.
     // A timeout must be visible immediately as a no-more-temperature-writes
     // boundary, even before the original HC call returns.
@@ -2415,6 +2628,26 @@ internal sealed partial class RealHcBackend : IDisposable
     private readonly object staGate = new();
     private readonly ManualResetEventSlim staDispatcherReady = new(false);
     private Thread? staThread;
+    // Diagnostic identity only: OS thread IDs in CPU samples are not managed IDs.
+    // Capture once on the existing STA; never query the dispatcher from a sample.
+    internal sealed record HcStaThreadIdentity(uint OsThreadId, int ManagedThreadId, long CapturedAtUnixMs);
+    private HcStaThreadIdentity? staThreadIdentity;
+    internal HcStaThreadIdentity? StaThreadIdentityForDiagnostics => Volatile.Read(ref staThreadIdentity);
+
+    [System.Runtime.InteropServices.DllImport("kernel32.dll", EntryPoint = "GetCurrentThreadId", ExactSpelling = true)]
+    private static extern uint ReadCurrentOsThreadId();
+
+    internal static HcStaThreadIdentity? TryCaptureStaThreadIdentity(Func<uint> readOsThreadId)
+    {
+        try
+        {
+            var osThreadId = readOsThreadId();
+            return osThreadId == 0 ? null : new HcStaThreadIdentity(
+                osThreadId, Environment.CurrentManagedThreadId, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
+        }
+        catch { return null; } // Missing identity cannot delay or reject manual control.
+    }
+
     private Dispatcher? staDispatcher;
     private object? activeStaWorkItem;
     private bool staDispatcherStopping;
@@ -2594,6 +2827,16 @@ internal sealed partial class RealHcBackend : IDisposable
             {
                 if (generation != expectedGeneration) return false;
                 accepting = true;
+                return true;
+            }
+        }
+
+        internal bool TryInvalidateSession(long expectedGeneration)
+        {
+            lock (gate)
+            {
+                if (generation != expectedGeneration) return false;
+                InvalidateSession();
                 return true;
             }
         }
@@ -2824,6 +3067,7 @@ internal sealed partial class RealHcBackend : IDisposable
     public RealHcBackend(HostOptions options)
     {
         this.options = options;
+        heartbeatVerificationWork = () => { VerifyActiveCurveSessionCore(); return true; };
         // HC-SLIM-01 R3 §6.2②：会话内固定 provider，非法值 fail-closed（不静默回退第二 writer）。
         // 缺省（null/空）保持发布默认 "hc"，用户路径与既有行为逐字一致。
         var requested = options.FanProvider?.Trim();
@@ -2833,8 +3077,14 @@ internal sealed partial class RealHcBackend : IDisposable
             "backend" => true,
             _ => throw new ArgumentException($"Unsupported --fan-provider: {options.FanProvider}"),
         };
+        var confirmation = options.Confirmation;
+        var session = options.SessionToken;
+        writeConfirmationUtf8 = string.IsNullOrWhiteSpace(confirmation) ? null : Encoding.UTF8.GetBytes(confirmation);
+        writeSessionTokenUtf8 = string.IsNullOrWhiteSpace(session) ? null : Encoding.UTF8.GetBytes(session);
     }
-    public bool IsLoaded => assembly is not null && device is not null;
+    public bool IsLoaded => Volatile.Read(ref hcFactoryDisposed) == 0 && Volatile.Read(ref hcCoreInitialized) &&
+        assembly is not null && device is not null && ReferenceEquals(hcInitializationAssembly, assembly) &&
+        ReferenceEquals(hcInitializationDevice, device);
     public bool IsOpen { get; private set; }
     public bool OpenAttempted => openAttempted;
     public bool HcOpenInvocationStarted => hcOpenInvocationStarted;
@@ -2919,7 +3169,7 @@ internal sealed partial class RealHcBackend : IDisposable
     public string? LastExternalProfileSource => lastExternalProfileSource;
     public long ExternalProfileSessionGeneration => externalProfileQueue.CurrentGeneration;
     public bool OperationTimedOut => operationTimedOut;
-    public bool CanWrite => options.AllowHardwareWrites && IsAuthorized();
+    public bool CanWrite => IsLoaded && options.AllowHardwareWrites && IsAuthorized();
     private FanCapabilityDecision? fanCapabilityDecision;
     public bool? FanCapabilitySupported => fanCapabilityDecision?.Supported;
     public bool? FanControlCapabilityDeclared => fanCapabilityDecision?.Declared;
@@ -2964,7 +3214,9 @@ internal sealed partial class RealHcBackend : IDisposable
     // FAN-934 R2 §3-A.2：仅自测使用——把一条已审阅路线显式接给 backend，用 mock 设备驱动
     // **真实** Begin/Settle/Evaluate 生产函数（不再靠手填判定布尔值）。生产路径恒为 null。
     internal FanRoute? routeOverrideForSelfTest;
-    public FanRoute? Route => routeOverrideForSelfTest ?? ResolveRoute(FactoryType);
+    private YeManFanBackend.Capabilities.HcCapabilityTypeCache<FanRoute>? routeTypeCache;
+    public FanRoute? Route => routeOverrideForSelfTest ??
+        (routeTypeCache ??= CapabilityRoutes.CreateTypeCache()).Resolve(device?.GetType())?.Consumer;
     /**
      * HC-SLIM-01 R3 §6.2②：只有 ASUS 曲线路线在 backend provider 下改由叶组件承担写入；
      * 其它机型沿用现有 HC 回调路线（本批不迁移其它协议）。provider 选择因此与 route 绑定。
@@ -2978,9 +3230,11 @@ internal sealed partial class RealHcBackend : IDisposable
     /** HC-SLIM-01 R3 §4.2：仅自测——backend writer 是否对本路线实际生效（非 ASUS 路线恒 false）。 */
     internal bool UsesBackendFanWriterForSelfTest => UsesBackendFanWriter;
     /** 诊断用的实际写来源标签。 */
-    private string FanDispatchSource => UsesBackendFanWriter ? "backend.asus-acpi-curve" : "hc.device-callback";
+    private string FanDispatchSource => UsesBackendFanWriter ? "backend.asus-acpi-curve" : Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease ? "hc.msi-family-fan-only" : "hc.device-callback";
     /** 诊断用的实际操作名（按 Software/硬件分支给出具体 entry point）。 */
-    private string FanDispatchOperation(bool isSoftware) => !UsesBackendFanWriter
+    private string FanDispatchOperation(bool isSoftware) => Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease
+        ? isSoftware ? "HC.WriteMsiFanTableBlock/SetFanControl/SetFanFullSpeed" : "HC.ReleaseMsiFanControl"
+        : !UsesBackendFanWriter
         ? "HC.PowerProfileManager_Applied"
         : isSoftware
             ? "YeManFanBackend.AsusFanCurveWriter.ApplySoftwareCurve"
@@ -2997,12 +3251,50 @@ internal sealed partial class RealHcBackend : IDisposable
     public double? LastTemperatureC => lastTemperatureC;
     public double? LastDutyPercent => lastDutyPercent;
     public Action<Exception>? FanDispatchFailure { get; set; }
-    public Action? TemperatureMonitorStale { get; set; }
+
+    // FAN-966: immutable producer ownership. The curve reference is opaque and
+    // changes only when a new control command commits or control is retired.
+    internal readonly record struct FanDispatchOwner(long GateEpoch, long ControlCycle, object? Curve);
+    internal sealed class BoundFanDispatchFailure(Exception cause, FanDispatchOwner owner)
+        : Exception(cause.Message, cause)
+    {
+        internal Exception Cause { get; } = cause;
+        internal FanDispatchOwner Owner { get; } = owner;
+    }
+    private FanDispatchOwner CaptureFanDispatchOwner(long? admittedEpoch = null) =>
+        new(admittedEpoch ?? Volatile.Read(ref suspendGateEpoch), ControlCycleId, Volatile.Read(ref activeCurveDuties));
+    internal bool IsFanDispatchOwnerCurrent(FanDispatchOwner owner, bool allowTimeoutGateDrift = false) =>
+        owner.ControlCycle == ControlCycleId && ReferenceEquals(owner.Curve, Volatile.Read(ref activeCurveDuties))
+        && (allowTimeoutGateDrift || owner.GateEpoch == Volatile.Read(ref suspendGateEpoch));
+    private void ReportFanDispatchFailure(Exception cause, FanDispatchOwner owner)
+    {
+        Exception ex = new BoundFanDispatchFailure(cause, owner);
+        _ = Task.Run(() => FanDispatchFailure?.Invoke(ex));
+    }
+    internal sealed record TemperatureStaleSignal(FanDispatchOwner Owner, long HealthRevision);
+    public Action<TemperatureStaleSignal>? TemperatureMonitorStale { get; set; }
+    internal bool IsTemperatureStaleCurrent(TemperatureStaleSignal signal) =>
+        IsFanDispatchOwnerCurrent(signal.Owner) &&
+        signal.HealthRevision == Volatile.Read(ref temperatureHealthRevision);
     // Reports whether a bounded HC call that timed out eventually returned
     // normally or with an exception. A timeout is not itself a completion
     // acknowledgement: Close() may return after the bound and still throw.
-    public Action<bool>? TimedOutOperationReturned { get; set; }
+    internal sealed record TimedOutHcReturn(bool OperationSucceeded, FanDispatchOwner ReturnOwner);
+    public Action<TimedOutHcReturn>? TimedOutOperationReturned { get; set; }
     public Action<string, object?>? Diagnostic { get; set; }
+    /** FAN-991：高频 Fan dispatch 诊断允许把 payload 延迟到日志门确认之后。
+     * 生产 Fan 写入不依赖此回调；未设置时保持原有 eager Diagnostic 语义。 */
+    public Action<string, Func<object?>>? DiagnosticLazy { get; set; }
+
+    private void EmitDiagnostic(string eventName, Func<object?> detailsFactory)
+    {
+        if (DiagnosticLazy is { } lazy)
+        {
+            lazy(eventName, detailsFactory);
+            return;
+        }
+        if (Diagnostic is { } diagnostic) diagnostic(eventName, detailsFactory());
+    }
     private static double ToMilliseconds(long ticks) =>
         ticks <= 0 ? 0 : ticks * 1000d / Stopwatch.Frequency;
     public bool TemperatureMonitorActive => cpuTemperatureMonitor is not null;
@@ -3034,7 +3326,8 @@ internal sealed partial class RealHcBackend : IDisposable
         lastTickDurationMs = ToMilliseconds(Volatile.Read(ref powerProfileWatchdogLastDurationTicks)),
         maxTickDurationMs = ToMilliseconds(Volatile.Read(ref powerProfileWatchdogMaxDurationTicks)),
     };
-    public IReadOnlyDictionary<string, string> ManagerStatusSnapshot()
+    // This is already an owned copy, so snapshot callers can reuse it directly.
+    public Dictionary<string, string> ManagerStatusSnapshot()
     {
         var snapshot = new Dictionary<string, string>(managerStatusSnapshot, StringComparer.Ordinal)
         {
@@ -3051,6 +3344,8 @@ internal sealed partial class RealHcBackend : IDisposable
         .Select(pair => new
         {
             deviceClass = pair.Key,
+            capabilityId = YeManFanBackend.Capabilities.HcDeviceCapabilityCatalog.Find(pair.Key)!.DeviceId,
+            capabilitySourceBaseline = YeManFanBackend.Capabilities.HcDeviceCapabilityCatalog.SourceBaseline,
             routeKind = pair.Value.Kind.ToString(),
             routeDescription = pair.Value.Description,
             writeReadyByDefault = pair.Value.WriteReadyByDefault,
@@ -3086,16 +3381,7 @@ internal sealed partial class RealHcBackend : IDisposable
     internal bool TemperatureWritesBlockedForSelfTest => AreTemperatureWritesBlocked();
     internal static bool IsAclWriteUnsafeForSelfTest(FileSystemRights rights) => HasUnsafeWriteRights(rights);
 
-    private static FanRoute? ResolveRoute(string? factoryType)
-    {
-        if (string.IsNullOrWhiteSpace(factoryType)) return null;
-        if (FanRoutes.TryGetValue(factoryType, out var exact)) return exact;
-        // The matrix records class names while HC namespaces differ by vendor
-        // (for example MSI.ClawA1M and Lenovo.LegionGoSZ1). Class names are
-        // unique in the mapped set, so resolve the vendor namespace safely.
-        var className = factoryType[(factoryType.LastIndexOf('.') + 1)..];
-        return FanRoutes.FirstOrDefault(pair => pair.Key.EndsWith($".{className}", StringComparison.Ordinal)).Value;
-    }
+    private static FanRoute? ResolveRoute(string? factoryType) => CapabilityRoutes.Resolve(factoryType)?.Consumer;
 
     public RealHandshakeResult LoadAndHandshake() => OnStaBounded(LoadAndHandshakeCore);
 
@@ -3155,7 +3441,7 @@ internal sealed partial class RealHcBackend : IDisposable
         string? sampleError = null;
         object? msiState = null;
         bool? msiStateMatchesBootIdentity = null;
-        if (device is not null)
+        if (IsLoaded && device is not null)
         {
             var sampler = device.GetType()
                 .GetMethods(BindingFlags.Public | BindingFlags.Instance)
@@ -3223,6 +3509,7 @@ internal sealed partial class RealHcBackend : IDisposable
             msiStateMatchesBootIdentity,
             msiState,
             lastRelease = ReflectPublicState(device is null ? null : GetMember(device, "LastMsiFanRelease")),
+            lastMsiFamilyFanSubmission = lastMsiFamilySubmission,
         };
         // 只有真正装配成功且完成一次只读采样才算成功；其余（failed/unsupported/null-result/异常）非零。
         var sampled = (loadOutcome == "loaded" || loadOutcome == "already-loaded") && sampleOutcome == "sampled";
@@ -3393,7 +3680,61 @@ internal sealed partial class RealHcBackend : IDisposable
             null);
     }
 
+    private OneXFanDeviceLifecycle? oneXFanLifecycle;
+    private long oneXFanOpenAdmissionEpoch;
+    private bool OneXFanOpenStillCurrent(long epoch) =>
+        !operationTimedOut && Volatile.Read(ref suspendGateEpoch) == epoch
+            && Volatile.Read(ref closeWriteBlocked) == 0;
+
+    private MsiFanDeviceLifecycle? msiFanLifecycle;
+    private long msiFanOpenAdmissionEpoch;
+
     public void Open() => OnStaBounded(OpenCore);
+
+    private object? retiredDeviceReference;
+    private long retiredControlCycleId;
+    internal bool HasVerifiedRetiredDeviceWithoutNewOpen =>
+        closed && device is not null && ReferenceEquals(device, retiredDeviceReference) &&
+        !IsOpen && !hcOpenInvocationStarted && !HcCloseIsOwed &&
+        sessionDeviceReference is null && sessionRouteMarker is null &&
+        HcVirtualCloseReturned && HcManagerCleanupConfirmed;
+    internal long RetiredControlCycleId => retiredControlCycleId;
+
+    private void BeginOpenAttemptEvidence()
+    {
+        openAttempted = true;
+        hcOpenInvocationStarted = false;
+        if (!IsOpen) externalProfileQueue.BeginSession();
+        oemBaselineCaptured = false;
+        // A preparation canceled before virtual HC Open acquired no new HC
+        // resources. Keep the SAME device's verified prior retirement intact.
+        // It is never a receipt proving this Open/rebuild succeeded.
+    }
+
+    private void BeginHcOpenInvocationEvidence()
+    {
+        // A genuinely retired inherited session may yield to the next original
+        // virtual lifecycle, including a vendor-override route. Pending debt may not.
+        if (inheritedEcFanSession is { CloseReturned: true })
+        {
+            inheritedEcFanSession = null;
+            inheritedEcFanWriterDevice = null;
+            inheritedEcFanWriter = null;
+        }
+        // A new HC ownership boundary invalidates every old release/close proof,
+        // including a partially failed Open. Such a failure MUST still Close.
+        retiredDeviceReference = null;
+        closed = false;
+        oemRestoreVerified = false;
+        oemRestoreEvidence = "none";
+        oemReleaseActionKind = "not-attempted";
+        oemReleaseActionEvidence = "none";
+        oemOwnershipStatus = "unknown-no-hc-contract";
+        hcOemReleaseCallbackCompleted = false;
+        asusOemReadbackConfirmed = false;
+        HcVirtualCloseReturned = false;
+        ResetManagerLifecycle();
+    }
 
     private void OpenCore()
     {
@@ -3403,29 +3744,10 @@ internal sealed partial class RealHcBackend : IDisposable
             // establish fan prerequisites in their override, so a hand-built
             // OpenLib/ACPI subset is not an equivalent lifecycle.
             EnsureRealWriteAuthorization();
-            openAttempted = true;
-            hcOpenInvocationStarted = false;
-            if (!IsOpen)
-            {
-                // A successful Open starts a new HC device session. Invalidate
-                // any detached Applied/Discarded snapshot before HC can emit a
-                // late callback from the previous session.
-                externalProfileQueue.BeginSession();
-            }
-            // A fresh HC Open() starts a new device session. Never carry the
-            // prior session's OEM proof into a new Open/Close transaction;
-            // CaptureOemBaseline() will establish fresh route context after
-            // Open succeeds.
-            oemRestoreVerified = false;
-            oemRestoreEvidence = "none";
-            oemReleaseActionKind = "not-attempted";
-            oemReleaseActionEvidence = "none";
-            oemOwnershipStatus = "unknown-no-hc-contract";
-            hcOemReleaseCallbackCompleted = false;
-            asusOemReadbackConfirmed = false;
-            HcVirtualCloseReturned = false;
-            ResetManagerLifecycle();
-            oemBaselineCaptured = false;
+            var msiOpenGateEpoch = Volatile.Read(ref suspendGateEpoch);
+            msiFanOpenAdmissionEpoch = msiOpenGateEpoch;
+            oneXFanOpenAdmissionEpoch = msiOpenGateEpoch;
+            BeginOpenAttemptEvidence();
             try
             {
                 // Fan-only ownership deliberately does not start the full HC
@@ -3438,15 +3760,19 @@ internal sealed partial class RealHcBackend : IDisposable
                 // FAN-936 R2 section 2: observe the MSI original raw blocks before
                 // the first Open() writes the software control latch. Bounded,
                 // read-only, MSI-only; never gates other routes.
+                PrepareMsiWmiPayloadBeforeOpen();
+                PrepareMsiWmiRegistrationBeforeOpen(msiOpenGateEpoch);
                 SetHcPhase("open.pre-baseline-readonly");
                 CapturePreOpenMsiOriginalBlockSnapshot();
+                if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease && !MsiWmiOpenStillCurrent(msiOpenGateEpoch))
+                    throw new FanApiException(409, "HC_RESUME_SUPERSEDED", "微星风扇初始化已被新睡眠/关闭或超时取代，未进入设备 Open");
                 SetHcPhase("open.hc-device");
                 OpenHcDevice();
                 SetHcPhase("open.capture-baseline");
                 CaptureOemBaseline();
                 SetHcPhase(null);
                 sessionDeviceReference = device;
-                sessionRouteMarker = BuildSessionRouteMarker();
+                CaptureSessionRouteMarker();
                 closed = false;
             }
             catch
@@ -3477,7 +3803,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     openAttempted = false;
                     hcOpenInvocationStarted = false;
                     sessionDeviceReference = null;
-                    sessionRouteMarker = null;
+                    ClearSessionRouteMarker();
                 }
                 else if (!hcOpenInvocationStarted)
                 {
@@ -3485,8 +3811,11 @@ internal sealed partial class RealHcBackend : IDisposable
                     // readiness wait failed before Open()). No HC resource
                     // ownership was crossed, so this is the only path that
                     // may clear the attempt marker.
-                    ResetManagerLifecycle();
-                    hcDeviceManagerLifecycle = ManagerFactoryNotStarted;
+                    if (!HasVerifiedRetiredDeviceWithoutNewOpen)
+                    {
+                        ResetManagerLifecycle();
+                        hcDeviceManagerLifecycle = ManagerFactoryNotStarted;
+                    }
                     openAttempted = false;
                 }
                 IsOpen = false;
@@ -3607,22 +3936,36 @@ internal sealed partial class RealHcBackend : IDisposable
         }
     }
 
+    // ManagerStatus is a Flags enum. Combined names must retain active/faulted
+    // cleanup debt just like their individual flags; no allocation per token.
+    private static bool HasManagerStatusFlag(string status, string flag)
+    {
+        ReadOnlySpan<char> remaining = status.AsSpan();
+        for (;;)
+        {
+            var separator = remaining.IndexOf(',');
+            var token = separator < 0 ? remaining : remaining[..separator];
+            if (token.Trim().Equals(flag.AsSpan(), StringComparison.OrdinalIgnoreCase)) return true;
+            if (separator < 0) return false;
+            remaining = remaining[(separator + 1)..];
+        }
+    }
     private static bool IsActiveManagerStatus(string status) =>
-        status.Equals("Initializing", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Initialized", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Starting", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Started", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Running", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Active", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Busy", StringComparison.OrdinalIgnoreCase);
+        HasManagerStatusFlag(status, "Initializing") ||
+        HasManagerStatusFlag(status, "Initialized") ||
+        HasManagerStatusFlag(status, "Starting") ||
+        HasManagerStatusFlag(status, "Started") ||
+        HasManagerStatusFlag(status, "Running") ||
+        HasManagerStatusFlag(status, "Active") ||
+        HasManagerStatusFlag(status, "Busy");
 
     private static bool IsFaultedManagerStatus(string status) =>
         status.Contains("Fault", StringComparison.OrdinalIgnoreCase) ||
         status.Contains("Fail", StringComparison.OrdinalIgnoreCase) ||
         status.Contains("Error", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Halting", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Halted", StringComparison.OrdinalIgnoreCase) ||
-        status.Equals("Stopping", StringComparison.OrdinalIgnoreCase);
+        HasManagerStatusFlag(status, "Halting") ||
+        HasManagerStatusFlag(status, "Halted") ||
+        HasManagerStatusFlag(status, "Stopping");
 
     /**
      * 920-v1.4 §16.2：把「短 STA 调用」与「异步等待」分离。
@@ -3645,12 +3988,13 @@ internal sealed partial class RealHcBackend : IDisposable
         Interlocked.Increment(ref hcDeviceOpenInFlight);
         try
         {
-            var need = OnStaBounded(OpenEventsBeginCore, "open-events-begin");
+            var preparation = OnStaBounded(PrepareOpenEventsCore, "open-events-begin");
+            var need = preparation.Need;
             if (need == HcDeviceOpenNeed.WaitForDeviceInserted)
             {
                 // §17.4-A：走**生产协调骨架**（自测走同一实现）。
                 var adapter = new ReflectiveHcDeviceOpenAdapter(this);
-                var operation = new HcDeviceOpenOperation("open-events", externalProfileQueue.CurrentGeneration);
+                var operation = new HcDeviceOpenOperation("open-events", preparation.Admission.ProfileGeneration);
                 LastDeviceOpenOperation = operation;
                 var phase = CoordinateHcDeviceOpen(adapter, HcDeviceOpenTimeoutMs, operation, Diagnostic);
                 if (phase == HcDeviceOpenPhase.TimedOut)
@@ -3662,7 +4006,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     throw new InvalidOperationException(
                         $"HC_DEVICE_OPEN_REJECTED: {operation.Describe()}");
             }
-            OnStaBounded(OpenEventsFinalizeCore, "open-events-finalize");
+            OnStaBounded(() => OpenEventsFinalizeCore(preparation.Admission), "open-events-finalize");
         }
         finally
         {
@@ -3682,6 +4026,12 @@ internal sealed partial class RealHcBackend : IDisposable
      */
     private int hcDeviceOpenInFlight;
     internal bool HcDeviceOpenInFlight => Volatile.Read(ref hcDeviceOpenInFlight) > 0;
+    // FAN-994: this is a diagnostic-only probe. Fault-state runtime samples can
+    // arrive every second, so do not reflect HC IsOpen on every sample or emit
+    // the same episode repeatedly. A new boundary or a closed device clears it.
+    private const long AbandonedOpenProbeIntervalMs = 5_000;
+    private long abandonedOpenProbeNotBeforeMonoMs;
+    private int abandonedOpenEpisodeReported;
 
     /**
      * §16.2/§16.5-2：可达的**遗弃设备打开**检测（只诊断，不改变行为，也不授权）。
@@ -3691,9 +4041,26 @@ internal sealed partial class RealHcBackend : IDisposable
      */
     internal bool DetectAbandonedDeviceOpen(string source)
     {
-        if (HcDeviceOpenInFlight || hcOpenEventsInvoked) return false;
-        if (!HcDeviceIsOpen(device)) return false;
-        Diagnostic?.Invoke("hc-abandoned-device-open.detected", new { source });
+        if (HcDeviceOpenInFlight || hcOpenEventsInvoked)
+        {
+            Volatile.Write(ref abandonedOpenEpisodeReported, 0);
+            return false;
+        }
+
+        var now = Environment.TickCount64;
+        var notBefore = Volatile.Read(ref abandonedOpenProbeNotBeforeMonoMs);
+        if (notBefore != 0 && now < notBefore)
+            return Volatile.Read(ref abandonedOpenEpisodeReported) != 0;
+        Volatile.Write(ref abandonedOpenProbeNotBeforeMonoMs, now + AbandonedOpenProbeIntervalMs);
+
+        if (!HcDeviceIsOpen(device))
+        {
+            Volatile.Write(ref abandonedOpenEpisodeReported, 0);
+            return false;
+        }
+
+        if (Interlocked.Exchange(ref abandonedOpenEpisodeReported, 1) == 0)
+            Diagnostic?.Invoke("hc-abandoned-device-open.detected", new { source });
         return true;
     }
 
@@ -3705,6 +4072,37 @@ internal sealed partial class RealHcBackend : IDisposable
     }
 
     private enum HcDeviceOpenNeed { None, WaitForDeviceInserted }
+
+    private sealed record OpenEventsAdmission(object? Device, long GateEpoch, long ProfileGeneration);
+    private sealed record OpenEventsPreparation(HcDeviceOpenNeed Need, OpenEventsAdmission Admission);
+
+    private OpenEventsPreparation PrepareOpenEventsCore()
+    {
+        lock (hardwareGate)
+        {
+            var admission = new OpenEventsAdmission(device, Volatile.Read(ref suspendGateEpoch), externalProfileQueue.CurrentGeneration);
+            RequireOpenEventsAdmissionCurrent(admission, requireDeviceOpen: false);
+            return new OpenEventsPreparation(OpenEventsBeginCore(), admission);
+        }
+    }
+
+    private void RequireOpenEventsAdmissionCurrent(OpenEventsAdmission admission, bool requireDeviceOpen)
+    {
+        EnsureRealWriteAuthorization();
+        var powerSuperseded = operationTimedOut || Volatile.Read(ref closeWriteBlocked) != 0 ||
+            Volatile.Read(ref suspendGateEpoch) != admission.GateEpoch ||
+            (!requireDeviceOpen && oneXFanOpenAdmissionEpoch != admission.GateEpoch);
+        if (!ReferenceEquals(device, admission.Device) || powerSuperseded ||
+            externalProfileQueue.CurrentGeneration != admission.ProfileGeneration)
+            throw new FanApiException(409, powerSuperseded ? "HC_OPEN_EVENTS_POWER_SUPERSEDED" : "HC_OPEN_EVENTS_SUPERSEDED",
+                "HC OpenEvents preparation was superseded by a newer power/device/session boundary");
+        if (requireDeviceOpen) EnsureHcSessionReadyForControl();
+        else EnsureHcSessionReadyForOpenEvents();
+        inheritedEcFanSession?.RequireCurrent(device);
+        inheritedEcFanWriter?.RequireMetadataCurrent();
+        if (oneXFanLifecycle is not null)
+            oneXFanLifecycle.EnsureEventsReady(() => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+    }
 
     private HcDeviceOpenNeed OpenEventsBeginCore()
     {
@@ -3733,55 +4131,130 @@ internal sealed partial class RealHcBackend : IDisposable
             // ManagerFactory fields as an invented admission test: doing so runs
             // HC's whole static application graph before this native lifecycle
             // boundary. Device-specific OpenEvents behavior remains owned by HC.
-            Invoke(device!, "OpenEvents");
+            if (msiFanLifecycle is not null)
+            {
+                msiFanLifecycle.EnsureEventsReady(() => MsiWmiOpenStillCurrent(msiFanOpenAdmissionEpoch));
+                return HcDeviceOpenNeed.None;
+            }
+            if (oneXFanLifecycle is not null)
+            {
+                oneXFanLifecycle.EnsureEventsReady(() => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+                return HcDeviceOpenNeed.None;
+            }
+            if (hcRawOpenEventsDevice is not null)
+            {
+                if (!ReferenceEquals(hcRawOpenEventsDevice, device))
+                    throw new FanApiException(409, "HC_OPEN_EVENTS_SUPERSEDED", "HC 原始事件入口仍属于其他设备，须先完成原会话关闭");
+                if (!hcRawOpenEventsReturned)
+                    throw new FanApiException(409, "HC_CLOSE_PENDING", "HC 原始事件入口未正常返回，须先完成同一会话关闭后再试");
+            }
+            else
+            {
+                hcRawOpenEventsDevice = device;
+                // Record entry before invoking HC: a partial throw can already
+                // own subscriptions and must be retired by its original Close.
+                Invoke(device!, "OpenEvents");
+                hcRawOpenEventsReturned = true;
+            }
             return BeginHcDeviceOpenForRestore();
         }
     }
 
-    private void OpenEventsFinalizeCore()
+    private void OpenEventsFinalizeCore(OpenEventsAdmission admission)
     {
         lock (hardwareGate)
         {
+            RequireOpenEventsAdmissionCurrent(admission, requireDeviceOpen: true);
             if (hcOpenEventsInvoked) return;
-            ObserveManagerFactoryLifecycle();
-            SubscribeExternalProfileEvents(externalProfileQueue.CurrentGeneration);
-            hcOpenEventsInvoked = true;
-            // P-3（2026-09-23 立案）：新 HC 会话开始——同一会话内的 loop stop/reopen 记账归零。
-            hcLoopStopSessionId++;
-            hcLoopStopSessionStartedTick = Environment.TickCount64;
-            hcLoopStopSessionAttempts = 0;
-            hcLoopStopSessionStops = 0;
-            hcLoopStopLastStopTick = 0;
-            // F1' (2026-09-17): the fan path only needs HC's device + power-profile
-            // managers. HC's controller-side tight loops (device HID read loop, SDL
-            // hotplug pump) have no fan function and spin once HidHide takes the
-            // built-in controller away; stop their flags as soon as the open
-            // boundary is complete (the runtime diagnostics timer re-asserts this,
-            // because a later device event can start a fresh read loop).
-            StopHcControllerCpuLoops("open-events");
+            ProfileEventRegistration? registration = null;
+            try
+            {
+                ObserveManagerFactoryLifecycle();
+                registration = SubscribeExternalProfileEvents(admission.ProfileGeneration);
+                // A power notification may arrive while handlers are attached.
+                // Revalidate this same immutable admission before publishing ready.
+                RequireOpenEventsAdmissionCurrent(admission, requireDeviceOpen: true);
+                hcOpenEventsInvoked = true;
+                // P-3（2026-09-23 立案）：新 HC 会话开始——同一会话内的 loop stop/reopen 记账归零。
+                hcLoopStopSessionId++;
+                hcLoopStopSessionStartedTick = Environment.TickCount64;
+                hcLoopStopSessionAttempts = 0;
+                hcLoopStopSessionStops = 0;
+                hcLoopStopLastStopTick = 0;
+                // F1' (2026-09-17): the fan path only needs HC's device + power-profile
+                // managers. HC's controller-side tight loops (device HID read loop, SDL
+                // hotplug pump) have no fan function and spin once HidHide takes the
+                // built-in controller away; stop their flags as soon as the open
+                // boundary is complete (the runtime diagnostics timer re-asserts this,
+                // because a later device event can start a fresh read loop).
+                StopHcControllerCpuLoops("open-events");
+            }
+            catch (Exception failure)
+            {
+                if (registration is not null)
+                {
+                    var owned = IsCurrentProfileRegistration(registration);
+                    try { RollbackProfileEventRegistration(registration); }
+                    catch (Exception cleanup) { throw new AggregateException(failure, cleanup); }
+                    finally { if (owned) hcOpenEventsInvoked = false; }
+                }
+                throw;
+            }
         }
     }
 
-    private void SubscribeExternalProfileEvents(long sessionGeneration)
+    private sealed record ProfileEventRegistration(object Manager, Delegate Applied, Delegate Discarded, long Generation);
+    private bool IsCurrentProfileRegistration(ProfileEventRegistration registration) =>
+        ReferenceEquals(subscribedPowerProfileManager, registration.Manager) &&
+        ReferenceEquals(externalProfileAppliedHandler, registration.Applied) &&
+        ReferenceEquals(externalProfileDiscardedHandler, registration.Discarded);
+
+    private void RollbackProfileEventRegistration(ProfileEventRegistration registration)
     {
-        if (subscribedPowerProfileManager is not null) return;
+        Exception? failure = null;
+        foreach (var (name, handler) in new[] { ("Applied", registration.Applied), ("Discarded", registration.Discarded) })
+        {
+            try
+            {
+                var eventInfo = registration.Manager.GetType().GetEvent(name, BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                    ?? throw new MissingMemberException(registration.Manager.GetType().FullName, name);
+                eventInfo.RemoveEventHandler(registration.Manager, handler);
+            }
+            catch (Exception error) { failure = failure is null ? error : new AggregateException(failure, error); }
+        }
+        externalProfileQueue.TryInvalidateSession(registration.Generation);
+        if (failure is not null)
+            throw new InvalidOperationException("HC_PROFILE_EVENTS_CLEANUP_PENDING: OpenEvents rollback must be retried by the existing Close owner", failure);
+        if (IsCurrentProfileRegistration(registration))
+        {
+            subscribedPowerProfileManager = null;
+            externalProfileAppliedHandler = null;
+            externalProfileDiscardedHandler = null;
+        }
+    }
+
+    private ProfileEventRegistration SubscribeExternalProfileEvents(long sessionGeneration)
+    {
+        if (subscribedPowerProfileManager is not null)
+            throw new InvalidOperationException("HC_PROFILE_EVENTS_CLEANUP_PENDING: previous event registration is still owned");
         var factory = FindType("HandheldCompanion.Managers.ManagerFactory")
             ?? throw new MissingMemberException("HandheldCompanion.Managers.ManagerFactory");
         var manager = GetStaticMember(factory, "powerProfileManager")
             ?? throw new InvalidOperationException("HC_MANAGER_FACTORY_PROFILE_UNAVAILABLE: PowerProfileManager 未构造");
         var appliedAttached = false;
         var discardedAttached = false;
+        Delegate? appliedHandler = null, discardedHandler = null;
         try
         {
             var applied = manager.GetType().GetEvent("Applied", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             var discarded = manager.GetType().GetEvent("Discarded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             if (applied?.EventHandlerType is null || discarded?.EventHandlerType is null)
                 throw new MissingMemberException(manager.GetType().FullName, "Applied/Discarded");
-            externalProfileAppliedHandler = BuildProfileEventDelegate(
+            appliedHandler = BuildProfileEventDelegate(
                 applied.EventHandlerType,
                 nameof(OnExternalProfileAppliedForSession),
                 sessionGeneration);
-            externalProfileDiscardedHandler = BuildProfileEventDelegate(
+            discardedHandler = BuildProfileEventDelegate(
                 discarded.EventHandlerType,
                 nameof(OnExternalProfileDiscardedForSession),
                 sessionGeneration);
@@ -3789,12 +4262,17 @@ internal sealed partial class RealHcBackend : IDisposable
             // Applied snapshot synchronously while a subscription is added.
             if (!externalProfileQueue.ActivateSession(sessionGeneration))
                 throw new InvalidOperationException("HC_PROFILE_EVENTS_SESSION_INVALID: OpenEvents 会话已失效");
-            applied.AddEventHandler(manager, externalProfileAppliedHandler);
+            applied.AddEventHandler(manager, appliedHandler);
             appliedAttached = true;
-            discarded.AddEventHandler(manager, externalProfileDiscardedHandler);
+            discarded.AddEventHandler(manager, discardedHandler);
             discardedAttached = true;
+            if (subscribedPowerProfileManager is not null)
+                throw new InvalidOperationException("HC_PROFILE_EVENTS_SUPERSEDED: another registration owns the current session");
             subscribedPowerProfileManager = manager;
+            externalProfileAppliedHandler = appliedHandler;
+            externalProfileDiscardedHandler = discardedHandler;
             Diagnostic?.Invoke("hc.external-profile-events-subscribed", new { manager = manager.GetType().FullName });
+            return new ProfileEventRegistration(manager, appliedHandler, discardedHandler, sessionGeneration);
         }
         catch (Exception ex)
         {
@@ -3807,19 +4285,23 @@ internal sealed partial class RealHcBackend : IDisposable
             {
                 var applied = manager.GetType().GetEvent("Applied", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
                 var discarded = manager.GetType().GetEvent("Discarded", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
-                if (appliedAttached && applied is not null && externalProfileAppliedHandler is not null)
-                    applied.RemoveEventHandler(manager, externalProfileAppliedHandler);
-                if (discardedAttached && discarded is not null && externalProfileDiscardedHandler is not null)
-                    discarded.RemoveEventHandler(manager, externalProfileDiscardedHandler);
+                if (appliedAttached && applied is not null && appliedHandler is not null)
+                    applied.RemoveEventHandler(manager, appliedHandler);
+                if (discardedAttached && discarded is not null && discardedHandler is not null)
+                    discarded.RemoveEventHandler(manager, discardedHandler);
             }
             catch (Exception cleanupError)
             {
                 Diagnostic?.Invoke("hc.external-profile-events-subscribe-cleanup-failure", new { error = DescribeException(cleanupError) });
             }
-            externalProfileQueue.InvalidateSession();
-            subscribedPowerProfileManager = null;
-            externalProfileAppliedHandler = null;
-            externalProfileDiscardedHandler = null;
+            externalProfileQueue.TryInvalidateSession(sessionGeneration);
+            if (ReferenceEquals(subscribedPowerProfileManager, manager) &&
+                ReferenceEquals(externalProfileAppliedHandler, appliedHandler) && ReferenceEquals(externalProfileDiscardedHandler, discardedHandler))
+            {
+                subscribedPowerProfileManager = null;
+                externalProfileAppliedHandler = null;
+                externalProfileDiscardedHandler = null;
+            }
             Diagnostic?.Invoke("hc.external-profile-events-subscribe-failure", new { error = DescribeException(ex) });
             throw new InvalidOperationException("HC_PROFILE_EVENTS_SUBSCRIBE_FAILED: 无法确认 PowerProfileManager 事件订阅", ex);
         }
@@ -4276,15 +4758,152 @@ internal sealed partial class RealHcBackend : IDisposable
         return ["hc-rog-device-inserted-true-dispatch"];
     }
 
+    public Func<object?>? PowerObservationContext { get; set; }
+    private long powerObservationSequence;
+    private bool powerObservationMissingReported;
+    private Assembly? powerObservationIdentityAssembly;
+    private object? powerObservationRuntimeIdentity;
+    private object StaticPowerObservationRuntimeIdentity()
+    {
+        try
+        {
+            var loaded = assembly;
+            if (powerObservationRuntimeIdentity is not null && ReferenceEquals(loaded, powerObservationIdentityAssembly))
+                return powerObservationRuntimeIdentity;
+            var sha = "not-observed";
+            if (loaded is not null)
+            {
+                try { using var file = File.OpenRead(loaded.Location); sha = Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant(); }
+                catch { sha = "disk-read-error"; }
+            }
+            var identity = new { assemblyMvid = loaded?.ManifestModule.ModuleVersionId.ToString("D") ?? "not-observed",
+                assemblyName = loaded?.GetName().Name ?? "not-observed", assemblyFileName = loaded is null ? "not-observed" : Path.GetFileName(loaded.Location),
+                diskSha256AtFirstObservation = sha, pinnedExpectedSha256 = EffectiveExpectedHcSha256,
+                evidenceScope = "loaded-MVID-plus-first-observation-disk-hash-not-loaded-byte-hash",
+                HCSourcePolicy = "locked-baseline-unmodified" };
+            powerObservationIdentityAssembly = loaded; powerObservationRuntimeIdentity = identity;
+            return identity;
+        }
+        catch { return new { status = "identity-not-observed", HCSourcePolicy = "locked-baseline-unmodified" }; }
+    }
+    private readonly object powerObservationFrequencySync = new();
+    private readonly Dictionary<string, (string Fingerprint, int Count, long FirstSeen)> powerObservationFrequency = new(StringComparer.Ordinal);
+    private sealed class SafePowerObservationScope : IDisposable
+    {
+        private readonly Action terminal;
+        private bool disposed;
+        public SafePowerObservationScope(Action terminal) => this.terminal = terminal;
+        public void Dispose() { if (disposed) return; disposed = true; try { terminal(); } catch { } }
+    }
+    // Host-owned static boundary only. The pinned HC source/DLL is never patched.
+    // Completion of this scope is NOT a leaf WMI receipt or physical-success proof.
+    private IDisposable? BeginPowerObservation(string owner, string callSite, object? profile = null)
+    {
+        try
+        {
+            object? context = null; try { context = PowerObservationContext?.Invoke(); } catch { }
+            var scopeId = $"fan:{Environment.ProcessId}:{Interlocked.Increment(ref powerObservationSequence)}";
+            var fan = profile is null ? null : GetMember(profile, "FanProfile");
+            var began = Environment.TickCount64;
+            var metadata = new { operationId = scopeId, fanScope = scopeId, owner, callSite,
+                phase = CurrentHcPhase, deviceClass = device?.GetType().FullName ?? "not-observed",
+                profileGuid = profile is null ? null : Convert.ToString(GetMember(profile, "Guid")),
+                fanMode = fan is null ? null : Convert.ToString(GetMember(fan, "fanMode")),
+                requestedCurve = (fan is null ? null : GetMember(fan, "fanSpeeds") as double[])?.Take(11).ToArray(),
+                lifecycleContext = context, hcRuntimeIdentity = StaticPowerObservationRuntimeIdentity(), hcSourcePolicy = "locked-baseline-unmodified",
+                registryScenarioOperation = "not-observed-no-new-registry-operation",
+                requestedTdp = "not-observed", oemPlReadback = "not-observed",
+                leafEvidence = "not-observed-pinned-HC-has-no-observation-hook",
+                verificationScope = "Host-invocation-boundary-only-not-leaf-WMI-or-physical-power" };
+            // Same static state in an existing repeated callback belongs in detail,
+            // not the permanent/base lane. No timer and no controller state changes.
+            var fingerprint = JsonSerializer.Serialize(new { owner, callSite, metadata.phase, metadata.deviceClass,
+                metadata.profileGuid, metadata.fanMode, metadata.requestedCurve, metadata.lifecycleContext }, JsonDefaults.Options);
+            var repeated = false; var repeatCount = 1; var firstSeen = began;
+            lock (powerObservationFrequencySync)
+            {
+                if (powerObservationFrequency.TryGetValue(callSite, out var prior) && prior.Fingerprint == fingerprint)
+                { repeated = true; repeatCount = prior.Count + 1; firstSeen = prior.FirstSeen; }
+                if (!powerObservationFrequency.ContainsKey(callSite) && powerObservationFrequency.Count >= 8)
+                    powerObservationFrequency.Remove(powerObservationFrequency.Keys.First());
+                powerObservationFrequency[callSite] = (fingerprint, repeatCount, firstSeen);
+            }
+            var boundaryEvent = repeated ? "oem.power-boundary-sample" : "oem.power-boundary";
+            if (!powerObservationMissingReported)
+            {
+                powerObservationMissingReported = true;
+                try { Diagnostic?.Invoke("oem.power-hook-unavailable", metadata); } catch { }
+            }
+            try { Diagnostic?.Invoke(boundaryEvent, new { repeatCount, state = "entered", timeWithOffset = DateTimeOffset.Now.ToString("O"), monotonicTick = began, metadata }); } catch { }
+            return new SafePowerObservationScope(() => {
+                Diagnostic?.Invoke(boundaryEvent, new {
+                    repeatCount, state = "scope-ended", timeWithOffset = DateTimeOffset.Now.ToString("O"), monotonicTick = Environment.TickCount64,
+                    durationMs = Math.Max(0, Environment.TickCount64 - began), metadata,
+                    outcome = "not-observed-use-existing-Host-result-events", leafEvidence = "not-observed" });
+                if (repeated && repeatCount % 32 == 0)
+                    Diagnostic?.Invoke("oem.power-boundary-summary", new { firstSeen, lastSeen = Environment.TickCount64,
+                        repeatCount, metadata, evidenceScope = "repeated-Host-boundaries-only-not-WMI-or-physical-success" });
+            });
+        }
+        catch { return null; }
+    }
+
     private void OpenHcDevice()
     {
+        using var powerObservation = BeginPowerObservation("FanHost.HC.Open", "OpenHcDevice");
         if (device is null)
             throw new InvalidOperationException("HC device unavailable");
+        if (inheritedEcFanSession is { CloseReturned: false } pendingEcSession)
+        {
+            pendingEcSession.RequireCurrent(device);
+            throw new InvalidOperationException("HC_INHERITED_EC_SESSION: previous EC close is still pending");
+        }
+        // For the exact inherited EC pair, observe the original virtual Open
+        // and retain its transport identity until that same Close retires it.
+        // The preflight precedes invocation evidence: a rejected foreign session
+        // acquired no resource and must not acquire a false cleanup claim.
+        if (Route?.RestoreStrategy == FanRestoreStrategy.GenericEcControl &&
+            InheritedEcFanWriter.InheritedRoot(device) is { } ecRoot)
+        {
+            OpenInheritedEcFanDevice(device, ecRoot);
+            IsOpen = true;
+            return;
+        }
         // Dispatches to the exact HC virtual override. Do not replace this
         // with a hand-built OpenLib/ACPI sequence: several device families
         // use Open() to establish their own fan and controller prerequisites.
+        BeginHcOpenInvocationEvidence();
         hcOpenInvocationStarted = true;
-        if (Invoke(device, "Open") is not bool opened || !opened)
+        if (MsiFanDeviceLifecycle.IsMsiFamily(device.GetType()))
+        {
+            try
+            {
+                msiFanLifecycle ??= new MsiFanDeviceLifecycle(device);
+                if (!msiFanLifecycle.Open(() => MsiWmiOpenStillCurrent(msiFanOpenAdmissionEpoch)))
+                    throw new InvalidOperationException("HC MSI fan transport Open returned false");
+            }
+            catch
+            {
+                // No fan write in failed preparation; retain only genuine cleanup debt.
+                hcOpenInvocationStarted = msiFanLifecycle?.HasResources == true;
+                throw;
+            }
+        }
+        else if (OneXFanDeviceLifecycle.IsFamily(device.GetType()))
+        {
+            try
+            {
+                oneXFanLifecycle ??= new OneXFanDeviceLifecycle(device);
+                if (!oneXFanLifecycle.Open(() => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch)))
+                    throw new InvalidOperationException("HC OneX fan transport Open returned false");
+            }
+            catch
+            {
+                hcOpenInvocationStarted = oneXFanLifecycle?.HasResources == true;
+                throw;
+            }
+        }
+        else if (Invoke(device, "Open") is not bool opened || !opened)
             throw new InvalidOperationException("HC device Open returned false");
         IsOpen = true;
     }
@@ -4300,6 +4919,13 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void WaitForHcDeviceReadyBeforeOpen()
     {
+        // The admitted OneX fan lifecycle initializes its own EC transport.
+        // X1 Mini IsReady probes LED HID, which is not a fan prerequisite.
+        if (device is not null && OneXFanDeviceLifecycle.IsFamily(device.GetType()))
+        {
+            RecordReadyWaitEvidence(-1, 0, 0, ready: false, skipped: "onex-fan-only-ec-readiness");
+            return;
+        }
         // This is the same readiness probe and 10-second budget used by HC's
         // MainWindow. HC logs the timeout but still lets its virtual Open()
         // decide, so the Host does exactly that instead of inventing a new
@@ -4459,9 +5085,15 @@ internal sealed partial class RealHcBackend : IDisposable
                $"outcome={GetMember(receipt, "Outcome") ?? "?"} phase={GetMember(receipt, "Phase") ?? "?"}";
     }
 
-    private static System.Reflection.MethodInfo? FindNoArgMethod(Type type, string name) =>
-        type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
+    private static System.Reflection.MethodInfo? FindNoArgMethod(Type type, string name)
+    {
+        var key = (type, name);
+        if (noArgMethodMetadata.TryGetValue(key, out var cached)) return cached.Method;
+        var method = type.GetMethods(BindingFlags.Public | BindingFlags.Instance)
             .FirstOrDefault(m => string.Equals(m.Name, name, StringComparison.Ordinal) && m.GetParameters().Length == 0);
+        noArgMethodMetadata.TryAdd(key, new NoArgMethodLookup(method));
+        return method;
+    }
 
     private static object? TryInvokeNoArg(Type type, object target, string name) =>
         FindNoArgMethod(type, name)?.Invoke(target, null);
@@ -4473,14 +5105,16 @@ internal sealed partial class RealHcBackend : IDisposable
         // open a second hardware-sensor backend: HWiNFO already owns the
         // sensor read and publishes the HWiNFO shared-memory channel for the
         // rest of YeMan.
-        cpuTemperatureMonitor = new HWiNFOTemperatureMonitor();
+        var monitor = new HWiNFOTemperatureMonitor();
+        cpuTemperatureMonitor = monitor;
         // HC publishes an event only when a matching CPU temperature changes.
         // The second callback is deliberately not a dispatch event: it marks
         // a valid, non-zero HC-equivalent sample so a steady CPU temperature
         // cannot be mistaken for a dead monitor.
         try
         {
-            cpuTemperatureMonitor.Start(OnHcCpuTemperatureChanged, OnHcCpuTemperatureSampled);
+            monitor.Start(value => OnTemperatureMonitorChanged(monitor, value),
+                () => OnTemperatureMonitorSampled(monitor));
             Diagnostic?.Invoke("temperature.monitor-started", cpuTemperatureMonitor.DiagnosticsSnapshot());
         }
         catch (Exception ex)
@@ -4496,35 +5130,87 @@ internal sealed partial class RealHcBackend : IDisposable
             cpuTemperatureMonitor = null;
             throw;
         }
-        lastTemperatureTick = Environment.TickCount64;
-        temperatureStaleSignaled = false;
+        MarkTemperatureHealthySample();
         temperatureWatchdog?.Dispose();
         temperatureWatchdog = new Timer(_ => TemperatureWatchdogTick(), null, 2000, 2000);
     }
 
     private void TemperatureWatchdogTick()
     {
-        var stale = false;
-        lock (hardwareGate)
+        // A vendor call can hold hardwareGate beyond several timer periods.
+        // Keep one waiting watchdog owner instead of queuing more blocked workers.
+        if (Interlocked.Exchange(ref temperatureWatchdogInFlight, 1) != 0) return;
+        try
         {
-            if (activeFanProfile is not null && IsOpen && !temperatureStaleSignaled &&
-                Environment.TickCount64 - lastTemperatureTick > TemperatureStaleTimeoutMs)
+            TemperatureStaleSignal? stale = null;
+            lock (hardwareGate)
             {
-                temperatureStaleSignaled = true;
-                DetachCpuTemperatureLoop();
-                stale = true;
+                if (activeFanProfile is not null && IsOpen && !AreTemperatureWritesBlocked() &&
+                    !temperatureStaleSignaled &&
+                    Environment.TickCount64 - lastTemperatureTick > TemperatureStaleTimeoutMs)
+                {
+                    // Freeze before detaching. A new curve, sleep boundary or healthy
+                    // sample can retire this notification while its engine owner waits.
+                    stale = new(CaptureFanDispatchOwner(), Volatile.Read(ref temperatureHealthRevision));
+                    temperatureStaleSignaled = true;
+                    DetachCpuTemperatureLoop();
+                }
             }
+            if (stale is { } signal)
+                _ = Task.Run(() => TemperatureMonitorStale?.Invoke(signal));
         }
-        if (stale)
-            _ = Task.Run(() => TemperatureMonitorStale?.Invoke());
+        finally { Volatile.Write(ref temperatureWatchdogInFlight, 0); }
     }
 
-    private void OnHcCpuTemperatureChanged(float? value)
+    private void OnTemperatureMonitorChanged(HWiNFOTemperatureMonitor source, float? value)
+    {
+        // FAN-997: OnHcCpuTemperatureChanged owns the hardwareGate. Keep the
+        // source identity check inside that same critical section so a detached
+        // callback cannot race Close, while avoiding a redundant re-entrant
+        // Monitor.Enter/Exit on every changed temperature sample.
+        OnHcCpuTemperatureChanged(source, value);
+    }
+
+    // Called only under hardwareGate: acquisition time survives a long HC lock wait.
+    private bool TryAcceptTemperatureSample(HWiNFOTemperatureMonitor source, out long sampledTick)
+    {
+        sampledTick = source.SampleReadTick;
+        var now = Environment.TickCount64;
+        if (ReferenceEquals(source, cpuTemperatureMonitor) && sampledTick >= 0 &&
+            now >= sampledTick && now - sampledTick <= TemperatureStaleTimeoutMs) return true;
+        source.RejectSampleDelivery();
+        return false;
+    }
+
+    private void OnTemperatureMonitorSampled(HWiNFOTemperatureMonitor source)
     {
         lock (hardwareGate)
         {
-            if (value is not null) MarkTemperatureHealthySample();
-            if (AreTemperatureWritesBlocked() || activeFanProfile is null || !IsOpen || value is null) return;
+            if (!TryAcceptTemperatureSample(source, out var sampledTick)) return;
+            MarkTemperatureHealthySampleAt(sampledTick);
+            // A steady sample still proves the monitor is healthy. Refresh the
+            // fan target only while an active HC profile can actually own it;
+            // inactive samples need no owner/gate walk.
+            if (activeFanProfile is not null && IsOpen)
+            {
+                if (ReferenceEquals(lastDispatchedFanProfile, activeFanProfile)) RefreshMonitorTarget();
+                else if (!AreTemperatureWritesBlocked()) source.RequestSampleDelivery();
+            }
+        }
+    }
+
+    private void OnHcCpuTemperatureChanged(HWiNFOTemperatureMonitor source, float? value)
+    {
+        lock (hardwareGate)
+        {
+            if (!TryAcceptTemperatureSample(source, out var sampledTick)) return;
+            if (value is not null) MarkTemperatureHealthySampleAt(sampledTick);
+            var fanProfile = activeFanProfile;
+            if (AreTemperatureWritesBlocked() || fanProfile is null || !IsOpen || value is null) return;
+            // Only capture dispatch ownership once this sample can actually
+            // reach the HC write/failure path. Inactive or blocked samples
+            // still update health above but do not need an owner snapshot.
+            var dispatchOwner = CaptureFanDispatchOwner();
             if (!IsHcSessionReadyForControl(out var sessionReason))
             {
                 // A missing HC device/HID marker is a control-session fault,
@@ -4533,26 +5219,31 @@ internal sealed partial class RealHcBackend : IDisposable
                 // single recovery owner back to FanHostEngine.
                 DetachCpuTemperatureLoop();
                 var error = new InvalidOperationException($"HC_SESSION_ROUTE_LOST: {sessionReason}");
-                _ = Task.Run(() => FanDispatchFailure?.Invoke(error));
+                ReportFanDispatchFailure(error, dispatchOwner);
                 return;
             }
             var temp = value.Value;
             // HC raises its temperature event only when the sensor changes.
             // The direct reader samples every second for watchdog health, but
             // preserves HC's dispatch behavior and avoids duplicate EC writes.
-            if (lastDispatchedTemperature == temp) return;
-            lastDispatchedTemperature = temp;
+            // A new HC profile must take effect even when its input temperature is unchanged.
+            if (lastDispatchedTemperature == temp && ReferenceEquals(lastDispatchedFanProfile, fanProfile)) return;
 
             // Exact body of HC PowerProfileManager's temperature-change
             // handler. HWiNFO supplies the sample; HC still owns the curve
             // calculation and the device callback that requests fan duty.
             try
             {
-                Invoke(activeFanProfile, "SetTemperature", temp);
-                var duty = Convert.ToDouble(Invoke(activeFanProfile, "GetFanSpeed"));
-                Invoke("SetFanDuty", duty);
+                SetFanProfileTemperature(fanProfile, temp);
+                var duty = ReadFanProfileSpeed(fanProfile);
+                if (!IsFanDispatchOwnerCurrent(dispatchOwner) || AreTemperatureWritesBlocked()) return;
+                WriteFanProfileDuty(duty);
+                lastDispatchedTemperature = temp;
+                lastDispatchedFanProfile = fanProfile;
                 lastTemperatureC = temp;
                 lastDutyPercent = duty;
+                if (double.IsFinite(duty) && duty >= 0 && duty <= 100 && IsFanDispatchOwnerCurrent(dispatchOwner) && !AreTemperatureWritesBlocked())
+                    Volatile.Write(ref monitorTarget, new MonitorTarget(dispatchOwner, duty, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()));
             }
             catch (Exception ex)
             {
@@ -4560,9 +5251,321 @@ internal sealed partial class RealHcBackend : IDisposable
                 // Detach first, then ask the engine to enter its existing
                 // restore/fault-lock path asynchronously to avoid lock inversion.
                 DetachCpuTemperatureLoop();
-                _ = Task.Run(() => FanDispatchFailure?.Invoke(ex));
+                ReportFanDispatchFailure(ex, dispatchOwner);
             }
         }
+    }
+
+
+    // This is identity evidence for the existing virtual lifecycle, not an
+    // alternate opener/closer. No transport is created, assigned or disposed here.
+    private sealed class InheritedEcFanSession
+    {
+        internal readonly object Gate;
+        private readonly object owner;
+        private readonly Func<object?> readTransport;
+        private readonly Func<bool> readOpen;
+        private object? observedTransport;
+        private bool transportRetired;
+        internal bool CloseReturned { get; private set; }
+        internal InheritedEcFanSession(object target, Type root)
+        {
+            owner = target;
+            Gate = root;
+            var field = root.GetField("openLibSys", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                ?? throw Contract("existing EC transport field missing");
+            var open = target.GetType().GetProperty("IsOpen", BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                ?? throw Contract("EC open marker missing");
+            if (open.PropertyType != typeof(bool)) throw Contract("EC open marker signature changed");
+            readTransport = Expression.Lambda<Func<object?>>(Expression.Convert(Expression.Field(null, field), typeof(object))).Compile();
+            readOpen = Expression.Lambda<Func<bool>>(Expression.Property(Expression.Constant(target, target.GetType()), open)).Compile();
+        }
+        internal void RequireFreshOpen()
+        {
+            if (readTransport() is not null || readOpen())
+                throw Contract("refusing a foreign EC session before original Open");
+        }
+        internal void CaptureOpen() => observedTransport = readTransport();
+        internal void RequireCurrent(object? current)
+        {
+            if (!ReferenceEquals(owner, current)) throw Contract("device ownership changed");
+            if (!ReferenceEquals(readTransport(), transportRetired ? null : observedTransport))
+                throw Contract("transport ownership changed; existing owned EC transport is not ready");
+        }
+        internal void ObserveCloseExit()
+        {
+            // A late Closed-event exception can follow actual transport disposal.
+            // Record only that cleanup fact; the virtual-return proof stays false.
+            if (readTransport() is null && !readOpen()) transportRetired = true;
+        }
+        internal void CompleteClose()
+        {
+            if (!transportRetired) throw Contract("HC_CLOSE_PENDING: original EC close has not retired its transport");
+            CloseReturned = true;
+        }
+        private static InvalidOperationException Contract(string detail) => new("HC_INHERITED_EC_SESSION: " + detail);
+    }
+
+    private InheritedEcFanSession? inheritedEcFanSession;
+    private void OpenInheritedEcFanDevice(object currentDevice, Type root)
+    {
+        lock (root)
+        {
+            var observation = new InheritedEcFanSession(currentDevice, root);
+            observation.RequireFreshOpen();
+            inheritedEcFanSession = observation;
+            inheritedEcFanWriterDevice = null;
+            inheritedEcFanWriter = null;
+            BeginHcOpenInvocationEvidence();
+            hcOpenInvocationStarted = true;
+            try
+            {
+                if (Invoke(currentDevice, "Open") is not bool opened || !opened)
+                    throw new InvalidOperationException("HC device Open returned false");
+            }
+            finally { observation.CaptureOpen(); }
+            inheritedEcFanWriter = InheritedEcFanWriter.Bind(currentDevice);
+            inheritedEcFanWriterDevice = currentDevice;
+        }
+    }
+
+    private void CloseObservedInheritedEcFanDevice()
+    {
+        var observation = inheritedEcFanSession;
+        if (observation is null) { Invoke(device!, "Close"); return; }
+        lock (observation.Gate)
+        {
+            observation.RequireCurrent(device);
+            inheritedEcFanWriter?.RequireMetadataCurrent();
+            try { Invoke(device!, "Close"); }
+            finally { observation.ObserveCloseExit(); }
+            observation.RequireCurrent(device);
+            observation.CompleteClose();
+        }
+    }
+
+    // The inherited HC fan setters discard ECRamDirectWriteByte's bool. Keep
+    // their exact packets/scaling while consuming that existing result. Binding
+    // is once per current device; no reflection, driver open or new poll per write.
+    private sealed class InheritedEcFanWriter
+    {
+        private readonly Func<ushort, byte, bool> write;
+        private readonly Func<bool> ready, metadataCurrent;
+        private readonly object transportGate;
+        private readonly ushort controlAddress, dutyAddress;
+        private readonly short minimum, maximum;
+
+        private InheritedEcFanWriter(object target, Type root, MethodInfo boundary)
+        {
+            transportGate = root;
+            const BindingFlags flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+            var ec = root.GetField("ECDetails", flags) ?? throw Contract("EC details missing");
+            var useOls = root.GetField("UseOpenLib", flags) ?? throw Contract("EC transport flag missing");
+            var open = target.GetType().GetProperty("IsOpen", flags) ?? throw Contract("open marker missing");
+            if (!ec.FieldType.IsValueType || useOls.FieldType != typeof(bool) || open.PropertyType != typeof(bool))
+                throw Contract("EC metadata or readiness signature changed");
+            if (boundary.DeclaringType != root || boundary.ReturnType != typeof(bool) ||
+                !boundary.GetParameters().Select(p => p.ParameterType).SequenceEqual(new[] { typeof(ushort), ec.FieldType, typeof(byte) }))
+                throw Contract("EC write boundary owner/signature changed");
+            var current = ec.GetValue(target) ?? throw Contract("EC details unavailable");
+            var library = root.GetField("openLibSys", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)
+                ?? throw Contract("existing EC transport field missing");
+            var existingTransport = library.GetValue(null) ?? throw Contract("existing owned EC transport is unavailable");
+            var targetExpression = Expression.Constant(target, target.GetType());
+            var ecExpression = Expression.Field(targetExpression, ec);
+            Expression stable = Expression.Constant(true);
+            object Read(string name, Type expected)
+            {
+                var field = ec.FieldType.GetField(name) ?? throw Contract(name + " missing");
+                if (field.FieldType != expected) throw Contract(name + " type changed");
+                var value = field.GetValue(current) ?? throw Contract(name + " unavailable");
+                stable = Expression.AndAlso(stable, Expression.Equal(Expression.Field(ecExpression, field), Expression.Constant(value, expected)));
+                return value;
+            }
+            var commandPort = (ushort)Read("AddressStatusCommandPort", typeof(ushort));
+            var dataPort = (ushort)Read("AddressDataPort", typeof(ushort));
+            controlAddress = (ushort)Read("AddressFanControl", typeof(ushort));
+            dutyAddress = (ushort)Read("AddressFanDuty", typeof(ushort));
+            minimum = (short)Read("FanValueMin", typeof(short));
+            maximum = (short)Read("FanValueMax", typeof(short));
+            if (commandPort == 0 || dataPort == 0 || controlAddress == 0 || dutyAddress == 0 ||
+                minimum < 0 || maximum > byte.MaxValue || maximum <= minimum)
+                throw Contract("inherited EC range/address is not a writable fan route");
+            var register = Expression.Parameter(typeof(ushort), "register");
+            var data = Expression.Parameter(typeof(byte), "data");
+            write = Expression.Lambda<Func<ushort, byte, bool>>(
+                Expression.Call(targetExpression, boundary, register, ecExpression, data), register, data).Compile();
+            ready = Expression.Lambda<Func<bool>>(Expression.AndAlso(Expression.AndAlso(
+                Expression.Field(targetExpression, useOls), Expression.Property(targetExpression, open)),
+                Expression.ReferenceEqual(Expression.Field(null, library), Expression.Constant(existingTransport, library.FieldType)))).Compile();
+            metadataCurrent = Expression.Lambda<Func<bool>>(stable).Compile();
+        }
+        internal static Type? InheritedRoot(object target)
+        {
+            var type = target.GetType();
+            var root = type.Assembly.GetType("HandheldCompanion.Devices.IDevice");
+            if (root is null || !root.IsInstanceOfType(target)) return null;
+            var control = type.GetMethod("SetFanControl", [typeof(bool), typeof(int)]);
+            var duty = type.GetMethod("SetFanDuty", [typeof(double)]);
+            // Vendor overrides retain their existing protocol consumers (OneX,
+            // CEii, MSI, ASUS, etc). Only the exact inherited pair is replaced.
+            if (control?.DeclaringType != root || duty?.DeclaringType != root) return null;
+            if (control.ReturnType != typeof(void) || duty.ReturnType != typeof(void))
+                throw Contract("inherited setter signature changed");
+            return root;
+        }
+        internal static InheritedEcFanWriter? Bind(object target)
+        {
+            var root = InheritedRoot(target);
+            if (root is null) return null;
+            var boundary = target.GetType().GetMethod("ECRamDirectWriteByte") ?? throw Contract("EC write boundary missing");
+            return new InheritedEcFanWriter(target, root, boundary);
+        }
+        internal void RequireMetadataCurrent()
+        {
+            if (!metadataCurrent()) throw Contract("EC fan data changed before write");
+        }
+        internal void SetControl(bool enabled, Func<bool> current) => Write(controlAddress, Convert.ToByte(enabled), current);
+        internal void SetDuty(double percent, Func<bool> current)
+        {
+            if (!double.IsFinite(percent) || percent < 0 || percent > 100)
+                throw new ArgumentOutOfRangeException(nameof(percent), "Fan duty must be finite and between 0 and 100");
+            // Same HC expression and Convert.ToByte midpoint rounding.
+            Write(dutyAddress, Convert.ToByte(percent * (maximum - minimum) / 100 + minimum), current);
+        }
+        private void Write(ushort address, byte value, Func<bool> current)
+        {
+            lock (transportGate)
+            {
+                CheckCurrent(current);
+                RequireMetadataCurrent();
+                if (!ready()) throw Contract("existing owned EC transport is not ready");
+                if (!write(address, value))
+                    throw new FanApiException(409, "FAN_CURVE_WRITE_FAILED", $"EC fan write was rejected at 0x{address:x4}; existing transport retained");
+                CheckCurrent(current);
+            }
+        }
+        private static void CheckCurrent(Func<bool> current)
+        {
+            if (!current()) throw new FanApiException(409, "FAN_WRITE_SUPERSEDED", "EC fan write was superseded");
+        }
+        private static InvalidOperationException Contract(string reason) => new("HC_INHERITED_EC_FAN_CONTRACT: " + reason);
+    }
+
+    private object? inheritedEcFanWriterDevice;
+    private InheritedEcFanWriter? inheritedEcFanWriter;
+    private InheritedEcFanWriter? GetInheritedEcFanWriter(object target)
+    {
+        // Lifecycle identity outlives temperature/profile delegate caches. A
+        // teardown must never bind a replacement transport as a new owner.
+        inheritedEcFanSession?.RequireCurrent(target);
+        if (!ReferenceEquals(inheritedEcFanWriterDevice, target))
+        {
+            inheritedEcFanWriter = InheritedEcFanWriter.Bind(target);
+            inheritedEcFanWriterDevice = target;
+        }
+        return inheritedEcFanWriter;
+    }
+    private bool InheritedEcFanWriteCurrent(object owner, long epoch)
+    {
+        if (!ReferenceEquals(device, owner) || operationTimedOut ||
+            Volatile.Read(ref suspendGateEpoch) != epoch || Volatile.Read(ref closeWriteBlocked) != 0) return false;
+        inheritedEcFanSession?.RequireCurrent(owner);
+        return true;
+    }
+
+    private void WriteFanProfileDuty(double duty)
+    {
+        var currentDevice = device ?? throw new InvalidOperationException("HC device unavailable");
+        if (oneXFanLifecycle is not null)
+        {
+            // Always precede the legacy delegate cache: void HC writers discard false.
+            oneXFanLifecycle.SetDuty(duty, () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+            return;
+        }
+        if (GetInheritedEcFanWriter(currentDevice) is { } ecWriter)
+        {
+            var epoch = oneXFanOpenAdmissionEpoch;
+            ecWriter.SetDuty(duty, () => InheritedEcFanWriteCurrent(currentDevice, epoch));
+            return;
+        }
+        var writer = ReferenceEquals(fanDutyWriterDevice, currentDevice) ? fanDutyWriter : null;
+        if (writer is not null)
+        {
+            try { writer(duty); }
+            catch (Exception error) { throw new TargetInvocationException(error); }
+            return;
+        }
+        fanDutyDispatchArgs[0] = duty;
+        Invoke(currentDevice, "SetFanDuty", fanDutyDispatchArgs);
+        if (!ReferenceEquals(fanDutyWriterDevice, currentDevice))
+        {
+            fanDutyWriterDevice = currentDevice;
+            fanDutyWriter = null;
+            if (instanceMethodMetadata.TryGetValue((currentDevice.GetType(), "SetFanDuty", 1), out var method)
+                && method.ReturnType == typeof(void)
+                && method.GetParameters()[0].ParameterType == typeof(double))
+            {
+                try { fanDutyWriter = method.CreateDelegate<Action<double>>(currentDevice); }
+                catch (Exception error) when (error is ArgumentException or MemberAccessException or NotSupportedException)
+                { /* Keep the selected HC device callback on the original fallback. */ }
+            }
+        }
+    }
+
+    private void SetFanProfileTemperature(object fanProfile, float temperature)
+    {
+        var writer = ReferenceEquals(fanTemperatureWriterProfile, fanProfile) ? fanTemperatureWriter : null;
+        if (writer is not null)
+        {
+            // The original binder widens the Single sample to HC's Double parameter.
+            try { writer(temperature); }
+            catch (Exception error) { throw new TargetInvocationException(error); }
+            return;
+        }
+        // Keep the original selected method, binder and target exception on first use.
+        temperatureDispatchArgs[0] = temperature;
+        Invoke(fanProfile, "SetTemperature", temperatureDispatchArgs);
+        if (!ReferenceEquals(fanTemperatureWriterProfile, fanProfile))
+        {
+            fanTemperatureWriterProfile = fanProfile;
+            fanTemperatureWriter = null;
+            if (instanceMethodMetadata.TryGetValue((fanProfile.GetType(), "SetTemperature", 1), out var method)
+                && method.ReturnType == typeof(void)
+                && method.GetParameters()[0].ParameterType == typeof(double))
+            {
+                try { fanTemperatureWriter = method.CreateDelegate<Action<double>>(fanProfile); }
+                catch (Exception error) when (error is ArgumentException or MemberAccessException or NotSupportedException)
+                { /* Unusual signatures retain the original Invoke fallback. */ }
+            }
+        }
+    }
+
+    private double ReadFanProfileSpeed(object fanProfile)
+    {
+        var reader = ReferenceEquals(fanSpeedReaderProfile, fanProfile) ? fanSpeedReader : null;
+        if (reader is not null)
+        {
+            try { return reader(); }
+            // Match MethodInfo.Invoke's target-failure shape; do not cache failures.
+            catch (Exception error) { throw new TargetInvocationException(error); }
+        }
+        // The first result retains the exact existing overload selection and binder.
+        // Only a successfully invoked, exact double GetFanSpeed() may be bound.
+        var duty = Convert.ToDouble(Invoke(fanProfile, "GetFanSpeed", noInvokeArguments));
+        if (!ReferenceEquals(fanSpeedReaderProfile, fanProfile))
+        {
+            fanSpeedReaderProfile = fanProfile;
+            fanSpeedReader = null;
+            if (instanceMethodMetadata.TryGetValue((fanProfile.GetType(), "GetFanSpeed", 0), out var method)
+                && method.ReturnType == typeof(double))
+            {
+                try { fanSpeedReader = method.CreateDelegate<Func<double>>(fanProfile); }
+                catch (Exception error) when (error is ArgumentException or MemberAccessException or NotSupportedException)
+                { /* An optional fast binding never changes the original Invoke fallback. */ }
+            }
+        }
+        return duty;
     }
 
     private void OnHcCpuTemperatureSampled()
@@ -4570,9 +5573,12 @@ internal sealed partial class RealHcBackend : IDisposable
         lock (hardwareGate) MarkTemperatureHealthySample();
     }
 
-    private void MarkTemperatureHealthySample()
+    private void MarkTemperatureHealthySample() => MarkTemperatureHealthySampleAt(Environment.TickCount64);
+
+    private void MarkTemperatureHealthySampleAt(long sampledTick)
     {
-        lastTemperatureTick = Environment.TickCount64;
+        Interlocked.Increment(ref temperatureHealthRevision);
+        lastTemperatureTick = Math.Max(lastTemperatureTick, sampledTick);
         temperatureStaleSignaled = false;
     }
 
@@ -4586,12 +5592,24 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void DetachCpuTemperatureLoop()
     {
+        Volatile.Write(ref monitorTarget, null);
         temperatureWatchdog?.Dispose();
         temperatureWatchdog = null;
         var monitor = cpuTemperatureMonitor;
         cpuTemperatureMonitor = null;
         activeFanProfile = null;
+        fanSpeedReaderProfile = null;
+        fanSpeedReader = null;
+        fanTemperatureWriterProfile = null;
+        fanTemperatureWriter = null;
+        fanDutyWriterDevice = null;
+        fanDutyWriter = null;
+        // inheritedEcFanWriter and its session belong to virtual Open/Close,
+        // not this temperature subscription. Keep the exact lifecycle identity.
+        hcOpenMarkerDevice = null;
+        hcOpenMarkerReader = null;
         lastDispatchedTemperature = null;
+        lastDispatchedFanProfile = null;
         if (monitor is not null)
         {
             monitor.Dispose();
@@ -4788,13 +5806,98 @@ internal sealed partial class RealHcBackend : IDisposable
      * 才承认软件控制已建立。读取失败 / 未写满 / 未 latch ⇒ fail-closed 抛 409，
      * 绝不给下游"已建立控制"的成功态。只对 `MsiHcDefaultRelease` 路线生效。
      */
+    private MsiFamilyFanSubmission? lastMsiFamilySubmission;
+    private FanNode[]? activeMsiCurveNodes;
+    private long msiFirmwareModeObservedRevision;
+    private long msiFirmwareModeSettledRevision;
+    private long msiFirmwareModeDeferredRevision;
+
+    // Known MSI mode writes are carried by the existing authenticated keepalive.
+    // This only arms the existing one-shot owner; no hardware work runs in Heartbeat.
+    internal bool NotifyMsiFirmwareModeChanged(long revision)
+    {
+        if (revision <= 0 || Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease ||
+            activeCurveDuties is null || !IsOpen || AreTemperatureWritesBlocked()) return false;
+        var previous = Volatile.Read(ref msiFirmwareModeObservedRevision);
+        while (revision > previous)
+        {
+            var observed = Interlocked.CompareExchange(ref msiFirmwareModeObservedRevision, revision, previous);
+            if (observed == previous)
+            {
+                RequestPowerProfileWatchdogTick();
+                return true;
+            }
+            previous = observed;
+        }
+        // Busy callbacks may settle out of order. An older unsubmitted replay
+        // can therefore leave its marker after a newer edge was observed.
+        // The latest pending edge consumes that obligation once; completed,
+        // ordinary duplicate and future revisions remain read-only.
+        var deferred = Volatile.Read(ref msiFirmwareModeDeferredRevision);
+        if (revision == previous && revision > Volatile.Read(ref msiFirmwareModeSettledRevision)
+            && deferred > 0 && deferred <= revision
+            && Interlocked.CompareExchange(ref msiFirmwareModeDeferredRevision, 0, deferred) == deferred)
+        {
+            RequestPowerProfileWatchdogTick();
+            return true;
+        }
+        return false;
+    }
+
+    private void ApplyMsiFamilyCurve(IReadOnlyList<FanNode> nodes, object profile, string sourceName = "Background", long? admittedGateEpoch = null)
+    {
+        var target = device ?? throw new InvalidOperationException("HC MSI device unavailable");
+        var targetAssembly = assembly;
+        lastMsiFamilySubmission = null;
+        lastUpdateSource = NormalizeUpdateSourceName(sourceName);
+        var epoch = admittedGateEpoch ?? Volatile.Read(ref suspendGateEpoch);
+        EmitDiagnostic("hc.fan-dispatch.begin", () => BuildFanDispatchEvidence(profile, lastUpdateSource));
+        try
+        {
+            _ = MsiFamilyFanCurve.Apply(nodes, new ReflectionMsiFanTransport(target),
+                // A new device/assembly owner cannot inherit an in-flight
+                // transport, even if the sleep epoch itself did not change.
+                () => ReferenceEquals(target, device) && ReferenceEquals(targetAssembly, assembly)
+                    && MsiCurveCommandStillCurrent(epoch),
+                result =>
+                {
+                    lastMsiFamilySubmission = result;
+                    Diagnostic?.Invoke("enable.msi-family-fan-only", new
+                    {
+                        factoryType = FactoryType, controlCycleId = ControlCycleId,
+                        contract = result.Contract, blocks = result.Blocks,
+                        tableStatus = result.TableStatus, softwareControlStatus = result.SoftwareControlStatus,
+                        fullSpeedStatus = result.FullSpeedStatus, fullSpeedRequested = result.FullSpeedRequested, success = result.Success,
+                        shiftWrittenByFanSubmission = false, physicalRpmConfirmed = false,
+                    });
+                });
+            EmitDiagnostic("hc.fan-dispatch.callback-returned", () => new
+            {
+                phase = "F3-controlled", source = "hc.msi-family-fan-only",
+                operation = "HC.WriteMsiFanTableBlock/SetFanControl/SetFanFullSpeed",
+                factoryType = FactoryType, callbackResult = "returned",
+                transportResult = "hc-structured", readbackMatch = lastMsiFamilySubmission?.Success,
+                physicalObservation = "not-observed",
+            });
+        }
+        catch (Exception ex)
+        {
+            EmitDiagnostic("hc.fan-dispatch.callback-failure", () => new
+            {
+                phase = "F3-controlled", source = "hc.msi-family-fan-only",
+                factoryType = FactoryType, error = DescribeException(ex), physicalObservation = "not-observed",
+            });
+            throw;
+        }
+    }
+
     private void EnsureMsiSoftwareControlEstablished(string phase)
     {
         if (Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease) return;
         var tableWrite = device is null ? null : GetMember(device, "LastMsiFanTableWrite");
         var controlWrite = device is null ? null : GetMember(device, "LastMsiFanControlWrite");
-        var tableStatus = tableWrite is null ? null : GetMember(tableWrite, "Status") as string;
-        var controlStatus = controlWrite is null ? null : GetMember(controlWrite, "Status") as string;
+        var tableStatus = lastMsiFamilySubmission?.TableStatus ?? (tableWrite is null ? null : GetMember(tableWrite, "Status") as string);
+        var controlStatus = lastMsiFamilySubmission?.SoftwareControlStatus ?? (controlWrite is null ? null : GetMember(controlWrite, "Status") as string);
         var controlOk = controlStatus is "ok" or "skipped-already-target";
         if (!string.Equals(tableStatus, "ok", StringComparison.Ordinal) || !controlOk)
         {
@@ -4845,7 +5948,7 @@ internal sealed partial class RealHcBackend : IDisposable
         catch { }
     }
 
-    private void CaptureHcProfileTemplate()
+    private void CaptureHcProfileTemplate(bool? observedPowerLineOnline = null)
     {
         if (device is null)
             throw new InvalidOperationException("HC device unavailable for profile context");
@@ -4856,6 +5959,7 @@ internal sealed partial class RealHcBackend : IDisposable
         if (candidates.Length == 0)
             throw new InvalidOperationException("HC device does not expose a power-profile context");
 
+        var online = observedPowerLineOnline ?? IsPowerLineOnline();
         object? selected = null;
         // Lenovo's HC callback uses OEMPowerMode before it applies the fan
         // table/RPM override.  Keep the firmware's current mode intact.
@@ -4870,12 +5974,12 @@ internal sealed partial class RealHcBackend : IDisposable
         // Guid.  Its default ProfileManager mapping is Balanced on battery
         // and Performance on AC; a matching live shift value has priority.
         selected ??= SelectMsiProfileByCurrentShift(candidates);
-        selected ??= SelectHcDefaultProfileForPowerLine(candidates);
+        selected ??= SelectHcDefaultProfileForPowerLine(candidates, online);
         selected ??= candidates.FirstOrDefault(candidate => Convert.ToBoolean(GetMember(candidate, "DeviceDefault") ?? false));
         selected ??= candidates[0];
 
         hcProfileTemplate = CloneHcPowerProfilePreservingFanState(selected);
-        profilePowerLineOnline = IsPowerLineOnline();
+        profilePowerLineOnline = online;
         profileSelectionSource = baselineSmartFanMode is not null
             ? "HC.OEMPowerMode"
             : baselineMsiShiftValue is not null
@@ -5006,7 +6110,8 @@ internal sealed partial class RealHcBackend : IDisposable
         // 原 1 Hz 常驻轮询是运行期唯一恒定的风扇门 CPU 成本（真机 tickCount 与秒数精确 1:1）。
         // 现在只在 enable / 外部 profile 事件到达时武装一次；AC/DC 变化由
         // ApplyCurveCore 的**写时电源档对齐**覆盖，route 丢失由写时校验覆盖。
-        powerProfileWatchdog = new Timer(_ => PowerProfileWatchdogTick(), null, Timeout.Infinite, Timeout.Infinite);
+        var replayOwner = CaptureFanDispatchOwner();
+        powerProfileWatchdog = new Timer(_ => PowerProfileWatchdogTick(replayOwner), null, Timeout.Infinite, Timeout.Infinite);
         powerProfileWatchdog.Change(0, Timeout.Infinite);
         Diagnostic?.Invoke("profile.watchdog-started", new
         {
@@ -5031,13 +6136,52 @@ internal sealed partial class RealHcBackend : IDisposable
         };
     }
 
-    private void PowerProfileWatchdogTick()
+    private void PowerProfileWatchdogTick(FanDispatchOwner? timerOwner = null)
     {
+        // Dispose may race an already queued callback. It belongs to the
+        // control lifetime that created its timer, never a replacement curve.
+        if (timerOwner is { } producer && (!IsFanDispatchOwnerCurrent(producer) || AreTemperatureWritesBlocked())) return;
         var started = Stopwatch.GetTimestamp();
         var acted = false;
         try
         {
-            acted = PowerProfileWatchdogTickCore();
+            var modeRevision = Volatile.Read(ref msiFirmwareModeObservedRevision);
+            if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease)
+            {
+                // Every MSI replay edge uses the same STA as manual/wake writes,
+                // including external profiles and power changes without a mode edge.
+                // Capture the sleep epoch before queueing, not after a later wake.
+                var admittedEpoch = Volatile.Read(ref suspendGateEpoch);
+                var dispatchOwner = timerOwner ?? CaptureFanDispatchOwner(admittedEpoch);
+                try { acted = OnStaBounded(() => PowerProfileWatchdogTickCore(admittedEpoch, dispatchOwner), "msi-mode-fan-replay"); }
+                catch (FanApiException ex) when (ex.Code == "HC_OPERATION_BUSY")
+                {
+                    // No firmware command ran. Only this explicit deferral may
+                    // be rearmed by the existing authenticated keepalive; ordinary
+                    // repeated pending/completed notifications remain read-only.
+                    if (modeRevision > Volatile.Read(ref msiFirmwareModeSettledRevision))
+                    {
+                        Interlocked.Exchange(ref msiFirmwareModeDeferredRevision, modeRevision);
+                        Diagnostic?.Invoke("msi.firmware-mode-fan-replay-deferred", new
+                        { revision = modeRevision, reason = ex.Code, submitted = false, physicalRpmConfirmed = false });
+                    }
+                    else if (externalProfileQueue.TryGetPending(out var pending) && pending is not null)
+                    {
+                        // Reuse the existing bounded profile retry; a busy
+                        // dispatcher did not submit any firmware command.
+                        RecordExternalProfileFailure(pending, ex, "sta-admission");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Interlocked.Exchange(ref msiFirmwareModeSettledRevision, modeRevision);
+                    Diagnostic?.Invoke("msi.firmware-mode-fan-replay-failed", new
+                    { revision = modeRevision, error = DescribeException(ex), physicalRpmConfirmed = false });
+                    ReportFanDispatchFailure(ex, dispatchOwner);
+                    acted = true;
+                }
+            }
+            else acted = PowerProfileWatchdogTickCore(admittedOwner: timerOwner);
         }
         finally
         {
@@ -5057,13 +6201,16 @@ internal sealed partial class RealHcBackend : IDisposable
         }
     }
 
-    private bool PowerProfileWatchdogTickCore()
+    private bool PowerProfileWatchdogTickCore(long? admittedModeEpoch = null, FanDispatchOwner? admittedOwner = null)
     {
+        var admittedGateEpoch = admittedModeEpoch ?? Volatile.Read(ref suspendGateEpoch);
+        // Preserve the producer owner captured before waiting for its STA.
+        var dispatchOwner = admittedOwner ?? CaptureFanDispatchOwner(admittedGateEpoch);
         // FAN-931 P1.5：每拍重置——只有本拍真的消费到丢弃边界才排截止点复核。
         profileWatchdogDiscardBoundaryConsumed = false;
         lock (hardwareGate)
         {
-            if (activeCurveDuties is null || !IsOpen || AreTemperatureWritesBlocked()) return false;
+            if (!IsFanDispatchOwnerCurrent(dispatchOwner) || activeCurveDuties is null || !IsOpen || AreTemperatureWritesBlocked()) return false;
             // YeMan observes the HC route marker before replaying an AC/DC or
             // external-profile update.  HC owns the actual device callback;
             // this check only prevents a stale fan-only session from issuing a
@@ -5079,7 +6226,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     reason = routeReason,
                     source = "yeman-profile-watchdog",
                 });
-                _ = Task.Run(() => FanDispatchFailure?.Invoke(routeLoss));
+                ReportFanDispatchFailure(routeLoss, dispatchOwner);
                 return true;
             }
             var online = IsPowerLineOnline();
@@ -5099,12 +6246,15 @@ internal sealed partial class RealHcBackend : IDisposable
                 externalTemplate = null;
                 externalProfileChanged = false;
             }
+            var firmwareModeRevision = Volatile.Read(ref msiFirmwareModeObservedRevision);
+            var firmwareModeChanged = Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease &&
+                firmwareModeRevision > Volatile.Read(ref msiFirmwareModeSettledRevision);
             if (profilePowerLineOnline is null)
             {
                 profilePowerLineOnline = online;
-                if (!externalProfileChanged) return false;
+                if (!externalProfileChanged && !firmwareModeChanged) return false;
             }
-            if (profilePowerLineOnline.Value == online && !externalProfileChanged) return false;
+            if (profilePowerLineOnline.Value == online && !externalProfileChanged && !firmwareModeChanged) return false;
             var previous = profilePowerLineOnline.Value;
             try
             {
@@ -5113,7 +6263,7 @@ internal sealed partial class RealHcBackend : IDisposable
                 // PowerProfileManager.ProfileManager_Applied path. Do not
                 // start HC's TDP/GPU/profile managers in this isolated Host.
                 if (profilePowerLineOnline.Value != online)
-                    CaptureHcProfileTemplate();
+                    CaptureHcProfileTemplate(online);
                 var profile = BuildPowerProfile(
                     activeCurveDuties,
                     software: true,
@@ -5121,10 +6271,22 @@ internal sealed partial class RealHcBackend : IDisposable
                 var source = externalProfileChanged
                     ? NormalizeUpdateSourceName(externalSnapshot?.Source)
                     : "Background";
-                ApplyPowerProfile(profile, source);
+                ApplyPowerProfile(profile, source, msiAdmissionEpoch: admittedGateEpoch);
                 hcProfileTemplate = profile;
                 activeFanProfile = GetMember(profile, "FanProfile");
                 profilePowerLineOnline = online;
+                if (firmwareModeChanged)
+                {
+                    Interlocked.Exchange(ref msiFirmwareModeSettledRevision, firmwareModeRevision);
+                    Diagnostic?.Invoke("msi.firmware-mode-fan-replayed", new
+                    {
+                        revision = firmwareModeRevision, source = "native.msi-shift210",
+                        controlCycleId = ControlCycleId, suspendGateEpoch = admittedGateEpoch,
+                        success = lastMsiFamilySubmission?.Success == true,
+                        fullSpeedRequested = lastMsiFamilySubmission?.FullSpeedRequested,
+                        shiftWrittenByFanReplay = false, physicalRpmConfirmed = false,
+                    });
+                }
                 if (externalSnapshot is not null)
                 {
                     if (externalProfileQueue.Complete(externalSnapshot))
@@ -5144,6 +6306,14 @@ internal sealed partial class RealHcBackend : IDisposable
             }
             catch (Exception ex)
             {
+                if (firmwareModeChanged)
+                {
+                    // One attempt per known mode revision. Existing failure recovery owns
+                    // cleanup/reopen; never create an unbounded fight with the OEM writer.
+                    Interlocked.Exchange(ref msiFirmwareModeSettledRevision, firmwareModeRevision);
+                    Diagnostic?.Invoke("msi.firmware-mode-fan-replay-failed", new
+                    { revision = firmwareModeRevision, error = DescribeException(ex), physicalRpmConfirmed = false });
+                }
                 if (externalSnapshot is not null)
                     RecordExternalProfileFailure(externalSnapshot, ex, "apply");
                 Diagnostic?.Invoke("hc.power-line-profile-failure", new
@@ -5152,7 +6322,7 @@ internal sealed partial class RealHcBackend : IDisposable
                     online,
                     error = DescribeException(ex),
                 });
-                _ = Task.Run(() => FanDispatchFailure?.Invoke(ex));
+                ReportFanDispatchFailure(ex, dispatchOwner);
             }
             return true;
         }
@@ -5178,12 +6348,11 @@ internal sealed partial class RealHcBackend : IDisposable
             : candidates.FirstOrDefault(candidate => Equals(GetMember(candidate, "Guid"), expectedGuid));
     }
 
-    private object? SelectHcDefaultProfileForPowerLine(IReadOnlyList<object> candidates)
+    private object? SelectHcDefaultProfileForPowerLine(IReadOnlyList<object> candidates, bool online)
     {
         // This is HC ProfileManager's built-in default mapping: Better
         // Performance when offline, Best Performance when online.  We only
         // use it when firmware state did not provide a stricter context.
-        var online = IsPowerLineOnline();
         var idDeviceType = FindType("HandheldCompanion.Devices.IDevice");
         if (idDeviceType is null) return null;
         var expectedGuid = GetStaticMember(idDeviceType, online ? "BestPerformanceGuid" : "BetterPerformanceGuid");
@@ -5316,9 +6485,19 @@ internal sealed partial class RealHcBackend : IDisposable
     }
 
 
-    public bool ApplyCurve(IReadOnlyList<FanNode> nodes) => OnStaBounded(() => ApplyCurveCore(nodes));
+    public bool ApplyCurve(IReadOnlyList<FanNode> nodes, long? admittedGateEpoch = null)
+    {
+        // Capture before STA queueing; a later sleep invalidates the admitted command.
+        var epoch = admittedGateEpoch ?? Volatile.Read(ref suspendGateEpoch);
+        // Only an engine-admitted control command may precede the recovery callback unlock.
+        // A fallback/takeover caller with no admission cannot write through an active sleep gate.
+        if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease &&
+            admittedGateEpoch is null && AreTemperatureWritesBlocked())
+            throw new FanApiException(409, "FAN_WRITE_SUPERSEDED", "当前睡眠写门尚未放行，拒绝未受理的曲线写入");
+        return OnStaBounded(() => ApplyCurveCore(nodes, epoch));
+    }
 
-    private bool ApplyCurveCore(IReadOnlyList<FanNode> nodes)
+    private bool ApplyCurveCore(IReadOnlyList<FanNode> nodes, long admittedGateEpoch)
     {
         lock (hardwareGate)
         {
@@ -5350,10 +6529,11 @@ internal sealed partial class RealHcBackend : IDisposable
         // 原 1 Hz watchdog 在电源线变化后重新捕获 HC 模板再套用曲线；现在只在本次写入发现
         // 电源线状态与记录不同（或记录未知）时，用**当前**状态重新捕获模板，再构建 profile。
         // 语义等价（仍是"按当前电源档的 OEM 模板建曲线"），触发者由 bridge 的 AC/DC 事件重放。
-        if (profilePowerLineOnline is null || profilePowerLineOnline.Value != IsPowerLineOnline())
+        // Selection and bookkeeping must describe this same live observation.
+        var online = IsPowerLineOnline();
+        if (profilePowerLineOnline is null || profilePowerLineOnline.Value != online)
         {
-            CaptureHcProfileTemplate();
-            profilePowerLineOnline = IsPowerLineOnline();
+            CaptureHcProfileTemplate(online);
         }
         var profile = BuildPowerProfile(duties, software: true);
         if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
@@ -5379,7 +6559,7 @@ internal sealed partial class RealHcBackend : IDisposable
         var writeScope = BeginAsusWriteScope("enable-curve");
         try
         {
-            ApplyPowerProfile(profile);
+            ApplyPowerProfile(profile, msiNodes: nodes, msiAdmissionEpoch: admittedGateEpoch);
         }
         catch (Exception)
         {
@@ -5442,6 +6622,7 @@ internal sealed partial class RealHcBackend : IDisposable
         if (route.Kind is FanRouteKind.GenericDuty or FanRouteKind.GenericRpmTarget)
             EnsureCpuTemperatureLoop();
         activeCurveDuties = duties;
+        activeMsiCurveNodes = route.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease ? nodes.ToArray() : null;
         EnsurePowerProfileWatchdog();
         return true;
         }
@@ -5457,7 +6638,7 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         // FAN-931 P0：心跳驱动的 STA 校验调用次数（P2A 的判定依据之一）。
         Interlocked.Increment(ref FanPerfCounters.StaVerifyRequests);
-        OnStaBounded(VerifyActiveCurveSessionCore);
+        OnStaBounded(heartbeatVerificationWork, "heartbeat-session-verify");
     }
 
     private void VerifyActiveCurveSessionCore()
@@ -5702,6 +6883,7 @@ internal sealed partial class RealHcBackend : IDisposable
         if (!ConfirmOemRestore())
             throw new InvalidOperationException("HC OEM restore did not satisfy the route release contract");
         activeCurveDuties = null;
+        activeMsiCurveNodes = null;
         }
     }
 
@@ -5714,6 +6896,67 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private string BuildSessionRouteMarker() =>
         $"{FactoryType}|{Route?.Kind}|{baselineStrategy}";
+
+    private void CaptureSessionRouteMarker()
+    {
+        var route = Route;
+        sessionRouteFactoryType = FactoryType;
+        sessionRouteKind = route?.Kind;
+        sessionRouteBaselineStrategy = baselineStrategy;
+        sessionRoute = route;
+        sessionRouteBindingCaptured = true;
+        // Keep the existing public diagnostic marker byte-for-byte equivalent.
+        sessionRouteMarker = BuildSessionRouteMarker();
+    }
+
+    private void ClearSessionRouteMarker()
+    {
+        sessionRouteMarker = null;
+        sessionRouteFactoryType = null;
+        sessionRouteKind = null;
+        sessionRouteBaselineStrategy = FanRestoreStrategy.None;
+        sessionRoute = null;
+        sessionRouteBindingCaptured = false;
+    }
+    internal static bool SessionRouteBindingMatches(
+        bool captured, string? capturedFactoryType, FanRouteKind? capturedKind,
+        FanRestoreStrategy capturedBaselineStrategy, string? currentFactoryType,
+        FanRouteKind? currentKind, FanRestoreStrategy currentBaselineStrategy)
+    {
+        return captured &&
+            string.Equals(capturedFactoryType, currentFactoryType, StringComparison.Ordinal) &&
+            capturedKind == currentKind &&
+            capturedBaselineStrategy == currentBaselineStrategy;
+    }
+    // hardwareGate-owned accessor binding. Never cache IsOpen itself: HC may
+    // derive it from current HID/ACPI state, including a route lost after Open.
+    private bool? ReadHcDeviceOpenMarker(object currentDevice)
+    {
+        var reader = ReferenceEquals(hcOpenMarkerDevice, currentDevice) ? hcOpenMarkerReader : null;
+        if (reader is not null)
+        {
+            try { return reader(); }
+            catch (Exception error) { throw new TargetInvocationException(error); }
+        }
+        var value = GetMember(currentDevice, "IsOpen");
+        if (!ReferenceEquals(hcOpenMarkerDevice, currentDevice))
+        {
+            hcOpenMarkerDevice = currentDevice;
+            hcOpenMarkerReader = null;
+            // Keep field, nullable/object and boxed-struct behavior on the exact
+            // original reflection path. Bind only after one successful read.
+            if (value is bool && !currentDevice.GetType().IsValueType
+                && instanceMemberMetadata.TryGetValue((currentDevice.GetType(), "IsOpen"), out var member)
+                && member is PropertyInfo property && property.PropertyType == typeof(bool)
+                && property.GetGetMethod(nonPublic: true) is { } getter && getter.GetParameters().Length == 0)
+            {
+                try { hcOpenMarkerReader = getter.CreateDelegate<Func<bool>>(currentDevice); }
+                catch (Exception error) when (error is ArgumentException or MemberAccessException or NotSupportedException)
+                { /* An optional binding cannot change the original live-read fallback. */ }
+            }
+        }
+        return value as bool?;
+    }
 
     private bool IsHcSessionReadyForControl(out string reason, bool requireHcReportedOpen = true)
     {
@@ -5728,13 +6971,30 @@ internal sealed partial class RealHcBackend : IDisposable
             reason = "device-reference-marker-lost";
             return false;
         }
-        if (!oemBaselineCaptured || !IsRouteStillReady())
+        if (!oemBaselineCaptured)
         {
             reason = "route-baseline-marker-lost";
             return false;
         }
-        var currentMarker = BuildSessionRouteMarker();
-        if (!string.Equals(sessionRouteMarker, currentMarker, StringComparison.Ordinal))
+        var useCapturedRoute = sessionRouteBindingCaptured && routeOverrideForSelfTest is null
+            && sessionRouteFactoryType is not null && sessionRoute is not null;
+        var currentFactoryType = useCapturedRoute ? sessionRouteFactoryType : FactoryType;
+        var currentRoute = useCapturedRoute ? sessionRoute : Route;
+        if (currentRoute is null || !currentRoute.HcCallbackReady ||
+            currentRoute.RestoreStrategy != baselineStrategy ||
+            !string.Equals(baselineRestoreRoute, currentFactoryType, StringComparison.Ordinal))
+        {
+            reason = "route-baseline-marker-lost";
+            return false;
+        }
+        if (!SessionRouteBindingMatches(
+            sessionRouteBindingCaptured,
+            sessionRouteFactoryType,
+            sessionRouteKind,
+            sessionRouteBaselineStrategy,
+            currentFactoryType,
+            currentRoute.Kind,
+            baselineStrategy))
         {
             reason = "session-route-marker-lost";
             return false;
@@ -5742,7 +7002,7 @@ internal sealed partial class RealHcBackend : IDisposable
         // HC routes do not all expose the same public marker. When a route
         // does expose IsOpen, however, a false value is authoritative HID /
         // device loss even if YeMan's backend bool is still true.
-        if (requireHcReportedOpen && GetMember(device, "IsOpen") is bool hcIsOpen && !hcIsOpen)
+        if (requireHcReportedOpen && ReadHcDeviceOpenMarker(device) is bool hcIsOpen && !hcIsOpen)
         {
             reason = "hc-device-is-open-false";
             return false;
@@ -6330,8 +7590,20 @@ internal sealed partial class RealHcBackend : IDisposable
         };
     }
 
-    private void ApplyPowerProfile(object profile, string sourceName = "Background")
+    private void ApplyPowerProfile(object profile, string sourceName = "Background", IReadOnlyList<FanNode>? msiNodes = null, long? msiAdmissionEpoch = null)
     {
+        using var powerObservation = BeginPowerObservation("FanHost.HC.ProfileCallback", "ApplyPowerProfile/" + sourceName, profile);
+        // Initial enable, next adjustment, wake and event-driven replays share this boundary.
+        var submittedFan = GetMember(profile, "FanProfile");
+        if (Route?.RestoreStrategy == FanRestoreStrategy.MsiHcDefaultRelease &&
+            string.Equals(Convert.ToString(submittedFan is null ? null : GetMember(submittedFan, "fanMode")),
+                "Software", StringComparison.OrdinalIgnoreCase) && hcBoundaryForSelfTest is null)
+        {
+            var originalNodes = msiNodes ?? activeMsiCurveNodes
+                ?? throw new FanApiException(409, "FAN_CURVE_WRITE_FAILED", "MSI 曲线原始节点缺失，拒绝猜测性重放");
+            ApplyMsiFamilyCurve(originalNodes, profile, sourceName, msiAdmissionEpoch);
+            return;
+        }
         // FAN-934 R2 §3-B：唯一自测 HC 边界（默认关闭）。开启时 HC 的 UpdateSource
         // 枚举解析与 PowerProfileManager_Applied 回调都改由边界承载（无 HC 程序集、
         // 无真实 EC/WMI），但诊断形状与回调计数语义保持不变。
@@ -6355,7 +7627,6 @@ internal sealed partial class RealHcBackend : IDisposable
             }
         }
         lastUpdateSource = normalized;
-        var evidence = BuildFanDispatchEvidence(profile, normalized);
         var callbackFan = GetMember(profile, "FanProfile");
         var callbackPhase = string.Equals(
             Convert.ToString(callbackFan is null ? null : GetMember(callbackFan, "fanMode")),
@@ -6363,7 +7634,7 @@ internal sealed partial class RealHcBackend : IDisposable
             StringComparison.OrdinalIgnoreCase)
             ? "F3-controlled"
             : "F4-oem-handoff";
-        Diagnostic?.Invoke("hc.fan-dispatch.begin", evidence);
+        EmitDiagnostic("hc.fan-dispatch.begin", () => BuildFanDispatchEvidence(profile, normalized));
         try
         {
             // This remains the single fan-write boundary. The Host does not
@@ -6373,9 +7644,17 @@ internal sealed partial class RealHcBackend : IDisposable
                 selfTestCallbackBoundary.Apply(profile, normalized);
             else if (UsesBackendFanWriter)
                 ApplyAsusCurveViaBackend(profile);
+            else if (oneXFanLifecycle is not null)
+                oneXFanLifecycle.SetControl(callbackPhase == "F3-controlled",
+                    () => OneXFanOpenStillCurrent(oneXFanOpenAdmissionEpoch));
+            else if (device is { } currentDevice && GetInheritedEcFanWriter(currentDevice) is { } ecWriter)
+            {
+                var epoch = oneXFanOpenAdmissionEpoch;
+                ecWriter.SetControl(callbackPhase == "F3-controlled", () => InheritedEcFanWriteCurrent(currentDevice, epoch));
+            }
             else
                 Invoke("PowerProfileManager_Applied", profile, source);
-            Diagnostic?.Invoke("hc.fan-dispatch.callback-returned", new
+            EmitDiagnostic("hc.fan-dispatch.callback-returned", () => new
             {
                 phase = callbackPhase,
                 source = FanDispatchSource,
@@ -6394,7 +7673,7 @@ internal sealed partial class RealHcBackend : IDisposable
         }
         catch (Exception ex)
         {
-            Diagnostic?.Invoke("hc.fan-dispatch.callback-failure", new
+            EmitDiagnostic("hc.fan-dispatch.callback-failure", () => new
             {
                 phase = callbackPhase,
                 source = FanDispatchSource,
@@ -6425,6 +7704,11 @@ internal sealed partial class RealHcBackend : IDisposable
      */
     private void ApplyAsusCurveViaBackend(object profile)
     {
+        // The registry lease precedes any autonomous hardware open/write.
+        var factoryType = routeOverrideForSelfTest is not null
+            ? "HandheldCompanion.Devices.ROGAlly"
+            : FactoryType ?? throw new InvalidOperationException("ASUS fan device identity unavailable");
+        backendFanCapability ??= YeManFanBackend.Capabilities.FanCapabilityCatalog.AcquireAsusCurve(factoryType);
         EnsureBackendAsusAcpiOpen();
         var fan = GetMember(profile, "FanProfile")
             ?? throw new InvalidOperationException("HC FanProfile construction failed");
@@ -6435,12 +7719,13 @@ internal sealed partial class RealHcBackend : IDisposable
         if (isSoftware)
         {
             var requested = GetMember(fan, "fanSpeeds") as double[] ?? Array.Empty<double>();
-            YeManFanBackend.Asus.AsusFanCurveWriter.ApplySoftwareCurve(
-                YeManFanBackend.Asus.AsusFanCurveWriter.ToAsusCurve(requested));
+            var result = backendFanCapability.ApplySoftwareCurve(requested);
+            EmitDiagnostic("fan.capability.result", () => result);
         }
         else
         {
-            _ = YeManFanBackend.Asus.AsusFanCurveWriter.RestoreDefaultCurves();
+            var result = backendFanCapability.RestoreDefaultCurves();
+            EmitDiagnostic("fan.capability.result", () => result);
         }
     }
 
@@ -6454,12 +7739,15 @@ internal sealed partial class RealHcBackend : IDisposable
      */
     private void ReleaseBackendAsusAcpiOwnedHandle(string cause)
     {
-        if (!backendAsusAcpiOpened && !YeManFanBackend.Asus.AsusACPI.IsOpen) return;
+        // A rejected/unbound Host must never close another Host's static ACPI handle.
+        var capability = backendFanCapability;
+        if (capability is null) return;
         var wasOpen = YeManFanBackend.Asus.AsusACPI.IsOpen;
         try
         {
-            YeManFanBackend.Asus.AsusACPI.Close();
+            capability.CloseOwnedHandle();
             backendAsusAcpiOpened = false;
+            backendFanCapability = null;
             Diagnostic?.Invoke("fan.backend-acpi.release", new
             {
                 cause,
@@ -6782,6 +8070,7 @@ internal sealed partial class RealHcBackend : IDisposable
             SetHcPhase("close.temperature-monitor-stop");
             StopCpuTemperatureMonitor();
             activeCurveDuties = null;
+        activeMsiCurveNodes = null;
             // Call the real HC virtual close path after the verified Hardware
             // profile restore when the caller is performing a profile handoff.
             // For sleep/process close this is the HC ownership boundary itself:
@@ -6805,8 +8094,10 @@ internal sealed partial class RealHcBackend : IDisposable
             openAttempted = false;
             hcOpenInvocationStarted = false;
             sessionDeviceReference = null;
-            sessionRouteMarker = null;
+            ClearSessionRouteMarker();
             closed = true;
+            retiredDeviceReference = device;
+            retiredControlCycleId = ControlCycleId;
         }
         finally
         {
@@ -6827,6 +8118,7 @@ internal sealed partial class RealHcBackend : IDisposable
     private void CloseHcDevice()
     {
         SetHcPhase("close.virtual-device-close");
+        using var powerObservation = BeginPowerObservation("FanHost.HC.OemRelease", "CloseHcDevice");
         HcVirtualCloseReturned = false;
         // FAN-936 R2 section 1: bind Close to its own release operation. HC's
         // current device Close performs its own fan hand-back; issuing a fresh
@@ -6841,12 +8133,27 @@ internal sealed partial class RealHcBackend : IDisposable
         // exit) from "entered but unproven".
         msiCloseReleaseInvocationCountBefore = ReadMsiReleaseInvocationCount();
         Diagnostic?.Invoke("hc-close.virtual-device.begin", new { factoryType = FactoryType });
+        Exception? oneXCloseFailure = null;
+        Exception? inheritedEcCloseFailure = null;
+        var closingDevice = device;
         ExecuteCloseBoundary(
             closeDevice: () =>
             {
                 try
                 {
-                    Invoke(device!, "Close");
+                    if (msiFanLifecycle is not null)
+                        msiFanLifecycle.Close();
+                    else if (oneXFanLifecycle is not null)
+                    {
+                        try { oneXFanLifecycle.Close(); }
+                        catch (Exception error) { oneXCloseFailure = error; throw; }
+                    }
+                    else
+                    {
+                        try { CloseObservedInheritedEcFanDevice(); }
+                        catch (Exception error) when (inheritedEcFanSession is not null)
+                        { inheritedEcCloseFailure = error; throw; }
+                    }
                 }
                 catch (Exception closeEx)
                 {
@@ -6871,6 +8178,11 @@ internal sealed partial class RealHcBackend : IDisposable
                 if (!ConfirmCandidateCloseCleanup(CloseCleanupSettlementWaitMs, out var cleanupDetail))
                     throw new InvalidOperationException(
                         $"HC_CLOSE_PENDING: candidate close cleanup not settled: {cleanupDetail}");
+                if (ReferenceEquals(hcRawOpenEventsDevice, closingDevice))
+                {
+                    hcRawOpenEventsDevice = null;
+                    hcRawOpenEventsReturned = false;
+                }
                 Diagnostic?.Invoke("hc-close.virtual-device.return", new { factoryType = FactoryType });
             },
             unbindEvents: () =>
@@ -6881,7 +8193,14 @@ internal sealed partial class RealHcBackend : IDisposable
                 UnsubscribeExternalProfileEvents();
                 hcOpenEventsInvoked = false;
             },
-            confirmManagerCleanup: ConfirmManagerCleanupAfterClose);
+            confirmManagerCleanup: () =>
+            {
+                try { ConfirmManagerCleanupAfterClose(); }
+                catch (Exception cleanup) when (oneXCloseFailure is not null)
+                { throw new AggregateException(oneXCloseFailure, cleanup); }
+                catch (Exception cleanup) when (inheritedEcCloseFailure is not null)
+                { throw new AggregateException(inheritedEcCloseFailure, cleanup); }
+            });
     }
 
     /**
@@ -7312,55 +8631,312 @@ internal sealed partial class RealHcBackend : IDisposable
         return routes;
     }
 
+    // FAN-948: reuse the approved HC vendor resource without relying on HC's
+    // desktop WPF pack context. This runs only inside the authorized MSI Open.
+    private void PrepareMsiWmiPayloadBeforeOpen()
+    {
+        if (Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease) return;
+        var windows = Environment.GetFolderPath(Environment.SpecialFolder.Windows);
+        if (string.IsNullOrWhiteSpace(windows) || assembly is null)
+            throw new InvalidOperationException("MSI WMI resource context unavailable");
+        var target = Path.Combine(windows, "SysWOW64", "msiapcfg.dll");
+        try
+        {
+            var result = MsiWmiPayloadResource.EnsurePresent(assembly, target);
+            Diagnostic?.Invoke("open.msi-wmi-resource-prepared", new { result, target,
+                source = "authenticated-hc-embedded-resource", registryOrPnpWrittenByHost = false });
+        }
+        catch (Exception error)
+        {
+            Diagnostic?.Invoke("open.msi-wmi-resource-failure", new { target, error = $"{error.GetType().Name}: {error.Message}" });
+            throw new FanApiException(409, "FAN_MSI_WMI_PREREQUISITE_FAILED",
+                "微星风扇 WMI 初始化资源不可用：" + error.Message);
+        }
+    }
+
+    private bool msiWmiRegistrationRestartAttempted;
+
+    // FAN-950: use the existing authenticated HC System.Management dependency.
+    // Metadata reads never invoke Get_Fan/Set_Fan/Get_AP or write a fan curve.
+    private Type MsiManagementType(string name)
+    {
+        var dependency = AssemblyLoadContext.Default.Assemblies.FirstOrDefault(item => item.GetName().Name == "System.Management")
+            ?? ResolveDependency(AssemblyLoadContext.Default, new AssemblyName("System.Management"))
+            ?? throw new FileNotFoundException("HC System.Management dependency unavailable");
+        return dependency.GetType(name, throwOnError: true)!;
+    }
+
+    private MsiWmiMetadataProbe ProbeMsiWmiInstance(string path)
+    {
+        object? metadata = null;
+        try
+        {
+            var optionsType = MsiManagementType("System.Management.ObjectGetOptions");
+            var getOptions = Activator.CreateInstance(optionsType)!;
+            optionsType.GetProperty("Timeout")!.SetValue(getOptions, TimeSpan.FromSeconds(2));
+            var objectType = MsiManagementType("System.Management.ManagementObject");
+            metadata = Activator.CreateInstance(objectType, [@"root\WMI", path, getOptions])!;
+            objectType.GetMethod("Get", Type.EmptyTypes)!.Invoke(metadata, null);
+            return new(true, false, "exact-hc-wmi-instance-metadata-bound");
+        }
+        catch (Exception error)
+        {
+            var cause = error;
+            while (cause.InnerException is not null) cause = cause.InnerException;
+            var status = cause.GetType().GetProperty("ErrorCode")?.GetValue(cause)?.ToString();
+            return new(false, status is "InvalidClass" or "NotFound",
+                $"{cause.GetType().Name}: {status ?? "unknown-status"}: {cause.Message}");
+        }
+        finally { (metadata as IDisposable)?.Dispose(); }
+    }
+
+    private IReadOnlyList<string> EnumerateMsiPnpDeviceIds()
+    {
+        var searcherType = MsiManagementType("System.Management.ManagementObjectSearcher");
+        using var searcher = (IDisposable)Activator.CreateInstance(searcherType,
+            [@"root\CIMV2", @"SELECT PNPDeviceID FROM Win32_PnPEntity WHERE PNPDeviceID LIKE 'ACPI\\PNP0C14%'"])!;
+        var enumerationOptions = searcherType.GetProperty("Options")!.GetValue(searcher)!;
+        enumerationOptions.GetType().GetProperty("Timeout")!.SetValue(enumerationOptions, TimeSpan.FromSeconds(2));
+        var result = searcherType.GetMethod("Get", Type.EmptyTypes)!.Invoke(searcher, null)!;
+        using var resultLifetime = result as IDisposable;
+        var ids = new List<string>();
+        foreach (var item in (System.Collections.IEnumerable)result)
+        {
+            using var itemLifetime = item as IDisposable;
+            var id = item.GetType().GetMethod("GetPropertyValue", [typeof(string)])!.Invoke(item, ["PNPDeviceID"]) as string;
+            if (!string.IsNullOrWhiteSpace(id)) ids.Add(id);
+        }
+        return ids;
+    }
+
+    // Temperature callbacks stay blocked until the recovery transaction commits.
+    // Its admitted curve command must execute BEFORE that callback gate opens.
+    // Open/current epoch/timeout/terminal Close still fence each MSI write stage.
+    private bool MsiCurveCommandStillCurrent(long admittedGateEpoch) =>
+        IsOpen && MsiWmiOpenStillCurrent(admittedGateEpoch);
+
+    internal bool MsiCurveCommandStillCurrentForSelfTest(long epoch) => MsiCurveCommandStillCurrent(epoch);
+    private bool MsiWmiOpenStillCurrent(long expectedGateEpoch) =>
+        !operationTimedOut && Volatile.Read(ref suspendGateEpoch) == expectedGateEpoch
+            && Volatile.Read(ref closeWriteBlocked) == 0;
+
+    internal static IReadOnlyList<string> RunMsiWmiOpenAdmissionSelfTest()
+    {
+        var checks = new List<string>();
+        var backend = new RealHcBackend(HostOptions.Parse(Array.Empty<string>()));
+        var first = backend.SuspendGateEpochForResume;
+        if (!backend.MsiWmiOpenStillCurrent(first)) throw new InvalidOperationException("MSI cold Open rejected");
+        checks.Add("fan950-cold-open-epoch-admitted");
+        backend.BlockWritesForSuspend();
+        if (backend.MsiWmiOpenStillCurrent(first)) throw new InvalidOperationException("late MSI baseline read crossed a new sleep");
+        checks.Add("fan950-new-sleep-during-baseline-rejects-late-open");
+        var resumeEpoch = backend.SuspendGateEpochForResume;
+        if (!backend.MsiWmiOpenStillCurrent(resumeEpoch)) throw new InvalidOperationException("normal MSI resume must prepare while suspend writes remain blocked");
+        checks.Add("fan950-normal-resume-epoch-admitted-before-write-gate-reopens");
+        backend.BlockWritesForClose();
+        if (backend.MsiWmiOpenStillCurrent(backend.SuspendGateEpochForResume)) throw new InvalidOperationException("terminal Close reopened MSI device");
+        checks.Add("fan950-terminal-close-cannot-reopen-msi");
+        var timedOut = new RealHcBackend(HostOptions.Parse(Array.Empty<string>()));
+        timedOut.operationTimedOut = true;
+        if (timedOut.MsiWmiOpenStillCurrent(timedOut.SuspendGateEpochForResume)) throw new InvalidOperationException("late MSI metadata after timeout reopened device");
+        checks.Add("fan950-timeout-during-baseline-rejects-late-open");
+        return checks;
+    }
+
+    private void PrepareMsiWmiRegistrationBeforeOpen(long expectedGateEpoch)
+    {
+        if (Route?.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease || device is null) return;
+        SetHcPhase("open.msi-wmi-registration");
+        var path = GetMember(device, "WmiPath") as string
+            ?? throw new InvalidOperationException("MSI device does not expose its WMI instance contract");
+        try
+        {
+            var result = MsiWmiRegistrationOrchestrator.EnsureAvailable(path,
+                () => ProbeMsiWmiInstance(path), EnumerateMsiPnpDeviceIds,
+                () => InvokeStatic("HandheldCompanion.Devices.ClawA1M", "CheckAndFixRegistry") is true,
+                exact =>
+                {
+                    // A retry cannot restart a second device or repeat this one
+                    // within the same Host. A fresh explicit Host owns a new attempt.
+                    if (msiWmiRegistrationRestartAttempted)
+                        throw new InvalidOperationException("MSI WMI exact restart already attempted by this Host");
+                    msiWmiRegistrationRestartAttempted = true;
+                    return InvokeStatic("HandheldCompanion.PnPUtil", "RestartDevice", exact) is true;
+                },
+                () => MsiWmiOpenStillCurrent(expectedGateEpoch),
+                () => Environment.TickCount64, Thread.Sleep,
+                (stage, evidence) => Diagnostic?.Invoke("open.msi-wmi-registration", new { stage, evidence }));
+            // A late return after the STA deadline/sleep must not proceed into
+            // the HC Open override and its firmware writes.
+            if (!MsiWmiOpenStillCurrent(expectedGateEpoch))
+                throw new InvalidOperationException("MSI initialization no longer owns this Open request");
+            Diagnostic?.Invoke("open.msi-wmi-registration", new { stage = "ready-for-hc-open", result,
+                fanWriteSuccessClaimed = false, deviceType = device.GetType().FullName });
+        }
+        catch (Exception error)
+        {
+            Diagnostic?.Invoke("open.msi-wmi-registration", new { stage = "failed", error = DescribeException(error),
+                fanWriteSuccessClaimed = false });
+            throw new FanApiException(409, "FAN_MSI_WMI_PREREQUISITE_FAILED",
+                "微星风扇 WMI 类/实例尚未就绪：" + DescribeException(error));
+        }
+    }
+
+    // Only allowlisted exception metadata is logged: messages/Data can contain credentials.
+    // Keep this boundary software-only so a nested reflection failure can be tested offline.
+    internal static void RunHcInitializationStage(string stage, Action initialize, Action<string, object?>? diagnostic)
+    {
+        try
+        {
+            initialize();
+        }
+        catch (Exception ex)
+        {
+            try
+            {
+                diagnostic?.Invoke("hc.initialization.failure", new
+                {
+                    phase = stage,
+                    stage,
+                    error = ex.GetType().FullName,
+                    dependencyFailures = YeMan.SharedRuntime.RuntimeDependencyContract.DescribeFailure(ex, stage),
+                    exceptionChain = Unwrap(ex).Select((current, depth) => new
+                    {
+                        depth,
+                        exceptionType = current.GetType().FullName,
+                        hResult = current.HResult,
+                        hResultHex = $"0x{current.HResult:X8}",
+                        typeInitializationType = (current as TypeInitializationException)?.TypeName,
+                        targetSite = current.TargetSite is { } target ? $"{target.DeclaringType?.FullName}.{target}" : null,
+                        stackTrace = current.StackTrace,
+                    }).ToArray(),
+                });
+            }
+            catch { /* Logging must not replace the original initialization failure. */ }
+            throw;
+        }
+    }
+
     private void LoadAssemblyAndFactory()
     {
-        ValidateFormalSessionCapabilityAcl();
-        // FAN-927 §2.2（2026-09-27 用户批准）：HC 首次加载**不再**遍历并哈希全部依赖文件，
-        // 也**不再**重复哈希 HC 主 DLL——完整文件校验归部署边界（安装/更新/回滚/修复）。
-        // 这里只做一次轻量"部署代"核对；记录缺失或不匹配才回落到一次完整校验并补齐记录。
-        ValidateDeploymentGenerationForHcLoad();
-        var hcPath = options.HcAssemblyPath ?? Path.Combine(options.HcRuntimeRoot ?? AppContext.BaseDirectory, "HandheldCompanion.dll");
-        if (!File.Exists(hcPath)) throw new FileNotFoundException("HandheldCompanion.dll not found", hcPath);
-        assemblyDirectory = Path.GetDirectoryName(Path.GetFullPath(hcPath));
-        hcRuntimeDirectory = Path.GetFullPath(options.HcRuntimeRoot ?? assemblyDirectory!);
-        ValidateGamepadMotion();
-        AssemblyLoadContext.Default.Resolving += ResolveDependency;
-        assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(hcPath));
-        ConfigureHcRuntime();
-        // Match HC App.InitializeDevice/StartNonUIInit ordering. These are
-        // initialization/read operations; the device cannot receive an EC or
-        // ACPI write until the separately authorized Open() session below.
-        InvokeStatic("HandheldCompanion.MotherboardInfo", "Collect");
-        deviceType = assembly.GetType("HandheldCompanion.Devices.IDevice", throwOnError: true);
-        if (string.IsNullOrWhiteSpace(options.HcDeviceType))
+        lock (hardwareGate)
         {
-            device = deviceType!.GetMethod("GetCurrent", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null)
-                ?? throw new InvalidOperationException("HC IDevice.GetCurrent returned null");
-        }
-        else
-        {
-            // §18 诊断/无硬件联调：开发机不是 ROG 掌机，GetCurrent 不会返回 ROGAlly。
-            // 按类型名构造候选设备实例，其余初始化步骤与生产一致。
-            var requestedType = assembly.GetType(options.HcDeviceType, throwOnError: true)
-                ?? throw new InvalidOperationException($"HC device type not found: {options.HcDeviceType}");
-            device = Activator.CreateInstance(requestedType)
-                ?? throw new InvalidOperationException($"HC device type could not be constructed: {options.HcDeviceType}");
+            RequireHcInitializationOwner();
+            if (IsLoaded) return;
+            if (hcInitializationInFlight)
+                throw new FanApiException(409, "HC_NOT_INITIALIZED", "HC 初始化仍在原调用中，不能重入");
+            hcInitializationInFlight = true;
         }
         try
         {
-            Invoke(device, "PullSensors");
+            RunHcInitializationStage("validation", () =>
+            {
+                ValidateFormalSessionCapabilityAcl();
+                // FAN-927 §2.2（2026-09-27 用户批准）：HC 首次加载**不再**遍历并哈希全部依赖文件，
+                // 也**不再**重复哈希 HC 主 DLL——完整文件校验归部署边界（安装/更新/回滚/修复）。
+                // 这里只做一次轻量"部署代"核对；记录缺失或不匹配才回落到一次完整校验并补齐记录。
+                ValidateDeploymentGenerationForHcLoad();
+            }, Diagnostic);
+            if (assembly is null)
+            {
+                var hcPath = options.HcAssemblyPath ?? Path.Combine(options.HcRuntimeRoot ?? AppContext.BaseDirectory, "HandheldCompanion.dll");
+                RunHcInitializationStage("assembly.load", () =>
+                {
+                    if (!File.Exists(hcPath)) throw new FileNotFoundException("HandheldCompanion.dll not found", hcPath);
+                    assemblyDirectory = Path.GetDirectoryName(Path.GetFullPath(hcPath));
+                    hcRuntimeDirectory = Path.GetFullPath(options.HcRuntimeRoot ?? assemblyDirectory!);
+                    ValidateGamepadMotion();
+                    EnsureHcDependencyResolverRegistered();
+                    assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(Path.GetFullPath(hcPath));
+                }, Diagnostic);
+                hcInitializationAssembly = assembly;
+            }
+            RequireHcInitializationOwner();
+            if (!hcRuntimeConfigured)
+            {
+                RunHcInitializationStage("assembly.configure", ConfigureHcRuntime, Diagnostic);
+                RequireHcInitializationOwner();
+                hcRuntimeConfigured = true;
+            }
+            if (!hcMotherboardCollected)
+            {
+                RunHcInitializationStage("motherboard.collect", () => InvokeStatic("HandheldCompanion.MotherboardInfo", "Collect"), Diagnostic);
+                RequireHcInitializationOwner();
+                hcMotherboardCollected = true;
+            }
+            if (deviceType is null)
+                RunHcInitializationStage("device.type", () =>
+                    deviceType = assembly!.GetType("HandheldCompanion.Devices.IDevice", throwOnError: true), Diagnostic);
+            if (device is null)
+            {
+                if (string.IsNullOrWhiteSpace(options.HcDeviceType))
+                {
+                    RunHcInitializationStage("device.get-current", () =>
+                        device = deviceType!.GetMethod("GetCurrent", BindingFlags.Public | BindingFlags.Static)?.Invoke(null, null)
+                            ?? throw new InvalidOperationException("HC IDevice.GetCurrent returned null"), Diagnostic);
+                }
+                else
+                {
+                    RunHcInitializationStage("device.construct", () =>
+                    {
+                        // §18 诊断/无硬件联调：开发机不是 ROG 掌机，GetCurrent 不会返回 ROGAlly。
+                        // 按类型名构造候选设备实例，其余初始化步骤与生产一致。
+                        var requestedType = assembly!.GetType(options.HcDeviceType, throwOnError: true)
+                            ?? throw new InvalidOperationException($"HC device type not found: {options.HcDeviceType}");
+                        // This fixed headless profile admits only the audited HC device class set.
+                        if (requestedType.Assembly != assembly || requestedType.IsAbstract ||
+                            !deviceType!.IsAssignableFrom(requestedType) ||
+                            requestedType.Namespace != "HandheldCompanion.Devices")
+                            throw new InvalidOperationException($"HC diagnostic type is outside the approved device profile: {options.HcDeviceType}");
+                        device = Activator.CreateInstance(requestedType)
+                            ?? throw new InvalidOperationException($"HC device type could not be constructed: {options.HcDeviceType}");
+                    }, Diagnostic);
+                }
+            }
+            hcInitializationDevice ??= device;
+            RequireHcInitializationOwner();
+            // [LIFECYCLE:FAN:INITIALIZE] Fan-only: do not call PullSensors here.
+            // HC PullSensors enumerates WinRT motion sensors and serial IMUs;
+            // these do not establish FanControl, route readiness or write permission.
+            // Keep identity, Initialize and the original Open/OpenEvents resource gates.
+            if (!hcDeviceInitializeReturned)
+            {
+                RunHcInitializationStage("device.initialize", () => Invoke(device!, "Initialize", false, false), Diagnostic);
+                RequireHcInitializationOwner();
+                hcDeviceInitializeReturned = true;
+            }
+            RunHcInitializationStage("device.identity", () =>
+            {
+                var identity = ReadIdentity(device!);
+                RequireHcInitializationOwner();
+                DeviceIdentity = identity;
+            }, Diagnostic);
+            Volatile.Write(ref hcCoreInitialized, true);
         }
-        catch (Exception ex) when (Unwrap(ex).Any(item => item is PlatformNotSupportedException))
+        finally
         {
-            // HC treats IMU/serial sensor bootstrap as part of the desktop
-            // application. A Fan Host on an unsupported desktop runtime can
-            // still perform a truthful read-only device Gate; never turn this
-            // environment limitation into a hardware-write permission.
-            HcCoreWarning = "HC PullSensors skipped: current runtime does not support System.IO.Ports";
+            lock (hardwareGate) hcInitializationInFlight = false;
         }
-        Invoke(device, "Initialize", false, false);
-        hcCoreInitialized = true;
-        DeviceIdentity = ReadIdentity(device);
+    }
+
+    private void RequireHcInitializationOwner()
+    {
+        if (Volatile.Read(ref hcFactoryDisposed) != 0)
+            throw new ObjectDisposedException(nameof(RealHcBackend));
+        if ((hcInitializationAssembly is not null && !ReferenceEquals(hcInitializationAssembly, assembly)) ||
+            (hcInitializationDevice is not null && !ReferenceEquals(hcInitializationDevice, device)))
+            throw new FanApiException(409, "HC_NOT_INITIALIZED", "HC 初始化对象已更换，不能沿用旧阶段或采纳替换对象");
+    }
+
+    private void EnsureHcDependencyResolverRegistered()
+    {
+        lock (hardwareGate)
+        {
+            RequireHcInitializationOwner();
+            if (hcDependencyResolverRegistered) return;
+            AssemblyLoadContext.Default.Resolving += ResolveDependency;
+            hcDependencyResolverRegistered = true;
+        }
     }
 
     /**
@@ -7429,10 +9005,9 @@ internal sealed partial class RealHcBackend : IDisposable
         }
     }
 
-    private static string ReadPayloadRuntimeId(string manifestPath)
+    private static string ReadPayloadRuntimeId(JsonElement manifest)
     {
-        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath, Encoding.UTF8));
-        var runtimeId = document.RootElement.TryGetProperty("runtimeId", out var value) && value.ValueKind == JsonValueKind.String
+        var runtimeId = manifest.TryGetProperty("runtimeId", out var value) && value.ValueKind == JsonValueKind.String
             ? value.GetString()
             : null;
         if (string.IsNullOrWhiteSpace(runtimeId)) throw new InvalidOperationException("Fan Host payload manifest 缺少 runtimeId");
@@ -7467,6 +9042,50 @@ internal sealed partial class RealHcBackend : IDisposable
         }
     }
 
+    private static readonly string[] RequiredHostPayloadFiles =
+    {
+        "YeManFanHost.exe", "YeManFanHost.dll", "YeManFanBackend.dll",
+        "YeManFanHost.deps.json", "YeManFanHost.runtimeconfig.json"
+    };
+
+    private static string ValidateRuntimeManifestBinding(string hostRoot, string payloadManifestPath, string runtimeManifestPath)
+    {
+        static InvalidOperationException Invalid(string reason) =>
+            new("Fan Host runtime binding is invalid: " + reason);
+        using var payload = JsonDocument.Parse(File.ReadAllText(payloadManifestPath, Encoding.UTF8));
+        using var runtime = JsonDocument.Parse(File.ReadAllText(runtimeManifestPath, Encoding.UTF8));
+        static bool Schema(JsonElement element, int expected) => element.ValueKind == JsonValueKind.Object &&
+            element.TryGetProperty("schemaVersion", out var schema) && schema.ValueKind == JsonValueKind.Number &&
+            schema.TryGetInt32(out var value) && value == expected;
+        if (!Schema(payload.RootElement, 2) || !Schema(runtime.RootElement, 1))
+            throw Invalid("payload/runtime schema differs from the split contract");
+        var runtimeId = ReadPayloadRuntimeId(payload.RootElement);
+        if (!runtime.RootElement.TryGetProperty("runtimeId", out var runtimeIdElement) ||
+            runtimeIdElement.ValueKind != JsonValueKind.String ||
+            !string.Equals(runtimeIdElement.GetString(), runtimeId, StringComparison.Ordinal))
+            throw Invalid("payload/runtime IDs differ");
+        if (!payload.RootElement.TryGetProperty("runtimeManifest", out var referenceElement) ||
+            referenceElement.ValueKind != JsonValueKind.String)
+            throw Invalid("runtime manifest reference is missing");
+        var reference = referenceElement.GetString();
+        if (string.IsNullOrWhiteSpace(reference) || Path.IsPathRooted(reference) || reference.Contains(':'))
+            throw Invalid("runtime manifest reference must be relative");
+        var referencedPath = Path.GetFullPath(Path.Combine(hostRoot, reference));
+        if (!string.Equals(referencedPath, Path.GetFullPath(runtimeManifestPath), StringComparison.OrdinalIgnoreCase))
+            throw Invalid("runtime manifest reference differs from the selected runtime root");
+        // A matching deployment record must still describe a complete Host.
+        // This checks manifest declarations only, preserving no per-DLL rehash.
+        if (!payload.RootElement.TryGetProperty("files", out var files) || files.ValueKind != JsonValueKind.Array)
+            throw Invalid("payload manifest files must be an array");
+        var declared = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var entry in files.EnumerateArray())
+            if (entry.ValueKind == JsonValueKind.Object && entry.TryGetProperty("path", out var path) && path.ValueKind == JsonValueKind.String)
+                declared.Add(path.GetString() ?? string.Empty);
+        foreach (var required in RequiredHostPayloadFiles)
+            if (!declared.Contains(required)) throw Invalid("payload manifest omits required file: " + required);
+        return runtimeId;
+    }
+
     private void ValidateDeploymentGenerationForHcLoad()
     {
         var hostRoot = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar);
@@ -7477,7 +9096,7 @@ internal sealed partial class RealHcBackend : IDisposable
             throw new InvalidOperationException("Fan Host 部署不完整：缺少 payload/runtime manifest");
         var payloadManifestSha256 = Sha256(payloadManifestPath);
         var runtimeManifestSha256 = Sha256(runtimeManifestPath);
-        var runtimeId = ReadPayloadRuntimeId(payloadManifestPath);
+        var runtimeId = ValidateRuntimeManifestBinding(hostRoot, payloadManifestPath, runtimeManifestPath);
         var recordPath = DeploymentRecordPath();
         var record = ReadDeploymentRecord(recordPath);
         if (record is not null &&
@@ -7605,7 +9224,14 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         var hostRoot = Path.GetFullPath(AppContext.BaseDirectory).TrimEnd(Path.DirectorySeparatorChar);
         var runtimeRoot = Path.GetFullPath(hcRuntimeDirectory ?? options.HcRuntimeRoot ?? hostRoot).TrimEnd(Path.DirectorySeparatorChar);
+        ValidateSplitPayloadManifestAt(hostRoot, runtimeRoot);
+    }
+
+    internal static void ValidateSplitPayloadManifestAt(string hostRoot, string runtimeRoot)
+    {
         if (!Directory.Exists(runtimeRoot)) throw new InvalidOperationException($"HC runtime directory is missing: {runtimeRoot}");
+        _ = ValidateRuntimeManifestBinding(hostRoot, Path.Combine(hostRoot, "YeManFanHost.payload.json"),
+            Path.Combine(runtimeRoot, "HandheldCompanion.runtime.json"));
         // R-fan-Safe（2026-09-11，与 install-fan-host-payload.ps1 runtime 段同构）：
         // 旧实现 value.Contains('/') || value.Contains('\\') 会把任何含子路径的
         // 条目整体拒绝——HC runtime.json 合法包含 XInputPlus/Loader/...、
@@ -7645,8 +9271,10 @@ internal sealed partial class RealHcBackend : IDisposable
         }
         var host = Read(hostRoot, Path.Combine(hostRoot, "YeManFanHost.payload.json"), 2, "Fan Host");
         var runtime = Read(runtimeRoot, Path.Combine(runtimeRoot, "HandheldCompanion.runtime.json"), 1, "HC runtime");
-        foreach (var required in new[] { "YeManFanHost.exe", "YeManFanHost.dll", "YeManFanHost.deps.json", "YeManFanHost.runtimeconfig.json" }) if (!host.Contains(required)) throw new InvalidOperationException($"Fan Host manifest omits required file: {required}");
-        foreach (var required in new[] { "HandheldCompanion.dll", "HandheldCompanion.deps.json", "LibreHardwareMonitorLib.dll", "Microsoft.Windows.SDK.NET.dll", "WinRT.Runtime.dll", "GamepadMotion.dll", "hidapi.dll", "hidapi.net.dll" }) if (!runtime.Contains(required)) throw new InvalidOperationException($"HC runtime manifest omits required file: {required}");
+        foreach (var required in RequiredHostPayloadFiles) if (!host.Contains(required)) throw new InvalidOperationException($"Fan Host manifest omits required file: {required}");
+        using var runtimeDocument = JsonDocument.Parse(File.ReadAllText(Path.Combine(runtimeRoot, "HandheldCompanion.runtime.json"), Encoding.UTF8));
+        var shared = YeMan.SharedRuntime.DeviceCoreSharedDependencies.ValidateDeclaredManifest(runtimeRoot, runtimeDocument.RootElement);
+        foreach (var required in new[] { "HandheldCompanion.dll", "HandheldCompanion.deps.json", "LibreHardwareMonitorLib.dll", "Microsoft.Windows.SDK.NET.dll", "WinRT.Runtime.dll", "GamepadMotion.dll", "hidapi.dll", "hidapi.net.dll" }) if (!runtime.Contains(required) && !shared.Contains(required)) throw new InvalidOperationException($"HC runtime manifest omits required file: {required}");
         foreach (var file in Directory.EnumerateFiles(hostRoot, "*", SearchOption.TopDirectoryOnly)) if (!file.EndsWith("YeManFanHost.payload.json", StringComparison.OrdinalIgnoreCase) && !host.Contains(Path.GetFileName(file))) throw new InvalidOperationException($"Fan Host has an unexpected file: {Path.GetFileName(file)}");
         foreach (var file in Directory.EnumerateFiles(runtimeRoot, "*", SearchOption.TopDirectoryOnly)) if (!file.EndsWith("HandheldCompanion.runtime.json", StringComparison.OrdinalIgnoreCase) && !runtime.Contains(Path.GetFileName(file))) throw new InvalidOperationException($"HC runtime has an unexpected file: {Path.GetFileName(file)}");
     }
@@ -7694,7 +9322,8 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         if (assemblyDirectory is null || string.IsNullOrWhiteSpace(name.Name)) return null;
         var path = Path.Combine(hcRuntimeDirectory ?? assemblyDirectory, name.Name + ".dll");
-        return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
+        return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path)
+            : YeMan.SharedRuntime.DeviceCoreSharedDependencies.Resolve(_, name, hcRuntimeDirectory ?? assemblyDirectory);
     }
 
     private void ConfigureHcRuntime()
@@ -7727,7 +9356,13 @@ internal sealed partial class RealHcBackend : IDisposable
     {
         var path = Path.Combine(hcRuntimeDirectory ?? assemblyDirectory!, "GamepadMotion.dll");
         if (!File.Exists(path)) throw new FileNotFoundException("GamepadMotion.dll not found", path);
-        if (!NativeLibrary.TryLoad(path, out var handle)) throw new InvalidOperationException("GamepadMotion.dll could not load");
+        // File.Exists accepts long paths that the Windows native loader still rejects.
+        // Preserve the exact absolute DLL identity, including UNC roots, for admission.
+        var loadPath = Path.GetFullPath(path);
+        if (OperatingSystem.IsWindows() && !loadPath.StartsWith(@"\\?\", StringComparison.Ordinal))
+            loadPath = loadPath.StartsWith(@"\\", StringComparison.Ordinal)
+                ? @"\\?\UNC\" + loadPath[2..] : @"\\?\" + loadPath;
+        if (!NativeLibrary.TryLoad(loadPath, out var handle)) throw new InvalidOperationException("GamepadMotion.dll could not load");
         NativeLibrary.Free(handle);
     }
 
@@ -7775,11 +9410,8 @@ internal sealed partial class RealHcBackend : IDisposable
      */
     private bool HasValidWriteConfirmation()
     {
-        var confirmation = options.Confirmation;
-        var session = options.SessionToken;
-        return !string.IsNullOrWhiteSpace(confirmation) && !string.IsNullOrWhiteSpace(session)
-            && CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(confirmation), Encoding.UTF8.GetBytes(session));
+        return writeConfirmationUtf8 is not null && writeSessionTokenUtf8 is not null
+            && CryptographicOperations.FixedTimeEquals(writeConfirmationUtf8, writeSessionTokenUtf8);
     }
 
     private void EnsureRealWriteSession()
@@ -7807,14 +9439,84 @@ internal sealed partial class RealHcBackend : IDisposable
             throw new FanApiException(409, "HOST_RECOVERY_UNAVAILABLE", "HC 恢复会话不可用");
     }
 
-    private Type? FindType(string fullName) => assembly?.GetType(fullName) ?? assembly?.GetTypes().FirstOrDefault(t => t.Name == fullName[(fullName.LastIndexOf('.') + 1)..]);
+    // HC is loaded once per FanHost process. Cache only immutable reflection metadata;
+    // calls and property/field getters still target the current object/value. This
+    // matters because fault-state runtime sampling re-enters the same ControllerManager
+    // probes every second. Failed type lookups keep the existing uncached path;
+    // absent instance members are cached separately without caching live values.
+    private static readonly ConcurrentDictionary<(Assembly Assembly, string FullName), Type> typeMetadata = new();
+    private Type? FindType(string fullName)
+    {
+        var loadedAssembly = assembly;
+        if (loadedAssembly is null) return null;
+        var key = (loadedAssembly, fullName);
+        if (typeMetadata.TryGetValue(key, out var cached)) return cached;
+        var found = loadedAssembly.GetType(fullName)
+            ?? loadedAssembly.GetTypes().FirstOrDefault(t => t.Name == fullName[(fullName.LastIndexOf('.') + 1)..]);
+        if (found is not null) typeMetadata.TryAdd(key, found);
+        return found;
+    }
+
+    // Only immutable reflection metadata is retained. Calls still target the
+    // current object, and getters still read its current value on every access.
+    private static readonly ConcurrentDictionary<(Type Type, string Name, int ArgumentCount), MethodInfo> instanceMethodMetadata = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Name, int ArgumentCount), byte> absentInstanceMethodMetadata = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Name), MemberInfo> instanceMemberMetadata = new();
+    // Missing metadata is stable for this exact runtime Type as well. Never
+    // cache a getter result (including null), device instance, or session state.
+    private static readonly ConcurrentDictionary<(Type Type, string Name), byte> absentInstanceMemberMetadata = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Name), MemberInfo> staticMemberMetadata = new();
+    private static readonly ConcurrentDictionary<(Type Type, string Name), FieldInfo> staticFieldMetadata = new();
+    // The named constant is immutable for this exact loaded enum Type.
+    // Its current HC field value is still read on every maintenance attempt.
+    private static readonly ConcurrentDictionary<Type, object> manualSlotModeMetadata = new();
+    // Optional HC receipt/cleanup probes are immutable per runtime Type. Keep a
+    // wrapper so an absent method can also be cached without changing the old
+    // "missing means absent" result or putting null into ConcurrentDictionary.
+    private sealed class NoArgMethodLookup
+    {
+        public NoArgMethodLookup(MethodInfo? method) => Method = method;
+        public MethodInfo? Method { get; }
+    }
+    private static readonly ConcurrentDictionary<(Type Type, string Name), NoArgMethodLookup> noArgMethodMetadata = new();
+
     private object? Invoke(string name, params object?[] args) => Invoke(device ?? throw new InvalidOperationException("HC device unavailable"), name, args);
     private static object? Invoke(object target, string name, params object?[] args)
     {
-        var method = target.GetType().GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
-            .FirstOrDefault(m => m.Name == name && m.GetParameters().Length == args.Length)
-            ?? throw new MissingMethodException(target.GetType().FullName, name);
-        return method.Invoke(target, args);
+        if (!TryInvokeCached(target, name, args, out var result))
+            throw new MissingMethodException(target.GetType().FullName, name);
+        return result;
+    }
+
+    /**
+     * Optional HC probes use the same cached method selection as required calls,
+     * but preserve the old "method absent" result instead of turning an optional
+     * diagnostic capability into a failure. MethodInfo is immutable; Invoke still
+     * reads the current target and current out-parameter values on every call.
+     */
+    private static bool TryInvokeCached(object target, string name, object?[] args, out object? result)
+    {
+        var key = (target.GetType(), name, args.Length);
+        if (!instanceMethodMetadata.TryGetValue(key, out var method))
+        {
+            // Runtime Type metadata is stable; cache absence, never a returned value or fault.
+            if (absentInstanceMethodMetadata.ContainsKey(key))
+            {
+                result = null;
+                return false;
+            }
+            method = key.Item1.GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic)
+                .FirstOrDefault(m => m.Name == name && m.GetParameters().Length == args.Length);
+            if (method is null)
+            {
+                absentInstanceMethodMetadata.TryAdd(key, 0);
+                result = null;
+                return false;
+            }
+            instanceMethodMetadata.TryAdd(key, method);
+        }
+        result = method.Invoke(target, args);
+        return true;
     }
 
     private void TryInvokeOptional(string name, params object?[] args)
@@ -7824,17 +9526,51 @@ internal sealed partial class RealHcBackend : IDisposable
         method?.Invoke(device, args);
     }
 
-    private static object? GetStaticMember(Type? type, string name)
+    private static MemberInfo? FindStaticMemberMetadata(Type? type, string name)
     {
+        if (type is null) return null;
+        var key = (type, name);
+        if (staticMemberMetadata.TryGetValue(key, out var cached)) return cached;
         for (var current = type; current is not null; current = current.BaseType)
         {
             var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static | BindingFlags.DeclaredOnly;
             var property = current.GetProperty(name, flags);
-            if (property is not null) return property.GetValue(null);
+            if (property is not null)
+            {
+                staticMemberMetadata.TryAdd(key, property);
+                return property;
+            }
             var field = current.GetField(name, flags);
-            if (field is not null) return field.GetValue(null);
+            if (field is not null)
+            {
+                staticMemberMetadata.TryAdd(key, field);
+                return field;
+            }
         }
         return null;
+    }
+
+    private static object? GetStaticMember(Type? type, string name)
+    {
+        var member = FindStaticMemberMetadata(type, name);
+        return member is PropertyInfo property
+            ? property.GetValue(null)
+            : member is FieldInfo field
+                ? field.GetValue(null)
+                : null;
+    }
+
+    // The loop-stop path intentionally looks only at a field declared on the
+    // ControllerManager type, matching the old direct GetField semantics.
+    // Cache the FieldInfo, but keep GetValue/SetValue live on every tick.
+    private static FieldInfo? FindDeclaredStaticFieldMetadata(Type? type, string name)
+    {
+        if (type is null) return null;
+        var key = (type, name);
+        if (staticFieldMetadata.TryGetValue(key, out var cached)) return cached;
+        var field = type.GetField(name, BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+        if (field is not null) staticFieldMetadata.TryAdd(key, field);
+        return field;
     }
 
     private object? InvokeStatic(string fullTypeName, string name, params object?[] args)
@@ -7872,14 +9608,29 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private static object? GetMember(object target, string name)
     {
-        for (var type = target.GetType(); type is not null; type = type.BaseType)
+        var key = (target.GetType(), name);
+        if (instanceMemberMetadata.TryGetValue(key, out var member))
+            return member is PropertyInfo cachedProperty
+                ? cachedProperty.GetValue(target)
+                : ((FieldInfo)member).GetValue(target);
+        if (absentInstanceMemberMetadata.ContainsKey(key)) return null;
+        for (var type = key.Item1; type is not null; type = type.BaseType)
         {
             var flags = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.DeclaredOnly;
             var property = type.GetProperty(name, flags);
-            if (property is not null) return property.GetValue(target);
+            if (property is not null)
+            {
+                instanceMemberMetadata.TryAdd(key, property);
+                return property.GetValue(target);
+            }
             var field = type.GetField(name, flags);
-            if (field is not null) return field.GetValue(target);
+            if (field is not null)
+            {
+                instanceMemberMetadata.TryAdd(key, field);
+                return field.GetValue(target);
+            }
         }
+        absentInstanceMemberMetadata.TryAdd(key, 0);
         return null;
     }
 
@@ -8010,15 +9761,15 @@ internal sealed partial class RealHcBackend : IDisposable
          * P-3 收口：**唯一的归集实现**（真机路径与自测共用，杜绝"两套算术"漂移）。
          * 返回本次**新**触发预算超限的维度名（每个维度每代只报一次；空列表=未超限）。
          */
-        internal List<string> Observe(bool stoppedAnything, int stopActionCount, long attemptTick, long sinceLastStopMs, double? cpuMsPerSec, bool idleAttempt)
+        internal IReadOnlyList<string> Observe(bool stoppedAnything, int stopActionCount, long attemptTick, long sinceLastStopMs, double? cpuMsPerSec, bool idleAttempt)
         {
-            var exceeded = new List<string>();
+            List<string>? exceeded = null;
             Attempts++;
             if (idleAttempt)
             {
                 // 空转尝试（此刻没有 loop 在跑）：只记账，不推进 reopen→stop 周期。
                 IdleAttempts++;
-                return exceeded;
+                return exceeded is null ? Array.Empty<string>() : exceeded;
             }
             if (cpuMsPerSec is double cpu)
             {
@@ -8040,19 +9791,19 @@ internal sealed partial class RealHcBackend : IDisposable
             if (StopActions > HcLoopStopActionsPerGenerationBudget && !ActionsExceeded)
             {
                 ActionsExceeded = true;
-                exceeded.Add("stop-actions-per-generation");
+                (exceeded ??= new List<string>()).Add("stop-actions-per-generation");
             }
             if (MaxReopenToStopMs > HcLoopReopenToStopMsBudget && !ReopenLatencyExceeded)
             {
                 ReopenLatencyExceeded = true;
-                exceeded.Add("reopen-to-stop-ms");
+                (exceeded ??= new List<string>()).Add("reopen-to-stop-ms");
             }
             if (MaxCpuMsPerSec > HcLoopCpuMsPerSecCeiling && !CpuExceeded)
             {
                 CpuExceeded = true;
-                exceeded.Add("cpu-ms-per-sec");
+                (exceeded ??= new List<string>()).Add("cpu-ms-per-sec");
             }
-            return exceeded;
+            return exceeded is null ? Array.Empty<string>() : exceeded;
         }
     }
 
@@ -8133,8 +9884,8 @@ internal sealed partial class RealHcBackend : IDisposable
     /// </summary>
     public bool StopHcControllerCpuLoops(string source, long powerGeneration = -1, string? hostState = null, double? cpuMsPerSec = null)
     {
-        var stopped = new List<string>();
-        var failures = new List<string>();
+        List<string>? stopped = null;
+        List<string>? failures = null;
         // P-3：本函数是"宿主侧发现的 HC loop 重开"的唯一入口 ⇒ 每一次调用=一次 stop 尝试；
         // 只有真的停到（stopped.Count>0）才算 reopen→stop 周期的结束点。
         var attemptTick = Environment.TickCount64;
@@ -8154,6 +9905,7 @@ internal sealed partial class RealHcBackend : IDisposable
                 var readLoopState = GetMember(device, "ReadLoopState");
                 if (GetMember(device, "LifecycleApiVersion") is int lifecycleApiVersion && lifecycleApiVersion >= 1)
                 {
+                    var readLoopStateName = readLoopState?.ToString();
                     // ---- P-3 目标 A（FAN-204 §31 R4 阶段 2，2026-09-24）：settle 后再停 + 复核 ----
                     // 判据来源（树 B == 线上 DLL）：读循环只能由打开操作启动/取代，自身不重启；每步打开
                     // 都经 AdmitDeviceCallOrWait 串行准入 ⇒ 在管线在途期间停循环是宿主侧自造的竞态
@@ -8165,10 +9917,10 @@ internal sealed partial class RealHcBackend : IDisposable
                         LedgerFor(powerGeneration),
                         source,
                         attemptTick,
-                        readLoopState?.ToString() ?? "unknown",
-                        loopPresent: readLoopState?.ToString() != "NotStarted",
-                        stopped,
-                        failures,
+                        readLoopStateName ?? "unknown",
+                        loopPresent: readLoopStateName != "NotStarted",
+                        ref stopped,
+                        ref failures,
                         out observedExistingPending);
                 }
                 else
@@ -8177,9 +9929,9 @@ internal sealed partial class RealHcBackend : IDisposable
                     if (reading is bool isReading && isReading)
                     {
                         if (SetInstanceBoolField(device, new[] { "IsReading", "isReading" }, false))
-                            stopped.Add("device-read-loop");
+                            (stopped ??= new List<string>()).Add("device-read-loop");
                         else
-                            failures.Add("device-read-loop:boolean-field-not-writable");
+                            (failures ??= new List<string>()).Add("device-read-loop:boolean-field-not-writable");
                     }
                 }
             }
@@ -8190,29 +9942,27 @@ internal sealed partial class RealHcBackend : IDisposable
                 if (GetStaticMember(controllerManager, "pumpThreadRunning") is bool pumpRunning && pumpRunning)
                 {
                     SetStaticMember(controllerManager, "pumpThreadRunning", false);
-                    stopped.Add("sdl-hotplug-pump");
+                    (stopped ??= new List<string>()).Add("sdl-hotplug-pump");
                 }
 
-                var modeField = controllerManager.GetField(
-                    "slotManagementMode",
-                    BindingFlags.Static | BindingFlags.NonPublic);
+                var modeField = FindDeclaredStaticFieldMetadata(controllerManager, "slotManagementMode");
                 if (modeField is not null && modeField.FieldType.IsEnum)
                 {
-                    var manual = Enum.Parse(modeField.FieldType, "Manual");
+                    var manual = manualSlotModeMetadata.GetOrAdd(modeField.FieldType, static type => Enum.Parse(type, "Manual"));
                     if (!Equals(modeField.GetValue(null), manual))
                     {
                         modeField.SetValue(null, manual);
-                        stopped.Add("slot-management-manual");
+                        (stopped ??= new List<string>()).Add("slot-management-manual");
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            failures.Add(DescribeException(ex));
+            (failures ??= new List<string>()).Add(DescribeException(ex));
         }
 
-        if (stopped.Count == 0 && failures.Count == 0 && !verifiedThisTick && !observedExistingPending)
+        if ((stopped?.Count ?? 0) == 0 && (failures?.Count ?? 0) == 0 && !verifiedThisTick && !observedExistingPending)
         {
             // P-3：空转尝试（此刻没有 loop 在跑）只记账不写行——事件式日志，零周期开销；
             //      "本轮只做了复核"不算空转（已在上方 verify 段登记）；FAN-931 P1.1：只复核
@@ -8223,10 +9973,10 @@ internal sealed partial class RealHcBackend : IDisposable
         }
 
         var ledger = LedgerFor(powerGeneration);
-        if (stopped.Count > 0)
+        if ((stopped?.Count ?? 0) > 0)
         {
-            Interlocked.Add(ref hcControllerCpuLoopStopActions, stopped.Count);
-            hcLoopStopSessionStops += stopped.Count;
+            Interlocked.Add(ref hcControllerCpuLoopStopActions, (stopped?.Count ?? 0));
+            hcLoopStopSessionStops += (stopped?.Count ?? 0);
             hcLoopStopLastStopTick = attemptTick;
             hcLoopStopLastStopAckSource = source;
         }
@@ -8236,7 +9986,7 @@ internal sealed partial class RealHcBackend : IDisposable
             Interlocked.Add(ref hcControllerCpuLoopStopActions, 0);
         }
         // P-3 收口：按代次归集（**唯一实现** = ledger.Observe，真机与自测共用）。
-        var budgetExceeded = ledger.Observe(stopped.Count > 0, stopped.Count, attemptTick, sinceLastStopMs, cpuMsPerSec, idleAttempt: false);
+        var budgetExceeded = ledger.Observe((stopped?.Count ?? 0) > 0, (stopped?.Count ?? 0), attemptTick, sinceLastStopMs, cpuMsPerSec, idleAttempt: false);
         // P-3 预算判定：超限**只发独立事件**（留痕，不改变任何控制语义、不伪造成功）；
         // 每个阈值每代只报一次（由 Observe 保证），避免高频。
         foreach (var dimension in budgetExceeded)
@@ -8263,13 +10013,13 @@ internal sealed partial class RealHcBackend : IDisposable
             });
         }
 
-        if (stopped.Count > 0 || failures.Count > 0 || verifiedThisTick)
+        if ((stopped?.Count ?? 0) > 0 || (failures?.Count ?? 0) > 0 || verifiedThisTick)
         {
             Diagnostic?.Invoke("hc.controller-cpu-loops-stopped", new
             {
                 source,
-                stopped,
-                failures,
+                stopped = (IReadOnlyList<string>?)stopped ?? Array.Empty<string>(),
+                failures = (IReadOnlyList<string>?)failures ?? Array.Empty<string>(),
                 totalStopActions = hcControllerCpuLoopStopActions,
                 // P-3 取证字段（同一会话内）：尝试/空转、reopen→stop 周期、会话年龄、电源代次与
                 // 当时的宿主状态、以及本次采样 CPU——用于判定"是谁把 loop 开回来的节拍"。
@@ -8312,7 +10062,7 @@ internal sealed partial class RealHcBackend : IDisposable
                 verifiedThisTick,
             });
         }
-        return stopped.Count > 0;
+        return (stopped?.Count ?? 0) > 0;
     }
 
     /**
@@ -8406,8 +10156,8 @@ internal sealed partial class RealHcBackend : IDisposable
         long attemptTick,
         string loopState,
         bool loopPresent,
-        List<string> stopped,
-        List<string> failures,
+        ref List<string>? stopped,
+        ref List<string>? failures,
         out bool observedExistingPending)
     {
         var verifiedThisTick = false;
@@ -8464,19 +10214,19 @@ internal sealed partial class RealHcBackend : IDisposable
         {
             ledger.SettleDeferred++;
             ledger.LastSettleDetail = settleDetail;
-            failures.Add($"device-read-loop:deferred-not-settled {settleDetail} state={loopState}");
+            (failures ??= new List<string>()).Add($"device-read-loop:deferred-not-settled {settleDetail} state={loopState}");
             return verifiedThisTick;
         }
         ledger.LastSettleDetail = settleDetail;
         if (!probe.TryRequestStop(source))
         {
-            failures.Add($"device-read-loop:lifecycle-api-rejected state={loopState}");
+            (failures ??= new List<string>()).Add($"device-read-loop:lifecycle-api-rejected state={loopState}");
             return verifiedThisTick;
         }
         ledger.StopRequests++;
         Interlocked.Increment(ref FanPerfCounters.LoopStopRequests);
         ledger.PendingStopRequestTick = attemptTick;
-        stopped.Add($"device-read-loop:lifecycle-api state={loopState} settle={settleDetail}");
+        (stopped ??= new List<string>()).Add($"device-read-loop:lifecycle-api state={loopState} settle={settleDetail}");
         if (Verify(out var immediateDetail))
         {
             ledger.StopVerified++;
@@ -8499,9 +10249,7 @@ internal sealed partial class RealHcBackend : IDisposable
         internal LifecycleLoopStopProbe(object device) => this.device = device;
         public bool TryObserveSettled(out string detail) => TryObserveOpenPipelineSettled(device, out detail);
         public bool TryRequestStop(string source) =>
-            device.GetType()
-                .GetMethod("RequestReadLoopStop", BindingFlags.Public | BindingFlags.Instance)
-                ?.Invoke(device, new object?[] { source }) is true;
+            TryInvokeCached(device, "RequestReadLoopStop", [source], out var result) && result is true;
         public bool TryVerifyEnded(out string detail) => TryInvokeWaitReadLoopEnded(device, out detail);
     }
 
@@ -8517,16 +10265,13 @@ internal sealed partial class RealHcBackend : IDisposable
         {
             if (GetMember(device, "LastCompatEntryOperationId") is not string operationId || operationId.Length == 0)
                 return true;
-            var method = device.GetType()
-                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => m.Name == "TryWaitDeviceOpenReceipt" && m.GetParameters().Length == 3);
-            if (method is null)
+            var args = new object?[] { operationId, 0, null };
+            if (!TryInvokeCached(device, "TryWaitDeviceOpenReceipt", args, out var result))
             {
                 detail = "settle:receipt-api-absent";
                 return true;
             }
-            var args = new object?[] { operationId, 0, null };
-            var terminal = method.Invoke(device, args) is true;
+            var terminal = result is true;
             detail = terminal ? $"settle:receipt-terminal op={operationId}" : $"settle:pipeline-in-flight op={operationId}";
             return terminal;
         }
@@ -8547,12 +10292,9 @@ internal sealed partial class RealHcBackend : IDisposable
         detail = "verify:api-absent";
         try
         {
-            var method = device.GetType()
-                .GetMethods(BindingFlags.Public | BindingFlags.Instance)
-                .FirstOrDefault(m => m.Name == "TryWaitReadLoopEnded" && m.GetParameters().Length == 2);
-            if (method is null) return false;
             var args = new object?[] { 0, null };
-            var ended = method.Invoke(device, args) is true;
+            if (!TryInvokeCached(device, "TryWaitReadLoopEnded", args, out var result)) return false;
+            var ended = result is true;
             detail = ended ? "verify:read-loop-ended" : "verify:" + (args[1] as string ?? "pending");
             return ended;
         }
@@ -8585,21 +10327,21 @@ internal sealed partial class RealHcBackend : IDisposable
         var stopped = new List<string>();
         var failures = new List<string>();
         var probe = new ScriptedLoopStopProbe { Settled = false, StopAccepts = true, VerifyEnds = false };
-        var v1 = EvaluateLoopStop(probe, ledger, "selftest", 1000, "Running", true, stopped, failures, out _);
-        Assert(!v1 && ledger.SettleDeferred == 1 && ledger.StopRequests == 0 && stopped.Count == 0 &&
-               failures.Count == 1 && ledger.PendingStopRequestTick == 0 && probe.StopCalls == 0,
-            $"in-flight pipeline must defer without a stop request (settleDeferred={ledger.SettleDeferred} stopRequests={ledger.StopRequests} stopped={stopped.Count} failures={failures.Count} stopCalls={probe.StopCalls})");
+        var v1 = EvaluateLoopStop(probe, ledger, "selftest", 1000, "Running", true, ref stopped, ref failures, out _);
+        Assert(!v1 && ledger.SettleDeferred == 1 && ledger.StopRequests == 0 && (stopped?.Count ?? 0) == 0 &&
+               (failures?.Count ?? 0) == 1 && ledger.PendingStopRequestTick == 0 && probe.StopCalls == 0,
+            $"in-flight pipeline must defer without a stop request (settleDeferred={ledger.SettleDeferred} stopRequests={ledger.StopRequests} stopped={(stopped?.Count ?? 0)} failures={(failures?.Count ?? 0)} stopCalls={probe.StopCalls})");
         checks.Add("p3-targetA-selftest: in-flight pipeline defers stop and issues no request OK");
         probe.Settled = true;
-        var v2 = EvaluateLoopStop(probe, ledger, "selftest", 2000, "Running", true, stopped, failures, out _);
+        var v2 = EvaluateLoopStop(probe, ledger, "selftest", 2000, "Running", true, ref stopped, ref failures, out _);
         Assert(!v2 && ledger.StopRequests == 1 && ledger.PendingStopRequestTick == 2000 && ledger.StopVerified == 0 &&
-               stopped.Count == 1 && probe.StopCalls == 1,
-            $"settled pipeline must issue exactly one stop request and keep verification pending (stopRequests={ledger.StopRequests} pendingTick={ledger.PendingStopRequestTick} verified={ledger.StopVerified} stopped={stopped.Count} stopCalls={probe.StopCalls})");
+               (stopped?.Count ?? 0) == 1 && probe.StopCalls == 1,
+            $"settled pipeline must issue exactly one stop request and keep verification pending (stopRequests={ledger.StopRequests} pendingTick={ledger.PendingStopRequestTick} verified={ledger.StopVerified} stopped={(stopped?.Count ?? 0)} stopCalls={probe.StopCalls})");
         checks.Add("p3-targetA-selftest: settled pipeline issues one stop request, verification stays pending OK");
         probe.VerifyEnds = true;
-        var v3 = EvaluateLoopStop(probe, ledger, "selftest", 2500, "Running", true, stopped, failures, out _);
+        var v3 = EvaluateLoopStop(probe, ledger, "selftest", 2500, "Running", true, ref stopped, ref failures, out _);
         Assert(v3 && ledger.StopVerified == 1 && ledger.PendingStopRequestTick == 0 && ledger.LastStopToVerifyMs == 500 &&
-               ledger.StopRequests == 1 && stopped.Count == 1,
+               ledger.StopRequests == 1 && (stopped?.Count ?? 0) == 1,
             $"verification must close the pending cycle without a duplicate stop request (verified={ledger.StopVerified} pendingTick={ledger.PendingStopRequestTick} lastStopToVerifyMs={ledger.LastStopToVerifyMs} stopRequests={ledger.StopRequests})");
         checks.Add("p3-targetA-selftest: read-loop-ended verification closes the cycle with stop→verify latency OK");
 
@@ -8608,8 +10350,8 @@ internal sealed partial class RealHcBackend : IDisposable
         var probeNeg1 = new ScriptedLoopStopProbe { Settled = false, StopAccepts = true, VerifyEnds = true };
         var stoppedNeg1 = new List<string>();
         var failuresNeg1 = new List<string>();
-        _ = EvaluateLoopStop(probeNeg1, ledgerNeg1, "selftest", 100, "Running", true, stoppedNeg1, failuresNeg1, out _);
-        Assert(probeNeg1.StopCalls == 0 && ledgerNeg1.StopRequests == 0 && stoppedNeg1.Count == 0,
+        _ = EvaluateLoopStop(probeNeg1, ledgerNeg1, "selftest", 100, "Running", true, ref stoppedNeg1, ref failuresNeg1, out _);
+        Assert(probeNeg1.StopCalls == 0 && ledgerNeg1.StopRequests == 0 && (stoppedNeg1?.Count ?? 0) == 0,
             $"negative control: stop was issued during in-flight pipeline (stopCalls={probeNeg1.StopCalls} stopRequests={ledgerNeg1.StopRequests})");
         checks.Add("p3-targetA-selftest-negative: in-flight pipeline must not issue RequestReadLoopStop OK");
 
@@ -8620,18 +10362,18 @@ internal sealed partial class RealHcBackend : IDisposable
         var probeNeg2 = new ScriptedLoopStopProbe { Settled = true, StopAccepts = true, VerifyEnds = false };
         var stoppedNeg2 = new List<string>();
         var failuresNeg2 = new List<string>();
-        var v4 = EvaluateLoopStop(probeNeg2, ledgerNeg2, "selftest", 900, "Running", true, stoppedNeg2, failuresNeg2, out var pendingObservedNeg2);
+        var v4 = EvaluateLoopStop(probeNeg2, ledgerNeg2, "selftest", 900, "Running", true, ref stoppedNeg2, ref failuresNeg2, out var pendingObservedNeg2);
         Assert(!v4 && pendingObservedNeg2 && probeNeg2.StopCalls == 0 && ledgerNeg2.StopRequests == 0 &&
                ledgerNeg2.StopAlreadyPending == 1 && ledgerNeg2.StopVerified == 0 && ledgerNeg2.VerifyPending == 1 &&
-               ledgerNeg2.PendingStopRequestTick == 500 && stoppedNeg2.Count == 0 && failuresNeg2.Count == 0,
+               ledgerNeg2.PendingStopRequestTick == 500 && (stoppedNeg2?.Count ?? 0) == 0 && (failuresNeg2?.Count ?? 0) == 0,
             $"negative control: an already-pending stop request was re-submitted or mis-accounted (stopCalls={probeNeg2.StopCalls} stopRequests={ledgerNeg2.StopRequests} alreadyPending={ledgerNeg2.StopAlreadyPending} verifyPending={ledgerNeg2.VerifyPending} pendingTick={ledgerNeg2.PendingStopRequestTick})");
         checks.Add("p3-targetA-selftest-negative: an already-pending stop request must be observed, never re-submitted OK");
 
         // ---- 正例②：未决请求最终被复核到"已结束" ⇒ 仍正确收敛（去重不得丢掉结算）----
         probeNeg2.VerifyEnds = true;
-        var v5 = EvaluateLoopStop(probeNeg2, ledgerNeg2, "selftest", 1300, "Running", true, stoppedNeg2, failuresNeg2, out var pendingObservedLate);
+        var v5 = EvaluateLoopStop(probeNeg2, ledgerNeg2, "selftest", 1300, "Running", true, ref stoppedNeg2, ref failuresNeg2, out var pendingObservedLate);
         Assert(v5 && !pendingObservedLate && ledgerNeg2.StopVerified == 1 && ledgerNeg2.PendingStopRequestTick == 0 &&
-               ledgerNeg2.LastStopToVerifyMs == 800 && probeNeg2.StopCalls == 0 && stoppedNeg2.Count == 0,
+               ledgerNeg2.LastStopToVerifyMs == 800 && probeNeg2.StopCalls == 0 && (stoppedNeg2?.Count ?? 0) == 0,
             $"late verification must still settle the deduped pending cycle (verified={ledgerNeg2.StopVerified} pendingTick={ledgerNeg2.PendingStopRequestTick} lastStopToVerifyMs={ledgerNeg2.LastStopToVerifyMs} stopCalls={probeNeg2.StopCalls})");
         checks.Add("p3-targetA-selftest: late read-loop-ended verification still settles the deduped pending OK");
 
@@ -8640,10 +10382,10 @@ internal sealed partial class RealHcBackend : IDisposable
         var probeNext = new ScriptedLoopStopProbe { Settled = true, StopAccepts = true, VerifyEnds = false };
         var stoppedNext = new List<string>();
         var failuresNext = new List<string>();
-        var v6 = EvaluateLoopStop(probeNext, ledgerNext, "selftest", 2000, "Running", true, stoppedNext, failuresNext, out var pendingObservedNext);
+        var v6 = EvaluateLoopStop(probeNext, ledgerNext, "selftest", 2000, "Running", true, ref stoppedNext, ref failuresNext, out var pendingObservedNext);
         Assert(!v6 && !pendingObservedNext && probeNext.StopCalls == 1 && ledgerNext.StopRequests == 1 &&
-               ledgerNext.StopAlreadyPending == 0 && ledgerNext.PendingStopRequestTick == 2000 && stoppedNext.Count == 1,
-            $"a new generation must still issue exactly one stop request (stopCalls={probeNext.StopCalls} stopRequests={ledgerNext.StopRequests} alreadyPending={ledgerNext.StopAlreadyPending} pendingTick={ledgerNext.PendingStopRequestTick} stopped={stoppedNext.Count})");
+               ledgerNext.StopAlreadyPending == 0 && ledgerNext.PendingStopRequestTick == 2000 && (stoppedNext?.Count ?? 0) == 1,
+            $"a new generation must still issue exactly one stop request (stopCalls={probeNext.StopCalls} stopRequests={ledgerNext.StopRequests} alreadyPending={ledgerNext.StopAlreadyPending} pendingTick={ledgerNext.PendingStopRequestTick} stopped={(stoppedNext?.Count ?? 0)})");
         checks.Add("p3-targetA-selftest: a new generation still issues exactly one stop request OK");
 
         return checks;
@@ -8901,12 +10643,19 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private static string Sha256(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();
 
-    private sealed class StaWorkItem<T>
+    private interface IStaWorkItem
     {
+        void RejectUnexecuted();
+    }
+
+    private sealed class StaWorkItem<T> : IStaWorkItem
+    {
+        private readonly RealHcBackend owner;
         private readonly Func<T> action;
 
-        public StaWorkItem(Func<T> action, string operationName)
+        public StaWorkItem(RealHcBackend owner, Func<T> action, string operationName)
         {
+            this.owner = owner;
             this.action = action;
             OperationName = operationName;
         }
@@ -8916,47 +10665,65 @@ internal sealed partial class RealHcBackend : IDisposable
         public Exception? Failure { get; private set; }
         public T? Result { get; private set; }
 
+        public void Dispatch() => owner.ExecuteStaWorkItem(this);
+
+        public void RejectUnexecuted()
+        {
+            Failure = new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭，请求未执行");
+            Completed.Set();
+        }
+
         public void Execute()
         {
             try { Result = action(); }
             catch (Exception ex) { Failure = ex; }
-            finally { Completed.Set(); }
+            // The dispatcher publishes completion only after retiring this owner.
         }
     }
 
     private Dispatcher EnsureStaDispatcher()
     {
-        var shouldStart = false;
         lock (staGate)
         {
-            if (staDispatcherStopping)
+            if (staDispatcherStopping || Volatile.Read(ref hcFactoryDisposed) != 0)
                 throw new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭");
             if (staDispatcher is not null) return staDispatcher;
-            if (staThread is null || !staThread.IsAlive)
+            if (staThread is null)
             {
                 staDispatcherReady.Reset();
-                staThread = new Thread(StaDispatcherLoop)
+                var thread = new Thread(StaDispatcherLoop)
                 {
-                    // A foreground thread is deliberate. If a vendor Close()
-                    // is still executing, Windows must not tear down this
-                    // process underneath the HC ACPI/HID lifecycle.
+                    // Keep the existing foreground lifecycle owner until its
+                    // vendor work and message pump have naturally returned.
                     IsBackground = false,
                     Name = "YeManFanHost.HC.STA",
                 };
-                staThread.SetApartmentState(ApartmentState.STA);
-                shouldStart = true;
+                thread.SetApartmentState(ApartmentState.STA);
+                staThread = thread;
+                try
+                {
+                    // Publish and start under the same gate. A second caller
+                    // cannot replace an unstarted Thread, and Dispose cannot
+                    // observe that Thread before Start returns.
+                    thread.Start();
+                }
+                catch
+                {
+                    staThread = null;
+                    staDispatcherStopping = true;
+                    staDispatcherReady.Set();
+                    Monitor.PulseAll(staGate);
+                    throw;
+                }
             }
         }
-
-        if (shouldStart)
-            staThread!.Start();
 
         if (!staDispatcherReady.Wait(TimeSpan.FromSeconds(5)))
             throw new TimeoutException("HC STA Dispatcher 未在 5 秒内启动");
 
         lock (staGate)
         {
-            if (staDispatcherStopping || staDispatcher is null)
+            if (staDispatcherStopping || staDispatcher is null || Volatile.Read(ref hcFactoryDisposed) != 0)
                 throw new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭");
             return staDispatcher;
         }
@@ -8964,14 +10731,47 @@ internal sealed partial class RealHcBackend : IDisposable
 
     private void StaDispatcherLoop()
     {
-        var dispatcher = Dispatcher.CurrentDispatcher;
-        lock (staGate)
+        var identity = TryCaptureStaThreadIdentity(ReadCurrentOsThreadId);
+        Volatile.Write(ref staThreadIdentity, identity);
+        try
         {
-            if (!staDispatcherStopping)
+            var dispatcher = Dispatcher.CurrentDispatcher;
+            lock (staGate)
+            {
+                // Dispose may have completed before the thread reached this
+                // publication point. Such a thread must not enter a pump that
+                // no remaining owner can shut down.
+                if (staDispatcherStopping || Volatile.Read(ref hcFactoryDisposed) != 0)
+                    return;
                 staDispatcher = dispatcher;
-            staDispatcherReady.Set();
+                staDispatcherReady.Set();
+            }
+            Dispatcher.Run();
         }
-        Dispatcher.Run();
+        finally
+        {
+            lock (staGate)
+            {
+                if (ReferenceEquals(staThread, Thread.CurrentThread))
+                {
+                    staDispatcher = null;
+                    staDispatcherStopping = true;
+                    // Run has returned, so no work item can still be executing
+                    // on this lifecycle STA. Retire any admitted item whose
+                    // dispatcher callback was abandoned during shutdown.
+                    if (activeStaWorkItem is IStaWorkItem pending)
+                    {
+                        activeStaWorkItem = null;
+                        operationTimedOut = false;
+                        pending.RejectUnexecuted();
+                    }
+                    staDispatcherReady.Set();
+                    Monitor.PulseAll(staGate);
+                }
+            }
+            // Never attach an ended lifecycle's OS ID to a later reused ID.
+            Interlocked.CompareExchange(ref staThreadIdentity, null, identity);
+        }
     }
 
     private void ExecuteStaWorkItem<T>(StaWorkItem<T> workItem)
@@ -8980,6 +10780,9 @@ internal sealed partial class RealHcBackend : IDisposable
         workItem.Execute();
 
         var timedOutCallReturned = false;
+        // Freeze before publishing the STA as available. Any following manual
+        // command may replace the curve/session before this callback gets gate.
+        var returnOwner = CaptureFanDispatchOwner();
         lock (staGate)
         {
             if (ReferenceEquals(activeStaWorkItem, workItem))
@@ -8991,7 +10794,9 @@ internal sealed partial class RealHcBackend : IDisposable
                 timedOutCallReturned = operationTimedOut;
                 operationTimedOut = false;
             }
+            Monitor.PulseAll(staGate);
         }
+        workItem.Completed.Set();
         Diagnostic?.Invoke("hc-operation.return", new
         {
             operation = workItem.OperationName,
@@ -9000,7 +10805,10 @@ internal sealed partial class RealHcBackend : IDisposable
             error = workItem.Failure is null ? null : DescribeException(workItem.Failure),
         });
         if (timedOutCallReturned)
-            _ = Task.Run(() => TimedOutOperationReturned?.Invoke(workItem.Failure is null));
+        {
+            var receipt = new TimedOutHcReturn(workItem.Failure is null, returnOwner);
+            _ = Task.Run(() => TimedOutOperationReturned?.Invoke(receipt));
+        }
     }
 
     private T OnStaBounded<T>(Func<T> action, string operationName = "hc-operation")
@@ -9009,18 +10817,41 @@ internal sealed partial class RealHcBackend : IDisposable
         lock (staGate) lifecycleThread = staThread;
         if (lifecycleThread is not null && Thread.CurrentThread == lifecycleThread) return action();
 
-        var workItem = new StaWorkItem<T>(action, operationName);
+        var budget = TimeSpan.FromSeconds(15);
+        var started = Stopwatch.GetTimestamp();
+        var workItem = new StaWorkItem<T>(this, action, operationName);
         var dispatcher = EnsureStaDispatcher();
+        var admissionWaited = false;
         lock (staGate)
         {
-            if (operationTimedOut || activeStaWorkItem is not null)
+            // FAN-964: a legitimate short background replay is not a failed HC
+            // session. Wait for the existing owner without holding hardwareGate,
+            // enqueueing a second work item, or starting a second writer. Admission
+            // and this invocation share the original 15-second total budget.
+            while (!operationTimedOut)
+            {
+                var remaining = budget - Stopwatch.GetElapsedTime(started);
+                if (remaining <= TimeSpan.Zero)
+                    throw new FanApiException(409, "HC_OPERATION_BUSY", "HC 串行调用仍在处理，本次请求未执行，请重试")
+                    {
+                        Details = new { retryAfterMs = 250, submitted = false, hardwareFailureClaimed = false },
+                    };
+                if (activeStaWorkItem is null) break;
+                admissionWaited = true;
+                Monitor.Wait(staGate, remaining);
+                if (staDispatcherStopping)
+                    throw new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭");
+            }
+            if (operationTimedOut)
                 throw new FanApiException(504, "HC_OPERATION_TIMEOUT", "上一次 HC 操作仍未返回，已拒绝并发调用");
+            if (staDispatcherStopping)
+                throw new ObjectDisposedException(nameof(RealHcBackend), "HC STA dispatcher 已关闭");
             activeStaWorkItem = workItem;
             try
             {
                 _ = dispatcher.BeginInvoke(
                     DispatcherPriority.Send,
-                    new Action(() => ExecuteStaWorkItem(workItem)));
+                    new Action(workItem.Dispatch));
             }
             catch (Exception ex) when (ex is InvalidOperationException or TaskCanceledException)
             {
@@ -9029,7 +10860,16 @@ internal sealed partial class RealHcBackend : IDisposable
             }
         }
 
-        if (!workItem.Completed.Wait(TimeSpan.FromSeconds(15)))
+        if (admissionWaited)
+            Diagnostic?.Invoke("hc-operation.admission-wait", new
+            {
+                operation = operationName,
+                elapsedMs = Math.Round(Stopwatch.GetElapsedTime(started).TotalMilliseconds, 1),
+                totalBudgetMs = 15000,
+                submitted = true,
+            });
+        var completionRemaining = budget - Stopwatch.GetElapsedTime(started);
+        if (!workItem.Completed.Wait(completionRemaining > TimeSpan.Zero ? completionRemaining : TimeSpan.Zero))
         {
             var timedOut = false;
             lock (staGate)
@@ -10099,7 +11939,17 @@ internal sealed partial class RealHcBackend : IDisposable
         // Engine Close owns the real CurrentDevice.Close boundary. Dispose is
         // only reached after a confirmed Host shutdown, so never synthesize a
         // second virtual device Close here.
-        lock (hardwareGate) StopCpuTemperatureMonitor();
+        Interlocked.Exchange(ref hcFactoryDisposed, 1);
+        lock (hardwareGate)
+        {
+            StopCpuTemperatureMonitor();
+            Volatile.Write(ref hcCoreInitialized, false);
+            if (hcDependencyResolverRegistered)
+            {
+                AssemblyLoadContext.Default.Resolving -= ResolveDependency;
+                hcDependencyResolverRegistered = false;
+            }
+        }
         // HC-SLIM-01 R4 §4 H1：backend provider 自持 ACPI 句柄，走同一归还助手（仅在真正
         // 打开或 leaf 句柄仍有效时归还），与 CloseCore 的关闭边界共用一份归属逻辑。
         ReleaseBackendAsusAcpiOwnedHandle("dispose");
@@ -10109,10 +11959,13 @@ internal sealed partial class RealHcBackend : IDisposable
         {
             if (staDispatcherStopping) return;
             staDispatcherStopping = true;
+            Monitor.PulseAll(staGate);
             dispatcher = staDispatcher;
             dispatcherThread = staThread;
         }
-        if (dispatcher is not null && Thread.CurrentThread != dispatcherThread)
+        // Queue shutdown on the existing dispatcher even when Dispose is
+        // called by its own STA. It runs after the current callback unwinds.
+        if (dispatcher is not null)
         {
             try { dispatcher.BeginInvokeShutdown(DispatcherPriority.Send); }
             catch (InvalidOperationException) { }
@@ -10146,12 +11999,70 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
         "HWiNFO_SENS_SM",
     ];
     private readonly record struct HWiNFOSnapshot(float TemperatureC);
+    private readonly record struct HeaderStamp(uint Signature, uint Version, uint Revision,
+        ulong PollTime, uint SensorOffset, uint SensorSize, uint SensorCount,
+        uint ReadingOffset, uint ReadingSize, uint ReadingCount, uint PeriodMs);
+    // Same freshness contract as native/monitor_freshness.h (R198/R199):
+    // readable mapping != advancing producer, integer-second repeats are normal.
+    // Separate the four possible mapping names so fallback cannot reset a frozen
+    // producer's monotonic budget merely by alternating between old mappings.
+    private sealed class ProducerFreshness
+    {
+        private ulong lastPollTime;
+        private long lastChangeTick;
+        private bool stale;
+        public bool IsFresh(ulong pollTime, uint periodMs, long nowTick, long nowUnixMs)
+        {
+            if (pollTime == 0) return false;
+            var threshold = Math.Max(5000L, Math.Clamp((long)periodMs, 500L, 60000L) + 3000L);
+            // Compare before multiplication: a malformed/future U64 cannot wrap
+            // into a recent epoch. Clock rollback follows native's age=0 policy;
+            // the monotonic non-advancement budget still expires.
+            var ageMs = nowUnixMs > 0 && pollTime <= (ulong)nowUnixMs / 1000UL
+                ? (ulong)nowUnixMs - pollTime * 1000UL : 0UL;
+            if (ageMs >= (ulong)threshold)
+            {
+                lastPollTime = pollTime;
+                stale = true;
+                return false;
+            }
+            if (lastPollTime == 0 || pollTime != lastPollTime)
+            {
+                lastPollTime = pollTime;
+                lastChangeTick = nowTick;
+                stale = false;
+                return true;
+            }
+            if (stale || nowTick - lastChangeTick >= threshold)
+            {
+                stale = true;
+                return false;
+            }
+            return true;
+        }
+    }
+    private readonly Dictionary<string, ProducerFreshness> producerFreshness = new(StringComparer.Ordinal);
+    private long staleProducerPollCount;
+    private ulong lastProducerPollTime;
+    private uint lastProducerPeriodMs;
 
     private readonly object gate = new();
+    // FAN-1035: reuse the stable shared-memory section/view between polls.
+    // A producer restart, invalid header, stale sample, or disposal invalidates it.
+    private readonly object mappingGate = new();
+    private string? cachedMappingName;
+    private MemoryMappedFile? cachedMapping;
+    private MemoryMappedViewAccessor? cachedMappingView;
     private Timer? timer;
     private Action<float?>? sampleReceived;
     private Action? healthySampleReceived;
     private float? lastPublishedTemperature;
+    private long sampleReadTick = -1;
+    private const int ForcedSampleDelivery = 2;
+    private int sampleDeliveryAccepted;
+    internal long SampleReadTick => Volatile.Read(ref sampleReadTick);
+    internal void RejectSampleDelivery() => Volatile.Write(ref sampleDeliveryAccepted, 0);
+    internal void RequestSampleDelivery() => Volatile.Write(ref sampleDeliveryAccepted, ForcedSampleDelivery);
     private int polling;
     private bool disposed;
     private long pollCount;
@@ -10164,6 +12075,19 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
     private DateTimeOffset? startedAtUtc;
     private long lastReadAtUnixMs;
     private string? lastMappingName;
+    // FAN-992: Poll() is single-flight, so one reusable label buffer removes
+    // one 128-byte allocation from every shared-memory scan. The last mapping
+    // name is also the preferred next probe; the full fallback list remains in
+    // place when HWiNFO recreates or renames its mapping.
+    private readonly byte[] labelBuffer = new byte[128];
+    // Sensor labels/layout are stable across producer samples. Cache only the
+    // classification, never values; a header layout change invalidates it.
+    private string? labelCacheMappingName;
+    private HeaderStamp labelCacheStamp;
+    private HWiNFOLabelKind[]? labelCacheKinds;
+    // FAN-1033: only CPU temperature readings are consumed after label
+    // classification. Cache their indices with the same layout identity.
+    private int[]? labelCacheTemperatureIndices;
 
     public HWiNFOTemperatureMonitor() { }
 
@@ -10204,14 +12128,21 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
             if (snapshot is null) return;
 
             Interlocked.Increment(ref healthyPollCount);
+            Volatile.Write(ref sampleReadTick, Environment.TickCount64);
+            Volatile.Write(ref sampleDeliveryAccepted, 1);
             Volatile.Write(ref lastReadAtUnixMs, DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
             // A valid but unchanged temperature is still a healthy sample;
             // the watchdog must not confuse a steady CPU with a dead source.
             healthyCallback();
+            var delivery = Volatile.Read(ref sampleDeliveryAccepted);
+            if (delivery == 0) return;
 
-            if (lastPublishedTemperature == snapshot.Value.TemperatureC) return;
-            lastPublishedTemperature = snapshot.Value.TemperatureC;
+            if (lastPublishedTemperature == snapshot.Value.TemperatureC && delivery != ForcedSampleDelivery) return;
             callback(snapshot.Value.TemperatureC);
+            // A queued callback can be rejected after acquiring hardwareGate.
+            // Keep its value eligible for the next fresh sample, never replay this old sample.
+            if (Volatile.Read(ref sampleDeliveryAccepted) != 0)
+                lastPublishedTemperature = snapshot.Value.TemperatureC;
         }
         catch (Exception ex)
         {
@@ -10257,6 +12188,9 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
             lastPollDurationMs = ToMilliseconds(Volatile.Read(ref lastPollDurationTicks)),
             maxPollDurationMs = ToMilliseconds(Volatile.Read(ref maxPollDurationTicks)),
             lastReadAtUnixMs = Volatile.Read(ref lastReadAtUnixMs),
+            staleProducerPollCount = Volatile.Read(ref staleProducerPollCount),
+            producerPollTime = Volatile.Read(ref lastProducerPollTime),
+            producerPeriodMs = Volatile.Read(ref lastProducerPeriodMs),
             lastPollError,
         };
     }
@@ -10264,85 +12198,318 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
     private static double ToMilliseconds(long ticks) =>
         ticks <= 0 ? 0 : ticks * 1000d / Stopwatch.Frequency;
 
-    private HWiNFOSnapshot? ReadSnapshot()
+    private void InvalidateCachedMapping(string? mappingName = null)
     {
-        foreach (var name in SharedMemoryNames)
-        {
-            try
-            {
-                using var map = MemoryMappedFile.OpenExisting(name, MemoryMappedFileRights.Read);
-                using var view = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
-                var snapshot = ReadSnapshot(view);
-                if (snapshot is not null)
-                {
-                    Volatile.Write(ref lastMappingName, name);
-                    return snapshot;
-                }
-            }
-            catch (FileNotFoundException) { }
-            catch (WaitHandleCannotBeOpenedException) { }
-            catch (UnauthorizedAccessException ex) { Volatile.Write(ref lastPollError, ex.GetType().Name); }
-            catch (IOException ex) { Volatile.Write(ref lastPollError, ex.GetType().Name); }
-        }
-        return null;
+        if (mappingName is not null && !string.Equals(cachedMappingName, mappingName, StringComparison.Ordinal)) return;
+        try { cachedMappingView?.Dispose(); } catch { }
+        try { cachedMapping?.Dispose(); } catch { }
+        cachedMappingView = null;
+        cachedMapping = null;
+        cachedMappingName = null;
+        InvalidateLabelCache();
     }
 
-    private static HWiNFOSnapshot? ReadSnapshot(MemoryMappedViewAccessor view)
+    private void InvalidateLabelCache()
     {
-        if (view.Capacity < 44 || view.ReadUInt32(0) != HWiNFOSignature) return null;
+        // FAN-1036: the shared-memory header describes the reading layout, not
+        // the text labels. A producer restart can therefore reuse the same
+        // mapping name and layout while changing label order. Never carry the
+        // old label-to-index classification across a mapping invalidation.
+        labelCacheMappingName = null;
+        labelCacheStamp = default;
+        labelCacheKinds = null;
+        labelCacheTemperatureIndices = null;
+    }
+
+    private MemoryMappedViewAccessor? GetCachedMappingView(string name)
+    {
+        var sameMapping = string.Equals(cachedMappingName, name, StringComparison.Ordinal);
+        if (sameMapping && cachedMappingView is not null) return cachedMappingView;
+        MemoryMappedFile? map = null;
+        MemoryMappedViewAccessor? view = null;
+        try
+        {
+            map = MemoryMappedFile.OpenExisting(name, MemoryMappedFileRights.Read);
+            view = map.CreateViewAccessor(0, 0, MemoryMappedFileAccess.Read);
+            // Retire the current owner only once its replacement has a usable view.
+            InvalidateCachedMapping();
+            cachedMappingName = name;
+            cachedMapping = map;
+            cachedMappingView = view;
+            var result = view;
+            map = null;
+            view = null; // Both owners have transferred to the cache.
+            return result;
+        }
+        catch
+        {
+            // Keep the existing reclassification contract even if another name is missing.
+            if (!sameMapping) InvalidateLabelCache();
+            throw;
+        }
+        finally
+        {
+            try { view?.Dispose(); }
+            finally { map?.Dispose(); }
+        }
+    }
+
+    private HWiNFOSnapshot? ReadSnapshot()
+    {
+        lock (mappingGate)
+        {
+            // A timer callback can capture its delegates, then wait here while
+            // Dispose closes the mapping. It must not reopen a stopped source.
+            if (Volatile.Read(ref disposed)) return null;
+            // FAN-992: a stable HWiNFO mapping is normally found on every poll.
+            // Try that mapping first, then retain the original four-name fallback
+            // so producer restarts and version changes remain recoverable.
+            var preferred = Volatile.Read(ref lastMappingName);
+            if (preferred is not null)
+            {
+                var preferredSnapshot = TryReadSnapshot(preferred);
+                if (preferredSnapshot is not null) return preferredSnapshot;
+            }
+            foreach (var name in SharedMemoryNames)
+            {
+                if (string.Equals(name, preferred, StringComparison.Ordinal)) continue;
+                var snapshot = TryReadSnapshot(name);
+                if (snapshot is not null) return snapshot;
+            }
+            return null;
+        }
+    }
+
+    private HWiNFOSnapshot? TryReadSnapshot(string name)
+    {
+        try
+        {
+            var view = GetCachedMappingView(name);
+            if (view is null) return null;
+            if (!TryReadHeader(view, out var stamp))
+            {
+                InvalidateCachedMapping(name);
+                return null;
+            }
+            if (!producerFreshness.TryGetValue(name, out var freshness))
+                producerFreshness.Add(name, freshness = new ProducerFreshness());
+            Volatile.Write(ref lastProducerPollTime, stamp.PollTime);
+            Volatile.Write(ref lastProducerPeriodMs, stamp.PeriodMs);
+            if (!freshness.IsFresh(stamp.PollTime, stamp.PeriodMs, Environment.TickCount64,
+                DateTimeOffset.UtcNow.ToUnixTimeMilliseconds()))
+            {
+                Interlocked.Increment(ref staleProducerPollCount);
+                InvalidateCachedMapping(name);
+                return null; // No full label scan or healthy callback for a frozen producer.
+            }
+            // PollTime is integer seconds, not a unique sample identity. Read
+            // the selected CPU values even when it repeats; a changed/invalid
+            // live value must not be hidden by the previous temperature.
+            // ReadSnapshot still reuses mapping, labels and CPU-only indices,
+            // then verifies the header; Poll suppresses unchanged callbacks.
+            var snapshot = ReadSnapshot(view, stamp, name);
+            if (snapshot is null) return null;
+            Volatile.Write(ref lastMappingName, name);
+            return snapshot;
+        }
+        catch (FileNotFoundException) { InvalidateCachedMapping(name); return null; }
+        catch (WaitHandleCannotBeOpenedException) { InvalidateCachedMapping(name); return null; }
+        catch (UnauthorizedAccessException ex) { InvalidateCachedMapping(name); Volatile.Write(ref lastPollError, ex.GetType().Name); return null; }
+        catch (IOException ex) { InvalidateCachedMapping(name); Volatile.Write(ref lastPollError, ex.GetType().Name); return null; }
+    }
+
+    private static bool TryReadHeader(MemoryMappedViewAccessor view, out HeaderStamp stamp)
+    {
+        stamp = default;
+        if (view.Capacity < 44 || view.ReadUInt32(0) != HWiNFOSignature) return false;
+        var version = view.ReadUInt32(4);
+        var revision = view.ReadUInt32(8);
+        var pollTime = view.ReadUInt64(12);
+        var sensorOffset = view.ReadUInt32(20);
+        var sensorSize = view.ReadUInt32(24);
+        var sensorCount = view.ReadUInt32(28);
         var offset = view.ReadUInt32(32);
         var size = view.ReadUInt32(36);
         var count = view.ReadUInt32(40);
-        if (size < MinimumReadingSize || count == 0 || count > 100000) return null;
+        if (size < MinimumReadingSize || count == 0 || count > 100000) return false;
         var end = (long)offset + ((long)size * count);
-        if (offset < 44 || end > view.Capacity) return null;
+        if (offset < 44 || end > view.Capacity) return false;
+        // +44 is an observed v2 extension, not a universal SM2 base-header field.
+        var period = version == 2 && sensorOffset >= 48 && view.Capacity >= 48
+            ? view.ReadUInt32(44) : 0U;
+        stamp = new(HWiNFOSignature, version, revision, pollTime, sensorOffset, sensorSize,
+            sensorCount, offset, size, count, period);
+        return true;
+    }
 
-        var readings = new List<(string Label, double Value)>();
-        for (var index = 0; index < count; index++)
+    private HWiNFOSnapshot? ReadSnapshot(MemoryMappedViewAccessor view) =>
+        TryReadHeader(view, out var stamp) ? ReadSnapshot(view, stamp, string.Empty) : null;
+
+    private static bool SameLabelLayout(HeaderStamp left, HeaderStamp right) =>
+        left.Signature == right.Signature && left.Version == right.Version && left.Revision == right.Revision &&
+        left.SensorOffset == right.SensorOffset && left.SensorSize == right.SensorSize && left.SensorCount == right.SensorCount &&
+        left.ReadingOffset == right.ReadingOffset && left.ReadingSize == right.ReadingSize && left.ReadingCount == right.ReadingCount;
+
+    private HWiNFOSnapshot? ReadSnapshot(MemoryMappedViewAccessor view, HeaderStamp stamp, string mappingName)
+    {
+        var offset = stamp.ReadingOffset;
+        var size = stamp.ReadingSize;
+        var count = stamp.ReadingCount;
+        double? tctlOrTdie = null;
+        double? cpuPackage = null;
+        var cached = labelCacheKinds is not null && labelCacheKinds.Length == count &&
+            labelCacheTemperatureIndices is not null &&
+            string.Equals(labelCacheMappingName, mappingName, StringComparison.Ordinal) &&
+            SameLabelLayout(labelCacheStamp, stamp);
+        var kinds = cached ? labelCacheKinds! : new HWiNFOLabelKind[count];
+        int[] temperatureIndices;
+        // Poll() is single-flight, so the monitor-owned buffer is not shared by
+        // concurrent scans. Reusing it avoids one allocation per full layout scan.
+        var labelBytes = labelBuffer;
+        if (!cached)
+        {
+            for (var index = 0; index < count; index++)
+            {
+                var baseOffset = (long)offset + ((long)size * index);
+                view.ReadArray(baseOffset + ReadingLabelOffset, labelBytes, 0, labelBytes.Length);
+                var kind = ClassifyLabel(labelBytes);
+                kinds[index] = kind;
+            }
+            temperatureIndices = SelectTemperatureIndices(kinds);
+        }
+        else
+        {
+            temperatureIndices = labelCacheTemperatureIndices!;
+        }
+        // Only CPU temperature labels can contribute to the selected result;
+        // avoid a shared-memory ReadDouble for every unrelated voltage/RPM/power
+        // reading on each producer sample.
+        foreach (var index in temperatureIndices)
         {
             var baseOffset = (long)offset + ((long)size * index);
-            var label = ReadAnsi(view, baseOffset + ReadingLabelOffset, 128);
             var value = view.ReadDouble(baseOffset + ReadingValueOffset);
-            if (double.IsFinite(value)) readings.Add((label, value));
+            if (!double.IsFinite(value) || value <= 0 || value > 100) continue;
+            AccumulateTemperature(kinds[index], value, ref tctlOrTdie, ref cpuPackage);
         }
 
-        var temperature = SelectTemperature(readings);
-        if (temperature is null) return null;
+        var temperature = tctlOrTdie ?? cpuPackage;
+        // Reject an observed layout/producer change during the scan. Cache only
+        // after this consistency check passes, so a partial mapping never poisons
+        // later samples.
+        if (temperature is null || !TryReadHeader(view, out var after) || after != stamp) return null;
+        if (!cached)
+        {
+            labelCacheMappingName = mappingName;
+            labelCacheStamp = stamp;
+            labelCacheKinds = kinds;
+            labelCacheTemperatureIndices = temperatureIndices;
+        }
         return new HWiNFOSnapshot((float)temperature.Value);
     }
 
-    private static string ReadAnsi(MemoryMappedViewAccessor view, long position, int length)
+    private static int[] SelectTemperatureIndices(HWiNFOLabelKind[] kinds)
     {
-        var bytes = new byte[length];
-        view.ReadArray(position, bytes, 0, bytes.Length);
-        var end = Array.IndexOf(bytes, (byte)0);
-        return Encoding.ASCII.GetString(bytes, 0, end >= 0 ? end : bytes.Length).Trim();
+        var indices = new List<int>();
+        for (var index = 0; index < kinds.Length; index++)
+        {
+            if (kinds[index] is HWiNFOLabelKind.CpuTctlOrTdie or HWiNFOLabelKind.CpuPackage)
+                indices.Add(index);
+        }
+        return indices.ToArray();
     }
+
+    internal static int[] SelectTemperatureIndicesForSelfTest(HWiNFOLabelKind[] kinds) =>
+        SelectTemperatureIndices(kinds);
+    internal enum HWiNFOLabelKind { Other, CpuTctlOrTdie, CpuPackage, Ignored }
+
+    private static HWiNFOLabelKind ClassifyLabel(ReadOnlySpan<byte> raw)
+    {
+        var length = raw.IndexOf((byte)0);
+        if (length < 0) length = raw.Length;
+        var start = 0;
+        while (start < length && raw[start] <= 0x20) start++;
+        while (length > start && raw[length - 1] <= 0x20) length--;
+        if (length <= start) return HWiNFOLabelKind.Ignored;
+
+        var label = raw.Slice(start, length - start);
+        if (ContainsAsciiIgnoreCase(label, "Power") ||
+            ContainsAsciiIgnoreCase(label, "Voltage") ||
+            ContainsAsciiIgnoreCase(label, "RPM") ||
+            ContainsAsciiIgnoreCase(label, "Current"))
+            return HWiNFOLabelKind.Ignored;
+
+        var hasCpu = ContainsAsciiIgnoreCase(label, "CPU");
+        if (hasCpu && (ContainsAsciiIgnoreCase(label, "Tctl") || ContainsAsciiIgnoreCase(label, "Tdie")))
+            return HWiNFOLabelKind.CpuTctlOrTdie;
+        if (EqualsAsciiIgnoreCase(label, "CPU Package")) return HWiNFOLabelKind.CpuPackage;
+        return HWiNFOLabelKind.Other;
+    }
+
+    private static bool ContainsAsciiIgnoreCase(ReadOnlySpan<byte> value, string needle)
+    {
+        if (needle.Length == 0 || needle.Length > value.Length) return false;
+        for (var i = 0; i <= value.Length - needle.Length; i++)
+        {
+            var matched = true;
+            for (var j = 0; j < needle.Length; j++)
+            {
+                if (FoldAscii(value[i + j]) != FoldAscii((byte)needle[j]))
+                {
+                    matched = false;
+                    break;
+                }
+            }
+            if (matched) return true;
+        }
+        return false;
+    }
+
+    private static bool EqualsAsciiIgnoreCase(ReadOnlySpan<byte> value, string expected)
+    {
+        if (value.Length != expected.Length) return false;
+        for (var i = 0; i < value.Length; i++)
+            if (FoldAscii(value[i]) != FoldAscii((byte)expected[i])) return false;
+        return true;
+    }
+
+    private static byte FoldAscii(byte value) =>
+        value is >= (byte)'a' and <= (byte)'z' ? (byte)(value - ('a' - 'A')) : value;
 
     private static double? SelectTemperature(IEnumerable<(string Label, double Value)> readings)
     {
         double? tctlOrTdie = null;
         double? cpuPackage = null;
         foreach (var reading in readings)
-        {
-            if (reading.Label.Length == 0 ||
-                reading.Label.Contains("Power", StringComparison.OrdinalIgnoreCase) ||
-                reading.Label.Contains("Voltage", StringComparison.OrdinalIgnoreCase) ||
-                reading.Label.Contains("RPM", StringComparison.OrdinalIgnoreCase) ||
-                reading.Label.Contains("Current", StringComparison.OrdinalIgnoreCase))
-                continue;
-            if (!double.IsFinite(reading.Value) || reading.Value <= 0 || reading.Value > 100) continue;
-
-            var isTctlOrTdie = reading.Label.Contains("CPU", StringComparison.OrdinalIgnoreCase) &&
-                               (reading.Label.Contains("Tctl", StringComparison.OrdinalIgnoreCase) ||
-                                reading.Label.Contains("Tdie", StringComparison.OrdinalIgnoreCase));
-            var isCpuPackage = reading.Label.Equals("CPU Package", StringComparison.OrdinalIgnoreCase);
-            if (isTctlOrTdie)
-                tctlOrTdie = tctlOrTdie is null ? reading.Value : Math.Max(tctlOrTdie.Value, reading.Value);
-            else if (isCpuPackage)
-                cpuPackage = cpuPackage is null ? reading.Value : Math.Max(cpuPackage.Value, reading.Value);
-        }
+            AccumulateTemperature(reading.Label, reading.Value, ref tctlOrTdie, ref cpuPackage);
         return tctlOrTdie ?? cpuPackage;
+    }
+
+    private static void AccumulateTemperature(HWiNFOLabelKind labelKind, double value, ref double? tctlOrTdie, ref double? cpuPackage)
+    {
+        if (!double.IsFinite(value) || value <= 0 || value > 100) return;
+        if (labelKind == HWiNFOLabelKind.CpuTctlOrTdie)
+            tctlOrTdie = tctlOrTdie is null ? value : Math.Max(tctlOrTdie.Value, value);
+        else if (labelKind == HWiNFOLabelKind.CpuPackage)
+            cpuPackage = cpuPackage is null ? value : Math.Max(cpuPackage.Value, value);
+    }
+    private static void AccumulateTemperature(string label, double value, ref double? tctlOrTdie, ref double? cpuPackage)
+    {
+        if (label.Length == 0 ||
+            label.Contains("Power", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("Voltage", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("RPM", StringComparison.OrdinalIgnoreCase) ||
+            label.Contains("Current", StringComparison.OrdinalIgnoreCase))
+            return;
+        if (!double.IsFinite(value) || value <= 0 || value > 100) return;
+
+        var isTctlOrTdie = label.Contains("CPU", StringComparison.OrdinalIgnoreCase) &&
+                           (label.Contains("Tctl", StringComparison.OrdinalIgnoreCase) ||
+                            label.Contains("Tdie", StringComparison.OrdinalIgnoreCase));
+        var isCpuPackage = label.Equals("CPU Package", StringComparison.OrdinalIgnoreCase);
+        if (isTctlOrTdie)
+            tctlOrTdie = tctlOrTdie is null ? value : Math.Max(tctlOrTdie.Value, value);
+        else if (isCpuPackage)
+            cpuPackage = cpuPackage is null ? value : Math.Max(cpuPackage.Value, value);
     }
 
     internal static float? SelectTemperatureForSelfTest(IEnumerable<(string Label, double Value)> readings) =>
@@ -10356,11 +12523,18 @@ internal sealed class HWiNFOTemperatureMonitor : IDisposable
         lock (gate)
         {
             if (disposed) return;
-            disposed = true;
+            Volatile.Write(ref disposed, true);
             timer?.Dispose();
             timer = null;
             sampleReceived = null;
             healthySampleReceived = null;
+        }
+        // FAN-1036: Timer.Dispose() does not release the cached section/view.
+        // Wait for an in-flight Poll() to leave mappingGate, then close both
+        // handles explicitly so host teardown cannot retain HWiNFO mappings.
+        lock (mappingGate)
+        {
+            InvalidateCachedMapping();
         }
     }
 }
@@ -10385,6 +12559,7 @@ internal sealed class FanHostEngine : IDisposable
     private readonly HostOptions options;
     private readonly HostDiagnosticLog diagnostics;
     private readonly HostState state;
+    private readonly HostStateJsonCopy snapshotJsonCopy = new();
     private readonly RealHcBackend? realBackend;
     /**
      * FAN-204 Q1-b（2026-09-23 裁决 DC61E311…）：**读路径的已发布不可变快照**。
@@ -10400,16 +12575,49 @@ internal sealed class FanHostEngine : IDisposable
      *      AC15c 的判定不空转。
      */
     private HostState? lastPublishedSnapshot;
+    private FanMonitorDisplayReceipt? lastMonitorFan;
+    // Called only by existing API responses. No gate wait, device call or new timer.
+    public FanMonitorDisplayReceipt? MonitorFanSnapshotForRead() => Volatile.Read(ref lastMonitorFan);
+    private FanMonitorDisplayReceipt BuildMonitorFanSnapshot(HostState snapshot)
+    {
+        // Decide from the already published Host state first. In inactive states
+        // there is no displayable monitor target to inspect.
+        var enabled = !options.MockHandshake && realBackend is not null && snapshot.State == "Ready"
+            && snapshot.HardwareWritesEnabled && snapshot.OpenCalled && snapshot.OpenEventsCalled
+            && snapshot.Lease is not null && snapshot.ActiveCurve is { Count: > 0 }
+            && !snapshot.UnknownState && !snapshot.CloseCalled && !snapshot.HcCloseCleanupPending
+            && snapshot.PowerState is not ("Suspended" or "Suspending" or "Resuming") && !snapshot.OemRestoreConfirmed;
+        var target = enabled ? realBackend!.MonitorTargetForRead() : null;
+        // MonitorTarget.SampledAt is refreshed by the temperature producer. Capture
+        // it once so validation and the published receipt describe the same sample.
+        // Re-reading it can cross a freshness boundary and publish a timestamp
+        // that was never the value actually validated.
+        var sampledAt = enabled && target is not null ? target.SampledAt : 0;
+        var now = target is not null ? DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() : 0;
+        var valid = enabled && target is not null && double.IsFinite(target.Percent) && target.Percent >= 0 && target.Percent <= 100 && sampledAt > 0 && sampledAt <= now && now - sampledAt < 6000;
+        double? displayPercent = valid ? target!.Percent : null;
+        var displaySampledAt = valid ? sampledAt : 0;
+        // The receipt is immutable. Reuse the last one when the observable
+        // values are unchanged; a new sample timestamp, target, or lifecycle
+        // state still publishes a new receipt.
+        var previous = Volatile.Read(ref lastMonitorFan);
+        if (previous is not null && previous.Enabled == enabled && previous.Percent == displayPercent && previous.SampledAt == displaySampledAt)
+            return previous;
+        var receipt = new FanMonitorDisplayReceipt(enabled, displayPercent, displaySampledAt);
+        Volatile.Write(ref lastMonitorFan, receipt);
+        return receipt;
+    }
     private bool publishedSnapshotDisabledForMock;
     private Timer? runtimeDiagnosticsTimer;
     private readonly object runtimeDiagnosticsGate = new();
     // 2026-09-23 CPU/日志降负（operator 指令：把风扇进程 CPU 占用大幅降低）：
     // 高频采样自适应——常规态 30s 一条轻量心跳；故障/挂起/未知态 1s（有界）；
-    // 线程归因只在 CPU 超阈值时才做（常态不再枚举 ProcessThread）。
+    // 线程归因限于已开启的诊断输出：CPU 超阈值，或每次详细日志开启后的三次取证。
     private const int RuntimeSampleNormalIntervalMs = 30000;
     private const int RuntimeSampleBusyIntervalMs = 1000;
     private const double CpuThreadAttributionThresholdPercent = 1.0;
     private const double CpuWarningThresholdPercent = 3.0;
+    private const int DetailedThreadAttributionAttemptLimit = 3;
     private int runtimeSampleInFlight;
     /**
      * FAN-931 P1.2：30 s 采样里 loop 维护（StopHcControllerCpuLoops / DetectAbandonedDeviceOpen）
@@ -10424,24 +12632,23 @@ internal sealed class FanHostEngine : IDisposable
     // identify a runaway thread without a debugger on the test machine.
     private readonly Dictionary<int, double> lastThreadCpuMs = new();
     private HashSet<int> lastThreadIds = new();
+    private bool runtimeThreadWindowLoggingEnabled;
+    private int runtimeThreadWindowRemaining;
+    private long lastThreadCpuSampleTimestamp;
 
     private readonly struct ThreadCpuRow
     {
-        public ThreadCpuRow(int tid, double deltaMs, double totalMs, string startedAt, string state, bool isNew)
+        public ThreadCpuRow(int tid, double deltaMs, double totalMs, bool isNew)
         {
             Tid = tid;
             DeltaMs = deltaMs;
             TotalMs = totalMs;
-            StartedAt = startedAt;
-            State = state;
             IsNew = isNew;
         }
 
         public int Tid { get; }
         public double DeltaMs { get; }
         public double TotalMs { get; }
-        public string StartedAt { get; }
-        public string State { get; }
         public bool IsNew { get; }
     }
     private bool disposed;
@@ -10543,6 +12750,9 @@ internal sealed class FanHostEngine : IDisposable
     // resident Host can rebuild the session even if the WebView never sends
     // its resume callback.
     private IReadOnlyList<FanNode>? suspendedCurve;
+    // An explicit OFF may precede its queued physical restore. Lease expiry or
+    // a late sleep must not turn the still-live physical curve into new intent.
+    private bool controlIntentCancelled;
     private Task? resumeTask;
     // 第一批：resume 接续归属。旧恢复任务未结束时收到的新 resume 请求不静默丢弃，
     // 登记为接续；由旧任务收尾时按归属再接跑（新睡眠会清此标记=被取代）。
@@ -10682,6 +12892,12 @@ internal sealed class FanHostEngine : IDisposable
             realBackend.TemperatureMonitorStale = OnBackendTemperatureMonitorStale;
             realBackend.TimedOutOperationReturned = OnTimedOutHcOperationReturned;
             realBackend.Diagnostic = (eventName, details) => this.diagnostics.Write(eventName, details);
+            realBackend.DiagnosticLazy = (eventName, detailsFactory) => this.diagnostics.WriteLazy(eventName, detailsFactory);
+            realBackend.PowerObservationContext = () => new {
+                powerGeneration = state.PowerOperationGeneration > 0 ? (object)state.PowerOperationGeneration : "not-observed",
+                fanControlCycleId = realBackend?.ControlCycleId, powerPhase = state.PowerState,
+                generationScope = "existing-Host-power-operation-metadata-not-guessed-native-epoch"
+            };
         }
         this.diagnostics.SetContextProvider(BuildDiagnosticContext);
         this.diagnostics.Write("route.catalog", new
@@ -10714,6 +12930,7 @@ internal sealed class FanHostEngine : IDisposable
         // 2026-09-23（operator：把风扇进程 CPU 占用大幅降低）：重入保护 + 自复位节拍。
         if (Interlocked.Exchange(ref runtimeSampleInFlight, 1) == 1) return;
         var nextDelayMs = RuntimeSampleNormalIntervalMs;
+        double? cpuMsPerSec = null;
         try
         {
             using var process = Process.GetCurrentProcess();
@@ -10737,20 +12954,21 @@ internal sealed class FanHostEngine : IDisposable
                 lastProcessSampleTimestamp = nowTimestamp;
             }
             // 绝对口径（ms/s）：与任务管理器/软件里"单核百分比"口径可直接对账。
-            var cpuMsPerSec = cpuPercent is null || intervalMs is null || intervalMs <= 0
+            cpuMsPerSec = cpuPercent is null || intervalMs is null || intervalMs <= 0
                 ? (double?)null
                 : Math.Round(cpuPercent.Value / 100d * Math.Max(1, Environment.ProcessorCount) * 1000d, 1);
-            // 线程归因（只读）只在"确实有话要说"时做：常态不再枚举 ProcessThread，
-            // 省掉每个采样周期的 StartTime/ThreadState 系统调用——本次 CPU 降负主项之一。
+            // Detailed logging adds only one bounded thread-evidence window;
+            // the existing timer cadence and control maintenance stay independent.
             var faultish = state.UnknownState || state.State is "FaultLocked" or "Suspended" or "Unknown";
             nextDelayMs = faultish ? RuntimeSampleBusyIntervalMs : RuntimeSampleNormalIntervalMs;
-            // FAN-931 P1.2：只为**会落盘**的记录取数。日志门关闭且本次 CPU 未达归因阈值时，
-            // 不再每 30 s 去取线程数（Toolhelp 快照）/工作集/私有内存/GC 与各证据对象——
-            // 旧实现即使门关也照取，而那条记录本身注定不会被写。loop 维护（下方
-            // StopHcControllerCpuLoops / DetectAbandonedDeviceOpen）与采样取数**解耦**，
-            // 两个分支都照常执行（不得 early-return 掉维护责任）。
-            var recordSample = diagnostics.IsRuntimeGateEnabled() ||
-                cpuPercent is >= CpuThreadAttributionThresholdPercent;
+            // FAN-1050: these three CPU/sample events obey the runtime log gate.
+            // Closed-gate high CPU must not construct records that will be discarded.
+            // Self-test capture retains its existing high-CPU evidence without disk I/O.
+            // Cheap process CPU counters above and maintenance in finally still run.
+            var detailedLoggingEnabled = diagnostics.IsRuntimeGateEnabled();
+            var recordSample = detailedLoggingEnabled ||
+                (HostDiagnosticLog.SelfTestCaptureEnabled && cpuPercent is >= CpuThreadAttributionThresholdPercent);
+            var attributeThreads = ShouldAttributeRuntimeThreads(detailedLoggingEnabled, recordSample, cpuPercent, out var threadCpuCollectionReason);
             Interlocked.Increment(ref FanPerfCounters.RuntimeStatusReads);
             if (recordSample) Interlocked.Increment(ref FanPerfCounters.RuntimeSamplesRecorded);
             else Interlocked.Increment(ref FanPerfCounters.RuntimeSamplesSkipped);
@@ -10759,11 +12977,17 @@ internal sealed class FanHostEngine : IDisposable
             var threadsRemovedCount = 0;
             if (recordSample)
             {
-                var attributeThreads = cpuPercent is >= CpuThreadAttributionThresholdPercent;
+                var threadCpuBaseline = attributeThreads && lastThreadCpuSampleTimestamp == 0;
+                double? threadCpuIntervalMs = null;
                 if (attributeThreads)
                 {
+                    var attributionTimestamp = Stopwatch.GetTimestamp();
+                    if (!threadCpuBaseline)
+                        threadCpuIntervalMs = (attributionTimestamp - lastThreadCpuSampleTimestamp) * 1000d / Stopwatch.Frequency;
                     (hotThreads, threadsAdded, threadsRemovedCount) = CollectThreadCpuAttribution(process);
+                    lastThreadCpuSampleTimestamp = attributionTimestamp;
                 }
+                var hcStaThread = realBackend?.StaThreadIdentityForDiagnostics;
                 diagnostics.Write("host.runtime-sample", new
                 {
                     processId = process.Id,
@@ -10772,6 +12996,12 @@ internal sealed class FanHostEngine : IDisposable
                     cpuMsPerSec,
                     sampleCadenceMs = nextDelayMs,
                     threadsAttributed = attributeThreads,
+                    threadCpuIdKind = "os-thread-id",
+                    hcStaThread,
+                    threadCpuIntervalBasis = "collection-start-to-start",
+                    threadCpuBaseline,
+                    threadCpuIntervalMs,
+                    threadCpuCollectionReason,
                     intervalMs,
                     processCpuTimeMs = nowCpu.TotalMilliseconds,
                     workingSetBytes = process.WorkingSet64,
@@ -10803,6 +13033,12 @@ internal sealed class FanHostEngine : IDisposable
                         sampleCadenceMs = nextDelayMs,
                         threadCount = process.Threads.Count,
                         state = state.State,
+                        threadCpuIdKind = "os-thread-id",
+                        hcStaThread,
+                        threadCpuIntervalBasis = "collection-start-to-start",
+                        threadCpuBaseline,
+                        threadCpuIntervalMs,
+                        threadCpuCollectionReason,
                         hotThreads,
                     });
                 }
@@ -10817,6 +13053,12 @@ internal sealed class FanHostEngine : IDisposable
                         intervalMs,
                         processorCount = Environment.ProcessorCount,
                         threadCount = process.Threads.Count,
+                        threadCpuIdKind = "os-thread-id",
+                        hcStaThread,
+                        threadCpuIntervalBasis = "collection-start-to-start",
+                        threadCpuBaseline,
+                        threadCpuIntervalMs,
+                        threadCpuCollectionReason,
                         hotThreads,
                         threadsAdded,
                         threadsRemovedCount,
@@ -10824,17 +13066,7 @@ internal sealed class FanHostEngine : IDisposable
                 }
             }
 
-            // F1' re-assert: HC can start a fresh device read loop when a device
-            // event arrives after the open boundary (the test-machine capture
-            // showed exactly that at the virtual-gamepad click). Re-checking on
-            // this existing 5s timer is bounded, allocation-free and only writes
-            // when a loop flag is actually found set.
-            realBackend?.StopHcControllerCpuLoops("runtime-sample", state.PowerOperationGeneration, state.State, cpuMsPerSec);
-            // 920-v1.4 §16.2：同一处再做**遗弃设备打开**的可达性判定（只诊断）。
-            // 若命中，说明被放弃的 Device_Inserted 续体确实在新的会话边界之后仍然生效，
-            // 这正是"旧操作是否干扰后续控制"的证据入口。
-            realBackend?.DetectAbandonedDeviceOpen("runtime-sample");
-            Interlocked.Increment(ref runtimeLoopMaintenanceRuns);
+
         }
         catch (Exception ex)
         {
@@ -10842,14 +13074,64 @@ internal sealed class FanHostEngine : IDisposable
         }
         finally
         {
-            // 自复位节拍：本方法（含异常路径）是唯一重排入口（Timer 为一次性）。
-            Interlocked.Exchange(ref runtimeSampleInFlight, 0);
-            try { runtimeDiagnosticsTimer?.Change(nextDelayMs, Timeout.Infinite); } catch { }
+            try
+            {
+                // Sampling/log I/O cannot skip the existing HC maintenance duty.
+                // Keep both probes independent: a failed first callback must not
+                // prevent the second one from examining an abandoned session.
+                try
+                {
+                    realBackend?.StopHcControllerCpuLoops("runtime-sample", state.PowerOperationGeneration, state.State, cpuMsPerSec);
+                }
+                catch (Exception ex)
+                {
+                    diagnostics.Write("host.runtime-sample-failure", new { phase = "hc-loop-maintenance", error = ExceptionText(ex) });
+                }
+                try
+                {
+                    realBackend?.DetectAbandonedDeviceOpen("runtime-sample");
+                }
+                catch (Exception ex)
+                {
+                    diagnostics.Write("host.runtime-sample-failure", new { phase = "abandoned-open-maintenance", error = ExceptionText(ex) });
+                }
+                // Counts maintenance windows attempted, not successful HC stops.
+                Interlocked.Increment(ref runtimeLoopMaintenanceRuns);
+            }
+            finally
+            {
+                // The same one-shot cadence is rearmed even after maintenance failure.
+                Interlocked.Exchange(ref runtimeSampleInFlight, 0);
+                try { runtimeDiagnosticsTimer?.Change(nextDelayMs, Timeout.Infinite); } catch { }
+            }
         }
     }
 
+    private bool ShouldAttributeRuntimeThreads(bool detailedLoggingEnabled, bool recordSample, double? cpuPercent, out string? reason)
+    {
+        if (detailedLoggingEnabled && !runtimeThreadWindowLoggingEnabled)
+        {
+            runtimeThreadWindowRemaining = DetailedThreadAttributionAttemptLimit;
+            lastThreadCpuMs.Clear();
+            lastThreadIds.Clear();
+            lastThreadCpuSampleTimestamp = 0;
+        }
+        else if (!detailedLoggingEnabled)
+        {
+            runtimeThreadWindowRemaining = 0;
+        }
+        runtimeThreadWindowLoggingEnabled = detailedLoggingEnabled;
+        var windowAttempt = detailedLoggingEnabled && runtimeThreadWindowRemaining > 0;
+        // Spend before collection: a failing probe cannot create unlimited retries.
+        if (windowAttempt) runtimeThreadWindowRemaining--;
+        var aboveThreshold = cpuPercent is >= CpuThreadAttributionThresholdPercent;
+        var attribute = recordSample && (aboveThreshold || windowAttempt);
+        reason = !attribute ? null : aboveThreshold ? "cpu-threshold" : "detailed-log-window";
+        return attribute;
+    }
+
     /**
-     * 线程级 CPU 归因（只读）。**只在 CPU 超阈值时调用**：枚举本进程每个 OS 线程，
+     * 线程级 CPU 归因（只读）。仅用于阈值取证或有界详细日志窗口：枚举本进程每个 OS 线程，
      * 给出本区间消耗最多的前 8 个（含线程起始时间，便于回指触发它的动作）。
      * 常态不再进入这里——`StartTime`/`ThreadState` 是系统调用，几千次/小时纯属开销。
      */
@@ -10858,6 +13140,7 @@ internal sealed class FanHostEngine : IDisposable
     {
         var currentIds = new HashSet<int>();
         var rows = new List<ThreadCpuRow>();
+        var sampledThreads = new Dictionary<int, ProcessThread>();
         foreach (ProcessThread thread in process.Threads)
         {
             int tid;
@@ -10875,29 +13158,22 @@ internal sealed class FanHostEngine : IDisposable
             var known = lastThreadCpuMs.TryGetValue(tid, out var previousCpuMs);
             var deltaMs = known ? Math.Max(0d, cpuMs - previousCpuMs) : 0d;
             lastThreadCpuMs[tid] = cpuMs;
+            sampledThreads[tid] = thread;
+            rows.Add(new ThreadCpuRow(tid, Math.Round(deltaMs, 1), Math.Round(cpuMs, 1), !known));
+        }
+        // StartTime/ThreadState are only diagnostic labels. Read them after the
+        // unchanged top-8/new-12 selection, once per emitted thread. CPU accounting
+        // still observes every readable thread, including rows not emitted now.
+        (string StartedAt, string State) ReadMetadata(int tid)
+        {
+            var thread = sampledThreads[tid];
             var startedAt = "unknown";
             try { startedAt = thread.StartTime.ToString("HH:mm:ss.fff"); } catch { }
             var stateText = "unknown";
             try { stateText = thread.ThreadState.ToString(); } catch { }
-            rows.Add(new ThreadCpuRow(tid, Math.Round(deltaMs, 1), Math.Round(cpuMs, 1), startedAt, stateText, !known));
+            return (startedAt, stateText);
         }
-        var hotThreads = rows
-            .OrderByDescending(row => row.DeltaMs)
-            .Take(8)
-            .Select(row => (object)new
-            {
-                tid = row.Tid,
-                cpuDeltaMs = row.DeltaMs,
-                cpuTotalMs = row.TotalMs,
-                startedAt = row.StartedAt,
-                state = row.State,
-            })
-            .ToArray();
-        var threadsAdded = rows
-            .Where(row => row.IsNew)
-            .Take(12)
-            .Select(row => (object)new { tid = row.Tid, startedAt = row.StartedAt, state = row.State })
-            .ToArray();
+        var (hotThreads, threadsAdded) = ShapeThreadCpuAttribution(rows, ReadMetadata);
         var threadsRemovedCount = lastThreadIds.Count(id => !currentIds.Contains(id));
         lastThreadIds = currentIds;
         if (lastThreadCpuMs.Count > 256)
@@ -10907,6 +13183,47 @@ internal sealed class FanHostEngine : IDisposable
             foreach (var kv in live) lastThreadCpuMs[kv.Key] = kv.Value;
         }
         return (hotThreads, threadsAdded, threadsRemovedCount);
+    }
+
+    private static (object[] HotThreads, object[] ThreadsAdded) ShapeThreadCpuAttribution(
+        IReadOnlyList<ThreadCpuRow> rows, Func<int, (string StartedAt, string State)> readMetadata)
+    {
+        var metadata = new Dictionary<int, (string StartedAt, string State)>();
+        (string StartedAt, string State) Metadata(int tid)
+        {
+            if (!metadata.TryGetValue(tid, out var value))
+            {
+                value = readMetadata(tid);
+                metadata.Add(tid, value);
+            }
+            return value;
+        }
+        var hotThreads = rows
+            .OrderByDescending(row => row.DeltaMs)
+            .Take(8)
+            .Select(row =>
+            {
+                var detail = Metadata(row.Tid);
+                return (object)new
+                {
+                    tid = row.Tid,
+                    cpuDeltaMs = row.DeltaMs,
+                    cpuTotalMs = row.TotalMs,
+                    startedAt = detail.StartedAt,
+                    state = detail.State,
+                };
+            })
+            .ToArray();
+        var threadsAdded = rows
+            .Where(row => row.IsNew)
+            .Take(12)
+            .Select(row =>
+            {
+                var detail = Metadata(row.Tid);
+                return (object)new { tid = row.Tid, startedAt = detail.StartedAt, state = detail.State };
+            })
+            .ToArray();
+        return (hotThreads, threadsAdded);
     }
 
     private object BuildDiagnosticContext()
@@ -11012,13 +13329,23 @@ internal sealed class FanHostEngine : IDisposable
         };
     }
 
-    private void OnTimedOutHcOperationReturned(bool operationSucceeded)
+    private void OnTimedOutHcOperationReturned(RealHcBackend.TimedOutHcReturn receipt)
     {
         lock (gate)
         {
             if (stopped) return;
             var backend = realBackend;
             if (backend is null) return;
+            if (!backend.IsFanDispatchOwnerCurrent(receipt.ReturnOwner))
+            {
+                diagnostics.Write("hc.timeout-returned-retired", new
+                {
+                    receipt.ReturnOwner.GateEpoch, receipt.ReturnOwner.ControlCycle,
+                    receipt.OperationSucceeded, recoveryForCurrentOwnerClaimed = false,
+                });
+                return;
+            }
+            var operationSucceeded = receipt.OperationSucceeded;
             // The STA call can return after the 15-second bound either
             // normally or with an exception. Only the former is a completed
             // HC lifecycle boundary. In particular, a Close() exception
@@ -11141,6 +13468,25 @@ internal sealed class FanHostEngine : IDisposable
         lock (gate)
         {
             if (stopped) return;
+            if (error is RealHcBackend.BoundFanDispatchFailure bound)
+            {
+                // A real timeout advances its own write fence. Keep that fault
+                // for the same curve/session, but never fault a newer owner.
+                var timeout = bound.Cause is FanApiException { Code: "HC_OPERATION_TIMEOUT" };
+                if (realBackend is null || !realBackend.IsFanDispatchOwnerCurrent(bound.Owner, timeout))
+                {
+                    diagnostics.Write("hc.fan-dispatch-failure-retired", new
+                    { bound.Owner.GateEpoch, bound.Owner.ControlCycle, error = ExceptionText(bound.Cause), hardwareFailureForCurrentOwnerClaimed = false });
+                    return;
+                }
+                error = bound.Cause;
+            }
+            if (error is FanApiException { Code: "FAN_WRITE_SUPERSEDED" })
+            {
+                diagnostics.Write("hc.fan-dispatch-cancelled", new
+                { reason = "local-write-fence", writesMayHaveOccurred = true, hardwareFailureClaimed = false });
+                return;
+            }
             // The temperature/HID callback has already stopped the source and
             // blocked the next write.  Route loss must now use the same single
             // recovery owner as heartbeat: one HC Close/unbind, then the
@@ -11167,11 +13513,22 @@ internal sealed class FanHostEngine : IDisposable
      * return the device to HC Hardware mode, but a successful return remains a
      * normal resumable state rather than a fabricated route conflict/lock.
      */
-    private void OnBackendTemperatureMonitorStale()
+    private void OnBackendTemperatureMonitorStale(RealHcBackend.TemperatureStaleSignal signal)
     {
         lock (gate)
         {
             if (stopped || !state.HardwareWritesEnabled) return;
+            // Check and safety recovery share the engine lock, so a newer manual
+            // owner cannot enter between validation and the existing restore path.
+            if (realBackend is null || !realBackend.IsTemperatureStaleCurrent(signal))
+            {
+                diagnostics.Write("temperature.monitor-stale-retired", new
+                {
+                    signal.Owner.GateEpoch, signal.Owner.ControlCycle,
+                    signal.HealthRevision, restoreForCurrentOwnerClaimed = false,
+                });
+                return;
+            }
             diagnostics.Write("temperature.monitor-stale", new { state = state.State });
             if (RestoreHardware(close: false))
             {
@@ -11269,7 +13626,7 @@ internal sealed class FanHostEngine : IDisposable
     {
         lock (gate)
         {
-            var snapshot = JsonSerializer.Deserialize<HostState>(JsonSerializer.Serialize(state, JsonDefaults.Options), JsonDefaults.Options)!;
+            var snapshot = snapshotJsonCopy.Copy(state);
             ApplyDerivedSnapshotFields(snapshot);
             return snapshot;
         }
@@ -11307,7 +13664,7 @@ internal sealed class FanHostEngine : IDisposable
     /** gate 内调用：取新鲜深拷贝、**整体替换**发布、返回同一对象（发布后不再修改）。 */
     private HostState PublishSnapshotLocked(string? stateOverride = null)
     {
-        var snapshot = JsonSerializer.Deserialize<HostState>(JsonSerializer.Serialize(state, JsonDefaults.Options), JsonDefaults.Options)!;
+        var snapshot = snapshotJsonCopy.Copy(state);
         // 先落阶段覆盖、再派生（否则 resumePhase/controlAccepting 会与覆盖后的 state 漂移）。
         if (stateOverride is not null) snapshot.State = stateOverride;
         ApplyDerivedSnapshotFields(snapshot);
@@ -11341,6 +13698,7 @@ internal sealed class FanHostEngine : IDisposable
         snapshot.ResumeRetryAfterMs = HostState.ResumePollRetryAfterMs;
         snapshot.ControlAccepting = IsControlAccepting(snapshot);
         snapshot.LastControlWriteEvidence = realBackend?.LastControlWriteEvidence ?? "none";
+        snapshot.MonitorFan = BuildMonitorFanSnapshot(snapshot);
         if (options.MockZeroHardwareEvidence)
         {
             // Engine retains logical mock flags for existing lifecycle/restore
@@ -11823,6 +14181,7 @@ internal sealed class FanHostEngine : IDisposable
                 // process or sleep boundary. HC hands fan ownership back by
                 // applying its Hardware profile and keeps the device session
                 // open for the resident app to acquire again.
+                RetainControlIntentBeforeLeaseExpiry();
                 if (!RestoreHardware(close: false))
                 {
                     state.State = "FaultLocked";
@@ -11960,12 +14319,15 @@ internal sealed class FanHostEngine : IDisposable
         throw reject;
     }
 
-    public FanLease Heartbeat(string leaseId)
+    public FanLease Heartbeat(string leaseId, long msiFirmwareModeRevision = 0)
     {
         // ── Q1-c：取锁前快速判定（不等 gate / 不调 HC / 不续租 / 不写曲线 / 不建第二 owner）──
         // 负例开关（仅 mock）：`--mock-heartbeat-legacy-gate` 退回修复前的"直接进 gate"行为，
         // 使 AC15d 的快速判定断言失败 —— 证明该判定不空转。
-        var startedTick = Environment.TickCount64;
+        var startedTimestamp = Stopwatch.GetTimestamp();
+        // Only the actual gate acquisition below runs this timer. A fast rejection has no gate span;
+        // snapshot checks and synchronous diagnostic I/O belong to the separate end-to-end timing.
+        var gateWait = new Stopwatch();
         if (!options.MockHeartbeatLegacyGate)
         {
             var fastReject = TryFastRejectHeartbeatLockFree();
@@ -11981,10 +14343,12 @@ internal sealed class FanHostEngine : IDisposable
                 // 不属于本夹具的断言范围；本夹具只对"快速拒绝路径是否如实上报未续租"负责。
                 var leaseRenewed = false;
                 var leaseExtensionMs = 0;
+                var diagnosticWriteTicks = 0L;
                 if (options.MockHeartbeatRenewLease)
                 {
                     leaseExtensionMs = 15000;
                     leaseRenewed = true;
+                    var injectionDiagnosticStarted = Stopwatch.GetTimestamp();
                     diagnostics.Write("api.heartbeat-fast-reject-defect-injected", new
                     {
                         injection = "mock-heartbeat-renew-lease",
@@ -11993,13 +14357,33 @@ internal sealed class FanHostEngine : IDisposable
                         engineStateMutated = false,
                         note = "sandbox-only contract mutation: AC15d's notRenewed assertion must fail",
                     });
+                    diagnosticWriteTicks += Stopwatch.GetTimestamp() - injectionDiagnosticStarted;
                 }
-                var waitedForGateMs = Environment.TickCount64 - startedTick;
+                var waitedForGateMs = gateWait.Elapsed.TotalMilliseconds;
                 var published = Volatile.Read(ref lastPublishedSnapshot);
+                // 事件级诊断（低频：仅在"重建期收到控制请求"时写一条），供真机取证。
+                var rejectionDiagnosticStarted = Stopwatch.GetTimestamp();
+                diagnostics.Write("api.heartbeat-fast-reject", new
+                {
+                    code = fastReject.Code,
+                    waitedForGateMs,
+                    fastRejectBeforeDiagnosticMs = Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds,
+                    priorDiagnosticWriteMs = diagnosticWriteTicks * 1000d / Stopwatch.Frequency,
+                    hcCalled = false,
+                    leaseRenewed,
+                    leaseExtensionMs,
+                    generation = published?.PowerOperationGeneration ?? -1,
+                    resumePhase = published?.ResumePhase ?? "unknown",
+                    state = published?.State,
+                });
+                diagnosticWriteTicks += Stopwatch.GetTimestamp() - rejectionDiagnosticStarted;
                 fastReject.Details = new
                 {
                     source = "published-snapshot",
                     waitedForGateMs,
+                    // Includes both synchronous diagnostic writes; HTTP serialization/transport is measured by the simulator.
+                    fastRejectElapsedMs = Stopwatch.GetElapsedTime(startedTimestamp).TotalMilliseconds,
+                    diagnosticWriteMs = diagnosticWriteTicks * 1000d / Stopwatch.Frequency,
                     gateWaited = false,
                     hcCalled = false,
                     generation = published?.PowerOperationGeneration ?? -1,
@@ -12009,23 +14393,13 @@ internal sealed class FanHostEngine : IDisposable
                     leaseRenewed,
                     leaseExtensionMs,
                 };
-                // 事件级诊断（低频：仅在"重建期收到控制请求"时写一条），供真机取证。
-                diagnostics.Write("api.heartbeat-fast-reject", new
-                {
-                    code = fastReject.Code,
-                    waitedForGateMs,
-                    hcCalled = false,
-                    leaseRenewed,
-                    leaseExtensionMs,
-                    generation = published?.PowerOperationGeneration ?? -1,
-                    resumePhase = published?.ResumePhase ?? "unknown",
-                    state = published?.State,
-                });
                 throw fastReject;
             }
         }
+        gateWait.Start();
         lock (gate)
         {
+            gateWait.Stop();
             EnsureControlAvailable();
             EnsureLease(leaseId);
             try
@@ -12036,6 +14410,12 @@ internal sealed class FanHostEngine : IDisposable
                 // EC, WMI or ACPI read result.
                 realBackend?.VerifyActiveCurveSession();
             }
+            catch (FanApiException ex) when (ex.Code == "HC_OPERATION_BUSY")
+            {
+                // Admission exhausted, not device failure: preserve current
+                // control/lease and return an honest unexecuted request.
+                throw;
+            }
             catch (Exception ex)
             {
                 RecoverAfterHardwareFailure(ex);
@@ -12044,6 +14424,9 @@ internal sealed class FanHostEngine : IDisposable
             var lease = state.Lease! with { ExpiresAtMonoMs = MonoMs() + 15000 };
             state.Lease = lease;
             leaseTimer?.Change(15000, Timeout.Infinite);
+            if (state.HardwareWritesEnabled && state.State == "Ready")
+                realBackend?.NotifyMsiFirmwareModeChanged(msiFirmwareModeRevision);
+            BuildMonitorFanSnapshot(state); // Existing gate owner; reads cached producer receipt only.
             return lease;
         }
     }
@@ -12054,6 +14437,7 @@ internal sealed class FanHostEngine : IDisposable
         RejectUserControlDuringTransitionLockFree("enable");
         lock (gate)
         {
+            var admittedGateEpoch = realBackend?.SuspendGateEpochForResume;
             diagnostics.Write("api.enable.begin", new { state = state.State, hasLease = state.Lease is not null });
             EnsureControlAvailable();
             EnsureLeaseFromBody(body);
@@ -12087,6 +14471,7 @@ internal sealed class FanHostEngine : IDisposable
             // prove that a fan command was issued.  Clear a previous OEM
             // acknowledgement before the HC callback so a disable -> enable
             // sequence can never skip its next hardware restore.
+            var previouslyEnabled = state.HardwareWritesEnabled;
             state.HardwareWritesObserved = true;
             state.HardwareWritesEnabled = true;
             state.OemRestoreConfirmed = false;
@@ -12102,15 +14487,18 @@ internal sealed class FanHostEngine : IDisposable
             }
             else
             {
-                try { realBackend!.ApplyCurve(nodes); }
+                try { realBackend!.ApplyCurve(nodes, admittedGateEpoch); }
                 catch (Exception ex)
                 {
+                    if (ex is FanApiException { Code: "FAN_WRITE_SUPERSEDED" })
+                        state.HardwareWritesEnabled = previouslyEnabled;
                     diagnostics.Write("api.enable.hc-write-failure", new { error = ExceptionText(ex) });
                     RecoverAfterHardwareFailure(ex);
                     throw;
                 }
             }
             activeCurve = nodes;
+            controlIntentCancelled = false;
             state.ActiveCurve = nodes;
             if (options.MockZeroHardwareEvidence) state.MockControlSequence++;
             state.LastTemperatureC = MockFanHandshakeFlag ? 55.0 : realBackend!.LastTemperatureC;
@@ -12141,9 +14529,13 @@ internal sealed class FanHostEngine : IDisposable
         // the same one-shot curve request used by manual edits. Dropping it
         // here made every real preset fail at Enable's lease gate and then
         // needlessly enter the UI recovery path.
-        using var document = JsonDocument.Parse(JsonSerializer.Serialize(new { nodes, leaseId }, JsonDefaults.Options));
-        return Enable(document.RootElement);
+        return Enable(BuildEnableRequest(nodes, leaseId));
     }
+
+    // Preserve each caller's declared node type and the current serializer options.
+    // The generated command owns its element without a UTF-16 string roundtrip.
+    private static JsonElement BuildEnableRequest<TNodes>(TNodes nodes, string? leaseId) =>
+        JsonSerializer.SerializeToElement(new { nodes, leaseId }, JsonDefaults.Options);
 
     internal static string BuildPresetPayloadForSelfTest(string name, string leaseId)
     {
@@ -12159,6 +14551,63 @@ internal sealed class FanHostEngine : IDisposable
         _ => throw new FanApiException(400, "INVALID_PRESET", "未知风扇预设"),
     };
 
+    // Administrative cancellation: never proves or performs an OEM release.
+    // It remains callable while asleep, so OFF does not only clear the page.
+    public object CancelControlIntent()
+    {
+        lock (gate)
+        {
+            CancelControlIntentUnlocked("intent-only");
+            ThrowIfControlIntentCancellationFailed();
+            return SnapshotUnlocked();
+        }
+    }
+
+    private string? controlIntentCancellationError;
+    private void ThrowIfControlIntentCancellationFailed()
+    {
+        if (controlIntentCancellationError is not null)
+            throw new FanApiException(409, "CONTROL_INTENT_CANCEL_FAILED", "本实例已取消风扇恢复，但旧交接文件未能撤销，请重试；未确认跨宿主取消完成");
+    }
+
+    private void CancelControlIntentUnlocked(string source)
+    {
+        var operation = activeResumeOperation;
+        var pending = Volatile.Read(ref resumeContinuationRequested) != 0;
+        suspendedCurve = null;
+        controlIntentCancelled = true;
+        controlIntentCancellationError = null;
+        try { File.Delete(ControlIntentPath()); }
+        catch (Exception error)
+        {
+            controlIntentCancellationError = ExceptionText(error);
+            diagnostics.Write("recovery.control-intent-cancel-failed", new { source, error = controlIntentCancellationError });
+        }
+        SettlePendingContinuationAsSupersededUnlocked();
+        Interlocked.Exchange(ref resumeContinuationRequested, 0);
+        Volatile.Write(ref resumeContinuationEpoch, 0);
+        if (operation is not null || automaticResumeInProgress || pending)
+        {
+            if (operation is ResumeOperationIdentity owner)
+                RevokeAutomaticResumePlaceholderLeaseLocked(owner.AttemptId, "user-control-cancelled");
+            activeResumeOperation = null;
+            Interlocked.Increment(ref powerEpoch);
+            automaticResumeInProgress = false;
+            automaticResumeResult = null;
+            state.PowerOperationStatus = "superseded";
+            state.PowerOperationOutcome = "user-cancelled";
+            if (operation is ResumeOperationIdentity cancelled) RecordResumeTerminalLocked(cancelled.AttemptId, "superseded", "user-cancelled");
+            if (state.State == "Resuming" && state.PowerState == "On")
+                state.State = activeCurve is null ? "AwaitingControl" : "Ready";
+        }
+        diagnostics.Write("power.resume-intent-cancelled", new
+        {
+            source, attempt = (operation as ResumeOperationIdentity)?.AttemptId ?? 0,
+            retainedCurveNodes = 0, hardwareReleasePerformed = false,
+            physicalOwnershipClaimed = false,
+        });
+    }
+
     public object Disable(JsonElement body)
     {
         lock (gate)
@@ -12167,6 +14616,7 @@ internal sealed class FanHostEngine : IDisposable
             // It must stay reachable after a lease timer fired or a client
             // crashed; a stale lease must never block the release of hardware.
             LogIgnoredLeaseForSafetyCleanup(body, "disable");
+            CancelControlIntentUnlocked("disable");
             if (!RestoreHardware(close: false))
             {
                 state.State = "FaultLocked";
@@ -12175,6 +14625,7 @@ internal sealed class FanHostEngine : IDisposable
             }
             state.State = "Ready";
             suspendedCurve = null;
+            ThrowIfControlIntentCancellationFailed();
             return SnapshotUnlocked();
         }
     }
@@ -12186,6 +14637,7 @@ internal sealed class FanHostEngine : IDisposable
             // See Disable: a stale lease can authorize neither a write nor a
             // new owner, but it cannot be allowed to prevent OEM recovery.
             LogIgnoredLeaseForSafetyCleanup(body, "restore");
+            CancelControlIntentUnlocked("restore");
             if (!RestoreHardware(close: false))
             {
                 state.State = "FaultLocked";
@@ -12194,6 +14646,7 @@ internal sealed class FanHostEngine : IDisposable
             }
             state.State = "Ready";
             suspendedCurve = null;
+            ThrowIfControlIntentCancellationFailed();
             return SnapshotUnlocked();
         }
     }
@@ -12214,6 +14667,7 @@ internal sealed class FanHostEngine : IDisposable
                     !string.Equals(value.GetString(), state.Lease.LeaseId, StringComparison.Ordinal))
                     throw new FanApiException(409, "LEASE_INVALID", "Fan lease 已失效");
             }
+            CancelControlIntentUnlocked("release");
             // HC's normal profile handoff changes FanMode back to Hardware but
             // keeps the device session open. IDevice.Close() belongs to the
             // process/sleep boundary, not lease release; calling it here can
@@ -12227,6 +14681,7 @@ internal sealed class FanHostEngine : IDisposable
             ClearLease();
             suspendedCurve = null;
             state.State = state.UnknownState ? "FaultLocked" : "AwaitingControl";
+            ThrowIfControlIntentCancellationFailed();
             return SnapshotUnlocked();
         }
     }
@@ -12649,9 +15104,13 @@ internal sealed class FanHostEngine : IDisposable
         // 裁决 H3：登记本次睡眠边界所属的不可变保护记录**实例**（引用同一性）——
         // 后续失败/终态路径只允许用这一条实例做记录级 CAS 释放，绝不按 Value 认领。
         suspendBoundaryOwnedRecord = Volatile.Read(ref suspendProtection);
-        suspendedCurve = activeCurve is null
+        // A new sleep can interrupt Open before the resume worker restores
+        // activeCurve. Keep the already frozen user intent for the next cycle;
+        // successful Disable/Restore/Release/Close still explicitly clear it.
+        var retainedCurve = controlIntentCancelled ? null : activeCurve ?? suspendedCurve;
+        suspendedCurve = retainedCurve is null
             ? null
-            : activeCurve.Select(node => new FanNode(node.TempC, node.DutyPercent)).ToArray();
+            : retainedCurve.Select(node => new FanNode(node.TempC, node.DutyPercent)).ToArray();
         StopCurveTimer();
         // Strict HC SystemPending: freeze/write-gate first, then let the
         // device's own CurrentDevice.Close() own all ACPI/HID teardown. Do not
@@ -12856,6 +15315,22 @@ internal sealed class FanHostEngine : IDisposable
         automaticResumeResult = null;
         if (curve is null)
         {
+            // Empty SystemReady has no worker to perform the versioned gate
+            // commit. A later explicit Open/Enable must be able to run its
+            // normal temperature/MSI event callbacks in this same power epoch.
+            // No device is opened here and a newer sleep/Close remains closed.
+            if (!AutomaticResumeOperationCurrent(operation) ||
+                (realBackend is not null && !realBackend.TryAllowWritesAfterResume(acceptedGateEpoch)))
+            {
+                automaticResumeInProgress = false;
+                automaticResumeResult = false;
+                state.PowerOperationStatus = "superseded";
+                state.PowerOperationOutcome = "superseded";
+                RecordResumeTerminalLocked(operation.AttemptId, "superseded", null);
+                diagnostics.Write("power.resume-commit-superseded", new { state = state.State, attempt = operation.AttemptId });
+                if (ReferenceEquals(activeResumeOperation, operation)) activeResumeOperation = null;
+                return new ResumeAdmission(SnapshotUnlocked(), operation.AttemptId, operation.AttemptId, "attempt", continuationId);
+            }
             automaticResumeInProgress = false;
             automaticResumeResult = true;
             state.State = "AwaitingControl";
@@ -12887,6 +15362,23 @@ internal sealed class FanHostEngine : IDisposable
         resumeWorkerActive = 1;
         resumeTask = Task.Run(() => CompleteAutomaticResume(curve));
         return new ResumeAdmission(SnapshotUnlocked(), operation.AttemptId, operation.AttemptId, "attempt", continuationId);
+    }
+
+    private bool AutomaticResumeOperationCurrent(object? operation) =>
+        operation is ResumeOperationIdentity accepted && ReferenceEquals(activeResumeOperation, operation)
+        && Volatile.Read(ref powerEpoch) == accepted.AcceptedPowerEpoch
+        && !stopped && !state.CloseCalled && !SuspendProtectionPending;
+
+    private T AutomaticResumeStep<T>(object? operation, Func<T> action)
+    {
+        // Check the immutable owner inside the same gate as the actual engine
+        // call. A final commit check alone still allowed a cancelled cached
+        // curve to reach Enable before its success was discarded.
+        lock (gate)
+        {
+            if (!AutomaticResumeOperationCurrent(operation)) throw ResumeSupersededError();
+            return action();
+        }
     }
 
     private void CompleteAutomaticResume(IReadOnlyList<FanNode> curve)
@@ -12933,15 +15425,19 @@ internal sealed class FanHostEngine : IDisposable
             // Call the same public engine boundaries used by the UI, but do
             // it from the resident Host so WebView loss cannot skip HC
             // Open/OpenEvents/lease/curve reconstruction.
-            _ = Open();
-            KeepAutomaticResumeState();
-            _ = OpenEvents();
-            KeepAutomaticResumeState();
-            var lease = AcquireControl();
-            // R1（FAN-926R 唤醒租约裁决 §3.2.1）：本 worker 留存**自己**铸造的临时租约身份，
-            // 与既有 operation/epoch/attempt 身份一并用于成功提交处的窄撤销。
-            automaticResumePlaceholderLeaseId = lease.LeaseId;
-            automaticResumePlaceholderLeaseGeneration = lease.Generation;
+            _ = AutomaticResumeStep(operation, Open);
+            KeepAutomaticResumeState(operation);
+            _ = AutomaticResumeStep(operation, OpenEvents);
+            KeepAutomaticResumeState(operation);
+            var lease = AutomaticResumeStep(operation, () =>
+            {
+                var acquired = AcquireControl();
+                // Publish ownership in the same gate as acquisition. OFF must
+                // never see a worker lease whose owner record is still absent.
+                automaticResumePlaceholderLeaseId = acquired.LeaseId;
+                automaticResumePlaceholderLeaseGeneration = acquired.Generation;
+                return acquired;
+            });
             diagnostics.Write("power.resume-placeholder-lease-created", new
             {
                 attempt = attemptId,
@@ -12949,13 +15445,9 @@ internal sealed class FanHostEngine : IDisposable
                 controlResponsibility = "host-resume-intent",
                 leaseTokenRecorded = false,
             });
-            KeepAutomaticResumeState();
-            using var document = JsonDocument.Parse(JsonSerializer.Serialize(new
-            {
-                nodes = curve,
-                leaseId = lease.LeaseId,
-            }, JsonDefaults.Options));
-            _ = Enable(document.RootElement);
+            KeepAutomaticResumeState(operation);
+            var enableRequest = BuildEnableRequest(curve, lease.LeaseId);
+            _ = AutomaticResumeStep(operation, () => Enable(enableRequest));
             // HC G5 keeps the fan write gate closed until Open, OpenEvents,
             // owner acquisition and the first profile write have completed.
             // Opening it at the start of recovery allowed a temperature tick
@@ -13000,7 +15492,7 @@ internal sealed class FanHostEngine : IDisposable
                 diagnostics.Write("power.resume-commit-superseded", new { state = state.State, attempt = attemptId });
                 return;
             }
-            KeepAutomaticResumeState();
+            KeepAutomaticResumeState(operation);
             var committedResume = false;
             lock (gate)
             {
@@ -13056,6 +15548,25 @@ internal sealed class FanHostEngine : IDisposable
         {
             lock (gate)
             {
+                if (!AutomaticResumeOperationCurrent(operation))
+                {
+                    // The lock-free sleep announcement can invalidate this
+                    // owner before SuspendUnlocked gets its turn. Retire only
+                    // this exact operation; never clear a later owner's flag.
+                    if (activeResumeOperation is null || ReferenceEquals(activeResumeOperation, operation))
+                        automaticResumeInProgress = false;
+                    if (operation is not null && ReferenceEquals(activeResumeOperation, operation))
+                    {
+                        activeResumeOperation = null;
+                        if (state.PowerOperationAttempt == attemptId)
+                        {
+                            state.PowerOperationStatus = "superseded";
+                            state.PowerOperationOutcome = "boundary-superseded";
+                        }
+                    }
+                    RecordResumeTerminalLocked(attemptId, "superseded", null);
+                    return;
+                }
                 // HC parity: a suspend boundary may close the device while
                 // this background rebuild is in flight (HC's SystemReady Open
                 // task has no sleep gate and Close is synchronous). The
@@ -13182,7 +15693,7 @@ internal sealed class FanHostEngine : IDisposable
      * `activeCurve`、已授权的硬件写状态与 Host 控制责任全部保持（§3.2.3）。客户端仍须凭认证、
      * 当前实例/代际和自己的租约才能写入（§3.1：不授予旧客户端写权）。
      */
-    private void RevokeAutomaticResumePlaceholderLeaseLocked(long attemptId)
+    private void RevokeAutomaticResumePlaceholderLeaseLocked(long attemptId, string reason = "resume-commit-complete")
     {
         var lease = state.Lease;
         var mine = automaticResumePlaceholderLeaseId is not null
@@ -13196,7 +15707,7 @@ internal sealed class FanHostEngine : IDisposable
                 attempt = attemptId,
                 reason = lease is null ? "no-lease-present" : "lease-not-owned-by-resume-worker",
                 controlResponsibility = "host-resume-intent",
-                nextAdjustmentStillRequired = true,
+                nextAdjustmentStillRequired = reason != "user-control-cancelled",
             });
             automaticResumePlaceholderLeaseId = null;
             automaticResumePlaceholderLeaseGeneration = 0;
@@ -13210,10 +15721,10 @@ internal sealed class FanHostEngine : IDisposable
         {
             attempt = attemptId,
             leaseGeneration = lease!.Generation,
-            reason = "resume-commit-complete",
+            reason,
             controlResponsibility = "host-resume-intent",
             clientWritesAuthorized = false,
-            nextAdjustmentStillRequired = true,
+            nextAdjustmentStillRequired = reason != "user-control-cancelled",
             state = state.State,
         });
         automaticResumePlaceholderLeaseId = null;
@@ -13413,11 +15924,11 @@ internal sealed class FanHostEngine : IDisposable
         return false;
     }
 
-    private void KeepAutomaticResumeState()
+    private void KeepAutomaticResumeState(object? operation)
     {
         lock (gate)
         {
-            if (!stopped && !state.CloseCalled && state.PowerState == "On")
+            if (AutomaticResumeOperationCurrent(operation) && state.PowerState == "On")
                 state.State = "Resuming";
         }
     }
@@ -13825,6 +16336,15 @@ internal sealed class FanHostEngine : IDisposable
         EnsureLease(value.GetString()!);
     }
 
+    // Called only by the gate owner after verifying the current lease expired.
+    // This memory-only intent is consumed by a later authenticated power resume;
+    // it neither renews the lease nor writes/retries the curve while awake.
+    private void RetainControlIntentBeforeLeaseExpiry()
+    {
+        if (!controlIntentCancelled && activeCurve is not null)
+            suspendedCurve = activeCurve.Select(node => new FanNode(node.TempC, node.DutyPercent)).ToArray();
+    }
+
     private void EnsureLease(string leaseId)
     {
         lock (gate)
@@ -13843,6 +16363,7 @@ internal sealed class FanHostEngine : IDisposable
             {
                 // Lease expiry follows HC's Hardware-profile handoff. Only a
                 // sleep or process-exit boundary owns the virtual Close().
+                RetainControlIntentBeforeLeaseExpiry();
                 if (RestoreHardware(close: false))
                 {
                     ClearLease();
@@ -13906,6 +16427,7 @@ internal sealed class FanHostEngine : IDisposable
                 // as Disable/Release; do not dispose HC resources here.
                 // R1（§3.2.9）：本次释放的**责任来源**必须可判读——只有"租约到期"这一条是
                 // 客户端租约安全策略；L1 用它证明占位租约撤销后不再有该来源的 restore。
+                RetainControlIntentBeforeLeaseExpiry();
                 if (RestoreHardware(close: false, cause: "lease-expiry"))
                 {
                     ClearLease();
@@ -14071,6 +16593,7 @@ internal sealed class FanHostEngine : IDisposable
         }
         try
         {
+            var alreadyRetiredBeforeClose = !stopDeviceManager && realBackend.HasVerifiedRetiredDeviceWithoutNewOpen;
             diagnostics.Write("restore.close-hc-begin", new
             {
                 stopDeviceManager,
@@ -14088,7 +16611,9 @@ internal sealed class FanHostEngine : IDisposable
             // device remains open. SystemPending never enters this branch: its
             // Close-first path above must not write OEM/default curves before
             // CurrentDevice.Close().
-            if (!skipOemRestore && state.HardwareWritesObserved && !state.OemRestoreConfirmed)
+            FanLifecycleCloseOrchestrator.Execute(
+                release: !skipOemRestore && state.HardwareWritesObserved && !state.OemRestoreConfirmed
+                    ? () =>
             {
                 diagnostics.Write("restore.close-hc-oem-restore-begin", new { source = "restore-before-hc-close" });
                 realBackend.RestoreOem();
@@ -14113,12 +16638,16 @@ internal sealed class FanHostEngine : IDisposable
                     state.OemRestoreEvidence,
                     state.OemOwnershipStatus,
                 });
-            }
-
-            // CurrentDevice.Close is the HC lifecycle boundary. No outer
-            // precondition may imply that an OEM/default-curve write happened
-            // first: strict SystemPending reaches this call directly.
-            realBackend.Close(stopDeviceManager);
+            } : null,
+                close: () => realBackend.Close(stopDeviceManager),
+                releaseStillInFlight: () => realBackend.OperationTimedOut,
+                recordReturnedReleaseFailure: error => diagnostics.Write("restore.close-hc-secondary-release-failed", new
+                {
+                    error = ExceptionText(error),
+                    releaseAction = realBackend.OemReleaseActionKind,
+                    lifecycleCloseStillRequired = true,
+                    physicalOwnershipClaimed = false,
+                }));
             if (clearOemEvidence)
             {
                 MarkSystemPendingOemEvidenceNotObserved();
@@ -14145,6 +16674,24 @@ internal sealed class FanHostEngine : IDisposable
             var hcCloseComplete = state.HcVirtualCloseReturned && realBackend.HcManagerCleanupConfirmed;
             if (!hcCloseComplete)
                 throw new InvalidOperationException("HC Close 返回但生命周期边界未完整完成");
+            if (alreadyRetiredBeforeClose && realBackend.HasVerifiedRetiredDeviceWithoutNewOpen)
+            {
+                state.OpenCalled = false;
+                state.OpenEventsCalled = false;
+                state.HardwareWritesEnabled = false;
+                state.UnknownState = false;
+                state.HcCloseCleanupPending = false;
+                state.LastError = null;
+                diagnostics.Write("restore.close-hc-already-retired", new
+                {
+                    result = "same-device-retired-before-new-hc-open",
+                    priorControlCycleId = realBackend.RetiredControlCycleId,
+                    currentControlCycleId = realBackend.ControlCycleId,
+                    newHcOpenEntered = false, hcCloseComplete = true,
+                    newReleaseActionClaimed = false, physicalOwnershipClaimed = false,
+                });
+                return true;
+            }
             // HC's Window_Closed and SystemPending clear their device session
             // once the virtual Close boundary returns. Do not require a
             // separate Hardware-profile callback here: HC uses that callback
@@ -14155,6 +16702,26 @@ internal sealed class FanHostEngine : IDisposable
             state.UnknownState = false;
             state.HcCloseCleanupPending = false;
             state.LastError = null;
+
+            // FAN-948: a fully retired process-close session cannot keep an
+            // acquisition lease or TTL/recovery timer alive. Keep the failure
+            // cycle counters and OEM evidence; this is not restore success.
+            if (stopDeviceManager && state.HcDeviceManagerStopCompleted)
+            {
+                state.Lease = null;
+                state.LeaseGeneration = null;
+                leaseTimer?.Dispose();
+                leaseTimer = null;
+                recoveryTimer?.Dispose();
+                recoveryTimer = null;
+                diagnostics.Write("restore.close-hc-resource-retired", new
+                {
+                    leaseRevoked = true,
+                    state.HcVirtualCloseReturned,
+                    state.HcDeviceManagerStopCompleted,
+                    oemReleaseSuccessClaimed = false,
+                });
+            }
 
             // §3.4（FAN-925B）：`skipOemRestore` 与 HC 清理完整**最多**表示"该阶段只结算
             // 设备关闭"。它**不是**"已释放"的出口：旧写法用它整条绕过 `IsOemReleaseSafe`，
@@ -14664,6 +17231,26 @@ internal sealed class FanHostEngine : IDisposable
 
     private void RecoverAfterHardwareFailure(Exception error)
     {
+        if (error is FanApiException { Code: "FAN_WRITE_SUPERSEDED" or "HC_OPEN_EVENTS_POWER_SUPERSEDED" })
+        {
+            // Event subscription rollback is local. The already-announced power
+            // boundary retains device Close/return ownership, exactly as for a
+            // superseded fan write; retain the cause without a second restore.
+            if (error is FanApiException { Code: "HC_OPEN_EVENTS_POWER_SUPERSEDED" })
+                state.LastError = ExceptionText(error);
+            // Sleep/Close/timeout has already retired this local write. Its
+            // lifecycle owner performs cleanup; don't erase committed intent
+            // or invent a second OEM/Close owner from this cancellation.
+            diagnostics.Write("hc-operation.write-cancelled", new
+            { state = state.State, writesMayHaveOccurred = true, hardwareFailureClaimed = false });
+            return;
+        }
+        if (error is FanApiException { Code: "HC_OPERATION_BUSY" })
+        {
+            diagnostics.Write("hc-operation.admission-busy", new
+            { state = state.State, submitted = false, hardwareFailureClaimed = false });
+            return;
+        }
         state.UnknownState = true;
         var failureText = ExceptionText(error);
         var routeLost = IsHcRouteLoss(error);
@@ -14684,7 +17271,19 @@ internal sealed class FanHostEngine : IDisposable
         {
             state.State = "FaultLocked";
             WriteFaultLockedDiagnostic("hardware-failure-restore-failed");
-            ScheduleRecoveryRetry();
+            if (state.HcVirtualCloseReturned && state.HcDeviceManagerStopCompleted
+                && !state.HcCloseCleanupPending && !state.OpenCalled && !state.OpenEventsCalled
+                && !state.HardwareWritesEnabled && realBackend?.IsOpen == false
+                && realBackend.OperationTimedOut == false)
+            {
+                diagnostics.Write("recovery.resource-retired-manual-restart-required", new
+                {
+                    cause = failureText,
+                    lifecycleCloseCompleted = true,
+                    oemReleaseSuccessClaimed = false,
+                });
+            }
+            else ScheduleRecoveryRetry();
         }
     }
 
@@ -15418,6 +18017,7 @@ internal sealed class FanHostEngine : IDisposable
             });
             return false;
         }
+        var currentIntent = (activeCurve ?? suspendedCurve)?.Select(node => new FanNode(node.TempC, node.DutyPercent)).ToArray();
         var accepted = false;
         var detail = "receipt-api-absent-no-hc-backend";
         var intentReplayed = false;
@@ -15437,7 +18037,7 @@ internal sealed class FanHostEngine : IDisposable
             // D5：拿到重开收据只代表**会话恢复**。成功结算还需当前意图重放（下一次调整
             // 是否有效由 T0-U 判），不得在曲线未恢复时报 recovered。
             if (accepted)
-                intentReplayed = RestoreControlIntentAfterTakeover(out intentDetail);
+                intentReplayed = RestoreCurrentIntentAfterReopen(currentIntent, out intentDetail);
         }
         catch (Exception ex)
         {
@@ -15496,7 +18096,7 @@ internal sealed class FanHostEngine : IDisposable
             // Host 重建会话"）。只读 `activeCurve` ⇒ 本文件在"睡眠→故障→受控更换"路径上
             // **恒为空**（真机 `recovery.control-intent-persisted curveNodes=0`），后继实例
             // 只能记 `control-intent-unusable(empty-curve)`，与本节"供后继恢复"的目的相反。
-            var intentCurve = suspendedCurve ?? activeCurve;
+            var intentCurve = activeCurve ?? suspendedCurve;
             var intent = new
             {
                 cycleId = recoveryCycle?.CycleId,
@@ -15524,7 +18124,7 @@ internal sealed class FanHostEngine : IDisposable
 
     /**
      * §4.1（FAN-926 P2）：**恰好一次**受控 Host 更换。
-     * 严格串行且不并写：先落盘控制意图 → 拉起**同映像**的后继实例（`--successor-takeover
+     * 严格串行且不并写：先落盘控制意图 → 启动精确等待旧进程退出的独立launcher → 后继启动**同映像**（`--successor-takeover
      * --predecessor-instance <本实例>`）→ 写正式收据。后继实例只有**重建生命周期互斥成功**
      * （= 本实例确已退出）后才会开始 HC 操作；周期与剩余预算由 `EnsureRecoveryCycleLocked`
      * 的 `Inherit` 分支继承，`Replacements>=1 ⇒ RefuseReplacementCap` 保证每周期至多一次。
@@ -15575,7 +18175,7 @@ internal sealed class FanHostEngine : IDisposable
             return false;
         }
         // 分配给后继的等待份额：不超过本周期剩余预算，也不超过旧常量上限。
-        var allocatedTakeoverBudgetMs = (int)Math.Min(remainingForTakeover, 15000);
+        var allocatedTakeoverBudgetMs = (int)Math.Min(remainingForTakeover - MinTakeoverBudgetMs, HostProcessLifetime.StopBudgetMs + 1000);
         PersistControlIntentForSuccessor();
         var argv = Environment.GetCommandLineArgs();
         var entry = argv.Length > 0 ? argv[0] : string.Empty;
@@ -15586,15 +18186,11 @@ internal sealed class FanHostEngine : IDisposable
                 StringComparison.OrdinalIgnoreCase);
         var launchArgs = new List<string>();
         if (viaMuxer) launchArgs.Add(entry);
-        launchArgs.AddRange(argv.Skip(1)
-            .Where(arg => !string.Equals(arg, "--successor-takeover", StringComparison.Ordinal) &&
-                          !string.Equals(arg, "--predecessor-instance", StringComparison.Ordinal) &&
-                          !string.Equals(arg, "--successor-budget-ms", StringComparison.Ordinal)));
-        // D6：从继承的 argv 里剔除上一代的 `--successor-budget-ms` **值**（避免旧预算被当成新预算）。
-        for (var i = launchArgs.Count - 1; i > 0; i--)
+        for (var i = 1; i < argv.Length; i++)
         {
-            if (string.Equals(launchArgs[i - 1], "--successor-budget-ms", StringComparison.Ordinal))
-                launchArgs.RemoveAt(i);
+            if (argv[i] == "--successor-takeover") continue;
+            if (argv[i] is "--predecessor-instance" or "--successor-budget-ms") { i++; continue; }
+            launchArgs.Add(argv[i]);
         }
         launchArgs.Add("--successor-takeover");
         launchArgs.Add("--predecessor-instance");
@@ -15602,7 +18198,7 @@ internal sealed class FanHostEngine : IDisposable
         // D6：把靠同一剩余预算分配出的接管等待预算交给后继；后继不再自带固定 15 s。
         launchArgs.Add("--successor-budget-ms");
         launchArgs.Add(allocatedTakeoverBudgetMs.ToString());
-        if (options.SelfTest)
+        if (options.SelfTest || Program.IsSelfTestProcess)
         {
             // 自测必须保持**无副作用**：不真拉起进程。进程级场景由 Fan 自有进程门覆盖。
             diagnostics.Write("recovery.host-replacement-spawned", new
@@ -15621,13 +18217,13 @@ internal sealed class FanHostEngine : IDisposable
         }
         try
         {
-            var info = new ProcessStartInfo(exe) { UseShellExecute = false, CreateNoWindow = true };
-            foreach (var arg in launchArgs) info.ArgumentList.Add(arg);
-            var successor = Process.Start(info);
+            using var successor = DeferredHostSuccessor.Start(exe, launchArgs, allocatedTakeoverBudgetMs);
             diagnostics.Write("recovery.host-replacement-spawned", new
             {
                 predecessorInstanceId = engineInstanceId,
-                successorPid = successor?.Id ?? 0,
+                successorPid = 0,
+                replacementLauncherPid = successor.Id,
+                spawnDeferredUntilExactPredecessorExit = true,
                 cycleId = recoveryCycle?.CycleId,
                 reopenCount = recoveryReopenCount,
                 replacementRequests = uiFreeReplacementRequests,
@@ -15635,8 +18231,8 @@ internal sealed class FanHostEngine : IDisposable
                 replacementCap = "at-most-one-auto-host-replacement-per-cycle",
                 scope = "spawn-is-a-request-only; recovery is proven by the successor takeover receipt",
             });
-            SchedulePredecessorOrderlyExit(successor?.Id ?? 0);
-            return successor is not null;
+            SchedulePredecessorOrderlyExit(0);
+            return true;
         }
         catch (Exception ex)
         {
@@ -16084,68 +18680,86 @@ internal sealed class FanHostEngine : IDisposable
      * 自己的 `recovery.control-intent-restored` 事件并显式标注 authority，绝不冒充 `api.enable`。
      * 无意图文件 / 曲线为空 / 无写权限 / 写入失败 ⇒ 一律如实记账，**不**宣称已恢复。
      */
+    private bool TryReadBoundTakeoverIntent(out ControlIntent? intent, out string detail)
+    {
+        intent = ReadControlIntent();
+        var persisted = ReadPersistedRecoveryCycle();
+        detail = "intent:bound";
+        if (!options.SuccessorTakeover || string.IsNullOrWhiteSpace(options.PredecessorInstanceId)) detail = "intent:no-takeover-owner";
+        else if (intent is null) detail = "intent:absent";
+        else if (string.IsNullOrWhiteSpace(intent.CycleId) || persisted is null || !string.Equals(intent.CycleId, persisted.CycleId, StringComparison.Ordinal)) detail = "intent:cycle-mismatch";
+        else if (!string.Equals(intent.PredecessorInstanceId, options.PredecessorInstanceId, StringComparison.Ordinal)) detail = "intent:predecessor-mismatch";
+        else if (!ParentIdentityMatchesEpisode(persisted!)) detail = "intent:parent-mismatch";
+        else if (RemainingRecoveryCycleMs(persisted!) <= 0) detail = "intent:cycle-exhausted-or-settled";
+        else if (intent.Curve is null || intent.Curve.Count == 0 || intent.CurveNodes != intent.Curve.Count) detail = "intent:empty-or-count-mismatch";
+        else
+        {
+            try { ValidateCurve(intent.Curve); }
+            catch (Exception) { detail = "intent:invalid-curve"; }
+        }
+        if (detail == "intent:bound") return true;
+        diagnostics.Write("recovery.control-intent-rejected", new { detail, intent?.CycleId, intent?.PredecessorInstanceId, scope = "no-hardware-write" });
+        intent = null;
+        return false;
+    }
+
+    private bool RestoreCurrentIntentAfterReopen(IReadOnlyList<FanNode>? curve, out string detail)
+    {
+        if (!internalRecoveryAdmissionActive || curve is null || curve.Count == 0)
+        {
+            detail = "intent:no-current-reopen-owner";
+            return false;
+        }
+        return ApplyRecoveryIntent(curve, "host-same-process-recovery", engineInstanceId, recoveryCycle?.CycleId, out detail);
+    }
+
+    private bool ApplyRecoveryIntent(IReadOnlyList<FanNode> curve, string authority, string? predecessor, string? cycleId, out string detail)
+    {
+        if (stopped || state.CloseCalled || SuspendProtectionPending || state.PowerState is "Suspended" or "Suspending" || state.HcCloseCleanupPending)
+        {
+            detail = "intent:current-boundary-refuses-write";
+            return false;
+        }
+        try
+        {
+            ValidateCurve(curve);
+            if (MockFanHandshakeFlag) { state.LastTemperatureC = 55.0; state.CurrentDutyPercent = 40; }
+            else
+            {
+                if (realBackend is null) { detail = "intent:no-write-authority"; return false; }
+                realBackend.ApplyCurve(curve);
+                state.LastTemperatureC = realBackend.LastTemperatureC;
+                state.CurrentDutyPercent = realBackend.LastDutyPercent;
+            }
+        }
+        catch (Exception error)
+        {
+            detail = "intent:write-failed";
+            diagnostics.Write("recovery.control-intent-unusable", new { reason = "write-failed", error = ExceptionText(error), cycleId });
+            return false;
+        }
+        activeCurve = curve;
+        controlIntentCancelled = false;
+        state.ActiveCurve = curve;
+        state.HardwareWritesObserved = true;
+        state.HardwareWritesEnabled = true;
+        state.State = "Ready";
+        diagnostics.Write("recovery.control-intent-restored", new { cycleId, curveNodes = curve.Count, predecessorInstanceId = predecessor, authority, isClientEnable = false, nextAdjustmentStillRequired = true });
+        detail = $"intent:restored nodes={curve.Count} cycle={cycleId ?? "<none>"}";
+        return true;
+    }
+
     internal bool RestoreControlIntentAfterTakeover(out string detail)
     {
         lock (gate)
         {
-            var intent = ReadControlIntent();
-            if (intent is null)
+            if (!TryReadBoundTakeoverIntent(out var intent, out detail)) return false;
+            if (recoveryCycle is null || !string.Equals(recoveryCycle.CycleId, intent!.CycleId, StringComparison.Ordinal) || RemainingRecoveryCycleMs(recoveryCycle) <= 0)
             {
-                detail = "intent:absent";
-                diagnostics.Write("recovery.control-intent-unusable", new { reason = "no-intent-file" });
+                detail = "intent:no-current-inherited-cycle";
                 return false;
             }
-            if (intent.Curve is null || intent.Curve.Count == 0)
-            {
-                detail = "intent:empty-curve";
-                diagnostics.Write("recovery.control-intent-unusable",
-                    new { reason = "empty-curve", intent.CycleId, intent.CurveNodes });
-                return false;
-            }
-            if (realBackend is null && !MockFanHandshakeFlag)
-            {
-                detail = "intent:no-write-authority";
-                diagnostics.Write("recovery.control-intent-unusable",
-                    new { reason = "no-write-authority", intent.CycleId, intent.CurveNodes });
-                return false;
-            }
-            try
-            {
-                if (MockFanHandshakeFlag)
-                {
-                    state.LastTemperatureC = 55.0;
-                    state.CurrentDutyPercent = 40;
-                }
-                else
-                {
-                    realBackend!.ApplyCurve(intent.Curve);
-                    state.LastTemperatureC = realBackend.LastTemperatureC;
-                    state.CurrentDutyPercent = realBackend.LastDutyPercent;
-                }
-            }
-            catch (Exception ex)
-            {
-                detail = "intent:write-failed";
-                diagnostics.Write("recovery.control-intent-unusable",
-                    new { reason = "write-failed", error = ExceptionText(ex), intent.CycleId });
-                return false;
-            }
-            activeCurve = intent.Curve;
-            state.ActiveCurve = intent.Curve;
-            state.HardwareWritesObserved = true;
-            state.HardwareWritesEnabled = true;
-            state.State = "Ready";
-            diagnostics.Write("recovery.control-intent-restored", new
-            {
-                intent.CycleId,
-                curveNodes = intent.Curve.Count,
-                intent.PredecessorInstanceId,
-                authority = "host-takeover-recovery",
-                isClientEnable = false,
-                nextAdjustmentStillRequired = true,
-            });
-            detail = $"intent:restored nodes={intent.Curve.Count} cycle={intent.CycleId ?? "<none>"}";
-            return true;
+            return ApplyRecoveryIntent(intent!.Curve!, "host-takeover-recovery", intent.PredecessorInstanceId, intent.CycleId, out detail);
         }
     }
 
@@ -16155,6 +18769,13 @@ internal sealed class FanHostEngine : IDisposable
      */
     internal void RunTakeoverRecovery()
     {
+        lock (gate)
+        {
+            // Validate before Open, not only before the final curve write.
+            // A stale, cancelled or exhausted transfer must do zero device work.
+            if (!TryReadBoundTakeoverIntent(out var intent, out _)) return;
+            if (!EnsureRecoveryCycleLocked("successor-takeover-startup") || recoveryCycle is null || !string.Equals(recoveryCycle.CycleId, intent!.CycleId, StringComparison.Ordinal)) return;
+        }
         try
         {
             _ = Open();
@@ -16279,8 +18900,7 @@ internal sealed class FanHostEngine : IDisposable
                 state.HcManagerFactoryStarted = realBackend.HcManagerFactoryStarted;
                 state.HcManagerFactoryIsolated = realBackend.HcManagerFactoryIsolated;
                 state.HcManagerFactoryLifecycle = realBackend.HcManagerFactoryLifecycle;
-            state.HcManagerStatuses = realBackend.ManagerStatusSnapshot()
-                .ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal);
+            state.HcManagerStatuses = realBackend.ManagerStatusSnapshot();
             state.HcOperationPhase = realBackend.CurrentHcPhase;
             state.ProfilePowerLineOnline = realBackend.ProfilePowerLineOnline;
             state.ProfileSelectionSource = realBackend.ProfileSelectionSource;
@@ -16299,7 +18919,7 @@ internal sealed class FanHostEngine : IDisposable
                 "hc-default-table-readback-confirmed",
                 StringComparison.Ordinal);
         }
-        var snapshot = JsonSerializer.Deserialize<HostState>(JsonSerializer.Serialize(state, JsonDefaults.Options), JsonDefaults.Options)!;
+        var snapshot = snapshotJsonCopy.Copy(state);
         // Q1（FAN-204 s31 补充裁决 2026-09-23）：恢复阶段真值 / 建议轮询间隔 / 控制可发送性 /
         // 最近写入收据——由 ApplyDerivedSnapshotFields 统一派生（与公开 Snapshot() 同一实现）。
         ApplyDerivedSnapshotFields(snapshot);
@@ -16335,7 +18955,8 @@ internal sealed class FanHostEngine : IDisposable
     internal static bool IsControlAccepting(HostState snapshot) =>
         !snapshot.UnknownState && !snapshot.HcCloseCleanupPending && !snapshot.CloseCalled &&
         snapshot.PowerState is not ("Suspending" or "Suspended" or "Resuming") &&
-        snapshot.PowerOperationStatus is not ("pending" or "executing" or "failed" or "superseded") &&
+        snapshot.PowerOperationStatus is not ("pending" or "executing" or "failed") &&
+        (snapshot.PowerOperationStatus != "superseded" || snapshot.PowerOperationOutcome == "user-cancelled") &&
         snapshot.State is "Ready" or "AwaitingControl";
     private static long MonoMs() => Environment.TickCount64;
     private static string ExceptionText(Exception ex) => string.Join(" -> ", Unwrap(ex).Select(e => e.GetType().Name + ": " + e.Message));
@@ -16418,6 +19039,8 @@ internal sealed class LocalFanHostServer : IDisposable
     private const int ResumeReceiptReadBudgetMs = 400;
     private readonly FanHostEngine engine;
     private readonly HostOptions options;
+    // HostOptions fixes the token for this server instance; cache its encoding, never an auth result.
+    private readonly byte[] sessionTokenUtf8;
     private readonly HostDiagnosticLog diagnostics;
     private HttpListener listener;
     private readonly CancellationTokenSource stopCts = new();
@@ -16446,6 +19069,7 @@ internal sealed class LocalFanHostServer : IDisposable
     // 处在同一任务内（Task.CurrentId 对 async 续体不可靠），若仍在 FinalizeWatchdogBeforeDispose
     // 里 task.Wait 就是等待自己。以此标记如实判别"因自身在收尾路径上而延后"。
     private int watchdogHandoffActive;
+    private int stopCancellationDispatchActive;
     // PID alone is not a durable parent identity on Windows: after YeManCC
     // exits, the same PID can be assigned to an unrelated process. Capture
     // start/path evidence once and require it on every watchdog check.
@@ -16463,6 +19087,7 @@ internal sealed class LocalFanHostServer : IDisposable
     {
         this.engine = engine;
         this.options = options;
+        sessionTokenUtf8 = Encoding.UTF8.GetBytes(options.SessionToken ?? string.Empty);
         this.diagnostics = diagnostics ?? new HostDiagnosticLog();
         // 第十六轮返修（admission/commit）：准入发布的"边沿归属"接线——睡眠保护
         // 只有在本 ingress 当前已宣布边沿仍是 Suspended 时才提交（更新的边沿意味着
@@ -16540,6 +19165,8 @@ internal sealed class LocalFanHostServer : IDisposable
             {
                 if (!completed.IsFaulted) return;
                 Interlocked.Exchange(ref watchdogFaultObserved, 1);
+                HostProcessLifetime.RequestStop("parent-watchdog-faulted");
+                _ = Task.Run(Stop); // one existing close owner, independent of the faulted observer
                 var error = completed.Exception?.GetBaseException();
                 diagnostics.Write("parent-watchdog.unhandled-observed", new
                 {
@@ -16583,6 +19210,7 @@ internal sealed class LocalFanHostServer : IDisposable
 
     private async Task HandleListenerFaultLockedAsync(Exception error)
     {
+        HostProcessLifetime.RequestStop("listener-failure-terminal");
         if (Interlocked.Exchange(ref listenerFaultLocked, 1) != 0) return;
         engine.MarkListenerFaultLocked(error);
         diagnostics.Write("listener.fault-locked", new
@@ -16640,29 +19268,24 @@ internal sealed class LocalFanHostServer : IDisposable
                     listenerRetryBudget.Reset();
                 }
                 engine.MarkListenerReady();
-                // Handshake is a read-only capability probe. Run it once as
-                // soon as the resident listener is ready so a frontend that
-                // misses its first request cannot leave the Fan route hidden
-                // while HC has never been queried at all. This never calls
-                // Open(), OpenEvents(), EC, ACPI or a fan write.
-                if (options.RealBackend)
-                {
-                    try
-                    {
-                        var startupHandshake = engine.Handshake();
-                        diagnostics.Write("startup.handshake", startupHandshake);
-                    }
-                    catch (Exception ex)
-                    {
-                        diagnostics.Write("startup.handshake-failure", new { error = ExceptionText(ex) });
-                    }
-                }
+                // [LIFECYCLE:FAN:LISTEN] Accept authenticated health requests before HC
+                // initialization. Only explicit /api/handshake owns capability loading;
+                // a listening process is not a ready device or permission to write.
                 diagnostics.Write("listener.ready", new { options.Port, options.RealBackend });
                 while (!stopCts.IsCancellationRequested)
                 {
                     HttpListenerContext context;
-                    try { context = await listener.GetContextAsync().WaitAsync(stopCts.Token); }
-                    catch (OperationCanceledException) { break; }
+                    Task<HttpListenerContext>? pendingAccept = null;
+                    try
+                    {
+                        pendingAccept = listener.GetContextAsync();
+                        context = await pendingAccept.WaitAsync(stopCts.Token);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        ObserveStoppedAccept(pendingAccept);
+                        break;
+                    }
                     catch (HttpListenerException) when (stopCts.IsCancellationRequested) { break; }
                     // 2026-09-25 C1 复现中发现：确认停止时 `StopListenerAfterConfirmedEngineClose`
                     // 先 `stopCts.Cancel()` 再 `listener.Stop()`；本循环若正好在该窗口内重新
@@ -16698,6 +19321,7 @@ internal sealed class LocalFanHostServer : IDisposable
 
     public void Stop()
     {
+        HostProcessLifetime.RequestStop("explicit-stop");
         if (stopCts.IsCancellationRequested) return;
         // ProcessExit, Dispose and /api/shutdown can all arrive after one
         // another. They share one HC close ownership boundary; only the first
@@ -16818,8 +19442,19 @@ internal sealed class LocalFanHostServer : IDisposable
         });
         // 记录已落盘，现在取消 token。必须先 Cancel 再 listener.Stop()：否则 Stop() 造成的
         // HttpListenerException 会落到 RunAsync 的故障分支并被当成监听器故障（二次 Close）。
-        stopCts.Cancel();
-        if (wasListening) listener.Stop();
+        // Cancel can inline RunAsync -> Main -> Dispose before the watchdog's
+        // own cancellation continuation is dispatched. Do not join that task
+        // from this cancellation stack; it would wait on itself for five seconds.
+        Interlocked.Increment(ref stopCancellationDispatchActive);
+        try { stopCts.Cancel(); }
+        finally { Interlocked.Decrement(ref stopCancellationDispatchActive); }
+        if (wasListening)
+        {
+            // Cancel can complete RunAsync inline; its owner may already have
+            // disposed this same listener before control returns to Stop().
+            try { listener.Stop(); }
+            catch (ObjectDisposedException) when (stopCts.IsCancellationRequested) { }
+        }
     }
 
     /** §6 F02（FAN-925B）：暴露收尾安全判据（纯函数）供正反例自测。 */
@@ -17163,6 +19798,7 @@ internal sealed class LocalFanHostServer : IDisposable
     /** FAN-931 P1.3：父实例退出后的唯一收尾路径（显式父退出与看门狗共用同一条责任链）。 */
     private async Task HandoffForParentExitAsync(CancellationToken cancellationToken)
     {
+        HostProcessLifetime.RequestStop("exact-parent-exited");
         // Parent termination is a single HC lifecycle boundary. Do
         // not call Stop() on every watchdog tick: after one HC Close
         // timeout that would repeatedly re-enter the same serialized
@@ -17503,6 +20139,7 @@ internal sealed class LocalFanHostServer : IDisposable
 
     private object BeginParentExitFromApi()
     {
+        HostProcessLifetime.RequestStop("authenticated-parent-exit");
         // Parent-exit is terminal for this Host generation. Keep the power
         // ingress closed while the resident recovery worker owns the HC Close
         // boundary; it must never be paired with a late Resume/Open.
@@ -17515,17 +20152,46 @@ internal sealed class LocalFanHostServer : IDisposable
         }
     }
 
+    // WaitAsync cancellation does not consume a later fault/result from the
+    // underlying accept. Retain that one terminal obligation without polling.
+    private static void ObserveStoppedAccept(Task<HttpListenerContext>? pending)
+    {
+        if (pending is null) return;
+        _ = pending.ContinueWith(static completed =>
+        {
+            if (completed.IsFaulted) _ = completed.Exception;
+            else if (completed.IsCompletedSuccessfully) AbortResponse(completed.Result);
+        }, CancellationToken.None, TaskContinuationOptions.ExecuteSynchronously, TaskScheduler.Default);
+    }
+
+    private static bool IsResponseTransportFailure(Exception error) =>
+        error is HttpListenerException or IOException or ObjectDisposedException or InvalidOperationException;
+
+    private static void AbortResponse(HttpListenerContext context)
+    {
+        try { context.Response.Abort(); }
+        catch (Exception ex) when (IsResponseTransportFailure(ex)) { }
+    }
+
+    private static void CloseResponse(HttpListenerContext context)
+    {
+        try { context.Response.Close(); }
+        catch (Exception ex) when (IsResponseTransportFailure(ex)) { AbortResponse(context); }
+    }
+
     private async Task HandleAsync(HttpListenerContext context)
     {
         var shutdownRequested = false;
-        var pathForLog = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
-        var methodForLog = context.Request.HttpMethod.ToUpperInvariant();
+        var pathForLog = string.Empty;
+        var methodForLog = "unknown";
         var requestId = Guid.NewGuid().ToString("N");
         var requestStarted = Stopwatch.GetTimestamp();
         double RequestDurationMs() => Stopwatch.GetElapsedTime(requestStarted).TotalMilliseconds;
-        context.Response.Headers["X-YeMan-Fan-Request-Id"] = requestId;
         try
         {
+            pathForLog = context.Request.Url?.AbsolutePath.TrimEnd('/') ?? string.Empty;
+            methodForLog = context.Request.HttpMethod.ToUpperInvariant();
+            context.Response.Headers["X-YeMan-Fan-Request-Id"] = requestId;
             if (!IsAuthorizedRequest(context.Request, out var rejectionCategory))
             {
                 // §5.1：401 只表示"这次请求的凭据未获接受"。记录同类请求的**可核对**字段
@@ -17550,7 +20216,7 @@ internal sealed class LocalFanHostServer : IDisposable
                         scope = "this-request-not-accepted; no bypass, no rotation, no second owner",
                     });
                 }
-                await WriteJsonAsync(context.Response, 401, new { ok = false, error = new { code = "API_SESSION_REQUIRED", message = "需要 Fan Host 会话令牌" } });
+                await WriteJsonAsync(context, 401, new { ok = false, error = new { code = "API_SESSION_REQUIRED", message = "需要 Fan Host 会话令牌" } });
                 return;
             }
             context.Response.Headers["Cache-Control"] = "no-store";
@@ -17560,9 +20226,25 @@ internal sealed class LocalFanHostServer : IDisposable
             // FAN-931 P0：请求入口计数（定长、无分配热点；调用者归类只是 UA 启发式诊断）。
             FanPerfCounters.RecordRequest(path, context.Request.UserAgent);
             object result;
+            HostState? readResponseSnapshot = null;
+            object CaptureResponseState(object value)
+            {
+                // SnapshotUnlocked already publishes state-bearing command
+                // results. Reuse only this response's snapshot, never a prior one.
+                if (value is HostState snapshot) readResponseSnapshot = snapshot;
+                return value;
+            }
 
-            if (method == "GET" && path == "/health") result = new { ok = true, host = "YeManFanHost", protocolVersion = 2, sessionRequired = true, parentPid = options.ParentPid, parentProcess = options.ParentProcessName, state = engine.SnapshotForRead() };
-            else if (method == "GET" && path == "/api/state") result = new { ok = true, state = engine.SnapshotForRead() };
+            if (method == "GET" && path == "/health")
+            {
+                readResponseSnapshot = engine.SnapshotForRead();
+                result = new { ok = true, host = "YeManFanHost", protocolVersion = 2, sessionRequired = true, parentPid = options.ParentPid, parentProcess = options.ParentProcessName, state = readResponseSnapshot };
+            }
+            else if (method == "GET" && path == "/api/state")
+            {
+                readResponseSnapshot = engine.SnapshotForRead();
+                result = new { ok = true, state = readResponseSnapshot };
+            }
             // FAN-931 P0：只读计数导出（认证入口已在上方判定；不含 token/lease 秘密）。
             // 带上非秘密的实例/进程身份与样本起点，使采集端能把"这份计数"绑到同一实例同一采集窗。
             else if (method == "GET" && path == "/api/perf-counters") result = new
@@ -17574,7 +20256,20 @@ internal sealed class LocalFanHostServer : IDisposable
                 sampleTimestampUnixMs = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
                 counters = FanPerfCounters.Snapshot(),
             };
-            else if (method == "POST" && path == "/api/handshake") result = engine.Handshake();
+            else if (method == "POST" && path == "/api/handshake")
+            {
+                try
+                {
+                    result = engine.Handshake();
+                    // Keep each explicit result: an unavailable first probe must not hide a later recovery.
+                    diagnostics.Write("startup.handshake", result);
+                }
+                catch (Exception error)
+                {
+                    diagnostics.Write("startup.handshake-failure", new { error = ExceptionText(error) });
+                    throw;
+                }
+            }
             else if (method == "POST" && path == "/api/suspend")
             {
                 var body = await ReadJsonAsync(context.Request);
@@ -17591,30 +20286,45 @@ internal sealed class LocalFanHostServer : IDisposable
                 result = (method, path) switch
                 {
                     ("POST", "/api/open") => OpenFromApi(),
-                    ("POST", "/api/open-events") => new { ok = true, state = engine.OpenEvents() },
+                    ("POST", "/api/open-events") => new { ok = true, state = CaptureResponseState(engine.OpenEvents()) },
                     ("POST", "/api/acquire-control") => new { ok = true, lease = engine.AcquireControl() },
-                    ("POST", "/api/heartbeat") => new { ok = true, lease = engine.Heartbeat(RequiredString(body, "leaseId")) },
-                    ("POST", "/api/enable") => new { ok = true, state = engine.Enable(body) },
-                    ("POST", "/api/preset") => new { ok = true, state = engine.Preset(body) },
-                    ("POST", "/api/disable") => new { ok = true, state = engine.Disable(body) },
-                    ("POST", "/api/restore") => new { ok = true, state = engine.Restore(body) },
-                    ("POST", "/api/release-control") => new { ok = true, state = engine.Release(body) },
+                    ("POST", "/api/heartbeat") => new { ok = true, lease = engine.Heartbeat(RequiredString(body, "leaseId"),
+                        body.TryGetProperty("msiFirmwareModeRevision", out var modeRevision) && modeRevision.TryGetInt64(out var revision) ? revision : 0), monitorFan = engine.MonitorFanSnapshotForRead() },
+                    ("POST", "/api/enable") => new { ok = true, state = CaptureResponseState(engine.Enable(body)) },
+                    ("POST", "/api/preset") => new { ok = true, state = CaptureResponseState(engine.Preset(body)) },
+                    ("POST", "/api/disable") => new { ok = true, state = CaptureResponseState(engine.Disable(body)) },
+                    ("POST", "/api/cancel-control-intent") => new { ok = true, controlIntentCancelled = true, state = CaptureResponseState(engine.CancelControlIntent()) },
+                    ("POST", "/api/restore") => new { ok = true, state = CaptureResponseState(engine.Restore(body)) },
+                    ("POST", "/api/release-control") => new { ok = true, state = CaptureResponseState(engine.Release(body)) },
                     ("POST", "/api/close") => CloseFromApi(),
                     ("POST", "/api/parent-exit") => BeginParentExitFromApi(),
                     ("POST", "/api/shutdown") => ShutdownResult(ref shutdownRequested),
                     _ => throw new FanApiException(404, "NOT_FOUND", "Fan API 路由不存在"),
                 };
             }
-            await WriteJsonAsync(context.Response, 200, result);
-            // FAN-204 Q1-b：① 读路径不等待 gate（用已发布快照）；② 响应耗时在**响应写完处**
-            // 取值——不再把诊断行的快照等待算进 durationMs（真机那条 10.24 s 伪影即此因）。
-            var responseMs = RequestDurationMs();
-            // Parent exit acknowledgement is intentionally lock-free. Do not
-            // reacquire the engine lock merely to enrich its diagnostic record
-            // or the native UI could wait behind the same wedged HC call that
-            // it is trying to hand off to this resident Host.
-            var responseState = path == "/api/parent-exit" ? "ParentExitRecovery" : engine.SnapshotForRead().State;
-            diagnostics.Write("api.request-success", new { requestId, method, path, state = responseState, durationMs = responseMs, httpStatus = 200 });
+            var responseWritten = await WriteJsonAsync(context, 200, result);
+            if (responseWritten)
+            {
+                // FAN-204 Q1-b：① 读路径不等待 gate（用已发布快照）；② 响应耗时在**响应写完处**
+                // 取值——不再把诊断行的快照等待算进 durationMs（真机那条 10.24 s 伪影即此因）。
+                var responseMs = RequestDurationMs();
+                // Parent exit acknowledgement is intentionally lock-free. Do not
+                // reacquire the engine lock merely to enrich its diagnostic record
+                // or the native UI could wait behind the same wedged HC call that
+                // it is trying to hand off to this resident Host.
+                // Read/state-bearing success describes this response's owned snapshot.
+                // Lease-only and custom results retain their existing publication read.
+                var responseState = path == "/api/parent-exit" ? "ParentExitRecovery"
+                    : readResponseSnapshot is not null ? readResponseSnapshot.State : engine.SnapshotForRead().State;
+                diagnostics.WriteApiRequestSuccess(requestId, method, path, responseState, responseMs);
+            }
+            else diagnostics.WriteLazy("api.response-aborted", () => new
+            {
+                requestId, method, path, intendedHttpStatus = 200,
+                responseComplete = false, handlerMayHaveExecuted = true,
+                scope = "transport-result-unknown-no-automatic-replay",
+            });
+            // An admitted shutdown owns its stop even if its response is lost.
             if (shutdownRequested)
             {
                 _ = Task.Run(async () =>
@@ -17634,12 +20344,12 @@ internal sealed class LocalFanHostServer : IDisposable
             var errorBody = ex.Details is null
                 ? (object)new { code = ex.Code, message = ex.Message }
                 : new { code = ex.Code, message = ex.Message, details = ex.Details };
-            await WriteJsonAsync(context.Response, ex.StatusCode, new { ok = false, error = errorBody, state = failureState });
+            await WriteJsonAsync(context, ex.StatusCode, new { ok = false, error = errorBody, state = failureState });
         }
         catch (JsonException ex)
         {
             diagnostics.Write("api.request-invalid-json", new { requestId, method = methodForLog, path = pathForLog, error = ex.Message, durationMs = RequestDurationMs(), httpStatus = 400 });
-            await WriteJsonAsync(context.Response, 400, new { ok = false, error = new { code = "INVALID_JSON", message = ex.Message } });
+            await WriteJsonAsync(context, 400, new { ok = false, error = new { code = "INVALID_JSON", message = ex.Message } });
         }
         catch (Exception ex)
         {
@@ -17647,15 +20357,24 @@ internal sealed class LocalFanHostServer : IDisposable
             var hostErrorMs = RequestDurationMs();
             var hostErrorState = engine.SnapshotForRead();
             diagnostics.Write("api.request-host-error", new { requestId, method = methodForLog, path = pathForLog, error = ExceptionText(ex), state = hostErrorState.State, lastError = hostErrorState.LastError, durationMs = hostErrorMs, httpStatus = 500 });
-            await WriteJsonAsync(context.Response, 500, new { ok = false, error = new { code = "HOST_ERROR", message = ex.Message }, state = hostErrorState });
+            await WriteJsonAsync(context, 500, new { ok = false, error = new { code = "HOST_ERROR", message = ex.Message }, state = hostErrorState });
         }
-        finally { context.Response.Close(); }
+        finally { CloseResponse(context); }
     }
 
     private static string ExceptionText(Exception ex) => string.Join(" -> ", Unwrap(ex).Select(e => e.GetType().Name + ": " + e.Message));
     private static IEnumerable<Exception> Unwrap(Exception ex)
     {
         for (Exception? current = ex; current is not null; current = current.InnerException) yield return current;
+    }
+
+    private static bool SessionTokenMatches(string supplied, ReadOnlySpan<byte> expected)
+    {
+        var byteCount = Encoding.UTF8.GetByteCount(supplied);
+        // Bound stack use by encoded bytes; longer credentials retain a heap buffer.
+        Span<byte> buffer = byteCount <= 256 ? stackalloc byte[byteCount] : new byte[byteCount];
+        var written = Encoding.UTF8.GetBytes(supplied.AsSpan(), buffer);
+        return CryptographicOperations.FixedTimeEquals(buffer[..written], expected);
     }
 
     /**
@@ -17677,8 +20396,7 @@ internal sealed class LocalFanHostServer : IDisposable
             rejectionCategory = "request-credential-missing";
             return false;
         }
-        if (!CryptographicOperations.FixedTimeEquals(
-                Encoding.UTF8.GetBytes(supplied), Encoding.UTF8.GetBytes(token)))
+        if (!SessionTokenMatches(supplied, sessionTokenUtf8))
         {
             rejectionCategory = supplied.Length != token.Length
                 ? "credential-length-mismatch"
@@ -17724,29 +20442,144 @@ internal sealed class LocalFanHostServer : IDisposable
         return new { ok = true, shutdownRequested = true };
     }
 
+    // JsonElement is an immutable view. Keep one owned empty element; sharing
+    // it never retains a request buffer, state, lease or authentication result.
+    private static readonly JsonElement EmptyRequestJson = JsonSerializer.SerializeToElement(new { }, JsonDefaults.Options);
+
+    private static JsonElement ParseRequestJson(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return EmptyRequestJson;
+        // The command owns its element beyond this helper. Parse directly into
+        // independent storage instead of renting a document and cloning its tree.
+        return JsonElement.Parse(raw);
+    }
+
+    private const int MaxRequestBodyBytes = 1024 * 1024;
+
+    // Enforce the existing byte limit even when HTTP chunking omits Content-Length.
+    // Keep StreamReader's original BOM/decoder and disposal semantics; the wrapper
+    // neither buffers the entire body nor adds a timer or an engine-gate owner.
+    private sealed class RequestBodyLimitStream(Stream source) : Stream
+    {
+        private long bytesRead;
+        private int AllowedRead(int requested) => (int)Math.Min(requested, MaxRequestBodyBytes - bytesRead + 1);
+        private int CountRead(int read)
+        {
+            bytesRead += read;
+            if (bytesRead > MaxRequestBodyBytes)
+                throw new FanApiException(413, "BODY_TOO_LARGE", "请求体过大");
+            return read;
+        }
+        public override int Read(byte[] buffer, int offset, int count) =>
+            CountRead(source.Read(buffer, offset, AllowedRead(count)));
+        public override int Read(Span<byte> buffer) =>
+            CountRead(source.Read(buffer[..AllowedRead(buffer.Length)]));
+        public override async ValueTask<int> ReadAsync(Memory<byte> buffer, CancellationToken cancellationToken = default) =>
+            CountRead(await source.ReadAsync(buffer[..AllowedRead(buffer.Length)], cancellationToken).ConfigureAwait(false));
+        public override Task<int> ReadAsync(byte[] buffer, int offset, int count, CancellationToken cancellationToken) =>
+            ReadAsync(buffer.AsMemory(offset, count), cancellationToken).AsTask();
+        public override bool CanRead => source.CanRead;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => throw new NotSupportedException();
+        public override long Position { get => throw new NotSupportedException(); set => throw new NotSupportedException(); }
+        public override void Flush() => source.Flush();
+        public override long Seek(long offset, SeekOrigin origin) => throw new NotSupportedException();
+        public override void SetLength(long value) => throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) => throw new NotSupportedException();
+        protected override void Dispose(bool disposing)
+        {
+            if (disposing) source.Dispose();
+            base.Dispose(disposing);
+        }
+    }
+
     private static async Task<JsonElement> ReadJsonAsync(HttpListenerRequest request)
     {
-        if (request.ContentLength64 > 1024 * 1024) throw new FanApiException(413, "BODY_TOO_LARGE", "请求体过大");
-        if (request.HttpMethod == "GET" || request.ContentLength64 == 0) return JsonDocument.Parse("{}").RootElement.Clone();
-        using var reader = new StreamReader(request.InputStream, Encoding.UTF8, leaveOpen: false);
+        if (request.ContentLength64 > MaxRequestBodyBytes) throw new FanApiException(413, "BODY_TOO_LARGE", "请求体过大");
+        if (request.HttpMethod == "GET" || request.ContentLength64 == 0) return EmptyRequestJson;
+        using var reader = new StreamReader(new RequestBodyLimitStream(request.InputStream), Encoding.UTF8, leaveOpen: false);
         var raw = await reader.ReadToEndAsync();
-        return JsonDocument.Parse(string.IsNullOrWhiteSpace(raw) ? "{}" : raw).RootElement.Clone();
+        return ParseRequestJson(raw);
     }
 
     private static string RequiredString(JsonElement body, string property)
     {
-        if (!body.TryGetProperty(property, out var value) || value.ValueKind != JsonValueKind.String || string.IsNullOrWhiteSpace(value.GetString()))
+        // Decode once per request. Keep the exact lease value; never cache or trim it.
+        var decoded = body.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
+            ? value.GetString() : null;
+        if (string.IsNullOrWhiteSpace(decoded))
             throw new FanApiException(400, "INVALID_REQUEST", $"缺少 {property}");
-        return value.GetString()!;
+        return decoded;
     }
 
-    private static async Task WriteJsonAsync(HttpListenerResponse response, int statusCode, object value)
+    // One idle buffer per server; a concurrent response never waits for it.
+    private JsonResponseBuffer? idleJsonResponseBuffer;
+
+    private sealed class JsonResponseBuffer : IDisposable
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(value, JsonDefaults.Options);
-        response.StatusCode = statusCode;
-        response.ContentType = "application/json; charset=utf-8";
-        response.ContentLength64 = bytes.Length;
-        await response.OutputStream.WriteAsync(bytes);
+        private readonly System.Buffers.ArrayBufferWriter<byte> buffer = new(4096);
+        private readonly Utf8JsonWriter writer;
+        public bool CanRetain => buffer.Capacity <= 64 * 1024;
+
+        public JsonResponseBuffer()
+        {
+            var options = JsonDefaults.Options;
+            writer = new Utf8JsonWriter(buffer, new JsonWriterOptions
+            {
+                Encoder = options.Encoder,
+                Indented = options.WriteIndented,
+                MaxDepth = options.MaxDepth == 0 ? 64 : options.MaxDepth,
+                SkipValidation = true, // Only JsonSerializer writes into this buffer.
+            });
+        }
+
+        public ReadOnlyMemory<byte> Serialize(object value)
+        {
+            JsonSerializer.Serialize(writer, value, JsonDefaults.Options);
+            writer.Flush();
+            return buffer.WrittenMemory;
+        }
+
+        public void Reset()
+        {
+            writer.Reset(buffer);
+            buffer.ResetWrittenCount();
+        }
+
+        public void Dispose() => writer.Dispose();
+    }
+
+    private async Task<bool> WriteJsonAsync(HttpListenerContext context, int statusCode, object value)
+    {
+        var buffer = Interlocked.Exchange(ref idleJsonResponseBuffer, null) ?? new JsonResponseBuffer();
+        try
+        {
+            // Serialization faults retain normal error handling. Only the response
+            // transport boundary may settle as undelivered after a peer/Host close.
+            var bytes = buffer.Serialize(value);
+            try
+            {
+                var response = context.Response;
+                response.StatusCode = statusCode;
+                response.ContentType = "application/json; charset=utf-8";
+                response.ContentLength64 = bytes.Length;
+                await response.OutputStream.WriteAsync(bytes);
+                return true;
+            }
+            catch (Exception ex) when (IsResponseTransportFailure(ex))
+            {
+                AbortResponse(context);
+                return false;
+            }
+        }
+        finally
+        {
+            // The response owns WrittenMemory until its asynchronous write settles.
+            buffer.Reset();
+            if (!buffer.CanRetain || Interlocked.CompareExchange(ref idleJsonResponseBuffer, buffer, null) is not null)
+                buffer.Dispose();
+        }
     }
 
     public void Dispose()
@@ -17769,12 +20602,14 @@ internal sealed class LocalFanHostServer : IDisposable
         // 一路走到 Main 返回触发本 Dispose。此时 task 正是当前执行路径本身，task.Wait 即自等；
         // Task.CurrentId 对 async 续体不可靠（旧判别漏判，留下 5 s 自等与误导性的 pending 记录）。
         // 如实记为"自身在收尾路径上，故释放延后到进程退出由外部 watchdog 证明"。
-        if (Volatile.Read(ref watchdogHandoffActive) != 0 ||
+        if (Volatile.Read(ref stopCancellationDispatchActive) != 0 ||
+            Volatile.Read(ref watchdogHandoffActive) != 0 ||
             (Task.CurrentId is int currentId && task.Id == currentId))
         {
             diagnostics.Write("parent-watchdog.dispose-deferred-self", new
             {
                 inHandoff = Volatile.Read(ref watchdogHandoffActive) != 0,
+                inStopCancellationDispatch = Volatile.Read(ref stopCancellationDispatchActive) != 0,
                 processExitEvidence = "external-watchdog-pid+start-time",
             });
             return;
@@ -18241,8 +21076,8 @@ internal static class FanRouteEvidenceSelfTest
         foreach (var (factory, expectedStrategy) in new[]
                  {
                      ("HandheldCompanion.Devices.GPDWin5", FanRestoreStrategy.GpdWin5HcAutoRelease),
-                     // 生产 FactoryType 是 MSI.ClawA2VM，路由表登记为 ClawA2VM ⇒ 走 className 后缀解析。
-                     ("HandheldCompanion.Devices.MSI.ClawA2VM", FanRestoreStrategy.MsiHcDefaultRelease),
+                     // Frozen HC factory identity is Devices.ClawA2VM; unknown namespaces are denied.
+                     ("HandheldCompanion.Devices.ClawA2VM", FanRestoreStrategy.MsiHcDefaultRelease),
                  })
         {
             var resolved = RealHcBackend.ResolveRouteForSelfTest(factory);
@@ -18257,6 +21092,11 @@ internal static class FanRouteEvidenceSelfTest
             throw new InvalidOperationException(
                 "FAN-934: an unregistered/unknown device class must not resolve to any route (fail-closed)");
         checks.Add("fan934-victim-models-resolve-to-compat-contract-unknown-fails-closed");
+
+        if (RealHcBackend.ResolveRouteForSelfTest("HandheldCompanion.Devices.MSI.ClawA2VM") is not null)
+            throw new InvalidOperationException(
+                "FAN-934: a same-name MSI class in an unregistered namespace must not acquire a route");
+        checks.Add("fan934-msi-unregistered-namespace-denied");
 
         // ④ 同一进程内顺序切换机型：适用性按 deviceClass 解析，不因程序集缓存串机型。
         var rog1 = RealHcBackend.ResolveRouteForSelfTest("HandheldCompanion.Devices.ROGAlly");
@@ -18388,7 +21228,7 @@ internal static class FanRouteEvidenceSelfTest
 
         // ⑩ §6.1 修前必失败／修后通过的同一输入对照（含 ASUS 观察 API 的装配下，GPD/MSI 被当作
         //    ASUS 作用域时：空收据→Unknown→不放行＝原 FaultLocked；改正后＝兼容回调结算→放行）。
-        foreach (var victim in new[] { "HandheldCompanion.Devices.GPDWin5", "HandheldCompanion.Devices.MSI.ClawA2VM" })
+        foreach (var victim in new[] { "HandheldCompanion.Devices.GPDWin5", "HandheldCompanion.Devices.ClawA2VM" })
         {
             var victimRoute = RealHcBackend.ResolveRouteForSelfTest(victim)
                 ?? throw new InvalidOperationException($"FAN-934: victim route {victim} is unregistered");
@@ -18496,7 +21336,7 @@ internal static class FanRouteEvidenceSelfTest
         //    （Begin→Settle→Classify→IsOemReleaseSafe）。修前负例手填 `compatPreconditionsOk:false`
         //    抓不住"依赖 OpenLib 的路线未核 UseOpenLib"这一缺口；这里改为用 mock 设备的
         //    真实成员值让生产前提函数自行判定。
-        foreach (var victim in new[] { "HandheldCompanion.Devices.GPDWin5", "HandheldCompanion.Devices.MSI.ClawA2VM" })
+        foreach (var victim in new[] { "HandheldCompanion.Devices.GPDWin5", "HandheldCompanion.Devices.ClawA2VM" })
         {
             var victimRoute = RealHcBackend.ResolveRouteForSelfTest(victim)
                 ?? throw new InvalidOperationException($"FAN-934: victim route {victim} is unregistered");
@@ -18613,7 +21453,7 @@ internal static class FanRouteEvidenceSelfTest
         foreach (var (factory, expectedPrecondition) in new[]
                  {
                      ("HandheldCompanion.Devices.GPDWin5", FanRoutePrecondition.OpenLibHandleOpen),
-                     ("HandheldCompanion.Devices.MSI.ClawA2VM", FanRoutePrecondition.DeviceOpen),
+                     ("HandheldCompanion.Devices.ClawA2VM", FanRoutePrecondition.DeviceOpen),
                  })
         {
             var route = RealHcBackend.ResolveRouteForSelfTest(factory)
@@ -19076,7 +21916,7 @@ internal static class FanRouteEvidenceSelfTest
         // not-attempted、绝不把正常退出降级。释放结算（`HcCloseReleaseSettlementForSelfTest`）
         // 与清理确认（`HcManagerCleanupConfirmed`）**分开记账**。
         {
-            var msiCloseRoute = RealHcBackend.ResolveRouteForSelfTest("HandheldCompanion.Devices.MSI.ClawA2VM")
+            var msiCloseRoute = RealHcBackend.ResolveRouteForSelfTest("HandheldCompanion.Devices.ClawA2VM")
                 ?? throw new InvalidOperationException("FAN-936 R2: MSI route is unregistered");
             if (msiCloseRoute.RestoreStrategy != FanRestoreStrategy.MsiHcDefaultRelease)
                 throw new InvalidOperationException(
@@ -20518,7 +23358,10 @@ internal static class FanHostSelfTest
             HostDiagnosticLog.ResetSelfTestCapture();
             _ = r1Engine.ResumeForSystemPower();
             var r1CommitDeadline = Stopwatch.StartNew();
-            while (r1CommitDeadline.ElapsedMilliseconds < 15_000 && r1Engine.Snapshot().State == "Resuming")
+            // Ready is published under the engine lock; the success event follows outside it.
+            // Wait for both, keeping the same 15s bound and all original assertions.
+            while (r1CommitDeadline.ElapsedMilliseconds < 15_000 &&
+                (r1Engine.Snapshot().State == "Resuming" || !EventSeen("power.resume-auto-rebuild.success")))
                 Thread.Sleep(25);
             if (!EventSeen("power.resume-placeholder-lease-created"))
                 throw new InvalidOperationException("L1: 缺少临时租约创建证据");
@@ -21906,6 +24749,18 @@ internal static class FanHostSelfTest
     public static async Task<SelfTestResult> RunAsync(FanHostEngine engine)
     {
         var checks = new List<string>();
+        checks.AddRange(HostDiagnosticLog.RunLazyWriteSelfTest());
+        checks.AddRange(FanLifecycleCloseOrchestrator.RunSelfTest());
+        checks.AddRange(MsiFamilyFanCurveSelfTest.Run());
+        checks.AddRange(MsiWmiRegistrationOrchestrator.RunSelfTest());
+        checks.AddRange(RealHcBackend.RunMsiWmiOpenAdmissionSelfTest());
+        var msiRegistrationLogRoot = Path.Combine(Path.GetTempPath(), "fan950-registration-log-" + Guid.NewGuid().ToString("N"));
+        var msiRegistrationLog = new HostDiagnosticLog(msiRegistrationLogRoot);
+        msiRegistrationLog.Write("open.msi-wmi-registration", new { stage = "self-test-boundary", fanWriteSuccessClaimed = false });
+        var msiRegistrationLedger = Path.Combine(msiRegistrationLogRoot, "fan-host-fault.log");
+        if (!File.Exists(msiRegistrationLedger) || !File.ReadAllText(msiRegistrationLedger).Contains("open.msi-wmi-registration", StringComparison.Ordinal))
+            throw new InvalidOperationException("MSI initialization evidence disappeared with detailed logging off");
+        checks.Add("fan950-registration-repair-evidence-survives-log-gate-off");
         checks.AddRange(BoundedRecoveryRetrySelfTest.RunSelfTest());
         // FAN-925：异常收尾**有界取锁**（设备语料实测旧实现被 gate 挂住 +5.0s ⇒ "20s 预算"
         // 并非驻留上界）。夹具先确定持有 gate，再断言异常收尾在 gate 等待上界内返回。
@@ -22280,10 +25135,11 @@ internal static class FanHostSelfTest
                 logG.Write("host.instance-started", new { credentialVersionId = "deadbeef", credentialFormatOk = true });
                 logG.Write("auth.rejected", new { rejectionCategory = "credential-value-mismatch" });
                 logG.Write("parent-exit-handoff.accepted", new { acceptingHostInstanceId = "x" });
+                logG.Write("host.exit-forced", new { cleanupConfirmed = false, oemOwnershipStatus = "unknown-after-forced-process-exit" });
                 var faultText = System.IO.File.Exists(System.IO.Path.Combine(dirG, "fan-host-fault.log"))
                     ? System.IO.File.ReadAllText(System.IO.Path.Combine(dirG, "fan-host-fault.log"))
                     : string.Empty;
-                foreach (var name in new[] { "host.instance-started", "auth.rejected", "parent-exit-handoff.accepted" })
+                foreach (var name in new[] { "host.instance-started", "auth.rejected", "parent-exit-handoff.accepted", "host.exit-forced" })
                     if (!faultText.Contains("\"eventName\":\"" + name + "\"", StringComparison.Ordinal))
                         throw new InvalidOperationException(
                             $"f09: minimal responsibility event '{name}' must survive an explicitly disabled detailed log");
@@ -22497,6 +25353,16 @@ internal static class FanHostSelfTest
             HWiNFOTemperatureMonitor.IsValidSharedSampleForSelfTest(101, true))
             throw new InvalidOperationException("invalid or unavailable HWiNFO shared samples must not enter fan dispatch");
         checks.Add("hwinfо-shared-memory-temperature-contract");
+        var temperatureIndices = HWiNFOTemperatureMonitor.SelectTemperatureIndicesForSelfTest(new[]
+        {
+            HWiNFOTemperatureMonitor.HWiNFOLabelKind.Other,
+            HWiNFOTemperatureMonitor.HWiNFOLabelKind.CpuPackage,
+            HWiNFOTemperatureMonitor.HWiNFOLabelKind.Ignored,
+            HWiNFOTemperatureMonitor.HWiNFOLabelKind.CpuTctlOrTdie,
+        });
+        if (!temperatureIndices.SequenceEqual(new[] { 1, 3 }))
+            throw new InvalidOperationException("HWiNFO temperature index cache must retain only CPU temperature labels");
+        checks.Add("hwinfо-temperature-index-cache-contract");
         if (!RealHcBackend.SessionRouteMarkerReadyForOpenEventsForSelfTest("route", "route", true, false, true) ||
             RealHcBackend.SessionRouteMarkerReadyForOpenEventsForSelfTest("route", "route", true, false, false) ||
             RealHcBackend.SessionRouteMarkerMatchesForSelfTest("route", "route", true, false, true))

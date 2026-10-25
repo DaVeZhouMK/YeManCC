@@ -4,6 +4,7 @@
 #include "../native/decky_sidebar_bootstrap.h"
 #include "../native/decky_sidebar_broker.h"
 #include "../native/decky_sidebar_diagnostics.h"
+#include "../native/decky_sidebar_recovery.h"
 #include <condition_variable>
 #include <fstream>
 #include <iostream>
@@ -18,7 +19,8 @@ class CdpFixture {
 public:
     unsigned short port=0;
     std::string run=std::string(32,'b');
-    std::atomic<unsigned> enables{0};
+    std::atomic<unsigned> enables{0},teardowns{0};
+    std::atomic<bool> boundary{false},bootMissing{true};
     CdpFixture(){
         listener_=socket(AF_INET,SOCK_STREAM,IPPROTO_TCP);sockaddr_in address{};
         address.sin_family=AF_INET;address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);
@@ -43,8 +45,13 @@ public:
                         const auto request=Json::parse(frame.payload);const auto method=request.value("method",std::string{});const auto id=request.at("id");
                         if(method=="Runtime.enable"){
                             ++enables;created(101);for(unsigned i=0;i<192;++i)send({{"method","Runtime.consoleAPICalled"},{"params",{{"type","log"},{"args",Json::array()}}}});send({{"id",id},{"result",Json::object()}});
+                        }else if(method=="Runtime.addBinding"){send({{"id",id},{"result",Json::object()}});
                         }else if(method=="Runtime.evaluate"){
                             const int context=request.at("params").at("contextId");
+                            const auto expression=request.at("params").value("expression",std::string{});
+                            if(expression.find(".read()")!=std::string::npos){send({{"id",id},{"result",{{"result",{{"type","string"},{"value",boundary.load()?"decky-render-failed":""}}}}}});continue;}
+                            if(expression=="!window.DeckyPluginLoader"){send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",bootMissing.load()}}}}}});continue;}
+                            if(expression.find("===")!=std::string::npos||expression.find("dismountAll")!=std::string::npos){if(expression.find("dismountAll")!=std::string::npos)++teardowns;send({{"id",id},{"result",{{"result",{{"type","boolean"},{"value",true}}}}}});continue;}
                             {std::lock_guard lock(state_);evaluated_.push_back(context);changed_.notify_all();}
                             if(context==400)continue; // Silent reply cancellation fixture.
                             if(context==300){send({{"id",id},{"error",{{"code",-32000}}}});continue;}
@@ -59,6 +66,7 @@ public:
         {std::lock_guard lock(send_);if(peer_!=INVALID_SOCKET)shutdown(peer_,SD_BOTH);}
         closesocket(listener_);if(worker_.joinable())worker_.join();if(peer_!=INVALID_SOCKET)closesocket(peer_);
     }
+    void closeWebSocket(){const unsigned char frame[]{0x88,0};std::lock_guard lock(send_);if(peer_!=INVALID_SOCKET)::send(peer_,reinterpret_cast<const char*>(frame),sizeof(frame),0);}
     void send(const Json& value){const auto bytes=encode(value.dump());std::lock_guard lock(send_);if(peer_!=INVALID_SOCKET)::send(peer_,bytes.data(),static_cast<int>(bytes.size()),0);}
     void created(int id,const char* origin="https://steamloopback.host",bool isDefault=true){send({{"method","Runtime.executionContextCreated"},{"params",{{"context",{{"id",id},{"origin",origin},{"auxData",{{"isDefault",isDefault},{"frameId","fixture"}}}}}}}});}
     bool wait(int id){std::unique_lock lock(state_);return changed_.wait_for(lock,std::chrono::seconds(4),[&]{return std::find(evaluated_.begin(),evaluated_.end(),id)!=evaluated_.end();});}
@@ -77,7 +85,7 @@ struct WatchFixture {
         watch.start(session,connection,socket,cancel,[this]{return owned.load();},"fixture guarded readonly expression",cdp.run,GetCurrentProcessId(),[this](const Json& value){std::lock_guard lock(mutex);records.push_back(value);changed.notify_all();});
     }
     ~WatchFixture(){watch.stop();}
-    bool stage(const char* expected){std::unique_lock lock(mutex);return changed.wait_for(lock,std::chrono::seconds(4),[&]{return std::any_of(records.begin(),records.end(),[&](const auto& v){return v.value("bootstrapStage",std::string{})==expected;});});}
+    bool stage(const char* expected,unsigned ms=4000){std::unique_lock lock(mutex);return changed.wait_for(lock,std::chrono::milliseconds(ms),[&]{return std::any_of(records.begin(),records.end(),[&](const auto& v){return v.value("bootstrapStage",std::string{})==expected;});});}
 };
 int main(){
     unsigned checks=0;const auto check=[&](bool condition,const char* name){if(!condition)throw std::runtime_error(name);++checks;};
@@ -101,6 +109,35 @@ int main(){
         {
             WatchFixture f;check(f.cdp.wait(101),"ownership test watch starts");f.owned=false;f.cdp.created(500);check(f.stage("failed"),"changed ownership fails closed");check(f.cdp.count()==1,"changed ownership never gets evaluation");
             f.cdp.created(501);Sleep(100);check(f.cdp.count()==1,"terminal ownership failure never retries");
+        }
+        {
+            WatchFixture f;check(f.cdp.wait(101),"close fixture attaches to the owned context");f.cdp.closeWebSocket();check(f.stage("failed"),"real WebSocket CLOSE wakes the watch");
+            std::lock_guard lock(f.mutex);const auto last=f.records.back();check(last.value("reason",std::string{})=="mirror-bootstrap-ws-closed","CLOSE is distinguished from malformed data");check(ymcc::deckysidebar::recoverableWatchFailure(last.value("reason",std::string{})),"CLOSE permits verified transport recovery");
+        }
+        {
+            WatchFixture f;check(f.cdp.wait(101),"hang fixture initially attaches");f.cdp.created(400);check(f.cdp.wait(400),"renderer evaluate is deliberately unresponsive");
+            const auto start=GetTickCount64();check(f.stage("failed"),"hung evaluate reaches its own finite IO deadline without user cancellation");
+            check(GetTickCount64()-start<4000,"hung renderer cannot hold watch command IO indefinitely");
+            {std::lock_guard lock(f.mutex);check(ymcc::deckysidebar::recoverableWatchFailure(f.records.back().value("reason",std::string{})),"hung evaluate is a recoverable transport failure, not identity failure");}
+            f.watch.stop();
+        }
+        {
+            WatchFixture f;check(f.cdp.wait(101),"a new verified context can attach after the hung watch is released");check(f.stage("context-attached"),"recovery context readback completes");
+        }
+        {
+            WatchFixture f;check(f.cdp.wait(101),"health fixture attaches verified context");check(f.stage("context-attached"),"health context admitted");
+            const auto signal=[&](int id,const std::string& run){f.cdp.send({{"method","Runtime.bindingCalled"},{"params",{{"name","__YMCC_DECKY_HEALTH_V1"},{"executionContextId",id},{"payload",Json{{"runId",run},{"code","decky-render-failed"}}.dump()}}}});};
+            f.cdp.boundary=true;signal(201,f.cdp.run);signal(101,"stale-run");f.cdp.boundary=false;signal(101,f.cdp.run);Sleep(80);
+            check(!f.stage("terminal",50),"foreign/stale/fabricated marker cannot close healthy frontend");
+            f.cdp.boundary=true;signal(101,f.cdp.run);check(f.stage("terminal"),"actual boundary readback triggers terminal event");check(f.cdp.teardowns==1,"fatal event tears down upstream lifecycle exactly once without restart");
+            {std::lock_guard lock(f.mutex);check(f.records.back().value("reason",std::string{})=="decky-render-failed","typed terminal reason retained");}
+        }
+        {
+            WatchFixture f;check(f.cdp.wait(101)&&f.stage("context-attached"),"unhandled boot fixture attaches");
+            const Json error={{"method","Runtime.exceptionThrown"},{"params",{{"exceptionDetails",{{"executionContextId",101},{"exception",{{"subtype","error"},{"className","TypeError"},{"description","TypeError: Cannot read properties of undefined (reading 'createElement')"}}},{"stackTrace",{{"callFrames",Json::array({{{"url","http://127.0.0.1:1337/frontend/index.js"}}})}}}}}}}};
+            auto plugin=error;plugin["params"]["exceptionDetails"]["stackTrace"]["callFrames"][0]["url"]="http://127.0.0.1:1337/plugins/example/dist/index.js";f.cdp.send(plugin);check(!f.stage("terminal",80),"individual plugin error does not close Decky");
+            f.cdp.bootMissing=false;f.cdp.send(error);check(!f.stage("terminal",100),"optional core error with initialized loader cannot disable Decky");
+            f.cdp.bootMissing=true;f.cdp.send(error);check(f.stage("terminal"),"official boot fatal exception stops consumer");check(f.cdp.teardowns==1,"boot fault owns only lifecycle teardown");
         }
         check(bootstrapSafeReason(std::runtime_error("secret token untrusted parse text"))=="mirror-bootstrap-invalid-message","untrusted exception contents sanitized");
         check(bootstrapSafeReason(std::runtime_error("mirror-bootstrap-owner-mismatch"))=="mirror-bootstrap-owner-mismatch","known error codes retained");

@@ -3,7 +3,7 @@ import { encodePersonaReport } from '../src/bridge/personaReportMock';
 import type { CanonicalFrame } from '../src/bridge/virtualReportAssembler';
 
 const frame: CanonicalFrame = {
-  schemaVersion: 1, runId: 'run', epoch: 7, powerGeneration: 1, targetId: 'target', persona: 'xbox360', configRevision: 1,
+  schemaVersion: 1, runId: 'run', epoch: 7, powerGeneration: 1, targetId: 'target', persona: 'elite', configRevision: 1,
   inputSequence: 1, sampleSequence: 0, timestamp: 1, neutral: false, buttons: 0, axes: {}, triggers: {},
   rightStickBase: { x: 0, y: 0 }, gyroContribution: { x: 0, y: 0 }, rightStick: { x: 0, y: 0 },
 };

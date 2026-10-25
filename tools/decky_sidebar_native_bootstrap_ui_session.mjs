@@ -3,7 +3,7 @@ import fs from 'node:fs';import path from 'node:path';import crypto from 'node:c
 import {createRequire} from 'node:module';import {createOriginalLosslessMemoryOwner} from './fixtures/decky_lossless_memory_owner.mjs';import {root,task} from './fixtures/decky_task_paths.mjs';import {createMirrorHostFixture} from './fixtures/decky_mirror_host_fixture.mjs';
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const loader=path.join(root,'PowerControl/decky/PluginLoader_noconsole.exe');
-if(hash(fs.readFileSync(loader))!=='1d8e06921ced35b0349e677207953d90e548ea254079150d99ced4d360381824')throw Error('Locked real loader mismatch');
+const {verifyLocal}=await import('./decky-loader-contract.mjs');verifyLocal(root);
 const directory=path.join(task,'Build/RealSteamUI','native-'+Date.now()),home=path.join(directory,'home');fs.mkdirSync(home,{recursive:true});
 fs.cpSync(path.join(root,'PowerControl/decky/plugins'),path.join(home,'plugins'),{recursive:true});
 // Optional task-built complete payload. Only the owned fixture home is touched.

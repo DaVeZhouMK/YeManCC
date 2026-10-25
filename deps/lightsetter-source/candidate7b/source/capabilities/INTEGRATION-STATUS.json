@@ -1,0 +1,214 @@
+{
+  "schemaVersion": 1,
+  "objective": "Frozen HC model capabilities: unified registration, dispatch, invocation and consumption, including missing wiring and required dependencies",
+  "goalComplete": false,
+  "physicalAcceptance": "separate",
+  "sourceScope": {
+    "baseline": "HC-BINARY-BATCH12-20260831",
+    "deviceClasses": 92,
+    "factoryClasses": 80
+  },
+  "domains": [
+    {
+      "id": "fan",
+      "status": "dispatch-connected",
+      "registeredRoutes": 70,
+      "consumer": "RealHcBackend.ResolveRoute -> existing FanRoute writer and lifecycle",
+      "verifiedScope": "all registered route aliases; ASUS production callback and transport receipts",
+      "remaining": [
+        "complete per-action consumption and cross-domain ownership audit",
+        "retain and verify each vendor writer and restore result contract"
+      ],
+      "evidence": {
+        "dispatchChecks": 601,
+        "selectedConsumerDispatches": 149,
+        "originalSourceRefusalFailures": 71,
+        "asusRoundtripChecks": 62,
+        "catalogCorruptionRejections": 6,
+        "physicalHardwareVerified": false,
+        "maintenanceChecks": 8
+      },
+      "highFrequencyOptimization": {
+        "status": "software-verified",
+        "consumer": "actual RealHcBackend.Route -> HcCapabilityTypeCache<FanRoute>",
+        "hotPath": "immutable runtime Type binding; direct cached consumer on stable Type",
+        "checks": 12,
+        "hotLookupAllocations": 0,
+        "retainedLiveGuards": [
+          "authorization",
+          "readiness",
+          "lease",
+          "device/ownership and restore settlement"
+        ],
+        "wholeProcessCpuReduction": "not measured"
+      }
+    },
+    {
+      "id": "lighting",
+      "status": "model-action-consumers-connected",
+      "consumers": [
+        "native ROG Aura",
+        "native MSI Claw HID",
+        "actual LightSetter HC callback",
+        "approved independent Mini core"
+      ],
+      "observedRegistration": {
+        "nativeLightingClasses": 47,
+        "sourceMinimumLightingClasses": 51,
+        "nonFactoryBasesNotAdvertised": [
+          "AYANEOAIRPlus",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "LegionGo"
+        ],
+        "secondColorPolicy": "retain lighting-disabled FlipDS/Flip1SDS exclusion",
+        "nextVerification": "software consumer gates passed; physical protocol/readback and installed-payload acceptance remain separate"
+      },
+      "registeredClasses": 47,
+      "factoryClasses": 44,
+      "explicitNativeBaseAliases": 3,
+      "brightnessRoutes": 42,
+      "secondColorEntries": 21,
+      "namedOneXPresets": 11,
+      "implementedPresetClasses": 5,
+      "verifiedScope": "actual managed operation selection/action functions; full native gate parity; actual ROG/MSI packet consumers; actual capability-query and exported receipt closures; existing product signals",
+      "evidence": {
+        "managedChecks": 549,
+        "nativeParityChecks": 3832,
+        "nativePacketChecks": 260,
+        "nativeCapabilityChecks": 5149,
+        "nativeReceiptChecks": 573,
+        "existingSignalCases": 52,
+        "physicalHardwareVerified": false
+      },
+      "remaining": [
+        "per-vendor HC initialization and transport lifecycle reconciliation with other capability domains",
+        "field verification on matching built/installed payload",
+        "low-frequency activation and remaining HC dependency optimization deferred behind high-frequency domains"
+      ]
+    },
+    {
+      "id": "battery",
+      "status": "exact-rules-and-actual-controller-consumers-connected",
+      "consumers": [
+        "HcBatteryCapabilityCatalog exact identity dispatcher",
+        "actual Policy and Controller",
+        "existing native provider/readback/recovery",
+        "existing component consumes actual Controller JSON"
+      ],
+      "registeredIdentityRules": 40,
+      "frozenIdentityRules": 34,
+      "reviewedNativeExtensions": 6,
+      "sourceDeclarationNotRequiredForReviewedNativeProvider": [
+        "GPDWinMini_HX370"
+      ],
+      "verifiedScope": "All existing rule identities select the original Route instance, enter actual Controller read/write against memory providers, restore software bypass on shutdown, and retain firmware/readback/conflict/recovery rejection. Actual provider protocol and UI tests retained.",
+      "evidence": {
+        "controllerGroups": 60,
+        "uiCases": 24,
+        "liveControllerCases": 6,
+        "sourceChangesDuringLocalRun": 0,
+        "physicalHardwareVerified": false
+      },
+      "runtimeSourceContract": "Includes four source-linked catalog files plus ProcessEfficiency; modified shared generated source is a stale-contract negative",
+      "remaining": [
+        "SuiPlay0X1 inherited source protocol remains explicitly not admitted by reviewed Windows policy",
+        "same-version installation/physical battery and vendor protocol validation are separate",
+        "continue joint lifecycle/dependency review"
+      ]
+    },
+    {
+      "id": "oem-input",
+      "status": "pending-unified-dispatch",
+      "next": "bind actual OEM catalogs, capture profiles and action consumers"
+    },
+    {
+      "id": "motion",
+      "status": "windows-recipe-total-binding-connected; private-provider-and-controller-binding-pending",
+      "next": "complete unified provider/recipe binding for all existing motion routes; prioritize repeated per-frame lookup/copy/IPC costs, keep sample ownership and generation fences live",
+      "highFrequencyOptimization": {
+        "status": "generic cache preserved; reviewed/legacy Bound consume unified original recipe reference",
+        "checks": 10021,
+        "compiledCacheKeyMutations": 5,
+        "scope": "generic and negative generic recipe selection only; current recognized-model fast guard unchanged",
+        "fullConsumerAssertionsPerConfiguration": 339261,
+        "originalCompiledSemanticFaults": 35,
+        "finalReceipt": "current-source-and-registration-valid",
+        "wholeProcessCpuReduction": "not measured"
+      },
+      "registration": {
+        "recipes": 89,
+        "reviewed": 27,
+        "legacy": 57,
+        "default": 3,
+        "generic": 2,
+        "controllerPreferredDeclarationsWindowsBlocked": 4,
+        "actualSelectedConsumers": 235,
+        "newBindingAssertionsPerConfiguration": 2485,
+        "actualConsumerAssertionsPerConfiguration": 339261,
+        "privateProviderBindingComplete": false,
+        "controllerBindingComplete": false
+      }
+    },
+    {
+      "id": "performance",
+      "status": "pending-unified-dispatch",
+      "next": "map frozen OEMCPU/OEMGPU operations and model limits to current TDP/CPU/GPU consumers"
+    },
+    {
+      "id": "lifecycle-and-dependencies",
+      "status": "pending-full-audit",
+      "next": "reconcile source/binary provenance, initialization, shared dependencies, resource ownership and restore for every activated consumer"
+    },
+    {
+      "id": "remaining-model-methods",
+      "status": "pending-full-reconciliation",
+      "next": "classify and connect all remaining frozen model protocol methods; preserve explicit disabled and unsupported states"
+    },
+    {
+      "id": "controller",
+      "status": "existing-consumers-inventoried; unified-source-binding-pending",
+      "next": "connect actual physical controller input/motion, virtual output and owned hide/return receipts using CONTROLLER-CONSUMPTION.json",
+      "feedback": "game-feedback callback/physical forwarding still unclosed; physical test vibration is separate",
+      "frozenSourceInventory": {
+        "files": 29,
+        "classDeclarations": 28,
+        "dummyFiles": 6,
+        "status": "complete-source-inventory-verified;runtime-binding-pending"
+      }
+    }
+  ],
+  "priorities": [
+    "capability registration/invocation/real-consumption/recovery completeness",
+    "fan and motion high-frequency direct consumption",
+    "remaining capability domains",
+    "low-frequency activation optimization"
+  ],
+  "longTerm": {
+    "cpu": "maximum CPU efficiency as a sustained optimization target; use actual per-call and whole-process measurements separately",
+    "hcDependency": "converge to EC-class hardware capabilities, by verified consumer/lifecycle/dependency migration",
+    "smallPurposeDlls": "allowed",
+    "furtherDllTrimming": "deferred-by-user",
+    "maintenanceRecord": "capabilities/EXECUTION-CHAINS.json",
+    "upgradePlanner": "tools/hc_capability_maintenance.mjs"
+  },
+  "maintenance": {
+    "registeredDomains": 9,
+    "recordedRouteIssues": 16,
+    "consumerAndUpgradeChecks": 12,
+    "normalBuildAndPackageGuard": "tools/verify-unified-capability-catalog.ps1",
+    "evidenceScope": "source and memory-transport software validation; no package, installation, real device IO or physical acceptance claimed",
+    "closedSoftwareRouteIssues": 1
+  },
+  "evidenceMeaning": "Successful incomplete paths are not a performance claim: per-rule positive consumers, writes and software-release assertions precede cost interpretation.",
+  "currentBatchAcceptance": {
+    "status": "CURRENT_RECEIPTS_VALID",
+    "selectedCurrentTests": 9,
+    "needsRerun": 0,
+    "auditPath": "D:/Codex/2026-10-19/ni-s/work/a6g/2026-10-19T05-37-01-979Z-88a8e6ee/receipt-audit.json",
+    "registeredSelectionValidated": true,
+    "previousAuditHistoricalOnly": "D:/Codex/2026-10-19/ni-s/work/a4/2026-10-19T04-52-14-894Z-c885e132/receipt-audit.json",
+    "physicalAcceptance": "separate",
+    "completeGoal": false
+  }
+}

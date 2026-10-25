@@ -26,7 +26,7 @@ fb.release();
 if (fb.snapshot(null).phase !== 'released') throw new Error('T6 release incomplete');
 
 const controller: ControllerFrame = {
-  runId: 'run-1', epoch: 3, powerGeneration: 7, targetId: 'target-1', persona: 'xbox360', configRevision: 4,
+  runId: 'run-1', epoch: 3, powerGeneration: 7, targetId: 'target-1', persona: 'elite', configRevision: 4,
   inputSequence: 1, timestamp: 1, buttons: 0, axes: {}, triggers: {}, rightStick: { x: 0.25, y: 0 },
 };
 const assembled = assembleCanonicalFrame(controller);

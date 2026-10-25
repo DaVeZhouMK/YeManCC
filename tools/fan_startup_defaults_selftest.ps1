@@ -36,7 +36,7 @@ $rowStart = [Math]::Max(0, $power.LastIndexOf('<Toggle', $rowStart))
 $rowEnd = $power.IndexOf('/>', $rowStart)
 if ($rowEnd -le $rowStart) { throw 'fan startup/default self-test failed: boot/wake fan row boundary missing' }
 $rowBody = $power.Substring($rowStart, $rowEnd - $rowStart)
-Assert-Contains $rowBody 'v-model="fanControlOnBoot"' 'the boot/wake fan row must bind an operable switch'
+Assert-Contains $rowBody ':model-value="fanControlOnBoot"' 'the boot/wake fan row must bind an operable controlled switch'
 Assert-Absent $rowBody ':disabled="true"' 'the boot/wake fan row must not be hard-disabled'
 
 # FanView mirror: same preference, writes the setting only; never starts control.

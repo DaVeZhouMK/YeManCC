@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>YeManBatteryHost</AssemblyName><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier><SelfContained>false</SelfContained>
+    <YmccSharedRuntimeRoot Condition="'$(YmccSharedRuntimeRoot)' == ''">$(MSBuildThisFileDirectory)..\..\deps\ymcc-shared-runtime</YmccSharedRuntimeRoot>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="System.Management" Version="10.0.9" />
+    <Reference Include="LibreHardwareMonitorLib">
+      <HintPath>$(YmccSharedRuntimeRoot)\bin\LibreHardwareMonitorLib.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <Reference Include="RAMSPDToolkit-NDD">
+      <HintPath>$(YmccSharedRuntimeRoot)\bin\RAMSPDToolkit-NDD.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+    <EmbeddedResource Include="battery-routes.json" />
+    <EmbeddedResource Include="runtime-contract.json" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.cs" Link="Capabilities\HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities\HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="..\..\capabilities\HcSecondaryDisplayCapabilityCatalog.cs" Link="Capabilities\HcSecondaryDisplayCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcBatteryCapabilityCatalog.cs" Link="Capabilities\HcBatteryCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcBatteryCapabilityCatalog.generated.cs" Link="Capabilities\HcBatteryCapabilityCatalog.generated.cs" />
+  </ItemGroup>
+</Project>

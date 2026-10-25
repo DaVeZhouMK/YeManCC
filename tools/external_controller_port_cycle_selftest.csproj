@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <PlatformTarget>x64</PlatformTarget>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="external_controller_port_cycle_selftest.cs" />
+    <Compile Include="../InputHost/ExternalControllerPortCycle.cs" Link="ExternalControllerPortCycle.cs" />
+    <Compile Include="../InputHost/ParentProcessLifetime.cs" Link="ParentProcessLifetime.cs" />
+    <Reference Include="Nefarius.Utilities.DeviceManagement">
+      <HintPath>../deps/ymcc-shared-runtime/bin/Nefarius.Utilities.DeviceManagement.dll</HintPath>
+      <Private>true</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

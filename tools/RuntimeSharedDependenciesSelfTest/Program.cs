@@ -3,19 +3,19 @@ using System.Runtime.Loader;
 using System.Security.Cryptography;
 using System.Text.Json;
 
-if (args.Length != 2) throw new ArgumentException("usage: <original-hc-runtime> <fixture-root-in-workspace>");
+if (args.Length != 2) throw new ArgumentException("usage: <independent-deps-bin> <fixture-root-in-workspace>");
 string source = Path.GetFullPath(args[0]);
 string fixture = Path.GetFullPath(args[1]);
 string allowed = Path.GetFullPath(@"G:\YeManCC-Work\Mainline\Build\Validation\HC-SIZE-ORDER-20261007") + Path.DirectorySeparatorChar;
 if (!fixture.StartsWith(allowed, StringComparison.OrdinalIgnoreCase) || Directory.Exists(fixture))
     throw new InvalidOperationException("Test writes require a new directory strictly inside the specified workspace validation root.");
 string host = Path.Combine(fixture, "PowerControl", "feature-assets", "virtual-gamepad");
-string shared = Path.Combine(fixture, "PowerControl", "handheldcompanion-runtime", RuntimeSharedDependencies.RuntimeId);
+string shared = Path.Combine(fixture, "PowerControl", RuntimeSharedDependencies.SharedDirectoryName);
 Directory.CreateDirectory(host); Directory.CreateDirectory(shared);
 var checks = new List<string>();
 void Check(bool value, string label) { if (!value) throw new Exception(label); checks.Add(label); }
 void Reject(Action action, string label) { bool rejected=false; try { action(); } catch (Exception) { rejected=true; } Check(rejected,label); }
-foreach (string name in new[] { "Newtonsoft.Json", "Nefarius.Utilities.DeviceManagement" })
+foreach (string name in new[] { "Newtonsoft.Json", "Nefarius.Utilities.DeviceManagement", "Nefarius.Drivers.HidHide" })
 {
     string original = Path.Combine(source,name+".dll");
     string file = Path.Combine(shared,name+".dll");

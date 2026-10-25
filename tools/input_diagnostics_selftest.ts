@@ -4,7 +4,7 @@ const bus = new InputDiagnosticsBus();
 const record: InputDiagnosticRecordV1 = {
   schemaVersion: 1, revision: 1, closure: 'NOT-OBSERVED', timestampUtc: new Date(0).toISOString(), timestampLocal: new Date(0).toString(),
   source: 'input-host', eventName: 'input.frame', operation: 'submit', runId: 'r1', hostInstanceId: 'host-1', processId: 1,
-  nativeGeneration: 1, inputEpoch: 1, configRevision: 1, configHash: null, targetId: 't1', persona: 'xbox360', lifecyclePhase: 'active',
+  nativeGeneration: 1, inputEpoch: 1, configRevision: 1, configHash: null, targetId: 't1', persona: 'elite', lifecyclePhase: 'active',
   transportResult: 'ok', callbackResult: 'ok', readback: 'not-observed', physicalObservation: 'not-observed', error: null, releaseProofId: null,
 };
 if (bus.append(record) || bus.snapshot().length !== 0) throw new Error('disabled diagnostics recorded data');
@@ -12,6 +12,7 @@ bus.setEnabled(true);
 if (!bus.append(record) || bus.snapshot().length !== 1) throw new Error('enabled diagnostics did not record');
 const exported = bus.exportSnapshot();
 if (exported.schemaVersion !== 1 || exported.records.length !== 1) throw new Error('diagnostic export invalid');
+if (exported.records[0].persona !== record.persona || exported.records[0].source !== record.source || exported.records[0].physicalObservation !== record.physicalObservation) throw new Error('diagnostic export changed current persona or source observation');
 bus.clear();
 if (bus.snapshot().length !== 0) throw new Error('diagnostic clear failed');
 bus.setEnabled(false);

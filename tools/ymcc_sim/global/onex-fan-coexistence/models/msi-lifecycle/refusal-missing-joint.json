@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-lifecycle23-from-accepted-onex92",
+  "evidenceKind": "EXACT_MSI_LIFECYCLE_PREPARE",
+  "role": "positive",
+  "ownedParent": "D:/Codex/2026-10-18/kai-s/work",
+  "stageRoot": "D:/Codex/2026-10-18/kai-s/work/MSI-REFUSAL-missing-joint-NOT-CREATED",
+  "acceptedOneX92": {
+    "summaryPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/SUMMARY.json",
+      "sha256": "bc53dc914731a6ae380a2da7c8949aaa3cac698455afe65c9309864372a26c7f"
+    },
+    "preparedPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+      "sha256": "e7fea6722ce27167b57333817265cd42a98a5aad5326f04cbd3a36249cc82260"
+    },
+    "graphPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/LOADED-GRAPH.json",
+      "sha256": "a7377291a21860b089ce8bd27136c20267c7707536aa44c49e7ec6713ec3bae9"
+    }
+  },
+  "derivativeQualificationPin": null
+}

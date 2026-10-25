@@ -33,12 +33,9 @@ export interface PowerResumeTransactionResult {
 const defaultSleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
 /**
- * Run one bounded wake transaction.  The isolated FanHost's HC-equivalent
- * F5 recovery completes first, native then publishes Ready/opens its global
- * write gate, and daemon handle rebuilding remains best-effort afterwards.
- *
- * This ordering prevents a renderer recreation from stranding a resident
- * FanHost in Suspended after native has already reported Ready.
+ * Run one bounded wake transaction. Native Ready is committed first; the
+ * daemon rebuild remains best-effort afterwards. App starts FanHost F5 from
+ * power.resume-ready independently, so this transaction never waits for it.
  */
 export async function runPowerResumeTransaction(
   generation: number,
@@ -54,6 +51,7 @@ export async function runPowerResumeTransaction(
 
   let commitAttempts = 0;
   let lastReason: string | undefined;
+  let commitAccepted = false;
 
   // HC SystemReady completes synchronously: managers resume and the device
   // open is fire-and-forget in a background task. The fan F5 is already
@@ -68,7 +66,8 @@ export async function runPowerResumeTransaction(
       ok: false,
       reason: error instanceof Error ? error.message : String(error),
     }));
-    if (result.ok) {
+    if (result.ok === true) {
+      commitAccepted = true;
       commitAttempts += 1;
       lastReason = undefined;
       break;
@@ -77,7 +76,8 @@ export async function runPowerResumeTransaction(
     if (commitAttempts + 1 < commitAttemptsLimit) await sleep(commitRetryDelayMs);
   }
 
-  if (lastReason || commitAttempts === 0) {
+  // Failure may omit its optional reason; only an explicit ok:true commits.
+  if (!commitAccepted) {
     return {
       committed: false,
       daemonRequired,

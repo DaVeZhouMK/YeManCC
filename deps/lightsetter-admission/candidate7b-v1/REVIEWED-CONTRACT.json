@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-lighting-reviewed-contract-v1",
+  "profile": "ymcc-device-core-v1",
+  "sourceBundleRelativePath": "../../lightsetter-source/candidate7b",
+  "sourceBundleRepoPath": "deps/lightsetter-source/candidate7b",
+  "sourceManifestSha256": "c06064b4d8f2916e895e8efaee4957cfcee0fd46be468a094981a810e86a18b2",
+  "admissionBundleRepoPath": "deps/lightsetter-admission/candidate7b-v1",
+  "admissionManifestSha256": "f362d687e0e0aaee0552aa3df2e9ab0a7dd5348af13a4a25dffbc90f6cf47017",
+  "templatePath": "PLAN-TEMPLATE.json",
+  "templateSha256": "733072654e8611ee01877946c60e1eee621409ac43457b2880d441e0de5d1a98",
+  "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "oldHelperSha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+  "profileSha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c",
+  "tuple": {
+    "native": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+    "fanHost": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+    "fanBackend": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a",
+    "fanManifest": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae",
+    "runtimeManifest": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "hc": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "independentCore": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e"
+  },
+  "scope": "Exact approved software component, real preimages, inert copied-install consumers. No physical acceptance or installed C writes.",
+  "requiredTools": [
+    "tools/hc-device-runtime/connect-installed-lighting.ps1",
+    "tools/hc-device-runtime/verify-lighting-catalog-evidence.ps1",
+    "tools/hc-device-runtime/verify-lighting-portable-evidence.ps1",
+    "tools/hc-device-runtime/Test-LightingConnection.ps1",
+    "tools/ymcc_sim/global/lighting-component-continuity/adapter.mjs",
+    "tools/ymcc_sim/global/lighting-component-continuity/Run-Continuity.ps1",
+    "tools/ymcc_sim/global/lighting-component-continuity/New-ReviewedPlan.ps1"
+  ],
+  "runtimeExport": false
+}

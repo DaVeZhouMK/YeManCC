@@ -1,0 +1,81 @@
+{
+  "schemaVersion": 1,
+  "status": "raw-observation-wired-game-feedback-unclosed",
+  "scope": "Admitted current Host controller raw output event to one bounded coalesced mailbox and existing validated response; observation only",
+  "maximumPayloadBytes": 256,
+  "completePacketQueue": false,
+  "callbackDeviceOrPipeIo": false,
+  "newPollerOrThread": false,
+  "outputEvent": "HMController.OutputReceived",
+  "lease": {
+    "identity": [
+      "exact controller reference",
+      "binding object reference",
+      "monotonic target generation",
+      "existing full SameTuple and successful response"
+    ],
+    "subscribe": "TryPrepare after target PnP admission",
+    "revoke": [
+      "QUIESCE",
+      "ReleaseLocalLocked before any early SDK release return",
+      "target rebind"
+    ],
+    "detachException": "Revoke authority first, retain exact delegate for retry, continue original SDK release responsibilities and include failure in release result"
+  },
+  "transport": {
+    "responseProperty": "gameOutputObservation",
+    "identity": "Validated enclosing Host response, plus local output generation and SDK sequence",
+    "overload": "Latest raw observation replaces pending observation; coalesced count records loss. Must not act as a motor command or complete protocol transcript.",
+    "oversize": "Reject whole packet; never truncate into a valid-looking report",
+    "idle": "One pending-state read, no observation serialization without new event",
+    "messageBudgetBytes": 14336
+  },
+  "lockedSdk": {
+    "file": "deps/hidmaestro/HIDMaestro.Core.dll",
+    "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+    "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+    "commit": "30b8faf0f7de746f249edc5f1520eaa0440965cf"
+  },
+  "profiles": [
+    {
+      "persona": "steamdeck",
+      "profile": "steam-deck-composite",
+      "extendedOutputReport": false,
+      "decodeStatus": "raw protocol not implemented; do not infer motor values"
+    },
+    {
+      "persona": "elite",
+      "profile": "xbox-elite-v2",
+      "extendedOutputReport": false,
+      "decodeStatus": "raw protocol not implemented; do not infer motor values"
+    },
+    {
+      "persona": "dualsense-edge",
+      "profile": "dualsense-edge",
+      "extendedOutputReport": true,
+      "reportId": 2,
+      "reportBytes": 64,
+      "decodeStatus": "Schema present; valid flags/protocol semantics still require independent verification"
+    }
+  ],
+  "sources": [
+    "InputHost/Program.cs",
+    "InputHost/HostGameOutputObservation.cs",
+    "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+    "tools/inputhost_lifecycle_selftest.mjs",
+    "tools/inputhost_game_output_observation_selftest.mjs",
+    "tools/inputhost_game_output_observation_selftest.cs"
+  ],
+  "publicCase": "controller.host-game-output-observation",
+  "protocolDecoded": false,
+  "gameFeedbackForwardingProven": false,
+  "gameOutputCallbackBound": false,
+  "physicalAcceptance": false,
+  "cpuGpuConsumptionChanged": false,
+  "nextSteps": [
+    "Verify each locked persona raw protocol and update-valid semantics with attributable samples",
+    "Implement decoded game feedback with exact native tuple/source, separate lease and asymmetric motors",
+    "Verify stop/expiry/revoke and manual/touch arbitration before any UI capability admission",
+    "Rebuild exact managed dependency closure after any Host/helper source change; never re-sign old binaries"
+  ]
+}

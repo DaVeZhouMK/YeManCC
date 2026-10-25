@@ -1,0 +1,463 @@
+{
+  "schemaVersion": 1,
+  "reviewId": "HC-COMPACT34-CANONICAL-LHM-20261024",
+  "baselineProfileSha256": "c3c35ee0e3e348c6dcdd28009d9e9ff5e679515c8d711456c7de9320780393a0",
+  "baselineManifestSha256": "64b6aba8840aeb2d6b212a027df6ea991439ec38ef4e45216227cd8f37fe7626",
+  "baselineInventorySha256": "76175778ed62ff16f3d7be4d47407b785c2c9d75ddeca8fc17bae8edb97475e8",
+  "identityOnly": true,
+  "physicalDeviceVerified": false,
+  "changes": [
+    {
+      "path": "BlackSharp.Core.dll",
+      "before": {
+        "bytes": 18432,
+        "sha256": "e25c49ab8104e2dd1afc944a7cc7dd2329eeaee465f12db025bb48382ac05553"
+      },
+      "after": {
+        "bytes": 18944,
+        "sha256": "008204da34bbf51e1654b98603b44c8707e816fd00c637f2ad4233929a77e1d7"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "GameLib.Core.dll",
+      "before": {
+        "bytes": 4608,
+        "sha256": "5ff56b9733ca5fd8383a38e6693b7aaaeccf3a52232f642ea2c487e71b358f5a"
+      },
+      "after": {
+        "bytes": 6656,
+        "sha256": "85895ee11a1e626b4eef7a826a1a3f0e9776759638798b7373fbb785bdadaabb"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Gma.System.MouseKeyHook.dll",
+      "before": {
+        "bytes": 24064,
+        "sha256": "75568c3a5fb10cc3284120938ec5c1a19cc62917b9a6afcce85d12a33e1f6460"
+      },
+      "after": {
+        "bytes": 26624,
+        "sha256": "1e01b3ec82d1473b97655c3426cc957d62e6055ec469db067f789b4f315f9d7e"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "GongSolutions.WPF.DragDrop.dll",
+      "before": {
+        "bytes": 11776,
+        "sha256": "c3f4ff7879721e5501097185d6983fd9cc610176e62e95d8a36f9822a969e340"
+      },
+      "after": {
+        "bytes": 15872,
+        "sha256": "64a20dc29177570bfa8c4a9ee64cc3607b5be00215f59bd8662bbf778c5149c0"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "GregsStack.InputSimulatorStandard.dll",
+      "before": {
+        "bytes": 18944,
+        "sha256": "f8fa62bf9416d3b8aeddd2502b33b385b7e7936dfa1ffa2c48b251e039c551fe"
+      },
+      "after": {
+        "bytes": 22016,
+        "sha256": "34150acd65c5787c3a7db7b570e334f99bef58adf2829b861778d4696385d54d"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "HandheldCompanion.runtime.json",
+      "before": {
+        "bytes": 15179,
+        "sha256": "64b6aba8840aeb2d6b212a027df6ea991439ec38ef4e45216227cd8f37fe7626"
+      },
+      "after": {
+        "bytes": 15145,
+        "sha256": "db2d4187b14166f016b951d2c8ea289550705d15140fcb4cfcdf9d936926c9eb"
+      },
+      "reason": "Official generator manifest binds the newly audited source profile and 34 exact smaller DLL replacements; no runtime additions or shared duplicates.; Canonical LHM relocation preserves immutable public035 validation while keeping all approved compact DLL bytes."
+    },
+    {
+      "path": "hidapi.net.dll",
+      "before": {
+        "bytes": 11776,
+        "sha256": "91288055c3fe1155caa98fc02355ccdf7ad2c36431e720df0756dddd97c61d57"
+      },
+      "after": {
+        "bytes": 11264,
+        "sha256": "329fb6b0feb827f892727669fe93dcabf0091009d677579ccb88940150840c74"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Interop.IWshRuntimeLibrary.dll",
+      "before": {
+        "bytes": 4096,
+        "sha256": "88bedd1d4cbb11023c33a01c94968cc3ed506a5a5b333149e95ded82287b3a7c"
+      },
+      "after": {
+        "bytes": 36352,
+        "sha256": "6b9e06fdb4fd1d259cb7018c35a722a04ae11b9948ae097378c8d73c13143e8a"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.dll",
+      "before": {
+        "bytes": 76288,
+        "sha256": "425973f519959b7cece47610a995d69e21e883c12549dc4627add50ef999bfad"
+      },
+      "after": {
+        "bytes": 76800,
+        "sha256": "99d453a66c475492b5f7be4a0033efb2dd807f46f14fce1fd9b1263137b1c5ca"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "before": {
+        "bytes": 9728,
+        "sha256": "caea1f9b5b8ccfbf8fad462c5262a0e3c5704637a74f329df52cb255a6845b57"
+      },
+      "after": {
+        "bytes": 11776,
+        "sha256": "2e4f53cf9da474021cc798749103d90363e16e46661b9d8ef57ab6235edc53c2"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.dll",
+      "before": {
+        "bytes": 16896,
+        "sha256": "0035ebb7fe48cdf562814db72f8bc6d5d738f2c52635e5304fd88596e540d564"
+      },
+      "after": {
+        "bytes": 17408,
+        "sha256": "0883d2404bdca3d84349d4176c6f5e171d7dafdc4fb9f4d0e1e8de4efce091de"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "before": {
+        "bytes": 9728,
+        "sha256": "9a112aafa7e07d845494377e3fb06993a1bf9c167d4ef36c70e512e73909e3bb"
+      },
+      "after": {
+        "bytes": 9728,
+        "sha256": "fbdd1901a24db5140ddd17d5e70bd1b5141d929234467e51293264ae40a1299e"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Physical.dll",
+      "before": {
+        "bytes": 29184,
+        "sha256": "6c549dc0773cd3dbbfe4a7f66b86cc65b6e4ac2403bcca31aa08b78437f6b611"
+      },
+      "after": {
+        "bytes": 29184,
+        "sha256": "b94c9413a0e39a61cb39223c1f335c9eeab665451a297180301f2ee744dfd0cb"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "before": {
+        "bytes": 33280,
+        "sha256": "6f2397f832dda29a0e0215fbd3671123db3b4fbc3a7188dfe4dda765833e7e1a"
+      },
+      "after": {
+        "bytes": 33792,
+        "sha256": "9555305fb892d2ad029432cfef9b15af925d6f290d8e95b000cc44c70e26ed26"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.Http.dll",
+      "before": {
+        "bytes": 49152,
+        "sha256": "342f80786ad210deee516ee576999d900fb45ae3dde9d34090c35055623fb2f9"
+      },
+      "after": {
+        "bytes": 59904,
+        "sha256": "14f9eb1eee87fb14e3760d4b9c95a98db6c3f796b2568501ec96750bf4c99220"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.Http.Polly.dll",
+      "before": {
+        "bytes": 13312,
+        "sha256": "a638287368fac42fe1e9c42e35dc21ec9d2bd0303a2ee5fe6478cd905e4589ed"
+      },
+      "after": {
+        "bytes": 13824,
+        "sha256": "b2fc863055bad9247578a4856737f9b764bdeb1206e02a6db15320a43014078a"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.Extensions.Primitives.dll",
+      "before": {
+        "bytes": 19968,
+        "sha256": "b232e7d48c257c7d272cb1d20c2ec023ccbc1688f17ab304cd89b21002b2bff2"
+      },
+      "after": {
+        "bytes": 30208,
+        "sha256": "e71a85527aca9d8abcd5437a522787090313e51e390b881ca5e7f92c6545f125"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Core.dll",
+      "before": {
+        "bytes": 26624,
+        "sha256": "0e2eb021f9920041d5ae67f2670cafbc208f96582b712f97f9bf52a2811c4b6a"
+      },
+      "after": {
+        "bytes": 52736,
+        "sha256": "91b3f5ba77b7de556fb7952b0f593c41c73c37ddfd474c21e0b117b0b80253f8"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Shell.dll",
+      "before": {
+        "bytes": 111616,
+        "sha256": "6e437131f78f452626649cf6a73495afa657930c4c065427a80fefbcb0e105e5"
+      },
+      "after": {
+        "bytes": 227328,
+        "sha256": "cd0e0857a83190850780eb8059c09c856dcaed6fe32f3caac27967a9b10ffc32"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "NAudio.Core.dll",
+      "before": {
+        "bytes": 13824,
+        "sha256": "41ae47df2c6039a47aea97ad76624708937360e47a3d498848a7b229c4238450"
+      },
+      "after": {
+        "bytes": 57856,
+        "sha256": "f35c84aeab3497f106428f080673f2e807c881a9d6aa63b1b7f3c9f3a6073ecb"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "NAudio.Vorbis.dll",
+      "before": {
+        "bytes": 9728,
+        "sha256": "dd49a5e16b3ffa5d2b00109c2b6a81e7c833ae0d8be4ba8919ad8a13014c1ae1"
+      },
+      "after": {
+        "bytes": 10240,
+        "sha256": "fbb2c625876e95d149822e175fec3b4baa3f6bf13cf4a1055d3954d9f2519cce"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "NAudio.Wasapi.dll",
+      "before": {
+        "bytes": 16896,
+        "sha256": "e3443fb2ab478d9f3ecc70db045902a1acbb7a264b6a1ca887c696aaa5410777"
+      },
+      "after": {
+        "bytes": 100352,
+        "sha256": "9342d5753f662eb5b4117ab5f938085bafb7f7d036f8c0779657c24b171ed156"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "NAudio.WinMM.dll",
+      "before": {
+        "bytes": 11264,
+        "sha256": "9d1baa066378586e04b2f5ddbd562fab3406ea037ce37842a676183e8d825267"
+      },
+      "after": {
+        "bytes": 29184,
+        "sha256": "972c605d23690174fed2cbb1bd3a285c5f7d053f93623e19e8217ebbb8dfda5b"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Nefarius.Utilities.Bluetooth.dll",
+      "before": {
+        "bytes": 213504,
+        "sha256": "1bdc69e3da741a65cf0625b3d69c48258d113700cc7b8e379d8bba6e0eeb702f"
+      },
+      "after": {
+        "bytes": 193024,
+        "sha256": "074b36140e3d235e2c35baca1c20372b82078a5a8e06a5ead30b941b7c97921d"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Nefarius.ViGEm.Client.dll",
+      "before": {
+        "bytes": 201216,
+        "sha256": "33c26dd54ec68f0ff943437dd16a371cdf90501a0282c1034f662ef162a4f919"
+      },
+      "after": {
+        "bytes": 195584,
+        "sha256": "d2e580e325c8a8c77a6fe3511b0b6beed39c5d17e12ee689e5658ef4ec09f4fa"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "NVorbis.dll",
+      "before": {
+        "bytes": 65536,
+        "sha256": "3f34bb8140f0393c32681ccd23b0b733f81c9200d08cc636cc22981d7b9a92c5"
+      },
+      "after": {
+        "bytes": 65536,
+        "sha256": "a770007c6563f04b87b06214718876c93a7c50f2fa0672ad9f93b3ebcbb1f8eb"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "PInvoke.Windows.Core.dll",
+      "before": {
+        "bytes": 257536,
+        "sha256": "85a6d7f631225640f2ac234697c5f203f18acf83711c5be2078af67720c8995e"
+      },
+      "after": {
+        "bytes": 257536,
+        "sha256": "5714085930b396c27db302983b5ee951438e75fae7d9437583cbefefe4b60400"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "Polly.dll",
+      "before": {
+        "bytes": 39936,
+        "sha256": "a8edcd568a404b5942953ddba57735ad7ff7e855174655b0c6f44e58ad21f254"
+      },
+      "after": {
+        "bytes": 79360,
+        "sha256": "c8110688dd4171099c628ca03dd0558ad51016acec80803c629dcd3229df4685"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "PrecisionTimer.NET.dll",
+      "before": {
+        "bytes": 9728,
+        "sha256": "a3006b68d21f5294172fe1f3f45953341c3bb432c661aa42fb24412468c90f08"
+      },
+      "after": {
+        "bytes": 10240,
+        "sha256": "44c8fddff6e5d41c8ade356bd528ff7c43d37af763c04cf9638d612a5220e473"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "SharpDX.Direct3D9.dll",
+      "before": {
+        "bytes": 39936,
+        "sha256": "530a2e95fb84932086f8038d16cbaffd4b9b806b4389f5f29ce1f0ad11486ae7"
+      },
+      "after": {
+        "bytes": 165376,
+        "sha256": "7123c60e074711b6ea7b59dc4a28d8fa43d36b577c9100983c263cfb460ce62a"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "SharpDX.DirectInput.dll",
+      "before": {
+        "bytes": 55808,
+        "sha256": "9b68076fda1397229200021c05f062d0283f73e406889a23da47fe7b6f8f7d03"
+      },
+      "after": {
+        "bytes": 98304,
+        "sha256": "c0db07b561c2082293e0c338c3efbf1895b29a96a89abbe29a2aa4f56146566f"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "SharpDX.dll",
+      "before": {
+        "bytes": 45056,
+        "sha256": "e862ba1f03827b812735008cfa03ca8a912d9c09a2d1845007ee0936116fa453"
+      },
+      "after": {
+        "bytes": 246784,
+        "sha256": "83b1096413d768b9218a7b70636883c735bb475ca058277869d5df0d23ae8fc1"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "SharpDX.XInput.dll",
+      "before": {
+        "bytes": 8192,
+        "sha256": "693c78dc680c50b6e1308cc0ecb2c2d1e95e0fb1bfd1e8f0d7d7be8ae5396f82"
+      },
+      "after": {
+        "bytes": 13312,
+        "sha256": "9dc5071976fea81882775ce58085d9e3bbdad27e5c185d07c87c897d1ddfd274"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "WindowsInput.dll",
+      "before": {
+        "bytes": 9216,
+        "sha256": "07753ffb4a77e57bb3a6997034ef362119e95fbbf2acfc55d6402a501921fd5a"
+      },
+      "after": {
+        "bytes": 35840,
+        "sha256": "70ba34a92bf3a071fb72d28db60dc515ce032a0ce20d0b7b44b694e8cf322ad5"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "WpfScreenHelper.dll",
+      "before": {
+        "bytes": 12288,
+        "sha256": "c597484887160410ffb36b28346ceca107a6f96f87c749a08d42ca99a089c203"
+      },
+      "after": {
+        "bytes": 13312,
+        "sha256": "0fa07a605282baceb8dfe11f578ec305cc34c37e1cb886304ee75ddced116343"
+      },
+      "reason": "Reviewed smaller derivative preserves current complete native/COM ABI, retained method IL and current consumer references. Historical compact bytes are retained as reference; unsafe removed slots/layout/shadow roots are not restored. Exact new hash is approved only after the five-phase software gate."
+    },
+    {
+      "path": "LibreHardwareMonitorLib.dll",
+      "before": null,
+      "after": {
+        "bytes": 1204224,
+        "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf"
+      },
+      "reason": "Relocate the identical authenticated LHM DLL from independent shared runtime into HC for immutable public035 compatibility. Remove its former shared-directory copy; do not add a package DLL copy. BatteryHost retains its pre-existing isolated local copy."
+    }
+  ],
+  "sourceProfileSha256": "bafb14c4a98f58aef4d4d596eaba70e93829688ad0b9e5e0b7ddc298b5b006f6",
+  "sourceManifestSha256": "db2d4187b14166f016b951d2c8ea289550705d15140fcb4cfcdf9d936926c9eb",
+  "sourceEvidence": {
+    "independentAbiAndRetainedIl": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\HCPolicy\\CompactIntegration/retained-il-and-abi.json",
+    "positiveAndNegativeAbi": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\HCPolicy\\CompactIntegration/after-synthetic/result.json",
+    "fivePhaseRequired": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\HCPolicy\\CompactIntegration/FanCompact/verification.json"
+  },
+  "baselineFileBytes": 11849647,
+  "currentFileBytes": 13826957,
+  "reviewedExpansionReason": "773120 bytes above the old historical compact payload preserve ABI, native value layout and dynamic SharpDX shadow surfaces proven missing from earlier unsafe trims; every one of the 34 DLLs is smaller than the restored upstream byte copy.",
+  "acceptance": "Identity-only explicit relocation delta; existing consumer/ABI/upgrade/runtime gates still required.",
+  "precedingReview": {
+    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261023-compact34.json",
+    "sha256": "e627c40ee0a29b67cde240c7997a0d298d7b52d4fd1b80e80947f83cca80f120"
+  },
+  "relocation": {
+    "fromDirectory": "PowerControl/ymcc-shared-runtime",
+    "toDirectory": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1",
+    "file": "LibreHardwareMonitorLib.dll",
+    "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+    "dllBytesAddedToWholePackage": 0,
+    "physicalDeviceVerified": false
+  }
+}

@@ -28,6 +28,7 @@ assert(native.includes('{"wakePasswordEnabled", currentSleep.value("wakePassword
 cases.push('Source contract: only one user-action setter, no system-read getter or automatic wake-password path; unrelated sleep saves preserve preference');
 
 const mocks={
+  '@/bridge/sleepRecovery':`export const getAutomaticSleepRecovery=async()=>({ok:true,enabled:false,phase:'idle',generation:0,healthVerified:false});export const setAutomaticSleepRecovery=async()=>{throw Error('unexpected automatic preference write')};`,
   '@/bridge/yeman':`
     export const PW={YEMAN:'1cb8b882-a900-4b9f-9bac-99d151e64441'};
     export async function sleepGuardGet(){window.__fixture.guardReads++;return {...window.__fixture.guard,wakePasswordEnabled:window.__fixture.preference};}
@@ -39,6 +40,9 @@ const mocks={
     export const getSleepPowerPlanOptimizationEnabled=async()=>true,setSleepPowerPlanOptimizationEnabled=async()=>{};
   `,
   '@/bridge/ipc':`
+    export const isNativeRuntime=true;
+    export function on(event,handler){const listener=e=>handler(e.detail);window.addEventListener('ipc:'+event,listener);return ()=>window.removeEventListener('ipc:'+event,listener);}
+
     export async function invoke(method,args){
       const f=window.__fixture;f.invokes.push({method,args});
       if(method!=='power.wakePassword.set')throw Error('unexpected extra native IPC: '+method);
@@ -62,7 +66,7 @@ const bundle=await build({
   `},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},
   plugins:[{name:'sleep-wake-password-fixture',setup(b){
     b.onResolve({filter:/.*/},args=>{
-      if(args.path==='./ipc'&&args.importer.endsWith('api.ts'))return {path:'@/bridge/ipc',namespace:'fixture'};
+      if(args.path==='./ipc'&&(args.importer.endsWith('api.ts')||args.importer.endsWith('sleepRecovery.ts')))return {path:'@/bridge/ipc',namespace:'fixture'};
       return args.path in mocks?{path:args.path,namespace:'fixture'}:null;
     });
     b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));

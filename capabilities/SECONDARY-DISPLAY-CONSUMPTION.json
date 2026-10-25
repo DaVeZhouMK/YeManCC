@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "domain": "model.secondary-display",
+  "state": "D15-candidate-software-consumers;not-promoted",
+  "models": [
+    "hc.device.AYANEOFlipDS",
+    "hc.device.AYANEOFlip1SDS"
+  ],
+  "sourceMethods": [
+    "CEcControl_GetSecDispBrightnessRaw",
+    "CEcControl_SetSecDispBrightness",
+    "ControllerManager_InputsUpdated"
+  ],
+  "sourceProtocol": {
+    "transport": "ACPI EC through existing EcAccess(false)",
+    "read": 78,
+    "latch": 79,
+    "latchValue": 0,
+    "brightness": 78,
+    "scale": "floor(clamp(short,0,100)*255/100)",
+    "defaultRaw": 255
+  },
+  "consumers": {
+    "catalog": "capabilities/HcSecondaryDisplayCapabilityCatalog.cs",
+    "controller": "native/BatteryHost/SecondaryDisplayController.cs",
+    "domainRouter": "native/BatteryHost/HostDomainRouter.cs",
+    "native": "native/secondary_display_client.h",
+    "oem": "nativeSecondaryDisplayKeyboardConsume"
+  },
+  "apis": [
+    "model.secondaryDisplay.get",
+    "model.secondaryDisplay.set",
+    "model.secondaryDisplay.toggle",
+    "model.secondaryDisplay.release"
+  ],
+  "lifetime": {
+    "startup": "no display EC access or automatic replay",
+    "resume": "invalidate old fences; no display replay",
+    "release": "invalidate fence; do not restore persistent setting",
+    "suspend": "invalidate; gate every EC write and final acceptance",
+    "chargeDomain": "lazy and independent; display request must not create charge controller or recover charge journal"
+  },
+  "ownership": {
+    "bus": "existing Global Access_EC mutex per complete EC session",
+    "process": "existing helper singleton and parent-bound private pipe",
+    "native": "existing HardwareWriteLease and serial shortcut queue",
+    "key": "neutral then one rising edge; configured mapping and shortcut recording suppress default"
+  },
+  "evidenceBoundary": {
+    "registerReadbackIsPhysicalEffect": false,
+    "fullNativeProductBuild": false,
+    "globalCaseRegistration": false,
+    "packageAccepted": false,
+    "physicalAcceptance": false,
+    "wholeProcessCpuReduction": null
+  },
+  "excludedUi": [
+    "HC OverlayQuickTools",
+    "QuickKeyboard",
+    "QuickTrackpad",
+    "generic wake-password UI"
+  ]
+}

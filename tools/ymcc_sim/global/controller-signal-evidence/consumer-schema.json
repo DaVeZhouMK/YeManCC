@@ -1,0 +1,2657 @@
+{
+  "schemaVersion": 1,
+  "partialCases": [
+    "normal-ready",
+    "partial-sensor-start-failed",
+    "partial-sensor-thread-create-failed-event-owned",
+    "partial-gm-create-null-dll-owned",
+    "no-init",
+    "normal-sensor-shutdown-fails-then-settles",
+    "partial-sensor-shutdown-fails-then-settles",
+    "prefix-admitted",
+    "prefix-stop-refused",
+    "prefix-exit-requested-refused",
+    "prefix-terminal-fence-refused",
+    "prefix-already-ready",
+    "prefix-assets-absent",
+    "same-worker-late-dsu-start-before-ready",
+    "retire-all-debts",
+    "retire-sta-timeout",
+    "retire-sta-wait-failed",
+    "retire-msi-provider",
+    "retire-hc-provider",
+    "retire-running-provider",
+    "retire-census",
+    "retire-dsu",
+    "retire-oem-pending",
+    "retire-oem-observation-failed",
+    "retire-onex-read-pending",
+    "retire-onex-write-pending",
+    "retire-x2",
+    "retire-timer-unproven",
+    "retire-timer-overflow",
+    "retire-timer-resolution-failure",
+    "retire-timer-close-failure",
+    "retire-sensor-thread-close-failure",
+    "retire-sensor-wake-close-failure",
+    "retire-oem-device-close-failure",
+    "retire-oem-event-close-failure",
+    "retire-onex-device-close-failure",
+    "retire-onex-read-event-close-failure",
+    "retire-onex-write-event-close-failure",
+    "retire-notification-close-failure",
+    "retire-free-library-failure",
+    "retire-missing-delete-export",
+    "retire-gamebar-com-unavailable",
+    "retire-gamebar-revoke-failure",
+    "retire-subscription-revoke-retained",
+    "retire-subscription-token-with-sta-exited",
+    "retire-metadata-is-not-destruction",
+    "emergency-pending-children",
+    "emergency-missing-delete-export",
+    "emergency-free-library-failure",
+    "emergency-gm-without-dll",
+    "emergency-stop-onex-throws",
+    "emergency-stop-windows-throws",
+    "emergency-stop-oem-throws",
+    "emergency-stop-legion-throws",
+    "emergency-sensor-shutdown-throws",
+    "emergency-retirement-observation-throws",
+    "emergency-already-empty"
+  ],
+  "partialVariants": [
+    "current",
+    "baseline",
+    "ready-guard-mutant",
+    "skip-gm-delete-mutant",
+    "skip-gm-free-mutant",
+    "drop-sink-on-failure-mutant",
+    "unsettled-sensor-unloads-gm-mutant",
+    "unchecked-sensor-close-mutant",
+    "unchecked-oem-close-mutant",
+    "unchecked-onex-close-mutant",
+    "unchecked-timer-close-mutant",
+    "unchecked-notification-close-mutant",
+    "failed-free-nulls-owner-mutant",
+    "legacy-emergency-mutant",
+    "gm-without-dll-loses-motion-debt-mutant"
+  ],
+  "x2Cases": [
+    "completion-live-poll",
+    "completion-write-timeout",
+    "completion-pending-close-retry",
+    "completion-observation",
+    "completion-pending-read",
+    "completion-pending-write",
+    "completion-pending-both",
+    "completion-close-device",
+    "completion-close-read-event",
+    "completion-close-write-event",
+    "completion-close-all",
+    "completion-close-probe",
+    "completion-blocks-rebind",
+    "binding-permission",
+    "write-permission",
+    "write-permission-withdraw",
+    "bound-path",
+    "status-init-boundary-x2",
+    "status-init-boundary-mini",
+    "status-write-watchdog-order",
+    "valid-layout-change",
+    "stop-immediate-release",
+    "stop-pending-retention",
+    "disabled",
+    "unknown-layout",
+    "unverified-revokes",
+    "collection-filtering",
+    "reopened-identity",
+    "raw-framing",
+    "multi-collection",
+    "initialization",
+    "retention",
+    "context-change",
+    "wait-failed",
+    "incomplete-result",
+    "incomplete-despite-internal",
+    "submission-failures",
+    "immediate",
+    "short-writes",
+    "timeout",
+    "rebind",
+    "bind-failures",
+    "reader-events",
+    "terminal-read-error",
+    "terminal-write-error",
+    "immediate-short-read"
+  ],
+  "x2Mutations": [
+    "completion-phase-only",
+    "completion-misses-read-event",
+    "completion-misses-write-event",
+    "failed-device-close-drops-owner",
+    "failed-read-event-close-drops-owner",
+    "failed-write-event-close-drops-owner",
+    "retirement-poll-calls-tick",
+    "retirement-poll-services-live",
+    "retained-event-allows-rebind",
+    "failed-probe-close-drops-owner",
+    "binding-permission-before-open-bypass",
+    "binding-permission-after-open-bypass",
+    "write-gate-final-check-bypass",
+    "write-withdraw-ticket-retained",
+    "closed-path-retained",
+    "gamepad-collection-admitted",
+    "submission-pretends-terminal",
+    "pending-error-pretends-terminal",
+    "valid-layout-change-retains-old-contract",
+    "quiescent-stop-defers-release",
+    "status-misses-due-init-x2",
+    "status-misses-due-init-mini",
+    "status-runs-watchdog-before-write-terminal",
+    "blocking-wait"
+  ],
+  "gamebarCases": [
+    "normal",
+    "partial",
+    "partial-stop",
+    "first-subscribe-failure",
+    "worker-six-retries",
+    "retry-budget",
+    "concurrent-init",
+    "stop-during-init",
+    "stop-during-factory",
+    "revoke-failure",
+    "revoke-both-fail",
+    "revoke-redirect-failure",
+    "inflight-callback",
+    "inflight-refresh",
+    "inflight-log",
+    "late-callback",
+    "wait-failure",
+    "thread-close-failure",
+    "event-close-failure",
+    "wait-timeout",
+    "join-without-resource-lock",
+    "wake-borrow",
+    "create-failures",
+    "blocked-remove"
+  ],
+  "gamebarMutations": [
+    "forget-callback-activity",
+    "unchecked-thread-close"
+  ],
+  "sensorCases": [
+    "memory",
+    "kernel",
+    "production-api",
+    "adapter",
+    "algorithm",
+    "provider-running-is-stopped",
+    "provider-unchecked-close",
+    "provider-start-unknown",
+    "census-unchecked-close",
+    "census-cancelled-is-stopped"
+  ],
+  "dsuRuns": [
+    "public-Debug",
+    "public-Release",
+    "private-Debug",
+    "private-Release",
+    "negative-running-only",
+    "negative-discard-socket-owner"
+  ],
+  "partialLegacyEmergencyCases": [
+    "normal-ready",
+    "partial-sensor-start-failed",
+    "partial-sensor-thread-create-failed-event-owned",
+    "partial-gm-create-null-dll-owned",
+    "no-init",
+    "normal-sensor-shutdown-fails-then-settles",
+    "partial-sensor-shutdown-fails-then-settles",
+    "prefix-admitted",
+    "prefix-stop-refused",
+    "prefix-exit-requested-refused",
+    "prefix-terminal-fence-refused",
+    "prefix-already-ready",
+    "prefix-assets-absent",
+    "same-worker-late-dsu-start-before-ready",
+    "retire-all-debts",
+    "retire-sta-timeout",
+    "retire-sta-wait-failed",
+    "retire-msi-provider",
+    "retire-hc-provider",
+    "retire-running-provider",
+    "retire-census",
+    "retire-dsu",
+    "retire-oem-pending",
+    "retire-oem-observation-failed",
+    "retire-onex-read-pending",
+    "retire-onex-write-pending",
+    "retire-x2",
+    "retire-timer-unproven",
+    "retire-timer-overflow",
+    "retire-timer-resolution-failure",
+    "retire-timer-close-failure",
+    "retire-sensor-thread-close-failure",
+    "retire-sensor-wake-close-failure",
+    "retire-oem-device-close-failure",
+    "retire-oem-event-close-failure",
+    "retire-onex-device-close-failure",
+    "retire-onex-read-event-close-failure",
+    "retire-onex-write-event-close-failure",
+    "retire-notification-close-failure",
+    "retire-free-library-failure",
+    "retire-missing-delete-export",
+    "retire-gamebar-com-unavailable",
+    "retire-gamebar-revoke-failure",
+    "retire-subscription-revoke-retained",
+    "retire-subscription-token-with-sta-exited",
+    "retire-metadata-is-not-destruction",
+    "emergency-pending-children",
+    "emergency-missing-delete-export",
+    "emergency-free-library-failure"
+  ],
+  "sensorEnsure": {
+    "schemaVersion": 1,
+    "id": "actual-sensor-thread-ensure",
+    "child": "sensor-ensure/RESULT.json",
+    "currentMainManifest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-Signal22Frozen23\\SOURCE-FREEZE-22.json",
+      "sha256": "619d82b000521385ac480077133ac87f0de9cba4d0531b7db45b8b1b68d2b4c9"
+    },
+    "historicalMain": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-SensorEnsure23/main.before.cpp",
+      "sha256": "50ade4c88674fac353bf2445033fc6b34becc76ad7815da4ea0d28e8d6a307db"
+    },
+    "historicalFunctions": {
+      "inputCaptureSensorThreadEnsure": "ee01d7291ba7ad699e9920491d8a4229bf2779c84192e35cc3ba56ca851f0a19",
+      "inputCaptureSensorThreadPost": "165e72e71e417c6af063574353259d35dde4a5710a0af5be49781bf9c3bd67ef",
+      "inputCaptureSensorThreadReap": "0027a87cc5b66e35845f2221e2bd35c7e723557b9b021bb66d6b7904f56c089c",
+      "inputCaptureSensorThreadShutdown": "2262823a76addbb5fdcc93bb853fd0681e2eacde64d6e88a155d934566b1d1e3"
+    },
+    "functions": [
+      "inputCaptureSensorThreadEnsure",
+      "inputCaptureSensorThreadPost",
+      "inputCaptureSensorThreadReap",
+      "inputCaptureSensorThreadShutdown"
+    ],
+    "profiles": [
+      "Release",
+      "Checked"
+    ],
+    "modes": [
+      "memory",
+      "kernel"
+    ],
+    "variants": [
+      "current",
+      "historical",
+      "restore-unchecked-close",
+      "wait-failed-treated-alive"
+    ],
+    "scenarioNames": [
+      "live-open",
+      "live-closed",
+      "signalled-close-failure-retry",
+      "wait-failed",
+      "wait-abandoned",
+      "wait-unexpected",
+      "event-create-failure",
+      "thread-create-failure-owned-wake",
+      "failed-create-reap-shutdown",
+      "signalled-close-create-success",
+      "signalled-close-create-failure",
+      "stop-terminal-fence",
+      "actual-shutdown-loop"
+    ],
+    "expectedCounts": {
+      "memory": {
+        "current": [
+          123,
+          0
+        ],
+        "historical": [
+          124,
+          14
+        ],
+        "restore-unchecked-close": [
+          124,
+          5
+        ],
+        "wait-failed-treated-alive": [
+          123,
+          2
+        ]
+      },
+      "kernel": {
+        "current": [
+          170,
+          0
+        ],
+        "historical": [
+          172,
+          14
+        ],
+        "restore-unchecked-close": [
+          172,
+          5
+        ],
+        "wait-failed-treated-alive": [
+          170,
+          2
+        ]
+      }
+    },
+    "negativeLabels": {
+      "historical": "failed close retains exact old owners without create",
+      "restore-unchecked-close": "failed close retains exact old owners without create",
+      "wait-failed-treated-alive": "unknown wait never promises worker availability"
+    },
+    "requiredSources": [
+      "native/main.cpp",
+      "native/sensor_thread_mailbox.h",
+      "deps/json/json.hpp",
+      "tools/input_capture_sensor_ensure_selftest.py",
+      "tools/input_capture_sensor_owners_selftest.py",
+      "tools/input_timer_evidence_adapter_selftest.py",
+      "tools/ymcc_sim/global/controller-signal-evidence/tool-inputs.json",
+      "tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json",
+      "tools/fixtures/input_capture_timer_retirement/sensor_ensure_memory.cpp.in",
+      "tools/fixtures/input_capture_timer_retirement/sensor_ensure_kernel.cpp.in",
+      "tools/ymcc_sim/global/controller-signal-evidence/consumer-schema.json",
+      "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json"
+    ],
+    "supplementalAuthority": {
+      "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json",
+      "sha256": "bd707e8124368840f34f14f61542b0c67de4c2c4c76e31e62c1cc014c03f70d1"
+    },
+    "parentLifecycleAcceptance": "INCOMPLETE",
+    "previousCurrentMainManifest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SensorEnsure23\\formal-20261023-100325-700533\\SOURCE-FREEZE-CURRENT.json",
+      "sha256": "5d586e4152181d8770238e33eb38977cd945e6081c3d936d9234c89427c6983f"
+    }
+  },
+  "ownedCleanupComposition": {
+    "schemaVersion": 1,
+    "id": "actual-pipe-owned-cleanup-composition",
+    "child": "owned-cleanup-composition/RESULT.json",
+    "delivery": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-Lifecycle-Integration-20261023/DELIVERY.json",
+      "sha256": "ea97b1967967f8230c40ea4af205517458fcdc6e3fea4b0ade727a8f5fc74725"
+    },
+    "frontDoorIntegration": {
+      "consumer": "tools/input_host_owned_cleanup_composition_selftest.py",
+      "arguments": [
+        "--require-wrapper",
+        "--out",
+        "ABS_FRESH_PRIVATE_DIRECTORY"
+      ],
+      "requiredResult": "RESULT.json",
+      "requiredStatus": "ACTUAL_WRAPPER_AND_OWNED_PREDICATES_COMPOSED_PASS",
+      "requiredFields": {
+        "pass": true,
+        "wrapperIntegrated": true,
+        "helperCompositionPassed": true,
+        "sourceChanged": []
+      },
+      "requiredVariants": [
+        "current",
+        "ignore-pipe-gate",
+        "pending-only-adapter",
+        "historical-failure-is-live-debt",
+        "unchecked-raw-slot-close"
+      ],
+      "profiles": [
+        "Release",
+        "Checked"
+      ],
+      "strictNegativeLabels": {
+        "ignore-pipe-gate": "zero pending does not retire active lease",
+        "pending-only-adapter": "zero pending does not retire active lease",
+        "historical-failure-is-live-debt": "historical failure count does not block successfully retired owner",
+        "unchecked-raw-slot-close": "raw pre-adoption close failure retains exact sole owner"
+      },
+      "currentSourceDependencies": [
+        "native/main.cpp",
+        "native/virtual_controller_stop_runtime.h",
+        "native/input_host_pipe_transport.h",
+        "deps/json/json.hpp",
+        "tools/input_pipe_retirement_memory_selftest.cpp",
+        "tools/input_pipe_test_allocation_fault.h",
+        "tools/input_host_owned_cleanup_composition_selftest.py",
+        "tools/fixtures/input_host_owned_cleanup_composition/suite.cpp.in",
+        "tools/fixtures/input_host_owned_cleanup_composition/README.md"
+      ],
+      "toolchainManifest": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\native-verified\\toolchain-manifest.json"
+    },
+    "deliveredSources": [
+      {
+        "path": "tools/input_host_owned_cleanup_composition_selftest.py",
+        "sha256": "0c672584d198bfc19c9a833641e537cb8e23b85266c8cd53726770e6226a737d"
+      },
+      {
+        "path": "tools/fixtures/input_host_owned_cleanup_composition/suite.cpp.in",
+        "sha256": "6373cb0b4f7826c920e2873561e2ee5e052ab6b83a7fd2f7201f37f7f8c6e515"
+      },
+      {
+        "path": "tools/fixtures/input_host_owned_cleanup_composition/README.md",
+        "sha256": "3f8c645273ca91155c2c547632e8ee8f598553a390e07b4e4ca0ec7c50d65d33"
+      }
+    ],
+    "toolchain": {
+      "path": "G:/YeManCC-Work/Build/Validation/VirtualController-Lifecycle-20261021-G3E-XboxSwitch/native-verified",
+      "manifestSha256": "b410b63e7bd10f7c8b2d99818d58af4641efb0ad54cb517cafb6133aaac4702e",
+      "captureSha256": "9d2a94fade1ea87dbc406eb586bb119fe82bdc0976bffd70047b3e66a573214b"
+    },
+    "functions": {
+      "inputHostOwnedCleanupProvenLocked": "native/virtual_controller_stop_runtime.h",
+      "inputHostDisabledCleanupProvenLocked": "native/virtual_controller_stop_runtime.h",
+      "inputHostPipeRetirementProvenLocked": "native/main.cpp"
+    },
+    "expectedCounts": {
+      "current": [
+        95,
+        0,
+        0
+      ],
+      "ignore-pipe-gate": [
+        95,
+        20,
+        0
+      ],
+      "pending-only-adapter": [
+        95,
+        12,
+        0
+      ],
+      "historical-failure-is-live-debt": [
+        95,
+        8,
+        0
+      ],
+      "unchecked-raw-slot-close": [
+        91,
+        8,
+        2
+      ]
+    },
+    "caseNames": [
+      "independent-host-endpoint-physical-history-facts",
+      "raw-slot-before-first-runtime",
+      "raw-slot-with-existing-empty-runtime",
+      "actual-upper-predicates-active-cache-close-debt",
+      "pending-io-and-late-completion",
+      "actual-wrapper-unavailable-snapshot",
+      "sealed-with-retained-close-debt"
+    ],
+    "parentLifecycleAcceptance": "INCOMPLETE",
+    "nestedToolClosure": {
+      "schemaVersion": 1,
+      "kind": "complete-frozen-toolchain-manifest",
+      "phases": [
+        "before",
+        "after"
+      ],
+      "expectedManifestFiles": 5772,
+      "topLevelArtifacts": "delivery-manifest-capture",
+      "fullFileHashBeforeAndAfter": true,
+      "sourceAndReceiptBound": true,
+      "deletionOrMutation": "reject",
+      "coverageReduced": false
+    },
+    "currentDelivery": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-Signal22Frozen23\\COMPOSITION-CURRENT-V2.json",
+      "sha256": "158d1a0ec394e196f0047fead8e86e381aca9f88f7b6527df4d93251251c314e"
+    },
+    "currentDeliveredSources": [
+      {
+        "path": "tools/input_host_owned_cleanup_composition_selftest.py",
+        "sha256": "81bb1ddf4bf59907ab72272aee763dae7e2eb91532f57137e0556fe88c850edc"
+      },
+      {
+        "path": "tools/fixtures/input_host_owned_cleanup_composition/suite.cpp.in",
+        "sha256": "84b0661321368bf82ed314f437bc57a7a7fa302dab91b0afed89de4776e3ecf8"
+      },
+      {
+        "path": "tools/fixtures/input_host_owned_cleanup_composition/README.md",
+        "sha256": "3f8c645273ca91155c2c547632e8ee8f598553a390e07b4e4ca0ec7c50d65d33"
+      }
+    ],
+    "currentFrontDoorIntegration": {
+      "consumer": "tools/input_host_owned_cleanup_composition_selftest.py",
+      "arguments": [
+        "--require-wrapper",
+        "--out",
+        "ABS_FRESH_PRIVATE_DIRECTORY"
+      ],
+      "requiredResult": "RESULT.json",
+      "requiredStatus": "ACTUAL_WRAPPER_AND_OWNED_PREDICATES_COMPOSED_PASS",
+      "requiredFields": {
+        "pass": true,
+        "wrapperIntegrated": true,
+        "helperCompositionPassed": true,
+        "sourceChanged": []
+      },
+      "requiredVariants": [
+        "current",
+        "ignore-pipe-gate",
+        "pending-only-adapter",
+        "historical-failure-is-live-debt",
+        "unchecked-raw-slot-close"
+      ],
+      "profiles": [
+        "Release",
+        "Checked"
+      ],
+      "strictNegativeLabels": {
+        "ignore-pipe-gate": "zero pending does not retire active lease",
+        "pending-only-adapter": "zero pending does not retire active lease",
+        "historical-failure-is-live-debt": "historical failure count does not block successfully retired owner",
+        "unchecked-raw-slot-close": "raw pre-adoption close failure retains exact sole owner"
+      },
+      "currentSourceDependencies": [
+        "native/main.cpp",
+        "native/virtual_controller_stop_runtime.h",
+        "native/input_host_pipe_transport.h",
+        "native/input_host_process_retirement.h",
+        "deps/json/json.hpp",
+        "tools/input_pipe_retirement_memory_selftest.cpp",
+        "tools/input_pipe_test_allocation_fault.h",
+        "tools/input_host_owned_cleanup_composition_selftest.py",
+        "tools/fixtures/input_host_owned_cleanup_composition/suite.cpp.in",
+        "tools/fixtures/input_host_owned_cleanup_composition/README.md"
+      ],
+      "toolchainManifest": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\native-verified\\toolchain-manifest.json"
+    },
+    "currentFunctions": {
+      "inputHostOwnedCleanupProvenLocked": "native/virtual_controller_stop_runtime.h",
+      "inputHostDisabledCleanupProvenLocked": "native/virtual_controller_stop_runtime.h",
+      "inputHostPipeRetirementProvenLocked": "native/main.cpp",
+      "inputHostPrimaryThreadRetirementProvenLocked": "native/main.cpp"
+    },
+    "primaryThreadScope": {
+      "actualGlobalAndHelperCompiled": true,
+      "defaultOwner": "nullptr; no primary ownership transfer in original cases",
+      "newPrimaryAcceptance": false,
+      "unchangedOriginalAssertions": 95
+    },
+    "previousCurrentDelivery": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\registration\\r104308-968795\\composition-current-v1.json",
+      "sha256": "f73023d0ba40ec97506ff32a593bf6edaf044436db223ad4ec5072afa7c57f66"
+    }
+  },
+  "exitFenceCurrent": {
+    "schemaVersion": 1,
+    "delivery": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ExitFenceCurrent23\\DELIVERY.json",
+      "sha256": "2f4da36d64230a9a9e75e1d0b9a0f21c73212fc982a4f16002d786a4cab28ef6"
+    },
+    "sourceContract": "tools/fixtures/input_capture_timer_retirement/exit_fence_source_contract.json",
+    "sourceContractSha256": "e1827f0e0d4354019b86e70820cc7f7582f363e1476a8165e3965933f6244c7f",
+    "deliveredSources": {
+      "tools/input_host_exit_fence_selftest.py": "713888a9e4bda179d80077e9316d1556cabc2501fa0972316927e35e0b62c26f",
+      "tools/fixtures/input_capture_timer_retirement/exit_fence_fixture.cpp.in": "e8d776e7540b8fd68a1c8cce726da1a84596df489299622fc12fc1276c8adc81",
+      "tools/fixtures/input_capture_timer_retirement/exit_fence_source_contract.json": "e1827f0e0d4354019b86e70820cc7f7582f363e1476a8165e3965933f6244c7f"
+    },
+    "dependencyHashes": {
+      "native/input_startup_policy.h": "21721f72f96fc2a6ae356740165a0ea1aac1f87be5c8f3c2234cad549ce5a3c5",
+      "native/controller_persona_settings.h": "5d1a40cfef3cce191877f188eb105a2b6f2cfe1c3d0e04e96d07560d16feb856",
+      "native/controller_persona.h": "9eee4ad364023d635c60c31c3464c980b6082b1099d958ef84a0fe9875eec457",
+      "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    },
+    "profiles": [
+      "Release",
+      "Checked"
+    ],
+    "routes": [
+      "legacy",
+      "monotonic",
+      "negative-restore-clear"
+    ],
+    "controlRoutes": [
+      "historical-candidate",
+      "historical-candidate-clear",
+      "reviewed-owner-noop-extension"
+    ],
+    "checksPerRoute": 148,
+    "failuresByRoute": {
+      "legacy": 53,
+      "monotonic": 0,
+      "negative-restore-clear": 52,
+      "historical-candidate": 0,
+      "historical-candidate-clear": 52,
+      "reviewed-owner-noop-extension": 0
+    },
+    "sourceGateNames": [
+      "current",
+      "CRLF-only",
+      "LF-only",
+      "explicit-reviewed-owner-noop-extension",
+      "unknown-function-statement",
+      "restore-terminal-clear",
+      "unknown-dependency-input_startup_policy.h",
+      "unknown-dependency-controller_persona_settings.h",
+      "unknown-dependency-controller_persona.h",
+      "unknown-dependency-json.hpp"
+    ],
+    "sourceGateNegatives": [
+      "unknown-function-statement",
+      "restore-terminal-clear",
+      "unknown-dependency-input_startup_policy.h",
+      "unknown-dependency-controller_persona_settings.h",
+      "unknown-dependency-controller_persona.h",
+      "unknown-dependency-json.hpp"
+    ],
+    "cliControls": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ExitFenceCurrent23\\cli-contract-checks\\CLI-CONTRACT-RESULT.json",
+      "sha256": "951841b062b4c2c162a172cbc57759c889e336fc4e8ac677eca7221b35e8df52"
+    },
+    "preservedConsumerReceipt": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ExitFenceCurrent23\\consumer\\RESULT.json",
+      "sha256": "3b20c77d2a34f0f133b47fdf017de69576c43713d358463f303cd163fd716424"
+    },
+    "wholeMainAcceptance": false,
+    "parentLifecycleAcceptance": "INCOMPLETE"
+  },
+  "primaryThread": {
+    "schemaVersion": 1,
+    "child": "primary-thread/RESULT.json",
+    "consumer": "tools/input_host_primary_thread_selftest.py",
+    "template": "tools/fixtures/input_host_primary_thread/suite.cpp.in",
+    "profiles": [
+      "Release",
+      "Checked"
+    ],
+    "variants": [
+      "current",
+      "historical-start-loses-owner",
+      "drop-owner-on-failed-Close",
+      "omit-owned-primary-duty",
+      "omit-Clear-primary-duty",
+      "omit-lifecycle-primary-duty",
+      "omit-BUS-primary-continuation"
+    ],
+    "sourceInputs": [
+      "native/main.cpp",
+      "native/input_host_pipe_transport.h",
+      "native/virtual_controller_stop_runtime.h",
+      "native/input_host_process_retirement.h",
+      "deps/json/json.hpp",
+      "tools/input_pipe_retirement_memory_selftest.cpp",
+      "tools/input_pipe_test_allocation_fault.h",
+      "tools/input_host_clear_retirement_selftest.py",
+      "tools/fixtures/input_host_clear_retirement/suite.cpp.in",
+      "tools/fixtures/input_host_clear_retirement/README.md",
+      "native/virtual_controller_start_runtime.h",
+      "tools/fixtures/input_host_primary_thread/suite.cpp.in",
+      "tools/input_host_primary_thread_selftest.py"
+    ],
+    "functions": {
+      "inputHostPrimaryThreadRetirementProvenLocked": "native/main.cpp",
+      "inputHostPipeOnlyReturnAdmittedLocked": "native/main.cpp",
+      "inputHostPipeCloseOwned": "native/main.cpp",
+      "inputHostPipeRetirementProvenLocked": "native/main.cpp",
+      "inputHostClearLocked": "native/main.cpp",
+      "inputHostReconcileQuarantine": "native/main.cpp",
+      "inputHostReconcileQuarantineOnLifecycleThread": "native/main.cpp",
+      "nativeLifecycleEventIsBase": "native/main.cpp",
+      "inputHostOwnedCleanupProvenLocked": "native/virtual_controller_stop_runtime.h",
+      "inputHostDisabledCleanupProvenLocked": "native/virtual_controller_stop_runtime.h"
+    },
+    "normalizationPolicy": "CRLF-to-LF-only;raw-file-and-raw-function-pins-retained",
+    "expectedRuntime": {
+      "current": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 31,
+        "failures": [],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 0,
+        "pass": true,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "historical-start-loses-owner": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 32,
+        "failures": [
+          "failed creation-thread Close retains sole owner",
+          "local PROCESS_INFORMATION no longer owns either handle",
+          "initial failed Close produces one scoped receipt",
+          "Clear preserves old tuple while primary handle remains",
+          "primary debt prevents a new writer",
+          "primary handle prevents Owned completion",
+          "source-free primary debt queues existing lifecycle cleanup",
+          "successful retry has separate actual Close receipt",
+          "current positive needs no primary oracle salvage"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 1,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "drop-owner-on-failed-Close": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 34,
+        "failures": [
+          "failed creation-thread Close retains sole owner",
+          "Clear preserves old tuple while primary handle remains",
+          "primary debt prevents a new writer",
+          "primary handle prevents Owned completion",
+          "source-free primary debt queues existing lifecycle cleanup",
+          "successful retry has separate actual Close receipt",
+          "current positive needs no primary oracle salvage",
+          "proven endpoint absence does not overtake primary handle retirement",
+          "current positive needs no primary oracle salvage",
+          "logger failure leaves failed-Close owner intact",
+          "current positive needs no primary oracle salvage"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 3,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "omit-owned-primary-duty": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 31,
+        "failures": [
+          "Owned independently rejects a retained primary handle",
+          "Disabled independently rejects a retained primary handle"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 0,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "omit-Clear-primary-duty": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 33,
+        "failures": [
+          "Clear preserves old tuple while primary handle remains",
+          "primary debt prevents a new writer",
+          "source-free primary debt queues existing lifecycle cleanup",
+          "same owner retires after close restriction clears",
+          "Owned completes after all named duties clear",
+          "successful retry has separate actual Close receipt",
+          "current positive needs no primary oracle salvage",
+          "endpoint-proven same owner closes before Clear",
+          "current positive needs no primary oracle salvage"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 2,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "omit-lifecycle-primary-duty": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 32,
+        "failures": [
+          "same owner retires after close restriction clears",
+          "paid source-free primary debt clears old session",
+          "Owned completes after all named duties clear",
+          "successful retry has separate actual Close receipt",
+          "current positive needs no primary oracle salvage",
+          "proven endpoint absence does not overtake primary handle retirement"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 1,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      },
+      "omit-BUS-primary-continuation": {
+        "cases": [
+          {
+            "case": "actual-adoption-protected-Close-source-free-return"
+          },
+          {
+            "case": "ordinary-primary-Close-keeps-thread-live"
+          },
+          {
+            "case": "primary-independent-of-process-and-configuration"
+          },
+          {
+            "case": "endpoint-proof-and-primary-return-remain-separate"
+          },
+          {
+            "case": "evidence-failure-independent-of-handle-return"
+          }
+        ],
+        "checks": 31,
+        "failures": [
+          "source-free primary debt queues existing lifecycle cleanup"
+        ],
+        "handlesAfter": 50,
+        "handlesBefore": 50,
+        "negativeOnlyPrimarySalvage": 0,
+        "pass": false,
+        "pipeOracleLiveBeforeExit": 0,
+        "primaryOwnerRemaining": false,
+        "privateThreadsJoinedBeforeExit": 5,
+        "realProductSdkDriverOrDeviceExecuted": false
+      }
+    },
+    "negativeLabels": {
+      "historical-start-loses-owner": "failed creation-thread Close retains sole owner",
+      "drop-owner-on-failed-Close": "failed creation-thread Close retains sole owner",
+      "omit-owned-primary-duty": "Owned independently rejects a retained primary handle",
+      "omit-Clear-primary-duty": "Clear preserves old tuple while primary handle remains",
+      "omit-lifecycle-primary-duty": "proven endpoint absence does not overtake primary handle retirement",
+      "omit-BUS-primary-continuation": "source-free primary debt queues existing lifecycle cleanup"
+    },
+    "deliveredSources": [
+      {
+        "path": "tools/input_pipe_retirement_memory_selftest.cpp",
+        "sha256": "0ea1d8d0c1cf1a2e5554b31affd35d927f3977d25bc1dfbdce7dd7a60b3270b4"
+      },
+      {
+        "path": "tools/input_pipe_test_allocation_fault.h",
+        "sha256": "4d8561ee7124dcb157d64eb3f9873072e4e5789de89b376bdd1dec049c2be8a2"
+      },
+      {
+        "path": "tools/input_host_clear_retirement_selftest.py",
+        "sha256": "87c8aaafdaf6fe45aa79186667675aac0d4f5ead2533d2ea0970411bfab4775d"
+      },
+      {
+        "path": "tools/fixtures/input_host_clear_retirement/suite.cpp.in",
+        "sha256": "8eb5582a7f258a960df2e78908c5db443812ba15076bdc7b90a6e1aec47d8e51"
+      },
+      {
+        "path": "tools/fixtures/input_host_clear_retirement/README.md",
+        "sha256": "7aa3c0d883d32e00adb1e941920dcc9929e9e70f81ace751175bb4c2945ca1fb"
+      },
+      {
+        "path": "tools/fixtures/input_host_primary_thread/suite.cpp.in",
+        "sha256": "76af3d1b6d0f4cc8f9e1197d4621aa12d347a63cb10882666e54337c2c46618a"
+      },
+      {
+        "path": "tools/input_host_primary_thread_selftest.py",
+        "sha256": "eea8b6092a1a789849a4ba3a66cdf7b9b3e81a8d0aebda0b65cdb9a15a2134ed"
+      }
+    ],
+    "historicalStart": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\before\\native\\virtual_controller_start_runtime.h",
+      "sha256": "f68f3557bd441bdbd92996bf7445f9f7e58f3f4f194201b1615d5408acd200c6"
+    },
+    "historicalManifest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\BEFORE.json",
+      "sha256": "e0b4cc8097c5ba079f99f89002f4abfd23902fb19c7861978c4ac0fb10c79f9a"
+    },
+    "basisResult": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\run-final2\\RESULT.json",
+      "sha256": "32bec86b269082a63b661ad553d77def0f4cffe8a3b393decee88e732a31d3cc"
+    },
+    "basisSourceFreeze": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\run-final2\\SOURCE-FREEZE.json",
+      "sha256": "0f69b73cd0aec1fff852d2eff29f03c58d9f753f80411c79305486a2374eff08"
+    },
+    "producerBeforeBinding": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PrimaryThread23\\registration\\group21-110116-406749\\before\\tools\\input_host_primary_thread_selftest.py",
+      "sha256": "af72e0daba26c8dcfe91eca70567760211a34a333788be8ff8df16da837a55e5"
+    },
+    "currentIdentityAuthority": "sensorEnsure.currentMainManifest; independent group requires an explicit pinned override",
+    "builds": 14,
+    "positiveChecksPerProfile": 31,
+    "parentLifecycleAcceptance": "INCOMPLETE"
+  },
+  "exitFenceCurrentV2": {
+    "schemaVersion": 1,
+    "delivery": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\FENCE-V2-DELIVERY.json",
+      "sha256": "06f4c52c6c18341264e88706170a9dd8f1aea52d3d19addcea9b9051db1a9140"
+    },
+    "sourceContract": "tools/ymcc_sim/global/controller-signal-evidence/exit-fence-current-v2.json",
+    "sourceContractSha256": "c81d5765d9cf88686aafdf2de62f6cf0843bb611c5115efa3ddc9c89fd769a8c",
+    "deliveredSources": {
+      "tools/input_host_exit_fence_selftest.py": "7ab9e0214fb6fa6c7588f9551af13acbab5a06915d93f513ffdb89d254c1ce76",
+      "tools/fixtures/input_capture_timer_retirement/exit_fence_fixture.cpp.in": "e8d776e7540b8fd68a1c8cce726da1a84596df489299622fc12fc1276c8adc81",
+      "tools/ymcc_sim/global/controller-signal-evidence/exit-fence-current-v2.json": "c81d5765d9cf88686aafdf2de62f6cf0843bb611c5115efa3ddc9c89fd769a8c"
+    },
+    "dependencyHashes": {
+      "native/input_startup_policy.h": "c76afb7e64e7f4021d22acc846b0e40524ee738c713023b3388651f33b0c2f64",
+      "native/controller_persona_settings.h": "5d1a40cfef3cce191877f188eb105a2b6f2cfe1c3d0e04e96d07560d16feb856",
+      "native/controller_persona.h": "9eee4ad364023d635c60c31c3464c980b6082b1099d958ef84a0fe9875eec457",
+      "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    },
+    "profiles": [
+      "Release",
+      "Checked"
+    ],
+    "routes": [
+      "legacy",
+      "monotonic",
+      "negative-restore-clear"
+    ],
+    "controlRoutes": [
+      "historical-candidate",
+      "historical-candidate-clear",
+      "reviewed-owner-noop-extension"
+    ],
+    "checksPerRoute": 148,
+    "failuresByRoute": {
+      "legacy": 53,
+      "monotonic": 0,
+      "negative-restore-clear": 52,
+      "historical-candidate": 0,
+      "historical-candidate-clear": 52,
+      "reviewed-owner-noop-extension": 0
+    },
+    "sourceGateNames": [
+      "current",
+      "CRLF-only",
+      "LF-only",
+      "explicit-reviewed-owner-noop-extension",
+      "unknown-function-statement",
+      "restore-terminal-clear",
+      "unknown-dependency-input_startup_policy.h",
+      "unknown-dependency-controller_persona_settings.h",
+      "unknown-dependency-controller_persona.h",
+      "unknown-dependency-json.hpp"
+    ],
+    "sourceGateNegatives": [
+      "unknown-function-statement",
+      "restore-terminal-clear",
+      "unknown-dependency-input_startup_policy.h",
+      "unknown-dependency-controller_persona_settings.h",
+      "unknown-dependency-controller_persona.h",
+      "unknown-dependency-json.hpp"
+    ],
+    "cliControls": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ExitFenceCurrent23\\cli-contract-checks\\CLI-CONTRACT-RESULT.json",
+      "sha256": "951841b062b4c2c162a172cbc57759c889e336fc4e8ac677eca7221b35e8df52"
+    },
+    "preservedConsumerReceipt": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\fence-current-v2\\RESULT.json",
+      "sha256": "91ed0acc0e97f759ebf02b5584057a88f544d0ce97754720e525efb8e96f33ec"
+    },
+    "wholeMainAcceptance": false,
+    "parentLifecycleAcceptance": "INCOMPLETE",
+    "contractVersion": 2,
+    "previousRegistration": "exitFenceCurrent",
+    "dependencyReview": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\STARTUP-POLICY-REVIEW.json",
+      "sha256": "2317bc4971b476573e402c0e0a638ca4778d82c50b3ef9cd2f004484a7361a88"
+    },
+    "policyFullImplementationResult": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\POLICY-IMPLEMENTATION-RESULT.json",
+      "sha256": "1cf20f70751c9ef86b55ddf428c71015cfdc538721d8dd0dc9c92b42f2ff51c3"
+    }
+  },
+  "managedTerminalCurrent": {
+    "schemaVersion": 1,
+    "groupVersion": 1,
+    "child": "managed-terminal/RESULT.json",
+    "consumer": "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+    "delivery": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\DELIVERY.json",
+      "sha256": "0a7db4bf4b6408374f05b9a77cc152e6d18d2f262edf265c03647d7d877c7959"
+    },
+    "basisCurrent": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\result.json",
+      "sha256": "6a22e099373da207afdf7945ddd3ec5c2e40a2af450033c89693edd2471b41fc"
+    },
+    "basisExtractions": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\consumer-extractions.json",
+      "sha256": "8207b0bc44f463d31f454744a7ac2af8543bad55ee3838b0e1269d2d72e1735f"
+    },
+    "sourceInputs": [
+      "InputHost/Program.cs",
+      "InputHost/ScreenTouchpadReport.cs",
+      "InputHost/ScreenButtonReport.cs",
+      "InputHost/PsEndpointOwnership.cs",
+      "InputHost/HostGameOutputObservation.cs",
+      "InputHost/HostControllerOutputStop.cs",
+      "InputHost/HostControllerIdleCtsRelease.cs",
+      "InputHost/ParentProcessLifetime.cs",
+      "InputHost/MsiSteamDeckReleaseFence1726.cs",
+      "InputHost/MsiVirtualReportChain1410.cs",
+      "InputHost/CanonicalFrameFingerprintMemo.cs",
+      "InputHost/HostResponseFields.cs",
+      "InputHost/HostTerminalCleanup.cs",
+      "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+      "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+      "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+      "tools/inputhost_lifecycle_selftest.mjs",
+      "tools/inputhost_lifecycle_selftest.cs",
+      "tools/inputhost_parent_lifecycle_selftest.cs",
+      "tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs",
+      "tools/ymcc_sim/global/inputhost-protocol/provenance.mjs",
+      "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+      "tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in",
+      "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/Workers.cs.in",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/ManagedCases.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalCases.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalPorts.cs",
+      "tools/fixtures/hidmaestro/2.0.0/binary-binding.json",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.Dispose.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.StopThreads.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.StopWorkers.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.CloseOutputCts.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.OutputPollLoop.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Stop.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Wake.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Close.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Loop.cs",
+      "deps/hidmaestro/HIDMaestro.Core.dll"
+    ],
+    "deliveredSources": [
+      {
+        "path": "InputHost/Program.cs",
+        "sha256": "e905a9f78dc1cb9e02429587bd7b04f9f322913b9354226961eba6a6ed37cfbc"
+      },
+      {
+        "path": "InputHost/ScreenTouchpadReport.cs",
+        "sha256": "fdf944b444557448ac304fb96d5b4b57f19e83d5ab5be1ebbfb2e0dee560eea7"
+      },
+      {
+        "path": "InputHost/ScreenButtonReport.cs",
+        "sha256": "9de83bc1614cbd6c2f77dc0317456d12d1416cb53e593952df7c2df770acb6d0"
+      },
+      {
+        "path": "InputHost/PsEndpointOwnership.cs",
+        "sha256": "67666153b1c71d3b62d7d3b7a268011e334c20c49bbcdb4b70f3ed9984a75ef7"
+      },
+      {
+        "path": "InputHost/HostGameOutputObservation.cs",
+        "sha256": "3ffb11949477a64d30b33417788f69c297e56def54b84aa6922b53124d26d6de"
+      },
+      {
+        "path": "InputHost/HostControllerOutputStop.cs",
+        "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+      },
+      {
+        "path": "InputHost/HostControllerIdleCtsRelease.cs",
+        "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+      },
+      {
+        "path": "InputHost/ParentProcessLifetime.cs",
+        "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+      },
+      {
+        "path": "InputHost/MsiSteamDeckReleaseFence1726.cs",
+        "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+      },
+      {
+        "path": "InputHost/MsiVirtualReportChain1410.cs",
+        "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+      },
+      {
+        "path": "InputHost/CanonicalFrameFingerprintMemo.cs",
+        "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+      },
+      {
+        "path": "InputHost/HostResponseFields.cs",
+        "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+      },
+      {
+        "path": "InputHost/HostTerminalCleanup.cs",
+        "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+      },
+      {
+        "path": "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+        "sha256": "e4946a34249ff6996f92d65006ff8ad02cd6f6bd7d4b84080cd67d83a6bbe117"
+      },
+      {
+        "path": "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+        "sha256": "ff3669ebec4f8bf013ca53391597c7c4be80a8e6a9c9e002042d05a6d9a7a1a0"
+      },
+      {
+        "path": "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+        "sha256": "bd306391acb9d2e259a497814f93edb20b73a7e79861359ce1ade2486b91a5b5"
+      },
+      {
+        "path": "tools/inputhost_lifecycle_selftest.mjs",
+        "sha256": "4b1d447aa72ba50d26d94fc58cfaf80c624ac51bc7031c453dc230f57c3f2a21"
+      },
+      {
+        "path": "tools/inputhost_lifecycle_selftest.cs",
+        "sha256": "03beae92f70deaf0de48102eaaf361cea2fa43166c077c5eb6df59dd04060fc3"
+      },
+      {
+        "path": "tools/inputhost_parent_lifecycle_selftest.cs",
+        "sha256": "4c500dbe341bf2b209299b7434931a92a92f6371d2a6b17ff4081bebb86858b2"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs",
+        "sha256": "67651e7724072c21a2e747c26ff54625faf5a4eef26e597c7186bb6b7a86eee8"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/provenance.mjs",
+        "sha256": "acfb6dc6d01c5b4dff9161c96ef4636c1f18fd2a587034618d03da73ec685488"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+        "sha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2"
+      },
+      {
+        "path": "tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in",
+        "sha256": "331deb35e89fd49d9dc1149603e3b0f354eaabfe8c9efd84f2aa6179a74d94a1"
+      },
+      {
+        "path": "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+        "sha256": "fb26f4aa14d7bb21a34eb27a8b997421b10336017223c9782ad7cc2c59939482"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/Workers.cs.in",
+        "sha256": "5372647c12b3c7bce8b8fa273d07e20519799153869573605bf1a82adede60de"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/ManagedCases.cs",
+        "sha256": "16e2414e3cf20d26f920ba87333dc7c1a173ff79168afa387023dacf64418f71"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalCases.cs",
+        "sha256": "adf6b8cf8c07c13edb72f6bf0a9dd63fa67b4c5aa904a9547dba78ffc556a7a5"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalPorts.cs",
+        "sha256": "3ff7a7625d56eb500dd2eb4e978c435535d37242fbc04ffc0d8c6d72a34253d4"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/binary-binding.json",
+        "sha256": "0c39be0028f002f733ab5773f90f43f743cd817b94a787111dc86a1cd0e59f8d"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.Dispose.cs",
+        "sha256": "e7bc724fb505505db5e65cc38942ccfebd25bb7936864ccfd62073ae25d47c0c"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.StopThreads.cs",
+        "sha256": "1f279487d6fca1f23628e3124bd80ff20348b5c06dde888354dbb51810619e87"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.StopWorkers.cs",
+        "sha256": "2746158a5c0b53ecbfd969913ce70324f6267d16e25fb8833a63e35001d3fabb"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.CloseOutputCts.cs",
+        "sha256": "7b6f041fe877e58c1eafb1e11d75d3d87fc05059bbfc6b6a0663fbb886218820"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.OutputPollLoop.cs",
+        "sha256": "db587d58d1fccfde712f8db92743f1a6b7d358d3be2ff452f6f8d882f6798fc0"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Stop.cs",
+        "sha256": "bd784a62b1c0097aaeace28311bfbd774ac670e5a601c7469402ed29908b38d5"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Wake.cs",
+        "sha256": "e9a89b2f9da31db25d38d7bb48b8b8edf21e42e34f08e7a669b330ea3cfa90ae"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Close.cs",
+        "sha256": "37aa30dce5fd1bcfcf3deb783b99fd3b5ee301c1cee17979b096807999bc4835"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Loop.cs",
+        "sha256": "12aae3fad24eccf8cf1088a05fdf9abab34b4bf342dffdee277ee42812010a89"
+      },
+      {
+        "path": "deps/hidmaestro/HIDMaestro.Core.dll",
+        "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c"
+      }
+    ],
+    "identityManifest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\MANAGED-SOURCE-IDENTITY-V3.json",
+      "sha256": "760e0f35d7878328326c78af1e13ba9e49b8d9d9e4a313eb3f4c9fb7ed491d52"
+    },
+    "profiles": [
+      "Release",
+      "Debug"
+    ],
+    "faults": [
+      "none",
+      "terminal-suppress-failure",
+      "terminal-no-retry",
+      "terminal-retry-sdk",
+      "terminal-repeat-shutdown",
+      "terminal-log-fatal"
+    ],
+    "negativeContracts": [
+      {
+        "fault": "terminal-suppress-failure",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\result.json",
+          "sha256": "ee25e8b2930a881eb0367421762fc1f4f083c1abd77945daba099b0d48e75a77"
+        },
+        "requiredFailedCase": "direct-output-permanent",
+        "requiredErrorPrefix": "System.Exception: terminal result erased cleanup failure"
+      },
+      {
+        "fault": "terminal-no-retry",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\result.json",
+          "sha256": "6e6ea50001ecf2de60a2c4912033cdf6fb47ccc0ddc8c936e16d1b86904b56ba"
+        },
+        "requiredFailedCase": "direct-output-transient",
+        "requiredErrorPrefix": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}"
+      },
+      {
+        "fault": "terminal-retry-sdk",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\result.json",
+          "sha256": "53a4ab4e2a7c688e938ac07e62c345861342adeca839b3f2d2cec3507423ee14"
+        },
+        "requiredFailedCase": "non-stop-failure-kept-controller-dispose",
+        "requiredErrorPrefix": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":2,\"DirectReleaseAttempts\":2,\"Retried\":true,\"FirstDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\",\"FinalDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\"}"
+      },
+      {
+        "fault": "terminal-repeat-shutdown",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\result.json",
+          "sha256": "d85c766232227e4920787e789230dbf0b84d01e25390c4e266a6db87ff423676"
+        },
+        "requiredFailedCase": "terminal-shutdown-healthy-fixed",
+        "requiredErrorPrefix": "System.Exception: SHUTDOWN attempted cleanup twice"
+      },
+      {
+        "fault": "terminal-log-fatal",
+        "receipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\result.json",
+          "sha256": "1f0012ec947d76074fa7b6957e4641a4454f18234e3b11b9c23b43e28d915616"
+        },
+        "requiredFailedCase": "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+        "requiredErrorPrefix": "System.Exception: production logger kind mismatch: terminal-cleanup-complete"
+      }
+    ],
+    "casesPerProfile": 40,
+    "caseNames": [
+      "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+      "exact retry detail whitelist excludes all non-barrier failures",
+      "direct-output-transient",
+      "direct-output-permanent",
+      "direct-clock-transient",
+      "direct-clock-permanent",
+      "direct-capture-transient",
+      "direct-capture-permanent",
+      "cancellation lock timeout retries same owner when lock becomes available",
+      "healthy release invokes SDK Dispose once without terminal retry",
+      "non-stop-failure-kept-controller-dispose",
+      "non-stop-failure-kept-context-dispose",
+      "non-stop-failure-kept-neutral",
+      "non-stop-failure-kept-mixed-neutral-output",
+      "non-stop-failure-kept-capture-identity",
+      "non-stop-failure-kept-release-throws",
+      "retry that reaches SDK Dispose failure retains both failure details",
+      "terminal-shutdown-healthy-fixed",
+      "terminal-shutdown-neutral-failure-healthy-fixed",
+      "terminal-shutdown-sdk-failure-healthy-fixed",
+      "terminal-invalid-shutdown-healthy-fixed",
+      "terminal-shutdown-write-failure-neutral-healthy-fixed",
+      "terminal-shutdown-write-failure-healthy-healthy-fixed",
+      "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+      "terminal-exception-healthy-fixed",
+      "terminal-read-loss-healthy-fixed",
+      "terminal-connect-loss-healthy-fixed",
+      "terminal-already-dead-healthy-fixed",
+      "terminal-pipe-break-healthy-fixed",
+      "terminal-read-loss-output-transient",
+      "terminal-read-loss-output-fixed",
+      "terminal-read-loss-clock-transient",
+      "terminal-read-loss-clock-fixed",
+      "terminal-shutdown-output-transient",
+      "terminal-shutdown-output-fixed",
+      "terminal-shutdown-clock-transient",
+      "terminal-shutdown-clock-fixed",
+      "terminal-exception-output-fixed",
+      "terminal-already-dead-output-fixed",
+      "terminal-pipe-break-output-fixed"
+    ],
+    "dotnetToolchain": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+    "dotnetToolchainSha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2",
+    "historicalReceipts": [
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\result.json",
+        "sha256": "6a22e099373da207afdf7945ddd3ec5c2e40a2af450033c89693edd2471b41fc"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\consumer-extractions.json",
+        "sha256": "6572a103dc6e6ae6ad87d00782fd2354b27286d8420dd150e261514455c4d429"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\inputs-before.json",
+        "sha256": "4df3bc6703e98ac046d03156190bced49e0c9a91d4f84af421e061b296eecaae"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\toolchain.json",
+        "sha256": "d4caf311dd6b16432fc7bd15093da662ce38485e4d6cd1961232f0d4019fc7c2"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\commands.json",
+        "sha256": "62df050ed36dfb27890d75e0c4df2aeb84037684c6f6146e33c8cab8d9b513f9"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\production-build-003\\result.json",
+        "sha256": "c16b6756b20711f3e67a7900f45d13e9dded838e49074d4127bc9da16f916eae"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\legacy-adapted-003\\result.json",
+        "sha256": "31732bd7c97820cf5fc9da57e5d7edeb67be45d4ac0d0075c1e5e73268ff816d"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\old-zero-false-replay-001\\result.json",
+        "sha256": "148378c19b158cae130c3656f74fe993e700355ebccfb88ef35f783a96a76d2d"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\result.json",
+        "sha256": "ee25e8b2930a881eb0367421762fc1f4f083c1abd77945daba099b0d48e75a77"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\commands.json",
+        "sha256": "b1a757d7dd53dbb78df93422fe9094b2be8ac615995a44fea122fa756aa1c108"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\result.json",
+        "sha256": "6e6ea50001ecf2de60a2c4912033cdf6fb47ccc0ddc8c936e16d1b86904b56ba"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\commands.json",
+        "sha256": "8c8a4c7e5cecc74aefa63cf086e2c36b8a53b867836e61ada884d18152f45830"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\result.json",
+        "sha256": "53a4ab4e2a7c688e938ac07e62c345861342adeca839b3f2d2cec3507423ee14"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\commands.json",
+        "sha256": "4ae6de776edb7f272666503f75772d211548786d1e06539b5035ad2c3a39c6c9"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\result.json",
+        "sha256": "d85c766232227e4920787e789230dbf0b84d01e25390c4e266a6db87ff423676"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\commands.json",
+        "sha256": "6e3fd44585b9865a503a15b9d891f3d1711d44c24c3ad3e0a31f85c5c7716fa5"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\result.json",
+        "sha256": "1f0012ec947d76074fa7b6957e4641a4454f18234e3b11b9c23b43e28d915616"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\commands.json",
+        "sha256": "5b5d21f2d06ad3da11b96991548fa96d10699bf84c636bbba02ea7f7a0898634"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-SOURCE-IDENTITY-V2.json",
+        "sha256": "9bbaa3834966f5a494fb3dd948d514ee430410a747e90dc2e2c249185392f309"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Boundary.cs",
+        "sha256": "eeeccc0197167a11a28b6cf0d7101bd3275fd619b42d4291f506d4194e6832d0"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ExtractedHost.cs",
+        "sha256": "bb490b957018761a10b28ae816e03e6797563df3083dde214871b9569ecf4366"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\SCHEMA-BEFORE-USBIP-V3.json",
+        "sha256": "cc24db6bee3ebd1b4cf30abfdeea489bd1e2aa571c775dd74f5fbb9c21de56e0"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\BaseCases.cs",
+        "sha256": "7e647372867845e24acb2e551b7b4a86d8f3afcbf0523771feba2c2e11d0629d"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\CanonicalFrameFingerprintMemo.cs",
+        "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Compatibility.cs",
+        "sha256": "06286d548f6114a9a1819bf86f7abca21ffa135e748b48ae99e54bfd88d3bd45"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ExtraProduction.cs",
+        "sha256": "80b8b97809e2f59ae36adfca2bfc9c6bd73c81489c7a734c3ac661346b872514"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Fixture.csproj",
+        "sha256": "c79e6f492b417e57af021e9cdb2280480a86c018c9b272552e6be7d28099cc10"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\global.json",
+        "sha256": "2a02fd3b88b4639f51c7a2287596b366f0f8e766ab48e3f1b9919ba50b8beef8"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostControllerIdleCtsRelease.cs",
+        "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostControllerOutputStop.cs",
+        "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostResponseFields.cs",
+        "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostTerminalCleanup.cs",
+        "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\LegacyDefinitions.cs",
+        "sha256": "03d469291d1d4a9c53b3ab2620d6981b5fdad3a5d42aa1a79d3f9cbc7316d541"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\MsiSteamDeckReleaseFence1726.cs",
+        "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\MsiVirtualReportChain1410.cs",
+        "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\NuGet.Config",
+        "sha256": "e497501960554d323eef45860c14474958accd1ae7f3ae6f95b10e4c1d340401"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ParentProcessLifetime.cs",
+        "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\TerminalCases.cs",
+        "sha256": "adf6b8cf8c07c13edb72f6bf0a9dd63fa67b4c5aa904a9547dba78ffc556a7a5"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\TerminalPorts.cs",
+        "sha256": "3ff7a7625d56eb500dd2eb4e978c435535d37242fbc04ffc0d8c6d72a34253d4"
+      },
+      {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Workers.cs",
+        "sha256": "e69af302eccfa2b899861fca4c1e59e973e52f49a6184fdbb40abfa4f8bc11a5"
+      }
+    ],
+    "legacy": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\legacy-adapted-003\\result.json",
+      "sha256": "31732bd7c97820cf5fc9da57e5d7edeb67be45d4ac0d0075c1e5e73268ff816d"
+    },
+    "oldZeroFalse": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\old-zero-false-replay-001\\result.json",
+      "sha256": "148378c19b158cae130c3656f74fe993e700355ebccfb88ef35f783a96a76d2d"
+    },
+    "retainedIneffectiveNegative": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-001\\result.json",
+      "sha256": "0b358b5a020a9a4a18cba79d511db6aef2b41020a495dc7537371a9cb7886f65"
+    },
+    "generatedUnits": {
+      "BaseCases.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\BaseCases.cs",
+        "sha256": "7e647372867845e24acb2e551b7b4a86d8f3afcbf0523771feba2c2e11d0629d"
+      },
+      "Boundary.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\Boundary.cs",
+        "sha256": "2464ff6786dd04a0a2e58466d713d3fb7c32bf6bef93c10c2eb5f84943dc0f33"
+      },
+      "CanonicalFrameFingerprintMemo.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\CanonicalFrameFingerprintMemo.cs",
+        "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+      },
+      "Compatibility.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\Compatibility.cs",
+        "sha256": "06286d548f6114a9a1819bf86f7abca21ffa135e748b48ae99e54bfd88d3bd45"
+      },
+      "ExtractedHost.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\ExtractedHost.cs",
+        "sha256": "8ae928776b6120e5dc2253240a176c17bda4d2667b2a36707f3717cacbbbd7be"
+      },
+      "ExtraProduction.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\ExtraProduction.cs",
+        "sha256": "80b8b97809e2f59ae36adfca2bfc9c6bd73c81489c7a734c3ac661346b872514"
+      },
+      "Fixture.csproj": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\Fixture.csproj",
+        "sha256": "c79e6f492b417e57af021e9cdb2280480a86c018c9b272552e6be7d28099cc10"
+      },
+      "global.json": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\global.json",
+        "sha256": "2a02fd3b88b4639f51c7a2287596b366f0f8e766ab48e3f1b9919ba50b8beef8"
+      },
+      "HostControllerIdleCtsRelease.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\HostControllerIdleCtsRelease.cs",
+        "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+      },
+      "HostControllerOutputStop.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\HostControllerOutputStop.cs",
+        "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+      },
+      "HostResponseFields.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\HostResponseFields.cs",
+        "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+      },
+      "HostTerminalCleanup.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\HostTerminalCleanup.cs",
+        "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+      },
+      "LegacyDefinitions.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\LegacyDefinitions.cs",
+        "sha256": "03d469291d1d4a9c53b3ab2620d6981b5fdad3a5d42aa1a79d3f9cbc7316d541"
+      },
+      "MsiSteamDeckReleaseFence1726.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\MsiSteamDeckReleaseFence1726.cs",
+        "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+      },
+      "MsiVirtualReportChain1410.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\MsiVirtualReportChain1410.cs",
+        "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+      },
+      "NuGet.Config": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\NuGet.Config",
+        "sha256": "e497501960554d323eef45860c14474958accd1ae7f3ae6f95b10e4c1d340401"
+      },
+      "ParentProcessLifetime.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\ParentProcessLifetime.cs",
+        "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+      },
+      "TerminalCases.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\TerminalCases.cs",
+        "sha256": "adf6b8cf8c07c13edb72f6bf0a9dd63fa67b4c5aa904a9547dba78ffc556a7a5"
+      },
+      "TerminalPorts.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\TerminalPorts.cs",
+        "sha256": "3ff7a7625d56eb500dd2eb4e978c435535d37242fbc04ffc0d8c6d72a34253d4"
+      },
+      "Workers.cs": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\usbip-api-current-candidate-r1\\integrated\\Workers.cs",
+        "sha256": "e69af302eccfa2b899861fca4c1e59e973e52f49a6184fdbb40abfa4f8bc11a5"
+      }
+    },
+    "parentLifecycleAcceptance": "INCOMPLETE",
+    "currentLegacyParentCancellationAccepted": false,
+    "processExitUsedAsCleanup": false,
+    "previousSourceIdentityManifest": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-SOURCE-IDENTITY-V1.json",
+      "sha256": "f2b7d474a116c1663f6ca1409da2f070c028a1d452301bf0aa51d5725d184337"
+    },
+    "parentFixtureDependencyReview": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-PARENT-DEPENDENCY-REVIEW.json",
+      "sha256": "40eec7e5789eec359f707da2aff4e3c9dd87cfa358042e6bd59d47652e73b236"
+    },
+    "preservedInitialIntegrationFailure": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-independent\\EXECUTION.json",
+      "sha256": "c60864a3fba1113c47e4ec5f76953588806f6607ea1893f4640e4a07d61a02ff"
+    },
+    "sourceIdentityVersion": 3,
+    "registrationState": "REGISTERED_SIGNAL_CHILD_JOB_VALIDATOR_V1",
+    "actualIndependentResult": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-current-parent-port\\EXECUTION.json",
+    "registeredSignalGroup": true,
+    "actualIndependentResultPin": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-current-parent-port\\EXECUTION.json",
+      "sha256": "3ea471984fcbaab65e85745f96c27c3d0c0ade633002abb4fe534b7fadd61af8"
+    },
+    "boundedEvidenceManifest": "tools/ymcc_sim/global/controller-signal-evidence/bounded-current-evidence.json",
+    "usbipStatusApiReview": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\MANAGED-SOURCE-IDENTITY-V3.json",
+      "sha256": "760e0f35d7878328326c78af1e13ba9e49b8d9d9e4a313eb3f4c9fb7ed491d52"
+    }
+  },
+  "managedTerminalVersions": {
+    "current": 2,
+    "contracts": {
+      "1": "managedTerminalCurrent",
+      "2": "managedTerminalCurrentV2"
+    },
+    "historicalV1": {
+      "schema": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ManagedSignalWiring23\\before\\tools\\ymcc_sim\\global\\controller-signal-evidence\\consumer-schema.json",
+        "sha256": "650bd4bb416e3b699d8be7f9996bf177d255c430beb9a80325ffcd3fa0823a81"
+      },
+      "aggregate": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-current-parent-port\\managed-terminal\\RESULT.json",
+        "sha256": "b8714bd3a479fc893a6e792245a472c701e9d248f45a92ef7f06b5ee5be013d8"
+      },
+      "sourceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j00\\o",
+      "meaning": "Actual old aggregate binds ccc1 Program, earlier than the preserved e905 v1 candidate. Neither identity is rewritten or conflated."
+    }
+  },
+  "managedTerminalCurrentV2": {
+    "schemaVersion": 1,
+    "groupVersion": 2,
+    "child": "managed-terminal/RESULT.json",
+    "consumer": "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+    "registrationState": "REGISTERED_SIGNAL_CHILD_JOB_VALIDATOR_V2",
+    "registeredSignalGroup": true,
+    "legacyContractSha256": "c286eb755dd8cbe98470ce2747ea194e8dd2d85c33a6f1b1ab307e1030c23d0e",
+    "sourceInputs": [
+      "InputHost/Program.cs",
+      "InputHost/ScreenTouchpadReport.cs",
+      "InputHost/ScreenButtonReport.cs",
+      "InputHost/PsEndpointOwnership.cs",
+      "InputHost/HostGameOutputObservation.cs",
+      "InputHost/HostControllerOutputStop.cs",
+      "InputHost/HostControllerIdleCtsRelease.cs",
+      "InputHost/ParentProcessLifetime.cs",
+      "InputHost/MsiSteamDeckReleaseFence1726.cs",
+      "InputHost/MsiVirtualReportChain1410.cs",
+      "InputHost/CanonicalFrameFingerprintMemo.cs",
+      "InputHost/HostResponseFields.cs",
+      "InputHost/HostTerminalCleanup.cs",
+      "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+      "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+      "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+      "tools/inputhost_lifecycle_selftest.mjs",
+      "tools/inputhost_lifecycle_selftest.cs",
+      "tools/inputhost_parent_lifecycle_selftest.cs",
+      "tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs",
+      "tools/ymcc_sim/global/inputhost-protocol/provenance.mjs",
+      "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+      "tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in",
+      "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/Workers.cs.in",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/ManagedCases.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalCases.cs",
+      "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalPorts.cs",
+      "tools/fixtures/hidmaestro/2.0.0/binary-binding.json",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.Dispose.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.StopThreads.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.StopWorkers.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.CloseOutputCts.cs",
+      "tools/fixtures/hidmaestro/2.0.0/HMController.OutputPollLoop.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Stop.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Wake.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Close.cs",
+      "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Loop.cs",
+      "deps/hidmaestro/HIDMaestro.Core.dll"
+    ],
+    "deliveredSources": [
+      {
+        "path": "InputHost/Program.cs",
+        "sha256": "7019c3529c9534d970f125c9ce9cb1dfb61101c7d348298dba58ff42a0f26e85"
+      },
+      {
+        "path": "InputHost/ScreenTouchpadReport.cs",
+        "sha256": "fdf944b444557448ac304fb96d5b4b57f19e83d5ab5be1ebbfb2e0dee560eea7"
+      },
+      {
+        "path": "InputHost/ScreenButtonReport.cs",
+        "sha256": "9de83bc1614cbd6c2f77dc0317456d12d1416cb53e593952df7c2df770acb6d0"
+      },
+      {
+        "path": "InputHost/PsEndpointOwnership.cs",
+        "sha256": "67666153b1c71d3b62d7d3b7a268011e334c20c49bbcdb4b70f3ed9984a75ef7"
+      },
+      {
+        "path": "InputHost/HostGameOutputObservation.cs",
+        "sha256": "3ffb11949477a64d30b33417788f69c297e56def54b84aa6922b53124d26d6de"
+      },
+      {
+        "path": "InputHost/HostControllerOutputStop.cs",
+        "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+      },
+      {
+        "path": "InputHost/HostControllerIdleCtsRelease.cs",
+        "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+      },
+      {
+        "path": "InputHost/ParentProcessLifetime.cs",
+        "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+      },
+      {
+        "path": "InputHost/MsiSteamDeckReleaseFence1726.cs",
+        "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+      },
+      {
+        "path": "InputHost/MsiVirtualReportChain1410.cs",
+        "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+      },
+      {
+        "path": "InputHost/CanonicalFrameFingerprintMemo.cs",
+        "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+      },
+      {
+        "path": "InputHost/HostResponseFields.cs",
+        "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+      },
+      {
+        "path": "InputHost/HostTerminalCleanup.cs",
+        "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+      },
+      {
+        "path": "tools/input_host_managed_lifecycle_terminal_selftest.mjs",
+        "sha256": "f8eb3aa13621117c1e3f57183e90e41bd8fdb3754897e52f1cbefde88441e208"
+      },
+      {
+        "path": "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+        "sha256": "ff3669ebec4f8bf013ca53391597c7c4be80a8e6a9c9e002042d05a6d9a7a1a0"
+      },
+      {
+        "path": "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+        "sha256": "bd306391acb9d2e259a497814f93edb20b73a7e79861359ce1ade2486b91a5b5"
+      },
+      {
+        "path": "tools/inputhost_lifecycle_selftest.mjs",
+        "sha256": "4b1d447aa72ba50d26d94fc58cfaf80c624ac51bc7031c453dc230f57c3f2a21"
+      },
+      {
+        "path": "tools/inputhost_lifecycle_selftest.cs",
+        "sha256": "03beae92f70deaf0de48102eaaf361cea2fa43166c077c5eb6df59dd04060fc3"
+      },
+      {
+        "path": "tools/inputhost_parent_lifecycle_selftest.cs",
+        "sha256": "4c500dbe341bf2b209299b7434931a92a92f6371d2a6b17ff4081bebb86858b2"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/extract-parser.mjs",
+        "sha256": "67651e7724072c21a2e747c26ff54625faf5a4eef26e597c7186bb6b7a86eee8"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/provenance.mjs",
+        "sha256": "acfb6dc6d01c5b4dff9161c96ef4636c1f18fd2a587034618d03da73ec685488"
+      },
+      {
+        "path": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+        "sha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2"
+      },
+      {
+        "path": "tools/ymcc_sim/global/host-sdk-stop/BclStopFixture.cs.in",
+        "sha256": "331deb35e89fd49d9dc1149603e3b0f354eaabfe8c9efd84f2aa6179a74d94a1"
+      },
+      {
+        "path": "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+        "sha256": "fb26f4aa14d7bb21a34eb27a8b997421b10336017223c9782ad7cc2c59939482"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/Workers.cs.in",
+        "sha256": "5372647c12b3c7bce8b8fa273d07e20519799153869573605bf1a82adede60de"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/ManagedCases.cs",
+        "sha256": "16e2414e3cf20d26f920ba87333dc7c1a173ff79168afa387023dacf64418f71"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalCases.cs",
+        "sha256": "6ae1229b7665adc0f4b377b118c91d70596cae7f93f96559b5285591dc82bc30"
+      },
+      {
+        "path": "tools/fixtures/input_host_managed_lifecycle_20261023/TerminalPorts.cs",
+        "sha256": "123b92d6d51b1982514f8ef364ed5e8cbae44e8c50c51457f725e10fbcb16e5f"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/binary-binding.json",
+        "sha256": "0c39be0028f002f733ab5773f90f43f743cd817b94a787111dc86a1cd0e59f8d"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.Dispose.cs",
+        "sha256": "e7bc724fb505505db5e65cc38942ccfebd25bb7936864ccfd62073ae25d47c0c"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.StopThreads.cs",
+        "sha256": "1f279487d6fca1f23628e3124bd80ff20348b5c06dde888354dbb51810619e87"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.StopWorkers.cs",
+        "sha256": "2746158a5c0b53ecbfd969913ce70324f6267d16e25fb8833a63e35001d3fabb"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.CloseOutputCts.cs",
+        "sha256": "7b6f041fe877e58c1eafb1e11d75d3d87fc05059bbfc6b6a0663fbb886218820"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/HMController.OutputPollLoop.cs",
+        "sha256": "db587d58d1fccfde712f8db92743f1a6b7d358d3be2ff452f6f8d882f6798fc0"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Stop.cs",
+        "sha256": "bd784a62b1c0097aaeace28311bfbd774ac670e5a601c7469402ed29908b38d5"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Wake.cs",
+        "sha256": "e9a89b2f9da31db25d38d7bb48b8b8edf21e42e34f08e7a669b330ea3cfa90ae"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Close.cs",
+        "sha256": "37aa30dce5fd1bcfcf3deb783b99fd3b5ee301c1cee17979b096807999bc4835"
+      },
+      {
+        "path": "tools/fixtures/hidmaestro/2.0.0/DeviceClock.Loop.cs",
+        "sha256": "12aae3fad24eccf8cf1088a05fdf9abab34b4bf342dffdee277ee42812010a89"
+      },
+      {
+        "path": "deps/hidmaestro/HIDMaestro.Core.dll",
+        "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c"
+      }
+    ],
+    "identityManifest": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/MANAGED-TERMINAL-V2-SOURCE-IDENTITY.json",
+      "sha256": "e50a12973b6415a7e98d84acd68c570a33afa060715a1d62a00f4ebde8efa74f"
+    },
+    "profiles": [
+      "Release",
+      "Debug"
+    ],
+    "faults": [
+      "none",
+      "terminal-suppress-failure",
+      "terminal-no-retry",
+      "terminal-retry-sdk",
+      "terminal-repeat-shutdown",
+      "terminal-log-fatal"
+    ],
+    "casesPerProfile": 42,
+    "caseNames": [
+      "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+      "exact retry detail whitelist excludes all non-barrier failures",
+      "direct-output-transient",
+      "direct-output-permanent",
+      "direct-clock-transient",
+      "direct-clock-permanent",
+      "direct-capture-transient",
+      "direct-capture-permanent",
+      "cancellation lock timeout retries same owner when lock becomes available",
+      "healthy release invokes SDK Dispose once without terminal retry",
+      "non-stop-failure-kept-controller-dispose",
+      "non-stop-failure-kept-context-dispose",
+      "non-stop-failure-kept-neutral",
+      "non-stop-failure-kept-mixed-neutral-output",
+      "non-stop-failure-kept-capture-identity",
+      "non-stop-failure-kept-release-throws",
+      "retry that reaches SDK Dispose failure retains both failure details",
+      "terminal-initialization-healthy",
+      "terminal-initialization-throws",
+      "terminal-shutdown-healthy-fixed",
+      "terminal-shutdown-neutral-failure-healthy-fixed",
+      "terminal-shutdown-sdk-failure-healthy-fixed",
+      "terminal-invalid-shutdown-healthy-fixed",
+      "terminal-shutdown-write-failure-neutral-healthy-fixed",
+      "terminal-shutdown-write-failure-healthy-healthy-fixed",
+      "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+      "terminal-exception-healthy-fixed",
+      "terminal-read-loss-healthy-fixed",
+      "terminal-connect-loss-healthy-fixed",
+      "terminal-already-dead-healthy-fixed",
+      "terminal-pipe-break-healthy-fixed",
+      "terminal-read-loss-output-transient",
+      "terminal-read-loss-output-fixed",
+      "terminal-read-loss-clock-transient",
+      "terminal-read-loss-clock-fixed",
+      "terminal-shutdown-output-transient",
+      "terminal-shutdown-output-fixed",
+      "terminal-shutdown-clock-transient",
+      "terminal-shutdown-clock-fixed",
+      "terminal-exception-output-fixed",
+      "terminal-already-dead-output-fixed",
+      "terminal-pipe-break-output-fixed"
+    ],
+    "basisCurrent": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/result.json",
+      "sha256": "ac89965c2f001e11eaef07611509a0896b44e1e2e52641e2535e54f46835c13d"
+    },
+    "basisExtractions": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/consumer-extractions.json",
+      "sha256": "92896f334db9fe5c1ff471654ba46b90f33b0a93351c29b4c582cadf0ebd136c"
+    },
+    "generatedUnits": {
+      "BaseCases.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/BaseCases.cs",
+        "sha256": "7e647372867845e24acb2e551b7b4a86d8f3afcbf0523771feba2c2e11d0629d"
+      },
+      "Boundary.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/Boundary.cs",
+        "sha256": "2464ff6786dd04a0a2e58466d713d3fb7c32bf6bef93c10c2eb5f84943dc0f33"
+      },
+      "CanonicalFrameFingerprintMemo.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/CanonicalFrameFingerprintMemo.cs",
+        "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+      },
+      "Compatibility.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/Compatibility.cs",
+        "sha256": "ddfae5eb5330cb7ef61cea204f4172abf8f9dde5d89ed86a05edcd013e7022de"
+      },
+      "ExtractedHost.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/ExtractedHost.cs",
+        "sha256": "8ae928776b6120e5dc2253240a176c17bda4d2667b2a36707f3717cacbbbd7be"
+      },
+      "ExtraProduction.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/ExtraProduction.cs",
+        "sha256": "9fb9b7b6cb69fdf37e80977a7377ac9f4c0d369beee9178d76e30f9353614aa3"
+      },
+      "Fixture.csproj": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/Fixture.csproj",
+        "sha256": "c79e6f492b417e57af021e9cdb2280480a86c018c9b272552e6be7d28099cc10"
+      },
+      "global.json": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/global.json",
+        "sha256": "2a02fd3b88b4639f51c7a2287596b366f0f8e766ab48e3f1b9919ba50b8beef8"
+      },
+      "HostControllerIdleCtsRelease.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/HostControllerIdleCtsRelease.cs",
+        "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+      },
+      "HostControllerOutputStop.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/HostControllerOutputStop.cs",
+        "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+      },
+      "HostResponseFields.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/HostResponseFields.cs",
+        "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+      },
+      "HostTerminalCleanup.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/HostTerminalCleanup.cs",
+        "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+      },
+      "LegacyDefinitions.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/LegacyDefinitions.cs",
+        "sha256": "03d469291d1d4a9c53b3ab2620d6981b5fdad3a5d42aa1a79d3f9cbc7316d541"
+      },
+      "MsiSteamDeckReleaseFence1726.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/MsiSteamDeckReleaseFence1726.cs",
+        "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+      },
+      "MsiVirtualReportChain1410.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/MsiVirtualReportChain1410.cs",
+        "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+      },
+      "NuGet.Config": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/NuGet.Config",
+        "sha256": "e497501960554d323eef45860c14474958accd1ae7f3ae6f95b10e4c1d340401"
+      },
+      "ParentProcessLifetime.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/ParentProcessLifetime.cs",
+        "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+      },
+      "TerminalCases.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/TerminalCases.cs",
+        "sha256": "6ae1229b7665adc0f4b377b118c91d70596cae7f93f96559b5285591dc82bc30"
+      },
+      "TerminalPorts.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/TerminalPorts.cs",
+        "sha256": "123b92d6d51b1982514f8ef364ed5e8cbae44e8c50c51457f725e10fbcb16e5f"
+      },
+      "Workers.cs": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/patched-001/integrated/Workers.cs",
+        "sha256": "e69af302eccfa2b899861fca4c1e59e973e52f49a6184fdbb40abfa4f8bc11a5"
+      }
+    },
+    "dotnetToolchain": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+    "dotnetToolchainSha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2",
+    "negativeContracts": [
+      {
+        "fault": "terminal-suppress-failure",
+        "requiredFailedCase": "direct-output-permanent",
+        "requiredErrorPrefix": "System.Exception: terminal result erased cleanup failure",
+        "legacyReceipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\result.json",
+          "sha256": "ee25e8b2930a881eb0367421762fc1f4f083c1abd77945daba099b0d48e75a77"
+        },
+        "receipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/n0/result.json",
+          "sha256": "3f03a84f866bdd206924ad6e196270c3e628e318f5ced05dd30b29c0a160b3ab"
+        },
+        "profiles": {
+          "Release": {
+            "passMask": "111010101100000001110011101111110101010101",
+            "failedCases": [
+              "direct-output-permanent",
+              "direct-clock-permanent",
+              "direct-capture-permanent",
+              "non-stop-failure-kept-controller-dispose",
+              "non-stop-failure-kept-context-dispose",
+              "non-stop-failure-kept-neutral",
+              "non-stop-failure-kept-mixed-neutral-output",
+              "non-stop-failure-kept-capture-identity",
+              "non-stop-failure-kept-release-throws",
+              "retry that reaches SDK Dispose failure retains both failure details",
+              "terminal-shutdown-neutral-failure-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-fixed",
+              "terminal-already-dead-output-fixed"
+            ],
+            "errorPrefixes": {
+              "direct-output-permanent": "System.Exception: terminal result erased cleanup failure",
+              "direct-clock-permanent": "System.Exception: terminal result erased cleanup failure",
+              "direct-capture-permanent": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-controller-dispose": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-context-dispose": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-neutral": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-mixed-neutral-output": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-capture-identity": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-release-throws": "System.Exception: terminal result erased cleanup failure",
+              "retry that reaches SDK Dispose failure retains both failure details": "System.Exception: terminal result erased cleanup failure",
+              "terminal-shutdown-neutral-failure-healthy-fixed": "System.Exception: terminal origin status lost",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: terminal origin status lost",
+              "terminal-read-loss-output-fixed": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed",
+              "terminal-already-dead-output-fixed": "System.Exception: assertion failed"
+            }
+          },
+          "Debug": {
+            "passMask": "111010101100000001110011101111110101010101",
+            "failedCases": [
+              "direct-output-permanent",
+              "direct-clock-permanent",
+              "direct-capture-permanent",
+              "non-stop-failure-kept-controller-dispose",
+              "non-stop-failure-kept-context-dispose",
+              "non-stop-failure-kept-neutral",
+              "non-stop-failure-kept-mixed-neutral-output",
+              "non-stop-failure-kept-capture-identity",
+              "non-stop-failure-kept-release-throws",
+              "retry that reaches SDK Dispose failure retains both failure details",
+              "terminal-shutdown-neutral-failure-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-fixed",
+              "terminal-already-dead-output-fixed"
+            ],
+            "errorPrefixes": {
+              "direct-output-permanent": "System.Exception: terminal result erased cleanup failure",
+              "direct-clock-permanent": "System.Exception: terminal result erased cleanup failure",
+              "direct-capture-permanent": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-controller-dispose": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-context-dispose": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-neutral": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-mixed-neutral-output": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-capture-identity": "System.Exception: terminal result erased cleanup failure",
+              "non-stop-failure-kept-release-throws": "System.Exception: terminal result erased cleanup failure",
+              "retry that reaches SDK Dispose failure retains both failure details": "System.Exception: terminal result erased cleanup failure",
+              "terminal-shutdown-neutral-failure-healthy-fixed": "System.Exception: terminal origin status lost",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: terminal origin status lost",
+              "terminal-read-loss-output-fixed": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed",
+              "terminal-already-dead-output-fixed": "System.Exception: assertion failed"
+            }
+          }
+        }
+      },
+      {
+        "fault": "terminal-no-retry",
+        "requiredFailedCase": "direct-output-transient",
+        "requiredErrorPrefix": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+        "legacyReceipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\result.json",
+          "sha256": "6e6ea50001ecf2de60a2c4912033cdf6fb47ccc0ddc8c936e16d1b86904b56ba"
+        },
+        "receipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/n1/result.json",
+          "sha256": "b4f3ce082ca03e858512df4cceabb24462c6d9d23bd97b5f33bd16fd368b90be"
+        },
+        "profiles": {
+          "Release": {
+            "passMask": "110000000111111101111111111111100000000000",
+            "failedCases": [
+              "direct-output-transient",
+              "direct-output-permanent",
+              "direct-clock-transient",
+              "direct-clock-permanent",
+              "direct-capture-transient",
+              "direct-capture-permanent",
+              "cancellation lock timeout retries same owner when lock becomes available",
+              "retry that reaches SDK Dispose failure retains both failure details",
+              "terminal-read-loss-output-transient",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-transient",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed",
+              "terminal-exception-output-fixed",
+              "terminal-already-dead-output-fixed",
+              "terminal-pipe-break-output-fixed"
+            ],
+            "errorPrefixes": {
+              "direct-output-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "direct-output-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "direct-clock-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\",\"FinalDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\"}",
+              "direct-clock-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\",\"FinalDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\"}",
+              "direct-capture-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\",\"FinalDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\"}",
+              "direct-capture-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\",\"FinalDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\"}",
+              "cancellation lock timeout retries same owner when lock becomes available": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-lock-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-lock-timeout\"}",
+              "retry that reaches SDK Dispose failure retains both failure details": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "terminal-read-loss-output-transient": "System.Exception: assertion failed",
+              "terminal-read-loss-output-fixed": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-transient": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed",
+              "terminal-exception-output-fixed": "System.Exception: assertion failed",
+              "terminal-already-dead-output-fixed": "System.Exception: assertion failed",
+              "terminal-pipe-break-output-fixed": "System.Exception: assertion failed"
+            }
+          },
+          "Debug": {
+            "passMask": "110000000111111101111111111111100000000000",
+            "failedCases": [
+              "direct-output-transient",
+              "direct-output-permanent",
+              "direct-clock-transient",
+              "direct-clock-permanent",
+              "direct-capture-transient",
+              "direct-capture-permanent",
+              "cancellation lock timeout retries same owner when lock becomes available",
+              "retry that reaches SDK Dispose failure retains both failure details",
+              "terminal-read-loss-output-transient",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-transient",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed",
+              "terminal-exception-output-fixed",
+              "terminal-already-dead-output-fixed",
+              "terminal-pipe-break-output-fixed"
+            ],
+            "errorPrefixes": {
+              "direct-output-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "direct-output-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "direct-clock-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\",\"FinalDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\"}",
+              "direct-clock-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\",\"FinalDetail\":\"steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout\"}",
+              "direct-capture-transient": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\",\"FinalDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\"}",
+              "direct-capture-permanent": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\",\"FinalDetail\":\"controller-idle-cts-capture:sdk-idle-clock-timeout\"}",
+              "cancellation lock timeout retries same owner when lock becomes available": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-lock-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-lock-timeout\"}",
+              "retry that reaches SDK Dispose failure retains both failure details": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":1,\"DirectReleaseAttempts\":1,\"Retried\":true,\"FirstDetail\":\"controller-output-stop:sdk-output-stop-timeout\",\"FinalDetail\":\"controller-output-stop:sdk-output-stop-timeout\"}",
+              "terminal-read-loss-output-transient": "System.Exception: assertion failed",
+              "terminal-read-loss-output-fixed": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-transient": "System.Exception: assertion failed",
+              "terminal-read-loss-clock-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed",
+              "terminal-exception-output-fixed": "System.Exception: assertion failed",
+              "terminal-already-dead-output-fixed": "System.Exception: assertion failed",
+              "terminal-pipe-break-output-fixed": "System.Exception: assertion failed"
+            }
+          }
+        }
+      },
+      {
+        "fault": "terminal-retry-sdk",
+        "requiredFailedCase": "non-stop-failure-kept-controller-dispose",
+        "requiredErrorPrefix": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":2,\"DirectReleaseAttempts\":2,\"Retried\":true,\"FirstDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\",\"FinalDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\"}",
+        "legacyReceipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\result.json",
+          "sha256": "53a4ab4e2a7c688e938ac07e62c345861342adeca839b3f2d2cec3507423ee14"
+        },
+        "receipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/n2/result.json",
+          "sha256": "3260b37ac008bd99f3e393fbdf1f4111833f0139b1f100d1adbf63b1deee7db0"
+        },
+        "profiles": {
+          "Release": {
+            "passMask": "101111111101111111111011111111111111111111",
+            "failedCases": [
+              "exact retry detail whitelist excludes all non-barrier failures",
+              "non-stop-failure-kept-controller-dispose",
+              "terminal-shutdown-sdk-failure-healthy-fixed"
+            ],
+            "errorPrefixes": {
+              "exact retry detail whitelist excludes all non-barrier failures": "System.Exception: controller-dispose:IOException",
+              "non-stop-failure-kept-controller-dispose": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":2,\"DirectReleaseAttempts\":2,\"Retried\":true,\"FirstDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\",\"FinalDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\"}",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed"
+            }
+          },
+          "Debug": {
+            "passMask": "101111111101111111111011111111111111111111",
+            "failedCases": [
+              "exact retry detail whitelist excludes all non-barrier failures",
+              "non-stop-failure-kept-controller-dispose",
+              "terminal-shutdown-sdk-failure-healthy-fixed"
+            ],
+            "errorPrefixes": {
+              "exact retry detail whitelist excludes all non-barrier failures": "System.Exception: controller-dispose:IOException",
+              "non-stop-failure-kept-controller-dispose": "System.Exception: {\"ExitCode\":7,\"SourceExitCode\":0,\"Reason\":\"fixture-direct-terminal\",\"ManagedReleaseComplete\":false,\"ResourceDisposition\":\"owner-retained\",\"ReleaseAttempts\":2,\"DirectReleaseAttempts\":2,\"Retried\":true,\"FirstDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\",\"FinalDetail\":\"controller-dispose:InvalidOperationException;msi-steamdeck-owned-absence-not-verified:pinned-arrival:USB\\\\VID_28DE\\u0026PID_1205\\\\OWNED-1\"}",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed"
+            }
+          }
+        }
+      },
+      {
+        "fault": "terminal-repeat-shutdown",
+        "requiredFailedCase": "terminal-shutdown-healthy-fixed",
+        "requiredErrorPrefix": "System.Exception: SHUTDOWN attempted cleanup twice",
+        "legacyReceipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\result.json",
+          "sha256": "d85c766232227e4920787e789230dbf0b84d01e25390c4e266a6db87ff423676"
+        },
+        "receipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/n3/result.json",
+          "sha256": "c0e56dc523768f60a018aac75e1e205841afc3424f1913e1191593c9a5130a5d"
+        },
+        "profiles": {
+          "Release": {
+            "passMask": "111111111111111111101010001111111110000111",
+            "failedCases": [
+              "terminal-shutdown-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed"
+            ],
+            "errorPrefixes": {
+              "terminal-shutdown-healthy-fixed": "System.Exception: SHUTDOWN attempted cleanup twice",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed"
+            }
+          },
+          "Debug": {
+            "passMask": "111111111111111111101010001111111110000111",
+            "failedCases": [
+              "terminal-shutdown-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed"
+            ],
+            "errorPrefixes": {
+              "terminal-shutdown-healthy-fixed": "System.Exception: SHUTDOWN attempted cleanup twice",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-output-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-output-fixed": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-transient": "System.Exception: assertion failed",
+              "terminal-shutdown-clock-fixed": "System.Exception: assertion failed"
+            }
+          }
+        }
+      },
+      {
+        "fault": "terminal-log-fatal",
+        "requiredFailedCase": "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+        "requiredErrorPrefix": "System.Exception: production logger kind mismatch: terminal-cleanup-complete",
+        "legacyReceipt": {
+          "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\result.json",
+          "sha256": "1f0012ec947d76074fa7b6957e4641a4454f18234e3b11b9c23b43e28d915616"
+        },
+        "receipt": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/n4/result.json",
+          "sha256": "168adafce46e6531f3ba19496bb9a2337067c6e93fee74dbff557d0e70825789"
+        },
+        "profiles": {
+          "Release": {
+            "passMask": "011111111111111111100000000000000000000000",
+            "failedCases": [
+              "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+              "terminal-shutdown-healthy-fixed",
+              "terminal-shutdown-neutral-failure-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-invalid-shutdown-healthy-fixed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-exception-healthy-fixed",
+              "terminal-read-loss-healthy-fixed",
+              "terminal-connect-loss-healthy-fixed",
+              "terminal-already-dead-healthy-fixed",
+              "terminal-pipe-break-healthy-fixed",
+              "terminal-read-loss-output-transient",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-transient",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed",
+              "terminal-exception-output-fixed",
+              "terminal-already-dead-output-fixed",
+              "terminal-pipe-break-output-fixed"
+            ],
+            "errorPrefixes": {
+              "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement": "System.Exception: production logger kind mismatch: terminal-cleanup-complete",
+              "terminal-shutdown-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-neutral-failure-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-invalid-shutdown-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-exception-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-connect-loss-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-already-dead-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-pipe-break-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-output-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-clock-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-clock-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-output-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-clock-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-clock-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-exception-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-already-dead-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-pipe-break-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement"
+            }
+          },
+          "Debug": {
+            "passMask": "011111111111111111100000000000000000000000",
+            "failedCases": [
+              "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement",
+              "terminal-shutdown-healthy-fixed",
+              "terminal-shutdown-neutral-failure-healthy-fixed",
+              "terminal-shutdown-sdk-failure-healthy-fixed",
+              "terminal-invalid-shutdown-healthy-fixed",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed",
+              "terminal-exception-healthy-fixed",
+              "terminal-read-loss-healthy-fixed",
+              "terminal-connect-loss-healthy-fixed",
+              "terminal-already-dead-healthy-fixed",
+              "terminal-pipe-break-healthy-fixed",
+              "terminal-read-loss-output-transient",
+              "terminal-read-loss-output-fixed",
+              "terminal-read-loss-clock-transient",
+              "terminal-read-loss-clock-fixed",
+              "terminal-shutdown-output-transient",
+              "terminal-shutdown-output-fixed",
+              "terminal-shutdown-clock-transient",
+              "terminal-shutdown-clock-fixed",
+              "terminal-exception-output-fixed",
+              "terminal-already-dead-output-fixed",
+              "terminal-pipe-break-output-fixed"
+            ],
+            "errorPrefixes": {
+              "actual production LogFatalExit classifies only terminal receipt reasons as resource settlement": "System.Exception: production logger kind mismatch: terminal-cleanup-complete",
+              "terminal-shutdown-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-neutral-failure-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-sdk-failure-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-invalid-shutdown-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-write-failure-neutral-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-write-failure-healthy-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-parent-loss-neutral-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-exception-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-connect-loss-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-already-dead-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-pipe-break-healthy-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-output-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-clock-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-read-loss-clock-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-output-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-clock-transient": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-shutdown-clock-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-exception-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-already-dead-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement",
+              "terminal-pipe-break-output-fixed": "System.Exception: production logger misclassified or duplicated terminal settlement"
+            }
+          }
+        }
+      }
+    ],
+    "initializationBoundary": {
+      "receipt": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/result.json",
+        "sha256": "b6be9d48ff194f404712248c51a6c593ff3982d9b46eb1beba20da75ab25388c"
+      },
+      "extractions": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/consumer-extractions.json",
+        "sha256": "a62813bf9b61bb31bec53d51f94d7a17638360b230a7729ca427378516e244ce"
+      },
+      "generatedUnits": {
+        "BaseCases.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/BaseCases.cs",
+          "sha256": "7e647372867845e24acb2e551b7b4a86d8f3afcbf0523771feba2c2e11d0629d"
+        },
+        "Boundary.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/Boundary.cs",
+          "sha256": "2464ff6786dd04a0a2e58466d713d3fb7c32bf6bef93c10c2eb5f84943dc0f33"
+        },
+        "CanonicalFrameFingerprintMemo.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/CanonicalFrameFingerprintMemo.cs",
+          "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+        },
+        "Compatibility.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/Compatibility.cs",
+          "sha256": "ddfae5eb5330cb7ef61cea204f4172abf8f9dde5d89ed86a05edcd013e7022de"
+        },
+        "ExtractedHost.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/ExtractedHost.cs",
+          "sha256": "8ae928776b6120e5dc2253240a176c17bda4d2667b2a36707f3717cacbbbd7be"
+        },
+        "ExtraProduction.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/ExtraProduction.cs",
+          "sha256": "fb34abefb2eac1014c30ba345604fd00662cd2df8088f30a3539925a5f66e4f7"
+        },
+        "Fixture.csproj": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/Fixture.csproj",
+          "sha256": "c79e6f492b417e57af021e9cdb2280480a86c018c9b272552e6be7d28099cc10"
+        },
+        "global.json": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/global.json",
+          "sha256": "2a02fd3b88b4639f51c7a2287596b366f0f8e766ab48e3f1b9919ba50b8beef8"
+        },
+        "HostControllerIdleCtsRelease.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/HostControllerIdleCtsRelease.cs",
+          "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+        },
+        "HostControllerOutputStop.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/HostControllerOutputStop.cs",
+          "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+        },
+        "HostResponseFields.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/HostResponseFields.cs",
+          "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+        },
+        "HostTerminalCleanup.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/HostTerminalCleanup.cs",
+          "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+        },
+        "LegacyDefinitions.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/LegacyDefinitions.cs",
+          "sha256": "03d469291d1d4a9c53b3ab2620d6981b5fdad3a5d42aa1a79d3f9cbc7316d541"
+        },
+        "MsiSteamDeckReleaseFence1726.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/MsiSteamDeckReleaseFence1726.cs",
+          "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+        },
+        "MsiVirtualReportChain1410.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/MsiVirtualReportChain1410.cs",
+          "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+        },
+        "NuGet.Config": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/NuGet.Config",
+          "sha256": "e497501960554d323eef45860c14474958accd1ae7f3ae6f95b10e4c1d340401"
+        },
+        "ParentProcessLifetime.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/ParentProcessLifetime.cs",
+          "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+        },
+        "TerminalCases.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/TerminalCases.cs",
+          "sha256": "6ae1229b7665adc0f4b377b118c91d70596cae7f93f96559b5285591dc82bc30"
+        },
+        "TerminalPorts.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/TerminalPorts.cs",
+          "sha256": "123b92d6d51b1982514f8ef364ed5e8cbae44e8c50c51457f725e10fbcb16e5f"
+        },
+        "Workers.cs": {
+          "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/integrated/Workers.cs",
+          "sha256": "e69af302eccfa2b899861fca4c1e59e973e52f49a6184fdbb40abfa4f8bc11a5"
+        }
+      },
+      "oldMainSource": {
+        "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/original-init-negative-001/sources/InputHost/Program.cs",
+        "sha256": "e905a9f78dc1cb9e02429587bd7b04f9f322913b9354226961eba6a6ed37cfbc"
+      },
+      "requiredFailedCase": "terminal-initialization-throws",
+      "profiles": {
+        "Release": {
+          "passMask": "111111111111111111011111111111111111111111",
+          "failedCases": [
+            "terminal-initialization-throws"
+          ],
+          "errorPrefixes": {
+            "terminal-initialization-throws": "System.IO.IOException: injected-host-initialization"
+          }
+        },
+        "Debug": {
+          "passMask": "111111111111111111011111111111111111111111",
+          "failedCases": [
+            "terminal-initialization-throws"
+          ],
+          "errorPrefixes": {
+            "terminal-initialization-throws": "System.IO.IOException: injected-host-initialization"
+          }
+        }
+      }
+    },
+    "actualFiveNegatives": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/ACTUAL-NEGATIVE-EXECUTION.json",
+      "sha256": "37d9c480a6d7eb57a63f8a39a2dc186fea5d96ded4970808e3d895445d51790a"
+    },
+    "parentLifecycleAcceptance": "INCOMPLETE",
+    "wholeLifecycleAcceptance": false,
+    "currentLegacyParentCancellationAccepted": false,
+    "processExitUsedAsCleanup": false,
+    "referencePositiveScope": "Previously executed patched-001; immutable result/units/logs and all 38 source snapshots rechecked against current 39-source identity. No fabricated producer registration binding.",
+    "evidenceRoot": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2",
+    "qualifiedAggregate": {
+      "path": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/qualification-003/RESULT.json",
+      "sha256": "82b61657a1188b036fcaf42026ae53018bb5844c4f7002aa39c676e0ccc5e86a"
+    },
+    "actualIndependentResult": "G:/YeManCC-Work/Testing/YMCC/Evidence/VC-HostExitReview23-R2/qualified-v2/parent-formal-r1/EXECUTION.json"
+  }
+}

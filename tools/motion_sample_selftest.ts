@@ -8,8 +8,10 @@ import {
   evaluateMotionPersona,
   processPairedMotion,
   type MotionSampleInputV1,
+  type MotionPersonaRequestV1,
   type ProviderCapabilityMatrixV1,
 } from '../src/bridge/motionSample';
+import { VIRTUAL_OUTPUT_PERSONAS } from '../src/bridge/controllerPersona';
 
 const capability: ProviderCapabilityMatrixV1 = {
   schemaVersion: 1, providerId: 'fixture-imu', sensorFamily: 'windows', ingressTransform: 'hc-windows-threshold-then-matrix', pairingPolicyId: 'fixture-atomic-v1',
@@ -101,26 +103,43 @@ if (malformedCapability.ok || malformedCapability.reason !== 'sample-pair-unprov
   throw new Error('T12 accepted a negative monotonic skew policy');
 }
 
-const x360Imu = evaluateMotionPersona({ persona: 'xbox360', outputMode: 'ds4-imu', descriptorVerified: false, mappedGyroXY: { x: 0, y: 0 }, rawDsu: { gyro: { x: 0, y: 0, z: 0 }, accel: { x: 0, y: 0, z: 1 } } });
-if (x360Imu.ok || x360Imu.reason !== 'persona-motion-unsupported') throw new Error('T12 allowed DS4 IMU fields for X360');
-const ds4NoDescriptor = evaluateMotionPersona({ persona: 'dualshock4', outputMode: 'ds4-imu', descriptorVerified: false, mappedGyroXY: { x: 0, y: 0 }, rawDsu: { gyro: { x: 0, y: 0, z: 0 }, accel: { x: 0, y: 0, z: 1 } } });
-if (ds4NoDescriptor.ok || ds4NoDescriptor.reason !== 'descriptor-unverified') throw new Error('T12 encoded an unverified HIDMaestro DS4 IMU descriptor');
-const ds4DescriptorOnly = evaluateMotionPersona({ persona: 'dualshock4', outputMode: 'ds4-imu', descriptorVerified: true, mappedGyroXY: { x: 0, y: 0 }, rawDsu: { gyro: { x: 0, y: 0, z: 0 }, accel: { x: 0, y: 0, z: 1 } } });
-if (ds4DescriptorOnly.ok || ds4DescriptorOnly.reason !== 'direct-imu-path-unresolved') throw new Error('T12 admitted DS4 IMU from a descriptor claim without encoder/readback');
-const ds4Stick = evaluateMotionPersona({ persona: 'dualshock4', outputMode: 'virtual-stick', descriptorVerified: false, mappedGyroXY: { x: 0.2, y: -0.2 }, rawDsu: { gyro: { x: 0, y: 0, z: 0 }, accel: { x: 0, y: 0, z: 1 } } });
-if (!ds4Stick.ok || ds4Stick.reportSemantic !== 'virtual-stick' || ds4Stick.imuEncoded) throw new Error('T12 mixed DS4 virtual-stick and IMU semantics');
+const personaRequest: MotionPersonaRequestV1 = {
+  persona: 'dualsense-edge', outputMode: 'virtual-stick', mappedGyroXY: { x: 0.2, y: -0.2 },
+  rawDsu: { gyro: { x: 1, y: 2, z: 3 }, accel: { x: 0, y: 0, z: 1 } },
+};
+const rawBefore = JSON.stringify(personaRequest.rawDsu);
+for (const persona of VIRTUAL_OUTPUT_PERSONAS) {
+  const stick = evaluateMotionPersona({ ...personaRequest, persona });
+  if (!stick.ok || stick.reportSemantic !== 'virtual-stick' || !stick.gyroContributionActive || stick.imuEncoded) throw new Error(`T12 current virtual-stick semantics failed: ${persona}`);
+  const disabled = evaluateMotionPersona({ ...personaRequest, persona, outputMode: 'disabled' });
+  if (!disabled.ok || disabled.reportSemantic !== 'none' || disabled.gyroContributionActive || disabled.imuEncoded) throw new Error(`T12 disabled motion action failed: ${persona}`);
+  for (const outputMode of ['ds4-imu', 'unknown', null, undefined, 0, true, {}] as unknown[]) {
+    const rejected = evaluateMotionPersona({ ...personaRequest, persona, outputMode: outputMode as MotionPersonaRequestV1['outputMode'] });
+    if (rejected.ok || rejected.reason !== 'persona-motion-unsupported') throw new Error(`T12 admitted retired/unknown motion mode: ${persona}/${String(outputMode)}`);
+  }
+}
+for (const persona of ['xbox360', 'dualshock4', 'dualsense', 'unknown', null, undefined, 0, true, {}, ['elite']] as unknown[]) {
+  for (const outputMode of ['virtual-stick', 'disabled'] as const) {
+    const rejected = evaluateMotionPersona({ ...personaRequest, persona: persona as MotionPersonaRequestV1['persona'], outputMode });
+    if (rejected.ok || rejected.reason !== 'persona-motion-unsupported') throw new Error(`T12 admitted unsupported runtime persona: ${String(persona)}`);
+  }
+}
+const disabledPersona = evaluateMotionPersona({ ...personaRequest, persona: 'disabled', outputMode: 'disabled' });
+if (!disabledPersona.ok || disabledPersona.reportSemantic !== 'none' || disabledPersona.gyroContributionActive) throw new Error('T12 disabled persona did not remain inactive');
+if (evaluateMotionPersona({ ...personaRequest, persona: 'disabled' }).ok) throw new Error('T12 disabled persona admitted a motion action');
+if (JSON.stringify(personaRequest.rawDsu) !== rawBefore) throw new Error('T12 modified raw physical IMU while evaluating motion action');
 
 const evidence = {
   evidenceId: 'T12-E01-MOTION-SAMPLE-MOCK-20260904', status: 'MOCK-READY', systemMutation: false,
   contract: '30-GYRO-PARAMETER-SHIELD-RESET-ACCEL-CONTRACT-20260904.md#11',
   assertions: {
     sameGenerationPairRequired: true, monotonicProofBoundsRequired: true, lockedHcMatrixRequired: true, auditedWindowsIngressRequired: true, separateRogMatrices: true, gyroOnlyThreshold: true,
-    fusionPortReceivesPairedSample: true, x360HasNoImu: true, hidMaestroDs4DescriptorUnenclosed: true,
-    virtualStickAndDs4ImuNotMixed: true,
+    fusionPortReceivesPairedSample: true, currentPersonasOnly: true, retiredWirePersonasRejected: true,
+    retiredDirectImuModeRejected: true, mockDoesNotEncodeImu: true, rawPhysicalImuUnchanged: true,
   },
   sample: paired.sample, output,
 };
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/GyroVirtual/T12-E01-motion-sample-mock-20260904.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/GyroVirtual'), 'T12-E01-motion-sample-mock-20260904.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
 console.log(`motion sample selftest: PASS (${evidencePath})`);

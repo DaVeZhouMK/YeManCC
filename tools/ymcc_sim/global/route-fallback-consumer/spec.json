@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "robust.route-fallback-consumer",
+  "source": {
+    "path": "src/robust/routeFallback.ts",
+    "sha256": "a15f713828b4b34a047dd92e9dec2a0a344fc5376d612ffc0b2379bdc5af3e36"
+  },
+  "boundedTimeoutMs": 30000,
+  "productBoundary": "Actual TS/DOM source; only dialog/reset and location.reload are memory ports.",
+  "lifecycle": "persistent",
+  "remaining": [
+    "Startup-failure has no public force-exit API",
+    "No sleep/ready/health API",
+    "Already-started settings reset cannot be cancelled by this overlay API; owner loss suppresses subsequent UI/reload effects"
+  ]
+}

@@ -1,0 +1,6 @@
+import {SPEC,MODULE,REPO,SOURCE_INPUTS,lockContext} from './contract.mjs';
+export function getSteamAppearanceDraftConsumerAdapters(repo=REPO,options={}){
+ let context,problem;try{context=lockContext(repo,options);}catch(error){problem='STEAM_APPEARANCE_DRAFT_INPUT_UNAVAILABLE: '+error.message;}
+ return [{id:SPEC.id,domain:'steam',title:'Steam appearance draft original memory consumer',kind:'node',path:MODULE+'/run.mjs',args:['--evidence-dir','{outDir}/steam-appearance-draft'],profiles:['desktop','full'],scope:'behavioral-mock',timeoutMs:SPEC.timeoutMs,evidenceInputs:[...SOURCE_INPUTS],artifactInputs:context?.authority.tools.map(row=>row.path)??[],resultFiles:['steam-appearance-draft/result.json'],blockedExitCodes:[10],completionContract:{schemaVersion:1,rules:[{stream:'stdout',line:`STEAM_APPEARANCE_DRAFT_CONSUMER_PASS cases=${SPEC.caseNames.length} faults=${SPEC.faults.length}`}]},...(problem?{blockedReason:problem}:{}),boundary:'Unchanged original producer; esbuild.transformSync compiles actual steamAppearanceDraft.ts; original VM, theme require fixture, clock/storage/timer and dependency memory ports. No native SteamAppearance service, real Steam/CSS, UI browser, app/host/device/network/process control or OS sleep acceptance.'}];
+}
+export default getSteamAppearanceDraftConsumerAdapters;

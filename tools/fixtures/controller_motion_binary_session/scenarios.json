@@ -1,0 +1,164 @@
+[
+  {
+    "name": "initial-and-requested-planes",
+    "executed": "Actual Session/Owner selection, native Manual initialization/calibration application, first dt and requested player/world reads.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "same-key-stability",
+    "executed": "Same Key and callback identity keeps native allocation, offset and time origin.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "wrong-key-gates",
+    "executed": "Synthetic identity/sensor/power/raw/capture/invalid token mismatch cannot reach native process/mode callbacks.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "auto-mode-coordination",
+    "executed": "Session cached0/3 writer observed through actual GetCalibrationMode; no convergence assertion.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "manual-borrow-invalidation",
+    "executed": "Fixture simulates manual borrower native mode/offset writes, invalidates Session cache and restores current preference; no actual main transaction.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "sleep-like-generations",
+    "executed": "Synthetic revoke and exact retired-token denial, separately changed power/raw/capture generations; Calibration restored from memory, no actual sleep/PBT or disk persistence.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "sensor-and-identity-scope",
+    "executed": "Concurrent CPU owners and synthetic side/device changes with independent Calibration values.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "callback-replacement",
+    "executed": "Forwarding callback address changes rebuild real native owner and reset first dt; not actual library replacement.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  },
+  {
+    "name": "Owner-key-gate",
+    "executed": "Direct actual Owner composition independently blocks wrong and retired keys before native callbacks.",
+    "real": [
+      "production Session/Owner header code",
+      "pinned DLL allocation, math and readback"
+    ],
+    "synthetic": [
+      "Key tokens",
+      "steady double timestamps",
+      "six-axis samples",
+      "in-memory Calibration values"
+    ],
+    "notExecuted": [
+      "main consumer/persistence/PBT/exit integration",
+      "hardware/WinRT/HID/Host"
+    ]
+  }
+]

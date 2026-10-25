@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
+const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2]&&path.resolve(process.argv[2]);
+if(!out)throw Error('Evidence JSON path required');
+const require=createRequire(path.join(root,'package.json')),{build}=require('esbuild'),sha=file=>crypto.createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex');
+const sources=['src/radial/model.ts','src/radial/geometry.ts','src/radial/presentation.ts','src/icons.ts','src/icons.json','tools/radial_contract_selftest.ts','tools/radial_geometry_selftest.mjs'];
+const sourceHashes=Object.fromEntries(sources.map(file=>[file,sha(file)]));
+const compiled=await build({entryPoints:[path.join(root,'tools/radial_contract_selftest.ts')],bundle:true,write:false,platform:'node',format:'cjs'}),lines=[];
+new Function('require','console',compiled.outputFiles[0].text)(require,{...console,log:line=>lines.push(line)});
+const result=JSON.parse(lines.at(-1));assert.ok(result.pass&&result.cases>624);
+for(const [file,digest]of Object.entries(sourceHashes))assert.equal(sha(file),digest,'Source changed while testing: '+file);
+fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify({...result,sourceHashes,scope:'Actual geometry/model and local icon projection; fixed-width rendered polygon cuts, matching hit geometry and hollow centre. No hardware or normal application IO.'},null,2)+'\n');
+console.log(JSON.stringify({pass:true,cases:result.cases,out}));

@@ -1,0 +1,269 @@
+{
+  "source": "mainline-continuous-performance-simulation",
+  "draftOnly": true,
+  "files": [
+    {
+      "name": "index.html",
+      "bytes": 662248,
+      "sha256": "41b242a5352200beaccb24835a78ae3daca4f09a1cf1406d4bd2658cb4ef16e4"
+    },
+    {
+      "name": "app.js",
+      "bytes": 134430,
+      "sha256": "b1b952d85acccaa72edc531928cc2ea93106d3021c2e84c91dbd45395ff5c176"
+    },
+    {
+      "name": "prototype.html",
+      "bytes": 3530,
+      "sha256": "7f34625ade92e899699a9fa501d688d47c83a3f52108a5ed26b925d88e9a9d83"
+    },
+    {
+      "name": "style.css",
+      "bytes": 70887,
+      "sha256": "7184d0801b1a9e7ce9ae947bb5faefbbdcc659b6b3adab61109f7fc2516b5b81"
+    },
+    {
+      "name": "schedule-controls.css",
+      "bytes": 2452,
+      "sha256": "0defaeee5ba081cf5d523063c8b9f81f971846247f422c7b735e3518832338c8"
+    },
+    {
+      "name": "split-layout.css",
+      "bytes": 5716,
+      "sha256": "b37709326794e019c28843f7be34d981bb0e3caa4efc8456385a4baf854f6963"
+    },
+    {
+      "name": "frame-work.js",
+      "bytes": 2890,
+      "sha256": "87c7db703cc325be580cfab3b76c568b6779174814fe37b95040b9b644b7f300"
+    },
+    {
+      "name": "frame-pipeline.js",
+      "bytes": 5017,
+      "sha256": "abcde6ff0d08bd31e1fac809c36a3f2d6f17181c0e7f59ed7cfd7004c49fc155"
+    },
+    {
+      "name": "gpu-capability-library.js",
+      "bytes": 11724,
+      "sha256": "f91ba68a3e3ff3860d4ddf98806502bb666e32be77fd7545c68b59b79cb5fac9"
+    },
+    {
+      "name": "gpu-capability-chart.js",
+      "bytes": 6021,
+      "sha256": "be3430b93932aed066dee5c03827e1ed054c50a074a8c07b94a36b368460843e"
+    },
+    {
+      "name": "gpu-capability-chart.css",
+      "bytes": 1511,
+      "sha256": "3500bf8898b7549c73f7d5d84a7784a238691383ffa6137970931c74f9953f71"
+    },
+    {
+      "name": "optimization-curve.js",
+      "bytes": 4726,
+      "sha256": "d941ce769c7c866788f60e652eef8e4de547ec0a3d28d3cbb649621e86e385f9"
+    },
+    {
+      "name": "split-layout.js",
+      "bytes": 1311,
+      "sha256": "e36a0c3a339abb126e2bcd7e4d4afea0df536e35832ae56d8c349f68eb06bc53"
+    },
+    {
+      "name": "ts-power-curve.js",
+      "bytes": 2375,
+      "sha256": "b11ccdb93e0817e0f9aad6d5d54317e698ac0b131b35ff276a5fab0fc5af5aab"
+    },
+    {
+      "name": "monitor-hud-base.css",
+      "bytes": 1791,
+      "sha256": "0df794209cf56ab52c9c5ebc3b29e0ac093dc6bc8559d1310ad263a3af351cd6"
+    },
+    {
+      "name": "simulation-monitor.css",
+      "bytes": 3003,
+      "sha256": "7f02a097216492135769bcf7eb90f8b30710617e69fdae4880983a88422df35c"
+    }
+  ],
+  "modelRevision": "CPU-submit-GPU-consumption-v1-2D-demand180pct-unified-preview-monitor",
+  "capabilityLibrary": {
+    "data": "gpu-capability-library.js",
+    "localOverrides": false,
+    "scope": "simulation-only",
+    "grid": {
+      "1-35W": 1,
+      "35-85W": 5
+    },
+    "location": "model-only",
+    "axisStartWatts": 3,
+    "sub3WData": false,
+    "g3eMaximumTurboWatts": 80,
+    "g3eSustainedConfigMaxWatts": 35,
+    "tdpAdvisories": {
+      "deckAbove": 16,
+      "ordinaryAbove": 45,
+      "exempt": [
+        "g3e",
+        "m395"
+      ]
+    },
+    "readOnly": true,
+    "minimumWatts": 3,
+    "profileMinimumWatts": {
+      "m395": 13
+    },
+    "visualization": "four-CPU-GPU-curves-over-watts"
+  },
+  "optimizationCurve": {
+    "data": "optimization-curve.js",
+    "points": [
+      [
+        3,
+        3
+      ],
+      [
+        20,
+        20
+      ],
+      [
+        30,
+        5
+      ],
+      [
+        43,
+        0
+      ]
+    ],
+    "meaning": "GPU gain conditioned on CPU capacity and same-budget active power suppression",
+    "measured": false,
+    "supplyEnvelope": {
+      "scope": "derived-model-not-new-measurements",
+      "operation": "maximum-feasible-GPU-score-at-or-below-current-equivalent-GPU-power",
+      "reference": "baseline-catches-up-as-headroom-shrinks",
+      "activation": "CPU-capacity-and-active-power-release",
+      "blend": "reference-plus-activation-times-remaining-feasible-headroom",
+      "thermalThrottling": false,
+      "rawCapabilityAnchorsUnchanged": true
+    }
+  },
+  "editorLayout": {
+    "designWidth": 432,
+    "designHeight": 628,
+    "designControlHeight": 35,
+    "actualHeight": "viewportHeight-92",
+    "scale": "actualHeight/628",
+    "left": "independent-fit-after-measuring-right",
+    "bridge": "split-layout.js"
+  },
+  "tsPowerChart": {
+    "renderer": "gpu-capability-chart.js",
+    "sampler": "ts-power-curve.js",
+    "axis": "watts",
+    "series": 4,
+    "minimumWattLabelGapPx": 12,
+    "scope": "four-curves-use-the-actual-shared-CPU-GPU-supply-solver"
+  },
+  "devicePowerCaps": {
+    "scope": "simulation-only",
+    "maximumWatts": {
+      "deck": 16,
+      "m780": 45,
+      "c8": 45,
+      "g3e": 80,
+      "m395": 80,
+      "z2e": 45,
+      "m6800": 45,
+      "m5800": 45,
+      "i1195": 45,
+      "c7": 45,
+      "gos": 45
+    },
+    "requestedMaximumWatts": 150,
+    "effectivePowerBeforeControllerAndCorePolicy": true,
+    "preserveRequestedSettings": true,
+    "snapshotDiagnostics": "powerLimits"
+  },
+  "g3ePowerEvidence": {
+    "manufacturerSustainedWatts": 45,
+    "processorMaximumTurboWatts": 80,
+    "unverifiedGpuAboveWatts": 35,
+    "confirmedGpuPlateauWatts": null,
+    "numericCurveChanged": false
+  },
+  "gameGpuEfficiency": {
+    "source": "YmccSceneData.GAME_GPU_EFFICIENCY",
+    "profiles": {
+      "c8": {
+        "ordinary3dRetainedPct": 89.41233608547839,
+        "animeRetainedPct": 100,
+        "light2dRetainedPct": 100,
+        "measured": false,
+        "origin": "user-game-parity-calibration",
+        "referenceGpu": {
+          "z2e": 3682,
+          "c8": 4118
+        }
+      }
+    },
+    "scope": "game-render-throughput-only",
+    "allPoliciesShare": true,
+    "tsScoreDirectScaling": false
+  },
+  "simulatedGpuCeilings": {
+    "deck": 1400,
+    "z2e": 3682
+  },
+  "sceneDemand": {
+    "e": {
+      "scale": 1.8,
+      "previousScale": 1,
+      "cpu": true,
+      "gpu": true,
+      "finiteTaskWork": true,
+      "origin": "user-requested-2026-10-18",
+      "scope": "simulation-scene-work-not-hardware-capacity-or-power-multiplier"
+    }
+  },
+  "previewMonitor": {
+    "location": "single-top-left-panel",
+    "primary": [
+      "FPS",
+      "1%Low",
+      "TDP"
+    ],
+    "secondary": [
+      "CPUusage",
+      "GPUusage",
+      "CPUfrequency"
+    ],
+    "floatingCornerReadouts": false,
+    "values": "same-selected-world-snapshot",
+    "tdp": "measured-simulation-packageWatts-not-configured-limit",
+    "productionStyles": {
+      "source": "src/components/MonitorHudTemplate.vue",
+      "generated": "monitor-hud-base.css",
+      "syncTool": "tools/sync_simulation_monitor_style.mjs",
+      "sensorConnections": false
+    }
+  },
+  "uiRevision": "quick-simulation-transient-spinner-2026-10-18",
+  "quickLoading": {
+    "indicator": "rotating-ring",
+    "container": "plan-loading",
+    "running": "visible-with-scene-progress",
+    "complete": "entire-container-hidden-zero-layout-space",
+    "cancel": "hidden-animation-released",
+    "error": "message-visible-without-spinner",
+    "policyComparisonsPreserved": true
+  },
+  "entryPreview": {
+    "scene": "e",
+    "label": "轻度2D",
+    "alwaysOnOpen": true,
+    "firstPersonMotionScale": 0.25,
+    "reductionPct": 75,
+    "forwardTravelPreserved": true
+  },
+  "sharedSpatialNavigation": {
+    "source": "src/gamepad/spatial.ts",
+    "sha256": "2b00c5c8bf21d07a833d962d3ffba2fdcd6eb2b82b7b935f3adf336f644b428f"
+  }
+}

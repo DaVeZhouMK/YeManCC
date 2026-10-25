@@ -1,0 +1,13 @@
+# Controller Session calibration mode offline sidecar
+
+Run `node tools/controller_motion_mode_selftest.mjs` in mainline. Optional `--out` names a fresh direct child of `Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/AutomaticCalibration/SessionMode`; optional `--vcvars` selects MSVC x64. Every child process is bounded at 45 seconds. Compiler metadata is limited to compiler location/hash/tool version/SDK version: no bare SET/environment dump is executed or saved.
+
+The harness includes the actual production `controller_motion_session.h` and its actual `controller_motion_processor.h` Owner dependency. Baselines include current production files directly; immutable byte snapshots and SHA256 are kept, include logs verify the selected files, and all input hashes are rechecked at completion. Missing new APIs fail explicitly instead of using a guessed substitute implementation.
+
+Manual assertions cover false->Manual0 and true->Stillness|SensorFusion3; no implicit auto activation from select/process; idempotent repeated frames; both toggle directions; invalidation with no native calls and subsequent restoration; valid/unknown/wrong/retired query; exact key ownership; failed/incomplete select/create and no retired-token resurrection; each Ops and ReadOps pointer replaced separately plus complete callback-set replacement; optional reads removed; pointer reuse and different-pointer replacement; fresh keys at a reused native address; unchanged select preserving known or unknown mode.
+
+Controlled callback records identify bank, slot, lifetime generation, kind and mode, so pointer reuse cannot stand in for ownership. Mode-only operations must leave offset, handle creation, processing calls, previous time, delta and quaternion state alone. A manually pinned first quaternion, zero-dt readback and explicit next dt are independent checks; an untouched actual Session is only a supplementary trajectory control, not a copied reference implementation.
+
+Callbacks are serialized, nonthrowing and non-reentrant C ABI stand-ins. No exceptions/reentry/concurrency or new exception-safety guarantees are tested. The sidecar never loads a real DLL, touches hardware/devices/settings/services, performs sleep/wake, or starts main/consumers. Physical calibration quality and real sensor fusion remain unverified.
+
+Eight small semantic mutants cover the two forced intents, ignored invalidation, per-frame cache loss, mode-triggered quaternion/time reset, a forbidden native invalidation write, and Owner incorrectly initializing Auto3. Every mutant must compile in both Release and Checked, complete all cases with normal semantic exit 1, and hit its predeclared assertion. Build failures and crashes never count as kills.

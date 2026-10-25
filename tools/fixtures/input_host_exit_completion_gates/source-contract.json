@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-23T11:34:21.244712+08:00",
+  "normalization": "none; all reviewed complete blocks/globals and dependencies use raw bytes",
+  "scopeRawHashes": {
+    "readyCase": "27919d627f4f927e7fb75e0003b20c2e3f611fe5072892518b7fdabd7134254b",
+    "messageLoop": "2cc7d1e013bd149e942dbd04a3e3230615c25b96adae546000477ce6c58daf8f",
+    "hostLocalPredicate": "7d466cbe784dc2cc6ac3c32196e8f7094b4ba8dda19b768e2d9fea007cafd7d4",
+    "capturePredicate": "90c754a95bc5b4ddada8501c2e615213db25e356b92defd12a252ea7b19cc4ea",
+    "global:g_exitRequested": "81db3e1a6cbae8f8f1a070be9da7831aa6a3c8767d5e5e6086d2296c26d7f14d",
+    "global:g_exitReadyPosted": "fb9be4449cd35b1652823fe4a42535d84a683e5bf8b1e0d80cb20a15f771d7b9",
+    "global:g_exitCode": "457fe91fe7dd07de68cafb1074a8540c642c89fba4054133e5aab26978eaa12d",
+    "global:g_exitCleanupThread": "5d24b8c36fa248ec5235ca273465d4738395768052afdcb8e0c9cbebf8e7a071",
+    "global:g_exitCleanupCompleted": "5839c3f1bc834a36cb5869a542182b0a6a749a792baa099943d2d361dac96c53",
+    "global:g_exitCleanupStage": "6e3569c61e69bcbf45ecaef28547c56612bf6127bb8e87e0f9c78b23375875a1",
+    "global:g_exitBeginTick": "c03ea2e0feb69b8dadc2bd44052eee50ee9e05fbba255b07f8bc9859972a3240",
+    "global:g_exitLastWaitingStage": "645a754d2aeffeae060c90f8dcbc52e8a493bc6433d9da2c86b3506d46dfc3d0",
+    "global:g_captureExitReleased": "050a356dffbf8b9ef0963ef6acb5406eff606bd5b4bd88db92ea6de884fd93bb",
+    "global:g_inputHostExitLocalReturned": "aab81e16141905c9a361e8546f425599dd03b9f464b1d7628a3ea585396f6616"
+  },
+  "dependencyHashes": {
+    "native/input_host_exit_owner_runtime.h": "8ad4d83c7d26fe83d193e92629fc18c1138ce3d97e09f284b6c2878c8b969338",
+    "native/exit_cleanup_wait.h": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6",
+    "native/input_host_exit_retirement.h": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a",
+    "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f",
+    "tools/input_timer_evidence_adapter_selftest.py": "2ac46662165a73a31c172c20dd9ee05dc7a4dd4c9b15ccdaa7a142fda6501660",
+    "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json": "4f452caa9eab95ab7d03d34af4862fe1e1966ddf9c5b9bb2a892b42e2f0a37d6"
+  },
+  "historicalMain": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\before\\native\\main.cpp",
+    "sha256": "b9e4489a94c83220c43a9101e251bfa62560f603d794f3ff9f3e7af207913b10",
+    "scopeRawHashes": {
+      "readyCase": "8e84acf3de7b4b1cd2d97f2b762f92664ec3b5f28da6324b3240ede538004de8",
+      "messageLoop": "ed0b04d95f6e7b0b4bb05e5794754738dd74247224fcc97b99cfb161ae0d7327"
+    },
+    "purpose": "Original complete READY case and wWinMain message loop before Host-local completion gate; actual negative controls only"
+  },
+  "syntaxR2Provenance": {
+    "receipt": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\native-snapshot-r2\\RESULT.json",
+    "receiptRawSha256": "6cf0095b3d608b5f36837f6da6a8358798a3fdaedd9709c5751bc9b84d30b74d",
+    "mainSha256": "ee7fcca1700fa635f9da481594d06d571ec7baa13b0c320847a8070d3c028203",
+    "sourceCount": 517,
+    "status": "PASS_EXACT_NATIVE_SNAPSHOT",
+    "completeSidecarScopeRawMatchesR2": true,
+    "wholeCurrentMainAcceptance": false
+  },
+  "leaves": {
+    "realPrivateWindowsResources": [
+      "CreateEventW/SetEvent/checked CloseHandle",
+      "CreateThread/normal return/real kernel wait/GetExitCodeThread/GetHandleInformation/checked CloseHandle"
+    ],
+    "productionFunctionsExecuted": [
+      "complete WM_APP_EXIT_READY case",
+      "complete wWinMain MSG declaration and for-loop",
+      "complete inputHostExitLocalOwnershipReleased",
+      "complete inputCaptureExitOwnershipReleased",
+      "real exit_cleanup_wait.h with explicit message-wait port"
+    ],
+    "hostState": "memory HostMx/std::mutex, process/primary/pipe cells and transport snapshot; no product Host or retirement worker",
+    "otherModulesAndUI": "all notification, timer, icon, job, WebView, gamepad, recovery and window teardown are memory ports",
+    "recoveryStopped": "memory fact; actual recovery worker is outside this scope",
+    "loopObservation": "Actual cleanup wait result followed by scripted queued-message wake. Memory PeekMessageW ends the observation via fixture exception outside the real noexcept wait helper. Actual branch/break/continue/WAIT_FAILED bodies remain unchanged.",
+    "localRetirementHeader": "raw source context pin only; resource retirement/worker belongs to parent/Gauss, not executed",
+    "fixtureActor": "later explicit return facts are supplied by harness; no product self-healing or main fallback claim"
+  }
+}

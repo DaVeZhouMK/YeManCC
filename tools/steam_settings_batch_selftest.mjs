@@ -2,7 +2,7 @@ import fs from 'node:fs';import path from 'node:path';import assert from 'node:a
 const root=process.cwd(),out=process.env.YMCC_STEAM_SETTINGS_OUT||path.resolve(root,'../../Build/Validation/monitor-steam-settings-20261009/batch');fs.mkdirSync(out,{recursive:true});
 const main=fs.readFileSync('native/main.cpp','utf8');
 const kick=main.slice(main.indexOf('static void steamOverlayFixKick(const char* reason) {'),main.indexOf('// SteamDeck desktop right-stick sensitivity.'));
-assert(kick.includes('steamSettingsQueue(reason)'));assert(!kick.includes('poolSubmit'));assert(!kick.includes('SetTimer'));
+assert(!kick.includes('steamSettingsQueue(reason)'));assert(kick.includes('g_sofEnabled.store(false'));assert(kick.includes('g_sofPending.store(false'));assert(!kick.includes('poolSubmit'));assert(!kick.includes('SetTimer'));
 const input=fs.readFileSync('tools/steam_settings_batch_selftest.cpp','utf8').replace('//__PRODUCTION_OVERLAY_KICK__',kick);
 fs.writeFileSync(path.join(out,'fixture.cpp'),input);
 const bat='@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"'+root+'\\native" /I"'+root+'\\deps\\json" "'+out+'\\fixture.cpp" /Fo"'+out+'\\fixture.obj" /Fe"'+out+'\\fixture.exe"\r\nexit /b %errorlevel%\r\n';
@@ -15,12 +15,12 @@ const mouse=main.slice(main.indexOf('static json steamDeckMouseSet('),main.index
 assert(mouse.includes('steamSettingsQueue("mouse-user")')&&!mouse.includes('sdmApplyLocked();'));
 const observer=main.slice(main.indexOf('static void steamSettingsObserverStart()'),main.indexOf('static bool sofApplyValueToConfigText(const std::string& in, int target, std::string* out) {'));
 assert(observer.includes('steamSettingsQueue("steam-session")'));assert(observer.includes('g_steamClientPending.load()'));assert(!observer.includes('SetTimer'));
-console.log('PASS both existing Steam feature adapters and shared session observer use one write lane');
+console.log('PASS monitor/mouse adapters keep one write lane; abandoned Overlay kick cannot queue');
 
 const adapters = ['src/bridge/steamDeckMouse.ts','src/bridge/steamOverlayFix.ts'].map(file=>fs.readFileSync(file,'utf8'));
 assert(adapters.every(text=>text.includes("'steam.settings.get'")));
 assert(adapters[0].includes("'steam.settings.set'"));
 const bridge=fs.readFileSync('src/bridge/yeman.ts','utf8');
 const sleepSetter=bridge.slice(bridge.indexOf('export async function sleepGuardSetConfig('),bridge.indexOf('export interface SleepFactEvent'));
-assert(sleepSetter.includes("'steam.settings.set', {overlayOffFix:cfg.steamOverlayOffFix}"));
-console.log('PASS monitor, existing mouse and sleep overlay frontends all route through the public unified Steam entry');
+assert(!sleepSetter.includes('overlayOffFix:cfg.steamOverlayOffFix'));assert(sleepSetter.includes("'steamOverlayOffFix' in cfg"));
+console.log('PASS active monitor/mouse use unified entry; sleep overlay frontend is removed and blocked');

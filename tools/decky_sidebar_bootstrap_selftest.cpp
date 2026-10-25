@@ -111,6 +111,30 @@ int main() {
         const auto until=GetTickCount64()+1500;while(!closingState.expired()&&GetTickCount64()<until)Sleep(5);
         check(closingState.expired());
     }
+    // A replacement binding must cancel the preceding real WinHTTP wait,
+    // including a passive WebSocket receive with no peer response. No Steam IO.
+    for(const auto& mode:{std::string("http-silent"),std::string("ws-silent")}){
+        LocalHttpFixture server(mode);CancelSignal owner;owner.renew();auto previous=owner.current();
+        ymcc::steamlive::HttpHandle session(WinHttpOpen(L"MirrorGenerationFixture/1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,WINHTTP_FLAG_ASYNC));
+        ymcc::steamlive::HttpHandle connection(WinHttpConnect(session.h,L"127.0.0.1",server.port,0));
+        const auto started=GetTickCount64();std::vector<std::weak_ptr<AsyncState>> pending;bool canceled=false;
+        std::thread replace([&]{if(WaitForSingleObject(server.accepted,2000)==WAIT_OBJECT_0){Sleep(40);owner.renew();}});
+        try{
+            AsyncRequest request(WinHttpOpenRequest(connection.h,L"GET",L"/generation",nullptr,WINHTTP_NO_REFERER,WINHTTP_DEFAULT_ACCEPT_TYPES,0),previous,GetTickCount64()+1000);
+            pending.push_back(request.callbackState());request.handshake(mode=="ws-silent");
+            if(mode=="ws-silent"){
+                AsyncRequest socket(WinHttpWebSocketCompleteUpgrade(request.handle(),0),previous,GetTickCount64()+1000,true);
+                pending.push_back(socket.callbackState());socket.receiveText(100);
+            }
+        }catch(const std::exception& error){canceled=std::string(error.what())=="mirror-bootstrap-canceled";}
+        replace.join();check(canceled);check(GetTickCount64()-started<700);
+        check(previous->canceled());auto current=owner.current();check(current!=previous&&!current->canceled());
+        previous->cancel();check(!current->canceled());owner.cancel();check(current->canceled());
+        const auto until=GetTickCount64()+1500;
+        const auto closed=[&]{return std::all_of(pending.begin(),pending.end(),[](const auto& state){return state.expired();});};
+        while(!closed()&&GetTickCount64()<until)Sleep(5);
+        check(closed());
+    }
     {
         LocalHttpFixture server("http-silent");
         ymcc::steamlive::HttpHandle session(WinHttpOpen(L"MirrorFixture/1",WINHTTP_ACCESS_TYPE_NO_PROXY,WINHTTP_NO_PROXY_NAME,WINHTTP_NO_PROXY_BYPASS,WINHTTP_FLAG_ASYNC));
@@ -121,6 +145,7 @@ int main() {
     }
     WSACleanup();
     std::cout<<"Bootstrap local guard tests passed: "<<checks<<"\n";
+    return 0;
 }
 
 

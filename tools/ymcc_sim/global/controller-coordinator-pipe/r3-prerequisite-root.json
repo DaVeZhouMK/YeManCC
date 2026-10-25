@@ -1,0 +1,96 @@
+{
+  "schemaVersion": 1,
+  "sourceVersion": "VC-R3-B46-368BADC1-20261020",
+  "productMainSha256": "368badc1f6af006a093e16bbc52e6330011abf447441b79101ffb6b7eb2f4d09",
+  "workspaceRoot": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1",
+  "authorizedBuildRoot": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1",
+  "expectedManagedSources": [
+    {
+      "relative": "InputHost/Program.cs",
+      "sha256": "d6ccb36b3bcd6049c854b8cfb034fd4822c464b2cf3c42468835b53684ac2504"
+    },
+    {
+      "relative": "InputHost/PsEndpointOwnership.cs",
+      "sha256": "28ddff52ffc9d25749d08d3d1044720ac694724b9687be8ccae154cd14402a89"
+    },
+    {
+      "relative": "InputHost/ParentProcessLifetime.cs",
+      "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+    },
+    {
+      "relative": "InputHost/HostControllerOutputStop.cs",
+      "sha256": "dc02273923d3c2858493e407e08e8fe82c0b4521b090148ff7ed3eb476ec3d61"
+    },
+    {
+      "relative": "InputHost/HostControllerIdleCtsRelease.cs",
+      "sha256": "f214a55f7a651a0be407a2d45337d2bcd8cb780e893616da97ad0daa90121841"
+    },
+    {
+      "relative": "InputHost/HostGameOutputObservation.cs",
+      "sha256": "3ffb11949477a64d30b33417788f69c297e56def54b84aa6922b53124d26d6de"
+    },
+    {
+      "relative": "InputHost/MsiSteamDeckReleaseFence1726.cs",
+      "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+    },
+    {
+      "relative": "InputHost/MsiVirtualReportChain1410.cs",
+      "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+    },
+    {
+      "relative": "InputHost/ScreenTouchpadReport.cs",
+      "sha256": "be9479ccd3dd43c45437ed2bbc774f6ffc033c956d75d2adf3cc41103d38794f"
+    },
+    {
+      "relative": "InputHost/ScreenButtonReport.cs",
+      "sha256": "135cfbbbdf6f0f2a00d794afb1d5046b6da5b9d8d1c4b1886cabbde072fca7f9"
+    },
+    {
+      "relative": "InputHost/CanonicalFrameFingerprintMemo.cs",
+      "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+    },
+    {
+      "relative": "InputHost/HostResponseFields.cs",
+      "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+    },
+    {
+      "relative": "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+      "sha256": "87899986c5eb3fa2c9199ab4122791296030bef9c6ece52877bf41a2ea9067ab"
+    },
+    {
+      "relative": "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+      "sha256": "bd306391acb9d2e259a497814f93edb20b73a7e79861359ce1ade2486b91a5b5"
+    },
+    {
+      "relative": "tools/inputhost_lifecycle_selftest.cs",
+      "sha256": "2dd948a805f35cd90efb32c108e60de86bb0fca7d95f635e68d6e9bb79b63b4e"
+    },
+    {
+      "relative": "tools/input_lifecycle_managed_fixture.mjs",
+      "sha256": "74d8f513f68e1bc03c1fefbab586a1ad2890e3fe520f70f40c96abf44d28a501"
+    },
+    {
+      "relative": "tools/fixtures/input_lifecycle_integration/ManagedEntry.cs",
+      "sha256": "b726178f329dd998c5e326c5f0cef0b192ed0c4cdc8646420ca9440035d6fb15"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/inputhost-protocol/adapter.mjs",
+      "sha256": "338e803547c9b0d6ba17482692c63779f3221b1cb8e2845e80b79891120aff13"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+      "sha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2"
+    },
+    {
+      "relative": "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+      "sha256": "fb26f4aa14d7bb21a34eb27a8b997421b10336017223c9782ad7cc2c59939482"
+    }
+  ],
+  "sourcePolicy": "Exact B46 source member mapping; independently rebuilt D-only artifacts. Historical B39/fixed24 identities retained unchanged.",
+  "fixedRunInputBinding": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/B46-fixed-run-input-bindings.json",
+    "sha256": "6d34f0dbbb104966e6de23b282f47b29130656adf82e2dab5448ec331a6826b9"
+  },
+  "sourceRoot": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46",
+  "maintainability": "This JSON is a per-batch declaration, not a permanent source or artifact dependency. refresh-prerequisites.mjs regenerates it from an explicit selected repo root, verified input binding, fresh owned output and reviewed isolation boundary."
+}

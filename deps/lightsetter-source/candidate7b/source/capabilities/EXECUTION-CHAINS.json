@@ -1,0 +1,538 @@
+{
+  "schemaVersion": 1,
+  "objective": "全部冻结HC机型能力统一分配、调用和消费；以长期维护和最强CPU性能为持续目标",
+  "goalComplete": false,
+  "policies": {
+    "priority": [
+      "capability-consumption-completeness",
+      "real-call-and-recovery-closure",
+      "fan-motion-other-high-frequency-paths",
+      "low-frequency-activation-optimization"
+    ],
+    "hcLongTermBoundary": "EC类硬件能力；逐项以真实依赖和生命周期证据确认迁出条件",
+    "currentDllTrimming": "deferred-by-user",
+    "smallSinglePurposeDlls": "allowed",
+    "selection": "resolve immutable model/recipe once, consume directly; rebind on changed identity",
+    "liveGuards": "readiness, authorization, ownership, source freshness, power and publication generations remain live",
+    "upgrade": "detect input/consumer differences, generate reviewed mappings, execute real positive/negative consumers and retain receipts",
+    "performance": "Record local cost; incomplete paths cannot establish lower whole-process cost. Require complete positive/negative consumer and release traces first."
+  },
+  "domains": [
+    {
+      "id": "fan",
+      "priority": 1,
+      "frequency": "repeated-control-and-status-ticks",
+      "status": "dispatch-connected",
+      "chain": [
+        "existing IPC/API",
+        "RealHcBackend.Route",
+        "HcCapabilityTypeCache<FanRoute>",
+        "bound FanRoute",
+        "existing vendor writer/callback",
+        "existing hardware transport"
+      ],
+      "consumers": [
+        {
+          "file": "FanLab/real-host/Program.cs",
+          "anchor": "routeTypeCache ??= CapabilityRoutes.CreateTypeCache()"
+        },
+        {
+          "file": "capabilities/HcDeviceCapabilityCatalog.cs",
+          "anchor": "public sealed class HcCapabilityTypeCache<T>"
+        },
+        {
+          "file": "capabilities/AsusFanCapabilitySession.cs",
+          "anchor": "AsusFanCapabilitySession"
+        }
+      ],
+      "necessaryBoundaries": [
+        "Host ownership and isolated failure handling",
+        "authorization/lease and actual readiness",
+        "vendor write result and restore/release settlement"
+      ],
+      "removedOverhead": [
+        "repeated full-name/catalog dictionary resolution for the same runtime Type"
+      ],
+      "remainingIssues": [
+        "FAN-HC-FACTORY",
+        "FAN-LIVE-CONSUMPTION-AUDIT"
+      ],
+      "tests": [
+        "fan.unified-capability-dispatch",
+        "fan.unified-capability-roundtrip"
+      ],
+      "observability": {
+        "existing": [
+          "CapabilityId in ASUS operation receipt",
+          "FanRoute/FactoryType",
+          "write provider/source",
+          "lease and restore settlement"
+        ],
+        "new": [
+          "Type-cache ResolutionCount for diagnostics, no per-tick log"
+        ],
+        "fieldAvailability": "depends on exact installed payload identity"
+      }
+    },
+    {
+      "id": "motion",
+      "priority": 1,
+      "frequency": "per-sensor-sample-and-BUS-frame",
+      "status": "windows-recipe-total-binding-connected; private-provider-and-controller-binding-pending",
+      "chain": [
+        "native/Host sensor source",
+        "retained Windows/controller sample and source lease",
+        "model recipe/selector admission",
+        "existing matrix and GamepadMotion processing",
+        "actual output consumer/publication fence"
+      ],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "static thread_local CachedRecipe cached;"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureMotionSelectorBound()"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureProcessMotionContribution("
+        },
+        {
+          "file": "capabilities/HcMotionCapabilityCatalog.h",
+          "anchor": "inline const Recipe* consume("
+        }
+      ],
+      "necessaryBoundaries": [
+        "source generation/freshness and paired gyro+accel",
+        "capture ownership and power/publication fencing",
+        "exact matrix lineage and controller/Windows owner separation"
+      ],
+      "removedOverhead": [
+        "repeated raw-DMI copy/normalization/full model resolution for unchanged generic identity",
+        "reviewed and legacy Bound retrieve original recipe by validated total-library slot rather than repeating a linear model/tuple lookup"
+      ],
+      "remainingIssues": [
+        "MOTION-TOTAL-BINDING",
+        "MOTION-REPEATED-RECIPE-LOOKUPS"
+      ],
+      "tests": [
+        "gyro.machine-motion-consumers",
+        "gyro.recipe-dispatch-hotpath",
+        "gyro.unified-motion-bindings"
+      ],
+      "additionalChecks": [
+        "tools/hc_generic_motion_hotpath_selftest.mjs"
+      ],
+      "observability": {
+        "existing": [
+          "selectorId/deviceClass",
+          "matrix IDs and source hash",
+          "power/binding generation",
+          "actual provider",
+          "unifiedCapabilityId",
+          "unifiedCatalogSha256"
+        ],
+        "fieldAvailability": "log-evidence task maps ordinary exported fields; software fixtures do not establish physical axes"
+      }
+    },
+    {
+      "id": "lighting",
+      "priority": 3,
+      "frequency": "low-frequency-commands",
+      "status": "model-action-consumers-connected; final-evidence-pending",
+      "chain": [
+        "gamepad.setLed",
+        "one shared identity lookup and indexed Route",
+        "ROG Aura / MSI HID / LightSetter selected directly",
+        "approved independent Mini core or HC device callback",
+        "bounded receipt"
+      ],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "const auto* lightingRoute = ymcc::lighting::resolve(catalogDevice);"
+        },
+        {
+          "file": "FanLab/LightSetter/Program.cs",
+          "anchor": "ExecuteResolvedCatalogLedAction"
+        },
+        {
+          "file": "FanLab/LightSetter/DeviceCoreConsumer.cs",
+          "anchor": "capabilityCatalogSha256"
+        }
+      ],
+      "necessaryBoundaries": [
+        "family/registered-model and action checks",
+        "LightSetter process isolation for remaining HC lifecycle",
+        "exact helper identity/action/catalog binding",
+        "write-task completion and error evidence"
+      ],
+      "removedOverhead": [
+        "repeat model checks and helper operation re-resolution",
+        "unrelated cached Aura handle selecting a writer"
+      ],
+      "remainingIssues": [
+        "LIGHTING-HC-LIFECYCLE",
+        "LIGHTING-LOW-FREQUENCY-OPTIMIZATION-DEFERRED"
+      ],
+      "tests": [
+        "lighting.unified-capability-dispatch",
+        "lighting.signal-consumer"
+      ],
+      "observability": {
+        "new": [
+          "requestedCapabilityId",
+          "capabilityId",
+          "capabilityOperation",
+          "capabilityCatalogSha256",
+          "backend",
+          "helperReceipt"
+        ],
+        "physicalEffectVerified": false,
+        "fieldAvailability": "new source only until normal payload build/promotion/installation"
+      }
+    },
+    {
+      "id": "battery",
+      "priority": 2,
+      "frequency": "policy-commands-and-readback",
+      "status": "exact-rule-and-controller-consumers-connected",
+      "consumers": [
+        {
+          "file": "native/BatteryHost/Policy.cs",
+          "anchor": "capabilityRoutes.Resolve("
+        },
+        {
+          "file": "capabilities/HcBatteryCapabilityCatalog.cs",
+          "anchor": "public static HcBatteryCapabilityDispatcher<T> Bind"
+        },
+        {
+          "file": "native/BatteryHost/Controller.cs",
+          "anchor": "capability=Policy.ResolveCapability(identity)"
+        },
+        {
+          "file": "native/BatteryHost/battery-routes.json",
+          "anchor": "asus-ally-acpi"
+        },
+        {
+          "file": "tools/battery-charge-contract.mjs",
+          "anchor": "project.matchAll(/<Compile"
+        }
+      ],
+      "tests": [
+        "battery.charge-workflow"
+      ],
+      "remainingIssues": [
+        "BATTERY-SUIPLAY-NOT-ADMITTED"
+      ],
+      "chain": [
+        "actual BatteryHost Identity",
+        "HcBatteryCapabilityCatalog exact reviewed rule",
+        "bound original Route consumer",
+        "live firmware and battery presence",
+        "independent provider readback/write/conflict/recovery",
+        "Snapshot with capability/rule/origin/catalog identity"
+      ],
+      "necessaryBoundaries": [
+        "existing exact firmware gate",
+        "independent readback and stale fence",
+        "software bypass hysteresis and conflict/recovery ownership"
+      ],
+      "observability": {
+        "new": [
+          "CapabilityId",
+          "CapabilityRuleId",
+          "CapabilityOrigin",
+          "CapabilityCatalogSha256",
+          "CapabilityDeclaredByFrozenHc"
+        ],
+        "runtimeContract": "sourceId covers all four linked catalog sources; binary identity remains version-specific",
+        "physicalEffectVerified": false,
+        "identityVsImplementation": "frozen-HC-identity describes model provenance only. GPDWinMini_HX370 has a reviewed native firmware route without a frozen HC declaration; six later models use ymcc.device IDs and reviewed-native-extension origin."
+      }
+    },
+    {
+      "id": "controller",
+      "priority": 1,
+      "frequency": "per-input-report-and-output-frame",
+      "status": "existing-consumers-inventoried; unified-source-binding-pending",
+      "chain": [
+        "physical source/container/interface",
+        "buttons/axes/backbutton or controller motion bank",
+        "actual input processing and ownership",
+        "virtual output final-submit fence",
+        "owned physical hiding and release/return"
+      ],
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideBuildSourceInterfaceInventory("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureOnGamepad("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "OemChordProfileId"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "legionMotionDecodeReport("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureLegionMotion("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureControllerCalibrationSourceKey("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionMayIssue("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionRequestCurrent("
+        },
+        {
+          "file": "InputHost/Program.cs",
+          "anchor": "TrySubmitFrame"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideApplyPhysicalTransaction("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideShouldReturnApplication("
+        },
+        {
+          "file": "src/bridge/controllerFeedbackCapabilities.ts",
+          "anchor": "outputCallbackBound: false"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "physicalFeedbackFinish("
+        }
+      ],
+      "tests": [
+        "controller.signal-consumer",
+        "controller.input-diagnostics",
+        "controller.persona",
+        "controller.inputhost-optional-trigger-protocol",
+        "controller.inputhost-cpu-cost-window",
+        "controller.feedback-capabilities"
+      ],
+      "remainingIssues": [
+        "CONTROLLER-SOURCE-AND-INPUT-BINDING",
+        "CONTROLLER-MOTION-PROVIDER-BINDING",
+        "CONTROLLER-VIRTUAL-OUTPUT-AND-HIDE-RECEIPTS",
+        "CONTROLLER-GAME-FEEDBACK-RETURN-PATH"
+      ],
+      "integrationContract": "capabilities/CONTROLLER-CONSUMPTION.json"
+    },
+    {
+      "id": "oem-input",
+      "priority": 2,
+      "frequency": "capture-and-dispatch",
+      "status": "pending-unified-dispatch",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "OemChordProfileId"
+        }
+      ],
+      "tests": [
+        "controller.signal-consumer"
+      ],
+      "remainingIssues": [
+        "OEM-INPUT-CAPTURE-ACTION-BINDING"
+      ]
+    },
+    {
+      "id": "performance",
+      "priority": 2,
+      "frequency": "scheduling-and-commands",
+      "status": "pending-unified-dispatch",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "tdp"
+        }
+      ],
+      "tests": [],
+      "remainingIssues": [
+        "PERFORMANCE-OEMCPU-OEMGPU-BINDING"
+      ]
+    },
+    {
+      "id": "lifecycle-and-dependencies",
+      "priority": 2,
+      "frequency": "activation-recovery-release",
+      "status": "pending-full-audit",
+      "consumers": [
+        {
+          "file": "FanLab/DeviceCoreSharedDependencies.cs",
+          "anchor": "DeviceCoreSharedDependencies"
+        },
+        {
+          "file": "FanLab/RuntimeDependencyContract.cs",
+          "anchor": "RuntimeDependencyContract"
+        }
+      ],
+      "tests": [
+        "fan.runtime-connection",
+        "fan.parent-exit-contract"
+      ],
+      "remainingIssues": [
+        "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION"
+      ]
+    },
+    {
+      "id": "remaining-model-methods",
+      "priority": 2,
+      "frequency": "unclassified",
+      "status": "pending-full-reconciliation",
+      "consumers": [
+        {
+          "file": "capabilities/hc-device-catalog.json",
+          "anchor": "method"
+        }
+      ],
+      "tests": [],
+      "remainingIssues": [
+        "REMAINING-METHODS-CLASSIFICATION"
+      ]
+    }
+  ],
+  "issues": [
+    {
+      "id": "FAN-HC-FACTORY",
+      "status": "open",
+      "domain": "fan",
+      "problem": "已分配的风扇路线仍可能依赖HC工厂与生命周期；写者接通不等于已摆脱HC",
+      "next": "逐机型确认启动、关闭、异常和归还依赖后再替换"
+    },
+    {
+      "id": "FAN-LIVE-CONSUMPTION-AUDIT",
+      "status": "open",
+      "domain": "fan",
+      "problem": "70条路线的所有实际动作与共享所有权尚待整体逐项核对",
+      "next": "保留现有写者；优先检查高频轮询、反射和不必要IPC"
+    },
+    {
+      "id": "MOTION-TOTAL-BINDING",
+      "status": "open",
+      "domain": "motion",
+      "problem": "既有矩阵和实际处理消费者尚未全部纳入总库统一域分配",
+      "next": "已接通89条Windows配方登记和真实Bound消费；继续接MSI/Xbox私有提供者及按实际控制器来源绑定，不能宣布全域完成"
+    },
+    {
+      "id": "MOTION-REPEATED-RECIPE-LOOKUPS",
+      "status": "open",
+      "domain": "motion",
+      "problem": "其他机型仍有多次recipe查找和逐帧元数据构造候选",
+      "next": "根据实测热点统一绑定；保留逐帧新鲜度与归还栅栏"
+    },
+    {
+      "id": "LIGHTING-HC-LIFECYCLE",
+      "status": "open",
+      "domain": "lighting",
+      "problem": "除已选原生和Mini小DLL路线外，剩余灯光仍需HC助手生命周期",
+      "next": "消费拓扑确定后按实际硬件协议逐项迁出；当前不裁DLL"
+    },
+    {
+      "id": "LIGHTING-LOW-FREQUENCY-OPTIMIZATION-DEFERRED",
+      "status": "deferred-by-priority",
+      "domain": "lighting",
+      "problem": "单次助手启动/依赖加载优化收益低于高频链路",
+      "next": "高频能力完成后再测启用成本"
+    },
+    {
+      "id": "BATTERY-EXACT-RULE-BINDING",
+      "status": "closed",
+      "domain": "battery",
+      "problem": "精确固件规则、独立读回与已批准扩展尚未绑定总库",
+      "next": "复用实际BatteryHost政策与读回测试",
+      "resolution": "40 existing exact rules consumed through the shared dispatcher; 34 frozen model identities + 6 reviewed native extensions; original firmware/readback/recovery kept and actual consumers tested."
+    },
+    {
+      "id": "OEM-INPUT-CAPTURE-ACTION-BINDING",
+      "status": "open",
+      "domain": "oem-input",
+      "problem": "OEM识别、采集配置与动作消费者尚未统一",
+      "next": "优先核对高频采集与动作接口"
+    },
+    {
+      "id": "PERFORMANCE-OEMCPU-OEMGPU-BINDING",
+      "status": "open",
+      "domain": "performance",
+      "problem": "冻结OEMCPU/OEMGPU和机型限制待接入现有调度",
+      "next": "核对当前TDP/CPU/GPU消费者及必要依赖"
+    },
+    {
+      "id": "JOINT-DEPENDENCY-OWNERSHIP-RECONCILIATION",
+      "status": "open",
+      "domain": "lifecycle-and-dependencies",
+      "problem": "全域初始化、同设备所有权、恢复/归还及依赖尚未联合复算",
+      "next": "按实际闭环批次进行连接门与负例验收"
+    },
+    {
+      "id": "REMAINING-METHODS-CLASSIFICATION",
+      "status": "open",
+      "domain": "remaining-model-methods",
+      "problem": "剩余冻结方法尚未逐项分类接入或明确禁用",
+      "next": "基于源码方法锚点和实际调用者补齐"
+    },
+    {
+      "id": "BATTERY-SUIPLAY-NOT-ADMITTED",
+      "domain": "battery",
+      "status": "open",
+      "problem": "Frozen SuiPlay inherits CEc charging declarations; reviewed Windows allowlist explicitly withheld this route.",
+      "next": "Reconcile source and actual Windows transport/readback/recovery evidence before considering an admitted writer; do not enable from flags alone."
+    },
+    {
+      "id": "CONTROLLER-SOURCE-AND-INPUT-BINDING",
+      "status": "open",
+      "domain": "controller",
+      "problem": "手柄是独立能力域，现有按键、轴和背键消费者尚未完成总库统一来源绑定",
+      "next": "按实际控制器容器、接口、协议连接；不能用主机机型代替"
+    },
+    {
+      "id": "CONTROLLER-MOTION-PROVIDER-BINDING",
+      "status": "open",
+      "domain": "controller",
+      "problem": "已有Legion运动和校准消费者，实际物理手柄来源/分银行尚未接总库；其他手柄未完成统一验收",
+      "next": "复用实际解码、校准、提交和断连归还链，保留寿命与代际栅栏"
+    },
+    {
+      "id": "CONTROLLER-VIRTUAL-OUTPUT-AND-HIDE-RECEIPTS",
+      "status": "open",
+      "domain": "controller",
+      "problem": "虚拟输出、屏蔽物理手柄和归还各有现有消费者，尚未与总库绑定同轮闭环回执",
+      "next": "让后续虚拟手柄和屏蔽AI读取消费合同，核对真实来源、输出与所有权归还"
+    },
+    {
+      "id": "CONTROLLER-GAME-FEEDBACK-RETURN-PATH",
+      "status": "open",
+      "domain": "controller",
+      "problem": "现有能力UI明确反馈回调/实体转发未闭环；手动震动测试不能证明游戏反馈到实体手柄已实现",
+      "next": "按虚拟目标+物理来源元组接反馈、触觉/灯光和自动停止归还，先保留unclosed状态"
+    }
+  ],
+  "collaboration": {
+    "simulation": {
+      "threadId": "01a14d5e-f558-77e0-bcd0-39e028ed43ed",
+      "title": "模拟测试环境"
+    },
+    "fieldLogs": {
+      "threadId": "01a102b8-49b9-7b30-a2a7-341c8f0b6940",
+      "title": "完善YMCC CPU日志抓取清单"
+    },
+    "feedback": "node + exact artifact/source identity + evidence + first divergence; reuse ordinary logs and actual consumer fixtures"
+  }
+}

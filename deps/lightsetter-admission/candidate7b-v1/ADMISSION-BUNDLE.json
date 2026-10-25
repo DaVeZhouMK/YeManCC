@@ -1,0 +1,2470 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-lighting-admission-v1",
+  "createdUtc": "2026-10-19T06:49:55.248497+00:00",
+  "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "sourceBundleManifestSha256": "c06064b4d8f2916e895e8efaee4957cfcee0fd46be468a094981a810e86a18b2",
+  "profileRuntimeId": "YMCC-DEVICECORE-20261018-v1",
+  "proofs": {
+    "snapshot": {
+      "bundle": "source",
+      "path": "evidence/source-snapshot.json",
+      "sha256": "0af131a0757d71841c5c7d7b437d37780a6aa7daf3620d50600104768eebc25f"
+    },
+    "pdb": {
+      "bundle": "source",
+      "path": "evidence/candidate-helper-source-pdb-proof.json",
+      "sha256": "0db2c68067ae4847225df390082e6b67ef05181cc190491d4730b6256dbd6142"
+    },
+    "catalog": {
+      "bundle": "evidence",
+      "path": "proofs/catalog-execution.json",
+      "sha256": "f7f69d58e30c1902764447d558f8771b2fb6a71c0ea1f7a1ebae324652b0a7ee"
+    },
+    "originalPlan": {
+      "bundle": "evidence",
+      "path": "proofs/original-plan.json",
+      "sha256": "2464b03ade43bbec03fefb8cf6f9b39c378c471dda2a74b69c79a925f5f3af85"
+    },
+    "sourceBundleVerification": {
+      "bundle": "evidence",
+      "path": "proofs/source-bundle-verification.json",
+      "sha256": "b2ccb92dd5d1825d03ba3fad946c8c1869cb3161989af7b3aacd73f24c943348"
+    },
+    "installedConnection": {
+      "bundle": "evidence",
+      "path": "proofs/installed-connection.json",
+      "sha256": "15156d09c457afe3a9988c1b3d1c39e3661c8e74e153bc32889033a76eb7f736"
+    },
+    "installedShaAcl": {
+      "bundle": "evidence",
+      "path": "proofs/installed-sha-acl.json",
+      "sha256": "c15321fce12b21be9d2d334f3482f77fc19b2642f52fce626c148130f6eb7047"
+    },
+    "profile": {
+      "bundle": "evidence",
+      "path": "profile/profile.json",
+      "sha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c"
+    },
+    "candidateGlobal": {
+      "bundle": "evidence",
+      "path": "proofs/candidate-global.json",
+      "sha256": "fc4277ddd080ad4fac0b3a53e0e85ecebd537ac7e58e23aae75220b3c160e6b4"
+    },
+    "candidateSignal": {
+      "bundle": "evidence",
+      "path": "proofs/candidate-signal.json",
+      "sha256": "902b361c299cf60bc09a7f2704168c087c5efde51f6897af4e7f420018e243bb"
+    },
+    "installedGlobal": {
+      "bundle": "evidence",
+      "path": "proofs/installed-global.json",
+      "sha256": "ecf30703a7ce4ff3804bc36a9c5df41a5d022b1fd4f00a741105c98ac5c94265"
+    },
+    "installedSignal": {
+      "bundle": "evidence",
+      "path": "proofs/installed-signal.json",
+      "sha256": "eb479ccdb6d81783f6d8a19fa665414f8b3377a6023a109d3bcd785b6a942138"
+    },
+    "global": {
+      "bundle": "evidence",
+      "path": "proofs/candidate-global.json",
+      "sha256": "fc4277ddd080ad4fac0b3a53e0e85ecebd537ac7e58e23aae75220b3c160e6b4"
+    },
+    "signal": {
+      "bundle": "evidence",
+      "path": "proofs/candidate-signal.json",
+      "sha256": "902b361c299cf60bc09a7f2704168c087c5efde51f6897af4e7f420018e243bb"
+    }
+  },
+  "recordedFiles": [
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\DeviceCoreConsumer.cs",
+      "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/DeviceCoreConsumer.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\LightingAssemblyPins.cs",
+      "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/LightingAssemblyPins.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\OneXLightingSession.cs",
+      "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/OneXLightingSession.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\OneXQueuedLighting.cs",
+      "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/OneXQueuedLighting.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\Program.cs",
+      "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/Program.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\native\\ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bundle": "source",
+      "path": "source/native/ProcessEfficiency.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bundle": "source",
+      "path": "source/FanLab/DeviceCoreSharedDependencies.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bundle": "source",
+      "path": "source/FanLab/RuntimeDependencyContract.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bundle": "source",
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bundle": "source",
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bundle": "source",
+      "path": "source/capabilities/HcLightingCapabilityCatalog.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bundle": "source",
+      "path": "source/capabilities/HcLightingCapabilityCatalog.generated.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\obj\\YeManLightSetter\\release_win-x64\\YeManLightSetter.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bundle": "source",
+      "path": "generated/12-YeManLightSetter.GlobalUsings.g.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\obj\\YeManLightSetter\\release_win-x64\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bundle": "source",
+      "path": "generated/13-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\obj\\YeManLightSetter\\release_win-x64\\YeManLightSetter.AssemblyInfo.cs",
+      "sha256": "7f907a1b773341e0c16697e5fc3c856f3edb476352d8feaa798967a15990225e",
+      "bundle": "source",
+      "path": "generated/14-YeManLightSetter.AssemblyInfo.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\YeManLightSetter.csproj",
+      "sha256": "d0e700bdad086e6984943a48fefd69809ae447d7b0541a9da176ce92250e64b0",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/YeManLightSetter.csproj"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\YeManLightSetter.json",
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7",
+      "bundle": "source",
+      "path": "source/FanLab/LightSetter/YeManLightSetter.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\LightSetterSelfTest\\Program.cs",
+      "sha256": "4e9ca7de60c3c880bd65a962be380041f075352ca183af2198d67dac38a76aa6",
+      "bundle": "source",
+      "path": "source/tools/LightSetterSelfTest/Program.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\LightSetterSelfTest\\ArtifactProbe.cs",
+      "sha256": "ab8c68f18b13bc307f9c6e3f8adf335e3d9be99e9b501c04a2fad7a42dfb53b6",
+      "bundle": "source",
+      "path": "source/tools/LightSetterSelfTest/ArtifactProbe.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\LightSetterSelfTest\\FakeOneXDevice.cs",
+      "sha256": "6adf0537de28e25aa31140fb1fd9833ed9216a1f2cda48c52611ac888eaa841b",
+      "bundle": "source",
+      "path": "source/tools/LightSetterSelfTest/FakeOneXDevice.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\LightSetterSelfTest\\LightSetterSelfTest.csproj",
+      "sha256": "900f0da5253c02d39572d8f26b3c865acf7012114635e73513e3f14bf77b8d36",
+      "bundle": "source",
+      "path": "source/tools/LightSetterSelfTest/LightSetterSelfTest.csproj"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+      "sha256": "1e57df06a6243746fdfcacd546ad3f76a2e36bbd70d44b43ebca77f4d50dd3ee",
+      "bundle": "source",
+      "path": "source/tools/HcLightingCapabilitySelfTest/Program.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\HcLightingCapabilitySelfTest\\HcLightingCapabilitySelfTest.csproj",
+      "sha256": "08dfc939012f82fea839e23e338297124d27c1ed176452f6bd50142712d2cd50",
+      "bundle": "source",
+      "path": "source/tools/HcLightingCapabilitySelfTest/HcLightingCapabilitySelfTest.csproj"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\deps\\handheldcompanion-runtime\\source\\Misc\\SerialQueueTasks.cs",
+      "sha256": "53dd7fee5ec52945e3ff8048306fec57a43d7b1c8f3d5fac891d3c945e071ca8",
+      "bundle": "source",
+      "path": "source/deps/handheldcompanion-runtime/source/Misc/SerialQueueTasks.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+      "sha256": "2517bdb4144b2e6db8a9104950d326c34994c19d0f4a3e623e084511086ca5f6",
+      "bundle": "source",
+      "path": "source/capabilities/hc-device-catalog.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-lighting-policy.json",
+      "sha256": "f092fbba40bd617c8a6e80309c4fc1d708ba822042e3e8a38a80d99006a192f1",
+      "bundle": "source",
+      "path": "source/capabilities/hc-lighting-policy.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\INTEGRATION-STATUS.json",
+      "sha256": "93a67c24ec8f3d43a58c4601a91e5ea43f1ed5ce3c13488b428a56d94deb20af",
+      "bundle": "source",
+      "path": "source/capabilities/INTEGRATION-STATUS.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\EXECUTION-CHAINS.json",
+      "sha256": "7713afbdca153954b4ded5a95450f0d3835b6df6387df4f51b98ba075c2e0ecb",
+      "bundle": "source",
+      "path": "source/capabilities/EXECUTION-CHAINS.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\hc_capability_catalog_generate.mjs",
+      "sha256": "cfde07f69d2a974d5d33385ca8ecf67ef2c4f43ed9ef8c0fa3e5019910e61865",
+      "bundle": "source",
+      "path": "source/tools/hc_capability_catalog_generate.mjs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\lib\\hc_lighting_catalog.mjs",
+      "sha256": "e91b7337e65046557c5c20bc8388d4a354395ea06901a01367b381e5421f0dab",
+      "bundle": "source",
+      "path": "source/tools/lib/hc_lighting_catalog.mjs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source-snapshot.json",
+      "sha256": "0af131a0757d71841c5c7d7b437d37780a6aa7daf3620d50600104768eebc25f",
+      "bundle": "source",
+      "path": "evidence/source-snapshot.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.dll",
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+      "bundle": "source",
+      "path": "artifacts/YeManLightSetter.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.pdb",
+      "sha256": "dcde27bdd7408c4357536f32bab4c57e06ebfacf9eab59dc7766c9e9b69bf815",
+      "bundle": "source",
+      "path": "artifacts/YeManLightSetter.pdb"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanBackend.dll",
+      "sha256": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanBackend.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.authorization.md",
+      "sha256": "68d515be999f6d70614ca2a388fc425fe4d3a4d4c2d7d4f119c2a6317296a327",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.authorization.md"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.deps.json",
+      "sha256": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.deps.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.dll",
+      "sha256": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.exe",
+      "sha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.exe"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.payload.json",
+      "sha256": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.payload.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.runtimeconfig.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\install-fan-host-payload.ps1",
+      "sha256": "5a6d68f5ae5573f78cc77f147b295af802cc757d1855d0996239b14af6f3fbdf",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/install-fan-host-payload.ps1"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\run-emergency-fan-restore.ps1",
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/fan-host-v2/run-emergency-fan-restore.ps1"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\BlackSharp.Core.dll",
+      "sha256": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/BlackSharp.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\GameLib.Core.dll",
+      "sha256": "1946b5f67a272a9f0ba25962e091a331c19261e747cc138ef31051b66ce111d8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GameLib.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\GamepadMotion.dll",
+      "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GamepadMotion.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Gma.System.MouseKeyHook.dll",
+      "sha256": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Gma.System.MouseKeyHook.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\GongSolutions.WPF.DragDrop.dll",
+      "sha256": "1672736512ddbb8608795c25a54d3c040ebc570c46e3a332ce52727a19d2140e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GongSolutions.WPF.DragDrop.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\GregsStack.InputSimulatorStandard.dll",
+      "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GregsStack.InputSimulatorStandard.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.deps.json",
+      "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.deps.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.dll",
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.json",
+      "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.runtime.json",
+      "sha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.runtime.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HidLibrary.dll",
+      "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HidLibrary.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\IGDB.dll",
+      "sha256": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/IGDB.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Interop.IWshRuntimeLibrary.dll",
+      "sha256": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Interop.IWshRuntimeLibrary.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Configuration.Abstractions.dll",
+      "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Abstractions.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Configuration.Binder.dll",
+      "sha256": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Binder.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.FileExtensions.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Configuration.Json.dll",
+      "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Json.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Configuration.dll",
+      "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.DependencyInjection.dll",
+      "sha256": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyInjection.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.DependencyModel.dll",
+      "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyModel.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "sha256": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.Abstractions.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Diagnostics.dll",
+      "sha256": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Abstractions.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.FileProviders.Physical.dll",
+      "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Physical.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.FileSystemGlobbing.dll",
+      "sha256": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileSystemGlobbing.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Http.Polly.dll",
+      "sha256": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.Polly.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Http.dll",
+      "sha256": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Logging.dll",
+      "sha256": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Logging.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "sha256": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.ConfigurationExtensions.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Options.dll",
+      "sha256": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Extensions.Primitives.dll",
+      "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Primitives.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Win32.TaskScheduler.dll",
+      "sha256": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Win32.TaskScheduler.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Windows.SDK.NET.dll",
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Windows.SDK.NET.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.WindowsAPICodePack.Core.dll",
+      "sha256": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.WindowsAPICodePack.Shell.dll",
+      "sha256": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Shell.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\NAudio.Core.dll",
+      "sha256": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\NAudio.Vorbis.dll",
+      "sha256": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Vorbis.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\NAudio.Wasapi.dll",
+      "sha256": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Wasapi.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\NAudio.WinMM.dll",
+      "sha256": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.WinMM.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\NVorbis.dll",
+      "sha256": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NVorbis.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Nefarius.Utilities.Bluetooth.dll",
+      "sha256": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.Utilities.Bluetooth.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Nefarius.ViGEm.Client.dll",
+      "sha256": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.ViGEm.Client.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\PInvoke.Kernel32.dll",
+      "sha256": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Kernel32.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\PInvoke.Windows.Core.dll",
+      "sha256": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Windows.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Polly.dll",
+      "sha256": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Polly.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\PrecisionTimer.NET.dll",
+      "sha256": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PrecisionTimer.NET.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Resources\\PawnIO\\RyzenSMU.bin",
+      "sha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/PawnIO/RyzenSMU.bin"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Resources\\RTSS\\RTSSSharedMemoryNET.dll",
+      "sha256": "685f6e8d09e3b685a8334ae989f30f9859262046a170374f0df8121b2deba74d",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/RTSS/RTSSSharedMemoryNET.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Resources\\inpoutx64.dll",
+      "sha256": "5f27ed4d5cd58a1ee23deeb802e09e73f3a1d884ce2135f6e827f67b171269e7",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/inpoutx64.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Resources\\msiapcfg.dll",
+      "sha256": "8f9fcb5f14c3fbc66843687d8c9e1ac54f7e7d62946c2965d67dd70c4b576dc5",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/msiapcfg.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\RestEase.dll",
+      "sha256": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/RestEase.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SDL3-CS.dll",
+      "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SDL3-CS.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SapientiaUsb.dll",
+      "sha256": "0b7c5845b94b9caf1c45f7555e54918020eb046e83fd4bd625781bcf7acae9f5",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SapientiaUsb.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Sentry.dll",
+      "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Sentry.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Extensions.Logging.File.dll",
+      "sha256": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.File.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Extensions.Logging.dll",
+      "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Formatting.Compact.dll",
+      "sha256": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Formatting.Compact.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Settings.Configuration.dll",
+      "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Settings.Configuration.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Sinks.Async.dll",
+      "sha256": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Async.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Sinks.Console.dll",
+      "sha256": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Console.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Sinks.File.dll",
+      "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.File.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.Sinks.RollingFile.dll",
+      "sha256": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.RollingFile.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Serilog.dll",
+      "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Shared.dll",
+      "sha256": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Shared.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SharpDX.Direct3D9.dll",
+      "sha256": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.Direct3D9.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SharpDX.DirectInput.dll",
+      "sha256": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.DirectInput.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SharpDX.XInput.dll",
+      "sha256": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.XInput.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\SharpDX.dll",
+      "sha256": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\System.IO.Ports.dll",
+      "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.IO.Ports.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\System.Management.dll",
+      "sha256": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.Management.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\System.ServiceProcess.ServiceController.dll",
+      "sha256": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.ServiceProcess.ServiceController.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\UEFIVaribleDll.dll",
+      "sha256": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/UEFIVaribleDll.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WinRT.Runtime.dll",
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WinRT.Runtime.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WindowsInput.dll",
+      "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WindowsInput.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WpfScreenHelper.dll",
+      "sha256": "727c1669a6094285f0ed771263a35847b6305b13a59562265aa955cc2e07b76f",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WpfScreenHelper.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Xinput1_4.dll",
+      "sha256": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Xinput1_4.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\controller-hidapi.net.dll",
+      "sha256": "cd47d72903dbcba4e8c68cd5cc424b8648c12aa8a5c00cf2a30050aa28e4d0ca",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/controller-hidapi.net.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\craftersmine.SteamGridDB.Net.dll",
+      "sha256": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/craftersmine.SteamGridDB.Net.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\hidapi.dll",
+      "sha256": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\hidapi.net.dll",
+      "sha256": "5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.net.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\iNKORE.UI.WPF.Modern.Controls.dll",
+      "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.Controls.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\iNKORE.UI.WPF.Modern.dll",
+      "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\protobuf-net.Core.dll",
+      "sha256": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.Core.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\protobuf-net.dll",
+      "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\ricaun.NamedPipeWrapper.Json.1.8.0.dll",
+      "sha256": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/ricaun.NamedPipeWrapper.Json.1.8.0.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\steam-hidapi.net.dll",
+      "sha256": "2d1d03847ff4f90b6ca7059d55cf7f9cae40eafd31f01cc9974d514de76c52f9",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/steam-hidapi.net.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightDeviceCore.dll",
+      "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightDeviceCore.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.deps.json",
+      "sha256": "3c99d2a11a849726eb98a449fcddb646a2e1337825dc8f92d594e8aeb46def90",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.deps.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.exe",
+      "sha256": "6be372d07eea812f06bef54e79ec4b39b53cb152d1f8b758b652caef435ed8cd",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.exe"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.json",
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.runtimeconfig.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\YeManCC\\YeManCC.exe",
+      "sha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+      "bundle": "evidence",
+      "path": "fixture/before/YeManCC/YeManCC.exe"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\YeManCC\\update-manifest.json",
+      "sha256": "fcbb9013a240d0be770786a75e4035e683e07c84d95ef56b6b1fff6bbf60fa9c",
+      "bundle": "evidence",
+      "path": "fixture/before/YeManCC/update-manifest.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.dll",
+      "sha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+      "bundle": "evidence",
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.dll"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\YeManCC\\export-identity.json",
+      "sha256": "4799cb26b32aa7a60e33f4f9179a4b56f341a21454d2c09a8bf14a5ae771d98a",
+      "bundle": "evidence",
+      "path": "fixture/before/YeManCC/export-identity.json"
+    },
+    {
+      "originalPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.dll",
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+      "bundle": "source",
+      "path": "artifacts/YeManLightSetter.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\ActualLightingCatalog.csproj",
+      "sha256": "27a01bea2c5e7ab1d4c6ceeed3b8a8ad1b9cb66cfb53a268eff7c1b1b064eaec",
+      "bundle": "evidence",
+      "path": "catalog/inputs/01-ActualLightingCatalog.csproj"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\Program.cs",
+      "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd",
+      "bundle": "evidence",
+      "path": "catalog/inputs/02-Program.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-full-result.json",
+      "sha256": "65bc755b252becb5661a7bed009540b37e965bf9726081b4e686c5aff0c6f6f3",
+      "bundle": "evidence",
+      "path": "catalog/reports/candidate-full.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+      "bundle": "source",
+      "path": "artifacts/YeManLightSetter.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\old-loki-control-result.json",
+      "sha256": "7b886c786805dcf19d6717713f144f139bedb9b1cc68a4a91257a9de47b6c5a5",
+      "bundle": "evidence",
+      "path": "catalog/reports/old-loki-control.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-loki-control-result.json",
+      "sha256": "23f20adfc5f26526d9def401f4bee74c3524ee43f16076574b95c42362f01e71",
+      "bundle": "evidence",
+      "path": "catalog/reports/candidate-loki-control.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+      "sha256": "1d7ac9338ba91dc7bd707d336412995d5850a7f363357223c7090d67d9af0b0c",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/ActualLightingCatalog.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.pdb",
+      "sha256": "b07cf684f707392f3135bb4f8e830669e293bc8d359e44d2eb9ce5c7b6a8a4ea",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/ActualLightingCatalog.pdb"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.deps.json",
+      "sha256": "e5d29a71c082453bcca0dbcc17f7863614e11967ee61c47ee618fdcffed30bc7",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/ActualLightingCatalog.deps.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/ActualLightingCatalog.runtimeconfig.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\ActualLightingCatalog.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/sources/05-ActualLightingCatalog.GlobalUsings.g.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/sources/06-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\ActualLightingCatalog.AssemblyInfo.cs",
+      "sha256": "6cc8c1220f7840dfa5f2e0df33d1f1bd93ef1a3a614e8112875b9baeb3e7103b",
+      "bundle": "evidence",
+      "path": "modules/catalog-original/sources/07-ActualLightingCatalog.AssemblyInfo.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\bin\\LightSetterSelfTest\\release\\LightSetterSelfTest.dll",
+      "sha256": "c2e4116ded3d345a4f742f7c249e58e393efe7f775f6f9c5b3048a2995b13ad7",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/LightSetterSelfTest.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\bin\\LightSetterSelfTest\\release\\LightSetterSelfTest.pdb",
+      "sha256": "5c6a4202e305324d3b465f61029862e35abdacb56b2333715b5603fa831f1f38",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/LightSetterSelfTest.pdb"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\bin\\LightSetterSelfTest\\release\\LightSetterSelfTest.deps.json",
+      "sha256": "88ae7ddd611bcd2bec1dcf07d5932f568c821c3694f55de30a6a4d04f423cf2f",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/LightSetterSelfTest.deps.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\bin\\LightSetterSelfTest\\release\\LightSetterSelfTest.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/LightSetterSelfTest.runtimeconfig.json"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\Program.cs",
+      "sha256": "4e9ca7de60c3c880bd65a962be380041f075352ca183af2198d67dac38a76aa6",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/00-Program.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\ArtifactProbe.cs",
+      "sha256": "ab8c68f18b13bc307f9c6e3f8adf335e3d9be99e9b501c04a2fad7a42dfb53b6",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/01-ArtifactProbe.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\FakeOneXDevice.cs",
+      "sha256": "6adf0537de28e25aa31140fb1fd9833ed9216a1f2cda48c52611ac888eaa841b",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/02-FakeOneXDevice.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\Program.cs",
+      "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/03-Program.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXQueuedLighting.cs",
+      "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/04-OneXQueuedLighting.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXLightingSession.cs",
+      "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/05-OneXLightingSession.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\DeviceCoreConsumer.cs",
+      "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/06-DeviceCoreConsumer.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\LightingAssemblyPins.cs",
+      "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/07-LightingAssemblyPins.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/08-RuntimeDependencyContract.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/09-DeviceCoreSharedDependencies.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/10-ProcessEfficiency.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\handheldcompanion-runtime\\source\\Misc\\SerialQueueTasks.cs",
+      "sha256": "53dd7fee5ec52945e3ff8048306fec57a43d7b1c8f3d5fac891d3c945e071ca8",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/11-SerialQueueTasks.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/12-HcDeviceCapabilityCatalog.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/13-HcDeviceCapabilityCatalog.generated.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/14-HcLightingCapabilityCatalog.cs"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/15-HcLightingCapabilityCatalog.generated.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\LightSetterSelfTest.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/16-LightSetterSelfTest.GlobalUsings.g.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/17-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\LightSetterSelfTest.AssemblyInfo.cs",
+      "sha256": "7b6af8fc1fbbdd791378aaf9a35db80593944de04e2f319cb94c89865aa6d9d9",
+      "bundle": "evidence",
+      "path": "modules/boundary-177/sources/18-LightSetterSelfTest.AssemblyInfo.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\bin\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.dll",
+      "sha256": "faf1698895674eae6a71ce783dc749082a31980edaf81bad4b35d4fcd2f1488b",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.dll"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\bin\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.pdb",
+      "sha256": "516821d8a3b080c74c4d3b318862b0570add0933b101b4624a0d2105ed6e482a",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.pdb"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\bin\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.deps.json",
+      "sha256": "082477796b84e2ead118f1c54320e8028c50b322fd412cfec85f3efc91b88cfe",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.deps.json"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\bin\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.runtimeconfig.json"
+    },
+    {
+      "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+      "sha256": "dcccf9038090d7dc14287da84fe1422b211fcfec1dc93a879d3be128aeb268dd",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/sources/00-Program.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/sources/13-HcLightingCapabilitySelfTest.GlobalUsings.g.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/sources/14-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs"
+    },
+    {
+      "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.AssemblyInfo.cs",
+      "sha256": "d3ceb8ca9b8deba5043ec26334afc2cdf1a761ae172d492872b39749c81c211e",
+      "bundle": "evidence",
+      "path": "modules/catalog-maintained/sources/15-HcLightingCapabilitySelfTest.AssemblyInfo.cs"
+    }
+  ],
+  "modules": [
+    {
+      "id": "catalog-original",
+      "artifacts": {
+        ".dll": {
+          "path": "modules/catalog-original/ActualLightingCatalog.dll",
+          "sha256": "1d7ac9338ba91dc7bd707d336412995d5850a7f363357223c7090d67d9af0b0c"
+        },
+        ".pdb": {
+          "path": "modules/catalog-original/ActualLightingCatalog.pdb",
+          "sha256": "b07cf684f707392f3135bb4f8e830669e293bc8d359e44d2eb9ce5c7b6a8a4ea"
+        },
+        ".deps.json": {
+          "path": "modules/catalog-original/ActualLightingCatalog.deps.json",
+          "sha256": "e5d29a71c082453bcca0dbcc17f7863614e11967ee61c47ee618fdcffed30bc7"
+        },
+        ".runtimeconfig.json": {
+          "path": "modules/catalog-original/ActualLightingCatalog.runtimeconfig.json",
+          "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+        }
+      },
+      "metadata": {
+        "path": "modules/catalog-original/metadata.json",
+        "sha256": "3ee2d59da68e52ee6b6339a64ba5505cfc54538346de9c55fb5874e0f5581d72"
+      },
+      "documents": [
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\Program.cs",
+          "path": "modules/catalog-original/sources/00-Program.cs",
+          "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "path": "modules/catalog-original/sources/01-HcDeviceCapabilityCatalog.cs",
+          "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "path": "modules/catalog-original/sources/02-HcDeviceCapabilityCatalog.generated.cs",
+          "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.cs",
+          "path": "modules/catalog-original/sources/03-HcLightingCapabilityCatalog.cs",
+          "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+          "path": "modules/catalog-original/sources/04-HcLightingCapabilityCatalog.generated.cs",
+          "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\ActualLightingCatalog.GlobalUsings.g.cs",
+          "path": "modules/catalog-original/sources/05-ActualLightingCatalog.GlobalUsings.g.cs",
+          "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "path": "modules/catalog-original/sources/06-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\obj\\ActualLightingCatalog\\release\\ActualLightingCatalog.AssemblyInfo.cs",
+          "path": "modules/catalog-original/sources/07-ActualLightingCatalog.AssemblyInfo.cs",
+          "sha256": "6cc8c1220f7840dfa5f2e0df33d1f1bd93ef1a3a614e8112875b9baeb3e7103b"
+        }
+      ]
+    },
+    {
+      "id": "boundary-177",
+      "artifacts": {
+        ".dll": {
+          "path": "modules/boundary-177/LightSetterSelfTest.dll",
+          "sha256": "c2e4116ded3d345a4f742f7c249e58e393efe7f775f6f9c5b3048a2995b13ad7"
+        },
+        ".pdb": {
+          "path": "modules/boundary-177/LightSetterSelfTest.pdb",
+          "sha256": "5c6a4202e305324d3b465f61029862e35abdacb56b2333715b5603fa831f1f38"
+        },
+        ".deps.json": {
+          "path": "modules/boundary-177/LightSetterSelfTest.deps.json",
+          "sha256": "88ae7ddd611bcd2bec1dcf07d5932f568c821c3694f55de30a6a4d04f423cf2f"
+        },
+        ".runtimeconfig.json": {
+          "path": "modules/boundary-177/LightSetterSelfTest.runtimeconfig.json",
+          "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+        }
+      },
+      "metadata": {
+        "path": "modules/boundary-177/metadata.json",
+        "sha256": "ef2fc875c03981e374b4985446d9a61b9c5ae15b6749bc27e1bb828f4169fc0e"
+      },
+      "documents": [
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\Program.cs",
+          "path": "modules/boundary-177/sources/00-Program.cs",
+          "sha256": "4e9ca7de60c3c880bd65a962be380041f075352ca183af2198d67dac38a76aa6"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\ArtifactProbe.cs",
+          "path": "modules/boundary-177/sources/01-ArtifactProbe.cs",
+          "sha256": "ab8c68f18b13bc307f9c6e3f8adf335e3d9be99e9b501c04a2fad7a42dfb53b6"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\FakeOneXDevice.cs",
+          "path": "modules/boundary-177/sources/02-FakeOneXDevice.cs",
+          "sha256": "6adf0537de28e25aa31140fb1fd9833ed9216a1f2cda48c52611ac888eaa841b"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\Program.cs",
+          "path": "modules/boundary-177/sources/03-Program.cs",
+          "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXQueuedLighting.cs",
+          "path": "modules/boundary-177/sources/04-OneXQueuedLighting.cs",
+          "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXLightingSession.cs",
+          "path": "modules/boundary-177/sources/05-OneXLightingSession.cs",
+          "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\DeviceCoreConsumer.cs",
+          "path": "modules/boundary-177/sources/06-DeviceCoreConsumer.cs",
+          "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\LightingAssemblyPins.cs",
+          "path": "modules/boundary-177/sources/07-LightingAssemblyPins.cs",
+          "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs",
+          "path": "modules/boundary-177/sources/08-RuntimeDependencyContract.cs",
+          "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+          "path": "modules/boundary-177/sources/09-DeviceCoreSharedDependencies.cs",
+          "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+          "path": "modules/boundary-177/sources/10-ProcessEfficiency.cs",
+          "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\handheldcompanion-runtime\\source\\Misc\\SerialQueueTasks.cs",
+          "path": "modules/boundary-177/sources/11-SerialQueueTasks.cs",
+          "sha256": "53dd7fee5ec52945e3ff8048306fec57a43d7b1c8f3d5fac891d3c945e071ca8"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "path": "modules/boundary-177/sources/12-HcDeviceCapabilityCatalog.cs",
+          "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "path": "modules/boundary-177/sources/13-HcDeviceCapabilityCatalog.generated.cs",
+          "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.cs",
+          "path": "modules/boundary-177/sources/14-HcLightingCapabilityCatalog.cs",
+          "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+          "path": "modules/boundary-177/sources/15-HcLightingCapabilityCatalog.generated.cs",
+          "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\LightSetterSelfTest.GlobalUsings.g.cs",
+          "path": "modules/boundary-177/sources/16-LightSetterSelfTest.GlobalUsings.g.cs",
+          "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "path": "modules/boundary-177/sources/17-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\shipping-artifact-probe\\obj\\LightSetterSelfTest\\release\\LightSetterSelfTest.AssemblyInfo.cs",
+          "path": "modules/boundary-177/sources/18-LightSetterSelfTest.AssemblyInfo.cs",
+          "sha256": "7b6af8fc1fbbdd791378aaf9a35db80593944de04e2f319cb94c89865aa6d9d9"
+        }
+      ]
+    },
+    {
+      "id": "catalog-maintained",
+      "artifacts": {
+        ".dll": {
+          "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.dll",
+          "sha256": "faf1698895674eae6a71ce783dc749082a31980edaf81bad4b35d4fcd2f1488b"
+        },
+        ".pdb": {
+          "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.pdb",
+          "sha256": "516821d8a3b080c74c4d3b318862b0570add0933b101b4624a0d2105ed6e482a"
+        },
+        ".deps.json": {
+          "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.deps.json",
+          "sha256": "082477796b84e2ead118f1c54320e8028c50b322fd412cfec85f3efc91b88cfe"
+        },
+        ".runtimeconfig.json": {
+          "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.runtimeconfig.json",
+          "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+        }
+      },
+      "metadata": {
+        "path": "modules/catalog-maintained/metadata.json",
+        "sha256": "d1c4d9f75d82537b31b03753f28f9a32cc2bb3986a93e819917cdcf754ad93a7"
+      },
+      "documents": [
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+          "path": "modules/catalog-maintained/sources/00-Program.cs",
+          "sha256": "dcccf9038090d7dc14287da84fe1422b211fcfec1dc93a879d3be128aeb268dd"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\Program.cs",
+          "path": "modules/catalog-maintained/sources/01-Program.cs",
+          "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\DeviceCoreConsumer.cs",
+          "path": "modules/catalog-maintained/sources/02-DeviceCoreConsumer.cs",
+          "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXQueuedLighting.cs",
+          "path": "modules/catalog-maintained/sources/03-OneXQueuedLighting.cs",
+          "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXLightingSession.cs",
+          "path": "modules/catalog-maintained/sources/04-OneXLightingSession.cs",
+          "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\LightingAssemblyPins.cs",
+          "path": "modules/catalog-maintained/sources/05-LightingAssemblyPins.cs",
+          "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs",
+          "path": "modules/catalog-maintained/sources/06-RuntimeDependencyContract.cs",
+          "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+          "path": "modules/catalog-maintained/sources/07-DeviceCoreSharedDependencies.cs",
+          "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+          "path": "modules/catalog-maintained/sources/08-ProcessEfficiency.cs",
+          "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "path": "modules/catalog-maintained/sources/09-HcDeviceCapabilityCatalog.cs",
+          "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "path": "modules/catalog-maintained/sources/10-HcDeviceCapabilityCatalog.generated.cs",
+          "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.cs",
+          "path": "modules/catalog-maintained/sources/11-HcLightingCapabilityCatalog.cs",
+          "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+          "path": "modules/catalog-maintained/sources/12-HcLightingCapabilityCatalog.generated.cs",
+          "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.GlobalUsings.g.cs",
+          "path": "modules/catalog-maintained/sources/13-HcLightingCapabilitySelfTest.GlobalUsings.g.cs",
+          "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "path": "modules/catalog-maintained/sources/14-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "originalPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\global-lighting-actual-catalog\\2026-10-19T06-23-35-769Z-be9129d7\\cases\\lighting.signal-consumer\\lighting\\build\\actual-artifact-catalog\\obj\\HcLightingCapabilitySelfTest\\release\\HcLightingCapabilitySelfTest.AssemblyInfo.cs",
+          "path": "modules/catalog-maintained/sources/15-HcLightingCapabilitySelfTest.AssemblyInfo.cs",
+          "sha256": "d3ceb8ca9b8deba5043ec26334afc2cdf1a761ae172d492872b39749c81c211e"
+        }
+      ]
+    }
+  ],
+  "fixture": {
+    "beforeRoot": "fixture/before",
+    "afterRoot": "fixture/after",
+    "preservedMembers": 103,
+    "changedMembers": 2,
+    "nativeSha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+    "oldHelperSha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf"
+  },
+  "members": [
+    {
+      "path": "PLAN-TEMPLATE.json",
+      "sha256": "733072654e8611ee01877946c60e1eee621409ac43457b2880d441e0de5d1a98",
+      "bytes": 46635
+    },
+    {
+      "path": "catalog/inputs/00-Program.cs",
+      "sha256": "1e57df06a6243746fdfcacd546ad3f76a2e36bbd70d44b43ebca77f4d50dd3ee",
+      "bytes": 12157
+    },
+    {
+      "path": "catalog/inputs/01-ActualLightingCatalog.csproj",
+      "sha256": "27a01bea2c5e7ab1d4c6ceeed3b8a8ad1b9cb66cfb53a268eff7c1b1b064eaec",
+      "bytes": 1357
+    },
+    {
+      "path": "catalog/inputs/02-Program.cs",
+      "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd",
+      "bytes": 14720
+    },
+    {
+      "path": "catalog/inputs/03-HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bytes": 5404
+    },
+    {
+      "path": "catalog/inputs/04-HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867
+    },
+    {
+      "path": "catalog/inputs/05-HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bytes": 3934
+    },
+    {
+      "path": "catalog/inputs/06-HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bytes": 8580
+    },
+    {
+      "path": "catalog/inputs/07-hc-device-catalog.json",
+      "sha256": "2517bdb4144b2e6db8a9104950d326c34994c19d0f4a3e623e084511086ca5f6",
+      "bytes": 715690
+    },
+    {
+      "path": "catalog/logs/candidate-full.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "catalog/logs/candidate-full.stdout.log",
+      "sha256": "de2a543221f43dbf6d66d8190dfba53d480a7840f63d4befb796be59176d4ff5",
+      "bytes": 58
+    },
+    {
+      "path": "catalog/logs/candidate-loki-control.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "catalog/logs/candidate-loki-control.stdout.log",
+      "sha256": "b4634ef6d4ed67174945e241a66eaa0b581d34ef9006318eefed9efe71d1335a",
+      "bytes": 55
+    },
+    {
+      "path": "catalog/logs/old-loki-control.stderr.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "catalog/logs/old-loki-control.stdout.log",
+      "sha256": "f12fd650cfe0be3b8b21a3b7f3178313894c3644dd0a693c9c16db381073e7a0",
+      "bytes": 150
+    },
+    {
+      "path": "catalog/logs/wrong-sha-refused.stderr.log",
+      "sha256": "c297f434eb84ea01d6beebfec37e8b925ac38ae4a1ea555b5135d376883051b6",
+      "bytes": 250
+    },
+    {
+      "path": "catalog/logs/wrong-sha-refused.stdout.log",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "bytes": 0
+    },
+    {
+      "path": "catalog/reports/candidate-full.json",
+      "sha256": "65bc755b252becb5661a7bed009540b37e965bf9726081b4e686c5aff0c6f6f3",
+      "bytes": 100618
+    },
+    {
+      "path": "catalog/reports/candidate-loki-control.json",
+      "sha256": "23f20adfc5f26526d9def401f4bee74c3524ee43f16076574b95c42362f01e71",
+      "bytes": 642
+    },
+    {
+      "path": "catalog/reports/old-loki-control.json",
+      "sha256": "7b886c786805dcf19d6717713f144f139bedb9b1cc68a4a91257a9de47b6c5a5",
+      "bytes": 707
+    },
+    {
+      "path": "fixture/after/PowerControl/light-setter/YeManLightSetter.dll",
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+      "bytes": 138240
+    },
+    {
+      "path": "fixture/after/YeManCC/export-identity.json",
+      "sha256": "bdf883f2cb7fc8a104bd080da604b29c039c51b11c6d9d5ff15141e58cee7f17",
+      "bytes": 129413
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanBackend.dll",
+      "sha256": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a",
+      "bytes": 84480
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.authorization.md",
+      "sha256": "68d515be999f6d70614ca2a388fc425fe4d3a4d4c2d7d4f119c2a6317296a327",
+      "bytes": 11295
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.deps.json",
+      "sha256": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec",
+      "bytes": 1505
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.dll",
+      "sha256": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+      "bytes": 1671168
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.exe",
+      "sha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab",
+      "bytes": 162304
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "bytes": 343
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.payload.json",
+      "sha256": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae",
+      "bytes": 2078
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/YeManFanHost.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/install-fan-host-payload.ps1",
+      "sha256": "5a6d68f5ae5573f78cc77f147b295af802cc757d1855d0996239b14af6f3fbdf",
+      "bytes": 12764
+    },
+    {
+      "path": "fixture/before/PowerControl/fan-host-v2/run-emergency-fan-restore.ps1",
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6",
+      "bytes": 4053
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/BlackSharp.Core.dll",
+      "sha256": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96",
+      "bytes": 37376
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GameLib.Core.dll",
+      "sha256": "1946b5f67a272a9f0ba25962e091a331c19261e747cc138ef31051b66ce111d8",
+      "bytes": 12288
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GamepadMotion.dll",
+      "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9",
+      "bytes": 25600
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Gma.System.MouseKeyHook.dll",
+      "sha256": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485",
+      "bytes": 61440
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GongSolutions.WPF.DragDrop.dll",
+      "sha256": "1672736512ddbb8608795c25a54d3c040ebc570c46e3a332ce52727a19d2140e",
+      "bytes": 214392
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GregsStack.InputSimulatorStandard.dll",
+      "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+      "bytes": 25600
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.deps.json",
+      "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+      "bytes": 59901
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.dll",
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+      "bytes": 2774016
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.json",
+      "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+      "bytes": 379
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.runtime.json",
+      "sha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+      "bytes": 15179
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HidLibrary.dll",
+      "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+      "bytes": 46592
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/IGDB.dll",
+      "sha256": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2",
+      "bytes": 111104
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Interop.IWshRuntimeLibrary.dll",
+      "sha256": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275",
+      "bytes": 37376
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Abstractions.dll",
+      "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33",
+      "bytes": 28496
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Binder.dll",
+      "sha256": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9",
+      "bytes": 43792
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7",
+      "bytes": 28496
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Json.dll",
+      "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb",
+      "bytes": 27984
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.dll",
+      "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121",
+      "bytes": 44880
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyInjection.dll",
+      "sha256": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869",
+      "bytes": 95568
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyModel.dll",
+      "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8",
+      "bytes": 85264
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "sha256": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32",
+      "bytes": 32040
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.dll",
+      "sha256": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab",
+      "bytes": 37160
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970",
+      "bytes": 23376
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Physical.dll",
+      "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980",
+      "bytes": 45392
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileSystemGlobbing.dll",
+      "sha256": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c",
+      "bytes": 47952
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.Polly.dll",
+      "sha256": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe",
+      "bytes": 32544
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.dll",
+      "sha256": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6",
+      "bytes": 92944
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Logging.dll",
+      "sha256": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f",
+      "bytes": 51536
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "sha256": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732",
+      "bytes": 22824
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.dll",
+      "sha256": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3",
+      "bytes": 65360
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Primitives.dll",
+      "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8",
+      "bytes": 44880
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Win32.TaskScheduler.dll",
+      "sha256": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d",
+      "bytes": 336896
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Windows.SDK.NET.dll",
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+      "bytes": 1074688
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Core.dll",
+      "sha256": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8",
+      "bytes": 104448
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Shell.dll",
+      "sha256": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039",
+      "bytes": 574464
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Core.dll",
+      "sha256": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09",
+      "bytes": 187904
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Vorbis.dll",
+      "sha256": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0",
+      "bytes": 14848
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Wasapi.dll",
+      "sha256": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e",
+      "bytes": 180224
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.WinMM.dll",
+      "sha256": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b",
+      "bytes": 58368
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NVorbis.dll",
+      "sha256": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4",
+      "bytes": 80896
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.Utilities.Bluetooth.dll",
+      "sha256": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433",
+      "bytes": 255488
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.ViGEm.Client.dll",
+      "sha256": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036",
+      "bytes": 208384
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Kernel32.dll",
+      "sha256": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44",
+      "bytes": 113728
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Windows.Core.dll",
+      "sha256": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c",
+      "bytes": 272960
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Polly.dll",
+      "sha256": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc",
+      "bytes": 287984
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PrecisionTimer.NET.dll",
+      "sha256": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331",
+      "bytes": 22016
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/PawnIO/RyzenSMU.bin",
+      "sha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0",
+      "bytes": 39652
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/RTSS/RTSSSharedMemoryNET.dll",
+      "sha256": "685f6e8d09e3b685a8334ae989f30f9859262046a170374f0df8121b2deba74d",
+      "bytes": 80896
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/inpoutx64.dll",
+      "sha256": "5f27ed4d5cd58a1ee23deeb802e09e73f3a1d884ce2135f6e827f67b171269e7",
+      "bytes": 98304
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/msiapcfg.dll",
+      "sha256": "8f9fcb5f14c3fbc66843687d8c9e1ac54f7e7d62946c2965d67dd70c4b576dc5",
+      "bytes": 13432
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/RestEase.dll",
+      "sha256": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7",
+      "bytes": 139776
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SDL3-CS.dll",
+      "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+      "bytes": 47616
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SapientiaUsb.dll",
+      "sha256": "0b7c5845b94b9caf1c45f7555e54918020eb046e83fd4bd625781bcf7acae9f5",
+      "bytes": 828352
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Sentry.dll",
+      "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+      "bytes": 827904
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.File.dll",
+      "sha256": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7",
+      "bytes": 11776
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.dll",
+      "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507",
+      "bytes": 28672
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Formatting.Compact.dll",
+      "sha256": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130",
+      "bytes": 8704
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Settings.Configuration.dll",
+      "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0",
+      "bytes": 71680
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Async.dll",
+      "sha256": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083",
+      "bytes": 9216
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Console.dll",
+      "sha256": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e",
+      "bytes": 38400
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.File.dll",
+      "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+      "bytes": 36864
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.RollingFile.dll",
+      "sha256": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e",
+      "bytes": 18432
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.dll",
+      "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505",
+      "bytes": 162304
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Shared.dll",
+      "sha256": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1",
+      "bytes": 13312
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.Direct3D9.dll",
+      "sha256": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55",
+      "bytes": 338944
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.DirectInput.dll",
+      "sha256": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f",
+      "bytes": 151040
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.XInput.dll",
+      "sha256": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3",
+      "bytes": 13824
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.dll",
+      "sha256": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd",
+      "bytes": 275968
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.IO.Ports.dll",
+      "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+      "bytes": 88912
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.Management.dll",
+      "sha256": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb",
+      "bytes": 314632
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.ServiceProcess.ServiceController.dll",
+      "sha256": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8",
+      "bytes": 91984
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/UEFIVaribleDll.dll",
+      "sha256": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13",
+      "bytes": 21136
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WinRT.Runtime.dll",
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+      "bytes": 528944
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WindowsInput.dll",
+      "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+      "bytes": 109056
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WpfScreenHelper.dll",
+      "sha256": "727c1669a6094285f0ed771263a35847b6305b13a59562265aa955cc2e07b76f",
+      "bytes": 17920
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Xinput1_4.dll",
+      "sha256": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec",
+      "bytes": 176640
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/controller-hidapi.net.dll",
+      "sha256": "cd47d72903dbcba4e8c68cd5cc424b8648c12aa8a5c00cf2a30050aa28e4d0ca",
+      "bytes": 7680
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/craftersmine.SteamGridDB.Net.dll",
+      "sha256": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564",
+      "bytes": 76288
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.dll",
+      "sha256": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4",
+      "bytes": 162304
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.net.dll",
+      "sha256": "5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17",
+      "bytes": 13312
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.Controls.dll",
+      "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+      "bytes": 547328
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.dll",
+      "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+      "bytes": 272896
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.Core.dll",
+      "sha256": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1",
+      "bytes": 301568
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.dll",
+      "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf",
+      "bytes": 285184
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/ricaun.NamedPipeWrapper.Json.1.8.0.dll",
+      "sha256": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9",
+      "bytes": 23040
+    },
+    {
+      "path": "fixture/before/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/steam-hidapi.net.dll",
+      "sha256": "2d1d03847ff4f90b6ca7059d55cf7f9cae40eafd31f01cc9974d514de76c52f9",
+      "bytes": 19968
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightDeviceCore.dll",
+      "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
+      "bytes": 28160
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.deps.json",
+      "sha256": "3c99d2a11a849726eb98a449fcddb646a2e1337825dc8f92d594e8aeb46def90",
+      "bytes": 496
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.dll",
+      "sha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+      "bytes": 71680
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.exe",
+      "sha256": "6be372d07eea812f06bef54e79ec4b39b53cb152d1f8b758b652caef435ed8cd",
+      "bytes": 162304
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.json",
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7",
+      "bytes": 350
+    },
+    {
+      "path": "fixture/before/PowerControl/light-setter/YeManLightSetter.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    },
+    {
+      "path": "fixture/before/YeManCC/YeManCC.exe",
+      "sha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+      "bytes": 10941952
+    },
+    {
+      "path": "fixture/before/YeManCC/export-identity.json",
+      "sha256": "4799cb26b32aa7a60e33f4f9179a4b56f341a21454d2c09a8bf14a5ae771d98a",
+      "bytes": 129412
+    },
+    {
+      "path": "fixture/before/YeManCC/update-manifest.json",
+      "sha256": "fcbb9013a240d0be770786a75e4035e683e07c84d95ef56b6b1fff6bbf60fa9c",
+      "bytes": 1024
+    },
+    {
+      "path": "modules/boundary-177/LightSetterSelfTest.deps.json",
+      "sha256": "88ae7ddd611bcd2bec1dcf07d5932f568c821c3694f55de30a6a4d04f423cf2f",
+      "bytes": 451
+    },
+    {
+      "path": "modules/boundary-177/LightSetterSelfTest.dll",
+      "sha256": "c2e4116ded3d345a4f742f7c249e58e393efe7f775f6f9c5b3048a2995b13ad7",
+      "bytes": 199168
+    },
+    {
+      "path": "modules/boundary-177/LightSetterSelfTest.pdb",
+      "sha256": "5c6a4202e305324d3b465f61029862e35abdacb56b2333715b5603fa831f1f38",
+      "bytes": 41068
+    },
+    {
+      "path": "modules/boundary-177/LightSetterSelfTest.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    },
+    {
+      "path": "modules/boundary-177/metadata.json",
+      "sha256": "ef2fc875c03981e374b4985446d9a61b9c5ae15b6749bc27e1bb828f4169fc0e",
+      "bytes": 22224
+    },
+    {
+      "path": "modules/boundary-177/sources/00-Program.cs",
+      "sha256": "4e9ca7de60c3c880bd65a962be380041f075352ca183af2198d67dac38a76aa6",
+      "bytes": 11031
+    },
+    {
+      "path": "modules/boundary-177/sources/01-ArtifactProbe.cs",
+      "sha256": "ab8c68f18b13bc307f9c6e3f8adf335e3d9be99e9b501c04a2fad7a42dfb53b6",
+      "bytes": 35092
+    },
+    {
+      "path": "modules/boundary-177/sources/02-FakeOneXDevice.cs",
+      "sha256": "6adf0537de28e25aa31140fb1fd9833ed9216a1f2cda48c52611ac888eaa841b",
+      "bytes": 5763
+    },
+    {
+      "path": "modules/boundary-177/sources/03-Program.cs",
+      "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994",
+      "bytes": 38702
+    },
+    {
+      "path": "modules/boundary-177/sources/04-OneXQueuedLighting.cs",
+      "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c",
+      "bytes": 7469
+    },
+    {
+      "path": "modules/boundary-177/sources/05-OneXLightingSession.cs",
+      "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605",
+      "bytes": 8125
+    },
+    {
+      "path": "modules/boundary-177/sources/06-DeviceCoreConsumer.cs",
+      "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885",
+      "bytes": 7015
+    },
+    {
+      "path": "modules/boundary-177/sources/07-LightingAssemblyPins.cs",
+      "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56",
+      "bytes": 224
+    },
+    {
+      "path": "modules/boundary-177/sources/08-RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bytes": 8570
+    },
+    {
+      "path": "modules/boundary-177/sources/09-DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bytes": 6751
+    },
+    {
+      "path": "modules/boundary-177/sources/10-ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bytes": 2747
+    },
+    {
+      "path": "modules/boundary-177/sources/11-SerialQueueTasks.cs",
+      "sha256": "53dd7fee5ec52945e3ff8048306fec57a43d7b1c8f3d5fac891d3c945e071ca8",
+      "bytes": 5700
+    },
+    {
+      "path": "modules/boundary-177/sources/12-HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bytes": 5404
+    },
+    {
+      "path": "modules/boundary-177/sources/13-HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867
+    },
+    {
+      "path": "modules/boundary-177/sources/14-HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bytes": 3934
+    },
+    {
+      "path": "modules/boundary-177/sources/15-HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bytes": 8580
+    },
+    {
+      "path": "modules/boundary-177/sources/16-LightSetterSelfTest.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bytes": 183
+    },
+    {
+      "path": "modules/boundary-177/sources/17-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bytes": 200
+    },
+    {
+      "path": "modules/boundary-177/sources/18-LightSetterSelfTest.AssemblyInfo.cs",
+      "sha256": "7b6af8fc1fbbdd791378aaf9a35db80593944de04e2f319cb94c89865aa6d9d9",
+      "bytes": 1192
+    },
+    {
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.deps.json",
+      "sha256": "082477796b84e2ead118f1c54320e8028c50b322fd412cfec85f3efc91b88cfe",
+      "bytes": 478
+    },
+    {
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.dll",
+      "sha256": "faf1698895674eae6a71ce783dc749082a31980edaf81bad4b35d4fcd2f1488b",
+      "bytes": 168448
+    },
+    {
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.pdb",
+      "sha256": "516821d8a3b080c74c4d3b318862b0570add0933b101b4624a0d2105ed6e482a",
+      "bytes": 34032
+    },
+    {
+      "path": "modules/catalog-maintained/HcLightingCapabilitySelfTest.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    },
+    {
+      "path": "modules/catalog-maintained/metadata.json",
+      "sha256": "d1c4d9f75d82537b31b03753f28f9a32cc2bb3986a93e819917cdcf754ad93a7",
+      "bytes": 21622
+    },
+    {
+      "path": "modules/catalog-maintained/sources/00-Program.cs",
+      "sha256": "dcccf9038090d7dc14287da84fe1422b211fcfec1dc93a879d3be128aeb268dd",
+      "bytes": 14911
+    },
+    {
+      "path": "modules/catalog-maintained/sources/01-Program.cs",
+      "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994",
+      "bytes": 38702
+    },
+    {
+      "path": "modules/catalog-maintained/sources/02-DeviceCoreConsumer.cs",
+      "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885",
+      "bytes": 7015
+    },
+    {
+      "path": "modules/catalog-maintained/sources/03-OneXQueuedLighting.cs",
+      "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c",
+      "bytes": 7469
+    },
+    {
+      "path": "modules/catalog-maintained/sources/04-OneXLightingSession.cs",
+      "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605",
+      "bytes": 8125
+    },
+    {
+      "path": "modules/catalog-maintained/sources/05-LightingAssemblyPins.cs",
+      "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56",
+      "bytes": 224
+    },
+    {
+      "path": "modules/catalog-maintained/sources/06-RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bytes": 8570
+    },
+    {
+      "path": "modules/catalog-maintained/sources/07-DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bytes": 6751
+    },
+    {
+      "path": "modules/catalog-maintained/sources/08-ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bytes": 2747
+    },
+    {
+      "path": "modules/catalog-maintained/sources/09-HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bytes": 5404
+    },
+    {
+      "path": "modules/catalog-maintained/sources/10-HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867
+    },
+    {
+      "path": "modules/catalog-maintained/sources/11-HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bytes": 3934
+    },
+    {
+      "path": "modules/catalog-maintained/sources/12-HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bytes": 8580
+    },
+    {
+      "path": "modules/catalog-maintained/sources/13-HcLightingCapabilitySelfTest.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bytes": 183
+    },
+    {
+      "path": "modules/catalog-maintained/sources/14-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bytes": 200
+    },
+    {
+      "path": "modules/catalog-maintained/sources/15-HcLightingCapabilitySelfTest.AssemblyInfo.cs",
+      "sha256": "d3ceb8ca9b8deba5043ec26334afc2cdf1a761ae172d492872b39749c81c211e",
+      "bytes": 1219
+    },
+    {
+      "path": "modules/catalog-original/ActualLightingCatalog.deps.json",
+      "sha256": "e5d29a71c082453bcca0dbcc17f7863614e11967ee61c47ee618fdcffed30bc7",
+      "bytes": 457
+    },
+    {
+      "path": "modules/catalog-original/ActualLightingCatalog.dll",
+      "sha256": "1d7ac9338ba91dc7bd707d336412995d5850a7f363357223c7090d67d9af0b0c",
+      "bytes": 104448
+    },
+    {
+      "path": "modules/catalog-original/ActualLightingCatalog.pdb",
+      "sha256": "b07cf684f707392f3135bb4f8e830669e293bc8d359e44d2eb9ce5c7b6a8a4ea",
+      "bytes": 20764
+    },
+    {
+      "path": "modules/catalog-original/ActualLightingCatalog.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    },
+    {
+      "path": "modules/catalog-original/metadata.json",
+      "sha256": "3ee2d59da68e52ee6b6339a64ba5505cfc54538346de9c55fb5874e0f5581d72",
+      "bytes": 19608
+    },
+    {
+      "path": "modules/catalog-original/sources/00-Program.cs",
+      "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd",
+      "bytes": 14720
+    },
+    {
+      "path": "modules/catalog-original/sources/01-HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bytes": 5404
+    },
+    {
+      "path": "modules/catalog-original/sources/02-HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867
+    },
+    {
+      "path": "modules/catalog-original/sources/03-HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bytes": 3934
+    },
+    {
+      "path": "modules/catalog-original/sources/04-HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bytes": 8580
+    },
+    {
+      "path": "modules/catalog-original/sources/05-ActualLightingCatalog.GlobalUsings.g.cs",
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+      "bytes": 183
+    },
+    {
+      "path": "modules/catalog-original/sources/06-.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+      "bytes": 200
+    },
+    {
+      "path": "modules/catalog-original/sources/07-ActualLightingCatalog.AssemblyInfo.cs",
+      "sha256": "6cc8c1220f7840dfa5f2e0df33d1f1bd93ef1a3a614e8112875b9baeb3e7103b",
+      "bytes": 1157
+    },
+    {
+      "path": "profile/profile.json",
+      "sha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c",
+      "bytes": 25177
+    },
+    {
+      "path": "proofs/candidate-global.json",
+      "sha256": "fc4277ddd080ad4fac0b3a53e0e85ecebd537ac7e58e23aae75220b3c160e6b4",
+      "bytes": 2835867
+    },
+    {
+      "path": "proofs/candidate-signal.json",
+      "sha256": "902b361c299cf60bc09a7f2704168c087c5efde51f6897af4e7f420018e243bb",
+      "bytes": 785562
+    },
+    {
+      "path": "proofs/catalog-execution.json",
+      "sha256": "f7f69d58e30c1902764447d558f8771b2fb6a71c0ea1f7a1ebae324652b0a7ee",
+      "bytes": 8263
+    },
+    {
+      "path": "proofs/installed-connection.json",
+      "sha256": "15156d09c457afe3a9988c1b3d1c39e3661c8e74e153bc32889033a76eb7f736",
+      "bytes": 1454
+    },
+    {
+      "path": "proofs/installed-global.json",
+      "sha256": "ecf30703a7ce4ff3804bc36a9c5df41a5d022b1fd4f00a741105c98ac5c94265",
+      "bytes": 2835763
+    },
+    {
+      "path": "proofs/installed-sha-acl.json",
+      "sha256": "c15321fce12b21be9d2d334f3482f77fc19b2642f52fce626c148130f6eb7047",
+      "bytes": 389
+    },
+    {
+      "path": "proofs/installed-signal.json",
+      "sha256": "eb479ccdb6d81783f6d8a19fa665414f8b3377a6023a109d3bcd785b6a942138",
+      "bytes": 785279
+    },
+    {
+      "path": "proofs/original-plan.json",
+      "sha256": "2464b03ade43bbec03fefb8cf6f9b39c378c471dda2a74b69c79a925f5f3af85",
+      "bytes": 45542
+    },
+    {
+      "path": "proofs/source-bundle-verification.json",
+      "sha256": "b2ccb92dd5d1825d03ba3fad946c8c1869cb3161989af7b3aacd73f24c943348",
+      "bytes": 574
+    },
+    {
+      "path": "tools/Read-PortableModule.ps1",
+      "sha256": "d1c6a6d8c140b291925f92514854c54caa5eb7af64908b07821469090daffb3d",
+      "bytes": 2498
+    }
+  ],
+  "runtimeExport": false,
+  "hardwareAcceptance": false
+}

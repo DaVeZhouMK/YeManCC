@@ -1,4 +1,4 @@
-param([ValidateSet('Inspect','Focus','Capture','ToggleOverlay')][string]$Action='Inspect',[string]$OutputPath)
+param([ValidateSet('Inspect','Focus','Capture','ToggleOverlay')][string]$Action='Inspect',[string]$OutputPath,[int]$ExpectedGamePid=0)
 $ErrorActionPreference='Stop'
 [Console]::OutputEncoding=[Text.UTF8Encoding]::new($false)
 Add-Type -AssemblyName System.Drawing
@@ -36,7 +36,7 @@ public class Ymcc2077Window {
 [void][Ymcc2077Window]::SetThreadDpiAwarenessContext([IntPtr](-4))
 $games=@(Get-Process -Name Cyberpunk2077 -ErrorAction Stop)
 if($games.Count -ne 1 -or $games[0].MainWindowHandle -eq 0){throw 'Require one already running Cyberpunk2077 window; never launch/close the game'}
-$game=$games[0];$h=[IntPtr]$game.MainWindowHandle;$previous=[Ymcc2077Window]::GetForegroundWindow();$owner=0;[void][Ymcc2077Window]::GetWindowThreadProcessId($h,[ref]$owner);if($owner -ne $game.Id){throw 'Game window ownership changed'}
+$game=$games[0];if($ExpectedGamePid -gt 0 -and $game.Id -ne $ExpectedGamePid){throw 'Game process changed; no focus/key/capture sent'};$h=[IntPtr]$game.MainWindowHandle;$previous=[Ymcc2077Window]::GetForegroundWindow();$owner=0;[void][Ymcc2077Window]::GetWindowThreadProcessId($h,[ref]$owner);if($owner -ne $game.Id){throw 'Game window ownership changed'}
 if($Action -in @('Focus','Capture','ToggleOverlay')){if(-not [Ymcc2077Window]::Focus($h)){throw 'Could not activate the actual game; no key/capture sent'}}
 if($Action -eq 'ToggleOverlay'){[Ymcc2077Window]::OverlayHotkey();Start-Sleep -Milliseconds 400}
 $rect=New-Object Ymcc2077Window+RECT;$client=New-Object Ymcc2077Window+RECT;$pt=New-Object Ymcc2077Window+POINT

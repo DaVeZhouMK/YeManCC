@@ -1,0 +1,10 @@
+import fs from'node:fs';import path from'node:path';import crypto from'node:crypto';import assert from'node:assert/strict';import{spawnSync}from'node:child_process';
+const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2];if(!out)throw Error('plugin output directory required');const checks=[];const check=(ok,label)=>{assert(ok,label);checks.push(label);};const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+const described=spawnSync(process.execPath,[path.join(root,'tools/build-decky-sidebar-plugin.mjs'),'--describe'],{cwd:root,encoding:'utf8',windowsHide:true});assert.equal(described.status,0,described.stderr);const manifest=JSON.parse(described.stdout.trim());const source=fs.readFileSync(path.join(out,'dist/index.js'));
+check(source.toString().startsWith('// YMCC_DECKY_FRONTEND_BUILD_ID='+manifest.buildId+'\n'),'explicit native-readable version prefix matches current compiler');
+check(sha(Buffer.from(source.toString().replaceAll(manifest.buildId,'0'.repeat(64))))===manifest.buildId,'complete file with zeroed version reproduces stable build identity');
+check(sha(source)===manifest.files.find(f=>f.name==='dist/index.js').sha256,'final plugin bytes match strict exporter describe');
+check(source.includes(Buffer.from('__YMCC_DECKY_FRONTEND__'))&&source.includes(Buffer.from('ymcc-decky-frontend-ready')),'loaded module publishes its actual lifecycle receipt');
+check(manifest.files.length===5,'runtime payload list retains expected files and licenses');
+for(const file of manifest.files)check(sha(fs.readFileSync(path.join(out,file.name)))===file.sha256,'exact payload '+file.name);
+const result={ok:true,checks:checks.length,results:checks,buildId:manifest.buildId,sha256:sha(source),actualSteam:false};if(process.argv[3])fs.writeFileSync(process.argv[3],JSON.stringify(result,null,2));console.log(JSON.stringify(result));

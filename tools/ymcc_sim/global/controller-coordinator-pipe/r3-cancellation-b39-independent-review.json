@@ -1,0 +1,735 @@
+{
+  "schemaVersion": 1,
+  "observedAt": "2026-10-20T07:03:25.057Z",
+  "status": "B39_CANCELLATION_SOURCE_EXTENSION_READ_ONLY_OLD2292_STATES_EXACT_NEW38_PASS",
+  "frozen47Adjudication": {
+    "path": "D:/Codex/2026-10-19/ni-s/work/enabled-capability-closure/CUT47-CANCELLATION-READONLY-ADJUDICATION.json",
+    "sha256": "ccdcd25920b3efaf4449fb4c7ea5a920fa806da29389afc22e8c20519665399e"
+  },
+  "sourceInputs": [
+    {
+      "main": {
+        "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\virtual-controller-fixture-upgrade-20261020-R3\\cut47\\Build\\Validation\\VirtualController-Lifecycle-20261019\\r3-cut47-cancellation\\source\\native\\main.cpp",
+        "sha256": "722a3c04dbc17887399b2d78968f6ee31a063605affd9345824ea697f4969baf"
+      },
+      "sourceManifest": {
+        "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-fixture-upgrade-20261020-R3/cut47/Build/Validation/VirtualController-Lifecycle-20261019/r3-cut47-cancellation/source-manifest.json",
+        "sha256": "b34ad57a5d9c85780e57e446a2bb97af48243ff8f4a6c0aa3e795000266f897f"
+      },
+      "actualInertCpp": {
+        "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-fixture-upgrade-20261020-R3/cut47/Build/Validation/VirtualController-Lifecycle-20261019/r3-cut47-cancellation/source/native/main.inert.cpp",
+        "sha256": "2a48fbce3a4a9d67e34d6f00a6d4ace5b8ea0d6dd073acf26dd4984a494a182d"
+      },
+      "recipeSource": {
+        "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\virtual-controller-fixture-upgrade-20261020-R3\\cut47\\Build\\Validation\\VirtualController-Lifecycle-20261019\\r3-cut47-cancellation\\source\\tools\\input_coordinator_lifecycle_selftest.mjs",
+        "sha256": "a5a1df2883e33614a4911607eaa6e90a1d3429bcee9539ff0503adfdcab7dcca"
+      },
+      "recipeLfSha256": "59cab536a03038b7f037d3ef47bf15fe5b9918a84a4c62f5dd1521478dc02350"
+    },
+    {
+      "main": {
+        "path": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-B39-Public-20261020-woz-R1\\r3-b39-cancellation\\source\\native\\main.cpp",
+        "sha256": "ba86ea1e1acd8fe3fa0c7ed57ea8735cabdf0436c7fd7a7568052c4a6fdf640f"
+      },
+      "sourceManifest": {
+        "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-cancellation/source-manifest.json",
+        "sha256": "c737e8920756463726c9ff7b18de233887f9eb744fda88502cf906bc39a6583b"
+      },
+      "actualInertCpp": {
+        "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-cancellation/source/native/main.inert.cpp",
+        "sha256": "39693390eb7455d4620468c5e9f30bf50bca87ba5337e255d4c7190d2f84a912"
+      },
+      "recipeSource": {
+        "path": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-B39-Public-20261020-woz-R1\\r3-b39-cancellation\\source\\tools\\input_coordinator_lifecycle_selftest.mjs",
+        "sha256": "a5a1df2883e33614a4911607eaa6e90a1d3429bcee9539ff0503adfdcab7dcca"
+      },
+      "recipeLfSha256": "59cab536a03038b7f037d3ef47bf15fe5b9918a84a4c62f5dd1521478dc02350"
+    }
+  ],
+  "originalFault": {
+    "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-fixture-upgrade-20261020-R3/cut47/Build/Validation/VirtualController-Lifecycle-20261019/r3-cut47-cancellation/RESULT.json",
+    "sha256": "d2630079679c361d2deb14251e55747801d6973febb1f6383eff09dfffe9bc7d"
+  },
+  "currentFault": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-cancellation/RESULT.json",
+    "sha256": "374e5f6c9beb1fbc2fae13a3ec2c6ebabaa61a361108956e364d3a153a038737"
+  },
+  "currentPositive": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-positive/RESULT.json",
+    "sha256": "9a3062bee1c61ebaaeab63bd4312106a9ac70773bcebaca07d02655f0d5b51c4"
+  },
+  "coreComparison": [
+    {
+      "symbol": "inputHostPerformPsWakeRearm",
+      "originalSha256": "749fcb04de2f95b510ba47233e10fc5f441e2b67941d9d11db3c2ad99543053b",
+      "executedSha256": "50aca86c2b1a0ed1b046a0495f6f5081c4ea76705db5edb0ffe88d4f5af5fbcd",
+      "original47": {
+        "symbol": "inputHostPerformPsWakeRearm",
+        "originalSha256": "ee62cde096f1a4c1a2e61e982e97856adcfb613c0b47564acce17e7a4f264848",
+        "executedSha256": "a53bb6264c0235106900701e86b6368fc7f2cf614441363807f1751c369f84a2"
+      },
+      "sameOriginal": false,
+      "sameExecuted": false
+    },
+    {
+      "symbol": "inputHostRecreatePreparedTarget",
+      "originalSha256": "9e1a78f4ec824939d5ecb9f115f57ede9257f3000591400033d74bd6bf176ffd",
+      "executedSha256": "c0f0fc3e5d39e527fb510006fe27bf8b47a8f01ecc23f0fa4268a6d04882f5d0",
+      "original47": {
+        "symbol": "inputHostRecreatePreparedTarget",
+        "originalSha256": "9e1a78f4ec824939d5ecb9f115f57ede9257f3000591400033d74bd6bf176ffd",
+        "executedSha256": "c0f0fc3e5d39e527fb510006fe27bf8b47a8f01ecc23f0fa4268a6d04882f5d0"
+      },
+      "sameOriginal": true,
+      "sameExecuted": true
+    },
+    {
+      "symbol": "inputHostSubmitPad",
+      "originalSha256": "5f98789dce909d69030fd4a7349ed05d1218b3bad6f41f3240d77bfb0884f815",
+      "executedSha256": "bd2b172400c1e24030cd9af8be0ce39f73dc0aad4d791a5c37f7506c116caaa9",
+      "original47": {
+        "symbol": "inputHostSubmitPad",
+        "originalSha256": "5f98789dce909d69030fd4a7349ed05d1218b3bad6f41f3240d77bfb0884f815",
+        "executedSha256": "bd2b172400c1e24030cd9af8be0ce39f73dc0aad4d791a5c37f7506c116caaa9"
+      },
+      "sameOriginal": true,
+      "sameExecuted": true
+    },
+    {
+      "symbol": "inputHostFrameSubmissionCurrent",
+      "originalSha256": "8bc2855a4f473aa731013fe32ded58feefb375eb092c8b3bbc822660f62713d3",
+      "executedSha256": "76cfcc3e7b35e93920733346054416d17e7b3e82e078eab4a3c5925ecaf636ce",
+      "original47": {
+        "symbol": "inputHostFrameSubmissionCurrent",
+        "originalSha256": "8bc2855a4f473aa731013fe32ded58feefb375eb092c8b3bbc822660f62713d3",
+        "executedSha256": "76cfcc3e7b35e93920733346054416d17e7b3e82e078eab4a3c5925ecaf636ce"
+      },
+      "sameOriginal": true,
+      "sameExecuted": true
+    }
+  ],
+  "sourceDelta": {
+    "path": "D:/Codex/2026-10-19/ni-s/work/enabled-capability-closure/B39-PS-WAKE-FUNCTION-DELTA.diff",
+    "sha256": "9d05d6304652cdf094796d2a750f2175df1f7762d6c1d4c69a489375bfcd1cc6"
+  },
+  "retainedOriginalAssertions": {
+    "count": 2292,
+    "exactOrderMultiplicityAndPassStatesMatch47": true,
+    "positiveOriginal2292AllPass": true
+  },
+  "newCurrentBoundary": {
+    "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+    "checks": 38,
+    "allActuallyExecutedAndPassed": true,
+    "independentGuardSurvivesOriginalFourGuardRollback": true,
+    "actualAssertions": [
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS cycle seeds its private ON document",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS cycle executes actual Start with one real managed child",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS cycle uses the real pipe connected to its owned child",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS cycle starts with the original Host power binding and Edge policy",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "actual queued lifecycle work drains without stranding ownership",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "normal current-source execution reaches actual managed acceptance before PS recovery",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS normal execution starts one full ten-second inspection inside the original player deadline",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "real managed PREPARE and current report establish owned PS target and accepted source authority",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "protected PS baseline proves current source and original power binding before injecting absence",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "normal execution precedes self-healing without reserving fallback or reporting a final",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "steady PS request is captured after the real original cycle succeeds",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "actual PS consumer queues the original protected worker token before expiry",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "expired PS request admits actual OFF for the new-ticket boundary",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "a new same-persona ticket is admitted after uncompleted OFF reaches its own hard cap",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "old steady PS task has zero protected ticket while the same Host now belongs to a new player request",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "expired queued PS token cannot probe rebuild or charge a current or newer request",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "old queued PS token preserves current request clocks flags and the unchanged live Host",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "boundary case exits through actual admitted player OFF",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "owned managed Host fixture exits naturally after real coordinator Stop",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "managed final receipt binds actual loop/session execution and source identities",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "boundary case releases the actual owned managed child naturally",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "actual queued lifecycle work drains without stranding ownership",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player transition is tested while the original protection is locked",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "all explicit player transitions including OFF are rejected during protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player request cannot finish replace or renew the original protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player transition is tested while the original protection is locked",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "all explicit player transitions including OFF are rejected during protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player request cannot finish replace or renew the original protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "ten-second candidate countdown alone never unlocks a player request",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player transition is tested while the original protection is locked",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "all explicit player transitions including OFF are rejected during protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "rejected player request cannot finish replace or renew the original protection",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+        "passed": true
+      },
+      {
+        "case": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+        "assertion": "boundary and all late queued work leave no replacement or ownership debt",
+        "passed": true
+      }
+    ],
+    "positiveTraceLength": 2330,
+    "positiveAddedAssertions": 38,
+    "positiveAddedAssertionsAllPass": true
+  },
+  "original29NamedInstances": [
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+      "oldCheckIndex": 1168,
+      "currentCheckIndex": 1168,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+      "oldCheckIndex": 1169,
+      "currentCheckIndex": 1169,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "oldCheckIndex": 1170,
+      "currentCheckIndex": 1170,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1176,
+      "currentCheckIndex": 1176,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "oldCheckIndex": 1195,
+      "currentCheckIndex": 1195,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "oldCheckIndex": 1235,
+      "currentCheckIndex": 1235,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1238,
+      "currentCheckIndex": 1238,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "oldCheckIndex": 1280,
+      "currentCheckIndex": 1280,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "oldCheckIndex": 1329,
+      "currentCheckIndex": 1329,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1332,
+      "currentCheckIndex": 1332,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "oldCheckIndex": 1374,
+      "currentCheckIndex": 1374,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+      "oldCheckIndex": 1531,
+      "currentCheckIndex": 1531,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+      "oldCheckIndex": 1532,
+      "currentCheckIndex": 1532,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "oldCheckIndex": 1533,
+      "currentCheckIndex": 1533,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1536,
+      "currentCheckIndex": 1536,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "old Edge Host closes naturally without stale-query recreation before requested persona replacement starts",
+      "oldCheckIndex": 1541,
+      "currentCheckIndex": 1541,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+      "oldCheckIndex": 1842,
+      "currentCheckIndex": 1842,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "assertion": "new target requires its own fresh ownership query and no second recreate",
+      "oldCheckIndex": 1844,
+      "currentCheckIndex": 1844,
+      "passed": false
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "oldCheckIndex": 1177,
+      "currentCheckIndex": 1177,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "oldCheckIndex": 1239,
+      "currentCheckIndex": 1239,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "oldCheckIndex": 1333,
+      "currentCheckIndex": 1333,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1424,
+      "currentCheckIndex": 1424,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "older endpoint query cannot clear or rebuild a newer pending PS request",
+      "oldCheckIndex": 1425,
+      "currentCheckIndex": 1425,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "newer PS request requires its own fresh query before reusing existing target",
+      "oldCheckIndex": 1427,
+      "currentCheckIndex": 1427,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "oldCheckIndex": 1468,
+      "currentCheckIndex": 1468,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "oldCheckIndex": 1537,
+      "currentCheckIndex": 1537,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "oldCheckIndex": 1674,
+      "currentCheckIndex": 1674,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "oldCheckIndex": 1675,
+      "currentCheckIndex": 1675,
+      "passed": true
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "oldCheckIndex": 1718,
+      "currentCheckIndex": 1718,
+      "passed": true
+    }
+  ],
+  "sixActuallyExecutedInterleavings": [
+    {
+      "kind": "off",
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 1,
+      "recreateCommandsAdded": 1,
+      "directRecreateReturned": true,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 12,
+          "currentRequestId": 2,
+          "foreignVirtual": 0,
+          "generation": 16,
+          "persona": "disabled",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 12,
+          "queryRequestId": 1,
+          "queuedGeneration": 16,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    },
+    {
+      "kind": "exit",
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 1,
+      "recreateCommandsAdded": 1,
+      "directRecreateReturned": true,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 13,
+          "currentRequestId": 1,
+          "foreignVirtual": 0,
+          "generation": 17,
+          "persona": "dualsense-edge",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 13,
+          "queryRequestId": 1,
+          "queuedGeneration": 17,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    },
+    {
+      "kind": "power",
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 1,
+      "recreateCommandsAdded": 1,
+      "directRecreateReturned": true,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 14,
+          "currentRequestId": 1,
+          "foreignVirtual": 0,
+          "generation": 18,
+          "persona": "dualsense-edge",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 14,
+          "queryRequestId": 1,
+          "queuedGeneration": 18,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    },
+    {
+      "kind": "generation",
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 2,
+      "recreateCommandsAdded": 0,
+      "directRecreateReturned": false,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 15,
+          "currentRequestId": 1,
+          "foreignVirtual": 0,
+          "generation": 19,
+          "persona": "dualsense-edge",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 15,
+          "queryRequestId": 1,
+          "queuedGeneration": 19,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    },
+    {
+      "kind": "persona",
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 1,
+      "recreateCommandsAdded": 1,
+      "directRecreateReturned": true,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 16,
+          "currentRequestId": 2,
+          "foreignVirtual": 0,
+          "generation": 21,
+          "persona": "elite",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 16,
+          "queryRequestId": 1,
+          "queuedGeneration": 21,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    },
+    {
+      "kind": "reentry",
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "callbackExecuted": true,
+      "probeCalls": 1,
+      "recreateCommandsAdded": 0,
+      "directRecreateReturned": false,
+      "markedRebuilt": false,
+      "rearmRequested": false,
+      "guardEvent": {
+        "detail": {
+          "currentHostEpoch": 18,
+          "currentRequestId": 3,
+          "foreignVirtual": 0,
+          "generation": 22,
+          "persona": "dualsense-edge",
+          "policy": "dualsense-edge-retained-hid",
+          "probeComplete": true,
+          "probeKind": "absent",
+          "probeLimitReached": false,
+          "probeReadError": 0,
+          "profileIdentity": "dualsense-edge",
+          "queryHostEpoch": 18,
+          "queryRequestId": 1,
+          "queuedGeneration": 22,
+          "reason": "admission-changed-before-rebuild",
+          "rebuiltAlready": false,
+          "retryDelayMs": 0
+        },
+        "event": "ps-wake-rearm-deferred"
+      }
+    }
+  ],
+  "remainingCoreTailByteIdentical": true,
+  "recommendation": "A B39-specific contract may retain exact18 original named failures plus11 original executed passes, all2330 assertions and25 groups, while binding current main ba86, current actual four-function/mutation identities, new queued-cycle guard and all38 added current-source checks. Keep the original47 contract andccd adjudication immutable; do not merely replace mainSha or use>=18.",
+  "publicWrapperPassNotGrantedByThisReview": true,
+  "scope": "Existing current-source R3 source/negative qualification only; no new feature, fault or public acceptance gate",
+  "actions": {
+    "productSourceWrites": false,
+    "wrapperOrOracleWrites": false,
+    "producerExecuted": false,
+    "compilerExecuted": false,
+    "nativeExecuted": false
+  },
+  "newCapabilityOrGate": false,
+  "currentPrimaryAccepted": false,
+  "physicalAcceptance": false,
+  "activeScopeComplete": false
+}

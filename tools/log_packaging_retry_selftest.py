@@ -90,7 +90,7 @@ def main() -> int:
     check("bounded-attempt-loop", "attempt <= LOG_ARCHIVE_MAX_ATTEMPTS" in helper)
     check("unique-temp-per-attempt", 'L".attempt-"' in helper and 'std::to_wstring(attempt)' in helper)
     check("per-attempt-staging-root", 'L".staging-"' in helper and "remove_all(stagingRoot" in helper)
-    check("snapshot-copy-before-tar", "CopyFileW" in helper and helper.index("CopyFileW") < helper.index("runCapture(command"))
+    check("snapshot-copy-before-tar", "snapshotSharedLog(source, staged, copyError)" in helper and helper.index("snapshotSharedLog(source, staged, copyError)") < helper.index("runCapture(command"))
     check("tar-reads-staged-entries", "stagedEntries" in helper and "for (const auto& entry : stagedEntries)" in helper)
     check("cleanup-before-attempt", "fspath::remove(tempPath, staleEc)" in helper)
     check("cleanup-after-failure", "fspath::remove(tempPath, removeEc)" in helper)

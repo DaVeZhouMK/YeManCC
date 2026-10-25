@@ -1,0 +1,23 @@
+{
+  "status": "PASS",
+  "checks": 1,
+  "models": 1,
+  "failures": [],
+  "hardwareIo": false,
+  "HCAssemblyLoaded": false,
+  "productionEntryPointInvoked": false,
+  "assemblySha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "assemblyPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+  "targetCalls": [
+    "Program.ExecuteLedAction"
+  ],
+  "dependencyAttempts": [],
+  "nativeAttempts": [],
+  "cases": [
+    {
+      "id": "loki-off-reaches-black-color-writer",
+      "ok": true,
+      "actualTargetCalls": 1
+    }
+  ]
+}

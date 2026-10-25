@@ -1,0 +1,96 @@
+// Positive real kernel-thread ownership proof. COM leaves are explicit memory
+// ports; every factory is explicit. No SensorManager/device activation occurs.
+#define NOMINMAX
+#define YMCC_FAULT_INJECT
+#include <windows.h>
+#include <sensorsapi.h>
+#include <sensors.h>
+#include <PortableDeviceTypes.h>
+#include <wrl/client.h>
+#include <atomic>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <type_traits>
+#include "sensor_inventory_cache.h"
+namespace port {
+static std::atomic<unsigned> activations{0};
+static HANDLE lastThread=nullptr;
+static HANDLE WINAPI thread(LPSECURITY_ATTRIBUTES sa,SIZE_T stack,LPTHREAD_START_ROUTINE entry,LPVOID argument,DWORD flags,LPDWORD id) {
+    lastThread=::CreateThread(sa,stack,entry,argument,flags,id);return lastThread;
+}
+static HRESULT WINAPI initialize(LPVOID,DWORD){return S_OK;}
+static void WINAPI uninitialize(){}
+static HRESULT WINAPI enable(LPVOID){return S_OK;}
+static HRESULT WINAPI disable(LPVOID){return S_OK;}
+static HRESULT WINAPI cancel(DWORD,ULONG){return E_FAIL;}
+static HRESULT WINAPI activate(REFCLSID,LPUNKNOWN,DWORD,REFIID,LPVOID*){++activations;return E_ACCESSDENIED;}
+}
+#define CreateThread port::thread
+#define CoInitializeEx port::initialize
+#define CoUninitialize port::uninitialize
+#define CoEnableCallCancellation port::enable
+#define CoDisableCallCancellation port::disable
+#define CoCancelCall port::cancel
+#define CoCreateInstance port::activate
+#include "sensorapi_inventory.h"
+#undef CreateThread
+#undef CoInitializeEx
+#undef CoUninitialize
+#undef CoEnableCallCancellation
+#undef CoDisableCallCancellation
+#undef CoCancelCall
+#undef CoCreateInstance
+using ymcc::msi_sensor::Provider;
+using ymcc::msi_sensor::Options;
+using ymcc::sensors::sensorapi_inventory::Census;
+static unsigned checks=0,failures=0;
+static void check(bool ok,const char* name){++checks;if(!ok){++failures;std::cerr<<"FAIL "<<name<<'\n';}}
+struct Gate {
+    HANDLE entered=CreateEventW(nullptr,TRUE,FALSE,nullptr),release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    std::atomic<bool> drained{false},expired{false};
+    HRESULT manager(ISensorManager** out) {
+        *out=nullptr;SetEvent(entered);if(WaitForSingleObject(release,3000)!=WAIT_OBJECT_0)expired=true;
+        drained=true;return E_ACCESSDENIED;
+    }
+    bool arrive(){return WaitForSingleObject(entered,2000)==WAIT_OBJECT_0;}
+    void open(){SetEvent(release);}
+    void close(){check(CloseHandle(entered)!=FALSE&&CloseHandle(release)!=FALSE,"owned controller gate handles close");entered=release=nullptr;}
+};
+int main() {
+    // Warm OS thread / CRT initialization before handle-count comparison.
+    HANDLE warm=CreateThread(nullptr,0,[](void*)->DWORD{return 0;},nullptr,0,nullptr);
+    check(warm&&WaitForSingleObject(warm,2000)==WAIT_OBJECT_0&&CloseHandle(warm),"owned warmup thread joined and closed");
+    DWORD before=0,after=0;check(GetProcessHandleCount(GetCurrentProcess(),&before)!=FALSE,"kernel handle baseline readable");
+    for(unsigned repeat=0;repeat<3;++repeat) {
+        {
+            Provider p;Gate gate;Options options;auto token=std::make_shared<int>(1);std::weak_ptr<int> weak=token;
+            options.managerFactory=[&gate,token](ISensorManager** out){return gate.manager(out);};token.reset();
+            check(p.stopped()&&p.start(std::move(options)),"actual provider starts owned kernel thread");auto thread=port::lastThread;
+            check(gate.arrive(),"provider entered explicit factory gate");
+            check(!p.stop(0)&&!p.stopped()&&p.running(),"blocked owned kernel reader remains quarantined after bounded stop");
+            check(!p.start(Options{}),"blocked reader rejects new start before default factory can activate");
+            gate.open();check(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0&&gate.drained&&!gate.expired,"provider thread actually signalled after controller release");
+            check(!p.stopped(),"signalled kernel thread still owned until explicit checked close");
+            check(p.stop(0)&&p.stopped()&&weak.expired(),"provider thread event and state actually retired");
+            check(p.stop(0)&&p.stopped(),"real provider repeated stop");gate.close();
+        }
+        {
+            Census::cancel();Gate gate;auto owner=std::make_shared<std::atomic<std::uint64_t>>(21);
+            const ymcc::sensors::inventory::Ticket ticket{{owner,21},1};
+            check(Census::request(ticket,[&gate](ISensorManager** out){return gate.manager(out);}),"actual census starts owned kernel thread");auto thread=port::lastThread;
+            check(gate.arrive(),"census entered explicit factory gate");
+            const auto start=GetTickCount64();check(!Census::retire()&&!Census::stopped(),"retire retains blocked real worker");
+            check(GetTickCount64()-start<500,"retire only observes without additional wait budget");
+            check(!Census::request(ticket,[](ISensorManager** out){*out=nullptr;return E_FAIL;}),"census refuses to stack blocked real worker");
+            gate.open();check(WaitForSingleObject(thread,2000)==WAIT_OBJECT_0&&gate.drained&&!gate.expired,"census actual kernel thread reached terminal state");
+            check(!Census::stopped(),"census actual terminal state alone is not stopped");
+            check(Census::retire()&&Census::stopped(),"retire closes actual signalled census worker");
+            check(Census::retire()&&Census::stopped(),"actual census repeat retirement");gate.close();
+        }
+    }
+    check(GetProcessHandleCount(GetCurrentProcess(),&after)!=FALSE&&before==after,"owned kernel resources return to handle baseline before process exit");
+    check(port::activations==0,"zero default SensorManager activations");
+    std::cout<<"checks="<<checks<<" failures="<<failures<<" handlesBefore="<<before<<" handlesAfter="<<after<<" activations="<<port::activations<<"\n";
+    return failures?1:0;
+}

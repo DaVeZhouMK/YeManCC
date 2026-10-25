@@ -1,0 +1,64 @@
+{
+  "schemaVersion": 1,
+  "source": "Literal ordinary YMCC export; original application and Windows event clocks retained",
+  "archive": "YeManCC-logs-20261021-224432-G3E.zip",
+  "archiveSha256": "46428815d1559a2d44aae3eb7a011b521cbe75bf941a428e0f23c824d45a36a3",
+  "sourceMember": "sleep-facts.log",
+  "expectedWakeCycles": 0,
+  "scope": "54-minute event session with delayed application delivery; no DRIPS/residency or fan-RPM proof. This is a control against treating delayed logs as long entry failure.",
+  "physicalSleepVerified": false,
+  "expectedExistingPolicy": "No automatic re-sleep for these short or user-ended sessions; PASS does not mean effective low-power entry was detected",
+  "clockNormalization": {
+    "origin": "2026-10-21T21:42:51.646",
+    "atMs": "application record time minus origin",
+    "eventAtMs": "Windows event fileTime minus origin"
+  },
+  "events": [
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "time": "2026-10-21 22:37:41.832",
+      "eventTime": "2026-10-21 21:43:01.646",
+      "sourceLine": 245,
+      "atMs": 3290186,
+      "eventAtMs": 10000
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 1,
+      "time": "2026-10-21 22:37:42.527",
+      "eventTime": "2026-10-21 22:37:41.338",
+      "sourceLine": 251,
+      "atMs": 3290881,
+      "eventAtMs": 3289692
+    }
+  ],
+  "literalSourceRecords": [
+    {
+      "line": 245,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-21 21:43:01.646",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 22:37:41.832"
+    },
+    {
+      "line": 251,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-21 22:37:41.338",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-21 22:37:42.527"
+    }
+  ]
+}

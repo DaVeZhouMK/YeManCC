@@ -1,0 +1,195 @@
+{
+  "schemaVersion": 1,
+  "generatedAt": "2026-10-19T07:34:45.487Z",
+  "status": "PROTOTYPE_DIAGNOSTICS_ONLY_UPSTREAM_STALE",
+  "id": "sensor.passive-fan-monitor-browser-consumer",
+  "writeScope": "tools/ymcc_sim/global/fan-monitor-browser-consumer/",
+  "original": {
+    "path": "tools/monitor_fan_browser_selftest.mjs",
+    "sha256": "7e79686c36ca2f200c4da99c4458bec12e19b1d49c3dcda2a461b32fe619a21b",
+    "originalAssertionsUnchanged": true,
+    "assertCallSites": 14,
+    "assertions": [
+      {
+        "line": 15,
+        "text": "assert.deepEqual(shapes[0],shapes[1])"
+      },
+      {
+        "line": 15,
+        "text": "assert.equal(shapes[0].text,'风扇转速85%')"
+      },
+      {
+        "line": 15,
+        "text": "assert.equal(shapes[0].group,'CPU')"
+      },
+      {
+        "line": 15,
+        "text": "assert.equal(shapes[0].zoom,scale)"
+      },
+      {
+        "line": 15,
+        "text": "assert(!shapes[0].clipped)"
+      },
+      {
+        "line": 15,
+        "text": "assert(shapes[0].width<=width)"
+      },
+      {
+        "line": 16,
+        "text": "assert.deepEqual(values,[c.expected<0?'—%':c.expected+'%',c.expected<0?'—%':c.expected+'%'])"
+      },
+      {
+        "line": 17,
+        "text": "assert.equal(await page.locator('[data-hud-metric=\"fanSpeed\"]').count(),0)"
+      },
+      {
+        "line": 17,
+        "text": "assert(await page.evaluate(()=>window.__selected()))"
+      },
+      {
+        "line": 17,
+        "text": "assert.equal(await page.locator('[data-hud-metric=\"fanSpeed\"]').count(),2)"
+      },
+      {
+        "line": 18,
+        "text": "assert.deepEqual(await page.locator('[data-hud-metric=\"fanSpeed\"] .hud-number').allTextContents(),['—%','—%'])"
+      },
+      {
+        "line": 18,
+        "text": "assert.deepEqual(await page.locator('[data-hud-metric=\"fps\"] strong').allTextContents(),['117','117'])"
+      },
+      {
+        "line": 19,
+        "text": "assert.equal(await page.evaluate(()=>window.__timers()),0)"
+      },
+      {
+        "line": 19,
+        "text": "assert.deepEqual(errors,[])"
+      }
+    ],
+    "staticCountIsNotExecutionCount": true
+  },
+  "expectedExecution": {
+    "actualConsumers": [
+      "src/bridge/monitorHudRenderer.ts mountMonitorHud",
+      "src/components/MonitorHudTemplate.vue",
+      "src/components/MonitorCrosshair.vue",
+      "src/bridge/monitorData.ts createMonitorDataHub/admitDisplayPublication",
+      "src/bridge/monitorHudModel.ts",
+      "src/bridge/monitorHudFreshness.ts"
+    ],
+    "widths": [
+      1280,
+      1920
+    ],
+    "height": 720,
+    "legacyLayouts": [
+      "corner",
+      "bar",
+      "capsule"
+    ],
+    "existingAliasMeaning": {
+      "corner": "capsule",
+      "bar": "cinema",
+      "capsule": "capsule"
+    },
+    "layoutAliasIsNotThreeDistinctModernLayouts": true,
+    "scales": [
+      1,
+      1.4,
+      2
+    ],
+    "shapeCheckpoints": 18,
+    "nativePayloadCheckpoints": 21,
+    "hideZeroAndIndependentExpiryCheckpoints": 2,
+    "expectedNamedCheckpoints": 41,
+    "finalAssertions": [
+      "Both renderer instances disposed",
+      "Page virtual timer count zero",
+      "No page errors",
+      "Own browser and loopback server closed"
+    ],
+    "expectedReport": "fan-browser/RESULT.json",
+    "expectedScreenshot": "fan-browser/fan-85.png",
+    "twoInstancesAreSameDocument": true,
+    "twoInstancesAreNotDesktopOrSteamWindowAcceptance": true
+  },
+  "upstream": {
+    "originalGlobalResult": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor\\2026-10-19T07-30-31-251Z-17f53c98\\result.json",
+    "originalGlobalResultSha256": "5213e50239b58ffc0b21b540c74161aa3a6cca294b84ac9b4f68510667bd5c8e",
+    "caseDir": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor\\2026-10-19T07-30-31-251Z-17f53c98\\cases\\sensor.passive-fan-monitor-consumer",
+    "payload": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor\\2026-10-19T07-30-31-251Z-17f53c98\\cases\\sensor.passive-fan-monitor-consumer\\fan-monitor\\positive\\private-output\\NATIVE-FAN-PAYLOADS.json",
+    "payloadSha256": "2b538a66bcac7c1d89d207187c193f3415417afb93730c0479395b3a881814fc",
+    "payloadCount": 21,
+    "sourceReceipt": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor\\2026-10-19T07-30-31-251Z-17f53c98\\cases\\sensor.passive-fan-monitor-consumer\\fan-monitor\\result.json",
+    "sourceReceiptSha256": "bd3a4f31edfc626808f76d8a2b01ab74fa5cf6a20177a277aab6232a7c9e5fc7",
+    "registeredScopeAudit": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\audit-five-consumers-public-r2\\2026-10-19T07-31-37-636Z-29839a23\\receipt-audit.json",
+    "nativeBusinessMustNotBeReexecuted": true,
+    "currentSourceAndArtifactCheckRequiredBeforeReuse": true
+  },
+  "tools": {
+    "node": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+    "browser": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+    "browserSha256": "c2451a012ff88e82449834de5b526ebb42b5a3fc25958d795910d2b172c975b6",
+    "playwrightPackage": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\package.json",
+    "playwrightVersion": "1.62.1",
+    "playwrightPackageSha256": "ca170ec143a88ed3043ac953eb3b2377b2b97304104f4e1e23316684ce2c35af",
+    "playwrightCoreVersion": "1.62.1",
+    "playwrightCorePackageSha256": "07c47543631fef9508760365dee9fbe958c562093ec8d122543949ed231f233f",
+    "vuePlugin": "tools/monitor_hud_vue_build.mjs",
+    "vuePluginSha256": "a652716eb921c950a8af69af266a1d341c60a11657003f640654d91bda9352b8"
+  },
+  "requiredBoundary": {
+    "onlyOwnBrowserInstance": true,
+    "noPersistentUserProfile": true,
+    "privateUserDataDir": true,
+    "onlyPrivateOutput": true,
+    "onlyOwned127001RandomPort": true,
+    "denyOtherBrowserRequests": true,
+    "noCurrentYmccOrNativeMonitorEndpoint": true,
+    "ownedJobForAllChildren": true,
+    "strictNaturalEndpointAndDeadline": true,
+    "observedCompiledGraphAndProgramBytes": true,
+    "productSourcesUnchanged": true,
+    "originalFailurePreservedBeforeAnyCompatibilityMigration": true,
+    "wholeScriptRecoveryIfBoundaryInjectionUsed": true,
+    "metadataAndLayoutAssertionsNeverRelaxedForGreen": true
+  },
+  "notYetProven": [
+    "Original browser runtime compatibility and actual endpoint",
+    "Loopback/process/read/write controls implemented and tested",
+    "Actual imported compiler/browser modules and generated artifact identities",
+    "Current screenshot rendering",
+    "Precise original assertion failure under private product source fault",
+    "Original global execution and registered audit"
+  ],
+  "originalExecuted": true,
+  "productChanges": 0,
+  "physicalAcceptance": false,
+  "fullGoalComplete": false,
+  "prototypeObservations": {
+    "original": {
+      "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\fan-browser-prototype-v1\\prototype-result.json",
+      "status": "FAIL",
+      "assertionLine": 18,
+      "meaning": "Unqualified synthetic FPS117 lacks producer identity/time and entrance observations; current product correctly rejects."
+    },
+    "separateV2": {
+      "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\fan-browser-prototype-v2\\prototype-result.json",
+      "checks": 41,
+      "originalAssertionsChanged": false,
+      "reversibleFixtureChanges": true,
+      "meaning": "Two qualified synthetic FPS observations3s apart; no admission-gate change. Diagnostic fixture render only; upstream fifth is stale."
+    },
+    "privateConsumerFault": {
+      "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\fan-browser-prototype-negative\\prototype-result.json",
+      "assertionLine": 15,
+      "meaning": "Private monitorSnapshotSignals proof suppression rendered dash instead of85; original renderer assertion catches it."
+    },
+    "screenshotInspected": true,
+    "currentFullChainAccepted": false
+  },
+  "upstreamCurrent": false,
+  "upstreamFreshnessGateImplemented": true,
+  "upstreamFreshnessGateEvidence": "D:\\Codex\\2026-10-19\\wo-z\\outputs\\HC连续接入-B0-20261019\\第六批-风扇渲染边界与原型\\上游来源变化实际拒绝.json"
+}

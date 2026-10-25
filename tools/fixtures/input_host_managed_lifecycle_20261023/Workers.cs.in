@@ -1,0 +1,109 @@
+// Reuse only the existing SDK 2.0 BCL fixture's clock and controller scaffolding.
+// Template markers are replaced by hash-locked SDK method fixtures by the runner.
+using System;
+using System.Threading;
+using HIDMaestro;
+using HIDMaestro.Internal;
+using Microsoft.Win32.SafeHandles;
+using Guard = YeManInputHost.Diagnostics.HostControllerOutputStop;
+using IdleGuard = YeManInputHost.Diagnostics.HostControllerIdleCtsRelease;
+@@CLOCK_SCAFFOLD@@
+@@CONTROLLER_SCAFFOLD@@
+internal static class World
+{
+    internal static int ContextCalls, UnsafeFakeUnmaps, UnsafeNeutralWrites;
+    internal static bool ThrowContextDispose;
+    internal static Action? AfterContextDispose;
+    internal static readonly System.Collections.Generic.List<string> Trace = new();
+}
+internal sealed class HMContext : IDisposable
+{
+    public HMContext(){Program.Fixture.Events.Add("context-create");}
+    public void LoadDefaultProfiles(){}
+    public HMProfile GetProfile(string id)=>new(){Id=id,RequiresUsbipBackend=id=="steam-deck-composite"};
+    public HMController CreateController(HMProfile profile)
+    {
+        Program.Fixture.Creates++; Program.Fixture.Events.Add("sdk-create");
+        if(Program.Fixture.CreateThrows)throw new System.IO.IOException("fake-create");
+        Program.Fixture.Current=Program.Arrival(Program.Fixture.NextRoot);
+        return OwnedWorkers.Create();
+    }
+    public static void RemoveAllVirtualControllers(bool keep)
+    {
+        Program.Fixture.Events.Add("existing-sweep"); Program.Fixture.Sweeps++;
+        if(OwnedWorkers.All.Any(w=>w.Output.IsAlive||w.Clock.Thread.IsAlive))World.UnsafeFakeUnmaps++;
+        Program.Fixture.OnSweep?.Invoke();
+        if(Program.Fixture.SweepThrows)throw new System.IO.IOException("fake-sweep");
+    }
+    public void Dispose()
+    {
+        Program.Fixture.Events.Add("context-dispose");
+        if(Program.Fixture.ContextThrows)throw new System.IO.IOException("fake-context");
+    }
+}
+internal sealed class OwnedWorkers : IDisposable
+{
+    internal static readonly List<OwnedWorkers> All=new();
+    internal static bool BlockClock,BlockOutput,OutputNeverStarted;
+    internal readonly CancellationTokenSource Cts=new();
+    internal readonly ManualResetEventSlim Gate=new(),Entered=new();
+    internal readonly DeviceClock<StreamTick> Clock;
+    internal readonly Thread Output;
+    internal readonly HMController Controller;
+    internal readonly SafeWaitHandle CtsHandle,ClockHandle;
+    private OwnedWorkers()
+    {
+        CtsHandle=Cts.Token.WaitHandle.SafeWaitHandle;
+        Clock=new DeviceClock<StreamTick>(blocked:BlockClock);
+        ClockHandle=Clock.ProofHandle;
+        bool blocked=BlockOutput;
+        Output=new Thread(()=>Controller!.RunOutput()){IsBackground=true,Name="managed-lifecycle-owned-reader"};
+        Controller=new HMController(Cts,Output,view:(nint)1,clock:Clock,poll:()=>{
+            Entered.Set(); if(blocked)Gate.Wait(); else Cts.Token.WaitHandle.WaitOne();
+        });
+        if(!OutputNeverStarted){Output.Start();Program.Assert(Entered.Wait(2000),"output startup");}
+    }
+    internal static HMController Create(){var w=new OwnedWorkers();All.Add(w);return w.Controller;}
+    internal static void Reset()
+    {
+        Program.Assert(All.Count==0,"prior fixture resources not cleaned");
+        BlockClock=BlockOutput=OutputNeverStarted=false;
+        ManagedAdmission.Idle.TerminationFails=false;World.ContextCalls=World.UnsafeFakeUnmaps=World.UnsafeNeutralWrites=0;World.ThrowContextDispose=false;World.AfterContextDispose=null;World.Trace.Clear();
+    }
+    internal bool Closed => !Output.IsAlive&&!Clock.Thread.IsAlive&&CtsHandle.IsClosed&&ClockHandle.IsClosed;
+    public void Dispose()
+    {
+        Gate.Set(); Clock.Finish();
+        if((Output.ThreadState&ThreadState.Unstarted)!=0)Controller.CloseOutputForTest();
+        else {if(!CtsHandle.IsClosed)Cts.Cancel();Program.Assert(Output.Join(2000),"fixture output leak");}
+        Cts.Dispose();Gate.Dispose();Entered.Dispose();
+    }
+    internal static void Cleanup(){foreach(var w in All)w.Dispose();All.Clear();}
+}
+internal static class ManagedAdmission
+{
+    internal static readonly OutputRuntime Output=new();
+    internal static readonly ClockRuntime Idle=new();
+    internal static bool StopOutput(HMController c,out string d){Program.Fixture.Events.Add("output-stop");return Guard.TryStopAgainstRuntime(c,Output,out d);}
+    internal static bool StopClock(HMController c,out string d){Program.Fixture.Events.Add("idle-stop");return IdleGuard.TryStopInputClockAgainstRuntime(c,Idle,out d);}
+    internal static bool Capture(HMController c,out IdleGuard.Captured? capture,out string d){Program.Fixture.Events.Add("idle-capture");return IdleGuard.TryCaptureAgainstRuntime(c,Idle,out capture,out d);}
+    internal sealed class OutputRuntime:Guard.IRuntime
+    {
+        public Type ControllerType=>typeof(HMController);public Type CancellationSourceType=>typeof(CancellationTokenSource);public Type ReaderType=>typeof(Thread);
+        public bool IsPinnedCore(Type t)=>true;public int ReadJoinBudgetMilliseconds(Type t)=>500;
+        public bool IsCurrentReader(object t)=>ReferenceEquals(t,Thread.CurrentThread);public ThreadState ReadThreadState(object t)=>((Thread)t).ThreadState;
+        public bool TryEnterCancellationLock(object g,int ms){Program.Assert(ms<=500,"output budget");return Monitor.TryEnter(g,ms);}
+        public void ExitCancellationLock(object g)=>Monitor.Exit(g);public void Cancel(object c)=>((CancellationTokenSource)c).Cancel();
+        public bool Join(object t,int ms){Program.Assert(ms<=500,"output join budget");return ((Thread)t).Join(ms);}
+    }
+    internal sealed class ClockRuntime:IdleGuard.IRuntime
+    {
+        public Type ControllerType=>typeof(HMController);public Type ClockInterfaceType=>typeof(IDeviceClock);public Type ReaderType=>typeof(Thread);
+        public bool IsPinnedCore(Type t)=>true;public bool IsPinnedClock(Type t)=>t==typeof(DeviceClock<StreamTick>);public int ReadJoinBudgetMilliseconds(Type t)=>500;
+        public bool IsCurrentReader(object t)=>ReferenceEquals(t,Thread.CurrentThread);public ThreadState ReadThreadState(object t)=>((Thread)t).ThreadState;
+        internal bool TerminationFails; public bool HasTerminated(object t)=>TerminationFails?throw new Exception("injected-final-proof"):((Thread)t).Join(0);public object ReadClockThread(object c)=>((IDeviceClock)c).Thread;
+        public void StopClock(object c,int ms){Program.Assert(ms<=500,"clock budget");((IDeviceClock)c).Stop(ms);}
+    }
+}
+
+

@@ -1,0 +1,394 @@
+{
+  "schemaVersion": 1,
+  "caseId": "sleep.marker-ownership-consumer",
+  "fixture": {
+    "path": "tools/ymcc_sim/global/marker-ownership-consumer/fixture.cpp.in",
+    "sha256": "4cea064d060c595c043e16663a3b8169c8bdc34353c441dfc645dbf5d5cb9964",
+    "positiveGroups": 32
+  },
+  "productSources": [
+    "native/main.cpp",
+    "deps/json/json.hpp"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+    "tools/sleep_game_pause_selftest.py",
+    "tools/sleep_non_user_wake_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    }
+  ],
+  "reviewedFunctions": [
+    {
+      "name": "sgEnsureMarkerDir",
+      "sha256": "6c4021ee674a893e8799adab47419a3644702b17e83e94766ba55f705471bcbd"
+    },
+    {
+      "name": "sgManualPauseRunToken",
+      "sha256": "a8200c7b4688f20cd634802ecb7567ae25c7366a6fafc93c29a6810cc40384e6"
+    },
+    {
+      "name": "sgWriteFileAtomicFlags",
+      "sha256": "a5e43fa55d0fa16de4eb2f9b0445fbe4e0571e2684d338097248235f0d8096e2"
+    },
+    {
+      "name": "sgWriteFileAtomic",
+      "sha256": "dd3d80553e6665317330c9a1e3675d3df400f5db0778828dd68a36d048c89e47"
+    },
+    {
+      "name": "sgWriteProcessMarker",
+      "sha256": "4c2b41de045338b767d83c332981712b67e4ed2a46da7e9e1e0416f47e67655a"
+    },
+    {
+      "name": "sgMarkerCreated",
+      "sha256": "dcdff96f5c687b8a4cffe5e39569f5f16697f2acfdd65f6158188952f5e83cb9"
+    },
+    {
+      "name": "sgMarkerIsSuspended",
+      "sha256": "bdb68c36b3da240f81c9dfd75e8b0444685f73e6b71008531d75ce6740ebb8d1"
+    },
+    {
+      "name": "sgMarkerGeneration",
+      "sha256": "3ae66df4f84d86af09bf15a51dbb2ca18ebc2835e6233602476b0d0de6a21837"
+    },
+    {
+      "name": "nativeValveValidateOwnedSuspendedTarget",
+      "sha256": "f2ce2d07c40efba7fe6ef91e1881634b1aca4c6bf7e9b023ab569ad2217e97f1"
+    },
+    {
+      "name": "sgSuspendGameByPidUnlocked",
+      "sha256": "990a30a256b07b0b5f604b9269193dbcc0f775a7b230f815f65390537b2a96d3"
+    },
+    {
+      "name": "sgPauseSleepTarget",
+      "sha256": "e87d5a41417d3dd80ae2412ff2b7afa5adc683980deeb6b9d865c0acb89705d8"
+    }
+  ],
+  "atomicMemoryPorts": [
+    "CreateFileW",
+    "WriteFile",
+    "FlushFileBuffers",
+    "CloseHandle",
+    "DeleteFileW",
+    "MoveFileExW",
+    "ReplaceFileW",
+    "Sleep",
+    "GetCurrentProcessId"
+  ],
+  "otherMemoryBoundaries": [
+    "fspath path/directory/file map",
+    "sgReadFile marker map",
+    "queryModes and processAlive identity/liveness state",
+    "OpenProcess/nativeProcessCreatedFromHandle integer process handles",
+    "countedNativeSuspend function pointer",
+    "currentPowerGeneration and lifecycle state",
+    "native valve admission/read and wake reconciliation responses",
+    "sleep target record and capture metadata map"
+  ],
+  "faults": [
+    {
+      "label": "fault-identity-guard-reverted",
+      "path": "native/main.cpp",
+      "before": "    if (!focusQueryProcessIdentity(pid, nullptr, &created) || created == 0) return false;\n    std::string body = \"pid=\"",
+      "after": "    focusQueryProcessIdentity(pid, nullptr, &created);\n    std::string body = \"pid=\"",
+      "expectedFailedCases": [
+        "pre-marker-query-fails-live-process",
+        "post-marker-query-fails-live-process",
+        "both-marker-queries-fail-live-process",
+        "direct-marker-unknown-identity",
+        "direct-marker-zero-birth"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-zero-birth-guard-removed",
+      "path": "native/main.cpp",
+      "before": "if (!focusQueryProcessIdentity(pid, nullptr, &created) || created == 0) return false;",
+      "after": "if (!focusQueryProcessIdentity(pid, nullptr, &created)) return false;",
+      "expectedFailedCases": [
+        "direct-marker-zero-birth"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-flush-failure-ignored",
+      "path": "native/main.cpp",
+      "before": "if (durable && writeOk && !FlushFileBuffers(file)) writeOk = false;",
+      "after": "if (durable && writeOk) (void)FlushFileBuffers(file);",
+      "expectedFailedCases": [
+        "marker-flush-fails",
+        "atomic-flush-failure-keeps-old-final"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-replace-failure-ignored",
+      "path": "native/main.cpp",
+      "before": "if (ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, replaceFlags, nullptr, 0))",
+      "after": "if ((ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, replaceFlags, nullptr, 0), true))",
+      "expectedFailedCases": [
+        "marker-move-and-replace-fail",
+        "atomic-rename-failure-keeps-old-final"
+      ],
+      "expectedNativeExit": 23
+    }
+  ],
+  "fixedInvariantAssertions": [
+    "Every counted native suspension begins with exact PID/birth/generation/final-state marker",
+    "Any live process reported frozen retains a marker accepted by actual owner validation",
+    "Unknown or zero process birth cannot commit a suspension marker",
+    "File write/flush/move/replace failure propagates and preserves prior committed contents"
+  ],
+  "historicalOriginalFailure": {
+    "status": "FAIL",
+    "groups": 32,
+    "failedGroups": 5,
+    "controlGroupsPassed": 27,
+    "nativeExit": 23,
+    "sourceSha256": "d67f013f22569828cd64360e9460f568f0cbbd5eaa415918cbe243f7825ebd9d",
+    "functionSha256": "82fe5264c0480a60f9710888d3e050081d12c8cf3b65742d0414b5d99627a60f",
+    "reviewSha256": "9ed80e52bbc70f67d5dc69497071f5a538eba6fbc06f61e09c0f95d36fbcb2b5"
+  },
+  "positiveSourcePolicy": "Execute actual captured product functions with reviewed hashes. Never inject the proposed product fix at runtime. Only explicit negative stages mutate private native/main.cpp copies.",
+  "actualProductionFunctions": 11,
+  "realNtFileProcessOperations": false,
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 2,
+    "kind": "exact-current-source-reverse-deltas",
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "compilerAndEnvironmentTextUnchanged": true,
+    "oldIdentities": "priorReviewedSharedLeafIdentities",
+    "sourceApproval": false
+  },
+  "sourceCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "oldIdentitiesRetained": true,
+    "fullReverseDeltaRequired": true,
+    "sourceApproval": false
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "013ff6b883408d4ccad959f6db91b8c021a51b59444a6e2e957e7a5c8430f3fa"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    }
+  ],
+  "priorFaults": [
+    {
+      "label": "fault-identity-guard-reverted",
+      "path": "native/main.cpp",
+      "before": "    if (!focusQueryProcessIdentity(pid, nullptr, &created) || created == 0) return false;\r\n    std::string body = \"pid=\"",
+      "after": "    focusQueryProcessIdentity(pid, nullptr, &created);\r\n    std::string body = \"pid=\"",
+      "expectedFailedCases": [
+        "pre-marker-query-fails-live-process",
+        "post-marker-query-fails-live-process",
+        "both-marker-queries-fail-live-process",
+        "direct-marker-unknown-identity",
+        "direct-marker-zero-birth"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-zero-birth-guard-removed",
+      "path": "native/main.cpp",
+      "before": "if (!focusQueryProcessIdentity(pid, nullptr, &created) || created == 0) return false;",
+      "after": "if (!focusQueryProcessIdentity(pid, nullptr, &created)) return false;",
+      "expectedFailedCases": [
+        "direct-marker-zero-birth"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-flush-failure-ignored",
+      "path": "native/main.cpp",
+      "before": "if (durable && writeOk && !FlushFileBuffers(file)) writeOk = false;",
+      "after": "if (durable && writeOk) (void)FlushFileBuffers(file);",
+      "expectedFailedCases": [
+        "marker-flush-fails",
+        "atomic-flush-failure-keeps-old-final"
+      ],
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-replace-failure-ignored",
+      "path": "native/main.cpp",
+      "before": "if (ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, replaceFlags, nullptr, 0))",
+      "after": "if ((ReplaceFileW(path.c_str(), tmp.c_str(), nullptr, replaceFlags, nullptr, 0), true))",
+      "expectedFailedCases": [
+        "marker-move-and-replace-fail",
+        "atomic-rename-failure-keeps-old-final"
+      ],
+      "expectedNativeExit": 23
+    }
+  ],
+  "faultSourceMaintenance": {
+    "kind": "exact-LF-source-selector",
+    "labels": [
+      "fault-identity-guard-reverted"
+    ],
+    "assertionsAndMutationsUnchanged": true,
+    "oldSelectorsRetained": "priorFaults",
+    "noWhitespaceInsensitiveExecution": true
+  },
+  "priorReviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  }
+}

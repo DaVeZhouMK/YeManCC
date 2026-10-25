@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "checkedUtc": "2026-10-19T06:36:34.0232031Z",
+  "installedFiles": 2,
+  "preservedFiles": 103,
+  "allShaAndAclVerified": true,
+  "fanHostSha256": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+  "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "hardwareIo": false,
+  "applicationRestarted": false
+}

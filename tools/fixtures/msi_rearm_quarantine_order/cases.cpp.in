@@ -1,0 +1,307 @@
+struct Options {
+    bool knownBoard=true, localAck=true, shutdownAck=true, exited=true;
+    bool historicalTransportError=false, operatorOff=true;
+    ULONGLONG releasePower=7;
+    std::string stopReason="virtual-target-disabled";
+};
+json rows=json::array();
+unsigned checks=0, scenarios=0;
+json state(){
+    const auto t=g_msiExplicitRearmTicket.snapshot();
+    return {{"blocked",g_inputHostStartBlocked},{"quarantined",g_inputHostReleaseQuarantined},
+        {"transportFault",g_inputHostTransportFault},{"hostPresent",g_inputHostProcess!=nullptr},
+        {"runId",g_inputHostRunId},{"epoch",g_inputHostEpoch},{"persona",inputHostConfiguredPersona()},
+        {"journalActive",g_hidHideVisibilityJournal.active},{"debt",g_msiSteamDeckReleaseDebt.required()},
+        {"wanted",t.wanted},{"sequence",t.sequence},{"offSequence",t.offSequence},
+        {"startedSequence",t.startedSequence},{"releaseFloor",t.releaseFloor},
+        {"releaseEligible",t.releaseEligible},{"consumedSequence",t.consumedSequence},
+        {"settingPower",t.settingPower},{"releasePower",t.releasePower}};
+}
+void expect(const std::string& name,bool pass,const json& detail=json::object()){
+    ++checks;
+    rows.push_back({{"name",name},{"pass",pass},{"state",state()},{"detail",detail}});
+}
+json events(const char* name){
+    json found=json::array();
+    for(const auto& e:model.events) if(e.at("event")==name) found.push_back(e);
+    return found;
+}
+json preservedEvents(){return events("msi-explicit-rearm-preserved");}
+unsigned preservedCount(){
+    unsigned count=0;
+    for(const auto& e:preservedEvents()) if(e.at("data").at("preserved").get<bool>()) ++count;
+    return count;
+}
+void reset(){
+    // A fresh unrelated scenario starts with a closed session. The REAL Clear
+    // initializes transportFault; there is no fixture transportFault=false write.
+    g_inputHostProcess=nullptr;
+    g_inputHostReleaseQuarantined=false;
+    g_hidHideVisibilityJournal.active=false;
+    inputHostClearLocked();
+    model=Model{};
+    g_msiExplicitRearmTicket.restore({});
+    g_msiSteamDeckReleaseDebt.clear();
+    g_realStickTest=Config{};
+    g_inputHostStartBlocked=false;
+    g_inputHostFaultHoldsStart=false;
+    g_inputHostPowerAdmissionRevoked=false;
+    g_inputReady=true;
+    g_powerLifecycle=PowerLifecycle::Ready;
+    g_powerGeneration=7;
+    g_wakeHoldPhysicalUnhide=false;
+    g_msiVirtualReleaseRearmEligible=false;
+    exitFence=false;
+    g_xinputConnectedMask=1;
+}
+void seed(const std::string& name,const Options& o=Options{}){
+    reset();
+    ++scenarios;
+    model.knownBoard=o.knownBoard;
+    applySetting(true,"steamdeck");
+    const auto owner=msiExplicitRearmStartSettingSequence();
+    g_inputHostProcess=reinterpret_cast<HANDLE>(std::uintptr_t{1});
+    g_inputHostServerPipe=reinterpret_cast<HANDLE>(std::uintptr_t{2});
+    g_inputHostRunId="accepted-run";
+    g_inputHostEpoch=41;
+    g_inputHostEpochMirror=41;
+    g_inputHostBoundPowerGeneration=7;
+    g_inputHostStartupNonce="accepted-nonce";
+    g_inputHostPipeName=L"symbolic-only";
+    g_inputHostBoundPersona="steamdeck";
+    g_inputHostHello=true;
+    g_inputHostPrepared=true;
+    g_inputHostNeutralized=true;
+    g_inputHostActive=true;
+    g_inputHostPipeConnected=true;
+    g_xinputPhysicalSourceLocked=true;
+    g_xinputPhysicalSourceMask=1;
+    g_msiSteamDeckReleaseFence.pinned=true;
+    msiExplicitRearmStarted(owner);
+    if(o.operatorOff) applySetting(false,"disabled");
+    const auto off=g_msiExplicitRearmTicket.snapshot();
+    expect(name+"/real-ON-started-OFF",!o.knownBoard ||
+        (owner==1 && off.sequence==(o.operatorOff?2u:1u) && off.startedSequence==1 &&
+         off.offSequence==(o.operatorOff?2u:0u) && off.wanted==!o.operatorOff));
+    // These are external Stop facts, not real transport/Host operations.
+    if(o.exited) g_inputHostProcess=nullptr;
+    g_inputHostReleaseQuarantined=true;
+    g_inputHostStartBlocked=true;
+    g_hidHideVisibilityJournal.active=true;
+    g_msiSteamDeckReleaseDebt.pinned=true;
+    if(o.historicalTransportError) g_inputHostTransportFault=true;
+    stopReceiptAndClear(o.stopReason.c_str(),o.localAck,o.shutdownAck,o.exited,o.releasePower);
+    const auto t=g_msiExplicitRearmTicket.snapshot();
+    const bool eligible=o.knownBoard && o.stopReason=="virtual-target-disabled" &&
+        o.operatorOff && o.localAck && o.shutdownAck && o.exited && o.releasePower!=0;
+    expect(name+"/real-release-receipt",t.releaseEligible==eligible);
+    expect(name+"/Clear-really-retains-and-faults",g_inputHostTransportFault &&
+        g_inputHostPipeRetired && !g_inputHostServerPipe && !g_inputHostPipeConnected &&
+        g_inputHostRunId=="accepted-run" && g_inputHostEpoch==41 && g_inputHostEpochMirror==41 &&
+        g_inputHostBoundPersona=="steamdeck" && g_inputHostStartupNonce=="accepted-nonce" &&
+        g_inputHostHello && g_inputHostPrepared && !g_inputHostActive && !g_inputHostNeutralized &&
+        g_xinputPhysicalSourceLocked && g_xinputPhysicalSourceMask==1 &&
+        g_msiSteamDeckReleaseDebt.required() && g_msiSteamDeckReleaseFence.required() &&
+        model.pipeCloses==1 && events("input-host-session-retained").size()==1,
+        {{"receipt",events("msi-explicit-rearm-release")},{"retain",events("input-host-session-retained")}});
+}
+void explicitOn(const std::string& name,const std::string& persona="steamdeck"){
+    const auto before=g_msiExplicitRearmTicket.snapshot();
+    applySetting(true,persona);
+    const auto after=g_msiExplicitRearmTicket.snapshot();
+    expect(name+"/actual-settings-rearm-boundary",!g_inputHostStartBlocked &&
+        g_inputHostReleaseQuarantined && g_inputHostTransportFault &&
+        (!model.knownBoard || (after.sequence==before.sequence+1 && after.wanted && after.persona==persona)));
+}
+void negative(const std::string& name,bool cleanupExpected=true){
+    inputHostReconcileQuarantineOnLifecycleThread();
+    const auto t=g_msiExplicitRearmTicket.snapshot();
+    const bool cleanupOk=cleanupExpected
+        ? (!g_inputHostReleaseQuarantined && !g_inputHostTransportFault &&
+           !g_inputHostPipeRetired && g_inputHostRunId.empty() && g_inputHostEpoch==0 &&
+           !g_inputHostHello && !g_inputHostPrepared && g_inputHostStartBlocked &&
+           !g_hidHideVisibilityJournal.active && !g_msiSteamDeckReleaseDebt.required())
+        : (g_inputHostReleaseQuarantined && g_inputHostTransportFault &&
+           g_inputHostRunId=="accepted-run" && g_inputHostEpoch==41 &&
+           g_inputHostHello && g_inputHostPrepared && g_msiSteamDeckReleaseDebt.required());
+    expect(name+"/no-rearm-no-consumption",cleanupOk && t.consumedSequence==0 && preservedCount()==0 &&
+        !startAdmissionOnly(),{{"events",model.events},{"cleanupExpected",cleanupExpected}});
+    inputHostReconcileQuarantineOnLifecycleThread();
+    expect(name+"/repeat-does-not-rebuild",preservedCount()==0 &&
+        g_msiExplicitRearmTicket.snapshot().consumedSequence==0 && !startAdmissionOnly() &&
+        (cleanupExpected ? g_inputHostStartBlocked : g_inputHostReleaseQuarantined));
+}
+void positive(const std::string& name,const std::string& persona,bool expected){
+    const auto intent=g_msiExplicitRearmTicket.snapshot();
+    const unsigned restoreBefore=model.restores;
+    inputHostReconcileQuarantineOnLifecycleThread();
+    const auto t=g_msiExplicitRearmTicket.snapshot();
+    const auto receipts=preservedEvents();
+    expect(name+"/baseline-false-current-true",receipts.size()==1 &&
+        receipts[0]["data"]["preserved"]==expected && (preservedCount()==1)==expected &&
+        g_inputHostStartBlocked==!expected && startAdmissionOnly()==expected &&
+        !g_inputHostTransportFault && !g_inputHostReleaseQuarantined &&
+        g_inputHostRunId.empty() && g_inputHostEpoch==0 &&
+        !g_inputHostHello && !g_inputHostPrepared && !g_inputHostProcess &&
+        !g_hidHideVisibilityJournal.active && !g_msiSteamDeckReleaseDebt.required() &&
+        t.sequence==intent.sequence && t.persona==persona &&
+        t.consumedSequence==(expected?intent.sequence:0) && t.releaseEligible==!expected,
+        {{"expectedPreserved",expected},{"events",model.events}});
+    // Observe the real helper's facts and log-time tuple, not a hand-built Facts.
+    const auto facts=receipts[0]["data"]["facts"];
+    const auto at=receipts[0]["atCall"];
+    expect(name+"/actual-helper-sees-correct-order",facts["transportFault"]==!expected &&
+        facts["restored"]==true && facts["quarantined"]==false &&
+        facts["visibilityJournalActive"]==false && facts["hostPresent"]==false &&
+        at["runId"]==(expected?"":"accepted-run") && at["epoch"]==(expected?0:41));
+    const auto cleared=events("input-host-quarantine-cleared");
+    bool retiredFields=true;
+    if(expected) retiredFields=cleared.size()==1 &&
+        cleared[0]["data"]["retiredHostEpoch"]==41 &&
+        cleared[0]["data"]["retiredRunId"]=="accepted-run" &&
+        cleared[0]["data"]["retiredTransportFault"]==true &&
+        cleared[0]["data"]["sessionClearedBeforeRearm"]==true;
+    expect(name+"/lifecycle-receipt-and-retired-fields",retiredFields && cleared.size()==1 &&
+        cleared[0]["data"]["rearmRequired"]==!expected && model.restores==restoreBefore+1);
+    inputHostReconcileQuarantineOnLifecycleThread();
+    expect(name+"/repeat-lifecycle-consumes-once",preservedEvents().size()==1 && model.restores==restoreBefore+1 &&
+        g_msiExplicitRearmTicket.snapshot().consumedSequence==t.consumedSequence &&
+        g_inputHostStartBlocked==!expected);
+    if(expected){
+        // A second actual helper attempt cannot consume the same explicit ON.
+        const bool again=msiExplicitRearmRestoredLocked();
+        expect(name+"/helper-second-take-refused",!again && preservedCount()==1 &&
+            g_msiExplicitRearmTicket.snapshot().consumedSequence==intent.sequence);
+    }
+}
+json runSuite(bool expected){
+    rows=json::array();checks=0;scenarios=0;
+    for(const char* persona:{"steamdeck","dualshock4","xbox360","dualsense","elite","dualsense-edge"}){
+        const std::string name=std::string("normal-off-new-ON-")+persona;
+        seed(name);explicitOn(name,persona);positive(name,persona,expected);
+    }
+    seed("endpoint-unproven");explicitOn("endpoint-unproven");model.endpointAbsent=false;
+    negative("endpoint-unproven",false);
+    expect("endpoint-unproven/no-restore",model.probes==2 && model.restores==0);
+    // Retry only the existing lifecycle cleanup once proof arrives.
+    model.endpointAbsent=true;positive("endpoint-later-proven","steamdeck",expected);
+
+    seed("incomplete-PnP-snapshot");explicitOn("incomplete-PnP-snapshot");model.snapshotComplete=false;
+    negative("incomplete-PnP-snapshot",false);
+    expect("incomplete-PnP-snapshot/no-restore",model.restores==0);
+
+    seed("restore-failed");explicitOn("restore-failed");model.restore=false;
+    negative("restore-failed",false);
+    expect("restore-failed/no-helper",model.restores==2 && preservedEvents().empty());
+    model.restore=true;positive("restore-later-succeeds","steamdeck",expected);
+
+    seed("host-still-present");explicitOn("host-still-present");
+    g_inputHostProcess=reinterpret_cast<HANDLE>(std::uintptr_t{1});
+    negative("host-still-present",false);
+    expect("host-still-present/no-probe-or-restore",model.probes==0 && model.restores==0);
+
+    seed("wake-hold");explicitOn("wake-hold");g_wakeHoldPhysicalUnhide=true;
+    negative("wake-hold",false);expect("wake-hold/no-restore",model.restores==0);
+
+    seed("no-new-ON");negative("no-new-ON");
+    seed("new-OFF-cancels");explicitOn("new-OFF-cancels");applySetting(false,"disabled");
+    negative("new-OFF-cancels");
+
+    seed("persona-latest-only");explicitOn("persona-latest-only","dualshock4");
+    explicitOn("persona-latest-only","xbox360");
+    const auto latest=g_msiExplicitRearmTicket.snapshot();
+    expect("persona-latest-only/old-not-consumed",latest.sequence==4 && latest.persona=="xbox360" && latest.consumedSequence==0);
+    positive("persona-latest-only","xbox360",expected);
+
+    seed("persona-stale-ticket");explicitOn("persona-stale-ticket","dualshock4");
+    // A stale receipt must not authorize a different current persona.
+    {std::lock_guard<std::mutex> lock(g_inputHostPersonaMx);g_realStickTest.virtualTargetPersona="xbox360";}
+    negative("persona-stale-ticket");
+
+    seed("power-changed-after-ON");explicitOn("power-changed-after-ON");g_powerGeneration=8;
+    negative("power-changed-after-ON");
+    seed("power-changed-before-ON");g_powerGeneration=8;explicitOn("power-changed-before-ON");
+    negative("power-changed-before-ON");
+    seed("zero-current-power");explicitOn("zero-current-power");g_powerGeneration=0;
+    negative("zero-current-power");
+
+    seed("faultHold-survives-cleanup");explicitOn("faultHold-survives-cleanup");g_inputHostFaultHoldsStart=true;
+    negative("faultHold-survives-cleanup");
+    const auto heldReceipts=preservedEvents();
+    expect("faultHold-survives-cleanup/real-helper-rejects-after-Clear",heldReceipts.size()==1 &&
+        heldReceipts[0]["data"]["facts"]["faultHold"]==true &&
+        heldReceipts[0]["data"]["facts"]["transportFault"]==!expected);
+    expect("faultHold-survives-cleanup/still-held",g_inputHostFaultHoldsStart.load() &&
+        !g_inputHostTransportFault && g_inputHostStartBlocked);
+
+    seed("exitFence");explicitOn("exitFence");exitFence=true;negative("exitFence");
+    seed("input-not-ready");explicitOn("input-not-ready");g_inputReady=false;negative("input-not-ready");
+    seed("power-lifecycle-not-ready");explicitOn("power-lifecycle-not-ready");
+    g_powerLifecycle=PowerLifecycle::Suspending;negative("power-lifecycle-not-ready");
+    seed("power-admission-revoked");explicitOn("power-admission-revoked");
+    g_inputHostPowerAdmissionRevoked=true;negative("power-admission-revoked");
+    seed("input-disabled");explicitOn("input-disabled");g_realStickTest.enabled=false;negative("input-disabled");
+
+    seed("retained-journal-source-gate");explicitOn("retained-journal-source-gate");
+    // A journal that remains active cannot be bypassed at Start admission.
+    // This assertion is before proof/restore and uses the extracted Start gates.
+    expect("retained-journal-source-gate/refuses-while-ON-unblocked",!g_inputHostStartBlocked &&
+        g_hidHideVisibilityJournal.active && !startAdmissionOnly());
+
+    Options noOff;noOff.operatorOff=false;noOff.stopReason="transport-error";noOff.historicalTransportError=true;
+    seed("transport-fault-without-operator-OFF",noOff);
+    explicitOn("transport-fault-without-operator-OFF","dualshock4");
+    negative("transport-fault-without-operator-OFF");
+    expect("transport-fault-without-operator-OFF/no-off-sequence",g_msiExplicitRearmTicket.snapshot().offSequence==0 &&
+        !g_inputHostTransportFault && g_inputHostStartBlocked);
+
+    Options noOffReceipt;noOffReceipt.operatorOff=false;
+    seed("normal-stop-label-without-OFF-setting",noOffReceipt);
+    explicitOn("normal-stop-label-without-OFF-setting","xbox360");
+    negative("normal-stop-label-without-OFF-setting");
+
+    Options common;common.knownBoard=false;
+    seed("non-MSI",common);explicitOn("non-MSI");negative("non-MSI");
+    seed("authority-lost-before-reconcile");explicitOn("authority-lost-before-reconcile");
+    model.knownBoard=false;negative("authority-lost-before-reconcile");
+
+    for(const char* reason:{"transport-error","host-already-exited","persona-changed"}){
+        Options o;o.stopReason=reason;o.historicalTransportError=true;
+        const std::string name=std::string("no-normal-OFF-ticket-")+reason;
+        seed(name,o);explicitOn(name);negative(name);
+        expect(name+"/old-fault-cleaned-but-still-blocked",!g_inputHostTransportFault &&
+            g_inputHostStartBlocked && !g_msiExplicitRearmTicket.snapshot().releaseEligible);
+    }
+    // A real transport failure commonly also lacks ACKs: prove cleanup cannot
+    // replace those missing receipts even if a later user ON is present.
+    Options fault;fault.historicalTransportError=true;fault.stopReason="transport-error";
+    fault.localAck=false;fault.shutdownAck=false;
+    seed("transport-error-missing-ACKs",fault);explicitOn("transport-error-missing-ACKs");
+    negative("transport-error-missing-ACKs");
+
+    for(unsigned missing=0;missing<4;++missing){
+        Options o;
+        if(missing==0)o.localAck=false;
+        if(missing==1)o.shutdownAck=false;
+        if(missing==2)o.exited=false;
+        if(missing==3)o.releasePower=0;
+        const std::string name=std::string("invalid-release-")+std::to_string(missing);
+        seed(name,o);explicitOn(name);
+        if(!o.exited)g_inputHostProcess=nullptr; // later observed exit cannot invent the old ACK
+        negative(name);
+    }
+    seed("same-setting-no-new-receipt");explicitOn("same-setting-no-new-receipt");
+    const auto sequence=g_msiExplicitRearmTicket.snapshot().sequence;
+    applySetting(true,"steamdeck");
+    expect("same-setting-no-new-receipt/unchanged-sequence",g_msiExplicitRearmTicket.snapshot().sequence==sequence);
+    positive("same-setting-no-new-receipt","steamdeck",expected);
+
+    seed("explicit-ON-cancelled-then-new-ON");explicitOn("explicit-ON-cancelled-then-new-ON","dualshock4");
+    applySetting(false,"disabled");explicitOn("explicit-ON-cancelled-then-new-ON","xbox360");
+    positive("explicit-ON-cancelled-then-new-ON","xbox360",expected);
+
+    unsigned failures=0;
+    for(const auto& r:rows)if(!r.at("pass").get<bool>())++failures;
+    return {{"scenarios",scenarios},{"cases",rows.size()},{"checks",checks},{"failures",failures},{"rows",rows},
+        {"expectedNormalONPreserved",expected},{"realHostSdkProductOrDeviceIO",false}};
+}

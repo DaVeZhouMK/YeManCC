@@ -1,0 +1,16 @@
+{
+  "Serilog": {
+    "Using": [ "Serilog.Sinks.File" ],
+    "MinimumLevel": "Information",
+    "WriteTo": [
+      {
+        "Name": "File",
+        "Args": {
+          "path": "%LOCALAPPDATA%\\YeManCC\\light-setter\\logs\\yeman-light-setter.log",
+          "rollingInterval": "Day",
+          "retainedFileCountLimit": 7
+        }
+      }
+    ]
+  }
+}

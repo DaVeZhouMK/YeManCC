@@ -1,0 +1,592 @@
+{
+  "schemaVersion": 1,
+  "status": "LOCKED_ORIGINAL_THREE_CONSTRUCTOR_FAULTS_METADATA_ONLY",
+  "identity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+  "source": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\fan-current-sta-bootstrap-original-r1\\prepared37\\original37-preparation\\owned-stage\\parent-original-constructor-metadata-r2\\leaf-hc\\HandheldCompanion.dll",
+    "sha256": "7fd600f2c7c7359d25fd99fc0f95e39439c98e86584f08d1439f1e0766a0a479"
+  },
+  "selectedMethods": [
+    {
+      "signature": "System.Void HandheldCompanion.Devices.MinisforumV3::.ctor()",
+      "canonicalSha256": "39a7df61ecb29628391060c866a442ae7a854cfb547c52aa181e0cc8cf121e4c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.LokiMiniPro::.ctor()",
+      "canonicalSha256": "9803930c96df84d78c807c57fab0b799edf263359c3b39e98792d06fcb409d53"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.LokiZero::.ctor()",
+      "canonicalSha256": "454b5b554cc610a41cd570cdeeea02c72995079288ceaaa86850b54e63d7cbc7"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.LokiMax6600U::.ctor()",
+      "canonicalSha256": "fe3d65e516aa7a2d62186a285b443c66204c32d8579929424966bc4a3677efbc"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.LokiMax6800U::.ctor()",
+      "canonicalSha256": "84443d3cb1c1fcbe096af67973ec6b7797e316a72b65115f4e255272988d8eb4"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AOKZOEA1::.ctor()",
+      "canonicalSha256": "64bec30ff00cbaaad783acbcafab5c95ce55b0865b5ac1bd8bdc30ec532fef79"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AOKZOEA1Pro::.ctor()",
+      "canonicalSha256": "f356446a490cbf76898030236206ba7465776c951ef3e535c3a9d298c9ac0c34"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AOKZOEA1X::.ctor()",
+      "canonicalSha256": "85e09c8c8e51dcdae27bc0c2d1dcc7f41dfbc625d4a83f5fb34c81c30754129a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AOKZOEA2::.ctor()",
+      "canonicalSha256": "cea97e323c09e288b42940875eb836545276434a2595eab9945b64cae032e6f8"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIR::.ctor()",
+      "canonicalSha256": "0779d448df60ba6d839ed065386ea097b3e9ce2aed8e93b0d98cb7aa763cdb7b"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIRPro::.ctor()",
+      "canonicalSha256": "297760a5f0025d4d96b72f2f9c2938ca15dcb0cc4111f50a3626ea7aa9f629ab"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIR1S::.ctor()",
+      "canonicalSha256": "55605162219d255e5c965626e07a841222e242966eab076b5b867cd11ab7fbc0"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIRLite::.ctor()",
+      "canonicalSha256": "6f446513cff01645d1d09aa787182c73d5aeeb8a2d00c464b66fbfeac7c653b2"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO2021::.ctor()",
+      "canonicalSha256": "7093d563abe8d07a23c45e2f904a02b8d8443a9f0a5f3e708d75cdbf3878ecb2"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO2021Pro::.ctor()",
+      "canonicalSha256": "ec91a5d2abcf79a924ae140e78bfdc47177289f564a18ebe15baddad4037aa92"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOKUN::.ctor()",
+      "canonicalSha256": "b0a13793d2cbafbe7de9ebc52d486c6de2bf91896ff57a4803d560e45ea5c139"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOSlide::.ctor()",
+      "canonicalSha256": "70f87298d2b27ede5283f6576db5ec0254a85386ab7f23f557a0667bf8c4b2d4"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEONEXT::.ctor()",
+      "canonicalSha256": "5a5a72d38fb263238187d4726dc9059ac17bd39b8d221a4e92ccee3b57e0eb3c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEONEXTLite::.ctor()",
+      "canonicalSha256": "07bcf6000ff78bb53bfbf946574d44feb23c1ae8bd3d8c7bac6c475d316c8414"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEONEXTLite4500U::.ctor()",
+      "canonicalSha256": "afb8ceacd5a4dafc27282fabd0ac3eb63e9de13e353706feb738bd80fc3b4871"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO2::.ctor()",
+      "canonicalSha256": "b96d4e2e4ccc02c6e1721d05cf17b59e62ff9f809f5763cdaa7f88b82cd1879e"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusAMD::.ctor()",
+      "canonicalSha256": "6aaf2723239e477fd4f3785bfdb0779ff5c3dae981a667a78231227f99bc0d14"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino::.ctor()",
+      "canonicalSha256": "82dcd4369d5851f6c63cdef84c42d347423303f61b42839c939b6f14f9a15ff7"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusIntel::.ctor()",
+      "canonicalSha256": "640381f5f1511f019283736ab83c4a6c5e2375a67dbb1f78f046ebed6877f91c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO2S::.ctor()",
+      "canonicalSha256": "cf8c678c43aa04a1d9d735e1bd62e4866d84f6401421422a82494b7197684d23"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOFlipKB::.ctor()",
+      "canonicalSha256": "95e45ad6ae2f6a3f1286d68c62452d815707eabf718ee6be989cbb5dc2971586"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::.ctor()",
+      "canonicalSha256": "6dbcc3e084d19f2ab4523437a206a0eb0f8d5ceda8330e3c63816e2a55d028ea"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS::.ctor()",
+      "canonicalSha256": "ff9c3c7890925323bfecb1a7a3336a9bd11ab8e5351b4860dc70eda36aa92a48"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB::.ctor()",
+      "canonicalSha256": "01e84aec9ade2cd814e73d5361cd5292b43e739df06eb65130949f5f1d34a499"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.SuiPlay0X1::.ctor()",
+      "canonicalSha256": "ebe2955614a6abda1e082e34d4ba59398f97a68b749a8c89562e09462547db7e"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin2::.ctor()",
+      "canonicalSha256": "1b76718fc363bbc2dab49e02f5292b33731523edd61c680402a0d1fb8c6998d3"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMini_7640U::.ctor()",
+      "canonicalSha256": "7525a04d3629dcd613710d1d24a1f5a031376275972683432a90ebdbd1a8f669"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMini::.ctor()",
+      "canonicalSha256": "3898e2b566e5cdcdc18e90e9a6f708f1cfa996fa9e2a58e3a7b67f695e054f3a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMini_8840U::.ctor()",
+      "canonicalSha256": "abd084fb1f63c9b3ca0eb14bb0bee92b03d5297ab9138c3df2c7e649a4e7d10c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMini_HX370::.ctor()",
+      "canonicalSha256": "80fe020c54a3c5b2d4fc7ac0b160490c552ff1bc101527faec989563cf410eba"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin3::.ctor()",
+      "canonicalSha256": "4b59736fda050e4e7b5a36176642a838cf4ca1bbcfec0278a41b856413f2c471"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4::.ctor()",
+      "canonicalSha256": "e1d788f36066f68b49c4572d62ce117dcfec80603cf50b11c34fc5c4e65bc30c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4_2023_7640U::.ctor()",
+      "canonicalSha256": "882ea0f8588fcbf0c51f27c951cbd28dfbff7bcd91fc0ee898b38a97889cbf97"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4_2023::.ctor()",
+      "canonicalSha256": "3cb4d5a7a606c3e1b0da924ab8f2257ff2bb82adcfacaaf53f49261b8d140605"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4_2024_8640U::.ctor()",
+      "canonicalSha256": "b8e1a38e7727212a8b97dfb49d3d865844347abddfe10cc5dbef3eef1a48ff82"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4_2024::.ctor()",
+      "canonicalSha256": "905e7126d6db1e79f47891ea2e0bfbc1c14df49c68a47135c4603dc4d70ea9c3"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin4_2024_HX370::.ctor()",
+      "canonicalSha256": "5cf1317033a5d2c2f79c05e7002a3c93f2861f5298ff70a2c36270e2f759c99f"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWin5::.ctor()",
+      "canonicalSha256": "d580ae80b3af05740a728bed914663e0e6d3931cd11bdfd5c4031a8be564772e"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2Intel::.ctor()",
+      "canonicalSha256": "0c881524ce90d6b9ca175fe1df14fd61f6ce758e3492c15a9b995310155a983b"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2022_6800U::.ctor()",
+      "canonicalSha256": "770c3278e8bc5d539d911eb4e72b18aada346e4a5b21b824c2c4ac618a79ea9a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2023_7640U::.ctor()",
+      "canonicalSha256": "faedccf95c0888b2c68289ed03f1bdb00438720fa36d9dc3890b6bf2a9d88112"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2023_7840U::.ctor()",
+      "canonicalSha256": "eaefd13ee7d25a86fe09282df23275e0e52961ec1b588f50f15a88b62e85c086"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_8640U::.ctor()",
+      "canonicalSha256": "89e2f0c857e4d0147d590785fc9eb01fdca4df11f4f42de03221ddf1c0629f72"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_8840U::.ctor()",
+      "canonicalSha256": "0b7e3413a2560763d7f0b79ba7abc91ff9e6ad98f58dd7e352c28e9442a92384"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_HX370::.ctor()",
+      "canonicalSha256": "caa98e4b651dcd44055039c933ce12943115f164ae6daa2d2dfc633c095b999f"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerX1Intel::.ctor()",
+      "canonicalSha256": "1acca1ae397d21dae8a9eb412366db77c5652265d3210be8b8c04c0767c4eb9f"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerX1AMD::.ctor()",
+      "canonicalSha256": "5a5e79671c8205cbd6ba270c326687a5edb0af252e99d6204640947a6c122345"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerX1Mini::.ctor()",
+      "canonicalSha256": "3bf52d207a68f106c1fb123149dde87e41a06a5e97a9102376cdf55a824f20dd"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerX1Pro::.ctor()",
+      "canonicalSha256": "ecf1d63f93ead1f2b35d3098bf964af18432d007a03b2d789dbcaf82e965b200"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex::.ctor()",
+      "canonicalSha256": "80d3c305a25ef28f4bf1f8b2b5ed1ac0294119f7e56de8d78d7ed6846ed71611"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerG1Intel::.ctor()",
+      "canonicalSha256": "4904d0da573c34eb0d4bcbd3a1849a4b1e70d7cd6ced839c3bc8429b1443e530"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerG1AMD::.ctor()",
+      "canonicalSha256": "e43281db5962c6154978fdcc3a4e2d3f4c05d9a310409b1d7effacb594e1e00c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerOneXFly::.ctor()",
+      "canonicalSha256": "a5cbaf72191c9869708ef3f090dbaa1e8e70b89dd7e81a2773b700ae2e9d5ae0"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro::.ctor()",
+      "canonicalSha256": "14a7d9b02dbf5b66bc564c0a95debd5e8336da556ec95b76cfa411549c965073"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerMiniAMD::.ctor()",
+      "canonicalSha256": "5d9ffb74167ac24b8c06f86b73c4aa6dfa9d148349a19087c393194e8b80f733"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerMiniIntel::.ctor()",
+      "canonicalSha256": "9fe95b77f1c4197279db66d6d2d0d0deba68763189cc40f75eb40b5775beff4c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayerMiniPro::.ctor()",
+      "canonicalSha256": "36674f1ea3e1f82c6f0983cf9756c1e62351e779794915bcb39a08b0a51d4a40"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayer2::.ctor()",
+      "canonicalSha256": "08126f9befaf963a7c912b47042683e337687065d4cf24843dcfced16f513952"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.OneXPlayer2Pro::.ctor()",
+      "canonicalSha256": "3d4d3523907b438212a4d256bbd7143b1975f55d69b7d8da6205b601825a73fb"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ROGAlly::.ctor()",
+      "canonicalSha256": "36615d7e8f1acb927345d48ab541ef80ed0f5544a870271caf541a562b40a0ad"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ROGAllyX::.ctor()",
+      "canonicalSha256": "55397260ee712c17b16a852a964f9d39f8e172f7122a8b67342dbe7091dd511d"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.XboxROGAlly::.ctor()",
+      "canonicalSha256": "864269401ed8c8fe1476b2c3c90dbf36286858f65548d6e64f766f666264c627"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.XboxROGAllyX::.ctor()",
+      "canonicalSha256": "bab82f3f62e1da799908be0502e7f29b3aac301a847c693af29fa5e25806bf11"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ASUS.ASUS::.ctor()",
+      "canonicalSha256": "13f1ab713c18a63e0075c2192b972465666064f357e400d22906196cf6099965"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.SteamDeck::.ctor()",
+      "canonicalSha256": "299aa43b90a3d35ed6f821eec9e31f035355ee80bfaef014e95d168acdda3eb6"
+    },
+    {
+      "signature": "System.Boolean HandheldCompanion.Devices.SteamDeck::Open()",
+      "canonicalSha256": "a91cb8beabf2311f8e812b38551483fc3d486147c757f168c037b9ff67babf1b"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoTablet::.ctor()",
+      "canonicalSha256": "eedc25de09f365a0711342ab35e121b60f5cbf54ec68343f4baf513f435dbcd9"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoTablet2::.ctor()",
+      "canonicalSha256": "8f95a28c22adccc607c07568190665a2ad44a28e4c20c36a5c17034d628992e4"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoSZ2::.ctor()",
+      "canonicalSha256": "a2c327abf9686e2a298d05466c076a15b4e384e304b807eb08bfa338b7eafc91"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoSZ1::.ctor()",
+      "canonicalSha256": "c52ae0d64ff74ea52a6ca1479ce0087f1e094b166a196ab0f43ba9f50cfcd678"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ClawA1M::.ctor()",
+      "canonicalSha256": "5f9a84a961c0c3af83b72cc45e1f4537e6929bf95c917e9447162547ae25f8f7"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ClawA2VM::.ctor()",
+      "canonicalSha256": "9e03cad08547636a4c756aee5c77b270e6ff99aba449c638e0ce21a103f35092"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.ClawBZ2EM::.ctor()",
+      "canonicalSha256": "dbac98b7ddf74a595dd4f5e0a108edf779b8036535daf49e66faa6bb02ec9cdb"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.MSI.ClawCG3EM::.ctor()",
+      "canonicalSha256": "aa2019619e5b42e827e2bf047d4a48c71fbaa1f22a939639c9c5b5ae3832b434"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.Zotac.GamingZone::.ctor()",
+      "canonicalSha256": "49f7c91d89760794a78a4737b17d3dd3ece95cfeb72f2bb07dc1515db925d996"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.DefaultDevice::.ctor()",
+      "canonicalSha256": "a0ddfa9272763f82cf3769af1d618d8443390673fa47d9ee2ccc012d70380f92"
+    },
+    {
+      "signature": "System.Boolean HandheldCompanion.Devices.IDevice::GetPhysicallyInstalledSystemMemory(System.UInt64&)",
+      "canonicalSha256": "2f1ab68f3b1b3bd24bea83e5e1fb44fb0059eedb58dd37f218df07a81187d5a4"
+    },
+    {
+      "signature": "HandheldCompanion.Devices.IDevice HandheldCompanion.Devices.IDevice::GetCurrent()",
+      "canonicalSha256": "c290a6d4d527fe6a3c578284a0499de0846c0e56be2b1e556a7e71079513b784"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.IDevice::Initialize(System.Boolean,System.Boolean)",
+      "canonicalSha256": "cc90fe04a1f403c48d615e1f3fcaf78abdb9e4d8727cdad4709520e9e77d4386"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Devices.IDevice::.ctor()",
+      "canonicalSha256": "d787e2542030424dfd5116935ec2ad90e5ff8cae26cc9b3deca1ce616ab1da66"
+    },
+    {
+      "signature": "System.Boolean HandheldCompanion.Devices.OneXPlayerX1::CheckIsBatteryProtectionSupported()",
+      "canonicalSha256": "54666c5c2d70cbde6f9ab3bfa98fb12b956f9e3b1825142639d02de776105924"
+    },
+    {
+      "signature": "System.Object HandheldCompanion.Managers.SettingsManager::GetProperty(System.String,System.Boolean)",
+      "canonicalSha256": "5b00f86f8a8b76fa5c4efcfd26ef084814ae8f8768b7f1dc840e0246dac124a5"
+    },
+    {
+      "signature": "System.Object HandheldCompanion.MotherboardInfo::queryCacheValue(System.String,System.String)",
+      "canonicalSha256": "4cc8b12277d60406e97b6ec6984cc97d309475b7c55af36055dd5107297130b6"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.MotherboardInfo::.cctor()",
+      "canonicalSha256": "68b44ed3bd37433b8967cb72ca304787bad7e1e7125e1374f5a9e0e6e6f6de94"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Managers.ManagerFactory::.cctor()",
+      "canonicalSha256": "abe6ef5f4020d0522521d4791e084ad908254bf071b0ea089ccb11c7bbf1d487"
+    },
+    {
+      "signature": "System.IntPtr HandheldCompanion.Helpers.GamepadMotion::CreateGamepadMotion()",
+      "canonicalSha256": "162b9a65693d4b19e61590e771d8067e90d56a2effc0c6ed3bb56888a597fd1a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::DeleteGamepadMotion(System.IntPtr)",
+      "canonicalSha256": "dc56ec7b134a75a160b12f973a3a4f4679df40267083c82f5daadaf80870d562"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetGamepadMotion(System.IntPtr)",
+      "canonicalSha256": "e3252dd54aec16605c31f330b497d9c24949d262d01380e72a3fccf38873fb54"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ProcessMotion(System.Single,System.Single,System.Single,System.Single,System.Single,System.Single,System.Single)",
+      "canonicalSha256": "fe8eae56607b5e1a022f6993a6823895a5d718fccf3a1523e0ff97e07b103d07"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ProcessMotion(System.IntPtr,System.Single,System.Single,System.Single,System.Single,System.Single,System.Single,System.Single)",
+      "canonicalSha256": "23a737818cbf912baa47dcb6fcc779d40eb723a4b0b8995350947904bbe156f2"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibratedGyro(System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "8382e0108aca393bfa9f272e0ad2ccd5a1dad376e812d3f62a2d6379e9017a97"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibratedGyro(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "abd820cc24718fcd298cbf00304a53cd491da60cd970d98542e90d3e89befcf0"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetGravity(System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "0a1851e26cb1095edd3a715388e74128cc83b89cad52d831cf244f2a07b43a77"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetGravity(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "7c0314c9c40f9eeea49cb3a99acd8dfbcabaa27fd1e8033f22920715c2adaefe"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetProcessedAcceleration(System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "335e782af1aed5a3851ed73f3ae87da9a490b5aab813a64af251e164abe9f3b2"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetProcessedAcceleration(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "b2031ec6c00ee39bd2c217527de79ae4dcc5b766c5c87ac8daaaa9a0013016fb"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetOrientation(System.Single&,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "04fe5a77955a6f28453eaa8870d1a74903ec483fedfad3012d56dc7c2f990ff4"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetOrientation(System.IntPtr,System.Single&,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "edfcfc789bba2785183f13604e93177a2cb4690717b2d31c7c6df89770337016"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetPlayerSpaceGyro(System.Single&,System.Single&,System.Single)",
+      "canonicalSha256": "0b08ac0a39a491b674033db58b10b963ed9cf4728babf421e70c0d79c9f41497"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetPlayerSpaceGyro(System.IntPtr,System.Single&,System.Single&,System.Single)",
+      "canonicalSha256": "7874bf13782a11c23e1b3fb5a1f5d1c0a81bc51fb6c9f69aae0fbdf12921d262"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetWorldSpaceGyro(System.Single&,System.Single&,System.Single)",
+      "canonicalSha256": "23245b80a718094ef6e4ec03ad475fbef53e9ecc07422d0bfd3431e9ff01da58"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetWorldSpaceGyro(System.IntPtr,System.Single&,System.Single&,System.Single)",
+      "canonicalSha256": "f807d31e772e53309fcefb62fa8284c61b65df0ba778ce61908127e8b7681319"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::StartContinuousCalibration()",
+      "canonicalSha256": "ce857cdb6c2746acfd5addd9bf47cf78250c96ae22a9b18afef65e472241f910"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::StartContinuousCalibration(System.IntPtr)",
+      "canonicalSha256": "ce4058bd4a5d8cfc91a58b5ffb03e0f07236fe23f9fe11305c00a4a33813c739"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::PauseContinuousCalibration()",
+      "canonicalSha256": "e81963d83f39c7de3029e9d6955bf8aae0c9093081e898b16d0877c8f0cd135c"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::PauseContinuousCalibration(System.IntPtr)",
+      "canonicalSha256": "d1bca69705c7782cfc8c7cd1e3f3674c6a6d642d619842ccddb8db02238372dd"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetContinuousCalibration()",
+      "canonicalSha256": "14757b075d49395a8ee29d2f7e4bb6a127ab4df912d1b9de944d7bf12c9d3cbf"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetContinuousCalibration(System.IntPtr)",
+      "canonicalSha256": "b7fafe9d5b70f616f4a2ee3ac9da9fa9fed8706320831a626d49d39455a595da"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibrationOffset(System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "417ef40d51181f3d58d58a28e695a9ae9143b7ef62f9f7f3f8b2a268d772f307"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibrationOffset(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "canonicalSha256": "45c6a597c58e8c9613c58636c4f9936b214118ca99c05f0d93a261458fdf490d"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationOffset(System.Single,System.Single,System.Single,System.Int32)",
+      "canonicalSha256": "241e7ed27eee12ab4c3756432500009205eae94475ac24f8425d8658c895044f"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationOffset(System.IntPtr,System.Single,System.Single,System.Single,System.Int32)",
+      "canonicalSha256": "84df41c4dc62f5a6bd63b5d239c7a4fa473b8ba575faeb7190d89f28ffaaef92"
+    },
+    {
+      "signature": "System.Single HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationConfidence()",
+      "canonicalSha256": "668f9a6771c849071bf16a224ed4a8085a9c6ab1cfe5149ef837479ac43a228b"
+    },
+    {
+      "signature": "System.Single HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationConfidence(System.IntPtr)",
+      "canonicalSha256": "d05092f935778e99601069d46ba21997e8d98c781b5cdd9bf5d820c645ef9392"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetAutoCalibrationConfidence(System.Single)",
+      "canonicalSha256": "8a9fd1921dac20b7acceac58fc538dd6d3553efc5741cc07832987a864df2669"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetAutoCalibrationConfidence(System.IntPtr,System.Single)",
+      "canonicalSha256": "3850a6ad450a1ed7634e6560e6b1db5fc6ef68d33c03e31e0d554f430bcb6193"
+    },
+    {
+      "signature": "System.Boolean HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationIsSteady()",
+      "canonicalSha256": "28207acb883742830abc554f885aa35b2d8410d304206e93a06a06cd63da32f6"
+    },
+    {
+      "signature": "System.Boolean HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationIsSteady(System.IntPtr)",
+      "canonicalSha256": "0ca034e475539ac8e0e7402e66b492d0c3d41ebc48fc8bd13a200e58ac88bf46"
+    },
+    {
+      "signature": "HandheldCompanion.Helpers.CalibrationMode HandheldCompanion.Helpers.GamepadMotion::GetCalibrationMode()",
+      "canonicalSha256": "52c5cda9d93c808d0d3dc3ffbfd80bf0a8adf6cc6089fbddec4919cc52efb780"
+    },
+    {
+      "signature": "HandheldCompanion.Helpers.CalibrationMode HandheldCompanion.Helpers.GamepadMotion::GetCalibrationMode(System.IntPtr)",
+      "canonicalSha256": "40b6947e60f57856a7fb6c1fc67dfd1177623056a38db3270861bd14eb7e39ea"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationMode(HandheldCompanion.Helpers.CalibrationMode)",
+      "canonicalSha256": "067afdfbbb30f5ac89b9d7b18fc899e04cf7e46b30cdc4a27c03a14f0c767d77"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationMode(System.IntPtr,HandheldCompanion.Helpers.CalibrationMode)",
+      "canonicalSha256": "7337c1ec883e3c9a4161ded2fc29b30cd61e30819a69b467887494105df05ca2"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetMotion()",
+      "canonicalSha256": "d746139902806373d333cc4299c90fed86bf32086e26b8193e7ddd42bc54475a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetMotion(System.IntPtr)",
+      "canonicalSha256": "9e60eb9c2225603e5a7b4f8a0c419940fed0460753baceced5fa733219f3b98a"
+    },
+    {
+      "signature": "System.Void HandheldCompanion.Helpers.GamepadMotion::Dispose()",
+      "canonicalSha256": "49eb060ef69547241a9516f28b604295445caa2d076c93897c929308ec7aab1e"
+    }
+  ],
+  "structureSha256": "b3be7f04a4e0b29a2b85e6d17cba9ada779b2dca7b83d785cf579f4bbdef3008",
+  "moduleSha256": "02eaec542de17744a5007dbb2660c9d5b9d54d5bef3c18a2467d877088417e10",
+  "roles": [
+    {
+      "mode": "capabilities",
+      "pin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/capabilities/HandheldCompanion.dll",
+        "sha256": "5b8ef2be840fb5bc4776298ef6b7ef477bc31d1a032a0bf2ca587535e61a9292"
+      },
+      "proof": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/capabilities/fault-proof.json",
+        "sha256": "c2dbc1733d19d867f9623c896e11846fcf786f974658d59980d45104e59e67a2"
+      },
+      "changedMethod": "System.Void HandheldCompanion.Devices.ROGAlly::.ctor()",
+      "expectedFailedCases": 4
+    },
+    {
+      "mode": "hotkeys",
+      "pin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/hotkeys/HandheldCompanion.dll",
+        "sha256": "03ab42b0d3734fab98b814ec9a4a52af314f2d23999bc1469298d7da6114cd01"
+      },
+      "proof": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/hotkeys/fault-proof.json",
+        "sha256": "3e56156aaed8e64dcaab37d96f5222a890aa4cafa9499a58a336dee92c34b0ef"
+      },
+      "changedMethod": "System.Void HandheldCompanion.Devices.IDevice::.ctor()",
+      "expectedFailedCases": 86
+    },
+    {
+      "mode": "dispose",
+      "pin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/dispose/HandheldCompanion.dll",
+        "sha256": "89b10ece33f55f27041c320b8de15f9afa90dae40388cabbe96a0f8593c4b4e7"
+      },
+      "proof": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/dispose/fault-proof.json",
+        "sha256": "9378756ae4c123180812c285f12ad42c25e5547d4f354208ccf38bbfdc208ade"
+      },
+      "changedMethod": "System.Void HandheldCompanion.Helpers.GamepadMotion::Dispose()",
+      "expectedFailedCases": 86
+    }
+  ],
+  "rawEvidence": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-three-original-negatives-raw-r57/RAW-RESULT.json",
+    "sha256": "4aeb6b9fda74f645963ab2230375c0431cf69d4a7e33acf91e3d34581044c356"
+  },
+  "sourceEvidence": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-three-original-negatives-raw-r57/SUMMARY.json",
+    "sha256": "610969a25df59f41021a7620b99a6514ac49b127d9b84a9a41977b3f78a01eea"
+  },
+  "generator": {
+    "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorCases.cs",
+    "sha256": "95bd9e9f30687c5b94f97a4e56432ced75ddb808dc40a8e74d32c3ba5e83e4b7"
+  },
+  "originalContract": {
+    "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/constructor-proof.mjs",
+    "sha256": "6d65939667c934d34ad7ebffbe683c086a0a133e0f16832955b75992b4322712"
+  },
+  "nativeRoleIncluded": false,
+  "metadataDoesNotProveCurrentBusiness": true
+}

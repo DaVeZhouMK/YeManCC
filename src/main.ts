@@ -1,3 +1,9 @@
+// [AI:ENTRY] 功能地图见 ./router.ts 的 [AI:MAP]；模块 [AI:USER:*] 只记“用户动作→应有表现”。
+// 用户行为约定始终须保留；内部执行读实现，注释与代码不一致先核实需求，不能据注释另造流程。
+// UI最低布局检查：1280×720、1280×800；手柄须可到达、可返回，方向移动自然，入口见 [AI:UI:*]。
+// 功能制作考虑自愈及运行开销；不能自愈须记录原因和未恢复状态，不能静默当作成功。
+// 模拟按影响与需要选 ../tools/ymcc_sim/ymcc_sim.ps1 的现有夹具；既有专项门禁看对应入口，模拟不等于实机。
+// 注释仅留导航与必要提醒；原位精简更新，不追加历史、内部算法或长规范。
 import { createApp, nextTick } from 'vue';
 import { createPinia } from 'pinia';
 import App from './App.vue';
@@ -10,6 +16,7 @@ import { clearRouteFallback, showRouteFallback } from './robust/routeFallback';
 import { APP_VERSION } from './version';
 import './styles/tokens.css';
 import './styles/gamepad.css';
+import './styles/integratedConsole.css';
 
 const app = createApp(App);
 app.use(createPinia());
@@ -139,7 +146,7 @@ async function signalInitialRenderReady(): Promise<void> {
         initialRouteReady,
         appStartupReady,
         // Editor popups are not a second main application.
-        router.isReady().then(() => router.currentRoute.value.name === 'button-mapping-shortcuts'
+        router.isReady().then(() => ['button-mapping-shortcuts', 'monitor-hud-preview'].includes(String(router.currentRoute.value.name))
           ? undefined : preloadStartupRoutes()),
       ]);
       await nextTick();

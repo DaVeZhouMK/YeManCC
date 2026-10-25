@@ -1,11 +1,11 @@
 import { powerLifecycle } from './api';
 import { powerSourceMode } from './powerSource';
 import { readSettingsSection,saveSettingsSection,getSettingsGeneration,assertSettingsGeneration } from './settingsRepository';
-import { detectPowerModeReliable,readRtssLimit,setRtssLimit } from './yeman';
+import { detectPerformanceTemplate, detectPowerModeReliable,readRtssLimit,setRtssLimit } from './yeman';
 import { getPolicyGame,gamePolicyKey,isPolicyGameInitialized } from './gamePolicyTarget';
 import { FRAME_RATE_DEFAULTS,frameRatePair,frameRateSetting,dedicatedFrameRatePair,type FrameRatePair,type FrameRateSide } from './frameRateModel';
 import { loadGameCustomConfig } from './performanceSchedule';
-import { getFloatInfo,setFloatTarget,setFloatRtssLinked } from './autofloat';
+import { getFloatInfo,setFloatTarget,setFloatRtssLinked,isContinuousFloat } from './autofloat';
 export * from './frameRateModel';
 const listeners=new Set<(pair:FrameRatePair)=>void>();
 let writeQueue:Promise<void>=Promise.resolve();
@@ -14,7 +14,10 @@ let fallbackGeneration=-1;
 export function onFrameRatesChanged(listener:(pair:FrameRatePair)=>void):()=>void {listeners.add(listener);return ()=>listeners.delete(listener);}
 export async function loadGlobalFrameRates():Promise<FrameRatePair> {
   const current=await readSettingsSection<any>('rtss');
-  if(current.frameRates && current.frameRates.ac && current.frameRates.dc)return frameRatePair(current.frameRates);
+  if(current.frameRates && current.frameRates.ac && current.frameRates.dc){
+    if(current.templateDefaults===true && typeof detectPerformanceTemplate==='function')return frameRatePair(null,(await detectPerformanceTemplate())==='desktop'?200:120,60);
+    return frameRatePair(current.frameRates);
+  }
   if(fallbackGeneration!==getSettingsGeneration()){fallbackCache=null;fallbackGeneration=getSettingsGeneration();}
   if(fallbackCache)return frameRatePair(current.frameRates,fallbackCache.ac,fallbackCache.dc);
   const [tdp,schedule]=await Promise.all([readSettingsSection<any>('tdp'),readSettingsSection<any>('performanceSchedule')]);
@@ -32,7 +35,7 @@ export async function ensureGlobalFrameRates():Promise<FrameRatePair> {
     assertSettingsGeneration(generation);
     const current=await readSettingsSection<any>('rtss');
     const pair=await loadGlobalFrameRates();
-    if(!current.frameRates?.ac || !current.frameRates?.dc)await saveSettingsSection('rtss',{frameRates:pair},generation);
+    if(!current.frameRates?.ac || !current.frameRates?.dc)await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);
     return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
@@ -43,7 +46,7 @@ export async function saveGlobalFrameRate(side:FrameRateSide,value:unknown):Prom
   const run=writeQueue.then(async()=>{
     assertSettingsGeneration(generation);
     const pair=await loadGlobalFrameRates();pair[side]=frameRateSetting(requested,pair[side]);
-    await saveSettingsSection('rtss',{frameRates:pair},generation);fallbackCache=frameRatePair(pair);
+    await saveSettingsSection('rtss',{frameRates:pair,templateDefaults:false},generation);fallbackCache=frameRatePair(pair);
     for(const listener of [...listeners]){try{listener(frameRatePair(pair));}catch{/* observer failure cannot turn durable save into failure */}}return pair;
   });writeQueue=run.then(()=>{},()=>{});return run;
 }
@@ -83,7 +86,12 @@ export function applyIndependentFrameRates(isCurrent:()=>boolean=()=>true):Promi
     }
     if(!current() || (await detectPowerModeReliable())!==side)return false;
     const optimizer=getFloatInfo();
-    if(optimizer.enabled && optimizer.target!==(value.fps || value.lastFps))await setFloatTarget(value.fps || value.lastFps);
+    const optimizerTarget = isContinuousFloat() ? value.fps : value.fps || value.lastFps;
+    if(optimizer.enabled && optimizer.target!==optimizerTarget)await setFloatTarget(optimizerTarget);
     return true;
   });applyQueue=run.then(()=>{},()=>{});return run;
+}
+
+export function publishFrameRatesChanged(pair: FrameRatePair): void {
+  for (const listener of [...listeners]) { try { listener(frameRatePair(pair)); } catch { /* observer isolation */ } }
 }

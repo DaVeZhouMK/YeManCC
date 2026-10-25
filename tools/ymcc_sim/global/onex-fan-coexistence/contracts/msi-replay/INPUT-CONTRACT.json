@@ -1,0 +1,200 @@
+{
+  "schemaVersion": 1,
+  "kind": "msi-replay-input-and-late-parent-binding-contract",
+  "profile": "msi-original-replay26-from-accepted-manual92",
+  "api": {
+    "inspect": "inspectMsiReplayInputs({inputsPin:{path,sha256}})",
+    "prepare": "prepareMsiReplay({inputsPin:{path,sha256}})",
+    "model": "projectMsiReplayMODEL_ONLY(bundle)",
+    "parentInspect": "inspectMsiReplayParentInputs({acceptedMsiManual92:{summaryPin,preparedPin,graphPin,jointReviewPin}})"
+  },
+  "inputShape": {
+    "schemaVersion": 1,
+    "profile": "msi-original-replay26-from-accepted-manual92",
+    "evidenceKind": "EXACT_MSI_REPLAY_PREPARE",
+    "role": [
+      "positive",
+      "sta",
+      "timer-owner",
+      "admitted-owner",
+      "mode-settlement",
+      "profile-complete",
+      "followup"
+    ],
+    "ownedParent": "Existing explicit local parent path",
+    "stageRoot": "Fresh direct child path, not yet existing",
+    "acceptedMsiManual92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/SUMMARY.json",
+        "sha256": "b801daa46a5d77411de04c54a61d4e9f5a3dae0b2cc54dd922b36b907e13769c"
+      },
+      "preparedPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/msim67-positive-r1/PREPARED-PLAN.json",
+        "sha256": "48c58335563b99e98c070e8cb5dff02591a5e16172962beed0340a4a54061643"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/LOADED-GRAPH.json",
+        "sha256": "6cf06bd4f6d1c08efc0b034f62f40359440ca4bb846dda9a36178803aedc65ca"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-seven-independent-joint/SUMMARY.json",
+        "sha256": "705713a0dd1c5af5e2834e5f7cdb5c48e6e4fa0fd5b8f82c4b8628b3dcff14e3"
+      }
+    },
+    "derivativeQualificationPin": "Future actual parent-qualified replay derivative JSON pin"
+  },
+  "lateBinding": {
+    "basisEditsRequired": false,
+    "currentActualParentAcceptanceBound": true,
+    "fixedActualManualFourPins": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/SUMMARY.json",
+        "sha256": "b801daa46a5d77411de04c54a61d4e9f5a3dae0b2cc54dd922b36b907e13769c"
+      },
+      "preparedPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/msim67-positive-r1/PREPARED-PLAN.json",
+        "sha256": "48c58335563b99e98c070e8cb5dff02591a5e16172962beed0340a4a54061643"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/LOADED-GRAPH.json",
+        "sha256": "6cf06bd4f6d1c08efc0b034f62f40359440ca4bb846dda9a36178803aedc65ca"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-seven-independent-joint/SUMMARY.json",
+        "sha256": "705713a0dd1c5af5e2834e5f7cdb5c48e6e4fa0fd5b8f82c4b8628b3dcff14e3"
+      }
+    },
+    "method": "The new successor basis fixes the existing actual manual parent. Inputs must match all four exact path/SHA pairs. Add the actual replay derivativeQualificationPin when available; do not rewrite source or use model review.",
+    "jointExactStatus": "MSI_ORIGINAL44_MANUAL_SEVEN_ROLES_INDEPENDENT_JOINT_PASS_SOURCE144_DEFAULT92",
+    "jointReferencePin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-seven-independent-joint/SUMMARY.json",
+      "sha256": "705713a0dd1c5af5e2834e5f7cdb5c48e6e4fa0fd5b8f82c4b8628b3dcff14e3"
+    },
+    "noNormalizationOrNewBusinessReceiptCreated": true,
+    "jointRequiredSemantics": {
+      "totalCases": 308,
+      "totalChecks": 10792,
+      "roles": [
+        "positive",
+        "owner",
+        "boundaries",
+        "table-status",
+        "preservation",
+        "fullspeed",
+        "axis-endpoint"
+      ],
+      "requiredMasks": [
+        0,
+        4,
+        9,
+        15,
+        4,
+        8,
+        11
+      ],
+      "allOriginal90000BusinessBudgetsPreserved": true,
+      "allMetadataPreload60000": true,
+      "originalParentBudget360000Preserved": true,
+      "nativeGuard116Unchanged": true
+    }
+  },
+  "qualificationShape": {
+    "schemaVersion": 1,
+    "kind": "msi-replay-derivative-qualification",
+    "status": "PARENT_QUALIFIED_MSI_REPLAY_DERIVATIVES",
+    "hostGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-replay-host-three-generation/SUMMARY.json",
+      "sha256": "4a36e728f8014bc0b344ff8cff21f90f1200944b82a447124266e47fe6f9cd82"
+    },
+    "reviewPin": "Exact normalized actual typed review binding pin",
+    "faultGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-replay-six-original-fault-generation/SUMMARY.json",
+      "sha256": "d064851de83548d2bb8773b606ce7d23351f085d2ef011ddc12733145d4ff17a"
+    },
+    "faultRawReviewPin": "Actual original six-fault raw review pin required for negative",
+    "reviewEvidencePins": [
+      "Actual report pins;1..96"
+    ],
+    "nativeDevicePermissionAdded": false
+  },
+  "reviewShape": {
+    "schemaVersion": 1,
+    "kind": "msi-replay-derivative-review-binding",
+    "status": "REVIEWED_EXACT_MSI_REPLAY_DERIVATIVES",
+    "evidenceKind": "ACTUAL_METADATA_RAW_REVIEW",
+    "derivedFrom": [
+      "Actual typed/raw proof pins; includes faultRawReviewPin for negatives"
+    ],
+    "hostSourcePin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-manual-host-three-generation\\msi-manual-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+      "sha256": "4be013fa557cb2956ce0ee4763451bdb16efe54be1ca9b68bd61a343f9bbb815"
+    },
+    "hostTargetPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-replay-host-three-generation\\msi-replay-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+      "sha256": "dc7046b5bdd2b03bff28fa4fbf3abf253c8a6fa42ce3b4f1c7e1ff875a169f09"
+    },
+    "hcPin": "Exact reviewed unchanged HC1827 pin",
+    "portsSHA256": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+    "hostChangedMethods": [
+      "System.Boolean YeManFanHost.RealHcBackend::IsPowerLineOnline()",
+      "System.Void YeManFanHost.RealHcBackend::EnsurePowerProfileWatchdog()",
+      "System.Void YeManFanHost.RealHcBackend::RequestPowerProfileWatchdogTick(System.Int32)"
+    ],
+    "wholeMethodSetsVerified": true,
+    "originalBaseOpenAndStructuredReleasePreserved": true,
+    "originalPublicApplyCurveAndTableBitWritersPreserved": true,
+    "originalTimerCallbacksAndReplayConsumersUnchanged": true,
+    "restoredEndpointOperandsEqualOriginalBodies": true,
+    "originalBclTimerCreatedUnarmed": true,
+    "originalTimerDisposalPreserved": true,
+    "physicalPowerIoOnlyTerminalReplaced": true,
+    "originalSentryModuleInitializerPreserved": true,
+    "ownedBuildPayloadWritesRemain": true,
+    "hostNoRegistryPnpGeneralOpenAdded": true,
+    "wallClockTimerDeliveryProven": false,
+    "rawWmiDecoderAccepted": false,
+    "nativeIoZeroClaim": false,
+    "physicalOemAcknowledgement": "UNKNOWN",
+    "targetCodeExecuted": false,
+    "nativeDevicePermissionAdded": false,
+    "variants": [
+      {
+        "role": "Exact original negative role",
+        "sourcePin": {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-replay-host-three-generation\\msi-replay-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+          "sha256": "dc7046b5bdd2b03bff28fa4fbf3abf253c8a6fa42ce3b4f1c7e1ff875a169f09"
+        },
+        "targetPin": "Own exact original generated Host fault",
+        "proofPin": "Exact original one-method proof",
+        "changedMethods": [
+          "Exact full original method signature"
+        ],
+        "wholeMethodSetVerified": true,
+        "typedReviewVerified": true,
+        "baseFieldsModuleUnchanged": true,
+        "onlyOriginalFault": true,
+        "targetKind": "host",
+        "expectedFailureMask": "Exact ordered source mask array"
+      }
+    ]
+  },
+  "budgets": {
+    "business": 90000,
+    "parent": 360000,
+    "generation": 30000,
+    "compile": 120000
+  },
+  "metadataBudgetMs": 60000,
+  "preloadBudgetMs": 60000,
+  "currentAcceptanceClaims": {
+    "manualParentReadOnlyVerified": true,
+    "newManualBusinessExecution": false,
+    "replay": false,
+    "actualSuccessfulFullReplayInspect": false
+  },
+  "inspectionBoundaries": {
+    "parentOnly": "Reads real manual source/plan/result/process/graph/joint and seven underlying results; no replay qualifier required; no writes or execution approval.",
+    "fullReplay": "inspectMsiReplayInputs keeps all existing exact original replay generation/raw/whole-methodset guards; a real replay derivative qualification is mandatory.",
+    "prepare": "prepareMsiReplay retains full inspect before fresh stage writes; not invoked by this task."
+  }
+}

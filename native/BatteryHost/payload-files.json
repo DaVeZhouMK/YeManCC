@@ -1,0 +1,13 @@
+[
+  "YeManBatteryHost.exe",
+  "YeManBatteryHost.dll",
+  "YeManBatteryHost.deps.json",
+  "YeManBatteryHost.runtimeconfig.json",
+  "LibreHardwareMonitorLib.dll",
+  "RAMSPDToolkit-NDD.dll",
+  "System.Management.dll",
+  "THIRD-PARTY-NOTICES.md",
+  "LICENSE.LibreHardwareMonitor.txt",
+  "LICENSE.System.Management.txt",
+  "battery-host.payload.json"
+]

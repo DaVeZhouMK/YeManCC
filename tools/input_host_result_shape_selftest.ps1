@@ -1,33 +1,19 @@
+﻿[CmdletBinding()]
+param([string]$Out)
 $ErrorActionPreference = 'Stop'
-
-$root = Split-Path -Parent $PSScriptRoot
-$nativePath = Join-Path $root 'native\main.cpp'
-$native = Get-Content -LiteralPath $nativePath -Raw
-
-function Assert-Contains([string]$text, [string]$needle, [string]$message) {
-    if (-not $text.Contains($needle)) { throw $message }
+$shapeProjectRoot = Split-Path -Parent $PSScriptRoot
+if ([string]::IsNullOrWhiteSpace($Out)) {
+    $shapeWorkspace = [IO.Path]::GetFullPath((Join-Path $shapeProjectRoot '..\..\..'))
+    $Out = Join-Path $shapeWorkspace 'Build\Validation\InputHostResultShape'
 }
-
-$match = [regex]::Match(
-    $native,
-    '(?s)static json inputHostSubmitPad\(.*?\n}\n\nstatic void inputCaptureStart\(\)')
-if (-not $match.Success) { throw 'inputHostSubmitPad function boundary not found' }
-$function = $match.Value
-
-Assert-Contains $function 'json frameProof = json::object();' 'frameProof must be built as an object'
-Assert-Contains $function 'json result = json::object();' 'host receipt must be built as an object'
-Assert-Contains $function 'result["rightStick"] = json::object' 'rightStick must remain an object'
-Assert-Contains $function 'result["gyroDps"] = json::object' 'gyroDps must remain an object'
-
-$legacyInitializer = '{"frameProof", {"sampleSequence", g_inputHostSampleSequence}, {"motionPairProofId", "pair-unproven-safe-zero"}}'
-if ($function.Contains($legacyInitializer)) {
-    throw 'legacy frameProof initializer can produce a top-level JSON array'
-}
-
+$shapeRunner = Join-Path $PSScriptRoot 'virtual_submit_result_perf_selftest.py'
+& python -X utf8 $shapeRunner --shape-only --out $Out
+if ($LASTEXITCODE -ne 0) { throw "Actual InputHost result shape selftest failed (exit=$LASTEXITCODE); see $Out" }
 [pscustomobject]@{
     ok = $true
     function = 'inputHostSubmitPad'
-    resultType = 'explicit-json-object'
-    frameProofType = 'explicit-json-object'
-    hostFrameValueReadSafe = $true
+    verification = 'compiled actual result construction; output/frameProof/rightStick/gyroDps objects'
+    deviceOrHostExecuted = $false
+    benchmarkExecuted = $false
+    output = [IO.Path]::GetFullPath($Out)
 } | ConvertTo-Json -Compress

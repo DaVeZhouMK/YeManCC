@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { computed } from 'vue';
+import { computed, onBeforeUnmount, onDeactivated } from 'vue';
 import InlineIcon from './InlineIcon.vue';
+import { editRepeatInterval } from '@/gamepad/sliderRepeat';
 
 const props = withDefaults(
   defineProps<{
@@ -12,7 +13,10 @@ const props = withDefaults(
     stepBase?: number;
     /** Keep existing accelerated keyboard behavior unless explicitly disabled. */
     accelerate?: boolean;
+    /** Opt-in continuous editing: accelerate the interval, keeping each step precise. */
+    repeatIntervalMs?: number;
     label?: string;
+    ariaLabel?:string;
     icon?: string;
     unit?: string;
     color?: 'ac' | 'dc' | 'accent';
@@ -22,6 +26,8 @@ const props = withDefaults(
     /** Optional spatial-navigation coordinates for the range input. */
     gpRow?: number | string;
     gpCol?: number | string;
+    /** Preferred controller entry target; focusing never starts range editing. */
+    gpInitialFocus?: boolean;
   }>(),
   { min: 0, max: 100, step: 1, color: 'accent', disabled: false, accelerate: true }
 );
@@ -43,7 +49,7 @@ const accentVar = computed(() =>
   props.color === 'dc' ? 'var(--dc-accent)' : 'var(--accent)'
 );
 const thumbGlow = computed(() =>
-  props.color === 'dc' ? 'color-mix(in srgb, var(--dc-accent) 32%, transparent)' : 'rgba(46, 166, 255, 0.32)'
+  props.color === 'dc' ? 'color-mix(in srgb, var(--dc-accent) 32%, transparent)' : 'color-mix(in srgb, var(--accent) 32%, transparent)'
 );
 
 // Explicit stepBase avoids a min=1 native range shifting the 5% grid.
@@ -58,40 +64,114 @@ function inputValue(e: Event): number {
   input.value = String(value);
   return value;
 }
+let editing=false, editStartValue=props.modelValue;
+let pointerCommit: number | null = null;
+function beginEdit(e: Event) {
+  if(props.disabled || editing)return;
+  editing=true; editStartValue=props.modelValue; pointerCommit=null;
+  (e.target as HTMLElement).dispatchEvent(new CustomEvent('gp:slider-edit-start',{bubbles:true}));
+}
+function resumeEdit() { if(!editing)editStartValue=props.modelValue; editing=true; pointerCommit=null; }
+function endEdit(e: Event) {
+  if(!editing)return;
+  editing=false;stopKeyRepeat();
+  (e.target as HTMLElement).dispatchEvent(new CustomEvent('gp:slider-edit-end',{bubbles:true}));
+}
+function resetEdit(_e: Event) { editing=false;pointerCommit=null;keyAccelStart=0;stopKeyRepeat(); }
+function cancelEdit(e: Event) {
+  if(!editing)return;
+  resetEdit(e);
+  (e.target as HTMLElement).dispatchEvent(new CustomEvent('gp:slider-edit-cancel',{bubbles:true}));
+}
 function onInput(e: Event) {
+  beginEdit(e);
   emit('update:modelValue', inputValue(e));
 }
-function onChange(e: Event) {
-  emit('commit', inputValue(e));
+function onPointerup(e: Event) {
+  if(!editing)return;
+  const value=inputValue(e), changed=value!==editStartValue;
+  endEdit(e);
+  // Complete before a parent's deferred refresh. A controlled range can lose
+  // the browser's later change event when Vue updates its value during drag.
+  if(changed) { pointerCommit=value; emit('commit',value); }
 }
-// 键盘左右/上下：加快100%（基础×2）+ 线性加速；仅在滑块聚焦时生效（@keydown 仅对聚焦元素触发）
-let keyAccelStart = 0;
+function onChange(e: Event) {
+  const value=inputValue(e);
+  if(pointerCommit===value) return;
+  pointerCommit=null;
+  endEdit(e);
+  emit('commit',value);
+}
+// Opted-in performance sliders repeat one grid step on a bounded hold timer.
+// OS autorepeat is ignored for these controls, so it cannot add a second clock.
+let keyAccelStart = 0, keyDirection = 0, keyStarted = 0, keyValue = 0;
+let keyInput: HTMLInputElement | null = null;
+let keyRepeatTimer: ReturnType<typeof setTimeout> | null = null;
+function stopKeyRepeat() {
+  if (keyRepeatTimer !== null) clearTimeout(keyRepeatTimer);
+  keyRepeatTimer = null; keyDirection = 0; keyInput = null;
+}
+function keyStep(direction: number, steps: number, base: number): number {
+  const step = props.step || 1;
+  let value = base + direction * step * steps;
+  if (props.stepBase !== undefined) {
+    const index = (base - props.stepBase) / step;
+    value = props.stepBase + (direction > 0 ? Math.floor(index) + steps : Math.ceil(index) - steps) * step;
+  }
+  return Math.max(props.min, Math.min(props.max, value));
+}
+function repeatKeyStep() {
+  if (!keyInput || !keyDirection) return;
+  keyRepeatTimer = setTimeout(() => {
+    keyRepeatTimer = null;
+    if (!keyInput || !keyDirection || props.disabled || document.visibilityState === 'hidden' ||
+        document.activeElement !== keyInput || !keyInput.isConnected) { stopKeyRepeat(); return; }
+    keyValue = keyStep(keyDirection, 1, keyValue);
+    emit('update:modelValue', keyValue);
+    repeatKeyStep(); // schedule one next step, never replay missed ticks
+  }, editRepeatInterval(performance.now() - keyStarted, props.repeatIntervalMs, props.accelerate));
+}
+function keyDirectionFor(key: string): number {
+  return key === 'ArrowRight' || key === 'ArrowUp' ? 1 : key === 'ArrowLeft' || key === 'ArrowDown' ? -1 : 0;
+}
 function onKeydown(e: KeyboardEvent) {
-  const dir =
-    e.key === 'ArrowRight' || e.key === 'ArrowUp' ? 1 :
-    e.key === 'ArrowLeft' || e.key === 'ArrowDown' ? -1 : 0;
+  const dir = keyDirectionFor(e.key);
   if (!dir) return;
   e.preventDefault();
-  const step = props.step || 1;
+  if (props.disabled || (props.repeatIntervalMs && e.repeat)) return;
+  beginEdit(e);
+  if (props.repeatIntervalMs) {
+    const input = e.target as HTMLInputElement;
+    if (keyInput === input && keyDirection === dir) return;
+    stopKeyRepeat();
+    keyInput = input; keyDirection = dir; keyStarted = performance.now();
+    keyValue = keyStep(dir, 1, props.modelValue);
+    emit('update:modelValue', keyValue);
+    repeatKeyStep();
+    return;
+  }
+  // Other pages keep their existing keyboard repeat/step behaviour.
   const now = performance.now();
   if (keyAccelStart === 0) keyAccelStart = now;
   const elapsed = (now - keyAccelStart) / 1000;
-  const steps = props.accelerate ? Math.min(12, 2 + Math.floor(elapsed * 4)) : 1; // 基础2步，每秒+4，上限12
-  let v = props.modelValue + dir * step * steps;
-  if (props.stepBase !== undefined) {
-    const index = (props.modelValue - props.stepBase) / step;
-    // An existing off-grid Steam value moves to the next grid point in the
-    // requested direction; merely mounting the slider never changes it.
-    v = props.stepBase + (dir > 0 ? Math.floor(index) + steps : Math.ceil(index) - steps) * step;
-  }
-  v = Math.max(props.min, Math.min(props.max, v));
-  emit('update:modelValue', v);
+  emit('update:modelValue', keyStep(dir, props.accelerate ? Math.min(12, 2 + Math.floor(elapsed * 4)) : 1, props.modelValue));
 }
 function onKeyup(e: KeyboardEvent) {
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') return;
+  const dir = keyDirectionFor(e.key);
+  if (!dir || (props.repeatIntervalMs && keyDirection !== dir)) return;
+  const value = props.repeatIntervalMs && keyInput ? keyValue : props.modelValue;
   keyAccelStart = 0;
-  emit('commit', props.modelValue);
+  endEdit(e);
+  emit('commit', value);
 }
+function stopHiddenKeyRepeat() { if (document.visibilityState === 'hidden') stopKeyRepeat(); }
+// No timer remains when the page/slider loses its input session.
+if (props.repeatIntervalMs) document.addEventListener('visibilitychange', stopHiddenKeyRepeat);
+onDeactivated(stopKeyRepeat);
+onBeforeUnmount(() => {
+  stopKeyRepeat();
+  document.removeEventListener('visibilitychange', stopHiddenKeyRepeat);
+});
 </script>
 
 <template>
@@ -115,12 +195,20 @@ function onKeyup(e: KeyboardEvent) {
         :step="rangeStep"
         :value="modelValue"
         :disabled="disabled"
-        :aria-label="label || '滑块'"
+        :aria-label="ariaLabel || label || '滑块'"
+        :data-gp-initial-focus="gpInitialFocus ? 'true' : undefined"
         :data-gp-row="gpRow"
         :data-gp-col="gpCol"
         :data-gp-step="stepBase === undefined ? undefined : step"
         :data-gp-step-base="stepBase"
         :data-gp-accelerate="accelerate ? undefined : 'false'"
+        :data-gp-repeat-interval-ms="repeatIntervalMs"
+        @pointerdown="beginEdit"
+        @pointerup="onPointerup"
+        @pointercancel="cancelEdit"
+        @blur="cancelEdit"
+        @gp:slider-edit-reset="resetEdit"
+        @gp:slider-edit-start="resumeEdit"
         @input="onInput"
         @change="onChange"
         @keydown="onKeydown"

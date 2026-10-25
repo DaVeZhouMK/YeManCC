@@ -1,6 +1,6 @@
 {
   "window": {
-    "title": "YeManCC",
+    "title": "YeManCC野蛮系统控制中心",
     "width": 580,
     "height": 780,
     "minWidth": 480,
@@ -13,6 +13,7 @@
     "resizable": true,
     "alwaysOnTop": false,
     "singleInstance": true,
+    "singleInstanceKey": "YeManCC",
     "rounded": true,
     "center": true,
     "showWhenReady": true,

@@ -1,0 +1,59 @@
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX {
+	margin: 1px;
+	border-radius: 10px;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX::before,
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before,
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_ToggleOn_3Qrs-::before {
+	content: "";
+	position: absolute;
+	top: 2px;
+	left: 4px;
+	bottom: 5px;
+	right: 4px;
+	border-radius: 8px;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardEmojiHeader_Qihxj img {
+	filter: brightness(0) saturate(100%) invert(92%) sepia(17%) saturate(169%) hue-rotate(2deg) brightness(88%) contrast(90%);
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX span {
+	position: relative;
+	z-index: 1;
+	margin-bottom: 5px;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX .virtualkeyboard_AltGrLabel_21WhT {
+	position: absolute;
+	right: 8px;
+	bottom: 6px
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardActionButtonLeft_2both,
+.DefaultTheme .virtualkeyboard_KeyboardActionButtonRight_2Q0Ip {
+	bottom: 7px;
+}
+
+.DefaultTheme .virtualkeyboard_KeyboardEnter_IunX6 span,
+.DefaultTheme .virtualkeyboard_KeyboardRightShift_iMZ3T span,
+.DefaultTheme .virtualkeyboard_KeyboardBackspace_3LsB3 span,
+.DefaultTheme .virtualkeyboard_KeyboardTabKey_3Gfcs span,
+.DefaultTheme .virtualkeyboard_KeyboardCapsKey_NGv5F span,
+.DefaultTheme .virtualkeyboard_KeyboardLeftShift_2ye7Y span {
+	margin: 0 8px 13px;
+}
+
+.DefaultTheme.virtualkeyboard_Keyboard_45rH7,
+.DefaultTheme.virtualkeyboard_EmojiKeyboard_icETE {
+	border-top: 1px solid #00000000;
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-nex-85-keyboard: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-fe39a7ee339d8970: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-00d1d478f8907a75: 1; }

@@ -1,0 +1,189 @@
+{
+  "schemaVersion": 1,
+  "positiveCases": 14,
+  "sourceFaults": 1,
+  "cases": [
+    {
+      "case": "original-input-only",
+      "kind": "original",
+      "args": "input",
+      "ops": [],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "original-normal",
+      "kind": "original",
+      "args": "normal",
+      "present": false,
+      "ops": [
+        "hello",
+        "get",
+        "set"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "original-bad-hello",
+      "kind": "original",
+      "args": "mismatch",
+      "ops": [
+        "hello"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "native-get-set",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set",
+        "hello",
+        "get"
+      ],
+      "writes": 1,
+      "raw": 1,
+      "expectedExit": 0
+    },
+    {
+      "case": "fragmented-pending",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set",
+        "hello",
+        "get"
+      ],
+      "writes": 1,
+      "raw": 1,
+      "expectedExit": 0
+    },
+    {
+      "case": "bad-component",
+      "kind": "extra",
+      "ops": [
+        "hello"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "reconnect-timeout",
+      "kind": "extra",
+      "ops": [
+        "hello"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "handshake-eof",
+      "kind": "extra",
+      "ops": [
+        "hello"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "truncated-after-apply",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set",
+        "hello",
+        "get"
+      ],
+      "writes": 1,
+      "raw": 1,
+      "expectedExit": 0
+    },
+    {
+      "case": "eof-after-apply",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set",
+        "hello",
+        "get"
+      ],
+      "writes": 1,
+      "raw": 1,
+      "expectedExit": 0
+    },
+    {
+      "case": "host-read-failure",
+      "kind": "extra",
+      "failRead": true,
+      "ops": [
+        "hello",
+        "get"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "stale-fence",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set"
+      ],
+      "writes": 0,
+      "raw": 1,
+      "expectedExit": 0
+    },
+    {
+      "case": "partial-operation-write",
+      "kind": "extra",
+      "ops": [
+        "hello",
+        "get",
+        "hello"
+      ],
+      "writes": 0,
+      "expectedExit": 0
+    },
+    {
+      "case": "software-owned-release",
+      "kind": "extra",
+      "route": "ayaneo-cec-bypass",
+      "percent": 90,
+      "ops": [
+        "hello",
+        "get",
+        "hello",
+        "set",
+        "hello",
+        "release"
+      ],
+      "writes": 2,
+      "raw": 170,
+      "expectedExit": 0
+    },
+    {
+      "case": "fault-original-bad-hello",
+      "kind": "fault",
+      "args": "mismatch",
+      "ops": [
+        "hello",
+        "set"
+      ],
+      "writes": 0,
+      "expectedExit": 23,
+      "expectedOriginalError": "old helper not diagnosed before set"
+    }
+  ]
+}

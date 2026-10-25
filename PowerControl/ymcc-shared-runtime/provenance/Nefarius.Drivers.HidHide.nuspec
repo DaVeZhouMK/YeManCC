@@ -1,0 +1,43 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Nefarius.Drivers.HidHide</id>
+    <version>3.4.0</version>
+    <authors>Benjamin Höglinger-Stelzer</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>NSS-128x128.png</icon>
+    <readme>README.md</readme>
+    <projectUrl>https://github.com/nefarius/Nefarius.Drivers.HidHide</projectUrl>
+    <description>Managed API for configuring HidHide.</description>
+    <copyright>Copyright © Benjamin Höglinger-Stelzer 2022-2025</copyright>
+    <repository type="git" url="https://github.com/nefarius/Nefarius.Drivers.HidHide" commit="746e9fb396ba65944dca81e3986cf09b159fe405" />
+    <dependencies>
+      <group targetFramework="net10.0-windows7.0">
+        <dependency id="Microsoft.Extensions.Logging.Abstractions" version="10.0.8" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Utilities.DeviceManagement" version="5.2.0" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Vicius.Abstractions" version="1.4.1" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net8.0-windows7.0">
+        <dependency id="Microsoft.Extensions.Logging.Abstractions" version="10.0.8" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Utilities.DeviceManagement" version="5.2.0" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Vicius.Abstractions" version="1.4.1" exclude="Build,Analyzers" />
+        <dependency id="System.Net.Http.Json" version="10.0.8" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net9.0-windows7.0">
+        <dependency id="Microsoft.Extensions.Logging.Abstractions" version="10.0.8" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Utilities.DeviceManagement" version="5.2.0" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Vicius.Abstractions" version="1.4.1" exclude="Build,Analyzers" />
+        <dependency id="System.Net.Http.Json" version="10.0.8" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="Microsoft.Extensions.Logging.Abstractions" version="10.0.8" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Utilities.DeviceManagement" version="5.2.0" exclude="Build,Analyzers" />
+        <dependency id="Nefarius.Vicius.Abstractions" version="1.4.1" exclude="Build,Analyzers" />
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+        <dependency id="System.Net.Http.Json" version="10.0.8" exclude="Build,Analyzers" />
+        <dependency id="System.Runtime.CompilerServices.Unsafe" version="6.1.2" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

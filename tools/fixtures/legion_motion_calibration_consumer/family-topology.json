@@ -1,0 +1,86 @@
+{
+  "schema": 1,
+  "origin": "Read-only reuse of the approved four-model consumer topology. These independent expectations are not generated from the new calibration implementation.",
+  "models": [
+    {
+      "name": "HandheldCompanion.Devices.LegionGoTablet",
+      "rightAllowed": true,
+      "vendorId": 6127,
+      "productIds": [
+        24962,
+        24963,
+        24964,
+        24965,
+        25067,
+        25068,
+        25069,
+        25070
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoTablet2",
+      "rightAllowed": true,
+      "vendorId": 6127,
+      "productIds": [
+        24962,
+        24963,
+        24964,
+        24965,
+        25067,
+        25068,
+        25069,
+        25070
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoSZ1",
+      "rightAllowed": false,
+      "vendorId": 6790,
+      "productIds": [
+        58128,
+        58129
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoSZ2",
+      "rightAllowed": false,
+      "vendorId": 6790,
+      "productIds": [
+        58128,
+        58129
+      ]
+    }
+  ],
+  "rejectedModels": [
+    "HandheldCompanion.Devices.SteamDeck",
+    "HandheldCompanion.Devices.LegionGoTablet-suffix",
+    "HandheldCompanion.Devices.LegionGoTablet2-suffix",
+    "HandheldCompanion.Devices.LegionGoSZ1-suffix",
+    "HandheldCompanion.Devices.LegionGoSZ2-suffix",
+    "HandheldCompanion.Devices.legiongotablet",
+    "HandheldCompanion.Devices.Unknown",
+    ""
+  ],
+  "wrongDevices": [
+    {
+      "vendorId": 4660,
+      "productId": 24962
+    },
+    {
+      "vendorId": 6127,
+      "productId": 58128
+    },
+    {
+      "vendorId": 6790,
+      "productId": 24962
+    },
+    {
+      "vendorId": 6790,
+      "productId": 0
+    },
+    {
+      "vendorId": 6127,
+      "productId": 0
+    }
+  ]
+}

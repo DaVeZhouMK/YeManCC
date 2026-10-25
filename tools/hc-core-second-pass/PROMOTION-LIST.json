@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "status": "NO_PROMOTION",
+  "promotionApproved": false,
+  "replace": [],
+  "remove": [],
+  "deploy": [],
+  "experimentalOnly": [
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\candidate\\HandheldCompanion.dll",
+      "bytes": 2238976,
+      "sha256": "4f9d2f534289c4e6cc7183deddd719cfd3dfa613fde1e99946ff5327697149ab",
+      "assemblyIdentity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+      "strongNameAdded": false,
+      "typeCount": 1557,
+      "primaryDevices": 77,
+      "allConcreteDeviceSubclasses": 91,
+      "trialOnly": true
+    }
+  ],
+  "blockers": [
+    {
+      "id": "REFLECTION_SEMANTIC_CLOSURE_UNPROVEN",
+      "detail": "348 retained HC reflection/serialization sites and 649 consumer lexical sites have complete locations and context but are not all classified into live Host/LightSetter targets versus excluded UI/profile flows. Root preservation and GetTypes/fixtures do not prove that arbitrary runtime-selected member names or serialized model types survive."
+    },
+    {
+      "id": "FACTORY_LIFECYCLE_EXECUTION_OUT_OF_SCOPE",
+      "detail": "13 Factory field manager types, Status, profile events/CloneProfile and the 771-method constructor/implicit-cctor closure are retained and independently IL-compared. Real ManagerFactory/device/OpenEvents lifecycle was not executed under the hardware prohibition; static closure is reported as such."
+    }
+  ],
+  "identityConstraint": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+  "sourceBeforeSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+  "parentJsonCompactWorkIndependent": true,
+  "manifestRule": "Never deploy the candidate scratch overlay or its old runtime manifest. This list authorizes no replacement."
+}

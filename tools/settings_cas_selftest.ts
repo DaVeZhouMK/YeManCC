@@ -79,3 +79,24 @@ if (rearDeep.value.outputTarget.oemRearMap?.m1 !== 'off' || rearDeep.value.outpu
 const rearRejected = evaluateInputCas(rearBase, 6, { outputTarget: { oemRearMap: { m1: 'left' } } });
 if (rearRejected.ok || rearRejected.value.outputTarget.oemRearMap?.m1 !== 'left') throw new Error('stale oemRearMap CAS write must be rejected without mutation');
 console.log('settings CAS selftest: PASS');
+
+// Retired output IDs migrate once without enabling input or retaining old identity receipts.
+for (const [previous, current] of [['xbox360', 'elite'], ['dualshock4', 'dualsense-edge'], ['dualsense', 'dualsense-edge']]) {
+  for (const enabled of [false, true]) for (const gyro of [false, true]) {
+    const source = { startupDesired: { virtualGamepadPersona: previous, gyroPreset: 'fps', extension: 42 }, input: {
+      revision: 7, appliedRevision: 7, appliedConfigHash: 'old', pendingConfigHash: 'old',
+      hostAcknowledgedRevision: 7, hostAcknowledgedConfigHash: 'old', applyStatus: 'active',
+      outputTarget: { persona: previous, buttonMappingEnabled: enabled, gyroEnabled: gyro, descriptorHash: 'old', closure: 'CLOSED', extension: 123 },
+      gameOverride: { sessionId: 'session', outputTarget: { persona: previous, buttonMappingEnabled: enabled, gyroEnabled: gyro, descriptorHash: 'old', closure: 'CLOSED' } },
+    } };
+    const before = JSON.stringify(source), migrated = normalizeSettings(source);
+    if (JSON.stringify(source) !== before) throw new Error('persona migration changed the caller-owned document');
+    const target = migrated.input.outputTarget, overlay = migrated.input.gameOverride.outputTarget;
+    if (target.persona !== current || target.buttonMappingEnabled !== enabled || target.gyroEnabled !== gyro || target.descriptorHash !== null || target.closure !== 'UNENCLOSED' || target.extension !== 123) throw new Error('retired base persona migration lost settings or trusted the old identity');
+    if (overlay.persona !== current || overlay.buttonMappingEnabled !== enabled || overlay.gyroEnabled !== gyro || overlay.descriptorHash !== null || overlay.closure !== 'UNENCLOSED') throw new Error('retired overlay persona survived migration');
+    if (migrated.startupDesired.virtualGamepadPersona !== current || migrated.startupDesired.extension !== 42) throw new Error('retired startup persona or extension migration failed');
+    if (migrated.input.appliedConfigHash !== null || migrated.input.hostAcknowledgedConfigHash !== null || migrated.input.hostAcknowledgedRevision !== null || migrated.input.applyStatus !== 'saved-pending') throw new Error('old identity acknowledgement survived persona migration');
+    if (JSON.stringify(normalizeSettings(migrated)) !== JSON.stringify(migrated)) throw new Error('persona migration is not idempotent');
+  }
+}
+console.log('retired controller persona migration: PASS (12 target/overlay/startup/receipt cases)');

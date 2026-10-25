@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "plugins.updater-service-consumer": {
+      "script": "tools/decky_updater_service_selftest.mjs",
+      "report": "UPDATER-SERVICE.json",
+      "entries": [
+        "src/bridge/deckyUpdaterService.ts",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts"
+      ],
+      "sources": [
+        "decky-plugin/src/deckyStoreClient.ts",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts",
+        "package.json",
+        "src/bridge/deckyUpdaterService.ts",
+        "tools/decky_updater_service_selftest.mjs"
+      ],
+      "expectedNames": [
+        "status is read-only and does not implicitly check or install",
+        "check -> download -> confirmed install reaches the original owner with the exact target",
+        "unverified package cannot enable installation",
+        "current or older manifest versions never enable a downgrade",
+        "duplicate install packet is acknowledged without a second install",
+        "conflicting packet IDs cannot replace the accepted package",
+        "old trimmed packet IDs remain rejected",
+        "wrong run and wrong peer never reach the update owner",
+        "install is blocked while a game runs or power is not ready",
+        "power/game is checked again immediately before installation",
+        "package replacement during install admission requires a fresh confirmation",
+        "synchronous validation failure is handled before an IPC acknowledgement finishes",
+        "disconnect after acceptance stops an unstarted install",
+        "an already connected mirror sends its status after enabling the updater consumer",
+        "old native protocol is explicitly unavailable and never sends update commands",
+        "unsupported or stale views cannot enable install",
+        "client duplicate activation cannot send two mutations",
+        "a different client cannot acknowledge this request",
+        "timeout requests fresh status but never replays installation",
+        "stale confirmation binds both package version and hash",
+        "missing host response finishes waiting without an idle poll",
+        "disconnect rejects the outstanding request and requires a fresh status",
+        "restored YMCC renderer requests status again without replaying the interrupted operation",
+        "twenty settings remounts reuse one bounded client identity with increasing receipts",
+        "a receipt from the prior page cannot acknowledge a new page operation",
+        "replacement page owns demand and old teardown cannot disable it"
+      ],
+      "target": "es2022",
+      "fault": {
+        "path": "src/bridge/deckyUpdaterService.ts",
+        "before": "state.sha256?.toLowerCase()===t.sha256",
+        "after": "true",
+        "expectedFailedCase": "unverified package cannot enable installation"
+      }
+    },
+    "plugins.dual-update-consumer": {
+      "script": "tools/decky_dual_update_selftest.mjs",
+      "report": "DUAL-UPDATE.json",
+      "entries": [
+        "decky-plugin/src/deckyLoaderUpdate.tsx",
+        "decky-plugin/src/deckyLoaderConsumer.ts"
+      ],
+      "sources": [
+        "decky-plugin/src/deckyLoaderConsumer.ts",
+        "decky-plugin/src/deckyLoaderUpdate.tsx",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts",
+        "decky-plugin/vendor/decky-loader.lock.json",
+        "package.json",
+        "tools/decky_dual_update_selftest.mjs",
+        "tools/decky_ymcc_update_selftest.mjs"
+      ],
+      "expectedNames": [
+        "Windows explicitly uses compatible YMCC channel and never submits upstream install",
+        "unknown platform is fallback-only",
+        "Linux supported native backend exposes actual target without installation",
+        "native explicit confirmation rechecks target then calls real native updater route",
+        "normal native return is not success until updated service version is observed",
+        "service/renderer recreation only reads result, never replays installation",
+        "native check error enables YMCC fallback",
+        "definite native installation error enables fallback without success claim",
+        "ambiguous native disconnect blocks competing installs and never auto-replays",
+        "stale confirmation cannot install changed target",
+        "unsupported native build falls back",
+        "foreign upstream repository falls back",
+        "missing native asset falls back",
+        "foreign binary URL falls back",
+        "duplicate native confirmations submit at most one mutation",
+        "current native version still keeps independent YMCC fallback available",
+        "progress is bounded, cleanup releases the exact listener",
+        "a hanging native check ends and exposes the fallback",
+        "native install timeout stays uncertain and blocks competing installation",
+        "ARM Linux requires its actual platform asset"
+      ],
+      "fault": {
+        "path": "decky-plugin/src/deckyNativeUpdate.ts",
+        "before": "fallbackAllowed:!uncertain",
+        "after": "fallbackAllowed:true",
+        "expectedFailedCase": "ambiguous native disconnect blocks competing installs and never auto-replays"
+      },
+      "retirement": {
+        "status": "UNSUPPORTED_RETIRED_NATIVE_CHANNEL",
+        "code": "PLUGIN_UPDATE_NATIVE_CHANNEL_RETIRED_NO_EQUIVALENT_CONSUMER",
+        "historicalManifest": "source-inputs.historical.json",
+        "historicalManifestSha256": "25cf0dc4579a68623c39fea8ec88b7acbc906b3abb1aad25b95d0e1610b97509",
+        "historicalCase": {
+          "script": "tools/decky_dual_update_selftest.mjs",
+          "report": "DUAL-UPDATE.json",
+          "entries": [
+            "decky-plugin/src/deckyNativeUpdate.ts"
+          ],
+          "sources": [
+            "decky-plugin/src/deckyNativeUpdate.ts",
+            "decky-plugin/src/deckyStoreClient.ts",
+            "package.json",
+            "tools/decky_dual_update_selftest.mjs"
+          ],
+          "expectedNames": [
+            "Windows explicitly uses compatible YMCC channel and never submits upstream install",
+            "unknown platform is fallback-only",
+            "Linux supported native backend exposes actual target without installation",
+            "native explicit confirmation rechecks target then calls real native updater route",
+            "normal native return is not success until updated service version is observed",
+            "service/renderer recreation only reads result, never replays installation",
+            "native check error enables YMCC fallback",
+            "definite native installation error enables fallback without success claim",
+            "ambiguous native disconnect blocks competing installs and never auto-replays",
+            "stale confirmation cannot install changed target",
+            "unsupported native build falls back",
+            "foreign upstream repository falls back",
+            "missing native asset falls back",
+            "foreign binary URL falls back",
+            "duplicate native confirmations submit at most one mutation",
+            "current native version still keeps independent YMCC fallback available",
+            "progress is bounded, cleanup releases the exact listener",
+            "a hanging native check ends and exposes the fallback",
+            "native install timeout stays uncertain and blocks competing installation",
+            "ARM Linux requires its actual platform asset"
+          ],
+          "fault": {
+            "path": "decky-plugin/src/deckyNativeUpdate.ts",
+            "before": "fallbackAllowed:!uncertain",
+            "after": "fallbackAllowed:true",
+            "expectedFailedCase": "ambiguous native disconnect blocks competing installs and never auto-replays"
+          }
+        },
+        "productDecision": "The shipped LoaderUpdateRow always returns YmccPackageUpdateRow. The original independent native updater file and route were removed; the old alias now imports the YMCC-only selftest. This cannot satisfy the old native Linux installer/uncertain-fallback contract.",
+        "replacementScript": "tools/decky_ymcc_update_selftest.mjs",
+        "replacementReport": "YMCC-ONLY-UPDATE.json",
+        "replacementExpectedNames": [
+          "actual product row always selects the single YMCC package updater",
+          "platform Linux x86_64 cannot select an independent Decky controller",
+          "platform Linux aarch64 cannot select an independent Decky controller",
+          "platform  cannot select an independent Decky controller",
+          "official pinned version is reviewed by consumer API adapter",
+          "normal stable 3.x consumer updates do not require a new literal",
+          "unreviewed major, prerelease, malformed and old APIs are rejected",
+          "production row bundle contains no independent upstream update route or release fetch",
+          "production row consumes the existing YMCC authenticated update client"
+        ],
+        "manualReadInputs": [
+          "package.json",
+          "tools/decky_dual_update_selftest.mjs",
+          "tools/decky_ymcc_update_selftest.mjs",
+          "decky-plugin/vendor/decky-loader.lock.json"
+        ],
+        "replacementScope": "Actual shipped row selection and official consumer API admission only; not a native update controller, installation, download or full authenticated updater-service run.",
+        "equivalentToHistoricalContract": false
+      }
+    },
+    "plugins.ymcc-package-update-consumer": {
+      "title": "Actual YMCC package row selector, client/protocol bundle and reviewed updater API admission",
+      "script": "tools/decky_ymcc_update_selftest.mjs",
+      "report": "YMCC-ONLY-UPDATE.json",
+      "entries": [
+        "decky-plugin/src/deckyLoaderUpdate.tsx",
+        "decky-plugin/src/deckyLoaderConsumer.ts"
+      ],
+      "sources": [
+        "decky-plugin/src/deckyLoaderConsumer.ts",
+        "decky-plugin/src/deckyLoaderUpdate.tsx",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts",
+        "decky-plugin/vendor/decky-loader.lock.json",
+        "package.json",
+        "tools/decky_ymcc_update_selftest.mjs"
+      ],
+      "manualReadInputs": [
+        "decky-plugin/vendor/decky-loader.lock.json"
+      ],
+      "format": "ymcc-only-original-string-cases",
+      "expectedNames": [
+        "actual product row always selects the single YMCC package updater",
+        "platform Linux x86_64 cannot select an independent Decky controller",
+        "platform Linux aarch64 cannot select an independent Decky controller",
+        "platform  cannot select an independent Decky controller",
+        "official pinned version is reviewed by consumer API adapter",
+        "normal stable 3.x consumer updates do not require a new literal",
+        "unreviewed major, prerelease, malformed and old APIs are rejected",
+        "production row bundle contains no independent upstream update route or release fetch",
+        "production row consumes the existing YMCC authenticated update client"
+      ],
+      "faults": [
+        {
+          "id": "selector-detached-from-ymcc",
+          "path": "decky-plugin/src/deckyLoaderUpdate.tsx",
+          "before": "export function LoaderUpdateRow(props:any){return <YmccPackageUpdateRow {...props}/>;}",
+          "after": "export function LoaderUpdateRow(props:any){return <div {...props}/>;}",
+          "expectedFailedCase": "actual product row always selects the single YMCC package updater",
+          "assertionSignature": {
+            "operator": "strictEqual",
+            "actual": {
+              "type": "string",
+              "value": "div"
+            },
+            "expected": {
+              "type": "function",
+              "name": "YmccPackageUpdateRow"
+            }
+          }
+        },
+        {
+          "id": "prerelease-api-admitted",
+          "path": "decky-plugin/src/deckyLoaderConsumer.ts",
+          "before": "$/.exec(current)",
+          "after": "/.exec(current)",
+          "expectedFailedCase": "unreviewed major, prerelease, malformed and old APIs are rejected",
+          "assertionSignature": {
+            "operator": "==",
+            "actual": {
+              "type": "boolean",
+              "value": false
+            },
+            "expected": {
+              "type": "boolean",
+              "value": true
+            }
+          }
+        }
+      ],
+      "scope": "The original nine YMCC-only production selector/API checks, including real client/protocol bundle provenance. Does not execute or replace the retired independent-native twenty cases or the separate authenticated updater-service suite."
+    }
+  }
+}

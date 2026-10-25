@@ -1,0 +1,15 @@
+--- a/FanLab/DeviceCoreSharedDependencies.cs
++++ b/FanLab/DeviceCoreSharedDependencies.cs
+@@
+-        var loaded = context.LoadFromAssemblyPath(path);
++        var loaded = RuntimeDependencyContract.LoadPinned(context, requested, path, spec.Sha256);
+--- a/FanLab/real-host/YeManFanHost.csproj
++++ b/FanLab/real-host/YeManFanHost.csproj
+@@
+     <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
++    <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+--- a/FanLab/LightSetter/YeManLightSetter.csproj
++++ b/FanLab/LightSetter/YeManLightSetter.csproj
+@@
+     <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
++    <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />

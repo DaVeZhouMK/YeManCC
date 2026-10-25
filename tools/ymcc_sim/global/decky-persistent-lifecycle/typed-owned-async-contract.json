@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 2,
+  "id": "decky.typed-async-owned-subtree",
+  "scope": "Actual production typed worker ownership including original callbacks, cancellation, contained WinHTTP state and parent resources",
+  "supersedesScope": "V1 fixture mixed same-process direct WinHTTP library state with typed parent resources. V1 original diagnostic continues to run and keeps its verdict.",
+  "source": "typed-owned-async-request-regression.cpp",
+  "nativeVerifier": "typed-owned-async-native.mjs",
+  "receiptVerifier": "typed-owned-async-parent.mjs",
+  "budgets": {
+    "nativeMs": 20000,
+    "outerMs": 135000,
+    "cancelToAllOwnedResourcesMs": 1500,
+    "renewMs": 700,
+    "originalLifecycleNativePredicates": 72
+  },
+  "required": {
+    "typedScenarios": 6,
+    "directConsumers": 2,
+    "negativeControls": 4,
+    "finiteOwnedDirectChildren": 10,
+    "callbackProofBeforeChildExit": true,
+    "exactChildIdentityAndNonce": true,
+    "naturalExitCode": 0,
+    "jobActiveProcesses": 0,
+    "parentHandlesStrictlyEqual": true,
+    "parentThreadsStrictlyEqual": true,
+    "parentRawSocketAndPublicCryptoInitializationIndependentlyMeasured": true
+  },
+  "preservedV1": {
+    "executedEveryParent": true,
+    "oldParserUnchanged": true,
+    "rawVerdictPreserved": true,
+    "sourceToolAndRawPinsRequired": true,
+    "sameProcessLibraryNaturalZeroNotClaimed": true
+  },
+  "forbidden": [
+    "private WebIO cleanup",
+    "hidden persistent process/session",
+    "shared WinHTTP session",
+    "callback release inferred from process death",
+    "resource offsets or exclusions",
+    "expanded deadline",
+    "expected failure substituted for ownership PASS"
+  ]
+}

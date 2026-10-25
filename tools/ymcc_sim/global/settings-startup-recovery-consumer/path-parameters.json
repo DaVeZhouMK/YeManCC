@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "kind": "only-explicit-runtime-and-browser-path-compatibility",
+  "priorOriginalSha256": "bc4618992b7e8fc7695dc9094f825585644741e11ae1b752790f76ce441a5c8e",
+  "currentOriginalSha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b",
+  "changes": [
+    {
+      "before": "const runtime='C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+      "after": "const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+      "count": 1
+    },
+    {
+      "before": "chromium.launch({headless:true,channel:'msedge'})",
+      "after": "chromium.launch({headless:true,...(process.env.YMCC_UI_BROWSER_EXE?{executablePath:process.env.YMCC_UI_BROWSER_EXE}:{channel:'msedge'})})",
+      "count": 1
+    }
+  ],
+  "businessExpectationsAndMemoryPortsUnchanged": true,
+  "originalCaseNamesAndOrderUnchanged": true,
+  "originalOutputArgv2Retained": true,
+  "originalLinesUnchangedExceptTwoPaths": true,
+  "defaultBrowserChannelRetained": true,
+  "coordinatorAuthorization": "01a14d5e-f558-77e0-bcd0-39e028ed43ed"
+}

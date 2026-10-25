@@ -1,0 +1,13 @@
+{
+  "root": "C:\\Users\\DaVe\\AppData\\Local\\Temp\\ymcc-hud-eev68K",
+  "markerSha256": "06f1b13b39f0fb9b0684d664f56a6a6fd5af89533217e6ad175c545bc244e004",
+  "verifiedBeforeRemoval": true,
+  "cleaned": true,
+  "childrenRemoved": [
+    "local",
+    "output",
+    "t"
+  ],
+  "retryErrors": [],
+  "markerPreservedUntilFinalCleanup": true
+}

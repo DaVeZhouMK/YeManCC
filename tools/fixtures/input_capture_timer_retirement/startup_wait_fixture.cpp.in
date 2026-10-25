@@ -1,0 +1,132 @@
+// Scheduling and accounting around complete production Start/worker/Stop.
+// Real kernel thread/wait/close/Sleep belong only to this private executable.
+// COM, HID, timer, Host, assets and logging remain explicit fixture leaves.
+@BASE_PREFIX@
+@START_AUXILIARY@
+@PRODUCTION_START@
+@PRODUCTION_STOP@
+static unsigned checks=0,failures=0;
+static void check(bool condition,const char*name){++checks;if(!condition){++failures;std::cerr<<"CHECK_FAILED "<<name<<'\n';}}
+static double elapsedMs(std::chrono::steady_clock::time_point start){return std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-start).count();}
+// A failed wait must not unwind a worker's context or discard its last join
+// handle. Keep this owner published until a positive join AND both closes.
+// Unresolved ownership stops subsequent cases and is reported as failure.
+struct StartupOwner {Scenario scenario;StartupCase state;HANDLE controller=nullptr;};
+static StartupOwner* retainedStartupOwner=nullptr;
+static json runStartup(unsigned scenario,bool legacy,const std::string&negative){
+    auto* owner=new StartupOwner;retainedStartupOwner=owner;
+    resetCaptureFixture();g_exitRequested=false;
+    current=&owner->scenario;StartupCase& state=owner->state;startupCurrent=&state;
+    state.holdRole=scenario==0;state.holdRoleUntilRecovery=negative=="controller-timeout";
+    g_inputCaptureThread=nullptr;g_inputCaptureStop=true;g_domainLogEnabled[1]=false;
+    const auto started=std::chrono::steady_clock::now();
+    const unsigned failuresBefore=failures;
+    inputCaptureStart();
+    const bool created=g_inputCaptureThread!=nullptr;
+    bool joined=!created,productClosed=!created,controllerClosed=true,stopExecuted=false;
+    DWORD firstWait=WAIT_FAILED,joinResult=WAIT_FAILED,recoveryResult=WAIT_FAILED,joinError=ERROR_SUCCESS;
+    double firstStopMs=0,delayElapsed=0;bool retainedAtFirstReturn=false,secondStop=false;
+    bool retainedAfterJoinFailure=false,recoveryWaitPerformed=false,controllerClosedBeforeJoin=false;
+    check(created,"actual Start created owned kernel worker");
+    if(created){
+        owner->controller=startupKernelDuplicate(g_inputCaptureThread);controllerClosed=owner->controller==nullptr;
+        check(owner->controller!=nullptr,"controller duplicate exists before product Stop");
+        const bool phase=state.waitFor([&]{return scenario==0?state.roleEntered:state.delayEntered;},5000);
+        check(phase,"actual worker reached selected startup boundary");
+        if(scenario==2){
+            joinResult=startupKernelWait(owner->controller,5000);joined=joinResult==WAIT_OBJECT_0;
+            check(joined,"normal startup delay completed and worker returned at fake COM boundary");
+            {std::lock_guard<std::mutex> lock(state.mutex);delayElapsed=elapsedMs(state.delayBegan);}
+            check(delayElapsed>=2450.0,"normal 2500ms startup delay was not shortened");
+        }
+        const auto stopAt=std::chrono::steady_clock::now();
+        const auto receipt=observeCaptureStop([]{return inputCaptureStop();});
+        if(!legacy)check(receipt.settled()==(g_inputCaptureThread==nullptr),"actual typed Stop receipt respects startup worker ownership");
+        stopExecuted=true;firstStopMs=elapsedMs(stopAt);retainedAtFirstReturn=g_inputCaptureThread!=nullptr;
+        if(!state.waitResults.empty())firstWait=state.waitResults[0];
+        check(!state.waitResults.empty()&&state.waitBudgets[0]==2000,"Stop executed original real 2000ms wait");
+        if(scenario!=2){
+            if(legacy||state.holdRoleUntilRecovery){
+                check(firstWait==WAIT_TIMEOUT&&retainedAtFirstReturn,"held or legacy startup retains ownership after original Stop timeout");
+                check(firstStopMs>=1900.0,"timeout positively consumed the kernel wait");
+            }else{
+                check(firstWait==WAIT_OBJECT_0&&!retainedAtFirstReturn,"cooperative startup closes in the first real Stop");
+            }
+            // Timeout uses the still-held real worker and a zero-budget kernel
+            // wait. Failure probes NULL, leaving the owned duplicate valid.
+            joinResult=startupKernelWait(negative=="controller-wait-failed"?nullptr:owner->controller,
+                negative=="controller-timeout"||negative=="controller-wait-failed"?0:5000);
+            joinError=joinResult==WAIT_FAILED?startupKernelGetLastError():ERROR_SUCCESS;
+            joined=joinResult==WAIT_OBJECT_0;
+            check(joined,"controller positively joined actual production worker");
+        }else{
+            check(firstWait==WAIT_OBJECT_0&&!retainedAtFirstReturn,"completed worker closes on ordinary Stop");
+        }
+        if(!joined){
+            retainedAfterJoinFailure=retainedStartupOwner==owner&&startupCurrent==&state&&
+                (owner->controller!=nullptr||g_inputCaptureThread!=nullptr);
+            check(retainedAfterJoinFailure,"failed join retains context and a live owned join handle");
+        }
+    }
+    // Bounded recovery only releases fixture-owned gates. It is not production
+    // recovery evidence. Never close the duplicate until a real positive join.
+    state.holdRoleUntilRecovery=false;state.releaseRole();
+    if(!joined){
+        HANDLE remaining=owner->controller?owner->controller:g_inputCaptureThread;
+        if(remaining){recoveryWaitPerformed=true;recoveryResult=startupKernelWait(remaining,5000);joined=recoveryResult==WAIT_OBJECT_0;}
+        // If duplication failed and Stop already closed the original, its real
+        // WAIT_OBJECT_0 is still an exit proof; never wait on the stale value.
+        else if(firstWait==WAIT_OBJECT_0&&g_inputCaptureThread==nullptr)joined=true;
+        check(joined,"bounded fixture recovery positively joined owned worker");
+    }
+    if(joined&&g_inputCaptureThread){(void)observeCaptureStop([]{return inputCaptureStop();});stopExecuted=true;secondStop=true;}
+    productClosed=g_inputCaptureThread==nullptr&&(!created||state.productCloseSuccesses==1);
+    check(productClosed,"product worker handle positively closed once");
+    if(joined&&owner->controller){
+        controllerClosed=startupKernelClose(owner->controller)!=0;
+        check(controllerClosed,"controller join handle positively closed");
+        if(controllerClosed)owner->controller=nullptr;
+    }
+    controllerClosed=owner->controller==nullptr;
+    check(!controllerClosedBeforeJoin,"controller is never closed before exit proof");
+    check(state.unexpectedCalls.load()==0,"no timer HID capture or real COM path admitted");
+    check(state.startCalls==1&&state.applyCalls==1&&state.assetsCalls==1,"full original Start admission was executed");
+    std::string reason;bool roleTimedOut;
+    {std::lock_guard<std::mutex> lock(state.mutex);reason=state.reason;roleTimedOut=state.roleGateTimedOut;}
+    if(joined&&created){
+        if(scenario!=2)check(state.coInitCalls.load()==0&&reason=="capture-cancelled-before-init","cancelled delay never enters even fake COM or hardware admission");
+        else check(state.coInitCalls.load()==1&&reason=="capture-com-init-failed","normal delay reaches only the explicit fake COM rejection");
+    }
+    const bool settled=joined&&productClosed&&controllerClosed;
+    check(settled,"all private kernel thread handles settled before context destruction");
+    const unsigned remainingHandles=unsigned(g_inputCaptureThread!=nullptr)+unsigned(owner->controller!=nullptr);
+    json row={{"scenario",scenario},{"legacyStartup",legacy},{"failureInjection",negative},
+        {"pass",failures==failuresBefore},{"actualStartWorkerStopExecuted",created&&stopExecuted},
+        {"realOwnedKernelThread",created},{"firstWaitResult",firstWait},{"firstStopMs",firstStopMs},
+        {"retainedAtFirstReturn",retainedAtFirstReturn},{"controllerJoinResult",joinResult},{"controllerJoinWin32",joinError},
+        {"controllerWaitUsesInvalidNullProbe",negative=="controller-wait-failed"},{"ownedThreadJoined",joined},
+        {"retainedAfterInitialJoinFailure",retainedAfterJoinFailure},{"recoveryWaitPerformed",recoveryWaitPerformed},
+        {"recoveryJoinResult",recoveryResult},{"controllerClosedBeforeJoin",controllerClosedBeforeJoin},
+        {"productHandleClosed",productClosed},{"controllerHandleClosed",controllerClosed},
+        {"ownedHandlesRemaining",remainingHandles},{"ownershipSettled",settled},{"contextRetained",!settled},
+        {"contextDestroyed",false},{"processExitCountsAsCleanup",false},
+        {"secondStopFixtureOnly",secondStop},{"normalDelayElapsedMs",delayElapsed},{"totalElapsedMs",elapsedMs(started)},
+        {"coInitCalls",state.coInitCalls.load()},{"unexpectedHardwareTimerCalls",state.unexpectedCalls.load()},
+        {"reason",reason},{"stopLogs",state.stopLogs},{"roleGateTimedOut",roleTimedOut},
+        {"productionRecoveryProven",false},{"arbitraryStalledWorkerDisposalProven",false}};
+    if(settled){startupCurrent=nullptr;current=nullptr;retainedStartupOwner=nullptr;delete owner;row["contextDestroyed"]=true;}
+    return row;
+}
+int main(int argc,char**argv){
+    const bool legacy=argc>=2&&std::string(argv[1])=="legacy";
+    const std::string negative=argc==3?argv[2]:"";json rows=json::array();
+    if(negative.empty()){
+        for(unsigned scenario:{0u,1u,2u}){rows.push_back(runStartup(scenario,legacy,negative));if(retainedStartupOwner)break;}
+    }else if(negative=="controller-timeout"||negative=="controller-wait-failed"){
+        rows.push_back(runStartup(negative=="controller-timeout"?0:1,legacy,negative));
+    }else check(false,"known failure-path schedule");
+    std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"cases",rows},
+        {"retainedOwners",retainedStartupOwner?1:0},{"processExitCountsAsCleanup",false},
+        {"realKernelThreadWaitCloseAndSleep",false},{"realKernelThreadWaitCloseAndEventDelay",true},{"realKernelSleepCalled",false},{"legacyDelayPort","owned kernel event timed wait"},{"productionStartWorkerStopExecuted",true},
+        {"noRealDeviceHostServiceOrWinmm",true},{"wholeLifecycleAcceptance",false}}).dump()<<'\n';return failures?1:0;
+}

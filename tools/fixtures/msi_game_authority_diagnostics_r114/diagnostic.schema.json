@@ -1,0 +1,289 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "R114 gameAuthority failure facts",
+  "description": "JSON suffix after the fixed stdout prefix. One attempted line per helper Run, at most 2048 UTF-8 bytes including prefix and CRLF. Null means not evaluated or not observed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "Schema",
+    "Kind",
+    "Result",
+    "Stage",
+    "Xusb",
+    "InputsValid",
+    "LocateResult",
+    "CompatibleSize",
+    "CompatibleData",
+    "CompatibleCount",
+    "ParentChain",
+    "ChainEnd",
+    "RootInChain",
+    "NoVirtualParent",
+    "GameUsage",
+    "ActiveXusb",
+    "InterfaceAttempts"
+  ],
+  "properties": {
+    "Schema": {
+      "const": 1
+    },
+    "Kind": {
+      "const": "ymcc.gameAuthority.failure"
+    },
+    "Result": {
+      "const": 8
+    },
+    "Stage": {
+      "enum": [
+        "first",
+        "after-prepare"
+      ]
+    },
+    "Xusb": {
+      "type": "boolean"
+    },
+    "InputsValid": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "LocateResult": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 4294967295
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "CompatibleSize": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Result",
+            "Type",
+            "Bytes"
+          ],
+          "properties": {
+            "Result": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "Type": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "Bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "CompatibleData": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "Result",
+            "Type",
+            "Bytes"
+          ],
+          "properties": {
+            "Result": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "Type": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            },
+            "Bytes": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 4294967295
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "CompatibleCount": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 32768
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ParentChain": {
+      "type": "array",
+      "maxItems": 16,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "DeviceIdResult",
+          "IsSelectedRoot",
+          "ParentResult"
+        ],
+        "properties": {
+          "DeviceIdResult": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "IsSelectedRoot": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "ParentResult": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "ChainEnd": {
+      "enum": [
+        null,
+        "depth-limit",
+        "device-id-error",
+        "selected-root",
+        "parent-error"
+      ]
+    },
+    "RootInChain": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "NoVirtualParent": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "GameUsage": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "ActiveXusb": {
+      "anyOf": [
+        {
+          "type": "boolean"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "HidCapabilityState": {
+      "type": "string",
+      "maxLength": 96,
+      "description": "Optional MSI current HID capability observation; absent when this route did not run. It is not device or consumer success proof."
+    },
+    "HidUsagePage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "HidUsage": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 65535
+    },
+    "InterfaceAttempts": {
+      "type": "array",
+      "maxItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "SizeResult",
+          "Characters",
+          "ListResult"
+        ],
+        "properties": {
+          "SizeResult": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "Characters": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 4294967295
+          },
+          "ListResult": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 4294967295
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        }
+      }
+    }
+  }
+}

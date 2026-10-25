@@ -1,0 +1,176 @@
+// Executes the exact extracted production handle and reference/ledger helpers.
+// Steam/native I/O are explicit controlled ports; only owned filesystem is real.
+#define NOMINMAX
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#include <bcrypt.h>
+#include <array>
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <functional>
+#include <iostream>
+#include <iterator>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#include "fixture_json.hpp"
+#include "steam_original_recovery_wake_watch.h"
+#include "steam_original_recovery_file_hash.h"
+using Json=nlohmann::json;using J=Json;using U64=std::uint64_t;
+namespace fp=std::filesystem;
+using Emit=std::function<void(const J&)>;using Current=std::function<bool()>;using WakeSignal=std::uintptr_t;
+struct Fixture {
+ U64 utc=134371880000000000ULL,tick=1000,wake=0,lossAt=UINT64_MAX;
+ DWORD flags=8196,postFlags=8196;bool current=true,observed=true,recoverInSource=false,failDriver=false,failPreflight=false,failSource=false,cleanup=true,replaceRecord=false;
+ unsigned snapshots=0,queries=0,source=0,drivers=0,queryEnds=0,waits=0,capacity=0,priorLedger=0;
+ std::vector<std::string> order;J request,ledgerBeforeQuery,lastReceipt;fp::path data;
+} fixture;
+U64 fixtureTick(){return fixture.tick;}
+#define GetTickCount64 fixtureTick
+std::atomic<bool> gActive{false};Emit gEmit;Current gCurrent,gObservationCurrent;WakeSignal gWakeSignal=0;
+std::wstring gTrialDirectory;bool gCleanupMode=false;std::function<bool()> gOriginalSteam,gSourceContextInit;
+@@BASE@@
+struct DiagnosticFailure:std::runtime_error {J detail;DiagnosticFailure(const char* reason,J value):runtime_error(reason),detail(std::move(value)){} };
+template<class F>void nativeFailureBoundary(F&& fn,const char*){fn();}
+void publish(const J& row){if(gEmit)gEmit(row);}
+bool current(){try{return !gCurrent||gCurrent();}catch(...){return false;}}
+bool observationCurrent(){try{return gObservationCurrent?gObservationCurrent():current();}catch(...){return false;}}
+void requireCurrent(){need(current(),"native-current-guard-revoked");}
+U64 nowFileTime(){return fixture.utc;}
+U64 threadCpuTicks(){return 0;}
+struct WorkerStamp{};struct WorkerCost {U64 cycles=0,clockFailures=0;void add(const WorkerStamp&,const WorkerStamp&){};};
+WorkerStamp workerStamp(){return {};}
+void noteWorkerPhase(J&,const char*,const WorkerStamp&){}
+void noteSnapshotCost(J&,const char*,const J&){}
+struct ExecutionProbeScope {ExecutionProbeScope(J&,const char*){} };
+struct BoundLive {DWORD pid=0,session=1;U64 born=0;std::wstring path;};
+struct Scope {std::array<BoundLive,4> roles;J identities;U64 gameId=0;DWORD appid=0;};
+namespace rw{bool exactProcess(void*,DWORD,U64,const std::wstring&,DWORD){return fixture.current;}}
+// Scope has handles so the exact handle's Steam ownership lambda compiles.
+struct FakeHandle {void* h=nullptr;};
+struct ScopeRole:BoundLive{FakeHandle handle;};
+struct FixtureScope {std::array<ScopeRole,4> roles;J identities;U64 gameId=0;DWORD appid=0;};
+#define Scope FixtureScope
+struct Snapshot {
+ DWORD flags=0;U64 flagsAddress=0x390000020ULL,gameId=0;
+ struct Module{U64 base=0;};Module client{0x180000000ULL},ui{0x190000000ULL};
+ struct Selection{U64 engine=0x200000000ULL,user=0x210000000ULL;}selected;
+ struct Records{U64 records=0x220000000ULL;}records;
+ struct Target{U64 index=0;DWORD primary=0;}target;
+ J executionProfile=J::object();std::string clientSha256=std::string(64,'a'),uiSha256=std::string(64,'b');
+};
+namespace embedded {const unsigned char image[]={0x52,0x36,0x46,0x49,0x58,0x54,0x55,0x52,0x45};std::string sha256;}
+namespace tr {bool profileForHashes(const std::string& a,const std::string& b){return a==std::string(64,'a')&&b==std::string(64,'b');}}
+Snapshot snapshot(Scope& scope,U64){requireCurrent();++fixture.snapshots;fixture.order.push_back("snapshot");Snapshot s;s.flags=fixture.flags;s.gameId=scope.gameId;s.target.primary=scope.roles[1].pid;if(fixture.replaceRecord&&fixture.drivers)s.records.records+=0x330;return s;}
+J nativeState(const Scope& scope,const Snapshot& s){return {{"flags",s.flags},{"running",s.flags==8196},{"gameId",std::to_string(scope.gameId)},{"gamePid",scope.roles[1].pid},{"birth",std::to_string(scope.roles[1].born)},{"primary",s.target.primary},{"originalPrimaryMatched",s.target.primary==scope.roles[1].pid}};}
+Scope openScope(const J& event){Scope s;s.gameId=decimal(event.at("target").at("gameId"));s.appid=event.at("target").at("appid").get<DWORD>();const std::array<const char*,4> names{"steam","game","ymcc","cef"};for(std::size_t i=0;i<4;++i){auto r=event.at(names[i]);s.identities[names[i]]=r;s.roles[i].pid=r.at("pid").get<DWORD>();s.roles[i].born=decimal(r.at("birthFileTime"));s.roles[i].session=r.at("session").get<DWORD>();s.roles[i].path=utf16(r.at("path").get<std::string>());}return s;}
+struct LifetimeMutex {void acquire(DWORD,U64){}};
+unsigned moduleCapacity(DWORD){++fixture.capacity;return 1;}
+J normalizedIdentity(const J& value){return value;}
+@@REFERENCES@@
+J importReference(const J&,Scope&,U64){throw std::runtime_error("fixture-seed-path-not-covered");}
+J loadCompatibleReference(const fp::path& data,const Scope& s,const Snapshot& sample,U64 account){const auto p=data/L"references"/utf16(scopeKey(s,account)+".json");if(!fp::exists(p))return nullptr;const auto ref=readJson(p);matchReference(ref,s,sample,account);return ref;}
+std::size_t ledgerCount(){std::size_t n=0;if(fp::exists(fixture.data/L"consumed"))for(const auto& e:fp::directory_iterator(fixture.data/L"consumed"))if(e.is_regular_file())++n;return n;}
+struct QueryActor {
+ QueryActor(U64,const std::wstring&,RecoveryRoute=RecoveryRoute::SemiStatic,std::string={}){requireCurrent();++fixture.queries;fixture.order.push_back("query");need(ledgerCount()==fixture.priorLedger,"source-acquisition-spent-publication-budget");}
+ ~QueryActor(){++fixture.queryEnds;fixture.order.push_back("query-end");}
+ void waitReady(){requireCurrent();fixture.order.push_back("query-ready");}
+};
+J sourceGetterContext(Scope&,const Snapshot&,U64,QueryActor&,J&){requireCurrent();++fixture.source;fixture.order.push_back("source");if(fixture.failSource)throw std::runtime_error("fixture-source-failed");if(fixture.recoverInSource)fixture.flags=8196;return {{"tid",991u},{"threadBirthFileTime","134371000000000001"}};}
+J runTrial(const J& request,QueryActor&,Current beforeMutation={}){
+ requireCurrent();fixture.order.push_back("driver-preflight");
+ if(fixture.failPreflight)return {{"status","failed"},{"reason","loaded-client-ui-compatibility-contract"},{"publisherCalls",0},{"mutationCommitAccepted",false},{"remoteAllocationAttempted",false}};
+ need(bool(beforeMutation)&&beforeMutation(),"fixture-mutation-commit-missing");
+ ++fixture.drivers;fixture.order.push_back("driver");fixture.request=request;
+ need(ledgerCount()==fixture.priorLedger+2,"driver-started-before-durable-consume");
+ if(fixture.failDriver)throw std::runtime_error("fixture-driver-failed");fixture.flags=fixture.postFlags;
+ return {{"mutationCommitAccepted",true},{"remoteAllocationAttempted",true},{"entryRestored",fixture.cleanup},{"debugRegistersRestored",true},{"debuggerDetached",true},{"disarmConfirmed",true},{"mutationResult",{{"publisherCalls",1},{"publisherReturned",true},{"guardBefore",true},{"guardAfter",true}}}};
+}
+struct WakeProbeReader {
+ Scope& scope;U64 calls=0,bytes=0;explicit WakeProbeReader(Scope& s):scope(s){}
+ bool owned()const{return fixture.current&&observationCurrent();}
+ DWORD flags(const Snapshot&){++calls;bytes+=4;if(fixture.tick>=fixture.lossAt)fixture.flags=4;return fixture.flags;}
+};
+DWORD fixtureWait(DWORD, const HANDLE*,BOOL,DWORD ms){++fixture.waits;fixture.tick+=ms;fixture.utc+=U64(ms)*10000;return WAIT_TIMEOUT;}
+#define WaitForMultipleObjects fixtureWait
+@@HANDLE@@
+#undef WaitForMultipleObjects
+#undef GetTickCount64
+#undef Scope
+
+unsigned checks=0;J cases=J::array();
+void check(bool value,const char* msg){++checks;if(!value)throw std::runtime_error(msg);}
+J eventFor(const fp::path& dir,const std::string& kind,const std::string& id="first"){
+ J e;const std::array<const char*,4> names{"steam","game","ymcc","cef"};
+ for(std::size_t i=0;i<4;++i)e[names[i]]={{"pid",4000u+static_cast<DWORD>(i)},{"birthFileTime",std::to_string(134370000000000001ULL+i)},{"session",1},{"path","D:\\owned-fixture\\"+std::string(names[i])+".exe"}};
+ e["target"]=e["game"];e["target"]["gameId"]="10260559608980439040";e["target"]["appid"]=2388972698u;
+ e["dataRoot"]=utf8((dir/L"data").wstring());e["evidenceRoot"]=utf8((dir/L"evidence").wstring());e["logRoot"]=utf8((dir/L"logs").wstring());e["account64"]="76561198000000001";e["recoveryAllowed"]=true;
+ e["trigger"]={{"kind",kind},{"generation",kind=="wake"?"7":"0"},{"id",id},{"rulesEpoch","1"}};
+ if(kind=="wake")e["trigger"]["powerEventFileTime"]=std::to_string(fixture.wake?fixture.wake:fixture.utc);
+ return e;
+}
+void reset(const fp::path& dir){fixture=Fixture{};fixture.data=dir/L"data";fixture.wake=fixture.utc;embedded::sha256=digest(embedded::image,sizeof embedded::image);}
+J invoke(const J& event){auto result=handle(event,{},[]{return fixture.current;},[]{return fixture.observed;},0);fixture.lastReceipt=result;check(!gActive.load(),"engine-active-leaked");check(!gEmit&&!gCurrent&&!gObservationCurrent&&!gOriginalSteam&&!gCleanupMode,"per-job-ports-leaked");return result;}
+J baseline(J event){event["trigger"]["kind"]="startup";event["trigger"]["id"]="healthy-reference";fixture.flags=8196;auto r=invoke(event);check(r.at("status")=="healthy"&&r.at("referenceCaptured")==true,"healthy-reference-not-captured");check(ledgerCount()==0&&fixture.queries==0&&fixture.drivers==0,"healthy-capture-consumed-or-published");return r;}
+void expectSuccess(const J& r,const J& event){
+ check(r.at("status")=="recovered-native"&&r.at("nativeRecovered")==true,"initial-success-path-refused");
+ check(r.at("consumed")==true&&ledgerCount()==2,"single-event-durable-keys-not-retained");
+ check(fixture.queries==1&&fixture.queryEnds==1&&fixture.source==1&&fixture.drivers==1,"success-not-single-publication");
+ check(r.at("after").at("flags")==8196&&r.at("after").at("primary")==event.at("game").at("pid"),"original-native-readback-not-restored");
+ check(fixture.request.at("gameId")==event.at("target").at("gameId")&&fixture.request.at("processes").at("game")==event.at("game"),"publisher-identity-replaced");
+ check(fixture.request.at("healthyProof").at("healthyFlags")==8196&&fixture.request.at("healthyProof").at("pinNonce").get<std::string>().size()==36,"healthy-proof-not-forwarded");
+ check(r.at("spawnedHelperProcesses")==0&&r.at("repairAccepted")==false&&r.at("uiVerified")==false&&r.at("inputVerified")==false,"fixture-was-misreported-as-field-acceptance");
+ check(fixture.order.back()=="query-end","query-resources-not-released");
+}
+J createHistoricalNoWriteAudit(J e){
+ e["recoveryRoute"]="semi-static";baseline(e);fixture.flags=4;
+ const auto scope=openScope(e);const auto identity=life(scope);const auto key=textHash(identity.dump());
+ const std::string oldId="historical-r7-static-readonly-failure";auto oldEvent=e;oldEvent["trigger"]["id"]=oldId;
+ consume(oldEvent,scope,fixture.data);
+ const auto operation=textHash(J{{"life",identity},{"operation","startup-mutation-once"}}.dump());
+ const auto eventKey=textHash(J{{"life",identity},{"eventId",oldId}}.dump());
+ for(const auto& name:{operation,eventKey}){auto value=readJson(fixture.data/L"consumed"/utf16(name+".json"));value["schema"]="ymcc.steam-original-recovery-consumption.v1";atomicJson(fixture.data/L"consumed"/utf16(name+".json"),value);}
+ const auto disabled=fixture.data/L"disabled"/utf16(key+".json");atomicJson(disabled,{{"reason","recovery-cleanup-not-confirmed"},{"consumed",true},{"noAutomaticRetry",true}});
+ J driver={{"status","failed"},{"reason","loaded-client-ui-compatibility-contract"},{"openProcessAttempted",true},{"writes",J::array()},{"sourceEntries",J::array()},{"publisherCalls",0},{"entryEverExposed",false},{"armAttempted",false},{"controlOutcomeUnknown",false},{"managementCallUnresolved",false},{"trialDllMayRemainLoaded",false},{"entryMayRemainPatched",false},{"pathMemoryReleased",true},{"packetMemoryReleased",true}};
+ J proof={{"engineRevision","dual-route-original-recovery-20261023-r7"},{"lifeKey",key},{"trigger",{{"kind","startup"},{"id",oldId}}},{"status","refused"},{"consumed",true},{"reason","recovery-cleanup-not-confirmed"},{"recoveryRoute","semi-static"},{"before",{{"gameId",std::to_string(scope.gameId)},{"gamePid",scope.roles[1].pid},{"originalPrimaryMatched",true}}},{"driverResult",driver}};
+ const auto root=fixture.data/L"audited-prepublication-transfer";atomicJson(root/utf16(key+".source.json"),proof);
+ J audit={{"schema","ymcc.steam-original-audited-prepublication-transfer.v1"},{"authorizedBy","explicit-operator-no-write-audit-20261023"},{"targetRoute","legacy-dynamic"},{"life",identity},{"sourceEngineRevision","dual-route-original-recovery-20261023-r7"},{"sourceNativeSha256","66d147da3511e33c0c349244cd81c158d7547489ce1a082865a8711cbe5e260e"},{"sourceEventId",oldId},{"disabledSha256",fileHash(disabled.wstring())},{"operationSha256",fileHash((fixture.data/L"consumed"/utf16(operation+".json")).wstring())},{"eventSha256",fileHash((fixture.data/L"consumed"/utf16(eventKey+".json")).wstring())},{"sourceSummarySha256",fileHash((root/utf16(key+".source.json")).wstring())}};
+ atomicJson(root/utf16(key+".json"),audit);fixture.priorLedger=2;e["recoveryRoute"]="legacy-dynamic";return e;
+}
+int main(int argc,char** argv){if(argc!=2)return 64;const auto root=fp::path(argv[1]);fp::create_directories(root);
+ auto run=[&](const char* name,auto body){J row={{"name",name}};const auto dir=root/std::to_wstring(cases.size());reset(dir);try{body(dir);row["passed"]=true;}catch(const std::exception& e){row["passed"]=false;row["reason"]=e.what();}row["lastStatus"]=fixture.lastReceipt.value("status",std::string());row["lastReason"]=fixture.lastReceipt.value("reason",std::string());row["queries"]=fixture.queries;row["drivers"]=fixture.drivers;row["ledgerKeys"]=ledgerCount();row["trace"]=fixture.order;cases.push_back(row);};
+ run("original-startup-lost-recovers",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;auto r=invoke(e);expectSuccess(r,e);});
+ run("ymcc-restart-keeps-original-game-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["ymcc"]["pid"]=9000u;e["ymcc"]["birthFileTime"]="134370000000900001";fixture.flags=4;expectSuccess(invoke(e),e);});
+ run("changed-steam-birth-cannot-borrow-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["steam"]["birthFileTime"]="134370000000900001";fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="lost-without-matching-healthy-reference"&&fixture.queries==0,"replacement-steam-reference-accepted");});
+ run("changed-full-gameid-cannot-borrow-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["target"]["gameId"]="10307630032478011392";e["target"]["appid"]=2399932135u;fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="lost-without-matching-healthy-reference"&&fixture.drivers==0,"replacement-full-gameid-accepted");});
+ run("original-wake-already-lost-recovers",[](const auto& dir){auto e=eventFor(dir,"wake");baseline(e);fixture.flags=4;auto r=invoke(e);expectSuccess(r,e);check(fixture.request.contains("mutationDeadlineTick"),"wake-deadline-not-sent");});
+ run("original-wake-delayed-loss-recovers",[](const auto& dir){auto e=eventFor(dir,"wake");baseline(e);fixture.lossAt=fixture.tick+7000;auto r=invoke(e);expectSuccess(r,e);check(r.at("lateLossObserved")==true&&fixture.waits>0,"late-loss-not-observed");check(r.at("before").at("flags")==8196&&r.at("lossNative").at("flags")==4,"before-loss-sequence-not-kept");});
+ run("late-52s-loss-still-recovers",[](const auto& dir){auto e=eventFor(dir,"wake");baseline(e);fixture.lossAt=fixture.tick+52000;auto r=invoke(e);expectSuccess(r,e);});
+ run("healthy-wake-no-unneeded-publish",[](const auto& dir){auto e=eventFor(dir,"wake");baseline(e);auto r=invoke(e);check(r.at("status")=="healthy"&&!r.at("consumed").get<bool>()&&fixture.drivers==0&&ledgerCount()==0,"healthy-wake-mutated");check(r.at("wakeObservation").at("probes").get<unsigned>()>0,"healthy-wake-no-watch");});
+ run("no-reference-cannot-invent-one-while-lost",[](const auto& dir){auto e=eventFor(dir,"startup");fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="lost-without-matching-healthy-reference"&&fixture.queries==0&&ledgerCount()==0,"missing-reference-was-bypassed");});
+ run("record-replaced-after-publish-refuses",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;fixture.replaceRecord=true;auto r=invoke(e);check(r.value("reason",std::string())=="saved-healthy-pins-changed"&&r.at("nativeRecovered")==false&&fixture.drivers==1&&ledgerCount()==2,"record-migration-accepted");check(fp::exists(fixture.data/L"disabled"/utf16(r.at("lifeKey").get<std::string>()+".v2.json")),"failed-publication-not-disabled");});
+ run("new-game-birth-cannot-use-original-reference",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);e["game"]["birthFileTime"]="134370000000900001";fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="lost-without-matching-healthy-reference"&&fixture.queries==0&&ledgerCount()==0,"new-game-admitted");});
+ run("duplicate-original-startup-cannot-publish-twice",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;expectSuccess(invoke(e),e);fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="event-already-consumed"&&fixture.drivers==1&&fixture.queries==1&&ledgerCount()==2,"duplicate-startup-mutated");});
+ run("duplicate-physical-wake-cannot-relabel-budget",[](const auto& dir){auto e=eventFor(dir,"wake");baseline(e);fixture.flags=4;expectSuccess(invoke(e),e);e["trigger"]["id"]="renamed-same-wake";fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="event-already-consumed"&&fixture.drivers==1&&ledgerCount()==2,"duplicate-wake-mutated");});
+ run("driver-failure-cannot-retry-or-refund",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;fixture.failDriver=true;auto r=invoke(e);check(r.value("reason",std::string())=="fixture-driver-failed"&&ledgerCount()==2,"driver-failure-not-consumed");auto again=invoke(e);check(again.at("reason")=="engine-disabled-after-prior-failure"&&fixture.drivers==1,"driver-failure-retried");});
+ run("observation-only-event-does-not-acquire-repair",[](const auto& dir){auto e=eventFor(dir,"target-changed");baseline(e);fixture.flags=4;auto r=invoke(e);check(r.value("reason",std::string())=="event-observation-only"&&ledgerCount()==0&&fixture.drivers==0,"observation-granted-mutation");});
+ run("source-race-recovers-before-dispatch-no-double-publish",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;fixture.recoverInSource=true;auto r=invoke(e);check(r.value("reason",std::string())=="recovery-no-longer-lost"&&fixture.drivers==0&&ledgerCount()==0,"source-race-dispatched");});
+ run("driver-readonly-qualification-failure-preserves-legacy-publication",[](const auto& dir){auto e=eventFor(dir,"startup");e["recoveryRoute"]="semi-static";baseline(e);fixture.flags=4;fixture.failPreflight=true;auto first=invoke(e);check(first.at("reason")=="loaded-client-ui-compatibility-contract"&&!first.at("consumed").get<bool>()&&ledgerCount()==0&&fixture.drivers==0&&first.at("publisherCallsKnown")==true,"prepublication-refusal-spent-budget");check(!fp::exists(fixture.data/L"disabled"/utf16(first.at("lifeKey").get<std::string>()+".json")),"prepublication-refusal-disabled-legacy");fixture.failPreflight=false;e["recoveryRoute"]="legacy-dynamic";auto second=invoke(e);check(second.at("status")=="recovered-native"&&second.at("consumed")==true&&ledgerCount()==2&&fixture.drivers==1,"legacy-blocked-after-static-readonly-refusal");});
+ run("source-failure-preserves-other-route-publication",[](const auto& dir){auto e=eventFor(dir,"startup");e["recoveryRoute"]="legacy-dynamic";baseline(e);fixture.flags=4;fixture.failSource=true;auto first=invoke(e);check(first.at("reason")=="fixture-source-failed"&&!first.at("consumed").get<bool>()&&ledgerCount()==0&&fixture.drivers==0,"source-failure-consumed-publication");fixture.failSource=false;e["recoveryRoute"]="semi-static";auto second=invoke(e);check(second.at("status")=="recovered-native"&&second.at("consumed")==true&&ledgerCount()==2&&fixture.drivers==1&&fixture.queries==2,"other-route-blocked-by-source-failure");});
+ run("audited-readonly-old-keys-preserved-legacy-publishes-once",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));const auto scope=openScope(e);const auto key=textHash(life(scope).dump());const auto disabled=fixture.data/L"disabled"/utf16(key+".json");const auto originalDisabled=fileHash(disabled.wstring());auto r=invoke(e);check(r.at("status")=="recovered-native"&&r.at("consumed")==true&&fixture.drivers==1&&ledgerCount()==4,"audited-legacy-did-not-publish-once");check(fileHash(disabled.wstring())==originalDisabled,"historical-disabled-was-overwritten");fixture.flags=4;e["trigger"]["id"]="relabelled-audited-startup";auto duplicate=invoke(e);check(duplicate.at("reason")=="event-already-consumed"&&fixture.drivers==1&&ledgerCount()==4,"audit-refunded-second-publication");});
+ run("audited-proof-with-remote-write-cannot-transfer",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));const auto scope=openScope(e);const auto key=textHash(life(scope).dump());const auto root=fixture.data/L"audited-prepublication-transfer";const auto file=root/utf16(key+".source.json");auto proof=readJson(file);proof["driverResult"]["writes"].push_back({{"address","0x1234"}});atomicJson(file,proof);auto audit=readJson(root/utf16(key+".json"));audit["sourceSummarySha256"]=fileHash(file.wstring());atomicJson(root/utf16(key+".json"),audit);auto r=invoke(e);check(r.at("reason")=="engine-disabled-after-prior-failure"&&fixture.drivers==0&&ledgerCount()==2,"written-source-replayed");});
+ run("audited-static-cannot-borrow-extra-startup-publication",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));e["recoveryRoute"]="semi-static";auto r=invoke(e);check(r.at("reason")=="event-already-consumed"&&fixture.drivers==0&&ledgerCount()==2,"static-used-legacy-extra-publication");});
+ run("audited-old-no-write-marker-does-not-block-static-healthy-read",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));fixture.flags=8196;e["recoveryRoute"]="semi-static";auto r=invoke(e);check(r.at("status")=="healthy"&&!r.at("consumed").get<bool>()&&fixture.drivers==0&&ledgerCount()==2,"old-no-write-marker-blocked-healthy-static");});
+ run("audited-old-no-write-marker-does-not-block-real-new-wake",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));e["trigger"]["kind"]="wake";e["trigger"]["generation"]="8";e["trigger"]["id"]="new-real-wake";e["trigger"]["powerEventFileTime"]=std::to_string(fixture.utc);auto r=invoke(e);check(r.at("status")=="recovered-native"&&fixture.drivers==1&&ledgerCount()==4,"old-no-write-marker-permanently-blocked-wake");});
+ run("new-mutation-failure-overrules-old-readonly-audit",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));fixture.failDriver=true;auto r=invoke(e);check(r.at("reason")=="fixture-driver-failed"&&r.at("consumed")==true&&ledgerCount()==4,"new-failure-not-consumed");fixture.failDriver=false;e["trigger"]["id"]="new-after-failure";fixture.flags=8196;auto again=invoke(e);check(again.at("reason")=="engine-disabled-after-prior-failure"&&fixture.drivers==1,"audit-erased-new-mutation-disable");});
+ run("audited-old-ledger-tamper-cannot-transfer",[](const auto& dir){auto e=createHistoricalNoWriteAudit(eventFor(dir,"startup"));const auto scope=openScope(e);const auto identity=life(scope);const auto operation=textHash(J{{"life",identity},{"operation","startup-mutation-once"}}.dump());const auto path=fixture.data/L"consumed"/utf16(operation+".json");auto value=readJson(path);value["refunded"]=true;atomicJson(path,value);auto r=invoke(e);check(r.at("reason")=="engine-disabled-after-prior-failure"&&fixture.drivers==0&&ledgerCount()==2,"changed-historical-ledger-replayed");});
+ run("failed-cleanup-never-counts-recovered",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;fixture.cleanup=false;auto r=invoke(e);check(r.value("reason",std::string())=="recovery-cleanup-not-confirmed"&&r.at("nativeRecovered")==false&&ledgerCount()==2,"cleanup-failure-accepted");});
+ run("native-readback-failure-never-counts-recovered",[](const auto& dir){auto e=eventFor(dir,"startup");baseline(e);fixture.flags=4;fixture.postFlags=4;auto r=invoke(e);check(r.value("reason",std::string())=="post-native-running-not-restored"&&r.at("nativeRecovered")==false,"running-only-accepted");});
+ const auto passed=std::count_if(cases.begin(),cases.end(),[](const auto& r){return r.at("passed")==true;});J result={{"schema","ymcc.steam-recovery-success-chain-consumer.v1"},{"tests",cases.size()},{"passed",passed},{"checks",checks},{"success",static_cast<std::size_t>(passed)==cases.size()},{"cases",cases},{"scope","Exact production handle + pins/reference match + durable consume; native snapshots/query/source/publication ports controlled, not Steam execution"},{"liveSteamOperations",0},{"extraGameProcesses",0},{"sleepActions",0},{"fieldRecoveryVerified",false}};std::cout<<result.dump(2)<<std::endl;return result.at("success")==true?0:1;}

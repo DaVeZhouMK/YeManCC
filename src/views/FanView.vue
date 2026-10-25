@@ -1,8 +1,31 @@
+<script lang="ts">
+import { shallowRef as fanPendingRef } from 'vue';
+import type { FanNode as PendingFanNode } from '@/bridge/fanApi';
+// One page-owned request survives route unmounts. This is an in-memory UI owner,
+// not another Host/recovery worker; OFF and new sleep still retire its epoch.
+let controlCommitEpoch = 0;
+let curveEditRevision = 0;
+let controlCommitTask: Promise<void> | null = null;
+let controlCommitEpochInFlight = -1;
+let controlCommitCancellationInFlight = -1;
+let controlCommitNodes: readonly PendingFanNode[] | null = null;
+const controlCommitPending = fanPendingRef(false);
+// One wake has one fixed protection deadline, including route unmount/remount.
+let fanWakeProtectionGeneration = -1;
+let fanWakeProtectionDeadline = 0;
+let fanControlSwitchProtectionDeadline = 0;
+</script>
+
 <script setup lang="ts">
+// [AI:USER:FAN] 开启→按当前曲线请求风扇控制；关闭→结束自定义控制并交还，未完成须显示未恢复及原因。
+// 切页/隐藏→不代表关闭；重新进页不代表一次新的开启。睡眠/唤醒沿当前有效意图恢复，旧请求不能推翻用户关闭。
+// 等待、握手成功、设置保存与已受控分别呈现；具体如何接管/交还读 bridge/fanHost.ts 与 Host实现。
+import IntegratedPage from '@/components/IntegratedPage.vue';
 import { computed, nextTick, onActivated, onDeactivated, onMounted, onUnmounted, ref, watch } from 'vue';
 import Dropdown from '@/components/Dropdown.vue';
 import Toggle from '@/components/Toggle.vue';
 import { topMonitorData } from '@/bridge/topmon';
+import { monitorCpuTemperature } from '@/bridge/monitorSnapshotSignals';
 import { onFanMirrorDisplay, registerFanMirrorUiBlocker, notifyFanMirrorUiGate } from '@/bridge/deckyFanDisplay';
 import {
   getFanFeatureSettings,
@@ -19,6 +42,7 @@ import {
 import { fanHostLifecycle, resolveFanEntryAction, type FanHostLifecycleState } from '@/bridge/fanHost';
 import type { FanNode } from '@/bridge/fanApi';
 import { normalizeFanNodes } from '@/bridge/fanCurve';
+import { compactFanStatus } from './fanStatusText';
 import { fanDiagnosticLog } from '@/bridge/fanDiagnostics';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
 import { emitNativeEvent } from '@/bridge/ipc';
@@ -65,9 +89,30 @@ const busy = ref(false);
 // the inner-page switch. A real start attempt is only ever made by this page,
 // so `startAttempted` distinguishes "never asked" from "asked and refused".
 const connecting = ref(false);
+// First click commits one direction. Ignore accidental repeat input for four seconds.
+// This timer is independent of Host progress, so a failed request cannot lock the UI forever.
+const controlSwitchLocked = ref(false);
+let controlSwitchLockTimer: ReturnType<typeof setTimeout> | null = null;
+function stopControlSwitchLockTimer(): void {
+  if (controlSwitchLockTimer !== null) clearTimeout(controlSwitchLockTimer);
+  controlSwitchLockTimer = null;
+}
+function syncControlSwitchLock(): void {
+  stopControlSwitchLockTimer();
+  const remaining = Math.max(fanControlSwitchProtectionDeadline, fanWakeProtectionDeadline) - performance.now();
+  controlSwitchLocked.value = remaining > 0;
+  if (remaining > 0) controlSwitchLockTimer = setTimeout(syncControlSwitchLock, remaining);
+}
+function lockControlSwitch(): void {
+  fanControlSwitchProtectionDeadline = performance.now() + 4000;
+  syncControlSwitchLock();
+}
+// Route changes resume the same deadline; task success/failure never moves it.
+syncControlSwitchLock();
 const startAttempted = ref(false);
 const hostState = ref<FanHostLifecycleState>(FAN_FORCE_PREVIEW ? 'awaiting-control' : fanHostLifecycle.state);
 const statusMessage = ref(FAN_FORCE_PREVIEW ? '模拟预览：握手成功' : '风扇控制未开启');
+const curveSaveFailure = ref<string | null>(null);
 /**
  * FAN-926R UX-1（2026-09-27，用户反馈"按阶段显示文字"）：关闭同样是一段要等的过程
  * （交回 OEM → 释放 HC 会话），旧版在整段里仍显示"控制已开启"，用户会以为开关坏了。
@@ -82,6 +127,7 @@ const closing = ref(false);
 const recovering = ref(false);
 /** 启用/关闭在途的已用时长：仅用于把"还在等"讲清楚（首次启用真的需要十几秒）。 */
 const busyElapsedMs = ref(0);
+const observedStartStage = ref(fanHostLifecycle.startStage);
 let busyTicker: ReturnType<typeof window.setInterval> | null = null;
 
 /** 启动阶段 → 用户可读进度（阶段名来自 bridge 的只读 `startStage`，与诊断行同源）。 */
@@ -95,15 +141,20 @@ const START_STAGE_TEXT: Record<string, string> = {
   // FAN-927 §2：逐文件校验与重复安装验证已归部署边界；正常开启只核对一份小部署记录，
   // 因此不再有"正在校验运行依赖…"这个阶段（它曾占首次开启 8 秒以上）。
   'deployment-record-verified': '正在校验风扇服务文件…',
-  'host-process-launched': '风扇服务已启动，正在连接…',
+  'host-process-launched': '风扇服务已启动，正在连接并握手…',
 };
 
 function startBusyTicker(): void {
   if (busyTicker !== null) return;
   busyElapsedMs.value = 0;
+  observedStartStage.value = fanHostLifecycle.startStage;
   const startedAt = Date.now();
   busyTicker = window.setInterval(() => {
-    busyElapsedMs.value = Date.now() - startedAt;
+    if (!viewActive || !viewVisible || (!busy.value && !closing.value && !hasCurrentControlCommit())) { stopBusyTicker(); return; }
+    // Only the six-second fallback threshold is displayed. Named stages still
+    // synchronize at 250ms without forcing identical message computations.
+    busyElapsedMs.value = Date.now() - startedAt >= 6000 ? 6000 : 0;
+    observedStartStage.value = fanHostLifecycle.startStage;
     // 只读镜像：把 bridge 的权威状态同步给界面，不发起任何请求。
     hostState.value = fanHostLifecycle.state;
     syncRecoveryFlag();
@@ -132,10 +183,13 @@ function syncRecoveryFlag(): void {
  */
 const fanBootAutoStart = ref(false);
 let fanBootSettingBusy = false;
+let fanBootSettingRevision = 0;
 
 async function refreshFanBootAutoStart(): Promise<void> {
+  const revision = ++fanBootSettingRevision;
   try {
     const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
+    if (revision !== fanBootSettingRevision || fanBootSettingBusy) return;
     fanBootAutoStart.value = startup.fanControl === true;
   } catch {
     // 读取失败按关闭处理；只影响镜像显示，不改动任何控制状态。
@@ -144,6 +198,7 @@ async function refreshFanBootAutoStart(): Promise<void> {
 
 async function onFanBootAutoStartToggle(v: boolean): Promise<void> {
   if (fanBootSettingBusy) return; // 双击/重复事件只产生一次写入
+  fanBootSettingRevision += 1;
   fanBootSettingBusy = true;
   const prev = fanBootAutoStart.value;
   fanBootAutoStart.value = v;
@@ -159,13 +214,17 @@ async function onFanBootAutoStartToggle(v: boolean): Promise<void> {
 
 /** 启用在途时的阶段文字（按 bridge 报出的真实阶段，逐段推进）。 */
 const enableStageText = computed(() => {
-  const stage = fanHostLifecycle.startStage;
+  // The bridge stage is read-only, not a Vue ref. Keep the existing visible-page
+  // ticker as a dependency even when a named stage returns early.
+  const elapsed = busyElapsedMs.value;
+  if (hostState.value === 'handshaking') return '正在握手，确认风扇机型…';
+  const stage = observedStartStage.value;
   if (stage && START_STAGE_TEXT[stage]) return START_STAGE_TEXT[stage];
-  if (hostState.value === 'handshaking') return '正在连接风扇服务…';
-  if (hostState.value === 'awaiting-control') return '正在接管风扇，马上就好…';
+  if (hostState.value === 'awaiting-control') return '握手成功，正在初始化并接管风扇…';
+  if (hostState.value === 'ready') return '正在应用风扇曲线…';
   // 首次启用要准备运行环境，实测约 10–20 秒：超过 6 秒就把这件事说出来，
   // 否则用户会以为卡死。
-  if (busyElapsedMs.value >= 6000) return '正在准备运行环境（首次启用需要十几秒）…';
+  if (elapsed >= 6000) return '首次启用正在初始化风扇，请稍候…';
   return '正在启动风扇服务…';
 });
 
@@ -196,12 +255,8 @@ let fanPowerGeneration = 0;
  * 关闭/重试不再被长期 busy/connecting 无声丢弃。
  */
 const CONTROL_ADMISSION_BUDGET_MS = 2000;
-/** FAN-938 R6 §P4：控制意图修订号。关闭/新睡眠/新意图递增，使在途提交的最终写入失效。 */
-let controlCommitEpoch = 0;
-/** FAN-938 R6 §P4：唯一的后台设备提交任务；不复用 busy/connecting，故不阻塞页面。 */
-let controlCommitTask: Promise<void> | null = null;
-/** FAN-938 R6 §P4：在途提交任务所持的修订号；与 `controlCommitEpoch` 不等即视为已失效。 */
-let controlCommitEpochInFlight = -1;
+// The current commit task/epoch live in the module script so route changes retain them.
+
 
 /** Keep the graph point and its lower editor card as one spatial selection.
  * The graph and the four cards are two renderings of the same node; allowing
@@ -220,10 +275,7 @@ function graphY(dutyPercent: number): number {
   return GRAPH_BOTTOM - dutyPercent * GRAPH_Y_SCALE;
 }
 
-const temperature = computed(() => {
-  const value = Number(topMonitorData.value?.tempC);
-  return Number.isFinite(value) && value >= 0 ? value : null;
-});
+const temperature = computed(() => monitorCpuTemperature(topMonitorData.value));
 const temperatureText = computed(() => temperature.value === null ? '无数据' : `${Math.round(temperature.value)}°C`);
 const expectedDuty = computed(() => {
   if (!controlActive.value || temperature.value === null) return 0;
@@ -232,14 +284,20 @@ const expectedDuty = computed(() => {
 const statusText = computed(() => {
   // UX-1：启用/关闭在途时先说清"正在做什么"，不要沿用上一次的结论文字。
   if (closing.value) return '关闭中';
-  if (connecting.value) return enableStageText.value;
+  if (connecting.value || controlStartPending.value) return enableStageText.value;
   // FAN-938 R5 §P4：恢复推进中不冒充"控制已开启"。
-  if (recovering.value) return '正在恢复';
+  if (hasCurrentControlCommit()) return '正在开启';
+  if (controlRecoveryPending.value) return recoveryStageText.value;
+  if (recovering.value) return '风扇恢复未完成，可点击重试';
+  if (curveSaveFailure.value) return curveSaveFailure.value;
   if (controlActive.value) {
     return '控制已开启';
   }
   return statusMessage.value;
 });
+
+// Header copy is bounded independently of lifecycle state and full diagnostics.
+const statusLabel = computed(() => compactFanStatus(statusText.value));
 
 function readableFanError(error: unknown): string {
   const message = error instanceof Error ? error.message : String(error);
@@ -265,8 +323,37 @@ function readableFanError(error: unknown): string {
   if (/LEASE_INVALID|LEASE_REQUIRED|lease/i.test(message)) return '风扇控制租约已失效，请重试';
   return userMessage || '风扇控制请求失败';
 }
-// The button reflects the requested on/off state; lifecycle progress stays above it.
-const controlText = computed(() => controlActive.value ? '风扇已开启' : '风扇未操控');
+// The button reflects the latest confirmed control; lifecycle progress stays above it.
+// A retained intent is not a successfully established hardware session.
+const hardwareControlConfirmed = ref(false);
+const controlEstablished = computed(() => FAN_FORCE_PREVIEW
+  ? controlActive.value && !recovering.value
+  : controlActive.value && hardwareControlConfirmed.value);
+// A pending first submission is neither OFF nor confirmed hardware control.
+// A terminal failure remains a reachable manual retry, even before old cleanup settles.
+const controlStartPending = computed(() => controlActive.value && hasCurrentControlCommit() && !controlEstablished.value
+  && !['fault-locked', 'conflict-locked', 'unknown'].includes(hostState.value));
+const controlRecoveryPending = computed(() => controlActive.value && recovering.value && !controlEstablished.value
+  && (!['fault-locked', 'conflict-locked', 'unknown'].includes(hostState.value) || fanHostLifecycle.recoveryActive));
+const recoveryStageText = computed(() => {
+  if (hostState.value === 'starting' || hostState.value === 'handshaking') return enableStageText.value;
+  if (hostState.value === 'awaiting-control') return '风扇服务已就绪，正在重新接管…';
+  if (hostState.value === 'ready') return '正在恢复风扇曲线并确认控制…';
+  if (hostState.value === 'suspended') return '正在准备恢复风扇…';
+  return '正在重建风扇控制会话…';
+});
+const controlText = computed(() => controlStartPending.value ? '正在开启…'
+  : controlRecoveryPending.value ? '正在恢复…'
+  : controlEstablished.value ? '风扇已开启' : '风扇未操控');
+
+function hostHasLiveControl(state: Awaited<ReturnType<typeof fanHostLifecycle.getState>>): boolean {
+  const lease = fanHostLifecycle.currentLease;
+  const mismatch = lease != null && typeof state.leaseGeneration === 'number'
+    && state.leaseGeneration !== lease.generation;
+  return ['Ready', 'Open'].includes(state.state) && state.hardwareWritesEnabled === true
+    && state.unknownState !== true && state.hcCloseCleanupPending !== true
+    && state.oemRestoreConfirmed !== true && !mismatch;
+}
 const chartPoints = computed(() => nodes.value
   .map((node) => `${graphX(node.tempC)},${graphY(node.dutyPercent)}`)
   .join(' '));
@@ -301,22 +388,22 @@ function nodeOptions(index: number, field: 'tempC' | 'dutyPercent'): number[] {
   return values.sort((a, b) => a - b);
 }
 
-function nodeDropdownOptions(index: number, field: 'tempC' | 'dutyPercent') {
-  const suffix = field === 'tempC' ? '°C' : '%';
-  return nodeOptions(index, field).map((value) => ({ value, label: `${value} ${suffix}` }));
-}
+// Curve-only display data: temperature/status renders reuse the same option arrays.
+const nodeDropdownOptions = computed(() => nodes.value.map((_, index) => ({
+  tempC: nodeOptions(index, 'tempC').map(value => ({ value, label: `${value} °C` })),
+  dutyPercent: nodeOptions(index, 'dutyPercent').map(value => ({ value, label: `${value} %` })),
+})));
 
 function normalizeEditedNodes(index: number, field: 'tempC' | 'dutyPercent', value: number, source: readonly FanNode[] = nodes.value): FanNode[] {
   return normalizeFanNodes(source, index, field, value);
 }
 
-function commitCurve(next: FanNode[]): void {
+function commitCurve(next: FanNode[], savedMessage?: string): void {
   nodes.value = next;
   fanDiagnosticLog('ui.curve-edited', { preset: selectedPreset.value, nodes: next });
-  void saveFanCurve(next, selectedPreset.value).catch(() => {
-    statusMessage.value = '曲线配置保存失败，当前控制未改变';
-  });
-  if (controlActive.value) void requestCurveApply();
+  // Match preset/reset: persist first, then submit only this current edit.
+  // Saving owns no UI lock; an explicit ON/OFF can still supersede it.
+  void saveAndApplySelectedCurve('曲线配置保存失败，当前修改未下发', savedMessage);
 }
 
 function updateNodeValue(index: number, field: 'tempC' | 'dutyPercent', rawValue: string | number): void {
@@ -333,6 +420,8 @@ function nodePointStyle(node: FanNode): Record<string, string> {
   };
 }
 
+const nodePointStyles = computed(() => nodes.value.map(nodePointStyle));
+
 function updateGraphNode(index: number, event: PointerEvent, commit = false): void {
   const chart = chartWrap.value;
   if (!chart) return;
@@ -343,14 +432,14 @@ function updateGraphNode(index: number, event: PointerEvent, commit = false): vo
   const temp = index === 0 ? 0 : Math.round(Math.max(0, Math.min(100, (x - GRAPH_LEFT) / GRAPH_X_SCALE)));
   const duty = Math.round(Math.max(0, Math.min(100, (GRAPH_BOTTOM - y) / GRAPH_Y_SCALE)));
   const next = normalizeEditedNodes(index, 'tempC', temp);
-  const dutyNext = next.map((node) => ({ ...node }));
-  dutyNext[index].dutyPercent = duty;
-  const normalized = normalizeEditedNodes(index, 'dutyPercent', dutyNext[index].dutyPercent, next);
-  nodes.value = normalized;
-  if (commit) {
-    void saveFanCurve(normalized, selectedPreset.value);
-    if (controlActive.value) void requestCurveApply();
+  const normalized = normalizeEditedNodes(index, 'dutyPercent', duty, next);
+  // Pointer movement can stay in the same rounded curve coordinates. Keep the
+  // current reactive array then; pointer-up still saves/applies the final intent.
+  if (normalized.length !== nodes.value.length || normalized.some((node, i) =>
+    node.tempC !== nodes.value[i].tempC || node.dutyPercent !== nodes.value[i].dutyPercent)) {
+    nodes.value = normalized;
   }
+  if (commit) commitCurve(normalized);
 }
 
 function onGraphNodePointerDown(index: number, event: PointerEvent): void {
@@ -410,10 +499,9 @@ function onGraphNodeClick(index: number, event: MouseEvent): void {
     graphDragArmed.value = null;
     syncGraphNodeEditMarker(index, false, event.currentTarget as HTMLElement);
     emitNativeEvent('gamepad.fan-node-edit', { active: false });
-    commitCurve(nodes.value.map((node) => ({ ...node })));
-    statusMessage.value = controlActive.value
-      ? `节点 ${index + 1} 已应用`
-      : `节点 ${index + 1} 已保存（未写入硬件：风扇控制未开启）`;
+    statusMessage.value = `正在保存节点 ${index + 1}…`;
+    commitCurve(nodes.value.map((node) => ({ ...node })),
+      `节点 ${index + 1} 已保存（未写入硬件：风扇控制未开启）`);
   } else {
     const previous = graphDragArmed.value;
     if (previous !== null) syncGraphNodeEditMarker(previous, false);
@@ -441,26 +529,56 @@ function onGraphSpatialEdit(index: number, event: Event): void {
   event.preventDefault();
 }
 
-function onFanGamepadBack(event: Event): void {
-  if (graphDragArmed.value === null) return;
+function stopGraphNodeEditing(): boolean {
+  if (graphDragArmed.value === null) return false;
   syncGraphNodeEditMarker(graphDragArmed.value, false);
   graphDragArmed.value = null;
   emitNativeEvent('gamepad.fan-node-edit', { active: false });
+  return true;
+}
+function onFanGamepadBack(event: Event): void {
+  if (!stopGraphNodeEditing()) return;
   statusMessage.value = '已取消节点编辑';
   event.preventDefault();
+}
+
+/** A finished local recovery does not need another Host reply to become retryable. */
+function showRecoveryNeedsAttention(): boolean {
+  if (!fanHostLifecycle.recoveryNeedsAttention || hasCurrentControlCommit()) return false;
+  hardwareControlConfirmed.value = false;
+  hostState.value = fanHostLifecycle.state;
+  recovering.value = false;
+  controlActive.value = false;
+  setFanControlActive(false);
+  setFanNavigationDuty(0);
+  statusMessage.value = '风扇自动恢复未完成，请点击重试';
+  stopTelemetry();
+  return true;
+}
+
+// Reconcile missing UI capability only after current live-control proof.
+function adoptConfirmedControlSupport(): void {
+  if (!hardwareControlConfirmed.value || !fanHostLifecycle.controlReady) return;
+  supported.value = true;
+  controlReady.value = true;
+  void recordFanHandshake(true);
 }
 
 async function refreshTelemetry(): Promise<void> {
   if (!controlActive.value) return;
   if (FAN_FORCE_PREVIEW) return;
+  if (showRecoveryNeedsAttention()) return;
   // FAN-931 P1.4：最多一个 GET 在途——重叠 tick 直接跳过（不排队、不叠加）。
   if (telemetryInFlightGeneration === telemetryGeneration) return;
   const generation = telemetryGeneration;
+  const intentEpoch = controlCommitEpoch;
   telemetryInFlightGeneration = generation;
   try {
-    const state = await fanHostLifecycle.getState();
+    const state = await fanHostLifecycle.getState({ discardSuperseded: true });
+    if (!state) return;
     // 迟到的 in-flight 结果按视图代丢弃：页面失活/隐藏/卸载后不得再写回状态。
-    if (generation !== telemetryGeneration) return;
+    if (generation !== telemetryGeneration || intentEpoch !== controlCommitEpoch) return;
+    hardwareControlConfirmed.value = hostHasLiveControl(state);
     hostState.value = fanHostLifecycle.state;
     // The Host is authoritative. If it restored OEM or entered a fault state
     // while the UI was waiting, never leave the page showing “control active”.
@@ -489,9 +607,14 @@ async function refreshTelemetry(): Promise<void> {
       // the one-shot wake event, hand the existing curve to the same bridge owner;
       // it reads native power state and stays write-closed until the cycle is safe.
       if (!remoteLeaseMismatch && fanHostLifecycle.hasControlIntent) {
-        await fanHostLifecycle.requestRecoveryAfterObservedHostState('telemetry-host-not-ready').catch(() => false);
+        const requested = await fanHostLifecycle
+          .requestRecoveryAfterObservedHostState('telemetry-host-not-ready', { discardSuperseded: true })
+          .catch(() => false);
+        if (requested === null || generation !== telemetryGeneration || intentEpoch !== controlCommitEpoch) return;
       }
       if (controlIntentPending() && !remoteLeaseMismatch) {
+        setFanControlActive(false);
+        setFanNavigationDuty(0);
         recovering.value = true;
         controlActive.value = true;
         hostState.value = fanHostLifecycle.state;
@@ -506,7 +629,9 @@ async function refreshTelemetry(): Promise<void> {
       // recovery ends exhausted and only re-arms on the next power event), so the
       // copy must not promise a 10 second guard recovery.
       statusMessage.value = remoteLeaseMismatch ? '风扇租约已失效，请重新打开开关' : '风扇服务已停止，请重新打开开关';
+      stopTelemetry();
     } else if (recovering.value) {
+      adoptConfirmedControlSupport();
       // FAN-938 R5 §P4：恢复达成——清除恢复文案，按**当次真实控制结果**转为“控制已开启”。
       recovering.value = false;
       controlReady.value = fanHostLifecycle.controlReady;
@@ -518,7 +643,8 @@ async function refreshTelemetry(): Promise<void> {
     }
   } catch {
     // 迟到失败同样按代丢弃：不得让已失活/隐藏的页面把状态改成“服务未响应”。
-    if (generation !== telemetryGeneration) return;
+    if (generation !== telemetryGeneration || intentEpoch !== controlCommitEpoch) return;
+    hardwareControlConfirmed.value = false;
     hostState.value = fanHostLifecycle.state;
     if (fanHostLifecycle.hasControlIntent) {
       // A Host GET timeout is not proof that the user's control intent ended.
@@ -526,12 +652,14 @@ async function refreshTelemetry(): Promise<void> {
       // Fan-only power snapshot becomes readable; its write gate stays closed
       // throughout a real suspend.
       const recoveryRequested = await fanHostLifecycle
-        .requestRecoveryAfterObservedHostState('telemetry-host-state-unavailable')
+        .requestRecoveryAfterObservedHostState('telemetry-host-state-unavailable', { discardSuperseded: true })
         .catch(() => false);
+      if (recoveryRequested === null || generation !== telemetryGeneration || intentEpoch !== controlCommitEpoch) return;
+      if (showRecoveryNeedsAttention()) return;
       recovering.value = true;
       controlActive.value = true;
-      setFanControlActive(true);
-      setFanNavigationDuty(expectedDuty.value);
+      setFanControlActive(false);
+      setFanNavigationDuty(0);
       statusMessage.value = recoveryRequested || fanHostLifecycle.recoveryActive
         ? '控制意图已保留，正在恢复…'
         : '风扇状态暂不可读，控制意图已保留；正在继续检查…';
@@ -542,21 +670,23 @@ async function refreshTelemetry(): Promise<void> {
     setFanControlActive(false);
     setFanNavigationDuty(0);
     statusMessage.value = '风扇服务未响应，请重新打开开关';
+    stopTelemetry();
   } finally {
     if (telemetryInFlightGeneration === generation) telemetryInFlightGeneration = -1;
   }
 }
 
-function startTelemetry(): void {
+function startTelemetry(refreshImmediately = true): void {
   // FAN-931 P1.4：失去「激活且可见」后，异步 enable/adopt/guard-state 的返回**不得复活**
   // 已停的页面定时器——这是旧实现"隐藏页仍每 5 s 取数"的来源之一。
   if (!viewActive || !viewVisible) return;
   if (telemetryTimer !== null) return;
-  void refreshTelemetry();
   // FAN-929（2026-09-27 用户裁决）：运行期自证回读从 1 Hz 降到 0.2 Hz。
   // 1 Hz 是"侧边栏常驻 + 控制已开启"时唯一恒定的渲染侧周期成本；降频后
   // 稳态请求降为 1/5，代价是"Host 已交回 OEM/租约失效"的 UI 提示最多晚 5 s。
+  // Register first: the immediate refresh may synchronously stop telemetry.
   telemetryTimer = window.setInterval(() => { void refreshTelemetry(); }, 5000);
+  if (refreshImmediately) void refreshTelemetry();
 }
 
 function stopTelemetry(): void {
@@ -569,15 +699,25 @@ function stopTelemetry(): void {
 /** FAN-931 P1.4：document 隐藏同样停止展示轮询（切走靠 onDeactivated 拦截）。 */
 function onDocumentVisibilityChange(): void {
   viewVisible = !document.hidden;
+  if (viewActive && viewVisible) syncControlSwitchLock();
   if (!viewActive || !viewVisible) {
+    stopGraphNodeEditing();
     stopTelemetry();
+    stopBusyTicker();
     return;
   }
+  if (hasCurrentControlCommit()) startBusyTicker();
   if (controlActive.value) startTelemetry();
 }
 
 function onFanPowerSuspending(event: Event): void {
   const generation = Number((event as CustomEvent<{ generation?: number }>).detail?.generation) || 0;
+  if (!Number.isSafeInteger(generation) || generation <= 0
+      || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration
+      || generation < fanPowerGeneration) return;
+  fanWakeProtectionDeadline = 0;
+  fanControlSwitchProtectionDeadline = 0;
+  syncControlSwitchLock();
   if (generation > fanPowerGeneration) fanPowerGeneration = generation;
   // App.vue is the sole lifecycle owner. FanView only consumes the boundary
   // to close its UI/write indicator immediately; it never calls Host suspend.
@@ -586,6 +726,7 @@ function onFanPowerSuspending(event: Event): void {
   }
   // FAN-938 R6 §P4：新睡眠使在途控制提交整体失效，避免旧曲线在唤醒前后被错误复活写入。
   controlCommitEpoch += 1;
+  controlCommitPending.value = false;
   controlActive.value = false;
   recovering.value = false;
   // The old admission task is now stale. Release only its UI admission locks so
@@ -604,10 +745,43 @@ function onFanPowerSuspending(event: Event): void {
   // OEM release (restore.close-hc-release-unproven), so the honest statement is
   // "handed back, ownership unproven" - not a claimed successful OEM restore.
   // UX-1：并说明恢复由**电源事件**驱动（本次真机 11/11 次唤醒都完成了曲线恢复）。
-  statusMessage.value = '睡眠中：已交回 OEM 默认转速（物理归属未证实）；唤醒后随电源事件自动恢复控制。';
+  statusMessage.value = fanHostLifecycle.hasControlIntent
+    ? '睡眠中：已保留开启请求，唤醒后将自动恢复风扇。'
+    : '睡眠中：风扇控制未开启。';
+}
+
+// Existing native wake facts restart only visible-page status observation.
+// The App/bridge remains the sole owner of HC resume and curve replay.
+function onFanPowerWake(event: Event): void {
+  const generation = Number((event as CustomEvent<{ generation?: number }>).detail?.generation);
+  const coordinator = fanHostLifecycle.coordinatorSnapshot;
+  if (!Number.isSafeInteger(generation) || generation <= 0
+    || generation < coordinator.powerGeneration) return;
+  // A second alias for an already-confirmed wake is not new loss of control.
+  // Keep the established ON/OFF direction; new sleep and pending recovery still enter below.
+  if (generation === fanWakeProtectionGeneration && !fanSuspendBoundary
+    && coordinator.wakeReadyGeneration === generation && fanHostLifecycle.state === 'ready'
+    && controlEstablished.value && !controlIntentPending()) return;
+  fanSuspendBoundary = false;
+  if (!fanHostLifecycle.hasControlIntent && !controlIntentPending()) return;
+  if (fanWakeProtectionGeneration !== generation) {
+    fanWakeProtectionGeneration = generation;
+    fanWakeProtectionDeadline = performance.now() + 5000;
+  }
+  syncControlSwitchLock();
+  hardwareControlConfirmed.value = false;
+  recovering.value = true;
+  controlActive.value = true;
+  setFanControlActive(false);
+  setFanNavigationDuty(0);
+  hostState.value = fanHostLifecycle.state;
+  statusMessage.value = '正在准备恢复风扇…';
+  startTelemetry();
+  if (viewActive && viewVisible) void refreshTelemetry();
 }
 
 function onFanGuardState(event: Event): void {
+  hardwareControlConfirmed.value = false;
   const detail = (event as CustomEvent<{ active?: boolean; state?: FanHostLifecycleState; error?: string }>).detail ?? {};
   fanSuspendBoundary = false;
   controlReady.value = fanHostLifecycle.controlReady;
@@ -615,10 +789,12 @@ function onFanGuardState(event: Event): void {
   if (detail.active === true && fanHostLifecycle.state === 'ready') {
     recovering.value = false;
     controlActive.value = true;
-    setFanControlActive(true);
-    setFanNavigationDuty(expectedDuty.value);
+    recovering.value = true;
+    setFanControlActive(false);
+    setFanNavigationDuty(0);
     startTelemetry();
-    statusMessage.value = '风扇开启守护已恢复控制';
+    if (viewActive && viewVisible) void refreshTelemetry();
+    statusMessage.value = '正在确认恢复后的风扇控制';
     return;
   }
   // FAN-938 R5 §P4：守护事件到达时若恢复 owner 仍在推进，不得把它显示成"服务已停止"。
@@ -626,8 +802,8 @@ function onFanGuardState(event: Event): void {
   if (controlIntentPending()) {
     recovering.value = true;
     controlActive.value = true;
-    setFanControlActive(true);
-    setFanNavigationDuty(expectedDuty.value);
+    setFanControlActive(false);
+    setFanNavigationDuty(0);
     startTelemetry();
     statusMessage.value = '控制意图已开启，正在恢复…';
     return;
@@ -640,19 +816,19 @@ function onFanGuardState(event: Event): void {
   statusMessage.value = supported.value ? '风扇服务已停止，请重新打开开关' : '风扇不支持';
 }
 
-async function ensureSupported(manualRecovery = false): Promise<boolean> {
+async function ensureSupported(manualRecovery = false, isCurrent: () => boolean = () => true): Promise<'cached' | 'started' | false> {
   if (FAN_FORCE_PREVIEW) {
     supported.value = true;
     controlReady.value = true;
     hostState.value = controlActive.value ? 'ready' : 'awaiting-control';
     statusMessage.value = controlActive.value ? '模拟控制已开启' : '模拟预览：握手成功';
-    return true;
+    return 'cached';
   }
   // A remembered device remains supported, but a fault/stopped lifecycle
   // must re-run the handshake/recovery path before another write attempt.
   if (supported.value && !['fault-locked', 'unknown', 'stopped'].includes(fanHostLifecycle.state)) {
     controlReady.value = fanHostLifecycle.controlReady;
-    return true;
+    return 'cached';
   }
   if (fanHostLifecycle.state === 'awaiting-control' || fanHostLifecycle.state === 'ready' || fanHostLifecycle.state === 'suspended') {
     supported.value = true;
@@ -661,7 +837,7 @@ async function ensureSupported(manualRecovery = false): Promise<boolean> {
     statusMessage.value = fanHostLifecycle.controlReady
       ? (fanHostLifecycle.state === 'ready' ? '控制已开启' : '握手成功')
       : '握手成功，真实写入能力待确认';
-    return true;
+    return 'cached';
   }
   try {
     // FAN-926R U2: this is the first and only place that spawns the Fan Host.
@@ -671,6 +847,7 @@ async function ensureSupported(manualRecovery = false): Promise<boolean> {
     const gate = await fanHostLifecycle.start(manualRecovery
       ? { manualRecovery: true, reason: 'user-action-while-suspended' }
       : undefined);
+    if (!isCurrent()) return false;
     supported.value = gate.allowed;
     controlReady.value = gate.writeReady;
     hostState.value = fanHostLifecycle.state;
@@ -678,8 +855,9 @@ async function ensureSupported(manualRecovery = false): Promise<boolean> {
       ? (gate.writeReady ? '握手成功' : '已识别风扇路线，真实写入尚未验证')
       : '风扇不支持';
     await recordFanHandshake(gate.allowed);
-    return gate.allowed;
+    return gate.allowed ? 'started' : false;
   } catch (error) {
+    if (!isCurrent()) return false;
     // A failed start/handshake is not allowed to leave the remembered device
     // visible as if this session were ready. The saved identity remains in
     // settings for the next retry, while the current route is fail-closed.
@@ -702,29 +880,29 @@ async function ensureSupported(manualRecovery = false): Promise<boolean> {
 async function adoptResidentControlState(): Promise<void> {
   if (FAN_FORCE_PREVIEW) return;
   try {
-    const remote = await fanHostLifecycle.getState();
+    const remote = await fanHostLifecycle.getState({ discardSuperseded: true });
+    if (!remote) return;
+    hardwareControlConfirmed.value = hostHasLiveControl(remote);
     hostState.value = fanHostLifecycle.state;
-    const active = ['Ready', 'Open'].includes(String(remote.state)) &&
-      remote.hardwareWritesEnabled === true &&
-      remote.unknownState !== true &&
-      remote.oemRestoreConfirmed !== true &&
-      remote.hcCloseCleanupPending !== true;
+    const active = hardwareControlConfirmed.value;
     controlActive.value = active;
     setFanControlActive(active);
     if (active) {
+      adoptConfirmedControlSupport();
       recovering.value = false;
       controlReady.value = true;
       statusMessage.value = '控制已开启';
       setFanNavigationDuty(expectedDuty.value);
-      startTelemetry();
+      // This adoption already consumed the current confirming sample.
+      startTelemetry(false);
       fanDiagnosticLog('ui.resident-control-adopted', { state: remote.state });
-    } else if (fanHostLifecycle.recoveryActive) {
+    } else if (hasCurrentControlCommit() || fanHostLifecycle.recoveryActive) {
       // FAN-938 R5 §P4：驻留会话正在恢复时重新进页，如实显示"正在恢复"，不冒充成功。
       recovering.value = true;
       controlActive.value = true;
-      setFanControlActive(true);
+      setFanControlActive(false);
       statusMessage.value = '控制意图已开启，正在恢复…';
-      setFanNavigationDuty(expectedDuty.value);
+      setFanNavigationDuty(0);
       startTelemetry();
     } else {
       recovering.value = false;
@@ -751,10 +929,13 @@ async function confirmFanHostBeforeWrite(): Promise<void> {
 
 async function applyCurveOnce(): Promise<void> {
   if (busy.value) return;
+  curveSaveFailure.value = null;
+  const cancellation = fanHostLifecycle.controlCancellationRevision;
   busy.value = true;
   try {
     fanDiagnosticLog('ui.control-enable-begin', { preset: selectedPreset.value, nodes: nodes.value });
     if (!controlActive.value && !FAN_FORCE_PREVIEW) {
+      hardwareControlConfirmed.value = false;
       // FAN-926R U3: publish the Starting/Connecting state and let Vue paint it
       // before the spawn/handshake round trip. The switch never waits on the HC
       // readiness path, which can legitimately take ten seconds.
@@ -764,31 +945,71 @@ async function applyCurveOnce(): Promise<void> {
       startBusyTicker();
       await nextTick();
     }
-    // FAN-938 R6 §P4：已有**仍有效**的后台提交在途时，本次点击只刷新最新意图（曲线/预设），
-    // 由在途任务在取得许可后写入最新值；不排队、不叠加第二个 owner，立即有界返回。
-    if (controlCommitTask !== null && controlCommitEpochInFlight === controlCommitEpoch) {
+    if (cancellation !== fanHostLifecycle.controlCancellationRevision) return;
+    const pendingCurrent = hasCurrentControlCommit()
+      && !['fault-locked', 'conflict-locked', 'unknown'].includes(fanHostLifecycle.state);
+    const sameCurve = controlCommitNodes?.length === nodes.value.length && controlCommitNodes.every((node, i) =>
+      node.tempC === nodes.value[i].tempC && node.dutyPercent === nodes.value[i].dutyPercent);
+    if (pendingCurrent && sameCurve) {
       publishControlIntent();
       return;
     }
     publishControlIntent();
     const epoch = ++controlCommitEpoch;
     controlCommitEpochInFlight = epoch;
-    const task = commitControlCurve(epoch);
+    controlCommitCancellationInFlight = cancellation;
+    controlCommitNodes = nodes.value;
+    const previous = pendingCurrent ? controlCommitTask : null;
+    // Accept the first explicit ON before startup awaits. A sleep boundary may
+    // cancel that attempt, but its latest curve must remain available to the
+    // existing wake recovery owner. OFF/Close still clears this staged intent.
+    if (!FAN_FORCE_PREVIEW) fanHostLifecycle.stagePendingControlCurve(nodes.value);
+    // Retire the old write immediately, then stay behind its already running HC
+    // call. Only the latest UI epoch may enter the normal start/apply path.
+    const submit = () => epoch === controlCommitEpoch && cancellation === fanHostLifecycle.controlCancellationRevision
+      ? commitControlCurve(epoch, cancellation) : Promise.resolve();
+    const task = previous ? previous.then(submit, submit) : submit();
     controlCommitTask = task;
-    void task.then(
-      () => { if (controlCommitTask === task) controlCommitTask = null; },
-      () => { if (controlCommitTask === task) controlCommitTask = null; },
-    );
+    controlCommitPending.value = true;
+    const releaseCommitTask = () => {
+      if (controlCommitTask !== task) return;
+      controlCommitTask = null;
+      controlCommitNodes = null;
+      controlCommitPending.value = false;
+      // OFF/Close can retire this request from another entry while its original
+      // Open is settling. Its late completion must also retire the UI intent.
+      if (cancellation !== fanHostLifecycle.controlCancellationRevision && !fanHostLifecycle.hasControlIntent) {
+        hardwareControlConfirmed.value = false;
+        recovering.value = false;
+        controlActive.value = false;
+        setFanControlActive(false);
+        setFanNavigationDuty(0);
+        statusMessage.value = '控制已关闭';
+        stopTelemetry();
+      }
+      if (!busy.value && !closing.value) stopBusyTicker();
+      // This owner is a plain promise, so Vue's gate watcher cannot observe
+      // its retirement. Publish it after clearing the exact current task.
+      notifyFanMirrorUiGate();
+    };
+    void task.then(releaseCommitTask, releaseCommitTask);
     // FAN-938 R6 §P4 有界受理：开启/重试在 ≤2s 内返回，页面恢复可操作；后台设备提交
     // 继续推进（不占用 busy/connecting），故"长期 busy/connecting"不再无声丢弃点击。
-    await Promise.race([
-      task,
-      new Promise<void>((resolve) => { window.setTimeout(resolve, CONTROL_ADMISSION_BUDGET_MS); }),
-    ]);
+    let admissionTimer: ReturnType<typeof window.setTimeout> | undefined;
+    try {
+      await Promise.race([
+        task,
+        new Promise<void>((resolve) => { admissionTimer = window.setTimeout(resolve, CONTROL_ADMISSION_BUDGET_MS); }),
+      ]);
+    } finally {
+      if (admissionTimer !== undefined) window.clearTimeout(admissionTimer);
+    }
   } finally {
     busy.value = false;
     connecting.value = false;
-    stopBusyTicker();
+    // Keep only the read-only progress mirror for this exact pending submission.
+    // Its completion/cancellation retires it; hiding the page also stops it.
+    if (!hasCurrentControlCommit()) stopBusyTicker();
   }
 }
 
@@ -796,14 +1017,24 @@ async function applyCurveOnce(): Promise<void> {
 function publishControlIntent(): void {
   recovering.value = true;
   controlActive.value = true;
+  if (!hardwareControlConfirmed.value) {
+    setFanControlActive(false);
+    setFanNavigationDuty(0);
+  }
   hostState.value = fanHostLifecycle.state;
   statusMessage.value = '控制意图已开启，正在恢复…';
   startTelemetry();
 }
 
 /** FAN-938 R6 §P4：本页是否仍有在途控制意图（有界提交在跑，或 bridge 恢复 owner 在推进）。 */
+function hasCurrentControlCommit(): boolean {
+  return controlCommitPending.value && controlCommitTask !== null
+    && controlCommitEpochInFlight === controlCommitEpoch
+    && controlCommitCancellationInFlight === fanHostLifecycle.controlCancellationRevision;
+}
+
 function controlIntentPending(): boolean {
-  return controlCommitTask !== null || fanHostLifecycle.recoveryActive || fanHostLifecycle.hasControlIntent;
+  return hasCurrentControlCommit() || fanHostLifecycle.recoveryActive;
 }
 
 /**
@@ -811,10 +1042,22 @@ function controlIntentPending(): boolean {
  * 只发布"最新意图"（`nodes.value`/预设），每个 await 后复核 `epoch` 令旧提交失效；本任务
  * 永不 reject（失败在内部收敛），因此既不阻塞页面，也不产生未处理拒绝。
  */
-async function commitControlCurve(epoch: number): Promise<void> {
+async function commitControlCurve(epoch: number, cancellation: number): Promise<void> {
+  // This request can outlive the page that submitted it. An OFF/Close from
+  // another entry must retire its start continuation before apply creates a
+  // new bridge intent. Normal power adoption is not terminal cancellation.
+  const isCurrent = () => epoch === controlCommitEpoch
+    && cancellation === fanHostLifecycle.controlCancellationRevision;
+  if (!isCurrent()) return;
   try {
-    if (!(await ensureSupported(true))) {
-      if (epoch !== controlCommitEpoch) return;
+    const supportCheck = await ensureSupported(true, isCurrent);
+    if (!supportCheck) {
+      if (!isCurrent()) return;
+      // A failed start can leave the same bounded owner restoring this ON.
+      if (fanHostLifecycle.recoveryActive && fanHostLifecycle.hasControlIntent) {
+        publishControlIntent();
+        return;
+      }
       controlActive.value = false;
       recovering.value = false;
       setFanControlActive(false);
@@ -824,7 +1067,7 @@ async function commitControlCurve(epoch: number): Promise<void> {
       return;
     }
     // 每个 await 后复核任务身份：关闭/新睡眠/新曲线已令本提交失效，不得复活它。
-    if (epoch !== controlCommitEpoch) return;
+    if (!isCurrent()) return;
     if (!controlReady.value) {
       // FAN-938 R6.2 T0：唤醒后的遥测可能先把页面镜像降为“未就绪”，
       // 但 FanHost 仍持有本代握手/控制意图，或正处于陈旧 Suspended 救援窗。
@@ -858,10 +1101,28 @@ async function commitControlCurve(epoch: number): Promise<void> {
       startTelemetry();
       return;
     }
-    await confirmFanHostBeforeWrite();
-    if (epoch !== controlCommitEpoch) return;
-    await fanHostLifecycle.apply(nodes.value);
-    if (epoch !== controlCommitEpoch) return;
+    // This request's completed start already performed the control preflight.
+    // Cached support still needs the existing current-start check.
+    if (supportCheck !== 'started') await confirmFanHostBeforeWrite();
+    if (!isCurrent()) return;
+    await fanHostLifecycle.apply(controlCommitNodes ?? nodes.value);
+    if (!isCurrent()) return;
+    // Verify the current Host, rather than promoting the saved intent or an
+    // old Ready mirror. One small existing state request, no file/hash work.
+    const committedState = await fanHostLifecycle.getState({ discardSuperseded: true });
+    if (!isCurrent()) return;
+    if (!committedState) {
+      // A newer write, readback or power/session boundary retired this reply.
+      // Keep display reconciliation independent of this completed command so
+      // its pending read cannot swallow a later explicit control request.
+      void refreshTelemetry();
+      return;
+    }
+    hardwareControlConfirmed.value = hostHasLiveControl(committedState);
+    if (!hardwareControlConfirmed.value)
+      throw new Error(`风扇尚未建立控制：${committedState.state}，可再次点击重试`);
+    adoptConfirmedControlSupport();
+    recovering.value = false;
     fanDiagnosticLog('ui.control-enable-success', { preset: selectedPreset.value });
     controlActive.value = true;
     setFanControlActive(true);
@@ -870,19 +1131,20 @@ async function commitControlCurve(epoch: number): Promise<void> {
     setFanNavigationDuty(expectedDuty.value);
     startTelemetry();
   } catch (error) {
-    if (epoch !== controlCommitEpoch) return;
+    if (!isCurrent()) return;
+    hardwareControlConfirmed.value = false;
     fanDiagnosticLog('ui.control-enable-failure', { state: fanHostLifecycle.state, error: error instanceof Error ? error.message : String(error) });
     hostState.value = fanHostLifecycle.state;
     // FAN-938 R6.2 T0：a stale Suspended wake edge is a recoverable manual
     // request. The bridge keeps the staged curve and a single recovery owner;
     // do not turn that explicit click into a dead switch just because the
     // first bounded HTTP attempt returned POWER_RESUMING/Suspended.
-    if (fanHostLifecycle.recoveryActive || fanHostLifecycle.hasControlIntent) {
+    if (fanHostLifecycle.recoveryActive) {
       publishControlIntent();
       recovering.value = true;
       controlActive.value = true;
-      setFanControlActive(true);
-      setFanNavigationDuty(expectedDuty.value);
+      setFanControlActive(false);
+      setFanNavigationDuty(0);
       statusMessage.value = '控制意图已登记，正在恢复…';
       startTelemetry();
       return;
@@ -906,6 +1168,7 @@ function requestCurveApply(): Promise<void> {
     }
   })().finally(() => {
     curveApplyPromise = null;
+    notifyFanMirrorUiGate();
   });
   return curveApplyPromise;
 }
@@ -914,8 +1177,11 @@ async function closeFanControl(): Promise<void> {
   // Switching off also cancels an explicit control request while recovery is pending.
   // disable() invalidates the recovery owner before entering its serialized queue.
   if (closing.value) return;
+  curveSaveFailure.value = null;
+  hardwareControlConfirmed.value = false;
   fanDiagnosticLog('ui.control-disable-begin');
   const epoch = ++controlCommitEpoch;
+  controlCommitPending.value = false;
   if (FAN_FORCE_PREVIEW) {
     controlActive.value = false;
     recovering.value = false;
@@ -986,15 +1252,65 @@ async function closeFanControl(): Promise<void> {
   }
 }
 
+/**
+ * [LIFECYCLE:FAN:UI] 修改开关/状态须同步本块、FAN:CORE 与对应验证，后续纠错就地写回。
+ * 入口：toggleControl → requestCurveApply/commitControlCurve；在途 ON 合并，已确认受控才切 OFF。
+ * 保护：操作4秒、唤醒每代5秒，沿固定截止；任务结果不延长保护，解锁后仍执行真实请求准入。
+ * 状态：开启/恢复投影为进行中；意图与握手不冒充已受控，顶部短句不参与控制判定。
+ * 取消：closeFanControl/新睡眠推进提交 epoch；过期保存、提交、回包不得重新开启。
+ * 责任：本页只提交意图/显示进度；App/bridge 协调电源恢复，页面卸载不新建第二恢复任务。
+ * 验证：tools/fan_host_lifecycle_selftest.ts 与 ymcc_sim/global/ui-navigation/templates/fanStatusCases.mjs。
+ */
 async function toggleControl(): Promise<void> {
-  if (closing.value) return;
-  // One switch owns both directions, including an in-flight recovery. Turning
-  // it off invalidates the pending intent before disable enters the queue.
-  if (controlActive.value) {
+  if (controlSwitchLocked.value || closing.value) return;
+  lockControlSwitch();
+  // Only established control turns OFF. After the fixed guard, repeated pending
+  // ON coalesces with its current submission; terminal failures can retry.
+  const terminal = ['fault-locked', 'conflict-locked', 'unknown'].includes(fanHostLifecycle.state);
+  // A background recovery intent is not established control. If a failed
+  // submission already retired, the visible OFF switch requests ON/retry;
+  // only a live control or the explicitly displayed pending ON is cancelled.
+  if (!terminal && controlEstablished.value) {
     await closeFanControl();
     return;
   }
   if (busy.value || connecting.value) return;
+  await requestCurveApply();
+}
+
+/** Persist the selected curve, then use the same cancellable owner as manual edits.
+ * OFF, sleep, a newer edit, or a later page instance retires this save continuation.
+ */
+async function saveAndApplySelectedCurve(failureMessage: string, savedMessage?: string): Promise<void> {
+  const revision = ++curveEditRevision;
+  curveSaveFailure.value = null;
+  const epoch = controlCommitEpoch;
+  const cancellation = fanHostLifecycle.controlCancellationRevision;
+  const curve = nodes.value;
+  const preset = selectedPreset.value;
+  const isCurrent = () => revision === curveEditRevision && epoch === controlCommitEpoch
+    && cancellation === fanHostLifecycle.controlCancellationRevision
+    // An unfinished pointer/gamepad edit changes nodes before its commit revision.
+    // A late save may submit only its own still-current curve, never that draft.
+    && (curve === nodes.value || (curve.length === nodes.value.length && curve.every((node, i) =>
+      node.tempC === nodes.value[i].tempC && node.dutyPercent === nodes.value[i].dutyPercent)));
+  try {
+    await saveFanCurve(curve, preset);
+  } catch {
+    if (isCurrent()) {
+      curveSaveFailure.value = failureMessage;
+      statusMessage.value = failureMessage;
+    }
+    return;
+  }
+  if (!isCurrent()) return;
+  if (!controlActive.value) {
+    if (savedMessage) statusMessage.value = savedMessage;
+    return;
+  }
+  // Host Preset(nodes, leaseId) already delegates to Enable(nodes, leaseId).
+  // Share the existing pending-curve owner so no obsolete preset can revive OFF
+  // or write the previous curve while the original HC Open is still pending.
   await requestCurveApply();
 }
 
@@ -1004,52 +1320,14 @@ async function choosePreset(rawValue: string | number): Promise<void> {
   selectedPreset.value = name;
   fanDiagnosticLog('ui.preset-selected', { preset: name });
   nodes.value = getFanPresetCurve(name);
-  try {
-    await saveFanCurve(nodes.value, name);
-  } catch {
-    statusMessage.value = '预设保存失败，硬件控制未改变';
-    return;
-  }
-  if (controlActive.value) {
-    if (FAN_FORCE_PREVIEW) {
-      statusMessage.value = '模拟预设已应用';
-      return;
-    }
-    // A graph drag may have queued an apply just before the dropdown opened.
-    // Let that serialized request settle before changing the active preset;
-    // otherwise two valid writes can interleave and the second one observes a
-    // lease that the first operation is already restoring.
-    if (curveApplyPromise) await curveApplyPromise.catch(() => {});
-    busy.value = true;
-    try {
-      await confirmFanHostBeforeWrite();
-      await fanHostLifecycle.applyPreset(name, nodes.value);
-      statusMessage.value = '控制已开启';
-    } catch (error) {
-      fanDiagnosticLog('ui.preset-apply-failure', { preset: name, state: fanHostLifecycle.state, error: error instanceof Error ? error.message : String(error) });
-      hostState.value = fanHostLifecycle.state;
-      controlActive.value = false;
-      setFanControlActive(false);
-      setFanNavigationDuty(0);
-      stopTelemetry();
-      statusMessage.value = `预设应用失败：${readableFanError(error)}，正在确认恢复`;
-    } finally {
-      busy.value = false;
-    }
-  }
+  await saveAndApplySelectedCurve('预设保存失败，硬件控制未改变');
 }
 
 async function resetCurve(): Promise<void> {
   // Reset only the currently selected preset. Other presets retain their
   // independently edited curves and will be restored when selected again.
   nodes.value = structuredClone(PRESETS[selectedPreset.value]);
-  try {
-    await saveFanCurve(nodes.value, selectedPreset.value);
-  } catch {
-    statusMessage.value = '重置保存失败，硬件控制未改变';
-    return;
-  }
-  if (controlActive.value) await requestCurveApply();
+  await saveAndApplySelectedCurve('重置保存失败，硬件控制未改变');
 }
 
 async function toggleMotion(): Promise<void> {
@@ -1062,14 +1340,19 @@ async function toggleMotion(): Promise<void> {
   }
 }
 
-watch(expectedDuty, (duty) => {
-  setFanNavigationDuty(controlActive.value ? duty : 0);
-});
+// Live navigation observes lifecycle receipts itself. The legacy page setter
+// is a production no-op, so only preview needs this temperature-driven watcher.
+if (FAN_FORCE_PREVIEW) {
+  watch(expectedDuty, (duty) => {
+    setFanNavigationDuty(controlEstablished.value ? duty : 0);
+  });
+}
 
 function onFanExitCleanupFailed(event: Event): void {
   const detail = (event as CustomEvent<{ message?: unknown }>).detail;
   // FAN-938 R6 §P4：退出清理边界同样使在途控制提交失效（安全交还优先于旧意图）。
   controlCommitEpoch += 1;
+  controlCommitPending.value = false;
   controlActive.value = false;
   setFanControlActive(false);
   setFanNavigationDuty(0);
@@ -1086,6 +1369,10 @@ onMounted(() => {
   viewVisible = !document.hidden;
   document.addEventListener('visibilitychange', onDocumentVisibilityChange);
   window.addEventListener('ipc:power.suspending', onFanPowerSuspending);
+  window.addEventListener('ipc:fan.suspending', onFanPowerSuspending);
+  window.addEventListener('ipc:power.resumed', onFanPowerWake);
+  window.addEventListener('ipc:power.resume-ready', onFanPowerWake);
+  window.addEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.addEventListener('fan:guard-state', onFanGuardState);
   window.addEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.addEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);
@@ -1106,16 +1393,21 @@ onMounted(() => {
 onActivated(() => {
   viewActive = true;
   viewVisible = !document.hidden;
+  if (viewVisible) syncControlSwitchLock();
   // FAN-932 §3.2：从 PowerView 改回本页时同步镜像开关（settingsRepository 无变更事件，
   // 且不允许常驻 watcher 或周期读取）。仅读设置，不触发任何启动。
   void refreshFanBootAutoStart().catch(() => {});
   if (FAN_FORCE_PREVIEW || !viewVisible) return;
+  if (hasCurrentControlCommit()) startBusyTicker();
   if (controlActive.value) startTelemetry();
+  else void adoptOnDemandEntryState();
 });
 
 onDeactivated(() => {
   viewActive = false;
+  stopGraphNodeEditing();
   stopTelemetry();
+  stopBusyTicker();
 });
 
 /**
@@ -1128,6 +1420,24 @@ onDeactivated(() => {
  * second start path.
  */
 async function adoptOnDemandEntryState(): Promise<void> {
+  if (hasCurrentControlCommit() && controlCommitTask !== null) {
+    const task = controlCommitTask;
+    const epoch = controlCommitEpoch;
+    supported.value = fanHostLifecycle.controlReady;
+    controlReady.value = fanHostLifecycle.controlReady;
+    publishControlIntent();
+    if (viewActive && viewVisible) startBusyTicker();
+    // Event completion follows the original request. Re-entry does not issue
+    // another start/Open/enable, or poll while the HC readiness call is pending.
+    const observeCompletion = () => {
+      if (viewActive && epoch === controlCommitEpoch) void adoptResidentControlState();
+    };
+    void task.then(observeCompletion, observeCompletion);
+    return;
+  }
+  // An external OFF may arrive while no page is mounted. Its old task still
+  // settles on the original queue, but cannot be adopted as a new pending ON.
+  controlCommitPending.value = false;
   if (resolveFanEntryAction(fanHostLifecycle.phase) === 'adopt-resident-session') {
     supported.value = true;
     await adoptResidentControlState();
@@ -1137,10 +1447,15 @@ async function adoptOnDemandEntryState(): Promise<void> {
 }
 
 onUnmounted(() => {
+  stopControlSwitchLockTimer();
   viewActive = false;
   emitNativeEvent('gamepad.fan-node-edit', { active: false });
   document.removeEventListener('visibilitychange', onDocumentVisibilityChange);
   window.removeEventListener('ipc:power.suspending', onFanPowerSuspending);
+  window.removeEventListener('ipc:fan.suspending', onFanPowerSuspending);
+  window.removeEventListener('ipc:power.resumed', onFanPowerWake);
+  window.removeEventListener('ipc:power.resume-ready', onFanPowerWake);
+  window.removeEventListener('ipc:fan.resume-ready', onFanPowerWake);
   window.removeEventListener('fan:guard-state', onFanGuardState);
   window.removeEventListener('ipc:gamepad-back', onFanGamepadBack);
   window.removeEventListener('ipc:fan.exit.cleanup-failed', onFanExitCleanupFailed);
@@ -1150,33 +1465,42 @@ onUnmounted(() => {
   fanSuspendBoundary = false;
 });
 // YMCC Decky sidebar: observation-only additions; original business functions remain unchanged.
-const fanMirrorBlocked = () => busy.value || connecting.value || closing.value ||
-  controlCommitTask !== null || curveApplyPromise !== null || graphDragArmed.value !== null || draggingNode.value !== null;
+const fanMirrorBlocked = () => controlSwitchLocked.value || busy.value || connecting.value || closing.value ||
+  hasCurrentControlCommit() ||
+  curveApplyPromise !== null || graphDragArmed.value !== null || draggingNode.value !== null;
 const stopFanMirrorBlocker = registerFanMirrorUiBlocker(fanMirrorBlocked);
 watch(() => [fanMirrorBlocked(), statusMessage.value, controlActive.value, hostState.value], notifyFanMirrorUiGate);
 const stopFanMirrorDisplay = onFanMirrorDisplay((value) => {
+  curveEditRevision += 1;
+  curveSaveFailure.value = null;
   selectedPreset.value = value.preset;
   nodes.value = getFanPresetCurve(value.preset);
   controlActive.value = value.active;
-  recovering.value = value.pending;
+  // A mirror event carries user intent. Verify its current Host before the
+  // inner page presents that intent as established control.
+  hardwareControlConfirmed.value = false;
+  recovering.value = value.active || value.pending;
   controlReady.value = fanHostLifecycle.controlReady;
   supported.value = fanHostLifecycle.controlReady || supported.value;
   hostState.value = fanHostLifecycle.state;
   statusMessage.value = value.notice;
-  if (value.active) { setFanNavigationDuty(expectedDuty.value); startTelemetry(); }
-  else { setFanNavigationDuty(0); stopTelemetry(); }
+  setFanNavigationDuty(0);
+  if (value.active) { startTelemetry(); if (viewActive && viewVisible) void refreshTelemetry(); }
+  else { stopTelemetry(); }
 });
 onUnmounted(() => { stopFanMirrorBlocker(); stopFanMirrorDisplay(); });
 </script>
 
 <template>
+  <IntegratedPage class="fan-control-page" title="风扇控制">
+    <template #status>
+      <div class="fan-status-banner" :class="{ supported }" role="status" :title="statusText"><strong>{{ statusLabel }}</strong></div>
+    </template>
   <section class="fan-page">
-    <header class="fan-header"><div><div class="fan-kicker">Fan API</div><h1>风扇控制</h1></div></header>
-    <div class="fan-status-banner" :class="{ supported }"><strong>{{ statusText }}</strong></div>
     <section class="fan-card controls-card" aria-label="风扇控制状态">
-      <div class="control-line" data-gp-row="0"><button class="control-state control-button fan-toggle" :class="{ 'fan-toggle-active': controlActive }" data-gp-row="0" data-gp-col="0" type="button" :aria-pressed="controlActive" :disabled="closing || (!controlActive && (busy || connecting))" @click="toggleControl">{{ controlText }}</button><button class="control-state control-button" data-gp-row="0" data-gp-col="1" type="button" :disabled="!supported || !controlReady" @click="toggleMotion">风扇图标 {{ motionEnabled ? '转动' : '静止' }}</button><span class="control-state temperature-state">温度 {{ temperatureText }}</span></div>
-      <div class="control-line" data-gp-row="1"><Dropdown class="control-dropdown" popup-class="fan-control-popup" :model-value="selectedPreset" :options="PRESET_OPTIONS" :disabled="!supported || !controlReady || busy" aria-label="转速预设" gp-row="1" gp-col="0" @change="choosePreset" /><button class="control-state control-button" data-gp-row="1" data-gp-col="1" type="button" :disabled="!supported || !controlReady || busy" @click="resetCurve">重置转速</button><span class="control-state">期望转速 {{ expectedDuty }}%</span></div>
-      <Toggle v-model="fanBootAutoStart" label="开机/休眠唤醒启动风扇" description="根据适配机型自动启动风扇" color="accent" :gp-row="2" :gp-col="0" @update:model-value="onFanBootAutoStartToggle" />
+      <div class="control-line" data-gp-row="0"><button class="control-state control-button fan-toggle" :class="{ 'fan-toggle-active': controlEstablished, 'fan-toggle-pending': controlStartPending || controlRecoveryPending }" data-gp-row="0" data-gp-col="0" type="button" :aria-pressed="controlEstablished" :aria-busy="controlStartPending || controlRecoveryPending || busy || closing" :disabled="controlSwitchLocked" @click="toggleControl">{{ controlText }}</button><button class="control-state control-button" data-gp-row="0" data-gp-col="1" type="button" :disabled="!supported || !controlReady" @click="toggleMotion">风扇图标 {{ motionEnabled ? '转动' : '静止' }}</button><span class="control-state temperature-state">温度 {{ temperatureText }}</span></div>
+      <div class="control-line" data-gp-row="1"><Dropdown class="control-dropdown" popup-class="fan-control-popup" :model-value="selectedPreset" :options="PRESET_OPTIONS" :disabled="!supported || !controlReady || busy" aria-label="转速预设" gp-row="1" gp-col="0" @change="choosePreset" /><button class="control-state control-button" data-gp-row="1" data-gp-col="1" type="button" :disabled="!supported || !controlReady || busy" @click="resetCurve">重置转速</button><span class="control-state">期望转速 {{ controlActive && temperature === null ? '无数据' : expectedDuty + '%' }}</span></div>
+      <Toggle :model-value="fanBootAutoStart" label="开机/休眠唤醒启动风扇" description="根据适配机型自动启动风扇" color="accent" :gp-row="2" :gp-col="0" @update:model-value="onFanBootAutoStartToggle" />
     </section>
     <section class="fan-card chart-card" aria-label="四节点风扇曲线">
       <div class="chart-title"><strong>风扇曲线</strong></div>
@@ -1201,12 +1525,14 @@ onUnmounted(() => { stopFanMirrorBlocker(); stopFanMirrorDisplay(); });
           <text x="14" y="195" text-anchor="middle" class="axis-label" transform="rotate(-90 14 195)">风扇转速 (%)</text>
         </svg>
         <div class="chart-node-hit-layer" aria-label="曲线节点">
-          <button v-for="(node, index) in nodes" :key="`hit-${index}`" class="chart-node-hit" :class="{ active: graphSelectedNode === index, 'edit-armed': graphDragArmed === index }" :style="nodePointStyle(node)" type="button" :data-gp-row="3" :data-gp-col="index" data-gp-inline-edit data-gp-inline-edit-scope="fan-curve-node" data-gp-inline-edit-repeat-ms="55" :data-gp-inline-edit-active="graphDragArmed === index ? 'true' : undefined" :aria-pressed="graphDragArmed === index" :aria-label="`节点 ${index + 1} ${node.tempC}°C ${node.dutyPercent}%`" @focus="selectNode(index)" @click="onGraphNodeClick(index, $event)" @gp:spatial-edit="onGraphSpatialEdit(index, $event)" @pointerdown="onGraphNodePointerDown(index, $event)" @pointermove="onGraphNodePointerMove(index, $event)" @pointerup="onGraphNodePointerUp(index, $event)" @pointercancel="onGraphNodePointerUp(index, $event)"><span>节点 {{ index + 1 }}</span></button>
+          <button v-for="(node, index) in nodes" :key="`hit-${index}`" class="chart-node-hit" :class="{ active: graphSelectedNode === index, 'edit-armed': graphDragArmed === index }" :style="nodePointStyles[index]" type="button" :data-gp-row="3" :data-gp-col="index" data-gp-inline-edit data-gp-inline-edit-scope="fan-curve-node" data-gp-inline-edit-repeat-ms="55" :data-gp-inline-edit-active="graphDragArmed === index ? 'true' : undefined" :aria-pressed="graphDragArmed === index" :aria-label="`节点 ${index + 1} ${node.tempC}°C ${node.dutyPercent}%`" @focus="selectNode(index)" @click="onGraphNodeClick(index, $event)" @gp:spatial-edit="onGraphSpatialEdit(index, $event)" @pointerdown="onGraphNodePointerDown(index, $event)" @pointermove="onGraphNodePointerMove(index, $event)" @pointerup="onGraphNodePointerUp(index, $event)" @pointercancel="onGraphNodePointerUp(index, $event)"><span>节点 {{ index + 1 }}</span></button>
         </div>
       </div>
-      <div class="node-grid" aria-label="节点配置"><article v-for="(node, index) in nodes" :key="index" class="node-card" :class="{ active: configSelectedNode === index }" @click="selectNode(index)" @focusin="selectNode(index)"><strong>节点 {{ index + 1 }}</strong><label>温度<Dropdown :model-value="node.tempC" :options="nodeDropdownOptions(index, 'tempC')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 温度`" :gp-row="4" :gp-col="index" @change="updateNodeValue(index, 'tempC', $event)" /></label><label>转速<Dropdown :model-value="node.dutyPercent" :options="nodeDropdownOptions(index, 'dutyPercent')" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 转速`" :gp-row="5" :gp-col="index" @change="updateNodeValue(index, 'dutyPercent', $event)" /></label></article></div>
+      <div class="node-grid" aria-label="节点配置"><article v-for="(node, index) in nodes" :key="index" class="node-card" :class="{ active: configSelectedNode === index }" @click="selectNode(index)" @focusin="selectNode(index)"><strong>节点 {{ index + 1 }}</strong><label>温度<Dropdown :model-value="node.tempC" :options="nodeDropdownOptions[index].tempC" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 温度`" :gp-row="4" :gp-col="index" @change="updateNodeValue(index, 'tempC', $event)" /></label><label>转速<Dropdown :model-value="node.dutyPercent" :options="nodeDropdownOptions[index].dutyPercent" :disabled="!supported || busy" :aria-label="`节点 ${index + 1} 转速`" :gp-row="5" :gp-col="index" @change="updateNodeValue(index, 'dutyPercent', $event)" /></label></article></div>
     </section>
   </section>
+
+  </IntegratedPage>
 </template>
 
 <style scoped>
@@ -1216,8 +1542,14 @@ onUnmounted(() => { stopFanMirrorBlocker(); stopFanMirrorDisplay(); });
 :global(.fan-control-popup) .dd-option { justify-content: center; text-align: center; position: relative; }
 :global(.fan-control-popup) .dd-opt-label { text-align: center; flex: 1 1 auto; }
 :global(.fan-control-popup) .dd-check { position: absolute; right: 10px; }
+/* Pending is an observable operation, distinct from both OFF and verified ON. */
+.fan-toggle-pending,.fan-toggle-pending:disabled,.fan-toggle-active:disabled { background:#1269a3;border-color:#2ea6ff;color:#fff;opacity:1;box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--accent) 35%,transparent); }
 .axis-label { font-size: 20px; }
 .chart-node text { font-size: 20px; font-weight: 700; paint-order: stroke; stroke: var(--bg-panel); stroke-width: 3px; stroke-linejoin: round; }
 .chart-node .node-value { fill: var(--text-dim); font-size: 18px; }
 .axis-ticks text { fill: var(--text-dim); font-size: 16px; font-weight: 600; pointer-events: none; }
+/* The connection receipt shares the title row and never becomes a focus stop. */
+.fan-control-page :deep(.console-heading) { min-width: 0; }
+.fan-control-page :deep(.console-heading h1) { flex: 0 0 auto; white-space: nowrap; }
+.fan-status-banner { flex: 0 1 auto; min-width: 0; max-width: min(60%, 14em); margin: 0 0 0 auto; padding: 6px 10px; font-size: 12px; line-height: 1.4; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 </style>

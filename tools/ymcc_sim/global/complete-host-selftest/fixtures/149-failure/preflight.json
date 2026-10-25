@@ -1,0 +1,11 @@
+{
+  "status": "PASS",
+  "consumerCount": 0,
+  "hostSha256": "149042f482b122adc85a19a905c8579c75cfbc881cd78d85c221aac1fe5cb424",
+  "backendSha256": "73c0070366a0907ac8ee908f4c2c73d1b495faab7edacab339027191f855ccb5",
+  "apphostSha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab",
+  "manifestSha256": "989c0b1ddf8f795f5a5fd10bbb053d945d272f6dac613560c023e599215fe795",
+  "realBackendRequested": false,
+  "hardwareWritesRequested": false,
+  "realTokenFileRequested": false
+}

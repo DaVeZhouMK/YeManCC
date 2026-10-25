@@ -1,0 +1,24 @@
+import {createApp,h,computed,ref,onBeforeUnmount,KeepAlive} from 'vue';
+import PowerView from '@/views/PowerView.vue';
+import {state,settings} from './runtimePorts';
+// This page fixture starts after the app's separately tested default-task bootstrap.
+state.legacyDesktop=true;settings.startupDesired.desktopModeOnBoot=true;
+import NavRail from '@/components/NavRail.vue';
+import TopMonitorBar from '@/components/TopMonitorBar.vue';
+import {acceptMouseModeState} from '@/bridge/mouseModeState';
+(window as any).__bootAcceptMouseMode=acceptMouseModeState;
+import {ymccStageWidth,YMCC_SHELL_BASE_WIDTH,YMCC_SHELL_BASE_HEIGHT,YMCC_SHELL_SCALE_BOOST} from '@/bridge/monitorLayout';
+import '@/gamepad/engine';
+const powerGeneration=ref(0),powerShown=ref(true);
+const Placeholder={render:()=>h('div',{'data-boot-other-route':''})};
+(window as any).__bootShowPower=(visible:boolean)=>{powerShown.value=visible;};
+const viewport=ref({width:innerWidth,height:innerHeight});
+const resize=()=>viewport.value={width:innerWidth,height:innerHeight};window.addEventListener('resize',resize);
+const scale=computed(()=>Math.min(viewport.value.height/YMCC_SHELL_BASE_HEIGHT*YMCC_SHELL_SCALE_BOOST,viewport.value.width/YMCC_SHELL_BASE_WIDTH));
+const style=computed(()=>({width:ymccStageWidth(YMCC_SHELL_BASE_WIDTH,viewport.value.width,scale.value)+'px',height:Math.ceil(viewport.value.height/scale.value)+'px',zoom:scale.value,'--gamepad-safe-bottom':Math.max(32,Math.min(64,viewport.value.height*.06))/Math.max(.5,scale.value)+'px'}));
+(window as any).__bootShellGeometry=()=>({scale:scale.value,baseWidth:YMCC_SHELL_BASE_WIDTH,baseHeight:YMCC_SHELL_BASE_HEIGHT,stageWidth:ymccStageWidth(YMCC_SHELL_BASE_WIDTH,viewport.value.width,scale.value)});
+const vm=createApp({setup(){onBeforeUnmount(()=>window.removeEventListener('resize',resize));return()=>h('div',{class:'app-root'},[h('div',{class:'app-backdrop','aria-hidden':'true'}),h('div',{class:'app-stage',style:style.value},[h('div',{class:'empty-background','aria-hidden':'true'}),h('div',{class:'app-body'},[h(NavRail),h('main',{class:'app-main'},[h(TopMonitorBar),h('div',{class:'app-content'},[h(KeepAlive,{key:powerGeneration.value},{default:()=>h(powerShown.value?PowerView:Placeholder)})])])])])]);}});
+vm.provide('globalRefreshKey',ref(0));
+vm.mount('#app');
+(window as any).__bootRemountPower=()=>{powerGeneration.value++;};
+(window as any).__bootUnmount=()=>vm.unmount();

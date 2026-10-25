@@ -1,0 +1,113 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXACT_B51_PRIVATE_RUNTIME_HARDENING_NOT_RUNTIME_PASS",
+  "originalAssertionsAndCaseOrderUnchanged": true,
+  "nativeBudgetMs": 60000,
+  "managedExitBudgetMs": 7000,
+  "files": [
+    {
+      "path": "positive/source/native/private_runtime_guard.h",
+      "beforeSha256": null,
+      "afterSha256": "c2538c66e5773a30baabbdb12085c1890ad7f2ad6fa1525328b11547ac23b4e8",
+      "source": "#pragma once\n#include <windows.h>\n#include <string>\n#include <vector>\n#include <cwchar>\n#include <algorithm>\nnamespace ymccPrivateRun {\ninline std::wstring env(const wchar_t* name){wchar_t v[32768]{};const auto n=GetEnvironmentVariableW(name,v,32768);return n&&n<32768?std::wstring(v,n):std::wstring{};}\ninline bool same(const std::wstring& a,const std::wstring& b){return !a.empty()&&!b.empty()&&_wcsicmp(a.c_str(),b.c_str())==0;}\ninline bool plainPath(const std::wstring& path,bool directory){\n if(path.size()<4||path[1]!=L':'||path[2]!=L'\\\\')return false;\n for(size_t i=3;i<=path.size();++i){if(i<path.size()&&path[i]!=L'\\\\')continue;const auto part=path.substr(0,i);const DWORD a=GetFileAttributesW(part.c_str());if(a==INVALID_FILE_ATTRIBUTES||(a&FILE_ATTRIBUTE_REPARSE_POINT))return false;if(i<path.size()&&!(a&FILE_ATTRIBUTE_DIRECTORY))return false;if(i==path.size()&&bool(a&FILE_ATTRIBUTE_DIRECTORY)!=directory)return false;}return true;\n}\nstruct BoundContext {std::wstring root,exe,dll;};\ninline BoundContext checkedContext(){\n BoundContext c{env(L\"YMCC_PRIVATE_RUN_ROOT\"),env(L\"YMCC_PRIVATE_EXE\"),env(L\"YMCC_PRIVATE_MANAGED_DLL\")};\n wchar_t cwd[32768]{},exe[32768]{};const auto nc=GetCurrentDirectoryW(32768,cwd),ne=GetModuleFileNameW(nullptr,exe,32768);\n if(!nc||nc>=32768||!ne||ne>=32768||!same(c.root,cwd)||!same(c.exe,exe)||!same(c.root,env(L\"YEMAN_POWER_CONTROL_DIR\"))||!plainPath(c.root,true)||!plainPath(c.exe,false)||!plainPath(c.dll,false))ExitProcess(ERROR_ACCESS_DENIED);\n return c;\n}\n// Declaration precedes main.inert.cpp, hence precedes POWER_CONTROL_DIR initialization in this TU.\nstatic const BoundContext bound=checkedContext();\ninline void requireContext(){const auto c=checkedContext();if(!same(c.root,bound.root)||!same(c.exe,bound.exe)||!same(c.dll,bound.dll))ExitProcess(ERROR_ACCESS_DENIED);}\ninline std::vector<wchar_t> childEnvironment(DWORD parent,const std::wstring& pipe,const std::wstring& nonce){\n std::vector<std::wstring> vars={L\"SystemRoot=C:\\\\Windows\",L\"DOTNET_ROOT=C:\\\\Program Files\\\\dotnet\",L\"DOTNET_MULTILEVEL_LOOKUP=0\",L\"YEMAN_POWER_CONTROL_DIR=\"+bound.root,L\"YMCC_PRIVATE_RUN_ROOT=\"+bound.root,L\"YMCC_PRIVATE_EXE=\"+bound.exe,L\"YMCC_PRIVATE_MANAGED_DLL=\"+bound.dll,L\"YMCC_PRIVATE_PARENT_PID=\"+std::to_wstring(parent),L\"YMCC_PRIVATE_PIPE=\"+pipe,L\"YMCC_PRIVATE_NONCE=\"+nonce};\n std::sort(vars.begin(),vars.end(),[](const auto& a,const auto& b){return _wcsicmp(a.c_str(),b.c_str())<0;});\n std::vector<wchar_t> block;for(const auto& v:vars){block.insert(block.end(),v.begin(),v.end());block.push_back(0);}block.push_back(0);return block;\n}\n}\n"
+    },
+    {
+      "path": "positive/fixture.cpp",
+      "beforeSha256": "042f970f28009892e8e734aa080ba9f4cc9e7c86760c0ba8061a9829516b8772",
+      "afterSha256": "df374ac7441699eb3ab828dfa094b6c28236acffd1b9f715894a0a7dd52fbc61",
+      "hunks": [
+        {
+          "label": "pre-main owned path binding before production global initialization",
+          "before": "#include \"source/native/private_terminal_observer.h\"",
+          "after": "#include \"source/native/private_terminal_observer.h\"\n#include \"source/native/private_runtime_guard.h\""
+        },
+        {
+          "label": "power deny counter",
+          "before": "static bool fixturePcPowerCapabilities=false;",
+          "after": "static bool fixturePcPowerCapabilities=false;\nstatic unsigned fixturePowerCapabilityDenied=0;"
+        },
+        {
+          "label": "no real power capability fallback",
+          "before": " return ::GetPwrCapabilities(caps);",
+          "after": " ++fixturePowerCapabilityDenied;if(caps)*caps={};SetLastError(ERROR_NOT_SUPPORTED);return FALSE;"
+        },
+        {
+          "label": "scoped own-pipe leaf wrapper",
+          "before": "#define GetExitCodeProcess fixtureOwnedHostExitCode\n#include \"main.inert.cpp\"\n#undef GetExitCodeProcess",
+          "after": "#define GetExitCodeProcess fixtureOwnedHostExitCode\nstatic HANDLE fixtureCreateNamedPipeW(LPCWSTR,DWORD,DWORD,DWORD,DWORD,DWORD,DWORD,LPSECURITY_ATTRIBUTES);\n#define CreateNamedPipeW fixtureCreateNamedPipeW\n#include \"main.inert.cpp\"\n#undef CreateNamedPipeW\n#undef GetExitCodeProcess\nstatic HANDLE fixtureCreateNamedPipeW(LPCWSTR name,DWORD open,DWORD mode,DWORD instances,DWORD outBytes,DWORD inBytes,DWORD timeout,LPSECURITY_ATTRIBUTES security){\n const std::wstring expected=L\"\\\\\\\\.\\\\pipe\\\\\"+g_inputHostPipeName;\n if(!fixtureFullPipe||!name||expected!=name){++forbiddenIo;SetLastError(ERROR_ACCESS_DENIED);return INVALID_HANDLE_VALUE;}\n return ::CreateNamedPipeW(name,open|FILE_FLAG_FIRST_PIPE_INSTANCE,mode,instances,outBytes,inBytes,timeout,security);\n}"
+        },
+        {
+          "label": "full-pipe only and explicit memory-deny assertion without adding or skipping a case",
+          "before": "if(argc!=3&&argc!=4)return 2;ymccPrivateTerminal::observeSelf",
+          "after": "if(argc!=4||std::wstring(argv[2])!=L\"full-pipe\")return 2;ymccPrivateRun::requireContext();if(!ymccPrivateRun::same(argv[1],ymccPrivateRun::bound.root)||!ymccPrivateRun::same(argv[3],ymccPrivateRun::bound.dll))return 2;\n SYSTEM_POWER_CAPABILITIES denied{};const auto denyBefore=fixturePowerCapabilityDenied;check(!fixtureGetPwrCapabilities(&denied)&&fixturePowerCapabilityDenied==denyBefore+1&&GetLastError()==ERROR_NOT_SUPPORTED,\"unmodeled power capability is an explicit counted memory deny\");ymccPrivateTerminal::observeSelf"
+        }
+      ]
+    },
+    {
+      "path": "positive/source/native/private_terminal_observer.h",
+      "beforeSha256": "0b8d7db8c0f8e07b191c51543162a7ecce86a945178970e9113a50d623b1cb4f",
+      "afterSha256": "734de5489fd81f7c6b7cbc45b1c64a7cfde76bd17a6bbbde39b312ef39027373",
+      "hunks": [
+        {
+          "label": "register factory-created original handle before DuplicateHandle; rebind only exact alias",
+          "before": "// Called only after successful CreateProcessW + DuplicateHandle in the original owned-child factory.\nstatic void observeChildCreated(HANDLE exactOwnedObservation,DWORD createdPid){\n const auto birth=ownedBirth(exactOwnedObservation);const auto actualPid=GetProcessId(exactOwnedObservation);\n std::lock_guard<std::mutex> lock(observerMutex);\n if(!exactOwnedObservation||!createdPid||actualPid!=createdPid||birth.empty()||createdPid==GetCurrentProcessId()||ownerCount==ownerCapacity){incrementBounded(observationRejected);return;}\n for(size_t i=0;i<ownerCount;++i)if(owners[i].pid==createdPid&&owners[i].birth==birth){incrementBounded(observationRejected);return;}\n owners[ownerCount++]={createdPid,birth,exactOwnedObservation,false,false,false};\n}\n",
+          "after": "// Factory provenance is recorded immediately after successful CreateProcessW, before duplication.\nstatic bool canObserveChild(){std::lock_guard<std::mutex> lock(observerMutex);return ownerCount<ownerCapacity;}\nstatic bool observeChildCreated(HANDLE original,DWORD pid){\n std::string birth;try{birth=ownedBirth(original);}catch(...){ }\n const auto actual=GetProcessId(original);std::lock_guard<std::mutex> lock(observerMutex);\n if(!original||!pid||actual!=pid||pid==GetCurrentProcessId()||ownerCount==ownerCapacity){incrementBounded(observationRejected);return false;}\n for(size_t i=0;i<ownerCount;++i)if(owners[i].pid==pid&&owners[i].birth==birth){incrementBounded(observationRejected);return false;}\n const bool known=!birth.empty();owners[ownerCount++]={pid,std::move(birth),original,false,false,!known};return known;\n}\nstatic bool rebindChildObservation(HANDLE original,HANDLE duplicate){\n const auto pid=GetProcessId(duplicate);std::string birth;try{birth=ownedBirth(duplicate);}catch(...){return false;}\n std::lock_guard<std::mutex> lock(observerMutex);for(size_t i=0;i<ownerCount;++i){auto& r=owners[i];if(r.observation==original&&!r.self&&!r.unknown&&r.pid==pid&&r.birth==birth){r.observation=duplicate;return true;}}incrementBounded(observationRejected);return false;\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "positive/pipe_cases.inc",
+      "beforeSha256": "1a9deb2558ac07a4879ac82be066a51f17f2340821fa1f3a0b254e9a3ffcb4b7",
+      "afterSha256": "b84e7fb5e0d602e7e669f656ec34edf1a43c41f2d01fca889bbbd65e8d421cdf",
+      "hunks": [
+        {
+          "label": "exact context/child environment and failure ownership cleanup",
+          "before": "static BOOL fixtureCreateManagedProcess(STARTUPINFOW& si,PROCESS_INFORMATION& pi){\n if(fixtureManagedDll.empty())throw std::runtime_error(\"explicit-managed-fixture-required\");\n const auto receipt=fspath::path(g_yemanccDataDir)/(L\"full-pipe-child-\"+std::to_wstring(++fullPipeSpawnCount)+L\".json\");\n const std::wstring dotnet=L\"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\";\n std::wstring command=fullPipeQuote(dotnet)+L\" \"+fullPipeQuote(fixtureManagedDll)+L\" --pipe \"+fullPipeQuote(g_inputHostPipeName)+L\" --parent-pid \"+std::to_wstring(GetCurrentProcessId())+L\" --receipt \"+fullPipeQuote(receipt.wstring())+L\" --nonce \"+fullPipeQuote(U2W(g_inputHostStartupNonce))+L\" --fault \"+U2W(fullPipeFault);\n if(!CreateProcessW(dotnet.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW,nullptr,nullptr,&si,&pi))return FALSE;\n HANDLE observation=nullptr;if(!DuplicateHandle(GetCurrentProcess(),pi.hProcess,GetCurrentProcess(),&observation,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error(\"private-child-observer-duplicate\");\n ymccPrivateTerminal::observeChildCreated(observation,pi.dwProcessId);\n fullPipeChildObservers.push_back(observation);fullPipeReceipts.push_back(receipt.wstring());return TRUE;\n}\n",
+          "after": "static BOOL fixtureCreateManagedProcess(STARTUPINFOW& si,PROCESS_INFORMATION& pi){\n ymccPrivateRun::requireContext();if(!ymccPrivateRun::same(fixtureManagedDll,ymccPrivateRun::bound.dll)||!ymccPrivateTerminal::canObserveChild())throw std::runtime_error(\"private-child-binding-or-capacity\");\n const auto receipt=fspath::path(g_yemanccDataDir)/(L\"full-pipe-child-\"+std::to_wstring(++fullPipeSpawnCount)+L\".json\");\n const std::wstring dotnet=L\"C:\\\\Program Files\\\\dotnet\\\\dotnet.exe\";\n std::wstring command=fullPipeQuote(dotnet)+L\" \"+fullPipeQuote(fixtureManagedDll)+L\" --pipe \"+fullPipeQuote(g_inputHostPipeName)+L\" --parent-pid \"+std::to_wstring(GetCurrentProcessId())+L\" --receipt \"+fullPipeQuote(receipt.wstring())+L\" --nonce \"+fullPipeQuote(U2W(g_inputHostStartupNonce))+L\" --fault \"+U2W(fullPipeFault);\n auto environment=ymccPrivateRun::childEnvironment(GetCurrentProcessId(),g_inputHostPipeName,U2W(g_inputHostStartupNonce));\n if(!CreateProcessW(dotnet.c_str(),command.data(),nullptr,nullptr,FALSE,CREATE_NO_WINDOW|CREATE_UNICODE_ENVIRONMENT,environment.data(),ymccPrivateRun::bound.root.c_str(),&si,&pi))return FALSE;\n HANDLE observation=nullptr;bool registered=false,rebound=false;\n const auto failOwned=[&](DWORD error)noexcept{\n  // No HELLO/PREPARE has been sent. Retire only this factory's adopted server; EOF/connect failure lets the child exit naturally.\n  inputHostPipeCloseOwned(g_inputHostServerPipe);g_inputHostServerPipe=nullptr;\n  const auto wait=WaitForSingleObject(pi.hProcess,5000);try{ymccPrivateTerminal::observeChildWait(rebound?observation:pi.hProcess,wait);}catch(...){ }\n  if(observation)CloseHandle(observation);if(pi.hThread)CloseHandle(pi.hThread);if(pi.hProcess)CloseHandle(pi.hProcess);pi={};SetLastError(error);return FALSE;\n };\n try{\n  registered=ymccPrivateTerminal::observeChildCreated(pi.hProcess,pi.dwProcessId);\n  if(!registered)return failOwned(ERROR_INVALID_DATA);\n  if(!DuplicateHandle(GetCurrentProcess(),pi.hProcess,GetCurrentProcess(),&observation,0,FALSE,DUPLICATE_SAME_ACCESS))return failOwned(GetLastError());\n  // Reserve vector allocations before rebinding so failure cleanup still observes the original handle.\n  fullPipeChildObservers.reserve(fullPipeChildObservers.size()+1);fullPipeReceipts.reserve(fullPipeReceipts.size()+1);auto receiptText=receipt.wstring();\n  if(!ymccPrivateTerminal::rebindChildObservation(pi.hProcess,observation))return failOwned(ERROR_INVALID_DATA);\n  rebound=true;fullPipeChildObservers.push_back(observation);fullPipeReceipts.push_back(std::move(receiptText));return TRUE;\n }catch(...){return failOwned(ERROR_NOT_ENOUGH_MEMORY);}\n}\n"
+        }
+      ]
+    },
+    {
+      "path": "managed/PrivateRuntimeGuard.cs",
+      "beforeSha256": null,
+      "afterSha256": "9551f5f3ca6e32caff3eb015feed9e7139131f0965b1db254997ab79075f12da",
+      "source": "using System.IO;using System.IO.Pipes;using System.Runtime.InteropServices;using Microsoft.Win32.SafeHandles;\ninternal static class PrivateRuntimeGuard {\n private static string Env(string name)=>Environment.GetEnvironmentVariable(name)??\"\";\n private static bool Same(string a,string b)=>a.Length>0&&b.Length>0&&string.Equals(Path.GetFullPath(a),Path.GetFullPath(b),StringComparison.OrdinalIgnoreCase);\n private static bool Plain(string p){if(!Path.IsPathFullyQualified(p))return false;for(var at=Path.GetFullPath(p);!string.IsNullOrEmpty(at);at=Path.GetDirectoryName(at)??\"\"){if((File.GetAttributes(at)&FileAttributes.ReparsePoint)!=0)return false;}return true;}\n internal static void ValidateLaunch(string pipe,int parent,string receipt,string nonce){\n  var root=Env(\"YMCC_PRIVATE_RUN_ROOT\");if(!Same(root,Environment.CurrentDirectory)||!Same(root,Env(\"YEMAN_POWER_CONTROL_DIR\"))||!Plain(root)||!Same(typeof(PrivateRuntimeGuard).Assembly.Location,Env(\"YMCC_PRIVATE_MANAGED_DLL\"))||!Plain(typeof(PrivateRuntimeGuard).Assembly.Location)||!Same(Path.GetDirectoryName(receipt)??\"\",root)||!Plain(Path.GetDirectoryName(receipt)!)||!int.TryParse(Env(\"YMCC_PRIVATE_PARENT_PID\"),out var expected)||parent!=expected||pipe!=Env(\"YMCC_PRIVATE_PIPE\")||nonce!=Env(\"YMCC_PRIVATE_NONCE\"))throw new InvalidDataException(\"private-launch-binding\");\n }\n internal static void ValidateServer(NamedPipeClientStream pipe,int expectedParent){if(!GetNamedPipeServerProcessId(pipe.SafePipeHandle,out var actual)||actual!=(uint)expectedParent)throw new IOException(\"private-pipe-server-not-native-parent\");}\n [DllImport(\"kernel32.dll\",SetLastError=true)][return:MarshalAs(UnmanagedType.Bool)]private static extern bool GetNamedPipeServerProcessId(SafePipeHandle pipe,out uint pid);\n}\n"
+    },
+    {
+      "path": "managed/ManagedEntry.cs",
+      "beforeSha256": "002a41314b0d8147ff948862c257deefffe02d121b945ceb07d217bf2af60b99",
+      "afterSha256": "f66ca0511a573084b343f785173b7bc13eee8b53502d80f81e337d0d7d3bbcce",
+      "hunks": [
+        {
+          "label": "validate exact factory context before HostSession and parent OpenProcess",
+          "before": "        var options = parsed!;\n",
+          "after": "        var options = parsed!;\n        PrivateRuntimeGuard.ValidateLaunch(options.Pipe, options.ParentPid, options.Receipt, options.Nonce);\n"
+        }
+      ]
+    },
+    {
+      "path": "managed/ProductionPipe.cs",
+      "beforeSha256": "584cbbf7f20cf248558b65c6e3af00084446e8b2f067abf0c81b6c3901c40f4c",
+      "afterSha256": "0da330ed91a0b93ebbe2a4828a474c97ba75c2d3ad13fd3342b06d61c1aba6dc",
+      "hunks": [
+        {
+          "label": "verify actual local server PID before first protocol message",
+          "before": "            pipe.ReadMode = PipeTransmissionMode.Message;",
+          "after": "            PrivateRuntimeGuard.ValidateServer(pipe, parentPid);\n            pipe.ReadMode = PipeTransmissionMode.Message;"
+        }
+      ]
+    },
+    {
+      "path": "managed/Fixture.csproj",
+      "beforeSha256": "330fc64c37c42ca3ff6cf00b64283a99b24ac3080881671d5c36c0be4a3132d8",
+      "afterSha256": "476455f48193d7ebf984e39041831d437fa1174ff1ca39b11922a455940a2a0b",
+      "hunks": [
+        {
+          "label": "compile own guard with original managed fixture items",
+          "before": "<Compile Include=\"BuildIdentity.g.cs\"/>",
+          "after": "<Compile Include=\"BuildIdentity.g.cs\"/><Compile Include=\"PrivateRuntimeGuard.cs\"/>"
+        }
+      ]
+    }
+  ]
+}

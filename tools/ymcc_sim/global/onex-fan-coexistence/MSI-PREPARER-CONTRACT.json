@@ -1,0 +1,508 @@
+{
+  "schemaVersion": 1,
+  "kind": "msi-three-stage-source-import-contract",
+  "currentPrimaryBehaviorAccepted": false,
+  "historicalAlgorithmOnly": true,
+  "currentGraphQualificationRequired": true,
+  "parentAdapterId": "fan.onex-lighting-coexistence",
+  "budgetsMs": {
+    "businessEachRole": 90000,
+    "metadataEachRole": 60000,
+    "preloadEachRole": 60000,
+    "parent": 360000
+  },
+  "lifecycleLegacyPlanBusinessMs": 60000,
+  "lifecycleLegacyPlanNote": "Keep original helper/basis bytes. The actual accepted lifecycle runner used an explicit 90000 business limit; do not infer it from plan.budgets.business or rewrite the historic plan. Metadata and preload stay 60000.",
+  "stages": [
+    {
+      "stage": "lifecycle",
+      "module": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-lifecycle.mjs",
+      "inspectExport": "inspectMsiLifecycleInputs",
+      "prepareExport": "prepareMsiLifecycle",
+      "profile": "msi-original-lifecycle23-from-accepted-onex92",
+      "orderedCaseIds": [
+        "msi-original-public-cycle:ClawA1M",
+        "msi-original-public-cycle:ClawA2VM",
+        "msi-original-public-cycle:ClawBZ2EM",
+        "msi-original-public-cycle:ClawCG3EM",
+        "msi-original-public-reopen:ClawA1M",
+        "msi-original-public-reopen:ClawA2VM",
+        "msi-original-public-reopen:ClawBZ2EM",
+        "msi-original-public-reopen:ClawCG3EM",
+        "msi-original-disconnected-hid-rebind",
+        "msi-original-unknown-firmware-honest",
+        "msi-original-open-read-failure:TransportFailed",
+        "msi-original-open-read-failure:ShortPayload",
+        "msi-original-open-read-failure:FlagNotSuccessful",
+        "msi-original-open-superseded",
+        "msi-original-release-read-unavailable:Get_Data",
+        "msi-original-release-read-unavailable:Get_AP",
+        "msi-original-release-write-transport-failed",
+        "msi-original-release-readback-mismatch",
+        "msi-original-release-readback-unavailable",
+        "msi-original-already-automatic-no-write",
+        "msi-original-foreign-release-receipt:OperationToken",
+        "msi-original-foreign-release-receipt:BootIdentity",
+        "msi-original-foreign-open-marker"
+      ],
+      "roles": [
+        "positive",
+        "narrow-open",
+        "usable",
+        "firmware",
+        "release-dispatch",
+        "settlement",
+        "binding"
+      ],
+      "exactFailureMasks": {
+        "positive": [],
+        "narrow-open": [
+          "msi-original-public-cycle:ClawA1M",
+          "msi-original-public-cycle:ClawA2VM",
+          "msi-original-public-cycle:ClawBZ2EM",
+          "msi-original-public-cycle:ClawCG3EM",
+          "msi-original-public-reopen:ClawA1M",
+          "msi-original-public-reopen:ClawA2VM",
+          "msi-original-public-reopen:ClawBZ2EM",
+          "msi-original-public-reopen:ClawCG3EM",
+          "msi-original-disconnected-hid-rebind",
+          "msi-original-unknown-firmware-honest",
+          "msi-original-open-read-failure:TransportFailed",
+          "msi-original-open-read-failure:ShortPayload",
+          "msi-original-open-read-failure:FlagNotSuccessful",
+          "msi-original-open-superseded",
+          "msi-original-release-read-unavailable:Get_Data",
+          "msi-original-release-read-unavailable:Get_AP",
+          "msi-original-release-write-transport-failed",
+          "msi-original-release-readback-mismatch",
+          "msi-original-release-readback-unavailable",
+          "msi-original-already-automatic-no-write",
+          "msi-original-foreign-release-receipt:OperationToken",
+          "msi-original-foreign-release-receipt:BootIdentity",
+          "msi-original-foreign-open-marker"
+        ],
+        "usable": [
+          "msi-original-open-read-failure:ShortPayload",
+          "msi-original-open-read-failure:FlagNotSuccessful"
+        ],
+        "firmware": [
+          "msi-original-public-cycle:ClawA1M",
+          "msi-original-public-cycle:ClawA2VM",
+          "msi-original-public-cycle:ClawBZ2EM",
+          "msi-original-public-cycle:ClawCG3EM",
+          "msi-original-disconnected-hid-rebind"
+        ],
+        "release-dispatch": [
+          "msi-original-public-cycle:ClawA1M",
+          "msi-original-public-cycle:ClawA2VM",
+          "msi-original-public-cycle:ClawBZ2EM",
+          "msi-original-public-cycle:ClawCG3EM",
+          "msi-original-public-reopen:ClawA1M",
+          "msi-original-public-reopen:ClawA2VM",
+          "msi-original-public-reopen:ClawBZ2EM",
+          "msi-original-public-reopen:ClawCG3EM",
+          "msi-original-unknown-firmware-honest",
+          "msi-original-release-read-unavailable:Get_Data",
+          "msi-original-release-read-unavailable:Get_AP",
+          "msi-original-release-write-transport-failed",
+          "msi-original-release-readback-mismatch",
+          "msi-original-release-readback-unavailable",
+          "msi-original-already-automatic-no-write",
+          "msi-original-foreign-release-receipt:OperationToken",
+          "msi-original-foreign-release-receipt:BootIdentity"
+        ],
+        "settlement": [
+          "msi-original-release-read-unavailable:Get_Data",
+          "msi-original-release-read-unavailable:Get_AP",
+          "msi-original-release-write-transport-failed",
+          "msi-original-release-readback-mismatch",
+          "msi-original-release-readback-unavailable"
+        ],
+        "binding": [
+          "msi-original-foreign-release-receipt:OperationToken",
+          "msi-original-foreign-release-receipt:BootIdentity"
+        ]
+      },
+      "failureCounts": [
+        0,
+        23,
+        2,
+        5,
+        17,
+        5,
+        2
+      ],
+      "markers": {
+        "narrow-open": [
+          "LIFE_FORBIDDEN:general-msi-Open"
+        ],
+        "usable": [
+          "Joined consumer must refuse WMI readiness read failed or truncated"
+        ],
+        "firmware": [
+          "Original HID readiness must supply",
+          "Disconnected original HID must rebind"
+        ],
+        "release-dispatch": [
+          "Original MSI close must enter release",
+          "Each reopened original session returns once",
+          "Unavailable original release read",
+          "Original failed write",
+          "Accepted WMI transport without changed original readback",
+          "Actual unreadable post-write verification",
+          "Original already-target result"
+        ],
+        "settlement": [
+          "Original MSI close must enter release",
+          "Each reopened original session returns once",
+          "Unavailable original release read",
+          "Original failed write",
+          "Accepted WMI transport without changed original readback",
+          "Actual unreadable post-write verification",
+          "Original already-target result"
+        ],
+        "binding": [
+          "Original successful release from another operation/boot must be refused"
+        ]
+      },
+      "acceptedHistoricalJoint": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-seven-independent-joint-r2/SUMMARY.json",
+        "sha256": "ecc6413373c841effdd932f6eb8f697cf70a87aa793434f91600cb89f5ac9fb9"
+      },
+      "historicalQualification": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-derivative-parent-qualification.json",
+        "sha256": "e5d96da6911695ff449856e2a3df95282fe602140be2e0f2303b7a9214412903"
+      }
+    },
+    {
+      "stage": "manual",
+      "module": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-manual.mjs",
+      "inspectExport": "inspectMsiManualInputs",
+      "prepareExport": "prepareMsiManual",
+      "profile": "msi-original-manual44-from-accepted-msi92",
+      "orderedCaseIds": [
+        "msi-manual-original-public-linear:ClawA1M",
+        "msi-manual-original-public-linear:ClawA2VM",
+        "msi-manual-original-public-linear:ClawBZ2EM",
+        "msi-manual-original-public-linear:ClawCG3EM",
+        "msi-manual-original-epoch-before-write",
+        "msi-manual-original-device-replaced",
+        "msi-manual-original-assembly-replaced",
+        "msi-manual-original-flat-fullspeed:ClawA1M",
+        "msi-manual-original-fullspeed-to-curve:ClawA1M",
+        "msi-manual-original-flat-fullspeed:ClawA2VM",
+        "msi-manual-original-fullspeed-to-curve:ClawA2VM",
+        "msi-manual-original-flat-fullspeed:ClawBZ2EM",
+        "msi-manual-original-fullspeed-to-curve:ClawBZ2EM",
+        "msi-manual-original-flat-fullspeed:ClawCG3EM",
+        "msi-manual-original-fullspeed-to-curve:ClawCG3EM",
+        "msi-manual-original-short-table:0",
+        "msi-manual-original-short-table:7",
+        "msi-manual-original-short-table:8",
+        "msi-manual-original-short-table:30",
+        "msi-manual-original-table-read-failure:1",
+        "msi-manual-original-table-read-failure:2",
+        "msi-manual-original-table-write-failure:1:InParamsUnavailable",
+        "msi-manual-original-table-write-failure:1:TransportFailed",
+        "msi-manual-original-table-write-failure:1:Exception",
+        "msi-manual-original-table-write-failure:2:InParamsUnavailable",
+        "msi-manual-original-table-write-failure:2:TransportFailed",
+        "msi-manual-original-table-write-failure:2:Exception",
+        "msi-manual-original-table-readback-unavailable",
+        "msi-manual-original-table-readback-mismatch",
+        "msi-manual-original-bit-read-failure:1",
+        "msi-manual-original-bit-read-failure:152",
+        "msi-manual-original-epoch-after-stage:1",
+        "msi-manual-original-epoch-after-stage:2",
+        "msi-manual-original-epoch-after-stage:212",
+        "msi-manual-original-epoch-after-stage:152",
+        "msi-manual-original-owner-after-table:device",
+        "msi-manual-original-owner-after-table:assembly",
+        "msi-manual-original-axis-fallback:short",
+        "msi-manual-original-axis-fallback:unordered",
+        "msi-manual-original-axis-fallback:unavailable",
+        "msi-manual-original-current-receipt-after-failure",
+        "msi-manual-original-invalid-public-curves",
+        "msi-manual-original-unadmitted-sleep-gate",
+        "msi-manual-original-extra-response-byte"
+      ],
+      "roles": [
+        "positive",
+        "owner",
+        "boundaries",
+        "table-status",
+        "preservation",
+        "fullspeed",
+        "axis-endpoint"
+      ],
+      "exactFailureMasks": {
+        "positive": [],
+        "owner": [
+          "msi-manual-original-device-replaced",
+          "msi-manual-original-assembly-replaced",
+          "msi-manual-original-owner-after-table:device",
+          "msi-manual-original-owner-after-table:assembly"
+        ],
+        "boundaries": [
+          "msi-manual-original-device-replaced",
+          "msi-manual-original-assembly-replaced",
+          "msi-manual-original-owner-after-table:device",
+          "msi-manual-original-owner-after-table:assembly",
+          "msi-manual-original-epoch-before-write",
+          "msi-manual-original-epoch-after-stage:1",
+          "msi-manual-original-epoch-after-stage:2",
+          "msi-manual-original-epoch-after-stage:212",
+          "msi-manual-original-epoch-after-stage:152"
+        ],
+        "table-status": [
+          "msi-manual-original-short-table:0",
+          "msi-manual-original-short-table:7",
+          "msi-manual-original-short-table:8",
+          "msi-manual-original-short-table:30",
+          "msi-manual-original-table-read-failure:1",
+          "msi-manual-original-table-read-failure:2",
+          "msi-manual-original-table-write-failure:1:InParamsUnavailable",
+          "msi-manual-original-table-write-failure:1:TransportFailed",
+          "msi-manual-original-table-write-failure:1:Exception",
+          "msi-manual-original-table-write-failure:2:InParamsUnavailable",
+          "msi-manual-original-table-write-failure:2:TransportFailed",
+          "msi-manual-original-table-write-failure:2:Exception",
+          "msi-manual-original-table-readback-unavailable",
+          "msi-manual-original-table-readback-mismatch",
+          "msi-manual-original-current-receipt-after-failure"
+        ],
+        "preservation": [
+          "msi-manual-original-public-linear:ClawA1M",
+          "msi-manual-original-public-linear:ClawA2VM",
+          "msi-manual-original-public-linear:ClawBZ2EM",
+          "msi-manual-original-public-linear:ClawCG3EM"
+        ],
+        "fullspeed": [
+          "msi-manual-original-flat-fullspeed:ClawA1M",
+          "msi-manual-original-fullspeed-to-curve:ClawA1M",
+          "msi-manual-original-flat-fullspeed:ClawA2VM",
+          "msi-manual-original-fullspeed-to-curve:ClawA2VM",
+          "msi-manual-original-flat-fullspeed:ClawBZ2EM",
+          "msi-manual-original-fullspeed-to-curve:ClawBZ2EM",
+          "msi-manual-original-flat-fullspeed:ClawCG3EM",
+          "msi-manual-original-fullspeed-to-curve:ClawCG3EM"
+        ],
+        "axis-endpoint": [
+          "msi-manual-original-public-linear:ClawA1M",
+          "msi-manual-original-public-linear:ClawA2VM",
+          "msi-manual-original-public-linear:ClawBZ2EM",
+          "msi-manual-original-public-linear:ClawCG3EM",
+          "msi-manual-original-epoch-before-write",
+          "msi-manual-original-device-replaced",
+          "msi-manual-original-assembly-replaced",
+          "msi-manual-original-table-readback-unavailable",
+          "msi-manual-original-axis-fallback:short",
+          "msi-manual-original-axis-fallback:unordered",
+          "msi-manual-original-axis-fallback:unavailable"
+        ]
+      },
+      "failureCounts": [
+        0,
+        4,
+        9,
+        15,
+        4,
+        8,
+        11
+      ],
+      "markers": {
+        "positive": [],
+        "owner": [
+          "Joined consumer must refuse FAN_WRITE_SUPERSEDED"
+        ],
+        "boundaries": [
+          "Joined consumer must refuse FAN_WRITE_SUPERSEDED"
+        ],
+        "table-status": [
+          "Joined consumer must refuse FAN_CURVE_WRITE_FAILED",
+          "WMI transport success cannot replace actual six-duty readback equality"
+        ],
+        "preservation": [
+          "Original HC writer preserves both boundaries"
+        ],
+        "fullspeed": [
+          "Explicit flat100 public intent",
+          "First public full-speed intent"
+        ],
+        "axis-endpoint": [
+          "Original public MSI interpolation",
+          "Unusable original temperature axis",
+          "Joined consumer must refuse FAN_WRITE_SUPERSEDED",
+          "Original transported table with missing readback"
+        ]
+      },
+      "acceptedHistoricalJoint": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-seven-independent-joint/SUMMARY.json",
+        "sha256": "705713a0dd1c5af5e2834e5f7cdb5c48e6e4fa0fd5b8f82c4b8628b3dcff14e3"
+      },
+      "historicalQualification": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-derivative-parent-qualification.json",
+        "sha256": "e08ad7071976483a07e0e24b0fdcdf3c50b46a977e22bc6c33b98a52e8fd25bf"
+      }
+    },
+    {
+      "stage": "replay",
+      "module": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-replay.mjs",
+      "inspectExport": "inspectMsiReplayInputs",
+      "prepareExport": "prepareMsiReplay",
+      "profile": "msi-original-replay26-from-accepted-manual92",
+      "orderedCaseIds": [
+        "msi-replay-original-firmware:ClawA1M",
+        "msi-replay-original-external-profile:ClawA1M",
+        "msi-replay-original-power-edge:ClawA1M",
+        "msi-replay-original-firmware:ClawA2VM",
+        "msi-replay-original-external-profile:ClawA2VM",
+        "msi-replay-original-power-edge:ClawA2VM",
+        "msi-replay-original-firmware:ClawBZ2EM",
+        "msi-replay-original-external-profile:ClawBZ2EM",
+        "msi-replay-original-power-edge:ClawBZ2EM",
+        "msi-replay-original-firmware:ClawCG3EM",
+        "msi-replay-original-external-profile:ClawCG3EM",
+        "msi-replay-original-power-edge:ClawCG3EM",
+        "msi-replay-original-old-timer-after-command",
+        "msi-replay-original-old-timer-after-reopen",
+        "msi-replay-original-discard-waits-applied",
+        "msi-replay-original-old-profile-generation",
+        "msi-replay-original-sleep-blocks-callback",
+        "msi-replay-original-close-blocks-callback",
+        "msi-replay-original-mode-duplicate-and-coalesce",
+        "msi-replay-original-mode-failure-once",
+        "msi-replay-original-profile-retry-bounded",
+        "msi-replay-original-new-applied-during-write",
+        "msi-replay-original-queued-owner-replaced",
+        "msi-replay-original-queued-sleep-announcement",
+        "msi-replay-original-no-pending-no-rearm",
+        "msi-replay-original-manual-fullspeed-replayed"
+      ],
+      "roles": [
+        "positive",
+        "sta",
+        "timer-owner",
+        "admitted-owner",
+        "mode-settlement",
+        "profile-complete",
+        "followup"
+      ],
+      "exactFailureMasks": {
+        "positive": [],
+        "sta": [
+          "msi-replay-original-firmware:ClawA1M",
+          "msi-replay-original-external-profile:ClawA1M",
+          "msi-replay-original-power-edge:ClawA1M",
+          "msi-replay-original-firmware:ClawA2VM",
+          "msi-replay-original-external-profile:ClawA2VM",
+          "msi-replay-original-power-edge:ClawA2VM",
+          "msi-replay-original-firmware:ClawBZ2EM",
+          "msi-replay-original-external-profile:ClawBZ2EM",
+          "msi-replay-original-power-edge:ClawBZ2EM",
+          "msi-replay-original-firmware:ClawCG3EM",
+          "msi-replay-original-external-profile:ClawCG3EM",
+          "msi-replay-original-power-edge:ClawCG3EM",
+          "msi-replay-original-old-timer-after-command",
+          "msi-replay-original-old-timer-after-reopen",
+          "msi-replay-original-discard-waits-applied",
+          "msi-replay-original-mode-duplicate-and-coalesce",
+          "msi-replay-original-new-applied-during-write",
+          "msi-replay-original-queued-owner-replaced",
+          "msi-replay-original-queued-sleep-announcement",
+          "msi-replay-original-manual-fullspeed-replayed"
+        ],
+        "timer-owner": [
+          "msi-replay-original-old-timer-after-command",
+          "msi-replay-original-old-timer-after-reopen"
+        ],
+        "admitted-owner": [
+          "msi-replay-original-queued-owner-replaced"
+        ],
+        "mode-settlement": [
+          "msi-replay-original-firmware:ClawA1M",
+          "msi-replay-original-firmware:ClawA2VM",
+          "msi-replay-original-firmware:ClawBZ2EM",
+          "msi-replay-original-firmware:ClawCG3EM",
+          "msi-replay-original-old-timer-after-command",
+          "msi-replay-original-mode-duplicate-and-coalesce"
+        ],
+        "profile-complete": [
+          "msi-replay-original-external-profile:ClawA1M",
+          "msi-replay-original-external-profile:ClawA2VM",
+          "msi-replay-original-external-profile:ClawBZ2EM",
+          "msi-replay-original-external-profile:ClawCG3EM",
+          "msi-replay-original-new-applied-during-write"
+        ],
+        "followup": [
+          "msi-replay-original-discard-waits-applied",
+          "msi-replay-original-profile-retry-bounded"
+        ]
+      },
+      "failureCounts": [
+        0,
+        20,
+        2,
+        1,
+        6,
+        5,
+        2
+      ],
+      "markers": {
+        "positive": [],
+        "sta": [
+          "Every replay write must execute on the original owned STA",
+          "Actual original ThreadPool callback must wait"
+        ],
+        "timer-owner": [
+          "Retired timer callback cannot adopt",
+          "A callback queued before Close cannot adopt"
+        ],
+        "admitted-owner": [
+          "A callback admitted before STA wait cannot adopt"
+        ],
+        "mode-settlement": [
+          "Actual callback settles the same completed firmware revision",
+          "Current timer still consumes the pending mode edge",
+          "One current callback settles latest coalesced"
+        ],
+        "profile-complete": [
+          "Actual replay consumes current original profile snapshot once",
+          "Next callback consumes only the latest current profile snapshot"
+        ],
+        "followup": [
+          "Original discard consumes one edge",
+          "Actual profile write failures consume exactly three"
+        ]
+      },
+      "acceptedHistoricalJoint": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r68-msi-replay-seven-independent-joint/SUMMARY.json",
+        "sha256": "30bf2438d33c4fcca5d55d53fbc623754ecd8ea290eca5151fac7c5b2ed6954e"
+      },
+      "historicalQualification": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-replay-derivative-parent-qualification.json",
+        "sha256": "05cf820b68478a3b19e24a2bbcf2f78917db9041bfc6761601ce789172bfd8c3"
+      }
+    }
+  ],
+  "graph": {
+    "defaultManaged": 92,
+    "framework": 64,
+    "exactAliases": 6,
+    "nativeGuards": 116,
+    "newPermission": false
+  },
+  "rawProofRequirement": "Complete actual typed IL/API and exact selected port/callback/timer signatures plus whole-module/method-set comparison and real natural metadata reader process. A same-source count or hash declaration does not qualify a different output PE.",
+  "unknown": [
+    "current compiled graph typed/API qualification",
+    "current G original full parent360 run",
+    "current G same-source fullglobal+sleep joint",
+    "HostMain",
+    "ManagerStart",
+    "physical OEM acknowledgement",
+    "wall clock timer delivery",
+    "CPU/power benefit",
+    "per-owner native math cleanup",
+    "framework dynamic serialization/database IO"
+  ]
+}

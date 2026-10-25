@@ -1,0 +1,3314 @@
+{
+  "status": "PASS",
+  "checks": 549,
+  "models": 47,
+  "failures": [],
+  "hardwareIo": false,
+  "HCAssemblyLoaded": false,
+  "productionEntryPointInvoked": false,
+  "assemblySha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "assemblyPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+  "targetCalls": [
+    "Program.ExecuteLedAction",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Bindings",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExitCodeForNote",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExitCodeForNote",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExitCodeForNote",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Require",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.IdentityMatches",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.IdentityMatches",
+    "YeManFanBackend.Capabilities.HcLightingCapabilityCatalog.Resolve",
+    "YeManFanBackend.Capabilities.HcDeviceCapabilityCatalog.Find",
+    "Program.ExecuteCatalogLedAction",
+    "Program.ExecuteCatalogLedAction"
+  ],
+  "dependencyAttempts": [],
+  "nativeAttempts": [],
+  "cases": [
+    {
+      "id": "loki-off-reaches-black-color-writer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "47-registered-lighting-classes",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1Pro:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA1X:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AOKZOEA2:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEO2S:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIR1S:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRLite:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMD:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusAMDMendocino:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPlusIntel:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOAIRPro:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlip1SKB:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOFlipKB:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOKUN:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AYANEOSlide:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:unsupported-brightness-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.AynLoki:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA2VM:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawBZ2EM:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawCG3EM:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:actual-color-consumer:gradient",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.GamingZone:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ1:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoSZ2:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LegionGoTablet2:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:unsupported-brightness-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6600U:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:unsupported-brightness-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMax6800U:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:unsupported-brightness-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiMiniPro:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:unsupported-brightness-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerApex:named-preset-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1AMD:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerG1Intel:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFly:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerOneXFlyF1Pro:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1:named-preset-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1AMD:named-preset-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Intel:named-preset-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Mini:declared-preset-without-transport-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.OneXPlayerX1Pro:named-preset-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAllyX:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:status-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.SuiPlay0X1:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAlly:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-color-consumer:solid",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-color-consumer:breathing",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-color-consumer:rainbow",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-color-consumer:wheel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-color-consumer:ambilight",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:actual-off-consumer",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:brightness-consumed",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:base-status-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:unadvertised-effect-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.XboxROGAllyX:spoofed-expected-class-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AOKZOEA1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AOKZOEA1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AOKZOEA1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AOKZOEA1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AOKZOEA1X",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AOKZOEA1X",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AOKZOEA2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AOKZOEA2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ASUS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ASUS.ASUS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ASUS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEO2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO2021",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEO2021",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO2021Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEO2021Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO2S",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEO2S",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIR",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIR",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIR1S",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIR1S",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRLite",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRLite",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRPlus",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRPlus",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRPlusAMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRPlusAMDMendocino",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRPlusIntel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOAIRPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOAIRPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO.AYANEODevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEODevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEODevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEODeviceCEc",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEODeviceCEc",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO.AYANEODeviceCEii",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEODeviceCEii",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEODeviceCEii",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOFlip1SDS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOFlip1SDS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOFlip1SKB",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOFlip1SKB",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOFlipDS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOFlipDS",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOFlipKB",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOFlipKB",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOKUN",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOKUN",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEONEXT",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEONEXT",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEONEXTLite",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEONEXTLite",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEONEXTLite4500U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEONEXTLite4500U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AYANEOSlide",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AYANEOSlide",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.AynLoki",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.AynLoki",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ClawA1M",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ClawA1M",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ClawA2VM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ClawA2VM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ClawBZ2EM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ClawBZ2EM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ClawCG3EM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.MSI.ClawCG3EM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ClawCG3EM",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.DefaultDevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.DefaultDevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin3",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin3",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4_2023",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4_2023",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4_2023_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4_2023_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4_2024",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4_2024",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4_2024_8640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4_2024_8640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin4_2024_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin4_2024_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWin5",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWin5",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2022_6800U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2023_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2023_7840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2024_8640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2024_8840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMax2_2024_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMini_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMini_7640U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMini_8840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMini_8840U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GPDWinMini_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GPDWinMini_HX370",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.GamingZone",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Zotac.GamingZone",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.GamingZone",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.IDevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.IDevice",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LegionGo",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Lenovo.LegionGo",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LegionGo",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LegionGoSZ1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LegionGoSZ1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LegionGoSZ2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LegionGoSZ2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LegionGoTablet",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LegionGoTablet",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LegionGoTablet2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LegionGoTablet2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LokiMax6600U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LokiMax6600U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LokiMax6800U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LokiMax6800U",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LokiMiniPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LokiMiniPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.LokiZero",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.LokiZero",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.MinisforumV3",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.MinisforumV3",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXAOKZOE",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXAOKZOE",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayer2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayer2",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayer2Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayer2Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerApex",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerApex",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerG1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerG1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerG1AMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerG1AMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerG1Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerG1Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerMini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerMini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerMiniAMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerMiniAMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerMiniIntel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerMiniIntel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerMiniPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerMiniPro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerOneXFly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerOneXFly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerOneXFlyF1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerX1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerX1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerX1AMD",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerX1Intel",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerX1Mini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerX1Mini",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.OneXPlayerX1Pro",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ROGAlly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ROGAlly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.ROGAllyX",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.ROGAllyX",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.SteamDeck",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.SteamDeck",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.SuiPlay0X1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.SuiPlay0X1",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.XboxROGAlly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.XboxROGAlly",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:HandheldCompanion.Devices.XboxROGAllyX",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "exact-lighting-alias:hc.device.XboxROGAllyX",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:failed-callback-not-success",
+      "ok": true,
+      "actualTargetCalls": 2
+    },
+    {
+      "id": "hc.device.LokiZero:failed-off-not-success",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.LokiZero:throwing-consumer-propagates",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:failed-callback-not-success",
+      "ok": true,
+      "actualTargetCalls": 2
+    },
+    {
+      "id": "hc.device.ROGAlly:failed-off-not-success",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ROGAlly:throwing-consumer-propagates",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:failed-callback-not-success",
+      "ok": true,
+      "actualTargetCalls": 2
+    },
+    {
+      "id": "hc.device.ClawA1M:failed-off-not-success",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "hc.device.ClawA1M:throwing-consumer-propagates",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "Mini-serial-status-is-not-advertised",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "reviewed-Loki-native-base-alias",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "unreviewed-cross-model-alias-refused",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "MSI-real-brightness-preserved-without-source-flag",
+      "ok": true,
+      "actualTargetCalls": 2
+    },
+    {
+      "id": "off-runtime-missing-writer-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "off-runtime-extra-writer-zero-io",
+      "ok": true,
+      "actualTargetCalls": 1
+    },
+    {
+      "id": "HC-not-loaded",
+      "ok": true,
+      "actualTargetCalls": 0
+    }
+  ]
+}

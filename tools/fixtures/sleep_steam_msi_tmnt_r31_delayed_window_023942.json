@@ -1,0 +1,836 @@
+{
+  "sourcePackage": "YeManCC-logs-20261014-023942-微星G3E.zip",
+  "zipSha256": "49d9f092b38d5655ba439994c12a468380eb89f61ce52a6fec0359555aeb9c76",
+  "implementation": "steam-wake-round31-native-predispatch-wait",
+  "generation": 2,
+  "phase": "blocked",
+  "reason": "steam-original-window-not-confirmed",
+  "before": {
+    "continueRecovery": {
+      "candidate": false,
+      "continueButtonVerified": false,
+      "displayMutated": false,
+      "reason": "steam-original-game-association-not-current",
+      "scope": "steam-continue",
+      "status": "unknown"
+    },
+    "foreground": {
+      "allowedForOriginalGameReturn": true,
+      "created": "134363898748713948",
+      "originalInstanceMatched": false,
+      "pid": 13172,
+      "role": "steam-ui"
+    },
+    "game": {
+      "created": "134363901017334319",
+      "exe": "tmnt",
+      "identityMatches": true,
+      "pid": 10944,
+      "powerGenerationMatches": true,
+      "recoveryBindingMatches": true
+    },
+    "gameApiProbe": {
+      "available": true,
+      "gameInputVerified": false,
+      "hookHealthVerified": false,
+      "inputLibrariesObserved": [
+        "dinput8.dll",
+        "sdl2.dll",
+        "windows.gaming.input.dll",
+        "xinput1_4.dll"
+      ],
+      "integrityRid": 8192,
+      "moduleCount": 143,
+      "moduleTruncated": false,
+      "overlayFromCurrentSteamRoot": true,
+      "reason": "query-only-no-input-health-proof",
+      "steamOverlayModulePresent": true
+    },
+    "gameInput": "not-tested",
+    "gamePause": {
+      "available": true,
+      "manualPauseHeld": false,
+      "paused": false,
+      "sleepLeaseHeld": false,
+      "waitForSleepRelease": false
+    },
+    "generation": 2,
+    "healthVerified": false,
+    "implementation": "steam-wake-round31-native-predispatch-wait",
+    "inspectionToken": null,
+    "originalGameRecovery": {
+      "continueButtonVerified": false,
+      "gameInputVerified": false,
+      "jointBindingVerified": true,
+      "originalInstanceMatched": true,
+      "originalWindowFocused": false,
+      "sharedCandidateMatched": true,
+      "sleepPauseReleased": true,
+      "steamSessionMatched": true,
+      "steamUiInputFocusMatched": false,
+      "uiFocusAuthority": "auxiliary-not-active-input-proof",
+      "verificationBasis": "ymcc-one-pid-steam-tracker-os-identity"
+    },
+    "recordEpoch": 1791916565.0579374,
+    "repairTicketReusable": false,
+    "scope": "steam",
+    "steam": {
+      "appBinding": "operator-or-native-tracker-supplied-not-proven-by-js",
+      "controllers": [
+        {
+          "index": 15,
+          "type": 4
+        }
+      ],
+      "gameInput": "unknown",
+      "inputContext": {
+        "configQueries": [
+          {
+            "appid": 2399932135,
+            "index": 15,
+            "selectionType": 0,
+            "status": "available",
+            "urlIdentity": 103121280,
+            "urlKind": "configured"
+          }
+        ],
+        "configQueriesTruncated": false,
+        "controllerListValid": true,
+        "controllers": [
+          {
+            "index": 15,
+            "type": 4
+          }
+        ],
+        "editor": {
+          "available": true,
+          "dirty": false,
+          "editingActive": true,
+          "editingAppid": 2399932135,
+          "editingAvailable": true,
+          "previewActive": false,
+          "updating": false
+        },
+        "focus": {
+          "appid": 769,
+          "available": true,
+          "overlayAppid": 0,
+          "overlayPid": 0,
+          "windowID": "0"
+        },
+        "gameInput": "not-tested",
+        "inputEventsObserved": false,
+        "interactive": {
+          "available": true,
+          "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+          "idle": true,
+          "keyboard": false,
+          "lockScreen": false,
+          "menuOpen": 0,
+          "menuSuppressed": false,
+          "overlayOrVrWindow": false,
+          "windowInstanceObserved": true,
+          "windowKindProbesComplete": true,
+          "windowKinds": {
+            "controllerConfigurator": false,
+            "desktopOverlay": false,
+            "gamepadOverlay": false,
+            "vr": false
+          }
+        }
+      },
+      "invalidRunningCount": 0,
+      "mutated": false,
+      "ok": true,
+      "overlayEnabled": true,
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 2399932135,
+          "canonicalInRunningList": false,
+          "gameidString": "10307630032478011392",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "overviewAvailable": true,
+          "overviewKey": 2399932135,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "rawRunningCount": 0,
+      "runningAppIDs": [],
+      "runningTruncated": false,
+      "signedAliasesNormalized": false,
+      "stage": "sleep-inspect"
+    },
+    "steamClient": {
+      "accountKnown": true,
+      "accountPinned": false,
+      "accountSource": "verified-active-process",
+      "created": "134363898746040362",
+      "foreignRegistryAccountIgnored": false,
+      "identityToken": "10898034144514336104",
+      "integrityRid": 8192,
+      "liveAccountPinned": false,
+      "pid": 12936,
+      "processVerified": true,
+      "reason": "steam-native-session-current",
+      "registeredPid": 12936,
+      "registeredPidMatchesVerified": true,
+      "source": "verified-active-process"
+    },
+    "steamInputRecovery": {
+      "associationVerified": false,
+      "contextMatched": false,
+      "gameInputVerified": false,
+      "healthVerified": false,
+      "reason": "steam-original-input-context-not-focused",
+      "repairable": true,
+      "requireOriginalWindowReturn": false,
+      "returnBasis": "captured-original-tracker",
+      "scope": "steam-input",
+      "status": "stale-context"
+    },
+    "steamRecovery": {
+      "appid": 2399932135,
+      "associationVerified": false,
+      "continueButtonVerified": false,
+      "gameInput": "not-tested",
+      "healthVerified": false,
+      "reason": "steam-backend-not-running",
+      "repairable": false,
+      "scope": "steam",
+      "status": "blocked"
+    },
+    "steamSessionRetry": {
+      "attempted": false,
+      "attempts": 0,
+      "boundedReadOnly": true,
+      "maxAttempts": 2,
+      "recovered": false
+    },
+    "steamSessionState": {
+      "ready": true,
+      "reason": "steam-native-session-current",
+      "retryable": false,
+      "status": "current"
+    },
+    "suspendCapture": {
+      "atTick": 274093,
+      "available": true,
+      "boundary": "power-suspend-notification",
+      "boundaryGeneration": 1,
+      "clientMatched": true,
+      "inputBefore": null,
+      "originalClient": {
+        "accountKnown": true,
+        "accountPinned": true,
+        "accountSource": "verified-active-process-capture",
+        "created": "134363898746040362",
+        "foreignRegistryAccountIgnored": false,
+        "identityToken": "10898034144514336104",
+        "integrityRid": 8192,
+        "liveAccountPinned": false,
+        "pid": 12936,
+        "processVerified": true,
+        "reason": "steam-native-session-current",
+        "registeredPid": 12936,
+        "registeredPidMatchesVerified": true,
+        "source": "verified-active-process"
+      },
+      "physicalPreSleepVerified": false,
+      "powerBoundaryFileTime": "134363901244304585",
+      "targetSelection": {
+        "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+        "exactTrackerPath": true,
+        "jointBindingVerified": true,
+        "observedAtTick": 302703,
+        "physicalPreSleepVerified": false,
+        "postWakeRetargetAllowed": false,
+        "preferredCreated": "134363901017334319",
+        "preferredExe": "tmnt",
+        "preferredPid": 10944,
+        "preferredTrackerStatus": "tracked",
+        "readOnly": true,
+        "reason": "steam-original-target-bound",
+        "selectedAppid": 2399932135,
+        "selectedCreated": "134363901017334319",
+        "selectedExe": "tmnt",
+        "selectedPid": 10944,
+        "sharedCandidateMatched": true,
+        "sharedCandidateModified": false,
+        "sharedCandidateStatus": "same-original-instance",
+        "source": "ymcc-candidate-exact-steam-binding",
+        "status": "bound",
+        "trackerLog": {
+          "available": true,
+          "copiedBytes": 33646,
+          "limitBytes": 2097152,
+          "originalBytes": 33646,
+          "truncated": false
+        },
+        "ymccPidValidation": {
+          "created": "134363901017334319",
+          "customConfigured": false,
+          "exactProcessIdentity": true,
+          "pid": 10944,
+          "rulesEpoch": "1",
+          "sharedCandidateIdentityMatched": true,
+          "sharedCandidateStatus": "same-instance",
+          "source": "nativeScanGameOnePid",
+          "status": "accepted",
+          "validatorReasonAvailable": true,
+          "whitelisted": false,
+          "workingSetBytes": 1652400128
+        },
+        "ymccRulesEpoch": "1",
+        "ymccSteamJoin": {
+          "appid": 2399932135,
+          "birthMatched": true,
+          "continueButtonVerified": false,
+          "gameInputVerified": false,
+          "pathMatched": true,
+          "preSleepOnly": true,
+          "sharedCandidateMatched": true,
+          "status": "exact-instance-matched",
+          "steamTrackedPid": 10944,
+          "windowsSessionMatched": true,
+          "ymccValidatedPid": 10944
+        }
+      }
+    },
+    "tracker": {
+      "appid": 2399932135,
+      "at": "2026-10-14 02:35:01",
+      "exactPath": true,
+      "lineInTail": 492,
+      "log": {
+        "available": true,
+        "copiedBytes": 33699,
+        "limitBytes": 2097152,
+        "originalBytes": 33699,
+        "truncated": false
+      },
+      "status": "tracked"
+    }
+  },
+  "after": {
+    "continueRecovery": {
+      "candidate": false,
+      "continueButtonVerified": false,
+      "displayMutated": false,
+      "reason": "steam-original-game-association-not-current",
+      "scope": "steam-continue",
+      "status": "unknown"
+    },
+    "foreground": {
+      "allowedForOriginalGameReturn": true,
+      "created": "134363901017334319",
+      "originalInstanceMatched": true,
+      "pid": 10944,
+      "role": "original-game"
+    },
+    "game": {
+      "created": "134363901017334319",
+      "exe": "tmnt",
+      "identityMatches": true,
+      "pid": 10944,
+      "powerGenerationMatches": true,
+      "recoveryBindingMatches": true
+    },
+    "gameApiProbe": {
+      "available": true,
+      "gameInputVerified": false,
+      "hookHealthVerified": false,
+      "inputLibrariesObserved": [
+        "dinput8.dll",
+        "sdl2.dll",
+        "windows.gaming.input.dll",
+        "xinput1_4.dll"
+      ],
+      "integrityRid": 8192,
+      "moduleCount": 143,
+      "moduleTruncated": false,
+      "overlayFromCurrentSteamRoot": true,
+      "reason": "query-only-no-input-health-proof",
+      "steamOverlayModulePresent": true
+    },
+    "gameInput": "not-tested",
+    "gamePause": {
+      "available": true,
+      "manualPauseHeld": false,
+      "paused": false,
+      "sleepLeaseHeld": false,
+      "waitForSleepRelease": false
+    },
+    "generation": 2,
+    "healthVerified": false,
+    "implementation": "steam-wake-round31-native-predispatch-wait",
+    "inspectionToken": null,
+    "originalGameRecovery": {
+      "continueButtonVerified": false,
+      "gameInputVerified": false,
+      "jointBindingVerified": true,
+      "originalInstanceMatched": true,
+      "originalWindowFocused": true,
+      "sharedCandidateMatched": true,
+      "sleepPauseReleased": true,
+      "steamSessionMatched": true,
+      "steamUiInputFocusMatched": false,
+      "uiFocusAuthority": "auxiliary-not-active-input-proof",
+      "verificationBasis": "ymcc-one-pid-steam-tracker-os-identity"
+    },
+    "recordEpoch": 1791916565.3848653,
+    "repairTicketReusable": false,
+    "scope": "steam",
+    "steam": {
+      "appBinding": "operator-or-native-tracker-supplied-not-proven-by-js",
+      "controllers": [
+        {
+          "index": 15,
+          "type": 4
+        }
+      ],
+      "gameInput": "unknown",
+      "inputContext": {
+        "configQueries": [
+          {
+            "appid": 2399932135,
+            "index": 15,
+            "selectionType": 0,
+            "status": "available",
+            "urlIdentity": 103121280,
+            "urlKind": "configured"
+          }
+        ],
+        "configQueriesTruncated": false,
+        "controllerListValid": true,
+        "controllers": [
+          {
+            "index": 15,
+            "type": 4
+          }
+        ],
+        "editor": {
+          "available": true,
+          "dirty": false,
+          "editingActive": true,
+          "editingAppid": 2399932135,
+          "editingAvailable": true,
+          "previewActive": false,
+          "updating": false
+        },
+        "focus": {
+          "appid": 413080,
+          "available": true,
+          "overlayAppid": 0,
+          "overlayPid": 0,
+          "windowID": "0"
+        },
+        "gameInput": "not-tested",
+        "inputEventsObserved": false,
+        "interactive": {
+          "available": true,
+          "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+          "idle": false,
+          "keyboard": false,
+          "lockScreen": false,
+          "menuOpen": 0,
+          "menuSuppressed": false,
+          "overlayOrVrWindow": true,
+          "windowInstanceObserved": true,
+          "windowKindProbesComplete": true,
+          "windowKinds": {
+            "controllerConfigurator": false,
+            "desktopOverlay": false,
+            "gamepadOverlay": true,
+            "vr": false
+          }
+        }
+      },
+      "invalidRunningCount": 0,
+      "mutated": false,
+      "ok": true,
+      "overlayEnabled": true,
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 2399932135,
+          "canonicalInRunningList": false,
+          "gameidString": "10307630032478011392",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "overviewAvailable": true,
+          "overviewKey": 2399932135,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "rawRunningCount": 0,
+      "runningAppIDs": [],
+      "runningTruncated": false,
+      "signedAliasesNormalized": false,
+      "stage": "sleep-inspect"
+    },
+    "steamClient": {
+      "accountKnown": true,
+      "accountPinned": false,
+      "accountSource": "verified-active-process",
+      "created": "134363898746040362",
+      "foreignRegistryAccountIgnored": false,
+      "identityToken": "10898034144514336104",
+      "integrityRid": 8192,
+      "liveAccountPinned": false,
+      "pid": 12936,
+      "processVerified": true,
+      "reason": "steam-native-session-current",
+      "registeredPid": 12936,
+      "registeredPidMatchesVerified": true,
+      "source": "verified-active-process"
+    },
+    "steamInputRecovery": {
+      "associationVerified": false,
+      "contextMatched": false,
+      "gameInputVerified": false,
+      "healthVerified": false,
+      "reason": "steam-interactive-ui-active-or-unknown",
+      "repairable": false,
+      "returnBasis": "captured-original-tracker",
+      "scope": "steam-input",
+      "status": "waiting-interaction"
+    },
+    "steamRecovery": {
+      "appid": 2399932135,
+      "associationVerified": false,
+      "continueButtonVerified": false,
+      "gameInput": "not-tested",
+      "healthVerified": false,
+      "reason": "steam-backend-not-running",
+      "repairable": false,
+      "scope": "steam",
+      "status": "blocked"
+    },
+    "steamSessionRetry": {
+      "attempted": false,
+      "attempts": 0,
+      "boundedReadOnly": true,
+      "maxAttempts": 2,
+      "recovered": false
+    },
+    "steamSessionState": {
+      "ready": true,
+      "reason": "steam-native-session-current",
+      "retryable": false,
+      "status": "current"
+    },
+    "suspendCapture": {
+      "atTick": 274093,
+      "available": true,
+      "boundary": "power-suspend-notification",
+      "boundaryGeneration": 1,
+      "clientMatched": true,
+      "inputBefore": null,
+      "originalClient": {
+        "accountKnown": true,
+        "accountPinned": true,
+        "accountSource": "verified-active-process-capture",
+        "created": "134363898746040362",
+        "foreignRegistryAccountIgnored": false,
+        "identityToken": "10898034144514336104",
+        "integrityRid": 8192,
+        "liveAccountPinned": false,
+        "pid": 12936,
+        "processVerified": true,
+        "reason": "steam-native-session-current",
+        "registeredPid": 12936,
+        "registeredPidMatchesVerified": true,
+        "source": "verified-active-process"
+      },
+      "physicalPreSleepVerified": false,
+      "powerBoundaryFileTime": "134363901244304585",
+      "targetSelection": {
+        "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+        "exactTrackerPath": true,
+        "jointBindingVerified": true,
+        "observedAtTick": 302703,
+        "physicalPreSleepVerified": false,
+        "postWakeRetargetAllowed": false,
+        "preferredCreated": "134363901017334319",
+        "preferredExe": "tmnt",
+        "preferredPid": 10944,
+        "preferredTrackerStatus": "tracked",
+        "readOnly": true,
+        "reason": "steam-original-target-bound",
+        "selectedAppid": 2399932135,
+        "selectedCreated": "134363901017334319",
+        "selectedExe": "tmnt",
+        "selectedPid": 10944,
+        "sharedCandidateMatched": true,
+        "sharedCandidateModified": false,
+        "sharedCandidateStatus": "same-original-instance",
+        "source": "ymcc-candidate-exact-steam-binding",
+        "status": "bound",
+        "trackerLog": {
+          "available": true,
+          "copiedBytes": 33646,
+          "limitBytes": 2097152,
+          "originalBytes": 33646,
+          "truncated": false
+        },
+        "ymccPidValidation": {
+          "created": "134363901017334319",
+          "customConfigured": false,
+          "exactProcessIdentity": true,
+          "pid": 10944,
+          "rulesEpoch": "1",
+          "sharedCandidateIdentityMatched": true,
+          "sharedCandidateStatus": "same-instance",
+          "source": "nativeScanGameOnePid",
+          "status": "accepted",
+          "validatorReasonAvailable": true,
+          "whitelisted": false,
+          "workingSetBytes": 1652400128
+        },
+        "ymccRulesEpoch": "1",
+        "ymccSteamJoin": {
+          "appid": 2399932135,
+          "birthMatched": true,
+          "continueButtonVerified": false,
+          "gameInputVerified": false,
+          "pathMatched": true,
+          "preSleepOnly": true,
+          "sharedCandidateMatched": true,
+          "status": "exact-instance-matched",
+          "steamTrackedPid": 10944,
+          "windowsSessionMatched": true,
+          "ymccValidatedPid": 10944
+        }
+      }
+    },
+    "tracker": {
+      "appid": 2399932135,
+      "at": "2026-10-14 02:35:01",
+      "exactPath": true,
+      "lineInTail": 492,
+      "log": {
+        "available": true,
+        "copiedBytes": 33699,
+        "limitBytes": 2097152,
+        "originalBytes": 33699,
+        "truncated": false
+      },
+      "status": "tracked"
+    }
+  },
+  "inputResume": {
+    "accepted": false,
+    "actionAcknowledged": true,
+    "after": {
+      "invalidRunningCount": 0,
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 2399932135,
+          "canonicalInRunningList": false,
+          "gameidString": "10307630032478011392",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "overviewAvailable": true,
+          "overviewKey": 2399932135,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "rawRunningCount": 0,
+      "runningAppIDs": [],
+      "runningTruncated": false,
+      "signedAliasesNormalized": false
+    },
+    "associationVerified": false,
+    "before": {
+      "invalidRunningCount": 0,
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 2399932135,
+          "canonicalInRunningList": false,
+          "gameidString": "10307630032478011392",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "overviewAvailable": true,
+          "overviewKey": 2399932135,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "rawRunningCount": 0,
+      "runningAppIDs": [],
+      "runningTruncated": false,
+      "signedAliasesNormalized": false
+    },
+    "controllerReconnectPending": false,
+    "foregroundWaitMs": 0,
+    "foregroundWaitReads": 0,
+    "gameInput": "not-tested",
+    "healthVerified": false,
+    "inputContext": {
+      "configQueries": [],
+      "configQueriesTruncated": false,
+      "controllerListValid": true,
+      "controllers": [
+        {
+          "index": 15,
+          "type": 4
+        }
+      ],
+      "editor": {
+        "available": true,
+        "dirty": false,
+        "editingActive": true,
+        "editingAppid": 2399932135,
+        "editingAvailable": true,
+        "previewActive": false,
+        "updating": false
+      },
+      "focus": {
+        "appid": 769,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "gameInput": "not-tested",
+      "inputEventsObserved": false,
+      "interactive": {
+        "available": true,
+        "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+        "idle": true,
+        "keyboard": false,
+        "lockScreen": false,
+        "menuOpen": 0,
+        "menuSuppressed": false,
+        "overlayOrVrWindow": false,
+        "windowInstanceObserved": false,
+        "windowKindProbesComplete": true,
+        "windowKinds": {
+          "controllerConfigurator": false,
+          "desktopOverlay": false,
+          "gamepadOverlay": false,
+          "vr": false
+        }
+      }
+    },
+    "inputContextBefore": {
+      "configQueries": [],
+      "configQueriesTruncated": false,
+      "controllerListValid": true,
+      "controllers": [
+        {
+          "index": 15,
+          "type": 4
+        }
+      ],
+      "editor": {
+        "available": true,
+        "dirty": false,
+        "editingActive": true,
+        "editingAppid": 2399932135,
+        "editingAvailable": true,
+        "previewActive": false,
+        "updating": false
+      },
+      "focus": {
+        "appid": 769,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "gameInput": "not-tested",
+      "inputEventsObserved": false,
+      "interactive": {
+        "available": true,
+        "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+        "idle": true,
+        "keyboard": false,
+        "lockScreen": false,
+        "menuOpen": 0,
+        "menuSuppressed": false,
+        "overlayOrVrWindow": false,
+        "windowInstanceObserved": true,
+        "windowKindProbesComplete": true,
+        "windowKinds": {
+          "controllerConfigurator": false,
+          "desktopOverlay": false,
+          "gamepadOverlay": false,
+          "vr": false
+        }
+      }
+    },
+    "mutated": true,
+    "nativeAdmissionReason": "admitted",
+    "nativePreDispatchCancelled": false,
+    "ok": false,
+    "originalCreated": "134363901017334319",
+    "originalIdentityStable": true,
+    "originalPid": 10944,
+    "originalWindowFocused": false,
+    "originalWindowReturn": false,
+    "pidWindowActivation": {
+      "apiAccepted": false,
+      "attempted": false,
+      "foregroundWaitMs": 0,
+      "foregroundWaitReads": 0,
+      "gameInputVerified": false,
+      "reason": "steam-return-not-eligible"
+    },
+    "preflightDeferred": false,
+    "reason": "steam-original-window-not-confirmed",
+    "returnBasis": "captured-original-tracker",
+    "runtimeAccepted": false,
+    "scope": "steam-input",
+    "stage": "sleep-input-resume",
+    "uiFocusMatched": false,
+    "uiFocusReadback": "auxiliary-cache-native-pid-postflight-required",
+    "verificationBasis": "ymcc-captured-pid-created-path",
+    "verificationPending": false,
+    "windowPreparation": false,
+    "windowReturnObserved": false
+  },
+  "observations": [],
+  "actualInputVerified": false,
+  "continueButtonVerified": false,
+  "sourceIsFieldEvidenceNotHarnessInputProof": true
+}

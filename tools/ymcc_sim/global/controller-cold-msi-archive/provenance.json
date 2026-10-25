@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "archive": {
+    "path": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261022-080106-触摸屏无法操控桌面-虚拟手柄新卡死.zip",
+    "sha256": "3efa8b18687158f6d4dcb9611197a2835f2cc050b608043fc47bb4e0ab5c5480"
+  },
+  "extractionReceipt": {
+    "path": "G:\\YeManCC-Work\\Build\\Validation\\VC-FIELD-080106-20261022\\ARCHIVE-RECEIPT.json",
+    "sha256": "5b48726266a0c84ab26f84b13c630e2a5bd7dd9b53b0c2b6f5616f0fb2d5ea93",
+    "bytes": 19445
+  },
+  "fieldRecord": {
+    "selectedPath": "G:\\YeManCC-Work\\Build\\Validation\\VC-FIELD-080106-20261022\\field\\target-return.json",
+    "zipEntry": "target-return.json",
+    "sha256": "e2390d9db29ec41ad5da1e3ff1ebd39edec0bdd9a106d3e76aef42042e36275a",
+    "bytes": 1287,
+    "localCopy": "field-record.json"
+  },
+  "currentOsState": false,
+  "archivedContentExecuted": false,
+  "meaning": "Original G3E fault export, byte-exact historical two-obligation record. Machine binding, PIDs and device paths are archived identities. Controlled OS census/writer/ancestry/visibility observations are fixture inputs and do not describe this machine now.",
+  "historicalEvidence": [
+    {
+      "path": "G:/YeManCC-Work/Build/Validation/VC-COLD-MSI-ARCHIVE-20261022/current/RESULT.json",
+      "topLevelStatus": "PASS",
+      "cases": 13,
+      "checks": 503,
+      "role": "First implementation; superseded by 14-case gate"
+    },
+    {
+      "path": "G:/YeManCC-Work/Build/Validation/VC-COLD-MSI-ARCHIVE-20261022/final-current/RESULT.json",
+      "topLevelStatus": "FAIL",
+      "fixtureStatus": "PASS",
+      "cases": 14,
+      "checks": 545,
+      "reason": "Concurrent FxSound native/main.cpp original input drift; no mainline acceptance"
+    },
+    {
+      "path": "G:/YeManCC-Work/Build/Validation/VC-COLD-MSI-ARCHIVE-20261022/final-rollback/RESULT.json",
+      "topLevelStatus": "FAIL",
+      "fixtureStatus": "FAIL",
+      "cases": 14,
+      "checks": 86,
+      "failedAssertions": 14,
+      "reason": "Expected semantic failures plus concurrent native/main.cpp original input drift; no mainline acceptance"
+    }
+  ]
+}

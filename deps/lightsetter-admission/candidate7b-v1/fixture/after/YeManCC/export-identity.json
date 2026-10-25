@@ -1,0 +1,3317 @@
+{
+  "schema": 1,
+  "packageId": "YeManCC",
+  "version": "0.0.35",
+  "buildId": "faa09a67b5be58952cae8dc40dc405b025410e4e6e83aa0e59e4475b43f3bac3",
+  "sourceTreeSha256": "4ef3a3c8e25d3c8533450cf4ba446f28b09f07e34fe74481217ad2bdb8b3a5e2",
+  "steamSleepRecovery": {
+    "status": "passed",
+    "implementation": "steam-wake-round50-native-record-diagnostic",
+    "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+    "requiredMarkers": [
+      "steam-wake-round50-native-record-diagnostic",
+      "ymcc-steam-exact-instance-join-v1",
+      "steam-running-link-v1",
+      "steam-app-lifetime-feedback-v1",
+      "contactConnected",
+      "contactRepairable",
+      "steam-contact-rescope-not-confirmed",
+      "steam-contact-global-running-unsafe",
+      "observerInstanceId",
+      "observerCreatedAtUnixMs",
+      "diagnosticCountersAvailable",
+      "rawCallbacksEntered",
+      "accountUnavailableCallbacks",
+      "accountMismatchCallbacks",
+      "nativeSubscriptionHealth",
+      "nativeWindowReadbackWait",
+      "waitingInitialOriginalWindow",
+      "nativeReturn",
+      "nativeRecordDiagnostic",
+      "steam-native-cuser-record-diagnostic",
+      "recordState",
+      "native-record-pre-capture-ui-bound",
+      "settledNativeReturn",
+      "steam-native-return-evidence-v1",
+      "wakeReadiness",
+      "steamSessionRetry"
+    ],
+    "sourceSha256": {
+      "sleep_recovery_auto.h": "b28a20e4f8be686a74c348a8ab2a909c0c3a6c87eba5a299b304e32ea9bd9193",
+      "sleep_steam_recovery.h": "aaff1afa467f34da94f6887665a093db211388b6be7b3395687e3ae581dedabe",
+      "sleep_steam_capture.h": "3a5b28da18b1c4a1422301f45b370b8296c940cacd0bc788ee382ffcac1d090d",
+      "sleep_steam_tracking.h": "63f00b3e65867ff7850018cb6c897c22919923a9a0952cff729b79e71d8ccffd",
+      "sleep_steam_input_context.h": "d6eeccf940267f930dc0a1f50b08e1eceba9fa21e013ab29010610e5a3240ee3",
+      "sleep_steam_game_probe.h": "2ce662f0420463c6ea1952f225be397f413c5c44bc970f468a45349df22012eb",
+      "sleep_steam_settle.h": "5dfe9fb585b86b7a2246d41fd04fdc69b7650d488a77e4c7d91e3bc1590ee738",
+      "steam_game_link_runtime.h": "2b4d333f7f776b1e5f2d16d7d2c154340b2d1c8769b299e8cd5944108c09bdb5",
+      "steam_game_link_state.h": "275fb2bd1c8cd3e459bd83aca78e876b721beeee2a05382745c1fea6b5e288b5",
+      "steam_live_cdp.h": "5d20169eda99ca312a1e54a658fe3198c7608512a8ca1e1085ee2a834608089c",
+      "steam_native_focus_feedback.h": "1efd704d6c7eb2973b38fc89a82130dff0d4b3c402d6c89af8cd787555681a0b",
+      "steam_app_lifetime_feedback.h": "4a063ec57fbee42e49c2cd885002391be15bf6d22bcf7ae0e124f7773661e1d7",
+      "steam_native_record_diagnostic.h": "0494b3771a890bc5447d5706c9a0345d7b65db9bca757b463c12fa678947d941",
+      "steam_native_record_identity.h": "a82c85a57b4619c374df882683815aba98bcdfb1e14cb25ccc1dd198e86c25ba",
+      "steam_native_record_win32.h": "aa431ad8e8501c57c2e5aebccba3037c8cd64cc584a33167794c0fb6931b6519",
+      "steam_native_return_evidence.h": "b6ede4da8faa6241b8ad3e16f3f54866e74127ed26d947ba3d9b033db23dc662",
+      "main.cpp": "415cb57ee07a4e60dcc08c3fbe1fa7fbf90ab795dcffc73317ddd369df71c12e",
+      "steam_live.js": "05d6e8a81e5d543671ee3513df1185d826ca03350894671c71ca29dfeae94074",
+      "steam_live_script.h": "f0e1712bce146b41e1334b42ecc4de023e1a57fb89afbf9ff2903c888ea9cb23"
+    },
+    "nativeSha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+    "fieldAcceptance": false
+  },
+  "gpuDedicatedMemory": {
+    "status": "passed",
+    "readerRevision": "ymcc-gpu-memory-r8-20261014",
+    "nativeSha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a",
+    "scope": "compiled-revision-marker-plus-existing-source-payload-binding",
+    "hardwareOrProductExecuted": false
+  },
+  "exportedAtUtc": "2026-10-18T17:50:27.9049639Z",
+  "payloadFileCount": 582,
+  "payload": [
+    {
+      "path": "PowerControl/_gamedetect.ps1",
+      "bytes": 1148,
+      "sha256": "5d2ea7d69986d010cc441f5de48c3ed123065a09c28d48000f2d4ce08bc6aaa1"
+    },
+    {
+      "path": "PowerControl/_quickapp_ctrl.ps1",
+      "bytes": 2714,
+      "sha256": "5bd62ae6930a405405f428d0e4d9f4455cd8dccd1552c0cccc9bd4978d5bc487"
+    },
+    {
+      "path": "PowerControl/3-Core.bat",
+      "bytes": 91,
+      "sha256": "4d1d10b33b0d8f558d89ef82c4c56f9cdeebab745d36842e464319fdf51a2dfc"
+    },
+    {
+      "path": "PowerControl/3-Core.ps1",
+      "bytes": 1446,
+      "sha256": "1ecf87ebdc35dad4f9cb0daa0e5d2fa0899a1439506f4ce2bcf9eac844a287a9"
+    },
+    {
+      "path": "PowerControl/8-Core.bat",
+      "bytes": 91,
+      "sha256": "b75a07dc1ef84729eea562852cdf7cabf53996a2e8bd5cd1a555159f561d88f8"
+    },
+    {
+      "path": "PowerControl/8-Core.PS1",
+      "bytes": 1464,
+      "sha256": "92a02d2d91398175b91195d9a4f94b9f84a50fed6cd26019cff252c2544c3d64"
+    },
+    {
+      "path": "PowerControl/AUTOPlan.bat",
+      "bytes": 2553,
+      "sha256": "067ebb711bfbb00393901a058dff89de4b2d9fcfd466ea3867b968b3af7c2398"
+    },
+    {
+      "path": "PowerControl/AUTOPlan.vbs",
+      "bytes": 114,
+      "sha256": "fae86d26289bec0d4cccc4c0d01378c6147096f996ff87ed8ad1797aab06c5ee"
+    },
+    {
+      "path": "PowerControl/battery-host/battery-host.payload.json",
+      "bytes": 2963,
+      "sha256": "4ae4f0a181f08d5b077c9a184e919fed1cfdc2d3a65ce3619acf2aeb373172dc"
+    },
+    {
+      "path": "PowerControl/battery-host/LibreHardwareMonitorLib.dll",
+      "bytes": 1204224,
+      "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf"
+    },
+    {
+      "path": "PowerControl/battery-host/LICENSE.LibreHardwareMonitor.txt",
+      "bytes": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "PowerControl/battery-host/LICENSE.System.Management.txt",
+      "bytes": 1116,
+      "sha256": "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310"
+    },
+    {
+      "path": "PowerControl/battery-host/RAMSPDToolkit-NDD.dll",
+      "bytes": 253952,
+      "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501"
+    },
+    {
+      "path": "PowerControl/battery-host/System.Management.dll",
+      "bytes": 314192,
+      "sha256": "fb53e5b0f3b4d5cccb2bb509be6eedd5896ca4037bbc413b315fb916710bb381"
+    },
+    {
+      "path": "PowerControl/battery-host/THIRD-PARTY-NOTICES.md",
+      "bytes": 2466,
+      "sha256": "c929d75306e12c59f6d09edbd3d19140e55c38cbb6a6ef6554330ea9b0852ab0"
+    },
+    {
+      "path": "PowerControl/battery-host/YeManBatteryHost.deps.json",
+      "bytes": 1914,
+      "sha256": "9e24803f27e42a647fc39c9c26212d5a993e50ed5cc7f3046b2e42828ba62f5b"
+    },
+    {
+      "path": "PowerControl/battery-host/YeManBatteryHost.dll",
+      "bytes": 113664,
+      "sha256": "f1cc0a2b782d7858ddd2f67c923cc8d6fa9935c579804c5bcdfbf9917f434f75"
+    },
+    {
+      "path": "PowerControl/battery-host/YeManBatteryHost.exe",
+      "bytes": 162304,
+      "sha256": "8a26d769bb2a247a46fa50b5ff3c17ca6a5d9c831741ee0ab9adc92cfc3670e2"
+    },
+    {
+      "path": "PowerControl/battery-host/YeManBatteryHost.runtimeconfig.json",
+      "bytes": 519,
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    },
+    {
+      "path": "PowerControl/decky/LICENSE.decky-loader",
+      "bytes": 18092,
+      "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
+    },
+    {
+      "path": "PowerControl/decky/PluginLoader_noconsole.exe",
+      "bytes": 13998464,
+      "sha256": "714444cdcf385c478e69124724a5573c2f1759078b496c3e20e6e04e525e2518"
+    },
+    {
+      "path": "PowerControl/decky/plugins/ymcc-sidebar/dist/index.js",
+      "bytes": 349648,
+      "sha256": "72f4e78ca023ea1439752e66e9a443de583aa326aab7402c7e1bd5f2564f501a"
+    },
+    {
+      "path": "PowerControl/decky/plugins/ymcc-sidebar/LICENSE.decky-api",
+      "bytes": 26527,
+      "sha256": "38965778962143b687faff3a5b69ef22dd228e0ca4f5a3752893e016ede87c6a"
+    },
+    {
+      "path": "PowerControl/decky/plugins/ymcc-sidebar/LICENSE.vue",
+      "bytes": 1091,
+      "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+    },
+    {
+      "path": "PowerControl/decky/plugins/ymcc-sidebar/package.json",
+      "bytes": 155,
+      "sha256": "25d3fa052f0c3f7c690f02e997b50f2349ed13cf446293f74d1b5fa7a878cfcb"
+    },
+    {
+      "path": "PowerControl/decky/plugins/ymcc-sidebar/plugin.json",
+      "bytes": 67,
+      "sha256": "0efaa318add76feffd226ed65125412f7a9d1998e65d4f0040ba660f1bb9dade"
+    },
+    {
+      "path": "PowerControl/Display/1280/1280.bat",
+      "bytes": 1438,
+      "sha256": "96527125b87a8563de1ebb52b850fe9ec8bf0aef3c90b6ec31c9cccd9beb2252"
+    },
+    {
+      "path": "PowerControl/Display/1600/1600.bat",
+      "bytes": 1440,
+      "sha256": "4add53758ec152c02d258f0cd17bfc155cbf7b14d9e3b5606949fa45b45b5bc2"
+    },
+    {
+      "path": "PowerControl/Display/1920/1920.bat",
+      "bytes": 1442,
+      "sha256": "1853f3e225088dce705b97dedd1c8b715a61135af745338993c479c2c047f680"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/install-fan-host-payload.ps1",
+      "bytes": 12764,
+      "sha256": "5a6d68f5ae5573f78cc77f147b295af802cc757d1855d0996239b14af6f3fbdf"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/run-emergency-fan-restore.ps1",
+      "bytes": 4053,
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanBackend.dll",
+      "bytes": 84480,
+      "sha256": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.authorization.md",
+      "bytes": 11295,
+      "sha256": "68d515be999f6d70614ca2a388fc425fe4d3a4d4c2d7d4f119c2a6317296a327"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.deps.json",
+      "bytes": 1505,
+      "sha256": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.dll",
+      "bytes": 1671168,
+      "sha256": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.exe",
+      "bytes": 162304,
+      "sha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.json",
+      "bytes": 343,
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.payload.json",
+      "bytes": 2078,
+      "sha256": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae"
+    },
+    {
+      "path": "PowerControl/fan-host-v2/YeManFanHost.runtimeconfig.json",
+      "bytes": 519,
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    },
+    {
+      "path": "PowerControl/feature-assets/gyro-motion/enabled.flag",
+      "bytes": 19,
+      "sha256": "ef9ac2c8fa8533a73186699d923744f1189d57f6c1d91d7426a808e890b26cd2"
+    },
+    {
+      "path": "PowerControl/feature-assets/gyro-motion/input-capture.flag",
+      "bytes": 9,
+      "sha256": "fe096a06d67909206ccb28fe0af9157fbc4a4f22e4b174ef3faeabeaa80852c8"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/enabled.flag",
+      "bytes": 19,
+      "sha256": "ef9ac2c8fa8533a73186699d923744f1189d57f6c1d91d7426a808e890b26cd2"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/HIDMaestro.Core.dll",
+      "bytes": 61417984,
+      "sha256": "f0b048e1b566804226efdf854f6201eb9d2895c1e83f3c1a8813562aab2d186c"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/input-capture.flag",
+      "bytes": 9,
+      "sha256": "fe096a06d67909206ccb28fe0af9157fbc4a4f22e4b174ef3faeabeaa80852c8"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "bytes": 65872,
+      "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/Microsoft.Extensions.Logging.Abstractions.dll",
+      "bytes": 66896,
+      "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/Nefarius.Drivers.HidHide.dll",
+      "bytes": 223232,
+      "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/Nefarius.Vicius.Abstractions.dll",
+      "bytes": 20992,
+      "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/YeManInputHost.deps.json",
+      "bytes": 3517,
+      "sha256": "7527d6769e5654e0b09a6134a943a7f07c0be93b1090e3f3c7406220513b4343"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/YeManInputHost.dll",
+      "bytes": 603648,
+      "sha256": "ac61f2921730590cd30da157ea093293147efd18119f733e69f791234e34919c"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/YeManInputHost.exe",
+      "bytes": 162304,
+      "sha256": "bac7f9fb48878b922ac1c4b3291a3bb3b6ddd1ccf4f34bb2070d1af56245fca9"
+    },
+    {
+      "path": "PowerControl/feature-assets/virtual-gamepad/YeManInputHost.runtimeconfig.json",
+      "bytes": 399,
+      "sha256": "3e965cd7cfd553c2ff4e842d8d8019aaae2da0a21d92ff85a87573dd8d1b95c6"
+    },
+    {
+      "path": "PowerControl/FPS-Monitor.ps1",
+      "bytes": 12253,
+      "sha256": "7cb52cfaa485998949a6070756646ca170df5e638147ab83d93948f558da3c41"
+    },
+    {
+      "path": "PowerControl/FPS-Monitor.vbs",
+      "bytes": 251,
+      "sha256": "5adba2797c7e71b4b5dc6060f1005f75953ba0cc3a27fb143a290f2a930450af"
+    },
+    {
+      "path": "PowerControl/GameTitlePolicy.json",
+      "bytes": 475,
+      "sha256": "82a1c3ec6c62a746cafbb1b7b85533036c17ac61b8645d30360545bc3f533dc4"
+    },
+    {
+      "path": "PowerControl/GameTitlePolicy.ps1",
+      "bytes": 1091,
+      "sha256": "4403696f0e271066ca4abc83790f2754e1b8aacbf4a501582e10b0c0b0e4db85"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/BlackSharp.Core.dll",
+      "bytes": 37376,
+      "sha256": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/controller-hidapi.net.dll",
+      "bytes": 7680,
+      "sha256": "cd47d72903dbcba4e8c68cd5cc424b8648c12aa8a5c00cf2a30050aa28e4d0ca"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/craftersmine.SteamGridDB.Net.dll",
+      "bytes": 76288,
+      "sha256": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GameLib.Core.dll",
+      "bytes": 12288,
+      "sha256": "1946b5f67a272a9f0ba25962e091a331c19261e747cc138ef31051b66ce111d8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GamepadMotion.dll",
+      "bytes": 25600,
+      "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Gma.System.MouseKeyHook.dll",
+      "bytes": 61440,
+      "sha256": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GongSolutions.WPF.DragDrop.dll",
+      "bytes": 214392,
+      "sha256": "1672736512ddbb8608795c25a54d3c040ebc570c46e3a332ce52727a19d2140e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/GregsStack.InputSimulatorStandard.dll",
+      "bytes": 25600,
+      "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.deps.json",
+      "bytes": 59901,
+      "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.dll",
+      "bytes": 2774016,
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.json",
+      "bytes": 379,
+      "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.runtime.json",
+      "bytes": 15179,
+      "sha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.dll",
+      "bytes": 162304,
+      "sha256": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/hidapi.net.dll",
+      "bytes": 13312,
+      "sha256": "5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HidLibrary.dll",
+      "bytes": 46592,
+      "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/IGDB.dll",
+      "bytes": 111104,
+      "sha256": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.Controls.dll",
+      "bytes": 547328,
+      "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/iNKORE.UI.WPF.Modern.dll",
+      "bytes": 272896,
+      "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Interop.IWshRuntimeLibrary.dll",
+      "bytes": 37376,
+      "sha256": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Abstractions.dll",
+      "bytes": 28496,
+      "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Binder.dll",
+      "bytes": 43792,
+      "sha256": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.dll",
+      "bytes": 44880,
+      "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.FileExtensions.dll",
+      "bytes": 28496,
+      "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Configuration.Json.dll",
+      "bytes": 27984,
+      "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyInjection.dll",
+      "bytes": 95568,
+      "sha256": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.DependencyModel.dll",
+      "bytes": 85264,
+      "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "bytes": 32040,
+      "sha256": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Diagnostics.dll",
+      "bytes": 37160,
+      "sha256": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "bytes": 23376,
+      "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileProviders.Physical.dll",
+      "bytes": 45392,
+      "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.FileSystemGlobbing.dll",
+      "bytes": 47952,
+      "sha256": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.dll",
+      "bytes": 92944,
+      "sha256": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Http.Polly.dll",
+      "bytes": 32544,
+      "sha256": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Logging.dll",
+      "bytes": 51536,
+      "sha256": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+      "bytes": 22824,
+      "sha256": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Options.dll",
+      "bytes": 65360,
+      "sha256": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Extensions.Primitives.dll",
+      "bytes": 44880,
+      "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Win32.TaskScheduler.dll",
+      "bytes": 336896,
+      "sha256": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.Windows.SDK.NET.dll",
+      "bytes": 1074688,
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Core.dll",
+      "bytes": 104448,
+      "sha256": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Microsoft.WindowsAPICodePack.Shell.dll",
+      "bytes": 574464,
+      "sha256": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Core.dll",
+      "bytes": 187904,
+      "sha256": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Vorbis.dll",
+      "bytes": 14848,
+      "sha256": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.Wasapi.dll",
+      "bytes": 180224,
+      "sha256": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NAudio.WinMM.dll",
+      "bytes": 58368,
+      "sha256": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.Utilities.Bluetooth.dll",
+      "bytes": 255488,
+      "sha256": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Nefarius.ViGEm.Client.dll",
+      "bytes": 208384,
+      "sha256": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/NVorbis.dll",
+      "bytes": 80896,
+      "sha256": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Kernel32.dll",
+      "bytes": 113728,
+      "sha256": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PInvoke.Windows.Core.dll",
+      "bytes": 272960,
+      "sha256": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Polly.dll",
+      "bytes": 287984,
+      "sha256": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/PrecisionTimer.NET.dll",
+      "bytes": 22016,
+      "sha256": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.Core.dll",
+      "bytes": 301568,
+      "sha256": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/protobuf-net.dll",
+      "bytes": 285184,
+      "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/inpoutx64.dll",
+      "bytes": 98304,
+      "sha256": "5f27ed4d5cd58a1ee23deeb802e09e73f3a1d884ce2135f6e827f67b171269e7"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/msiapcfg.dll",
+      "bytes": 13432,
+      "sha256": "8f9fcb5f14c3fbc66843687d8c9e1ac54f7e7d62946c2965d67dd70c4b576dc5"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/PawnIO/RyzenSMU.bin",
+      "bytes": 39652,
+      "sha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Resources/RTSS/RTSSSharedMemoryNET.dll",
+      "bytes": 80896,
+      "sha256": "685f6e8d09e3b685a8334ae989f30f9859262046a170374f0df8121b2deba74d"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/RestEase.dll",
+      "bytes": 139776,
+      "sha256": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/ricaun.NamedPipeWrapper.Json.1.8.0.dll",
+      "bytes": 23040,
+      "sha256": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SapientiaUsb.dll",
+      "bytes": 828352,
+      "sha256": "0b7c5845b94b9caf1c45f7555e54918020eb046e83fd4bd625781bcf7acae9f5"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SDL3-CS.dll",
+      "bytes": 47616,
+      "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Sentry.dll",
+      "bytes": 827904,
+      "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.dll",
+      "bytes": 162304,
+      "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.dll",
+      "bytes": 28672,
+      "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Extensions.Logging.File.dll",
+      "bytes": 11776,
+      "sha256": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Formatting.Compact.dll",
+      "bytes": 8704,
+      "sha256": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Settings.Configuration.dll",
+      "bytes": 71680,
+      "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Async.dll",
+      "bytes": 9216,
+      "sha256": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.Console.dll",
+      "bytes": 38400,
+      "sha256": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.File.dll",
+      "bytes": 36864,
+      "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Serilog.Sinks.RollingFile.dll",
+      "bytes": 18432,
+      "sha256": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Shared.dll",
+      "bytes": 13312,
+      "sha256": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.Direct3D9.dll",
+      "bytes": 338944,
+      "sha256": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.DirectInput.dll",
+      "bytes": 151040,
+      "sha256": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.dll",
+      "bytes": 275968,
+      "sha256": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/SharpDX.XInput.dll",
+      "bytes": 13824,
+      "sha256": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/steam-hidapi.net.dll",
+      "bytes": 19968,
+      "sha256": "2d1d03847ff4f90b6ca7059d55cf7f9cae40eafd31f01cc9974d514de76c52f9"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.IO.Ports.dll",
+      "bytes": 88912,
+      "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.Management.dll",
+      "bytes": 314632,
+      "sha256": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/System.ServiceProcess.ServiceController.dll",
+      "bytes": 91984,
+      "sha256": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/UEFIVaribleDll.dll",
+      "bytes": 21136,
+      "sha256": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WindowsInput.dll",
+      "bytes": 109056,
+      "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WinRT.Runtime.dll",
+      "bytes": 528944,
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/WpfScreenHelper.dll",
+      "bytes": 17920,
+      "sha256": "727c1669a6094285f0ed771263a35847b6305b13a59562265aa955cc2e07b76f"
+    },
+    {
+      "path": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/Xinput1_4.dll",
+      "bytes": 176640,
+      "sha256": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec"
+    },
+    {
+      "path": "PowerControl/Install-GameInputRedist.ps1",
+      "bytes": 3037,
+      "sha256": "f5410a84af1e5a8b6c2c6be51b78c474c241c27c67ce4250d59b95c4e5819a5d"
+    },
+    {
+      "path": "PowerControl/JoyXoff.bat",
+      "bytes": 340,
+      "sha256": "8807a60a1e92959efd30c0471be2f1544ee6ac2d2cbfe6e0fea924fe5697c5c5"
+    },
+    {
+      "path": "PowerControl/KiLL-EXE.bat",
+      "bytes": 384,
+      "sha256": "1d79cf58c0c35a29f3b2bf839a0683b176773a5cf7802b0ef3541f1037d4ae54"
+    },
+    {
+      "path": "PowerControl/KiLL-EXE.ps1",
+      "bytes": 958,
+      "sha256": "d46e89fd9264a9c5a3a4c4212eeecd773d34f6ededb0f185345f51d74b25284f"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightDeviceCore.dll",
+      "bytes": 28160,
+      "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightSetter.deps.json",
+      "bytes": 496,
+      "sha256": "3c99d2a11a849726eb98a449fcddb646a2e1337825dc8f92d594e8aeb46def90"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightSetter.dll",
+      "bytes": 138240,
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightSetter.exe",
+      "bytes": 162304,
+      "sha256": "6be372d07eea812f06bef54e79ec4b39b53cb152d1f8b758b652caef435ed8cd"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightSetter.json",
+      "bytes": 350,
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7"
+    },
+    {
+      "path": "PowerControl/light-setter/YeManLightSetter.runtimeconfig.json",
+      "bytes": 519,
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    },
+    {
+      "path": "PowerControl/MemoryScan/CeScanEngine.lua",
+      "bytes": 8859,
+      "sha256": "24d41f2bdc2b7c22c680c2021dc17af5b5afa8bcccb340379094f5088d28035a"
+    },
+    {
+      "path": "PowerControl/MemoryScan/MemoryScanHost.cs",
+      "bytes": 18639,
+      "sha256": "acfe804d3557e45f8d2493d79ed8948999bded039471d9f8edbaf5e97f3f9bfb"
+    },
+    {
+      "path": "PowerControl/MemoryScan/MemoryScanHost.exe",
+      "bytes": 17920,
+      "sha256": "64782f0f4a7d272972913e14829b5d1441757f4373e758b419cf272155ae6722"
+    },
+    {
+      "path": "PowerControl/MemoryScan/MemoryScanHost.payload.json",
+      "bytes": 447,
+      "sha256": "6b80f3d58d476fa96b91eed8a45a281c35a0bcd8bc22983b3f8058d171e5508e"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct.exe",
+      "bytes": 396288,
+      "sha256": "dd55a81d56e8c32918e5190b2ec2a1f2a7edbbca884627439b4b619fdfb5602d"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct.exe.sig",
+      "bytes": 566,
+      "sha256": "3152dde222deb493a3e56e41014f9ba7340393b0aa2a7f61615228a4c0af560e"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct.ini",
+      "bytes": 364,
+      "sha256": "e621dfaffc0a10a26882fefafa9b9ad654d8f5cfab9f36b5ea7c98980f3fe445"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct.lng",
+      "bytes": 115500,
+      "sha256": "bccfb40bcb6830ef3f87d61e7ec0ad010d0fda088cca77bbdd9a5353d473f72c"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct.sig",
+      "bytes": 566,
+      "sha256": "bf7f10021944988588f6f4e0b10aa761b42ff79e04dcf5514b1653ba4c1faec1"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/memreduct_clear.vbs",
+      "bytes": 931,
+      "sha256": "6cd7cc761d8376ed50a3da75daa851a5bdf68b14e535e6113d816db09cccef60"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/portable.dat",
+      "bytes": 10,
+      "sha256": "889b31c6a536fee7b302a65e6a816ec43341b2602e791b2c04fc74d499886e99"
+    },
+    {
+      "path": "PowerControl/MG-AUTO/清理内存.bat",
+      "bytes": 245,
+      "sha256": "ab8abc73756676293d97a807fdd20adb138231ebc7cb23deb793153ca3342b4b"
+    },
+    {
+      "path": "PowerControl/OpenSpeedy/bridge32.exe",
+      "bytes": 231208,
+      "sha256": "22c8ec264a243012ee9e411db9c261eba214a4092ea6afca7b4e23859552d77c"
+    },
+    {
+      "path": "PowerControl/OpenSpeedy/bridge64.exe",
+      "bytes": 260392,
+      "sha256": "0f9d5dda098a1930aef5ce737a665b59e0ccfea216e363198c8a8c4115493bf0"
+    },
+    {
+      "path": "PowerControl/OpenSpeedy/speedpatch32.dll",
+      "bytes": 38704,
+      "sha256": "1b2cb2275488ae7cf5bc827b7c746dce9d35c1c3acd5300955fc4ca10dccb7fb"
+    },
+    {
+      "path": "PowerControl/OpenSpeedy/speedpatch64.dll",
+      "bytes": 50480,
+      "sha256": "388ae5f9c054d5a064bab04f8201f520657c2908a34e5c614d5dd275d00d3512"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_bz2.pyd",
+      "bytes": 86752,
+      "sha256": "76a33e2baa3880aa46290cc7d5810b3155c5e2f5a1cc7d3f7b751f6434144ada"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_ctypes.pyd",
+      "bytes": 134368,
+      "sha256": "75687620596877b0dde462e74ae12140d695b3c78df3c6c099d55717768dde42"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_decimal.pyd",
+      "bytes": 286432,
+      "sha256": "906964c01d04b360c316a2bb86d03d9ca9864e039baa01fa866815e6dce4a9b1"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_hashlib.pyd",
+      "bytes": 69344,
+      "sha256": "5eb4a2aa9e28b49cb2a4f6ecee21f3c2b629b43a0709bad1d7e6204bac74eac2"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_lzma.pyd",
+      "bytes": 159456,
+      "sha256": "f221ed5f1c2789aa357f3c2dc4cd22af134b4b91acb3fb78f9fa5f7f9a7b62e4"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_socket.pyd",
+      "bytes": 86752,
+      "sha256": "ba944001aa6b53350f8c64e93643742abf1a08dd07c7dbbc13996e7d4d8a9efa"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/_ssl.pyd",
+      "bytes": 181984,
+      "sha256": "1cf939510359f5aa3c5f51a0ad994d9b819f5603dd100872cd30a1e25cd83f05"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/base_library.zip",
+      "bytes": 1409329,
+      "sha256": "0626caefbaa5a37934c8d520d9ff5ec71974fd22ca56fe8cf7739b8458c557a7"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/COPYING",
+      "bytes": 27032,
+      "sha256": "1e7e6bae5a5bde32f1ae5a7c37a082d1ab03cf89354f7f936ac40be9e39a6531"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/libcrypto-3.dll",
+      "bytes": 5238520,
+      "sha256": "09499e186cf0e434ffa17ad153aa9a66d6048c54a2c03b823e2a06c49d9affe4"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/libffi-8.dll",
+      "bytes": 39696,
+      "sha256": "eff52743773eb550fcc6ce3efc37c85724502233b6b002a35496d828bd7b280a"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/libssl-3.dll",
+      "bytes": 794872,
+      "sha256": "28c395290279fa4f4f54a57b85cd66d853895f925fefb8f6fdebc0d8b1cdd07c"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/python313.dll",
+      "bytes": 6132448,
+      "sha256": "3a7a6170ea840bf2a2a76d05b687b946fcdc8d0cfedfe159012b38f1e8959a7c"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/select.pyd",
+      "bytes": 32992,
+      "sha256": "a208997eb871b5c7785eb9bcc6a22ba8c43262255b59a3394fbe9912f38b4692"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/unicodedata.pyd",
+      "bytes": 712928,
+      "sha256": "7f8d28574732959cdb1188127fe3494c3618b602eede69c0a71846f0b5cc8a15"
+    },
+    {
+      "path": "PowerControl/pawnio/_internal/VCRUNTIME140.dll",
+      "bytes": 120400,
+      "sha256": "052ad6a20d375957e82aa6a3c441ea548d89be0981516ca7eb306e063d5027f4"
+    },
+    {
+      "path": "PowerControl/pawnio/AMDFamily17.bin",
+      "bytes": 9300,
+      "sha256": "099dc01d6db97ea997fec4a461e191cc64b9d7ce47c9d2153c451c56c2adcf50"
+    },
+    {
+      "path": "PowerControl/pawnio/IntelMSR.bin",
+      "bytes": 5292,
+      "sha256": "5bfda87500160076158befc77300f81a388d72b11df2c794a3939ebe66777098"
+    },
+    {
+      "path": "PowerControl/pawnio/PawnIO_setup.exe",
+      "bytes": 3410960,
+      "sha256": "1f519a22e47187f70a1379a48ca604981c4fcf694f4e65b734aaa74a9fba3032"
+    },
+    {
+      "path": "PowerControl/pawnio/RyzenSMU.bin",
+      "bytes": 39652,
+      "sha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0"
+    },
+    {
+      "path": "PowerControl/pawnio/YeManTdpCtl.exe",
+      "bytes": 1905401,
+      "sha256": "c3fc706e966895485308d0410a39d4b5e6810fc14fdf64c9906d0fc8195ac9d1"
+    },
+    {
+      "path": "PowerControl/physpanel.exe",
+      "bytes": 174592,
+      "sha256": "f8b55d55b31ab3a918849e923725cc85895320665a7c67d7c9afd8dff52cfc6f"
+    },
+    {
+      "path": "PowerControl/Plan-AC.bat",
+      "bytes": 246,
+      "sha256": "ad81c5c573216ee6c59f4a99a7f6250de1613f33eb3f0e004aa0e4513b0b5af9"
+    },
+    {
+      "path": "PowerControl/Plan-AC.vbs",
+      "bytes": 101,
+      "sha256": "7f9c2b1f4d9679a82f2d499908c228ad3a37e207fd1e71d7c8fcf731698f9571"
+    },
+    {
+      "path": "PowerControl/Plan-DC.bat",
+      "bytes": 246,
+      "sha256": "ad81c5c573216ee6c59f4a99a7f6250de1613f33eb3f0e004aa0e4513b0b5af9"
+    },
+    {
+      "path": "PowerControl/Plan-DC.vbs",
+      "bytes": 101,
+      "sha256": "2c5c2872eebe379ac807d727bcfb5e46601392236102a6b9870dbfadfdddd185"
+    },
+    {
+      "path": "PowerControl/PowerShellPriority.reg",
+      "bytes": 2920,
+      "sha256": "b8b9538327b7719c8416c59d48ec713d8d4227e3deac79e6f331c37db61cf667"
+    },
+    {
+      "path": "PowerControl/redist/HidHide_1.5.230_x64.exe",
+      "bytes": 8078016,
+      "sha256": "f4bbbcb82e6258641b887c74bc81c4c5f66e4aa811808dfc304347687b7605f6"
+    },
+    {
+      "path": "PowerControl/redist/HidHideCLI.exe",
+      "bytes": 222632,
+      "sha256": "9dd283fedfbd301e1a574a3d4b8663f6274ccb5c896f468ed55a6239f9ade270"
+    },
+    {
+      "path": "PowerControl/redist/HIDMaestroSetup.deps.json",
+      "bytes": 439,
+      "sha256": "85a8834e8cb62e3566fc45995e6dd763b49b0ee8fd1bf69cc1ecbf9dbdb06f7e"
+    },
+    {
+      "path": "PowerControl/redist/HIDMaestroSetup.dll",
+      "bytes": 56832,
+      "sha256": "3002c825083aa0c8e0ba530bbe6cb1924b577eb6065857a8e5b9ca294ef3c96b"
+    },
+    {
+      "path": "PowerControl/redist/HIDMaestroSetup.exe",
+      "bytes": 162304,
+      "sha256": "5267bc5eca8e9f296a8a8d91fca4aa8236e12207dbee394c5f8292c467ae6dff"
+    },
+    {
+      "path": "PowerControl/redist/HIDMaestroSetup.manifest.json",
+      "bytes": 1930,
+      "sha256": "98130a3a59c66e9b4155eb9aa3381dffda46ef4f654e24f58003fa92ff8cd8b6"
+    },
+    {
+      "path": "PowerControl/redist/HIDMaestroSetup.runtimeconfig.json",
+      "bytes": 399,
+      "sha256": "3e965cd7cfd553c2ff4e842d8d8019aaae2da0a21d92ff85a87573dd8d1b95c6"
+    },
+    {
+      "path": "PowerControl/Repair-GamingHandheld.ps1",
+      "bytes": 2199,
+      "sha256": "2b4b238f12a632c9d279844b0b43b4895850a192ab3aa85bfa569d27fe602cc7"
+    },
+    {
+      "path": "PowerControl/Resume-AllSuspended.ps1",
+      "bytes": 2505,
+      "sha256": "5fb50487b1821f40c8823af5b05e44ccea582e701a1c7f755683be80374b6c54"
+    },
+    {
+      "path": "PowerControl/RTSS-FPS.ps1",
+      "bytes": 5642,
+      "sha256": "8ae6d06b5a5750f5e2b1971e2c2ed713c855037180dec2cce4e30690275a971d"
+    },
+    {
+      "path": "PowerControl/RTSS-FPS-AC.bat",
+      "bytes": 1187,
+      "sha256": "f27384866185a6a8fe83637a8bbd42acb829eb1da9b7a01668e9cd351f3c313c"
+    },
+    {
+      "path": "PowerControl/RTSS-FPS-AC.vbs",
+      "bytes": 105,
+      "sha256": "144cb7d45c247af8494a82767ddbe6c92a9ac53b2bf12ddb18c2a1e645150425"
+    },
+    {
+      "path": "PowerControl/RTSS-FPS-DC.bat",
+      "bytes": 261,
+      "sha256": "04abe5bdb0b39d55ee4db0ba73c31a9fdc30befabc5f06eb54d23b3724601e0d"
+    },
+    {
+      "path": "PowerControl/RTSS-FPS-DC.vbs",
+      "bytes": 105,
+      "sha256": "62fe11d1e68904c5d6eea8b8e672a2f76102d7adfbde0d3bd7b247bf6a4551ec"
+    },
+    {
+      "path": "PowerControl/RTSS-Overlays/Empty.ovl",
+      "bytes": 229,
+      "sha256": "4d68043394857d9192e7bde4c2c922a14503c89cf38b6df52190bf366842f347"
+    },
+    {
+      "path": "PowerControl/RTSS-Overlays/YeManOBS-JJ-1.ovl",
+      "bytes": 6763,
+      "sha256": "33c32a66c4641b061cda22b8fe1794d2bd590afb13807ac4379d3517251cdc2f"
+    },
+    {
+      "path": "PowerControl/RTSS-Overlays/YeManOBS-L-1.ovl",
+      "bytes": 23490,
+      "sha256": "85bba1d23b02bd5a5a1f7916dc07d0c4f392b7545964d5f29682f7fd2733e855"
+    },
+    {
+      "path": "PowerControl/RTSS-Overlays/YeManOBS-W-1.ovl",
+      "bytes": 23703,
+      "sha256": "b8558bc179c7f4383512c4ce86c266df0e9b117f9917311db85fe98999d88a6f"
+    },
+    {
+      "path": "PowerControl/RTSS-start.ps1",
+      "bytes": 6751,
+      "sha256": "54abd97e14d11232d2728d927911e03f98c715f048c338c913f3fc3412d1f78a"
+    },
+    {
+      "path": "PowerControl/Run-Resume-PS.vbs",
+      "bytes": 575,
+      "sha256": "818b2f13eee20ba5be3b99ad749d12513d500f10c1164aeba49e0eb4b100963a"
+    },
+    {
+      "path": "PowerControl/Run-Suspend-PS.vbs",
+      "bytes": 576,
+      "sha256": "43b4e0861f883ff8f2a2c2c25d5f54adbf7dfab54eb16047440f95beb6881441"
+    },
+    {
+      "path": "PowerControl/Sleep/player-blacklist.txt",
+      "bytes": 234,
+      "sha256": "8907aa7bff5b8fce2a5d16de7c25d902ebe668b1bd4448fb70dbfd6bf2882145"
+    },
+    {
+      "path": "PowerControl/Sleep/system-blacklist.txt",
+      "bytes": 7020,
+      "sha256": "797aa1c10bc583f5f58d5c1ee54ad2011e188e6b6d653bbe10e3b146d3fe8aac"
+    },
+    {
+      "path": "PowerControl/speedhack-blocklist.txt",
+      "bytes": 246,
+      "sha256": "6cf1c13214abc4e56ad22def1c1eb0bf365531c6f80a0cad589bf3cab2a40d99"
+    },
+    {
+      "path": "PowerControl/steam-appearance.ps1",
+      "bytes": 31952,
+      "sha256": "bb9702f05f58191b6e8f6280c1393d1e7216a419722b93f52af0609272cd3461"
+    },
+    {
+      "path": "PowerControl/steam-appearance/idle.ps1",
+      "bytes": 13597,
+      "sha256": "7c3b056597a3e705e8566138ad38cf5970caf40130fcfbda36b407d85a1f863f"
+    },
+    {
+      "path": "PowerControl/steam-appearance/manifest.json",
+      "bytes": 11156,
+      "sha256": "be50573bec84cb2a2f476f78211cc4beb1c6cb2cac5ce50250f66eec9a98b734"
+    },
+    {
+      "path": "PowerControl/steam-appearance/preset.ps1",
+      "bytes": 30746,
+      "sha256": "644bc0e9158c68bc009bed5aa1412d02ce3f8f6fcae3b4ecb23cf7f8befd92a4"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/config_USER.json",
+      "bytes": 504,
+      "sha256": "70aaedeb7d54d22d050aad29eb2ade878060bcf472126b10130c0f83bc4ed903"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/footer.css",
+      "bytes": 383,
+      "sha256": "6928697bbdf0d617adff04d92eef8ab0299f6d6c29da614e5c9eeb3b57171615"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/FullBG.css",
+      "bytes": 89,
+      "sha256": "6d5058779a8731b47f502f65051da52ff639da5d991d18a02c7ef1a5808cd346"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/invertedgradient.css",
+      "bytes": 489,
+      "sha256": "98cb4f35c5f1f4cb78070cb4a967bcb0b571a56df9c94e6edb347642967367df"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/LeakingBG.css",
+      "bytes": 93,
+      "sha256": "8f9c7a2c1b91ca7ca82333eddbde650139b451e1f2411ef2b79cfff07613391b"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/lineargradient.css",
+      "bytes": 468,
+      "sha256": "013d5cce538c1a040b188adf12bd31e3ae8e0747c23eefb7fdc2c29780675969"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/lineargradientinverted.css",
+      "bytes": 462,
+      "sha256": "1b47537f34754b2b4366f4e6b1ba168f0bfa83ce866208e556824c93c2728e3a"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/NoBG.css",
+      "bytes": 174,
+      "sha256": "fd76b26f1533d95b88fca53635af3e90bca1f9fc5bb22b849e926e5ac00c1e61"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/nofooter.css",
+      "bytes": 58,
+      "sha256": "7fce2a39fb7513021763b208fa12e20d96ee12af0271333f45803e1def61f53e"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/noheader.css",
+      "bytes": 43,
+      "sha256": "081fcb4ff0cb7f329be1e7a057556e7d3e7cce0abd6448cf0318e281a35b31a5"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/noherogradient.css",
+      "bytes": 391,
+      "sha256": "dcbf23b8d74963412ae2af99c647127601518f1bb00c1ecaed8ca83aec1f68f2"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/shared.css",
+      "bytes": 3977,
+      "sha256": "4b86ce7d4714d4272e54acd897ccf6ee475c7bfa7c42b07cb72965a5b996c2cd"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/StandardBG.css",
+      "bytes": 81,
+      "sha256": "3c3c58805116246c08af81849ba6d47f6a4bb112dcb49536bd6210ed1daaadf1"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/subtlegradient.css",
+      "bytes": 509,
+      "sha256": "e9526dfd50ca0963863c778b6aacf1af112e4240e609390ba874430ce010496c"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Art Hero/theme.json",
+      "bytes": 21257,
+      "sha256": "97a351c868803b486d999985bb61a862560845e04bb84920d636e168c1e54bac"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Centered Game Text/config_USER.json",
+      "bytes": 16,
+      "sha256": "89a174b4d9e4c94e26fa0173e4a5dcc341b1bb0d61171aa7de275eaa68ce6176"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Centered Game Text/LICENSE",
+      "bytes": 1074,
+      "sha256": "4f38814b0d43483a9ca91d86e3b46fd4921f172a243e98f01fb0ffaf8820f206"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Centered Game Text/shared.css",
+      "bytes": 589,
+      "sha256": "e1da7c747ca6a855de97f2264325ab34df18c7e42ea06d37931d21379f03cb9c"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Centered Game Text/theme.json",
+      "bytes": 208,
+      "sha256": "107fdc662515552c706abd108867409bc1288556af29e103c7533ae69917a4f0"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/config_USER.json",
+      "bytes": 79,
+      "sha256": "1ebccfe9bb4ba20be4c0f2e91c621d863cd62eff120a327ee9085bd6ceaddc22"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/global.css",
+      "bytes": 232,
+      "sha256": "940330a1933c391cca9ed91c5e9dd13eaac0a400180db36d63cb0d21e254b701"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/LICENSE",
+      "bytes": 1066,
+      "sha256": "aa0d093e54888701390f332b53586bbc70174d35bccbb81ffa35213c298d9ed5"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/recent-games.css",
+      "bytes": 286,
+      "sha256": "6c340dad029c8a39fd17ae7c6538f0e8168b07d00e52ee31e8e35d5da6c17a81"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/shared.css",
+      "bytes": 82,
+      "sha256": "19b925b779fb2fc62a6fb5b06d9b7506cb07eee37f2b93eaaa2e07e14c26bafb"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Darken Unfocused Games/theme.json",
+      "bytes": 3153,
+      "sha256": "21b7d550a352b9a9e9bd5746d3fb1743b9aa68db50adc55c8346eb32204fbf3d"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Game Cover Reflections/config_USER.json",
+      "bytes": 112,
+      "sha256": "0e8c48981f65a4607df2135727627dcb553047742a8ab90192838e0c55fd1fa0"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Game Cover Reflections/LICENSE",
+      "bytes": 1066,
+      "sha256": "aa0d093e54888701390f332b53586bbc70174d35bccbb81ffa35213c298d9ed5"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Game Cover Reflections/shared.css",
+      "bytes": 1236,
+      "sha256": "c0480c97d6706ea4af5f8b3651494818f91b59da1a7d7b5e704a5686f1635c7d"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Game Cover Reflections/theme.json",
+      "bytes": 5991,
+      "sha256": "c9dc2055489d0d5a70212ed12e106776e36957b05d784c826334cd4615d6c405"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/config_USER.json",
+      "bytes": 31,
+      "sha256": "0acd08b9b83625b18ab6f46e11f4aacf0723a1142501d4d7fbe16811f56e7dc9"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/eight.css",
+      "bytes": 68,
+      "sha256": "e71a63c2610aed7e976b90a8f7a0d1a0797384b6aa113a142b50e0e8b9d5da0f"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/five.css",
+      "bytes": 66,
+      "sha256": "437ba24fbbab66edf0f1788ba2692e052fbae660f031c1e764b9bd33fa870f1e"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/nine.css",
+      "bytes": 68,
+      "sha256": "338a57d9d9febcc95e8eab001568ff2b6570e4d40ce538d8cc8ae4661f7ecd4d"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/seven.css",
+      "bytes": 68,
+      "sha256": "a6b31c8198b9fa210f96526e62989c9fad4e5e49f5900002877b87161e4636aa"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/shared.css",
+      "bytes": 180,
+      "sha256": "4cc97bfe308b4e8753d56f802391dfb853c26aba0dae198290daf07db1d81c39"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/six.css",
+      "bytes": 68,
+      "sha256": "a2053882f065cb6825940a23eddd32d61814e84be6a89bb2374b1b68d8baaebc"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Mini Carousel/theme.json",
+      "bytes": 1111,
+      "sha256": "9ea136dc9066843099193d2192f45ba8b08d5caed37502a068797d3e984a0eeb"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/config_USER.json",
+      "bytes": 63,
+      "sha256": "0e35f9e090372758b9e4eff3ec6a865e4fcc28317c96c3ca835b9d802ba3490d"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/blue.css",
+      "bytes": 346,
+      "sha256": "cdcd6e546f016175e347f12239b9c8e9e513995fb32335c9846ba0b894d16579"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/default.css",
+      "bytes": 346,
+      "sha256": "620ec1643186d68159fcb79915d3bd8682f1ecd9d4a45aea225dfe105d40b298"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/green.css",
+      "bytes": 346,
+      "sha256": "92e4e28236ca1b45edb728ba26c69f53e99aa21a4229e81b8237e2aa6986861d"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/purple.css",
+      "bytes": 346,
+      "sha256": "4ab6312953b50516c35a7fc2532d9f874bf0bb37e5f5b718b1db1f4cdd3d38a8"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/red.css",
+      "bytes": 346,
+      "sha256": "7435d11d69e5498224f06da0e87f78c5d7f02047562c8a6849f88a3f37cd47ec"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/teal.css",
+      "bytes": 346,
+      "sha256": "2f7495aa596ecd5ca2157ab84e500d81e08e48ee13e2f375a912518cb41d5b45"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/focus/yellow.css",
+      "bytes": 346,
+      "sha256": "54d1750ee82ffa72aa1c4bd62105e55aefcc14980bdb6dc5eb967faaccbd35e7"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/mode/dark.css",
+      "bytes": 3878,
+      "sha256": "7c1749ee5af60988847cb9ce1242da2f152e7ed9c97dc57b196648bb23dd60c0"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/mode/light.css",
+      "bytes": 3880,
+      "sha256": "ca74cb0bc492a98bd147d9ab7f1f7ba1f7c9fa8b93b05c36d5011a23a0b08212"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/shared.css",
+      "bytes": 1535,
+      "sha256": "5ba13ee4eaea9279b8453980414f378405214fd72adffb7bf706410bd7e69071"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/NEX-85 Keyboard/theme.json",
+      "bytes": 1237,
+      "sha256": "a6d0ccf7ca1b6da369a5e0f69f86fd228683c7bff57422328e74f7cba697d072"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/config_USER.json",
+      "bytes": 58,
+      "sha256": "aadb2d9265e10bd210fec4b0b85723c8baf7eef2fffdd8f4938185b3e3ef3959"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/hide-outline.css",
+      "bytes": 167,
+      "sha256": "314916d617ec7dd1af094469169c4389f5fd132f396a9e71f9de8bd3edbca505"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/10px.css",
+      "bytes": 50,
+      "sha256": "5a7e4e9f198493fe9fc7f64f1d1740c04e6bd0d90f96e39f59af7872c63b3724"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/15px.css",
+      "bytes": 50,
+      "sha256": "2845ef6c4cc73c6d9a8ec22362660f6864897c68443767a7e95837574edd2b0a"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/20px.css",
+      "bytes": 50,
+      "sha256": "f1795c56c7f932d5822c269d5d355e47ce7cd1f20170ce36f8e697c61e598c4b"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/30px.css",
+      "bytes": 50,
+      "sha256": "0fce1bebc028d50f33bd587f2dd8655d673972f2d68203f5036ba2a3b4a6aae2"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/3px.css",
+      "bytes": 49,
+      "sha256": "568a8cc97af677a026e5f17995ec09c6fa24a7bedc5f16af35180227c203d4de"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/intensity/5px.css",
+      "bytes": 49,
+      "sha256": "5587a5d71f56b72eeb977d49af792f7879196b26467a73bb0d3ce51700238105"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/LICENSE",
+      "bytes": 1064,
+      "sha256": "5d8c347e4557305c4aff3531cf93258bae1b86205e5361c0abaec06764933b52"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/round-outline.css",
+      "bytes": 1908,
+      "sha256": "7110ec58dcd03ab221421b915aaf91b16f2580ed4f70e7f3b18836e2f1daae78"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/shared.css",
+      "bytes": 14353,
+      "sha256": "f1d11f843efceddeb3341fe6a9e492482fd64cf1bb530497f4e230c25f685838"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/Round/theme.json",
+      "bytes": 1621,
+      "sha256": "f7f09596d86d12450d21fcf0f5fa1121ea754fe379fc78edd35145e785dda3e5"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/YMCC Game Details/config_USER.json",
+      "bytes": 21,
+      "sha256": "4830d1ee11b28387a21e99d165457ca29347db801e5bb2d03af6411a96d56a77"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/YMCC Game Details/shared.css",
+      "bytes": 586,
+      "sha256": "aff2384d1043f1df7485828fff142043da3e2a4e5a70b2f9f0e7b915e0cdf03a"
+    },
+    {
+      "path": "PowerControl/steam-appearance/themes/YMCC Game Details/theme.json",
+      "bytes": 322,
+      "sha256": "df0d5b1b444b872f1f7f5d5dd7c5ea6d76338d2545e4c334bc080c49d96e89f3"
+    },
+    {
+      "path": "PowerControl/Steamcommunity_302.xml",
+      "bytes": 3136,
+      "sha256": "3eb3962516a7921742834e1bfbdec4a089167f7c48df04335a59cc4b2f2084d4"
+    },
+    {
+      "path": "PowerControl/Suspend-LargestGame.ps1",
+      "bytes": 3608,
+      "sha256": "3c7c2e4dd4fd0875bb61eac4978d52f9ac7ed932629cbc0c33c3a10266b2eaa3"
+    },
+    {
+      "path": "PowerControl/TDP/Elite.bat",
+      "bytes": 4538,
+      "sha256": "628c77c663e6eb9af75552e6dc534ff9bc35ac71c0fba21c7bb41f408f032037"
+    },
+    {
+      "path": "PowerControl/TDP/Elite.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Extreme.bat",
+      "bytes": 4524,
+      "sha256": "3801c41eccf677e9901a53a4e8cbd5dbe97630d37a866e2357ab2ebed5ba1479"
+    },
+    {
+      "path": "PowerControl/TDP/Extreme.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Medium.bat",
+      "bytes": 4539,
+      "sha256": "d9b7707db233ce1d8586dcf1b74f7a8687361390c73c08c45410df6c1ddbf973"
+    },
+    {
+      "path": "PowerControl/TDP/Medium.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Performance.bat",
+      "bytes": 4544,
+      "sha256": "025479816c4ac427ae09a93185c75f33f0f95c0e38fce56d6d4d0dd1a85bf2e0"
+    },
+    {
+      "path": "PowerControl/TDP/Performance.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Elite.bat",
+      "bytes": 4665,
+      "sha256": "7ba087088a271fc29cdebee6c365e9a49753a4280f08100c868d793d9291b411"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Elite.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Extreme.bat",
+      "bytes": 4652,
+      "sha256": "2ca1b4b7854d7729cdd0b5847b49dd066a10208410b3365eadd647d36b4f3b60"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Extreme.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Medium.bat",
+      "bytes": 4666,
+      "sha256": "182574771519e13699197cb7cfc66b0a002e10408f0bc58f2319b76d6921418d"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Medium.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Performance.bat",
+      "bytes": 4671,
+      "sha256": "3c58892eb8e855b758b617b767628e50a84d5c4453623c8ce1bf13eb61a51783"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Performance.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Silent.bat",
+      "bytes": 4665,
+      "sha256": "2f5609ea849a245ced0c8e79bf6895b508efc774d27510fa7370b0378ef7e843"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Silent.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Tubo.bat",
+      "bytes": 4665,
+      "sha256": "70d02b7bb4671bbcc3bb5ba9a0cf8cdc1017ab243873877b1143febbafd3276a"
+    },
+    {
+      "path": "PowerControl/TDP/Plan-Tubo.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Silent.bat",
+      "bytes": 4539,
+      "sha256": "4714dd0cafd1afc04f8b920a8661a3357d5876e07cf04bd43f35a76e3508f292"
+    },
+    {
+      "path": "PowerControl/TDP/Silent.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TDP/Turbo.bat",
+      "bytes": 4538,
+      "sha256": "e0326b87aa6e8ca6961267d8b3a75994ff7a9889df464132b53c524ab9989d6f"
+    },
+    {
+      "path": "PowerControl/TDP/Turbo.vbs",
+      "bytes": 126,
+      "sha256": "64a576c6d4d3bb1eb2c9087468f4c377d8494c7e3bc6438ab14d5084dd434de2"
+    },
+    {
+      "path": "PowerControl/TopMonitor.ps1",
+      "bytes": 16877,
+      "sha256": "8c2cbbd9caf68a153b79e02999a53a1c0e7d864da98ba087daec0d9793c7d50b"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerBackend.psm1",
+      "bytes": 51696,
+      "sha256": "62f334817320f80dafa4c8df8b712d452d1801a4d55afd7098f27da0912fa6f6"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerCatalog.ps1",
+      "bytes": 11047,
+      "sha256": "e7a5139efd1814d2448525fe2d17793407d46c74a298a45785a71388cf1b7ee3"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerCustomLibrary.ps1",
+      "bytes": 10405,
+      "sha256": "2c5230f450ad6b2543b5b4cb752864274a84828715b9567d17cf27caf3e2a01b"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerGcmFallback.ps1",
+      "bytes": 5108,
+      "sha256": "1fe0e6f69d14ddecb70b6eb1c6842fb6404da031987446f968b885b174e7e840"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerIdentity.ps1",
+      "bytes": 4720,
+      "sha256": "8d6706db256fa063f4b4aa022193b686d98c6977b91599678850b458a58b924a"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerLaunch.ps1",
+      "bytes": 11806,
+      "sha256": "73d32044b490879ca7d2885dc9d6018f9c120450e10a8799c2f52b3fb8508a2e"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerLaunchPaths.ps1",
+      "bytes": 8730,
+      "sha256": "664c895f36f6bf7c5a10ff4687a769e3a3cc829c2708f4ab61d539dcb0900dad"
+    },
+    {
+      "path": "PowerControl/Trainer/TrainerProcessIdentity.ps1",
+      "bytes": 4513,
+      "sha256": "603f2e7bca293716284ec80750ca363f9b28ce294ff49802a7e6026d4649916d"
+    },
+    {
+      "path": "PowerControl/virtualmemory/virtualmemory1G-32G.ps1",
+      "bytes": 706,
+      "sha256": "eb52e1f3114ce39df716ce561c4ec876c77fef5dfbee425ea3cae8534f1ab062"
+    },
+    {
+      "path": "PowerControl/Wake Block List.reg",
+      "bytes": 34012,
+      "sha256": "b5e4788a2b9de077931f47f4b8b80bf382c7b5187c9fb6d29665c856814447a7"
+    },
+    {
+      "path": "PowerControl/Xbox大屏游戏模式.xml",
+      "bytes": 3438,
+      "sha256": "f659c3884d5eeec9f7d594bfc3562ce3d9c26b19f9f2096a5806bc5bf2dec07f"
+    },
+    {
+      "path": "PowerControl/YeManGcmSearch.ps1",
+      "bytes": 10427,
+      "sha256": "83ee16139d5e31cff0b08117ffbbfaaa388c764a91c2c56e33ac4730272e7c3e"
+    },
+    {
+      "path": "PowerControl/YeManHWiNFO.bat",
+      "bytes": 776,
+      "sha256": "e74879575b397cfaf708d2cd9ca519db63738520a45106d1a6de456b136c7da4"
+    },
+    {
+      "path": "PowerControl/YeManHWiNFO.ps1",
+      "bytes": 42437,
+      "sha256": "5db026aa9080fa2580060e99365c091f9df48e3e5a9b8f59a8bde6797e9839c7"
+    },
+    {
+      "path": "PowerControl/YeManRTSS.bat",
+      "bytes": 148,
+      "sha256": "34e45470fee8781b8aa78eb8bf9e0e5fe206393079b2300d766bb2846500fdaf"
+    },
+    {
+      "path": "PowerControl/YeManRTSS.vbs",
+      "bytes": 110,
+      "sha256": "4a8f89625fcd37a0efda88588fc70eb8d108ddbefe1334b35593346367e0ce42"
+    },
+    {
+      "path": "PowerControl/YeManRTSSone.bat",
+      "bytes": 148,
+      "sha256": "34e45470fee8781b8aa78eb8bf9e0e5fe206393079b2300d766bb2846500fdaf"
+    },
+    {
+      "path": "PowerControl/YeManRTSSone.vbs",
+      "bytes": 113,
+      "sha256": "1fb18006baaf4663cf8833b603d6ef6c88c31414ae981d460d6ba683fbc47c50"
+    },
+    {
+      "path": "PowerControl/YeManSteam.bat",
+      "bytes": 82,
+      "sha256": "82461bbd59e9a324ea8c0338676e0167acd4a8538430e332ded0a56828824c95"
+    },
+    {
+      "path": "PowerControl/YeManSteam.vbs",
+      "bytes": 6416,
+      "sha256": "1453c626ce35b9d5260e742488d07bca7d23667cf41e56e87b0fa7927333dbd4"
+    },
+    {
+      "path": "PowerControl/YeManSteam/CssLoader-Standalone-Headless.txt",
+      "bytes": 59,
+      "sha256": "a066db8102db649932503a27b755836de08c1ccef7df1afceb0aaeb122328b94"
+    },
+    {
+      "path": "PowerControl/YeManSteam2.bat",
+      "bytes": 3122,
+      "sha256": "d788ce2906e67a4e4ccfe3538a1ff51a1bedecf568c4d979f51cc2d2954e2479"
+    },
+    {
+      "path": "PowerControl/YeManTrainerLaunch.ps1",
+      "bytes": 839,
+      "sha256": "02250bc282b66fff483381c786be07680b621324103ef6210a8744065d77a284"
+    },
+    {
+      "path": "PowerControl/YeManTrainerPrepare.ps1",
+      "bytes": 1095,
+      "sha256": "36b9317c1a527cc011517195d529a28415e55826d987d225c5ce96e5f44d529f"
+    },
+    {
+      "path": "PowerControl/YeManWake.bat",
+      "bytes": 4101,
+      "sha256": "95e3f6d6be1fc31255f417f409f4a49bdbc7eaf2a219e8cd16eb5f818571b072"
+    },
+    {
+      "path": "PowerControl/YeManWake.vbs",
+      "bytes": 113,
+      "sha256": "fec664a4f42c3a3a00fb8c628f3160c2a742d6b910ad9edad0d939492cf0342a"
+    },
+    {
+      "path": "PowerControl/YM.pow",
+      "bytes": 24576,
+      "sha256": "5cb4a232cd8fcf9cfa3602bbecb760c47c46e3cf5d8260f50f0f737f03a4a5be"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/LibreHardwareMonitorLib.dll",
+      "bytes": 1204224,
+      "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/LibreHardwareMonitorLib.txt",
+      "bytes": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Microsoft.Extensions.DependencyInjection.Abstractions.txt",
+      "bytes": 1115,
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Microsoft.Extensions.Logging.Abstractions.txt",
+      "bytes": 1115,
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Microsoft.Extensions.THIRD-PARTY-NOTICES.txt",
+      "bytes": 78041,
+      "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Nefarius.Drivers.HidHide.txt",
+      "bytes": 1089,
+      "sha256": "b8a55b0c2e2747c73f43990bb15097c4e2005e648e4c53b2b3118f13798160f5"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Nefarius.Utilities.DeviceManagement.txt",
+      "bytes": 1084,
+      "sha256": "87784a55fc2a823955fc69fa6c03179c69c6f89af2badce4651ed24408b29b34"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Nefarius.Vicius.Abstractions.txt",
+      "bytes": 1084,
+      "sha256": "e8a2fca4ed262f330903cf85a6ab7d4e79dae410a6dc5dace27c49e75c43f1bd"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/Newtonsoft.Json.txt",
+      "bytes": 1104,
+      "sha256": "b98a397897ff55f76cddc380041507a95a896b2946e0188703bf0496793d6516"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/licenses/RAMSPDToolkit-NDD.txt",
+      "bytes": 16725,
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/manifest.json",
+      "bytes": 15342,
+      "sha256": "4bd622f2aed6cc045f14e11844208b0f081cdce8c9d1af495b3ad8af15c81362"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "bytes": 65872,
+      "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Microsoft.Extensions.Logging.Abstractions.dll",
+      "bytes": 66896,
+      "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Nefarius.Drivers.HidHide.dll",
+      "bytes": 223232,
+      "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Nefarius.Utilities.DeviceManagement.dll",
+      "bytes": 328192,
+      "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Nefarius.Vicius.Abstractions.dll",
+      "bytes": 20992,
+      "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/Newtonsoft.Json.dll",
+      "bytes": 723368,
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Microsoft.Extensions.DependencyInjection.Abstractions.nuspec",
+      "bytes": 1741,
+      "sha256": "83e449cc179b02de9953997b21240306020028090e02fe37100450832faf43ef"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Microsoft.Extensions.Logging.Abstractions.nuspec",
+      "bytes": 2990,
+      "sha256": "d4d2218a656fc99770df9bc39c81dc2026e9e219cfa12a36aeff7219c5485a75"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Nefarius.Drivers.HidHide.nuspec",
+      "bytes": 2848,
+      "sha256": "848cc0ddc9c238beb2de44d607b7cbd8cd844c1352dd36adc2cc943884b92f42"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Nefarius.Utilities.DeviceManagement.nuspec",
+      "bytes": 1800,
+      "sha256": "8db426e41be2401a3e48ae3d4d5e564b24751e7b0b25d90d3bd9da705f856792"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Nefarius.Vicius.Abstractions.nuspec",
+      "bytes": 1737,
+      "sha256": "2a99ff034c4faecdaa0c3f5a6f6e7fc7ae4d5eecd372a3711b5d32322e5b7e95"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/Newtonsoft.Json.nuspec",
+      "bytes": 2413,
+      "sha256": "f4bc224d57a21fb481f1dc655c3fde6f2e5b8ce80a9448e74a5721a51932adf3"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/provenance/RAMSPDToolkit-NDD.nuspec",
+      "bytes": 2465,
+      "sha256": "f7787e5c1ad8c687459c45c578eb9e119fc0b0fb3c19a393117d4b2407589326"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/RAMSPDToolkit-NDD.dll",
+      "bytes": 253952,
+      "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501"
+    },
+    {
+      "path": "PowerControl/ymcc-shared-runtime/README.md",
+      "bytes": 1974,
+      "sha256": "d086b9b5252bef6a9aa2abb41d664da6fb84c6c155996ed2cb09e617b2f0f918"
+    },
+    {
+      "path": "PowerControl/改平板模式.vbs",
+      "bytes": 1153,
+      "sha256": "e68682fc13833e24bdaf6bcb3b54864e0084f1080abce033b5f138c8bb2d8f0a"
+    },
+    {
+      "path": "PowerControl/改平板模式-野蛮.bat",
+      "bytes": 784,
+      "sha256": "6f0d504f266d2c4c17b634e1c1e08c2ee1da2d483d4fdcbcb76d39c096ae0ba6"
+    },
+    {
+      "path": "PowerControl/关闭屏幕切为节能.vbs",
+      "bytes": 3380,
+      "sha256": "8ddbfc85f806a55ccbba1cf95fd3a1156c566d866975ec189339339859821c9e"
+    },
+    {
+      "path": "PowerControl/还原成非平板模式.bat",
+      "bytes": 788,
+      "sha256": "d607e5d4c73ce1d271403212c8d7cbb34119897f8b539805c587c6d1da81d7a4"
+    },
+    {
+      "path": "PowerControl/还原成非平板模式.vbs",
+      "bytes": 1153,
+      "sha256": "477169a94a4a74da6cf89987feda0e95fa82b18dbc6af06463d40e36a6d7f2bc"
+    },
+    {
+      "path": "PowerControl/监控-开机启动监控锁帧软件RTSS.xml",
+      "bytes": 3186,
+      "sha256": "1dc1d46e738de4d6de3fe0054929add07ac20acac753a7725e2353a6c1c6ab97"
+    },
+    {
+      "path": "PowerControl/节能-能源之星.xml",
+      "bytes": 3108,
+      "sha256": "3d92d29b82518f68cbd576e463f33756fade3093d581fe2f6d43165d31538499"
+    },
+    {
+      "path": "PowerControl/模拟鼠标.vbs",
+      "bytes": 998,
+      "sha256": "13b33b6aae3cd65190dfb78cf5edd7e99f39a9ebb306801d52714b9cf8ba58c5"
+    },
+    {
+      "path": "PowerControl/内存-开机自动内存清理并关闭.xml",
+      "bytes": 3156,
+      "sha256": "8fa2183a110803187a34e5e73e2464ed096669fdd521250c0480c0b41df5c961"
+    },
+    {
+      "path": "PowerControl/手柄图标-01.png",
+      "bytes": 68390,
+      "sha256": "efb62b51f000dbbb307e9fdfa8bd0195a405e943c08451ffadaf952eed4333c7"
+    },
+    {
+      "path": "PowerControl/手柄图标-02.png",
+      "bytes": 69616,
+      "sha256": "79523163110eccde0db5738a89fe7335bd446b902aed4098b78acd74b34bfa2a"
+    },
+    {
+      "path": "PowerControl/手柄图标-03.png",
+      "bytes": 41879,
+      "sha256": "867f25ff69cdfaff6a29bf291473215314b841f231adba8a9ea79abd020d88ec"
+    },
+    {
+      "path": "PowerControl/睡眠还原.vbs",
+      "bytes": 2007,
+      "sha256": "6c7f3de23bcb2a108c9ec9c9b427b8214683bff71d7ce9fe34c101c5d5724cdc"
+    },
+    {
+      "path": "PowerControl/睡眠优化.vbs",
+      "bytes": 2000,
+      "sha256": "d9de9e4e75101da2364dc30084de1425880c16633b009b0e67fdb8168ee27a4f"
+    },
+    {
+      "path": "PowerControl/野蛮控制中心-开机启动.xml",
+      "bytes": 3202,
+      "sha256": "9cc0f973986cbd002f1c927b57a50d312de8b430a2720d961a826c43659e1e4b"
+    },
+    {
+      "path": "PowerControl/重置电源到Elite精睿高性能.bat",
+      "bytes": 3320,
+      "sha256": "79014aea85b051e9321e2d3c4f250fb28505c2e470e1275e8aa451c90135c620"
+    },
+    {
+      "path": "PowerControl/重置电源到EX机制性能.bat",
+      "bytes": 3301,
+      "sha256": "68957fd383d5d533237e57a0f0a4ba5f0be4a6f90f6c3a0a48b8b48f66f79b18"
+    },
+    {
+      "path": "PowerControl/重置电源到Performance平衡.bat",
+      "bytes": 3324,
+      "sha256": "5136efe513e26159d2d576177bb31ccf5143879b6092a9c053dd65da8594833f"
+    },
+    {
+      "path": "PowerControl/重置电源到Turbo高性能.bat",
+      "bytes": 3320,
+      "sha256": "1f88f3c26c4718ef29e4be52577d0c55f4c905dd04f5d38e181cfaa6d4354adb"
+    },
+    {
+      "path": "PowerControl/桌面模式-开机设置为桌面模式.xml",
+      "bytes": 3114,
+      "sha256": "7db77dcf19f27b1a1a2ece2e28a4279ff173672bcfde8c53453aac77df357678"
+    },
+    {
+      "path": "YeManCC/app.config.json",
+      "bytes": 692,
+      "sha256": "baef0b5a878ae2be306af4b250f6a15e6cc63e91cb1c9a8b88894f2ee1624202"
+    },
+    {
+      "path": "YeManCC/assets/ButtonMappingView-BwDQ9iPj.css",
+      "bytes": 23728,
+      "sha256": "0bbfd9d6f9b73ed35cb87c7cec87dcd60348d94a3dcbfd3a5f0743e276c986a1"
+    },
+    {
+      "path": "YeManCC/assets/ButtonMappingView-DuYnz9u2.js",
+      "bytes": 55801,
+      "sha256": "8e7a3bd2c419ea0bd8bb11d4022e957518d972f2fb982594e7ffcb0ad162d7f7"
+    },
+    {
+      "path": "YeManCC/assets/ControllerDeviceDiagram-B7kd1Gjt.js",
+      "bytes": 147235,
+      "sha256": "76bb7b74869c0e3d8e7f1028e46e5fa72fb95062e673824138aa0f53cf5d225f"
+    },
+    {
+      "path": "YeManCC/assets/ControllerDeviceDiagram-BQhkRZZ7.css",
+      "bytes": 1145,
+      "sha256": "e527786f3d14d25db6bde53b6cdc502198ad9dc761fbb243b68669f9c4658233"
+    },
+    {
+      "path": "YeManCC/assets/ControllerShortcutEditorStandaloneView-C83QukwY.js",
+      "bytes": 745,
+      "sha256": "da68195c6587f0e4e54e9d24a8b9972110a4b0910d247762e228f1855f2298d0"
+    },
+    {
+      "path": "YeManCC/assets/ControllerShortcutEditorView-C4BR-PhZ.js",
+      "bytes": 328514,
+      "sha256": "92ab33b01e20e76982cc773cac481e192f3adcc2428dd3e98c0bee7e3fc4657f"
+    },
+    {
+      "path": "YeManCC/assets/ControllerShortcutEditorView-CRymZFCv.css",
+      "bytes": 55858,
+      "sha256": "0392f269304ca30bae0dc5b877d1dfba698b19aa80b4f7df715bd536a49f68af"
+    },
+    {
+      "path": "YeManCC/assets/CustomSteamLibraryView-D1dwURTO.css",
+      "bytes": 307,
+      "sha256": "c6e5695274a4bef14d5f8c14c9c0e5427fc3eb2263a753985159860a8d44595b"
+    },
+    {
+      "path": "YeManCC/assets/CustomSteamLibraryView-Du6We6Fb.js",
+      "bytes": 1519,
+      "sha256": "f77540365fad4c98d122d30b99641f3ebb3ee0364f5bb9b202fab91b92eec86e"
+    },
+    {
+      "path": "YeManCC/assets/gameInputEditor-BKKjJE5m.js",
+      "bytes": 2183,
+      "sha256": "449764e12aef953b473ba0290c3179cdc2bc18ae36e85d648762036a6ca03913"
+    },
+    {
+      "path": "YeManCC/assets/GyroMotionView-CxNj9YhZ.js",
+      "bytes": 104502,
+      "sha256": "1b015bca9c10c3a5f2134d25c95a2b943d8c0beb030b42a313bd21eb355745e6"
+    },
+    {
+      "path": "YeManCC/assets/GyroMotionView-D13mGank.css",
+      "bytes": 22366,
+      "sha256": "5342944e76eb7ac8e040d82c1ce995dbe9691411f2475675328bc5893429c998"
+    },
+    {
+      "path": "YeManCC/assets/hud-CLZsuaiY.js",
+      "bytes": 7284,
+      "sha256": "78c724c2ff063a690585e4e99306509a0b9bc26c87b57ecb96ce7fd5089b01f9"
+    },
+    {
+      "path": "YeManCC/assets/main-ByXjg_ZE.js",
+      "bytes": 929811,
+      "sha256": "6ec24d9ff52c848c1d6a796580b584281f2e8382e50492948b160b86a4d9d14a"
+    },
+    {
+      "path": "YeManCC/assets/main-CGe2cP9T.css",
+      "bytes": 93139,
+      "sha256": "b9b8e47327d2940030a8598ed6bc5241f0dd22769a0394392cc6b1adc4ae96e5"
+    },
+    {
+      "path": "YeManCC/assets/MonitorCrosshair.vue_vue_type_script_setup_true_lang-DHW6rcFz.js",
+      "bytes": 1436,
+      "sha256": "b97d2fb34ab9b84b91dd3e0930df9fc5d9fae935ba8968c583039199a787d9f3"
+    },
+    {
+      "path": "YeManCC/assets/monitorHudModel-lRhmGXrU.js",
+      "bytes": 123379,
+      "sha256": "fdd7c61100b85fd34115cb429182c05ed3a745979c4adfa9c76918b46ccca321"
+    },
+    {
+      "path": "YeManCC/assets/monitorHudOutput-L64T3mgl.js",
+      "bytes": 911,
+      "sha256": "e39443593ddd3932ba8e1e2aa3697e65ffcf32c7ac8c46dd619cc6c9c8b773eb"
+    },
+    {
+      "path": "YeManCC/assets/monitorHudOutput-VYdAkIkZ.css",
+      "bytes": 1061,
+      "sha256": "2979e1e467bbd37e26fdb42faad653b1a88c7f1844dd257092cccc32923bfb5b"
+    },
+    {
+      "path": "YeManCC/assets/MonitorHudPreviewView-D101yXhf.js",
+      "bytes": 2719,
+      "sha256": "f1630523bae1c8f68d3bd63417dc1a6cf46ae7411430ce0f7f9b21184e5f9925"
+    },
+    {
+      "path": "YeManCC/assets/MonitorHudPreviewView-VT8xArjt.css",
+      "bytes": 1025,
+      "sha256": "987a87f41c76a1299afd934f5998cbd9010ec7fbfac51acb491961475e8c87e9"
+    },
+    {
+      "path": "YeManCC/assets/monitorHudProtocol-QVYHHHZG.js",
+      "bytes": 1867,
+      "sha256": "8c792b6a5182fa684559213421ef97732a1c08d3b575082b3f93af104c9dce39"
+    },
+    {
+      "path": "YeManCC/assets/MonitorHudTemplate-B3sqAi3X.css",
+      "bytes": 19439,
+      "sha256": "99f1396ed89f411cebedcc95438c7b18f02144a391f3b0edc8e2f4ae9943edc7"
+    },
+    {
+      "path": "YeManCC/assets/MonitorHudTemplate-Mt3KM7wd.js",
+      "bytes": 72398,
+      "sha256": "0bccc7e0434df3de2b3effe436cd77b9f664b99d610ee2518658c4a487d6fddf"
+    },
+    {
+      "path": "YeManCC/assets/MonitorOutputView-Bqt2z4Gb.css",
+      "bytes": 18565,
+      "sha256": "f3b6c96bc84d9007201436372b05f052c9fd3969eda13340c239c2ee2e4ad387"
+    },
+    {
+      "path": "YeManCC/assets/MonitorOutputView-V8wxC87l.js",
+      "bytes": 23995,
+      "sha256": "793e42b3c4d5249e58769a6a843403ee5d329a367eccae50c118c6a0210f7d2a"
+    },
+    {
+      "path": "YeManCC/assets/notice-D74E67QV.css",
+      "bytes": 1666,
+      "sha256": "451c2653a0e8e150a671f907730c80e5d88c82dd9ed93fe11f93e93195a5bf16"
+    },
+    {
+      "path": "YeManCC/assets/notice-I75Ir0xN.js",
+      "bytes": 5615,
+      "sha256": "fabc75d462da27cd56bf2a726d6098970809453d0285db38e13ea0c3d8f3befb"
+    },
+    {
+      "path": "YeManCC/assets/PerformanceScheduleView-BznAQayL.js",
+      "bytes": 13534,
+      "sha256": "97c9e2bc20ee3365401a61b6f6ecc2acce9e4f811b8a03c92a2b600d460c0f06"
+    },
+    {
+      "path": "YeManCC/assets/PerformanceScheduleView-L0bhimAX.css",
+      "bytes": 3682,
+      "sha256": "1ae363bf4f4af6205df9db4afd8e7d831abdbf5159dce95c147a062aa0ed445b"
+    },
+    {
+      "path": "YeManCC/assets/PowerView-BqeB4AmU.js",
+      "bytes": 12854,
+      "sha256": "026acd16acdcd6dc493cc3d159a73f564bf2d8a388801ea8ff1a286d48d0f846"
+    },
+    {
+      "path": "YeManCC/assets/PowerView-CON6R9DY.css",
+      "bytes": 3710,
+      "sha256": "4ca203f0109192e32e0e58962872eed54394d7312dace98b6200f9b79e97052c"
+    },
+    {
+      "path": "YeManCC/assets/QuickAppView-_QBhUk3T.js",
+      "bytes": 32426,
+      "sha256": "65eddf38e432579c7550c9bbb1a2bc64969152b3bfb54f0aafc6aabc4738a8d0"
+    },
+    {
+      "path": "YeManCC/assets/QuickAppView-DAJ-qS2I.css",
+      "bytes": 14431,
+      "sha256": "1030e2c2e85929dcbd161f962909757bff1f3eac2c65dbefaaf5b9f896d0f533"
+    },
+    {
+      "path": "YeManCC/assets/SegButton-C9SZmB5n.js",
+      "bytes": 1146,
+      "sha256": "69b0ee15efbf72f6b96820ac28b7a1d93a264129888a512d8888fffd132ab594"
+    },
+    {
+      "path": "YeManCC/assets/SegButton-D_wZahCn.css",
+      "bytes": 1375,
+      "sha256": "ae9ff233210a781b4092addca4b5c658e5e779cf023959cdf24a41c39cf98f96"
+    },
+    {
+      "path": "YeManCC/assets/SettingsSections-BXGjSuqA.css",
+      "bytes": 2244,
+      "sha256": "bd4277c13b8073388749a3b6ad07e28eb4d90fd4dcdfe59e081305b7bbe4bd05"
+    },
+    {
+      "path": "YeManCC/assets/SettingsSections-DUm9R9yj.js",
+      "bytes": 3231,
+      "sha256": "da9fe368fe55407ba5ba6115197ad89ce3223cf039fccfa5961ac8ff0365757c"
+    },
+    {
+      "path": "YeManCC/assets/SettingsView-BO9Jbnz2.js",
+      "bytes": 42987,
+      "sha256": "1590194fa855d2a866d8b2f37d3f79e0302c0da19564e014a37081d0d67b7f86"
+    },
+    {
+      "path": "YeManCC/assets/SettingsView-C-hjOdTv.css",
+      "bytes": 42040,
+      "sha256": "41f2e7b162f8bd8f848dd07dfc27d981d43a7281c6a47c1264ae827ea90ffe78"
+    },
+    {
+      "path": "YeManCC/assets/SleepGuardView-CXPRbSUz.css",
+      "bytes": 4871,
+      "sha256": "ef04a5353d00225497cfd14a340d73b2a7d6dafcb80761eebe43fc929789b76c"
+    },
+    {
+      "path": "YeManCC/assets/SleepGuardView-JRb83POR.js",
+      "bytes": 17612,
+      "sha256": "4ccb0b7e6918d393d5167dd44de105f70e2d1c63a7f5518712557c9a0f4a8eca"
+    },
+    {
+      "path": "YeManCC/assets/SteamView-0oI2ijmu.js",
+      "bytes": 57029,
+      "sha256": "d3529f8d6d0f57e8002ed2ea55b7112b8b15e309ab375f9be5707012f41c2b1b"
+    },
+    {
+      "path": "YeManCC/assets/SteamView-DsiUX9dM.css",
+      "bytes": 24910,
+      "sha256": "8a103368981292c818d1db05ba03fcc1fef30267d13a014be50032eb5e498046"
+    },
+    {
+      "path": "YeManCC/assets/tokens-DiNpNc-w.css",
+      "bytes": 3182,
+      "sha256": "b0e1aaa2683538badb657639d5b693078e412dd39a8bdb4f329acf2bddc66929"
+    },
+    {
+      "path": "YeManCC/assets/tokens-Dlb00hPT.js",
+      "bytes": 4241,
+      "sha256": "3cac46394591295621a702a4d909675de271fe656efc9d4b5d73da44551acba8"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/keyboard-KENNEY-LICENSE.txt",
+      "bytes": 708,
+      "sha256": "ca2f58f80f903512119da5828868199478119818cd7ecffb303d625cb74cbb5a"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/keyboard-w3c.svg",
+      "bytes": 209882,
+      "sha256": "890eee09d13bbd9ed4be718dd33de8dfd6d38ec38db74ed2a0fbd66225e42a0c"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/ps5.svg",
+      "bytes": 20393,
+      "sha256": "112e9a6f265214737f236e95cf627278ce536e8f6144bd86766d89e64e937658"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/ps5.webp",
+      "bytes": 42122,
+      "sha256": "ec181dc8bc7a796654e5ec601afa0dbd3e9f7a32ae2df0a2a4ea080d0af943fd"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/steamdeck.svg",
+      "bytes": 19432,
+      "sha256": "1b11a44158fcc6ab47dfc0ee740c2f4d57f910f262000d485b787496e4ff59ef"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/steamdeck.webp",
+      "bytes": 336180,
+      "sha256": "a65bf444f940201fa3885c99f041183fd67f93b15b05363b02fbda3acf68c782"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/steam-vector-provenance.json",
+      "bytes": 875,
+      "sha256": "9ae2e8f4dd07d9cd1aed6ae261875b6b292f81818426f6b5eec2acad384b7b98"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/xbox.svg",
+      "bytes": 23524,
+      "sha256": "d41140f6ff0d284925ca2810ad885907d9babc90f20b6f7a7f0739af7ecda3bd"
+    },
+    {
+      "path": "YeManCC/controller-diagrams/xbox.webp",
+      "bytes": 37366,
+      "sha256": "667fb4ad8cc03235aeeaf079e607852d8c1e52a4f4786da43af2cc16669ce7df"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/assets/custom-steam-library.ico",
+      "bytes": 125864,
+      "sha256": "6bdea618684f30f5ec1d0b53bdab854aa3cbba00fd32ea551ba580d24cbc76af"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/CustomSteamLibrary.exe",
+      "bytes": 2053632,
+      "sha256": "2a48ec503abe7ba44fa864b6ff8b5376f87f76a9742410a6e97c4effd5ee5ae7"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/CUSTOM-STEAM-LIBRARY-INTEGRATION-CONTRACT.md",
+      "bytes": 6306,
+      "sha256": "9dc62f94e6b44b493e8499b854578fb5bd62e8b198f3b658c646eda5b73a983e"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/CUSTOM-STEAM-LIBRARY-UPGRADE-CONTRACT.md",
+      "bytes": 11787,
+      "sha256": "3881bc74fbd28d7ac7f615a7199f49ece822e82c0d5732452e1c79783244e744"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/package-manifest.json",
+      "bytes": 21229,
+      "sha256": "d68eff0f6755d286bfc6c094e6b476bf5ab29a50cabc2e84b989fb2b33b0ebfd"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/run-workspace.bat",
+      "bytes": 597,
+      "sha256": "8de9f08333a6748df5812f8b8f2f54cf305741773e7ee8246a44a2f2ab7784ce"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/SEPARATION-TASK-CUSTOM-STEAM-LIBRARY.md",
+      "bytes": 55818,
+      "sha256": "b7a624d7640e2490f754cbf321a200cca69631d637fae7303c3c8bf5c1c2ebcb"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/SteamArtworkLab.exe",
+      "bytes": 3032064,
+      "sha256": "56e79bced8201942320e2deebce17d5ee87c80a39a24a3a1633776ff047c6696"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/workspace-ui/app.js",
+      "bytes": 221366,
+      "sha256": "db668da60c9f3e9274ecfd5c808a808b53fcba2544857bebdbd8f33c27d6657a"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/workspace-ui/index.html",
+      "bytes": 19988,
+      "sha256": "0a06aa2cd313e35913eaec0d8d0691194814d01295593e610aac1ad2748f4ef6"
+    },
+    {
+      "path": "YeManCC/CustomSteamLibrary/workspace-ui/styles.css",
+      "bytes": 75834,
+      "sha256": "aff403c8de5f08267db262a7c70d09ad73da1f3b10df24a8fdc4d3620e850e87"
+    },
+    {
+      "path": "YeManCC/gamepad-base.png",
+      "bytes": 41879,
+      "sha256": "867f25ff69cdfaff6a29bf291473215314b841f231adba8a9ea79abd020d88ec"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5447a9cd4bdc2dbd208b4567.glb",
+      "bytes": 170012,
+      "sha256": "2f436893849a389e9dec97b5b911aba34e9d7ffbf7250b9f25c4d6a21300a8f8"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/55d355e64bdc2d962f8b4569.glb",
+      "bytes": 100496,
+      "sha256": "5bb33255b788cfed242a2152f3c4f478e8a54bbbc829a332fcc1a1f64fe5565e"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/55d3632e4bdc2d972f8b4569.glb",
+      "bytes": 30488,
+      "sha256": "1e2a29ab986159dbff1174879519b814e57cff424414574eeeea33b1f1ab1f20"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/55d4887d4bdc2d962f8b4570.glb",
+      "bytes": 55904,
+      "sha256": "a7c6e19dc6f78f2bbd196311b13de9d53ce91d0333bb1cac174e0b6b205483b3"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/55d4ae6c4bdc2d8b2f8b456e.glb",
+      "bytes": 104692,
+      "sha256": "521fb4cb09ac4a99b9aa148084efa69afd5210b0a810ce281b268c1cfb7515e8"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/55d4b9964bdc2d1d4e8b456e.glb",
+      "bytes": 40484,
+      "sha256": "ea94209ff3484c7993c712d8f7b5579a2db9fd216cbc3c188dd34d24fb31a5a9"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5649be884bdc2d79388b4577.glb",
+      "bytes": 62184,
+      "sha256": "c15a9aeeba0dbaf1fbebd0feed79b97196ccb937d1b402a06703f3ccd5e00370"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/56eabcd4d2720b66698b4574.glb",
+      "bytes": 49688,
+      "sha256": "4e422d252c5a69f7f7945f471dfab5d4d5d9f95222e47cff02a500209fb3512e"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5b3b99475acfc432ff4dcbee.glb",
+      "bytes": 151944,
+      "sha256": "be80f93af217fb45626a6ec9ada3081fa93f08a7903e067ffc78638b3b73609a"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5c6d710d2e22165df16b81e7.glb",
+      "bytes": 87304,
+      "sha256": "bb9cfa27dd364570dfca92c03eb2b3c251d330411436252ca27f4ad5d962e806"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5ea16ada09aa976f2e7a51be.glb",
+      "bytes": 180868,
+      "sha256": "0131948e4211bb08ea077c238a51e9bb9c059d4a7cd5dceab834d6433b600ae0"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/5ea16d4d5aad6446a939753d.glb",
+      "bytes": 114836,
+      "sha256": "26914ddfd9c374807b87ed95e422496bd36307a1fba3d50ac97a5911da21c0c4"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/618b9643526131765025ab35.glb",
+      "bytes": 154144,
+      "sha256": "fcfc416fb03c2a9c0dba70621515233127c50fab451d6a12eb5afd135322e941"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/651a8bf3a8520e48047bf708.glb",
+      "bytes": 113124,
+      "sha256": "7ae00b7de675e4d682a4c5520bd8c4f88c70b9f91d5b47c9a6f5d844cf1ae5ab"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/models/m4-vudu.json",
+      "bytes": 5634,
+      "sha256": "1fe85b1e8caa9b29882c90ad0cde812e41eea30da4def859ab8b8d0ff97096f0"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/muzzle-flash.webp",
+      "bytes": 27694,
+      "sha256": "69ad04645ead92a93ac2e7ad64718f40501f088adfbdaff0103bbc49de9b4792"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/muzzle-flash-source.json",
+      "bytes": 326,
+      "sha256": "cdf84a671387ed1d50d9dbd0d2bf1a7d40cae202380cd9afef6c94e38a5fee57"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/range3d.js",
+      "bytes": 664253,
+      "sha256": "8b982e89ebb3f0845a50e873ab26211f9a25ea53d0d4aca653df0b0cceb57fbe"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/size-manifest.json",
+      "bytes": 1645,
+      "sha256": "9161dae062eb56f0c1bd539ba93875f969f2b6774eeb16cd1b5977f95a9f9da4"
+    },
+    {
+      "path": "YeManCC/gyro-simulation/three-LICENSE.txt",
+      "bytes": 1081,
+      "sha256": "8b378ebe60e2fe500158cb0ac71cb5e8b7d92953c2abcc63a0eb90499653b5bc"
+    },
+    {
+      "path": "YeManCC/hls.min.js",
+      "bytes": 413952,
+      "sha256": "484054e8cd03d3f6d1781fb7f402bdc318d8a4c527f933a95c624e27cc9a9470"
+    },
+    {
+      "path": "YeManCC/hud-output.html",
+      "bytes": 1128,
+      "sha256": "03eb66e59b5aa957f276e5122744332c8ac33e721e58aaefcb5b70ed2d468a2c"
+    },
+    {
+      "path": "YeManCC/icons/balance.svg",
+      "bytes": 210,
+      "sha256": "bf48cfaee9475226801362deeaf7654765e49fac8798f1d2b06c68bd906fd5a3"
+    },
+    {
+      "path": "YeManCC/icons/battery.svg",
+      "bytes": 252,
+      "sha256": "1c2b946684448594d55eff1a4aec68605f00427e9c0e30f972f636506f11bdff"
+    },
+    {
+      "path": "YeManCC/icons/bed.svg",
+      "bytes": 228,
+      "sha256": "584b4f2c78bef7d0b6db188bc3a28dec3aecb5b1fd4b500c7dc329c0560d7857"
+    },
+    {
+      "path": "YeManCC/icons/bolt.svg",
+      "bytes": 201,
+      "sha256": "8ea401b7dc833b652f68535f250300074a59e4ba73e2182377e86ebe8b70f6b8"
+    },
+    {
+      "path": "YeManCC/icons/broom.svg",
+      "bytes": 219,
+      "sha256": "1bf1a86aa485fd60669d11d68df75454546a4ed1d5be45e10ce20667e17a4850"
+    },
+    {
+      "path": "YeManCC/icons/calendar.svg",
+      "bytes": 257,
+      "sha256": "14c6b0af00824f8aa8c8ef081cfb97f4e40e1a90600e8021a0894062bdc1cca2"
+    },
+    {
+      "path": "YeManCC/icons/check.svg",
+      "bytes": 188,
+      "sha256": "84495a0b91fbb827e9ecc1447696cb7063d7f514fb5abd0e92b7dcba2526bcae"
+    },
+    {
+      "path": "YeManCC/icons/clock.svg",
+      "bytes": 217,
+      "sha256": "df74507c724684dd8929b6c9cfb2ae536ae2d81d00a67939fbffbc4e44b3fec4"
+    },
+    {
+      "path": "YeManCC/icons/close.svg",
+      "bytes": 197,
+      "sha256": "16f763889f5ea7d5e30091c0891929c6aa04b29cf89220e6e231208f4f08d2c0"
+    },
+    {
+      "path": "YeManCC/icons/core.svg",
+      "bytes": 240,
+      "sha256": "af6181f7674489f0ec929f11a3f5d445e84b207e918d31043e3ad1f6e3e45bd8"
+    },
+    {
+      "path": "YeManCC/icons/cpu.svg",
+      "bytes": 332,
+      "sha256": "d691e8e846be9fb3f372bfcf39596a104a41fa8a00281a9e138b5ea4cd02679c"
+    },
+    {
+      "path": "YeManCC/icons/cpufloat.svg",
+      "bytes": 406,
+      "sha256": "f9d10e9a8c7a3f653b9618731e050dfddb6f761998637341ada37a604f3591ef"
+    },
+    {
+      "path": "YeManCC/icons/cross.svg",
+      "bytes": 197,
+      "sha256": "16f763889f5ea7d5e30091c0891929c6aa04b29cf89220e6e231208f4f08d2c0"
+    },
+    {
+      "path": "YeManCC/icons/edit.svg",
+      "bytes": 196,
+      "sha256": "9bf12251aaad4e19630cfce84eb4d3fa3bc59ac5f2f3f6e9880f89989766b4b1"
+    },
+    {
+      "path": "YeManCC/icons/fan.svg",
+      "bytes": 487,
+      "sha256": "5aae07de81c5857174ba029ea8a5830d25a9fea08bbd2d2afb1a232bf030d460"
+    },
+    {
+      "path": "YeManCC/icons/fire.svg",
+      "bytes": 273,
+      "sha256": "7bebcad20e8fc689d9b4f39858f079988952aefb59212325d61a38c2ae9f06e0"
+    },
+    {
+      "path": "YeManCC/icons/folder.svg",
+      "bytes": 253,
+      "sha256": "d5a99905ee54b68b940adacff95f48b2a965029f8e0d7d65f4a7eee518cdd758"
+    },
+    {
+      "path": "YeManCC/icons/fullscreen.svg",
+      "bytes": 212,
+      "sha256": "5ef0ad1d51a96be018e11f96c2f236af1485fef4c841834e50af7367d4ec6896"
+    },
+    {
+      "path": "YeManCC/icons/gamepad.svg",
+      "bytes": 279,
+      "sha256": "127042ec5272783a49c862c0b3116c71fad525657f73a87df5d0a61c9c3e400b"
+    },
+    {
+      "path": "YeManCC/icons/gauge.svg",
+      "bytes": 270,
+      "sha256": "02c275403d1dd45a1157eb0221ac1b590c3f60c7121e8a5446b256c875f708d4"
+    },
+    {
+      "path": "YeManCC/icons/globe.svg",
+      "bytes": 265,
+      "sha256": "b245b7e5cebdca30e35fd1ac9f500ee99a6aac8643f760ad9b1884eff121b45b"
+    },
+    {
+      "path": "YeManCC/icons/gpu.svg",
+      "bytes": 288,
+      "sha256": "5f37cfd435ea23d24e4ae5b94bbe004956d41b18c130bb9cac1da620b253fcd6"
+    },
+    {
+      "path": "YeManCC/icons/headphones.svg",
+      "bytes": 267,
+      "sha256": "c902396b843e4e0bc07cb78fab2c4cae966fb633552ef2447fd314cb0decc225"
+    },
+    {
+      "path": "YeManCC/icons/home.svg",
+      "bytes": 241,
+      "sha256": "2e9420ccfbdf39b2c292c0fd866d93620c5455baac540c57cd36e7f74fe2a9e4"
+    },
+    {
+      "path": "YeManCC/icons/keyboard.svg",
+      "bytes": 293,
+      "sha256": "7e8fcb8f3eb868f4b2acfeb2c22165ec85b0084972c53eb360b94789d8092265"
+    },
+    {
+      "path": "YeManCC/icons/leaf.svg",
+      "bytes": 253,
+      "sha256": "23c53507af4bc47e9c6846d59364d78cdc61baab1903ae4f63c73d148cd8cbb6"
+    },
+    {
+      "path": "YeManCC/icons/link.svg",
+      "bytes": 309,
+      "sha256": "11e4e66777cfcf70bc04205dd4bd151ad15427406b5b3546ae0db26b01982be2"
+    },
+    {
+      "path": "YeManCC/icons/list.svg",
+      "bytes": 198,
+      "sha256": "291db30bee94559102d3b808f63acb2d4592f4898907085137188264b18c8077"
+    },
+    {
+      "path": "YeManCC/icons/lock.svg",
+      "bytes": 315,
+      "sha256": "cd10fa4328705ab581d96c97f6c6d4d32549ecad4661e8e77129dfe2e46c7cf6"
+    },
+    {
+      "path": "YeManCC/icons/logout.svg",
+      "bytes": 261,
+      "sha256": "ade80dec92dbce80e146d8ab83f3e198be1fe6d3de3f2c15fc032fd1a0adad0e"
+    },
+    {
+      "path": "YeManCC/icons/memory.svg",
+      "bytes": 282,
+      "sha256": "7cfee1bd0fc4ff8d6841eda748fb6b4bfa59548493289c545f45fdffc3617d31"
+    },
+    {
+      "path": "YeManCC/icons/minimize.svg",
+      "bytes": 183,
+      "sha256": "1c6f20119ef5ed3d25f984826b42dce5d6c5f7eab29bc51047395a8144d435aa"
+    },
+    {
+      "path": "YeManCC/icons/monitor.svg",
+      "bytes": 231,
+      "sha256": "f77b07a2ba955336d771498a9557c3d82ecd811795f6ad318a5c8305374db719"
+    },
+    {
+      "path": "YeManCC/icons/mouse.svg",
+      "bytes": 230,
+      "sha256": "07108add284d7990b1e0c3a1a34bc3fc4b558dccab7e42c4fa7111ab527ce4c2"
+    },
+    {
+      "path": "YeManCC/icons/music.svg",
+      "bytes": 290,
+      "sha256": "1748f9f5a76b823f5b878d8e709022a511308b876093cb9bd849d7281be947bc"
+    },
+    {
+      "path": "YeManCC/icons/mute.svg",
+      "bytes": 225,
+      "sha256": "73f439de5c665820fdaaacde742e96221319d7f00ba260f9132db52b8e75946e"
+    },
+    {
+      "path": "YeManCC/icons/next.svg",
+      "bytes": 200,
+      "sha256": "ef3e1a839e2d97073eb1413636b5c1f0b104a5cbf192cfec5ab1c4ef445efb00"
+    },
+    {
+      "path": "YeManCC/icons/package.svg",
+      "bytes": 243,
+      "sha256": "10ec5673edbfb915b646f549b7552e96d74dc573a4b2c3c70d715514fa1cacb1"
+    },
+    {
+      "path": "YeManCC/icons/pause.svg",
+      "bytes": 190,
+      "sha256": "44d2e0e11998c381c1f8b9363a068d0310c2df025f6e9abbde3971d9fb0b523b"
+    },
+    {
+      "path": "YeManCC/icons/play.svg",
+      "bytes": 190,
+      "sha256": "99476535aac16f7d1240e68e94e8125d416ac68fad500b6cdef271beed04f0e3"
+    },
+    {
+      "path": "YeManCC/icons/plug.svg",
+      "bytes": 268,
+      "sha256": "064ce67ac768fcc70c6cefbd469802e38dd25e96148688cb5e3f5e1a265b58b8"
+    },
+    {
+      "path": "YeManCC/icons/plus.svg",
+      "bytes": 191,
+      "sha256": "7c75d90dbde14cc23547b2e0e5733e16e23caac375e70977d1c082d8854748bb"
+    },
+    {
+      "path": "YeManCC/icons/power.svg",
+      "bytes": 256,
+      "sha256": "befc247510b9b827ce62609eb48624d0faa3406bcb18c2f5892e4eb69f8b3f98"
+    },
+    {
+      "path": "YeManCC/icons/prev.svg",
+      "bytes": 200,
+      "sha256": "0576463458c262fb4728df1fe3f7d318f1b7c8978dbae6a692da9781bf19a23c"
+    },
+    {
+      "path": "YeManCC/icons/quick.svg",
+      "bytes": 387,
+      "sha256": "620df053a24e579a94c8c396c1601f5ae8b9f0969a6ccfde95f3e63f31fdaa60"
+    },
+    {
+      "path": "YeManCC/icons/refresh.svg",
+      "bytes": 219,
+      "sha256": "dc5797d8054c9349365966cad57cd0c6cf0f3336c36560ece50af926ab3baa5a"
+    },
+    {
+      "path": "YeManCC/icons/rocket.svg",
+      "bytes": 371,
+      "sha256": "209802d9efaed0b9d83a8c828db3387b39faa543794ef6acec0b5d23dfb3fdbe"
+    },
+    {
+      "path": "YeManCC/icons/rotate.svg",
+      "bytes": 317,
+      "sha256": "8d64673f0a6c19a41ba29f7a742234b5c3f6062324d05ab34b26614e6faf7b05"
+    },
+    {
+      "path": "YeManCC/icons/rtss.svg",
+      "bytes": 264,
+      "sha256": "b434153a612395058f340d340acc0c538ee99e57c95c40bea69585262111857f"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/dots.png",
+      "bytes": 865,
+      "sha256": "d9aad7d9d9ea839092e5593b2dfe1a22d500a70a9ab4620592616ca8f5f9aef1"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/lb.png",
+      "bytes": 2056,
+      "sha256": "084ed9a5ad25e2d44cb1e1cb025123a8b073740461a3327c2ed560dd9fbd35eb"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/lfn.png",
+      "bytes": 1618,
+      "sha256": "343c74d847637ac5e4840c7fc2130786ab28244126bf00148252b24aa7bebb9b"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/mute.png",
+      "bytes": 2589,
+      "sha256": "eb0c45623dfa425bac8c4d84a27f243f2bc91748aa965437b21ce675c4d1f6b5"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/ps.png",
+      "bytes": 1602,
+      "sha256": "1453e5e25c20548a04702d9078853c3abd4b2d790848bb7ccd014be655c2e86e"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/rb.png",
+      "bytes": 2201,
+      "sha256": "8e9dd9be9161a990bd360826489c2b67a594fc7281416ebbd1db50cef34efa47"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/rfn.png",
+      "bytes": 1674,
+      "sha256": "132e44db60e7db999249c17e71abaf5e470566aa9739c841cac72060dfaeff39"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/steam.png",
+      "bytes": 1171,
+      "sha256": "b752f01b7876a2bec5c8f80987a0e25dbaa6e85e8d4d556c0ab842811c9d4235"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/xbox.png",
+      "bytes": 2418,
+      "sha256": "e0223a95b885486f48f08454b8b671c25ce6603166de60da0d11310edc5cd160"
+    },
+    {
+      "path": "YeManCC/icons/screen-controls/ymcc.png",
+      "bytes": 1392,
+      "sha256": "36f665b110370e5681f5878331e4945a76507e176777ac353f848000b397defc"
+    },
+    {
+      "path": "YeManCC/icons/search.svg",
+      "bytes": 216,
+      "sha256": "4c7ff6cbfe4928c6352dc680b1490c72df716fd41124b73c92d7c1c000081baa"
+    },
+    {
+      "path": "YeManCC/icons/settings.svg",
+      "bytes": 1496,
+      "sha256": "db5478f94fb82bcfb5f0209a515f4f7638ebd98a9b56bc1d72fecbc3f07592ed"
+    },
+    {
+      "path": "YeManCC/icons/sleep.svg",
+      "bytes": 223,
+      "sha256": "46adeac6e099ea28ed0c35a048ba1796bd2b8bd42c6a9e4f8b4e4ce57e79087c"
+    },
+    {
+      "path": "YeManCC/icons/speaker.svg",
+      "bytes": 227,
+      "sha256": "22dbd0c4f56a441fa193d6518f3c94ba4cd807fd87236d506ac59f701fe4ac60"
+    },
+    {
+      "path": "YeManCC/icons/speed.svg",
+      "bytes": 214,
+      "sha256": "86d10dda955f759d48721be0559d724d1296a710fbd02ed57a4c3e22756bb33f"
+    },
+    {
+      "path": "YeManCC/icons/star.svg",
+      "bytes": 232,
+      "sha256": "a1e7c6944aeb065763e774db7f2563cedcccd93acf2919b72bc63ef3c0207410"
+    },
+    {
+      "path": "YeManCC/icons/startup.svg",
+      "bytes": 313,
+      "sha256": "0e1b953d5ccaa6cb59746273fe240d30f3d3e9cf48bd76ea5d2e41128a842e26"
+    },
+    {
+      "path": "YeManCC/icons/steam.png",
+      "bytes": 15398,
+      "sha256": "2fba8a16dd880bcbdbf1f7ce9dab92ec1b04458470ab5e33bd440fef4c37a7e4"
+    },
+    {
+      "path": "YeManCC/icons/steam.svg",
+      "bytes": 7964,
+      "sha256": "6a47e1dd57a10b60c5ab73fa7aafb83db88306ecd8137c9b4b9db2f46f6bcdcf"
+    },
+    {
+      "path": "YeManCC/icons/target.svg",
+      "bytes": 222,
+      "sha256": "6eafeab828652bf5b10aa76f6b8b2d02257917bd9ff97044e0002ce9ca486bb3"
+    },
+    {
+      "path": "YeManCC/icons/tdp.svg",
+      "bytes": 201,
+      "sha256": "8ea401b7dc833b652f68535f250300074a59e4ba73e2182377e86ebe8b70f6b8"
+    },
+    {
+      "path": "YeManCC/icons/trash.svg",
+      "bytes": 252,
+      "sha256": "9573f35d2903389887a9f4a8aa2fb69e8c50dca6add3af4c53a71cda0408ba81"
+    },
+    {
+      "path": "YeManCC/icons/unlock.svg",
+      "bytes": 317,
+      "sha256": "8f67f7bea583b3d4db270cc2660c417162c8a6deeaaf9b8ebfc619c8fbbcbc66"
+    },
+    {
+      "path": "YeManCC/icons/volume.svg",
+      "bytes": 247,
+      "sha256": "6e49161ade4ac4afdd9133ded1917fa599917d3881fb15ac5dcd716551a53d3f"
+    },
+    {
+      "path": "YeManCC/icons/warning.svg",
+      "bytes": 276,
+      "sha256": "517cc77b48dcdbf98bbef33617d1b32a6fcbe31d511bb593cd4ac1303bf43c61"
+    },
+    {
+      "path": "YeManCC/icons/wrench.svg",
+      "bytes": 292,
+      "sha256": "8abc7348f8f906914f46b43d05a0800a1a025886f71e90ffb4dcca4e822bdb9d"
+    },
+    {
+      "path": "YeManCC/icons/yeman.svg",
+      "bytes": 270,
+      "sha256": "acfcac8ea8cc603036b7ea38ab120249c177f6640e152764df61c4ba7339c571"
+    },
+    {
+      "path": "YeManCC/index.html",
+      "bytes": 1015,
+      "sha256": "17afad89463e8866c6ae87e2cc6a24a8f9ed362d2f5cfdc3b37c686cd3b008af"
+    },
+    {
+      "path": "YeManCC/notice-output.html",
+      "bytes": 775,
+      "sha256": "a6b745ccb264101d53ceba27f552ad6d92c8f50fe9fd0ab04443f8c83f7698fa"
+    },
+    {
+      "path": "YeManCC/performance-simulation/app.js",
+      "bytes": 132599,
+      "sha256": "064815740f875d550ed285cd0366ac6907b98b7f00f4aaf2b5e7e593d61a608e"
+    },
+    {
+      "path": "YeManCC/performance-simulation/frame-pipeline.js",
+      "bytes": 5017,
+      "sha256": "abcde6ff0d08bd31e1fac809c36a3f2d6f17181c0e7f59ed7cfd7004c49fc155"
+    },
+    {
+      "path": "YeManCC/performance-simulation/frame-work.js",
+      "bytes": 2890,
+      "sha256": "87c7db703cc325be580cfab3b76c568b6779174814fe37b95040b9b644b7f300"
+    },
+    {
+      "path": "YeManCC/performance-simulation/gpu-capability-chart.css",
+      "bytes": 1511,
+      "sha256": "3500bf8898b7549c73f7d5d84a7784a238691383ffa6137970931c74f9953f71"
+    },
+    {
+      "path": "YeManCC/performance-simulation/gpu-capability-chart.js",
+      "bytes": 6021,
+      "sha256": "be3430b93932aed066dee5c03827e1ed054c50a074a8c07b94a36b368460843e"
+    },
+    {
+      "path": "YeManCC/performance-simulation/gpu-capability-library.js",
+      "bytes": 11724,
+      "sha256": "f91ba68a3e3ff3860d4ddf98806502bb666e32be77fd7545c68b59b79cb5fac9"
+    },
+    {
+      "path": "YeManCC/performance-simulation/index.html",
+      "bytes": 662248,
+      "sha256": "41b242a5352200beaccb24835a78ae3daca4f09a1cf1406d4bd2658cb4ef16e4"
+    },
+    {
+      "path": "YeManCC/performance-simulation/manifest.json",
+      "bytes": 7547,
+      "sha256": "d085216f8d9eae220fe40da487be58b0bec2b6565700a94f73f3d3717b592db8"
+    },
+    {
+      "path": "YeManCC/performance-simulation/monitor-hud-base.css",
+      "bytes": 1791,
+      "sha256": "0df794209cf56ab52c9c5ebc3b29e0ac093dc6bc8559d1310ad263a3af351cd6"
+    },
+    {
+      "path": "YeManCC/performance-simulation/optimization-curve.js",
+      "bytes": 4726,
+      "sha256": "d941ce769c7c866788f60e652eef8e4de547ec0a3d28d3cbb649621e86e385f9"
+    },
+    {
+      "path": "YeManCC/performance-simulation/prototype.html",
+      "bytes": 3530,
+      "sha256": "7f34625ade92e899699a9fa501d688d47c83a3f52108a5ed26b925d88e9a9d83"
+    },
+    {
+      "path": "YeManCC/performance-simulation/schedule-controls.css",
+      "bytes": 2452,
+      "sha256": "0defaeee5ba081cf5d523063c8b9f81f971846247f422c7b735e3518832338c8"
+    },
+    {
+      "path": "YeManCC/performance-simulation/simulation-monitor.css",
+      "bytes": 3003,
+      "sha256": "7f02a097216492135769bcf7eb90f8b30710617e69fdae4880983a88422df35c"
+    },
+    {
+      "path": "YeManCC/performance-simulation/split-layout.css",
+      "bytes": 5716,
+      "sha256": "b37709326794e019c28843f7be34d981bb0e3caa4efc8456385a4baf854f6963"
+    },
+    {
+      "path": "YeManCC/performance-simulation/split-layout.js",
+      "bytes": 1311,
+      "sha256": "e36a0c3a339abb126e2bcd7e4d4afea0df536e35832ae56d8c349f68eb06bc53"
+    },
+    {
+      "path": "YeManCC/performance-simulation/style.css",
+      "bytes": 70887,
+      "sha256": "7184d0801b1a9e7ce9ae947bb5faefbbdcc659b6b3adab61109f7fc2516b5b81"
+    },
+    {
+      "path": "YeManCC/performance-simulation/ts-power-curve.js",
+      "bytes": 2375,
+      "sha256": "b11ccdb93e0817e0f9aad6d5d54317e698ac0b131b35ff276a5fab0fc5af5aab"
+    },
+    {
+      "path": "YeManCC/settings-preview/SteamDeck.mp4",
+      "bytes": 3026151,
+      "sha256": "9fc6194832f8667c92d9bafc963dc2dc916233cf19796e4ba4d2a93f6db3bfaa"
+    },
+    {
+      "path": "YeManCC/update-manifest.json",
+      "bytes": 1024,
+      "sha256": "fcbb9013a240d0be770786a75e4035e683e07c84d95ef56b6b1fff6bbf60fa9c"
+    },
+    {
+      "path": "YeManCC/version.json",
+      "bytes": 300,
+      "sha256": "fa4b3971acf566d2f0b48222e898bc1eb444f21071ff61e04e51390e986ecd86"
+    },
+    {
+      "path": "YeManCC/Xinput1_4.dll",
+      "bytes": 176640,
+      "sha256": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec"
+    },
+    {
+      "path": "YeManCC/YeManCC.exe",
+      "bytes": 10941952,
+      "sha256": "9e9e31d88aad4fa537e1453e1b15fd9c5c12f28fdf854849f0faa7e8ebd8f50a"
+    },
+    {
+      "path": "YeManCC/YeManControllerVisibilityProbe.exe",
+      "bytes": 527360,
+      "sha256": "85a37c6075572cc0e6bd1bb3b1ae2ef259dcb3b67e78e8eb4a33a427fb4bb109"
+    },
+    {
+      "path": "YeManCC/YeManRecoveryService.exe",
+      "bytes": 391168,
+      "sha256": "9536346f33b1853de5db647dcb65bf08c05b2845d220c94615c537c8273e3667"
+    },
+    {
+      "path": "YeManCC/YeMan-Support.html",
+      "bytes": 10173,
+      "sha256": "0ca489a6b9a1e55ad73b17dddd69bd8fe60288fe361ebea25e191318b092e880"
+    },
+    {
+      "path": "YeManCC/YMCCOverlayBridge.dll",
+      "bytes": 116736,
+      "sha256": "c009678a86f0b6fad7baad53115a249385b31de449a8f556d3a2f479c3764bd7"
+    },
+    {
+      "path": "YeManCC/YMCCRtssProfileHelper.exe",
+      "bytes": 133120,
+      "sha256": "eb80b5f9fbf29a6b21900c7a218cab9174b0f89eff519c598363e2089bf52faa"
+    }
+  ],
+  "runtimeRepair": {
+    "kind": "installed-runtime-originals-component-repair",
+    "runtimeManifestSha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "profileSha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c",
+    "currentSourceBuildClaimed": false,
+    "nativeAndFrontendReplaced": false
+  },
+  "runtimeOriginalRestoration": {
+    "preparedAtUtc": "2026-10-18T18:17:15.579843+00:00",
+    "newRestoredFiles": [
+      "BlackSharp.Core.dll",
+      "GameLib.Core.dll",
+      "Gma.System.MouseKeyHook.dll",
+      "GongSolutions.WPF.DragDrop.dll",
+      "GregsStack.InputSimulatorStandard.dll",
+      "Microsoft.Extensions.DependencyInjection.dll",
+      "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "Microsoft.Extensions.Diagnostics.dll",
+      "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "Microsoft.Extensions.FileProviders.Physical.dll",
+      "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "Microsoft.Extensions.Http.dll",
+      "Microsoft.Extensions.Http.Polly.dll",
+      "Microsoft.Extensions.Primitives.dll",
+      "NVorbis.dll",
+      "Polly.dll",
+      "PrecisionTimer.NET.dll",
+      "SharpDX.XInput.dll",
+      "WindowsInput.dll",
+      "hidapi.net.dll",
+      "Nefarius.Utilities.Bluetooth.dll",
+      "Nefarius.ViGEm.Client.dll",
+      "PInvoke.Windows.Core.dll"
+    ],
+    "restoredOriginalCount": 34,
+    "ordinaryDllCount": 77,
+    "sourceProfileSha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c",
+    "runtimeManifestSha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "wholeInstalledInventoryClaimed": false,
+    "physicalDeviceVerified": false,
+    "fullGate": "D:\\Codex\\2026-10-18\\kai-s\\work\\remaining-abi-repair-20261019\\full-all-verified\\run-all-20261019-020247-aca5a595.json"
+  },
+  "lightingRepair": {
+    "kind": "MSI-OneX-X1-and-Fly-HID-lighting-only-sessions",
+    "helperSha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+    "artifactBehaviorChecksPassed": 177,
+    "msiActualMethodContractPassed": true,
+    "onexActualMethodContractPassed": true,
+    "onexRequestCacheContractPassed": true,
+    "boundHidLightingContractPassed": true,
+    "sourceBehaviorCasesPassed": 47,
+    "compiledInputs": [
+      {
+        "path": "FanLab/LightSetter/Program.cs",
+        "sha256": "cdbb44064ad05173490a1bb36c594772fe24c5ce213f84ab5aeceeb766cc0f7b"
+      },
+      {
+        "path": "FanLab/LightSetter/DeviceCoreConsumer.cs",
+        "sha256": "42e34dd7348870baa6d6014c7979874132c5382c2c7b99f656e7f237d981fd17"
+      },
+      {
+        "path": "FanLab/LightSetter/OneXQueuedLighting.cs",
+        "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c"
+      },
+      {
+        "path": "FanLab/LightSetter/OneXLightingSession.cs",
+        "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605"
+      },
+      {
+        "path": "FanLab/LightSetter/LightingAssemblyPins.cs",
+        "sha256": "456a13f07c847a835cde66f0afa9d0f7b12dbad2e8a78079d36d7b4295bf3c88"
+      },
+      {
+        "path": "FanLab/LightSetter/YeManLightSetter.csproj",
+        "sha256": "49a0047ca8498fc237e3da722d3e2131b6c17be3947cabdf09acbd405038787a"
+      },
+      {
+        "path": "FanLab/DeviceCoreSharedDependencies.cs",
+        "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+      },
+      {
+        "path": "FanLab/RuntimeDependencyContract.cs",
+        "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+      },
+      {
+        "path": "native/ProcessEfficiency.cs",
+        "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+      }
+    ],
+    "gateSha256": "b2d2ae543e2564ee92e0668fe78cefdbf43b490da640dfba760474b1ed2f357d",
+    "nativeAndFrontendReplaced": false,
+    "wholeInstalledInventoryVerified": false,
+    "physicalHardwareVerified": false
+  },
+  "fanLifecycleRepair": {
+    "kind": "MSI-fan-only-open-events-close",
+    "hostDllSha256": "7f4136c87fe97b10c375b1e2e53d2074f6fc1899e34a4b2a37203ea633adcc5f",
+    "backendDllSha256": "f8fdbd516d2a002fa65e1cad5bc02405f16ec7b04208d4f6a8c2d26f330dea09",
+    "compiledInputs": [
+      {
+        "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+        "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+      },
+      {
+        "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+        "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+      },
+      {
+        "path": "FanLab/real-host/G1FanContractAdapter.cs",
+        "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+      },
+      {
+        "path": "FanLab/real-host/HostProcessLifetime.cs",
+        "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+      },
+      {
+        "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+        "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+      },
+      {
+        "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+        "sha256": "fc1ef727f643ba12f04fba317125aefdaf4a9cc565d500138c1e02b3469091a8"
+      },
+      {
+        "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+        "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+      },
+      {
+        "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+        "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+      },
+      {
+        "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+        "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+      },
+      {
+        "path": "FanLab/real-host/Program.cs",
+        "sha256": "f2d35efab4ea15edc36237e7f0a45175f6cef18381d61ffbb628413e43f0f29a"
+      },
+      {
+        "path": "FanLab/real-host/Section18CandidateFakes.cs",
+        "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+      },
+      {
+        "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+        "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+      },
+      {
+        "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+        "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+      },
+      {
+        "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+        "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+      },
+      {
+        "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+        "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+      },
+      {
+        "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+        "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+      },
+      {
+        "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+        "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+      },
+      {
+        "path": "FanLab/real-host/YeManFanHost.csproj",
+        "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+        "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+        "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+        "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+        "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+      },
+      {
+        "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+        "sha256": "3e40e80e1e9e756d9c20ad90e6c3a2af7a80b87fec63079383972f78e03de1b1"
+      },
+      {
+        "path": "native/ProcessEfficiency.cs",
+        "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+      },
+      {
+        "path": "FanLab/RuntimeDependencyContract.cs",
+        "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+      },
+      {
+        "path": "FanLab/DeviceCoreSharedDependencies.cs",
+        "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+      }
+    ],
+    "openIsolationEvidenceSha256": "25c3200f435c4a9f22cebb6767b87fad08c60f8c3c21ce9092e1d3471e000a25",
+    "oldRuntimeBindingCorrected": "85D75DE442300296DE056B487D68D7DB9AB9123EFA5D51D5245E0C32B2DDF032",
+    "runtimeManifestSha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "nativeAndFrontendRebuilt": false,
+    "fullProductAcceptance": false,
+    "physicalHardwareVerified": false
+  },
+  "oneXStrictFanWriteCandidate": {
+    "candidateHostSha256": "6b2f96972a47515bbe06e820e4196a22897782b7314adc03553f9b8e0aea9cf3",
+    "candidateBackendSha256": "211dce9f5594ff2a040ce3ac7824135f0e4df23987edcda563d038050d1dd04d",
+    "compiledInputs": [
+      {
+        "path": "FanLab/DeviceCoreSharedDependencies.cs",
+        "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+        "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+        "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+        "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+      },
+      {
+        "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+        "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+      },
+      {
+        "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+        "sha256": "3e40e80e1e9e756d9c20ad90e6c3a2af7a80b87fec63079383972f78e03de1b1"
+      },
+      {
+        "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+        "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+      },
+      {
+        "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+        "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+      },
+      {
+        "path": "FanLab/real-host/G1FanContractAdapter.cs",
+        "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+      },
+      {
+        "path": "FanLab/real-host/HostProcessLifetime.cs",
+        "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+      },
+      {
+        "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+        "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+      },
+      {
+        "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+        "sha256": "fc1ef727f643ba12f04fba317125aefdaf4a9cc565d500138c1e02b3469091a8"
+      },
+      {
+        "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+        "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+      },
+      {
+        "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+        "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+      },
+      {
+        "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+        "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+      },
+      {
+        "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+        "sha256": "94f7be466347b24ab8099c42aa1c7ddb2d92fcce84fee1c8e655e550d55010cd"
+      },
+      {
+        "path": "FanLab/real-host/Program.cs",
+        "sha256": "4c1beb56fee82bc99a4bc53e31fcc7c04ad6f57e283cdc3cfb0fb8ce7258b574"
+      },
+      {
+        "path": "FanLab/real-host/Section18CandidateFakes.cs",
+        "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+      },
+      {
+        "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+        "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+      },
+      {
+        "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+        "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+      },
+      {
+        "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+        "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+      },
+      {
+        "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+        "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+      },
+      {
+        "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+        "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+      },
+      {
+        "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+        "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+      },
+      {
+        "path": "FanLab/real-host/YeManFanHost.csproj",
+        "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0"
+      },
+      {
+        "path": "FanLab/RuntimeDependencyContract.cs",
+        "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+      },
+      {
+        "path": "native/ProcessEfficiency.cs",
+        "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+      }
+    ],
+    "sourceProof": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex-strict-write-20261019\\final-candidate\\result.json",
+    "sourceProofSha256": "e3728ceedf2e851107e1f491cc3d3ad6480f5bea8cd7aff2a7c31fd0f1e8610a",
+    "candidateBehaviorCases": 69,
+    "candidateBehaviorChecks": 580,
+    "installed": false,
+    "preparationOnly": true,
+    "fullProductAcceptance": false,
+    "physicalHardwareVerified": false
+  }
+}

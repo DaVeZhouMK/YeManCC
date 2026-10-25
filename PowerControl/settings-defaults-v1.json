@@ -1,0 +1,256 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "2026-08-09-user-default",
+  "ui": {
+    "theme": "blue-black",
+    "dynamicBackgroundEnabled": true,
+    "backgroundOpacity": 0.7,
+    "backgroundBlur": 0,
+    "backgroundPositionX": 50,
+    "backgroundPositionY": 50,
+    "videoBatteryPause": true,
+    "scheduleMonitor": true,
+    "steamChartAutoRefresh": "none",
+    "gestureSummonEnabled": false
+  },
+  "background": {
+    "asset": {},
+    "dynamic": {}
+  },
+  "music": {
+    "folder": "",
+    "mode": "random",
+    "volume": 0.11
+  },
+  "gamepad": {
+    "enabled": true,
+    "bDoubleMinimize": true,
+    "tdpShortcut": true,
+    "fpsShortcut": true,
+    "killGame": true,
+    "openKeyboard": true,
+    "returnDesktop": true,
+    "mouseToggle": true,
+    "mouseBackend": "joyxoff",
+    "feedback": {
+      "vibrationStrength": 70,
+      "lighting": {
+        "enabled": false,
+        "off": false,
+        "mode": "solid",
+        "presetId": "",
+        "color": "#2ea6ff",
+        "color2": "#9d7cff",
+        "speed": 55,
+        "brightness": 65
+      }
+    }
+  },
+  "performanceSchedule": {
+    "version": 2,
+    "configured": true,
+    "enabled": true,
+    "active": {
+      "ac": "elite",
+      "dc": "medium"
+    },
+    "profiles": {}
+  },
+  "gameCustom": {
+    "version": 1,
+    "entries": {}
+  },
+  "rtss": {
+    "templateDefaults": true,
+    "frameRates": {
+      "ac": {
+        "fps": 120,
+        "ceiling": 120,
+        "lastFps": 120
+      },
+      "dc": {
+        "fps": 60,
+        "ceiling": 60,
+        "lastFps": 60
+      }
+    }
+  },
+  "tdp": {
+    "tdpMax": 120,
+    "fpsLimit": 120,
+    "float": {
+      "target": 120,
+      "profile": "none",
+      "tdpStrategy": "none"
+    },
+    "autoApply": {
+      "boot": true,
+      "wake": true
+    }
+  },
+  "cpu": {
+    "profiles": {},
+    "active": "balanced",
+    "autostart": {
+      "ccd": {
+        "enabled": true,
+        "mode": 0
+      },
+      "uv": {
+        "enabled": true,
+        "preset": "off",
+        "vendor": "amd"
+      }
+    },
+    "autoEnable": {
+      "mode": "dc"
+    },
+    "lock": {}
+  },
+  "sleep": {
+    "mode": "custom",
+    "pauseGameOnSleep": true,
+    "retryOnEntryFailure": true,
+    "retryOnNonUserWake": true,
+    "factMonitorEnabled": false,
+    "sleepPowerPlanOptimizationEnabled": true,
+    "wakePasswordEnabled": false,
+    "steamOverlayOffFix": false,
+    "autoWakeRecovery": true
+  },
+  "quickApps": {
+    "apps": [
+      {
+        "name": "此电脑",
+        "path": "C:\\Windows\\explorer.exe"
+      },
+      {
+        "name": "edge浏览器",
+        "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe"
+      },
+      {
+        "name": "任务管理器",
+        "path": "C:\\Windows\\System32\\Taskmgr.exe"
+      },
+      {
+        "name": "关屏下载",
+        "path": "C:\\SOFT\\YeMan\\PowerControl\\关闭屏幕切为节能.vbs"
+      },
+      {
+        "name": "复古键盘",
+        "path": "C:\\Windows\\system32\\osk.exe"
+      }
+    ]
+  },
+  "startupDesired": {
+    "virtualGamepadPersona": "disabled",
+    "gyroPreset": "off",
+    "bootControlCenter": true,
+    "fanControl": false,
+    "rtss": false,
+    "energyStar": false,
+    "memoryCleanup": false,
+    "steamCommunity": false
+  },
+  "power": {
+    "scheme": {}
+  },
+  "tray": {
+    "resident": false
+  },
+  "autoclose": {
+    "enabled": false,
+    "procs": []
+  },
+  "fan": {
+    "featureEnabled": true,
+    "configured": false,
+    "deviceIdentity": null,
+    "preset": "balanced",
+    "motionEnabled": true,
+    "diagnosticLoggingEnabled": false
+  },
+  "input": {
+    "schemaVersion": 1,
+    "revision": 0,
+    "appliedRevision": null,
+    "appliedConfigHash": null,
+    "pendingConfigHash": null,
+    "hostAcknowledgedRevision": null,
+    "hostAcknowledgedConfigHash": null,
+    "applyStatus": "unknown",
+    "outputTarget": {
+      "schemaVersion": 1,
+      "revision": 0,
+      "closure": "UNENCLOSED",
+      "persona": "disabled",
+      "descriptorHash": null,
+      "buttonMappingEnabled": false,
+      "gyroEnabled": false,
+      "visibilityPolicy": "hidden",
+      "backMapping": false
+    },
+    "buttonMapping": {
+      "schemaVersion": 1,
+      "revision": 0,
+      "closure": "UNENCLOSED",
+      "profileId": "default",
+      "rules": {}
+    },
+    "gyroMotion": {
+      "schemaVersion": 1,
+      "revision": 0,
+      "closure": "UNENCLOSED",
+      "enabled": false,
+      "provider": null,
+      "unit": null,
+      "calibrationId": null,
+      "outputMode": "disabled",
+      "motionInput": "local-space",
+      "motionMode": "off",
+      "motionTrigger": null,
+      "steeringAxis": "roll",
+      "gyroMultiplier": 1,
+      "accelerometerMultiplier": 1,
+      "gyroThreshold": 2000,
+      "motionSensitivityX": 1.5,
+      "motionSensitivityY": 1.5,
+      "gyroWeight": 1.8,
+      "velocityMode": "default",
+      "velocityScale": 1,
+      "innerDeadzone": 1,
+      "outerDeadzone": 0,
+      "deadzone": 1,
+      "antiDeadzone": 20,
+      "outputShape": "default",
+      "invertHorizontal": false,
+      "invertVertical": false,
+      "aimingSightsMultiplier": 0.3,
+      "aimingSightsTrigger": null,
+      "preset": "fps",
+      "outputStick": "right",
+      "outputAxis": "xy",
+      "calibration": null,
+      "autoCalibrate": true,
+      "virtualPadLink": true,
+      "steeringMaxAngle": 30,
+      "steeringPower": 1,
+      "steeringDeadzone": 0
+    },
+    "ownership": {
+      "schemaVersion": 1,
+      "mode": "ymcc-semantic",
+      "frontendSummonVirtualControl": false,
+      "externalControllerPriority": false
+    },
+    "diagnostics": {
+      "inputLoggingEnabled": false
+    }
+  },
+  "extensions": {},
+  "configurationBaseline": {
+    "id": "ymcc-settings",
+    "revision": 1,
+    "legacyImported": true
+  }
+}

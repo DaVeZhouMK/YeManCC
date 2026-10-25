@@ -1,0 +1,138 @@
+{
+  "schemaVersion": 1,
+  "kind": "msi-manual-input-contract",
+  "profile": "msi-original-manual44-from-accepted-msi92",
+  "api": {
+    "inspect": "inspectMsiManualInputs({inputsPin:{path,sha256}})",
+    "prepare": "prepareMsiManual({inputsPin:{path,sha256}})",
+    "model": "projectMsiManualMODEL_ONLY(bundle)"
+  },
+  "inputShape": {
+    "schemaVersion": 1,
+    "profile": "msi-original-manual44-from-accepted-msi92",
+    "evidenceKind": "EXACT_MSI_MANUAL_PREPARE",
+    "role": "positive",
+    "ownedParent": "D:/Codex/2026-10-18/kai-s/work",
+    "stageRoot": "D:/Codex/2026-10-18/kai-s/work/msi-manual-positive-REPLACE_WITH_FRESH_OWNED_ROOT",
+    "acceptedMsiLifecycle92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/SUMMARY.json",
+        "sha256": "a5cc28db7273fd3ab8e687a581932b0728bee4a12ba11a5296845ec2e06d22ef"
+      },
+      "preparedPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/msi66-positive-r1/PREPARED-PLAN.json",
+        "sha256": "d29dee0fb2cbac0e8b0a3fcddf2970cba727c6c7eebe299afde0f5a4050f4a78"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/LOADED-GRAPH.json",
+        "sha256": "d2bd1f30335e71a5a101c24a8a246641fb7d16e8135c62b3558b71ee92761213"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-seven-independent-joint-r2/SUMMARY.json",
+        "sha256": "ecc6413373c841effdd932f6eb8f697cf70a87aa793434f91600cb89f5ac9fb9"
+      }
+    },
+    "derivativeQualificationPin": null
+  },
+  "qualificationShape": {
+    "schemaVersion": 1,
+    "kind": "msi-manual-derivative-qualification",
+    "status": "PARENT_QUALIFIED_MSI_MANUAL_DERIVATIVES",
+    "hostGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-manual-host-three-generation/SUMMARY.json",
+      "sha256": "bb7dd3606d85ecb018263c4d0111a26111f9326ecf9eeb451f9c64b943e5d64f"
+    },
+    "inventoryGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-manual-host-inventory-generation/SUMMARY.json",
+      "sha256": "18770ceeb4f3860e1b08f33f7675412ca2da4d92cf0d6c5880639fc403b3c184"
+    },
+    "reviewPin": "Exact actual normalized review binding pin; pending",
+    "inventory": {
+      "resultPin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-manual-host-inventory-generation\\msi-manual-host-inventory\\owned-stage\\msi-manual-host-inventory.json",
+        "sha256": "050949480dc195faa2729dd8ded4d1f06889a59ccc2bc29a6ea1e670a04aca50"
+      },
+      "processPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-manual-host-inventory-generation/msi-manual-host-inventory/GENERATION-PROCESS.json",
+        "sha256": "b3c55c9013ec91a6f43731eb8240dc588ad8ce4590994cd141452cc710462b2e"
+      }
+    },
+    "faultGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-manual-six-original-fault-generation/SUMMARY.json",
+      "sha256": "e43b513016a01c1338de489712adff954d42966f6eda4891ed9cebbd1ba47af2"
+    },
+    "faultRawReviewPin": "Exact actual six-fault typed raw review pin; required for negatives, pending",
+    "reviewEvidencePins": [
+      "Exact actual source/raw/provider report pins, length1..96"
+    ],
+    "nativeDevicePermissionAdded": false
+  },
+  "reviewShape": {
+    "schemaVersion": 1,
+    "kind": "msi-manual-derivative-review-binding",
+    "status": "REVIEWED_EXACT_MSI_MANUAL_DERIVATIVES",
+    "evidenceKind": "ACTUAL_METADATA_RAW_REVIEW",
+    "derivedFrom": [
+      "Actual typed report pins; must include faultRawReviewPin for negative role"
+    ],
+    "hostSourcePin": "Exact source4a461 pin in host-generation summary",
+    "hostTargetPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-manual-host-three-generation\\msi-manual-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+      "sha256": "4be013fa557cb2956ce0ee4763451bdb16efe54be1ca9b68bd61a343f9bbb815"
+    },
+    "hcPin": "Verified original lifecycle HC1827 file pin; any explicitly reviewed original copy must have the exact frozen SHA; no new image permission",
+    "portsSHA256": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+    "hostChangedMethods": "Exact full method names in original host proof (same ordering)",
+    "inventoryResultPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r66-msi-manual-host-inventory-generation\\msi-manual-host-inventory\\owned-stage\\msi-manual-host-inventory.json",
+      "sha256": "050949480dc195faa2729dd8ded4d1f06889a59ccc2bc29a6ea1e670a04aca50"
+    },
+    "inventoryMethods": [
+      "System.Void YeManFanHost.RealHcBackend::ApplyMsiFamilyCurve(System.Collections.Generic.IReadOnlyList`1<YeManFanHost.FanNode>,System.Object,System.String,System.Nullable`1<System.Int64>)",
+      "System.Boolean YeManFanHost.RealHcBackend::MsiCurveCommandStillCurrentForSelfTest(System.Int64)",
+      "System.Object YeManFanHost.RealHcBackend/<>c__DisplayClass470_0::<ApplyMsiFamilyCurve>b__0()",
+      "System.Boolean YeManFanHost.RealHcBackend/<>c__DisplayClass470_0::<ApplyMsiFamilyCurve>b__1()",
+      "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass470_0::<ApplyMsiFamilyCurve>b__2(YeManFanHost.MsiFamilyFanSubmission)",
+      "System.Object YeManFanHost.RealHcBackend/<>c__DisplayClass470_0::<ApplyMsiFamilyCurve>b__3()",
+      "System.Object YeManFanHost.RealHcBackend/<>c__DisplayClass470_1::<ApplyMsiFamilyCurve>b__4()"
+    ],
+    "wholeMethodSetsVerified": true,
+    "originalBaseOpenAndStructuredReleasePreserved": true,
+    "originalPublicApplyCurveAndTableBitWritersPreserved": true,
+    "bothTimerArmsOnlyOperandChangesInverseVerified": true,
+    "physicalPowerIoOnlyTerminalReplaced": true,
+    "originalSentryModuleInitializerPreserved": true,
+    "ownedBuildPayloadWritesRemain": true,
+    "freshChildManualEnabledDefaultFalse": true,
+    "hostNoRegistryPnpGeneralOpenAdded": true,
+    "backgroundReplayExecuted": false,
+    "rawWmiDecoderAccepted": false,
+    "targetCodeExecuted": false,
+    "nativeDevicePermissionAdded": false,
+    "variants": [
+      {
+        "role": "One exact original role",
+        "sourcePin": "Original HC1827 for preservation, Host4be otherwise",
+        "targetPin": "Exact generated fault image pin",
+        "proofPin": "Exact original single-method proof pin",
+        "changedMethods": [
+          "Exact one full original changed method"
+        ],
+        "wholeMethodSetVerified": true,
+        "typedReviewVerified": true,
+        "baseFieldsModuleUnchanged": true,
+        "onlyOriginalFault": true,
+        "targetKind": "hc for preservation; host for all other faults",
+        "expectedFailureMask": "The exact original role mask array from MSI-MANUAL-ORACLE.json, including order"
+      }
+    ]
+  },
+  "notes": [
+    "No qualification is synthesized. Pending example refuses before stage writes.",
+    "All non-positive roles use same original90000 business budget.",
+    "Metadata/preload60000, generation30000, parent360000, original compile120000.",
+    "MODEL_ONLY data is always rejected by actual read/inspect/prepare admission.",
+    "No proof accepts simple-name-only dependencies or changes to context/aliases/native manifest.",
+    "Historical preparation flags do not override actual accepted receipt pins."
+  ]
+}

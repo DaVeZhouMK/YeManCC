@@ -13,13 +13,23 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
   // Registered while closed, so Steam can cancel even before the conditional
   // options join its native focus tree. The stable callback reads current props.
   const nativeCancel = React.useRef((event?: any) => latest.current.opened ? cancel(event, latest.current) : false);
+  // A selected speed menu closes while its trigger is disabled. Return focus
+  // once that same trigger becomes available, without another timer or popup.
+  const returnFocus = React.useRef(false);
   React.useEffect(() => {
     if (props.opened) {
+      returnFocus.current = false;
       const selected = root.current?.querySelector('[role="option"][aria-selected="true"]:not([aria-disabled="true"])');
       (selected || root.current?.querySelector('[role="option"]:not([aria-disabled="true"])'))?.focus();
-    } else if (wasOpen.current && !props.disabled) trigger.current?.element?.focus();
+    } else {
+      if (wasOpen.current) returnFocus.current = true;
+      if (returnFocus.current && !props.disabled) {
+        trigger.current?.element?.focus();
+        returnFocus.current = false;
+      }
+    }
     wasOpen.current = props.opened;
-  }, [props.opened]);
+  }, [props.opened, props.disabled]);
   const keys = (event: any) => {
     if (!props.opened) return;
     if (event.key === 'Escape') { cancel(event); return; }
@@ -32,6 +42,9 @@ export function AnchoredDropdown(props: { label: any; selectedOption: string; rg
   return <DFL.Focusable ref={root} className="ymcc-anchored-dropdown" data-ymcc-menu-owner="native-scope"
     focusable={false} flow-children="column" onCancel={nativeCancel.current} onKeyDownCapture={keys}>
     <DFL.DropdownItem label={props.label} selectedOption={props.selectedOption} rgOptions={props.rgOptions}
+      // The native dropdown already highlights its trigger. Avoid a second
+      // focus background around the label and trigger, especially in core pairs.
+      highlightOnFocus={false}
       controlled={true} childrenContainerWidth="max" bottomSeparator="none" disabled={props.disabled}
       dropDownControlRef={trigger} onMenuWillOpen={() => { if (props.opened) props.onCancel(); else props.onMenuWillOpen(() => {}); return false; }}
       onChange={(option: Choice) => { if (!props.opened && !props.disabled && !option.disabled) { props.onMenuWillOpen(() => {}); props.onChange(option); } }} />

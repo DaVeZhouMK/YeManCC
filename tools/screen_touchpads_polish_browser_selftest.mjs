@@ -12,13 +12,13 @@ const req=createRequire(path.join(root,'package.json'));
 const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compiler-sfc');
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
 const {chromium}=createRequire(path.join(runtime,'_screen-touchpads-polish.cjs'))('playwright');
-const out=path.resolve(root,'../../Build/Validation/ScreenTouchpads-Polish');fs.mkdirSync(out,{recursive:true});
+const out=process.env.YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION?path.resolve(process.env.YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION):path.resolve(root,'../../Build/Validation/ScreenTouchpads-Polish');fs.mkdirSync(out,{recursive:true});
 const css=[fs.readFileSync(path.join(root,'src/styles/tokens.css'),'utf8')],cases=[],errors=[];
 const mocks={
  '@/router':`export const ROUTES=[];`,
  '@/bridge/performanceSchedule':`export async function loadPerformanceSchedule(){return {enabled:false}}`,
  '@/bridge/yeman':`export async function summonGet(){return {enabled:true}}`,
- '@/robust/frontendDiagnostics':`export function reportFrontendError(){}`,
+ '@/robust/frontendDiagnostics':`export function reportFrontendError(){} export function reportFrontendTrace(){}`,
  '@/bridge/ipc':`export const isNativeRuntime=true;
  export function on(type,fn){const cb=e=>fn(e.detail);window.addEventListener('ipc:'+type,cb);return ()=>window.removeEventListener('ipc:'+type,cb)}
  function padState(persona){const f=window.__fixture;return {...structuredClone(f.padProfiles[persona]),persona,ok:true,available:true,visible:f.padProfiles[persona].enabled,
@@ -79,6 +79,24 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
   cases.push({name:persona+'-saved-special-off-is-not-overwritten-on-load',ok:true});
  }
  await switchPersona('steamdeck');
+ assert.equal(await controlValue('触摸板触摸反馈'),'中震动反馈');
+ cases.push({name:'SteamDeck-touch-feedback-default-medium',ok:true});
+ await chooseControl('触摸板触摸反馈','关闭');
+ assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.steamdeck.touchFeedback),'off');
+ await switchPersona('dualsense-edge');assert.equal(await controlValue('触摸板触摸反馈'),'中震动反馈');
+ await switchPersona('steamdeck');assert.equal(await controlValue('触摸板触摸反馈'),'关闭');
+ cases.push({name:'saved-touch-feedback-off-survives-persona-switch',ok:true});
+ const hapticBaseline=await page.evaluate(()=>({p:window.__fixture.currentPersona,on:window.__fixture.targetEnabled}));
+ for(const [value,label] of [['minimal','最小震动反馈'],['medium','中震动反馈'],['strong','强震动反馈']]) {
+  await chooseControl('触摸板触摸反馈',label);
+  assert.equal(await page.evaluate(()=>window.__fixture.padProfiles.steamdeck.touchFeedback),value);
+  assert.ok((await page.evaluate(()=>window.__fixture.savedPads)).some(p=>p.persona==='steamdeck'&&p.config.touchFeedback===value));
+  await switchPersona('dualsense-edge');assert.equal(await controlValue('触摸板触摸反馈'),'中震动反馈');
+  await switchPersona('steamdeck');assert.equal(await controlValue('触摸板触摸反馈'),label);
+  assert.deepEqual(await page.evaluate(()=>({p:window.__fixture.currentPersona,on:window.__fixture.targetEnabled})),hapticBaseline);
+  cases.push({name:'touch-feedback-'+value+'-persists-without-mutating-virtual-target',ok:true});
+ }
+ await chooseControl('触摸板触摸反馈','关闭');
  async function action(name){await page.evaluate(name=>window.dispatchEvent(new CustomEvent('ipc:gamepad.ui-input',{detail:{action:name}})),name);await page.waitForTimeout(30)}
  async function checkValue(label,expected,el=steam){assert.equal(Number(await el.inputValue()),expected,label);cases.push({name:label,ok:true})}
  await checkValue('initial-Steam-value-preserved',100);assert.equal(await steam.getAttribute('step'),'any');assert.equal(await steam.getAttribute('data-gp-step'),'5');
@@ -105,7 +123,7 @@ try{browser=await chromium.launch({headless:true,executablePath:process.env.YMCC
  async function setLayout(name){await page.locator('.screen-touchpad-layout button').click();await page.locator('.dd-menu:visible').last().getByRole('option',{name,exact:true}).click();await page.waitForTimeout(80)}
  async function enablePads(){await setLayout('双触摸板')}
  async function setRange(label,value){await page.locator('input[aria-label="'+label+'"]').evaluate((el,value)=>{el.value=String(value);el.dispatchEvent(new Event('input',{bubbles:true}))},value);await page.waitForTimeout(220)}
- for(const [persona,opacity,size] of [['disabled',35,50],['dualsense-edge',70,150],['elite',60,200]]){await switchPersona(persona);await enablePads();await checkValue(persona+'-default-80',80,transparency);await checkValue(persona+'-default-scale-100',100,scale);await setRange('触摸板显示透明度',opacity);await checkValue(persona+'-independent-opacity',opacity,transparency);await setRange('触摸板缩放',size);await checkValue(persona+'-independent-scale',size,scale);}
+ for(const [persona,opacity,size] of [['disabled',35,50],['dualsense-edge',70,150],['elite',60,200]]){await switchPersona(persona);await enablePads();assert.equal(await controlValue('触摸板触摸反馈'),'中震动反馈');cases.push({name:persona+'-enabled-layout-inherits-medium-feedback',ok:true});await checkValue(persona+'-default-80',80,transparency);await checkValue(persona+'-default-scale-100',100,scale);await setRange('触摸板显示透明度',opacity);await checkValue(persona+'-independent-opacity',opacity,transparency);await setRange('触摸板缩放',size);await checkValue(persona+'-independent-scale',size,scale);}
  for(const [persona,opacity,size] of [['disabled',35,50],['dualsense-edge',70,150],['elite',60,200],['steamdeck',85,100]]){await switchPersona(persona);await checkValue(persona+'-restored-opacity',opacity,transparency);await checkValue(persona+'-restored-scale',size,scale);}
  await transparency.evaluate(el=>{el.value='95';el.dispatchEvent(new Event('input',{bubbles:true}))});await switchPersona('dualsense-edge');await setRange('触摸板显示透明度',65);const profiles=await page.evaluate(()=>window.__fixture.padProfiles);assert.equal(profiles.steamdeck.transparency,95);assert.equal(profiles['dualsense-edge'].transparency,65);assert.equal(profiles.disabled.transparency,35);cases.push({name:'fast-persona-switch-drains-save-to-original-slot',ok:true});
  await switchPersona('steamdeck');await scale.evaluate(el=>{el.value='105';el.dispatchEvent(new Event('input',{bubbles:true}))});await switchPersona('elite');await setRange('触摸板缩放',175);

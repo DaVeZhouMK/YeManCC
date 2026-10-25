@@ -1,0 +1,1007 @@
+{
+  "schemaVersion": 1,
+  "kind": "controller-signal-node-package-prerequisites",
+  "meaning": "Complete package members selected for this browser bundle and esbuild service; predeclared package graph is not an actual loaded-module graph.",
+  "originHelper": "tools/ymcc_sim/global/snapshot-node-tools.mjs",
+  "originHelperSha256": "563521308628c61bacef7377bb2b9ba49c045f5f43f568ce948ba829cca84a1a",
+  "originGraphSha256": "7e43a96b59efd917440674a704e9ad56fbc2090e4fc17a1f76dbcdc72277ba67",
+  "selectedPackageNames": [
+    "esbuild",
+    "@esbuild/win32-x64",
+    "vue",
+    "@vue/runtime-dom",
+    "@vue/runtime-core",
+    "@vue/reactivity",
+    "@vue/shared"
+  ],
+  "selection": "esbuild service and Vue browser-runtime dependencies; compiler/server/TypeScript packages are not needed by this consumer build",
+  "packages": [
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64",
+      "name": "@esbuild/win32-x64",
+      "version": "0.21.5",
+      "metadata": {
+        "name": "@esbuild/win32-x64",
+        "version": "0.21.5",
+        "description": "The Windows 64-bit binary for esbuild, a JavaScript bundler.",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/evanw/esbuild.git"
+        },
+        "license": "MIT",
+        "preferUnplugged": true,
+        "engines": {
+          "node": ">=12"
+        },
+        "os": [
+          "win32"
+        ],
+        "cpu": [
+          "x64"
+        ]
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\package.json",
+        "size": 374,
+        "sha256": "5fefc397d9fe3a69260545a7bfe570493b41498f3a949652e416a153dfdf695b"
+      },
+      "files": [
+        {
+          "path": "README.md",
+          "size": 143,
+          "sha256": "29cf512fa580b72392176bf694933ae0decaf18116fdeee917511b445411ce16"
+        },
+        {
+          "path": "esbuild.exe",
+          "size": 9913856,
+          "sha256": "b868c8d988ffe76006c03c91f856312c312e42e2f3932a6bb56d7f4a1790c8b3"
+        },
+        {
+          "path": "package.json",
+          "size": 374,
+          "sha256": "5fefc397d9fe3a69260545a7bfe570493b41498f3a949652e416a153dfdf695b"
+        }
+      ],
+      "directories": [],
+      "links": [],
+      "fileCount": 3,
+      "totalBytes": 9914373
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity",
+      "name": "@vue/reactivity",
+      "version": "3.5.41",
+      "metadata": {
+        "name": "@vue/reactivity",
+        "version": "3.5.41",
+        "description": "@vue/reactivity",
+        "main": "index.js",
+        "module": "dist/reactivity.esm-bundler.js",
+        "types": "dist/reactivity.d.ts",
+        "unpkg": "dist/reactivity.global.js",
+        "jsdelivr": "dist/reactivity.global.js",
+        "files": [
+          "index.js",
+          "dist"
+        ],
+        "exports": {
+          ".": {
+            "types": "./dist/reactivity.d.ts",
+            "node": {
+              "production": "./dist/reactivity.cjs.prod.js",
+              "development": "./dist/reactivity.cjs.js",
+              "default": "./index.js"
+            },
+            "module": "./dist/reactivity.esm-bundler.js",
+            "import": "./dist/reactivity.esm-bundler.js",
+            "require": "./index.js"
+          },
+          "./*": "./*"
+        },
+        "sideEffects": false,
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/vuejs/core.git",
+          "directory": "packages/reactivity"
+        },
+        "buildOptions": {
+          "name": "VueReactivity",
+          "formats": [
+            "esm-bundler",
+            "esm-browser",
+            "cjs",
+            "global"
+          ]
+        },
+        "keywords": [
+          "vue"
+        ],
+        "author": "Evan You",
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/vuejs/core/issues"
+        },
+        "homepage": "https://github.com/vuejs/core/tree/main/packages/reactivity#readme",
+        "dependencies": {
+          "@vue/shared": "3.5.41"
+        }
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\package.json",
+        "size": 1297,
+        "sha256": "f8f16905eaf2a207a0150c2d972232758fc4dfa373d04ecbfec55795341c421a"
+      },
+      "files": [
+        {
+          "path": "LICENSE",
+          "size": 1091,
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+        },
+        {
+          "path": "README.md",
+          "size": 921,
+          "sha256": "365358d3597b718901ad22235686962a721c6381d5450a6119729431030b4251"
+        },
+        {
+          "path": "dist/reactivity.cjs.js",
+          "size": 54389,
+          "sha256": "ced4b68a84b160893c7cd9951a4ea11cc093b122dfead31139b6f4e89ba2f64a"
+        },
+        {
+          "path": "dist/reactivity.cjs.prod.js",
+          "size": 50120,
+          "sha256": "69f1ef82d891c809658d46f142f0fa080994f63aa17846d97c4c92cb31975e62"
+        },
+        {
+          "path": "dist/reactivity.d.ts",
+          "size": 27379,
+          "sha256": "8fa68a409acbfc169f88bc6763ffb2df73b49346a938fd7b75397261995db523"
+        },
+        {
+          "path": "dist/reactivity.esm-browser.js",
+          "size": 54525,
+          "sha256": "5202fed47c991210545ab0c36821284b0b7424cf81c88cd3eeb34158be747548"
+        },
+        {
+          "path": "dist/reactivity.esm-browser.prod.js",
+          "size": 19778,
+          "sha256": "862278e9c35aef1dcdf07705d538ddeb3fbfc6392be24dc4b5b55c6283729dd4"
+        },
+        {
+          "path": "dist/reactivity.esm-bundler.js",
+          "size": 54728,
+          "sha256": "11b17a5069f0019bb1ec886891022a04bbbbe57c893cd01d313b35ccdededb79"
+        },
+        {
+          "path": "dist/reactivity.global.js",
+          "size": 59845,
+          "sha256": "43832fa70f94fc35769383e11f4ab7ce2fefbb0afe61c8b842c9e9889d6e540d"
+        },
+        {
+          "path": "dist/reactivity.global.prod.js",
+          "size": 19636,
+          "sha256": "f4f61c43fa42155fcc8f2a8aadbfdf103a772af87c5b937374c229e6cd1b3037"
+        },
+        {
+          "path": "index.js",
+          "size": 185,
+          "sha256": "ea58baa61892122ece77249d50c4b4bcdda46dd5233d6908d86d6bb4f874a109"
+        },
+        {
+          "path": "package.json",
+          "size": 1297,
+          "sha256": "f8f16905eaf2a207a0150c2d972232758fc4dfa373d04ecbfec55795341c421a"
+        }
+      ],
+      "directories": [
+        "dist"
+      ],
+      "links": [],
+      "fileCount": 12,
+      "totalBytes": 343894
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core",
+      "name": "@vue/runtime-core",
+      "version": "3.5.41",
+      "metadata": {
+        "name": "@vue/runtime-core",
+        "version": "3.5.41",
+        "description": "@vue/runtime-core",
+        "main": "index.js",
+        "module": "dist/runtime-core.esm-bundler.js",
+        "types": "dist/runtime-core.d.ts",
+        "files": [
+          "index.js",
+          "dist"
+        ],
+        "exports": {
+          ".": {
+            "types": "./dist/runtime-core.d.ts",
+            "node": {
+              "production": "./dist/runtime-core.cjs.prod.js",
+              "development": "./dist/runtime-core.cjs.js",
+              "default": "./index.js"
+            },
+            "module": "./dist/runtime-core.esm-bundler.js",
+            "import": "./dist/runtime-core.esm-bundler.js",
+            "require": "./index.js"
+          },
+          "./*": "./*"
+        },
+        "buildOptions": {
+          "name": "VueRuntimeCore",
+          "formats": [
+            "esm-bundler",
+            "cjs"
+          ]
+        },
+        "sideEffects": false,
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/vuejs/core.git",
+          "directory": "packages/runtime-core"
+        },
+        "keywords": [
+          "vue"
+        ],
+        "author": "Evan You",
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/vuejs/core/issues"
+        },
+        "homepage": "https://github.com/vuejs/core/tree/main/packages/runtime-core#readme",
+        "dependencies": {
+          "@vue/shared": "3.5.41",
+          "@vue/reactivity": "3.5.41"
+        }
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\package.json",
+        "size": 1233,
+        "sha256": "1d2610263892722de3cc90f493a0fe2c0dd76afa8487ff6febfd5096b757c257"
+      },
+      "files": [
+        {
+          "path": "LICENSE",
+          "size": 1091,
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+        },
+        {
+          "path": "README.md",
+          "size": 657,
+          "sha256": "c20f70d913da280c584f71c66a6c155f4b75c2f100a73328ce0b21983c24a5e0"
+        },
+        {
+          "path": "dist/runtime-core.cjs.js",
+          "size": 267473,
+          "sha256": "01863738f63ce23838d1251b0f0c5f59568e503741b73e6aac039f08a9b64a45"
+        },
+        {
+          "path": "dist/runtime-core.cjs.prod.js",
+          "size": 207694,
+          "sha256": "3c4e62f30a542d5e51dea711f3ceec11af267b3d4b97f20203c28d0c3d985da0"
+        },
+        {
+          "path": "dist/runtime-core.d.ts",
+          "size": 94078,
+          "sha256": "9243d44702e421a75334cce0eea4dc83377cddfeae40bd0a2d45ade7f53de444"
+        },
+        {
+          "path": "dist/runtime-core.esm-bundler.js",
+          "size": 276476,
+          "sha256": "73b808ccf5c04f9202022cade93e10d002d6854c10b8ba56e44e081505f511d3"
+        },
+        {
+          "path": "index.js",
+          "size": 189,
+          "sha256": "62c7b9f4f1090dd5217eccacffb381d56a5d27f60c0256e7f04915a77489ef82"
+        },
+        {
+          "path": "package.json",
+          "size": 1233,
+          "sha256": "1d2610263892722de3cc90f493a0fe2c0dd76afa8487ff6febfd5096b757c257"
+        }
+      ],
+      "directories": [
+        "dist"
+      ],
+      "links": [],
+      "fileCount": 8,
+      "totalBytes": 848891
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom",
+      "name": "@vue/runtime-dom",
+      "version": "3.5.41",
+      "metadata": {
+        "name": "@vue/runtime-dom",
+        "version": "3.5.41",
+        "description": "@vue/runtime-dom",
+        "main": "index.js",
+        "module": "dist/runtime-dom.esm-bundler.js",
+        "types": "dist/runtime-dom.d.ts",
+        "unpkg": "dist/runtime-dom.global.js",
+        "files": [
+          "index.js",
+          "dist"
+        ],
+        "exports": {
+          ".": {
+            "types": "./dist/runtime-dom.d.ts",
+            "node": {
+              "production": "./dist/runtime-dom.cjs.prod.js",
+              "development": "./dist/runtime-dom.cjs.js",
+              "default": "./index.js"
+            },
+            "module": "./dist/runtime-dom.esm-bundler.js",
+            "import": "./dist/runtime-dom.esm-bundler.js",
+            "require": "./index.js"
+          },
+          "./*": "./*"
+        },
+        "sideEffects": false,
+        "buildOptions": {
+          "name": "VueRuntimeDOM",
+          "formats": [
+            "esm-bundler",
+            "esm-browser",
+            "cjs",
+            "global"
+          ]
+        },
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/vuejs/core.git",
+          "directory": "packages/runtime-dom"
+        },
+        "keywords": [
+          "vue"
+        ],
+        "author": "Evan You",
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/vuejs/core/issues"
+        },
+        "homepage": "https://github.com/vuejs/core/tree/main/packages/runtime-dom#readme",
+        "dependencies": {
+          "csstype": "^3.2.3",
+          "@vue/shared": "3.5.41",
+          "@vue/runtime-core": "3.5.41",
+          "@vue/reactivity": "3.5.41"
+        },
+        "devDependencies": {
+          "@types/trusted-types": "^2.0.7"
+        }
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\package.json",
+        "size": 1424,
+        "sha256": "807d437dd13acfb23fa883887c6460504a8b883f7bb29571a62a365feeebc373"
+      },
+      "files": [
+        {
+          "path": "LICENSE",
+          "size": 1091,
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+        },
+        {
+          "path": "README.md",
+          "size": 198,
+          "sha256": "60cbfcd4e1ef3c136c0a77e6725ca4e5328992cf1af1dacad863e521d9121156"
+        },
+        {
+          "path": "dist/runtime-dom.cjs.js",
+          "size": 61431,
+          "sha256": "5f155f9d1a4e5eabb3b2227b8f289da53c0671917e12d6fa9013f80c8b763dbd"
+        },
+        {
+          "path": "dist/runtime-dom.cjs.prod.js",
+          "size": 55689,
+          "sha256": "4a648d7968e74caf66b5630fcbd54c5dba5b9d3ea741e9619c9f2020ba5b35ad"
+        },
+        {
+          "path": "dist/runtime-dom.d.ts",
+          "size": 57976,
+          "sha256": "596a4e510b37817875d6fb599b0fef10f4e05560057064fa93247343d5c137e9"
+        },
+        {
+          "path": "dist/runtime-dom.esm-browser.js",
+          "size": 388069,
+          "sha256": "0221915b40019444371d38d8f5630d2e3ab44185e54ba1f1e5526ffc7d4e3f0e"
+        },
+        {
+          "path": "dist/runtime-dom.esm-browser.prod.js",
+          "size": 109711,
+          "sha256": "f4cb25a49aa17ef02906c30b8012b2b95552ec7ef6a9ad4011979ffd08f69a9c"
+        },
+        {
+          "path": "dist/runtime-dom.esm-bundler.js",
+          "size": 63641,
+          "sha256": "298253e8e8020d9984cad57c59c771143d2648305c00ec4af279c08cbd4aea59"
+        },
+        {
+          "path": "dist/runtime-dom.global.js",
+          "size": 414332,
+          "sha256": "fb784bd7185ff2ceb11f41e0b10a200d872e2f9a2468d8e0496b454b2560853b"
+        },
+        {
+          "path": "dist/runtime-dom.global.prod.js",
+          "size": 107677,
+          "sha256": "450f2df5bd02fde132565a5088353007de95abfa366f6cb87fe3db0e83c0c307"
+        },
+        {
+          "path": "index.js",
+          "size": 187,
+          "sha256": "32a727cae7f8ef6ff93696552dd16b5fd355207439f74421dd9f19d7193f866f"
+        },
+        {
+          "path": "package.json",
+          "size": 1424,
+          "sha256": "807d437dd13acfb23fa883887c6460504a8b883f7bb29571a62a365feeebc373"
+        }
+      ],
+      "directories": [
+        "dist"
+      ],
+      "links": [],
+      "fileCount": 12,
+      "totalBytes": 1261426
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared",
+      "name": "@vue/shared",
+      "version": "3.5.41",
+      "metadata": {
+        "name": "@vue/shared",
+        "version": "3.5.41",
+        "description": "internal utils shared across @vue packages",
+        "main": "index.js",
+        "module": "dist/shared.esm-bundler.js",
+        "types": "dist/shared.d.ts",
+        "files": [
+          "index.js",
+          "dist"
+        ],
+        "exports": {
+          ".": {
+            "types": "./dist/shared.d.ts",
+            "node": {
+              "production": "./dist/shared.cjs.prod.js",
+              "development": "./dist/shared.cjs.js",
+              "default": "./index.js"
+            },
+            "module": "./dist/shared.esm-bundler.js",
+            "import": "./dist/shared.esm-bundler.js",
+            "require": "./index.js"
+          },
+          "./*": "./*"
+        },
+        "sideEffects": false,
+        "buildOptions": {
+          "formats": [
+            "esm-bundler",
+            "cjs"
+          ]
+        },
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/vuejs/core.git",
+          "directory": "packages/shared"
+        },
+        "keywords": [
+          "vue"
+        ],
+        "author": "Evan You",
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/vuejs/core/issues"
+        },
+        "homepage": "https://github.com/vuejs/core/tree/main/packages/shared#readme"
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\package.json",
+        "size": 1082,
+        "sha256": "111fef6001916651a932841286f7e288cdaf8c5bec7d8683956b5b6e91554922"
+      },
+      "files": [
+        {
+          "path": "LICENSE",
+          "size": 1091,
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+        },
+        {
+          "path": "README.md",
+          "size": 87,
+          "sha256": "a4be695a372c53520ac6e188605dfbf4163b953907ac1bffe25b775eb38c46ed"
+        },
+        {
+          "path": "dist/shared.cjs.js",
+          "size": 24678,
+          "sha256": "cb8b5c2d5930cb40d6a3b028266cf8bbf0dd99cced447acb55416ffdbd8e2774"
+        },
+        {
+          "path": "dist/shared.cjs.prod.js",
+          "size": 24416,
+          "sha256": "74b4b418e42b037b5aeaa2e4ec608e19ce2191a31b3c220a6111cc0133190146"
+        },
+        {
+          "path": "dist/shared.d.ts",
+          "size": 13433,
+          "sha256": "f468b74459f1ad4473b36a36d49f2b255f3c6b5d536c81239c2b2971df089eaf"
+        },
+        {
+          "path": "dist/shared.esm-bundler.js",
+          "size": 23090,
+          "sha256": "eee1821dd346d842f4b7b8fe3bfb6d9ed507313b1ed25eb13d18ab8d6b94ec1f"
+        },
+        {
+          "path": "index.js",
+          "size": 177,
+          "sha256": "22aeabedc1f2782f67b05c54df4382d4e52a0e0c384ff02349372e2acd9974ed"
+        },
+        {
+          "path": "package.json",
+          "size": 1082,
+          "sha256": "111fef6001916651a932841286f7e288cdaf8c5bec7d8683956b5b6e91554922"
+        }
+      ],
+      "directories": [
+        "dist"
+      ],
+      "links": [],
+      "fileCount": 8,
+      "totalBytes": 88054
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild",
+      "name": "esbuild",
+      "version": "0.21.5",
+      "metadata": {
+        "name": "esbuild",
+        "version": "0.21.5",
+        "description": "An extremely fast JavaScript and CSS bundler and minifier.",
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/evanw/esbuild.git"
+        },
+        "scripts": {
+          "postinstall": "node install.js"
+        },
+        "main": "lib/main.js",
+        "types": "lib/main.d.ts",
+        "engines": {
+          "node": ">=12"
+        },
+        "bin": {
+          "esbuild": "bin/esbuild"
+        },
+        "optionalDependencies": {
+          "@esbuild/aix-ppc64": "0.21.5",
+          "@esbuild/android-arm": "0.21.5",
+          "@esbuild/android-arm64": "0.21.5",
+          "@esbuild/android-x64": "0.21.5",
+          "@esbuild/darwin-arm64": "0.21.5",
+          "@esbuild/darwin-x64": "0.21.5",
+          "@esbuild/freebsd-arm64": "0.21.5",
+          "@esbuild/freebsd-x64": "0.21.5",
+          "@esbuild/linux-arm": "0.21.5",
+          "@esbuild/linux-arm64": "0.21.5",
+          "@esbuild/linux-ia32": "0.21.5",
+          "@esbuild/linux-loong64": "0.21.5",
+          "@esbuild/linux-mips64el": "0.21.5",
+          "@esbuild/linux-ppc64": "0.21.5",
+          "@esbuild/linux-riscv64": "0.21.5",
+          "@esbuild/linux-s390x": "0.21.5",
+          "@esbuild/linux-x64": "0.21.5",
+          "@esbuild/netbsd-x64": "0.21.5",
+          "@esbuild/openbsd-x64": "0.21.5",
+          "@esbuild/sunos-x64": "0.21.5",
+          "@esbuild/win32-arm64": "0.21.5",
+          "@esbuild/win32-ia32": "0.21.5",
+          "@esbuild/win32-x64": "0.21.5"
+        },
+        "license": "MIT"
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\package.json",
+        "size": 1340,
+        "sha256": "0f35e0d63bd60a43ed85879604a40f7e9688b321904cf28a95be5b1bc629559c"
+      },
+      "files": [
+        {
+          "path": "LICENSE.md",
+          "size": 1069,
+          "sha256": "b40ec5baec7bb34fa5b1c09521fa3cd52d5fad7adafed74932a2010d3612a681"
+        },
+        {
+          "path": "README.md",
+          "size": 175,
+          "sha256": "6d481cd60ec3c679e5e395f547ab4221147f35642894f6b95a8df38fd25c87bd"
+        },
+        {
+          "path": "bin/esbuild",
+          "size": 9200,
+          "sha256": "9ce5381d8403ef3e2738e32d1dcf9728d65a0b9e76c242110419d86dc034d62c"
+        },
+        {
+          "path": "install.js",
+          "size": 10943,
+          "sha256": "97427508f98287d50b8001d36954fa547cdf73705d699c85de9f87c1c5ca909f"
+        },
+        {
+          "path": "lib/main.d.ts",
+          "size": 22991,
+          "sha256": "bacf2c84cf448b2cd02c717ad46c3d7fd530e0c91282888c923ad64810a4d511"
+        },
+        {
+          "path": "lib/main.js",
+          "size": 87654,
+          "sha256": "ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee"
+        },
+        {
+          "path": "package.json",
+          "size": 1340,
+          "sha256": "0f35e0d63bd60a43ed85879604a40f7e9688b321904cf28a95be5b1bc629559c"
+        }
+      ],
+      "directories": [
+        "bin",
+        "lib"
+      ],
+      "links": [],
+      "fileCount": 7,
+      "totalBytes": 133372
+    },
+    {
+      "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue",
+      "name": "vue",
+      "version": "3.5.41",
+      "metadata": {
+        "name": "vue",
+        "version": "3.5.41",
+        "description": "The progressive JavaScript framework for building modern web UI.",
+        "main": "index.js",
+        "module": "dist/vue.runtime.esm-bundler.js",
+        "types": "dist/vue.d.ts",
+        "unpkg": "dist/vue.global.js",
+        "jsdelivr": "dist/vue.global.js",
+        "files": [
+          "index.js",
+          "index.mjs",
+          "dist",
+          "compiler-sfc",
+          "server-renderer",
+          "jsx-runtime",
+          "jsx.d.ts"
+        ],
+        "exports": {
+          ".": {
+            "import": {
+              "types": "./dist/vue.d.mts",
+              "node": "./index.mjs",
+              "default": "./dist/vue.runtime.esm-bundler.js"
+            },
+            "require": {
+              "types": "./dist/vue.d.ts",
+              "node": {
+                "production": "./dist/vue.cjs.prod.js",
+                "development": "./dist/vue.cjs.js",
+                "default": "./index.js"
+              },
+              "default": "./index.js"
+            }
+          },
+          "./server-renderer": {
+            "import": {
+              "types": "./server-renderer/index.d.mts",
+              "default": "./server-renderer/index.mjs"
+            },
+            "require": {
+              "types": "./server-renderer/index.d.ts",
+              "default": "./server-renderer/index.js"
+            }
+          },
+          "./compiler-sfc": {
+            "import": {
+              "types": "./compiler-sfc/index.d.mts",
+              "browser": "./compiler-sfc/index.browser.mjs",
+              "default": "./compiler-sfc/index.mjs"
+            },
+            "require": {
+              "types": "./compiler-sfc/index.d.ts",
+              "browser": "./compiler-sfc/index.browser.js",
+              "default": "./compiler-sfc/index.js"
+            }
+          },
+          "./jsx-runtime": {
+            "types": "./jsx-runtime/index.d.ts",
+            "import": "./jsx-runtime/index.mjs",
+            "require": "./jsx-runtime/index.js"
+          },
+          "./jsx-dev-runtime": {
+            "types": "./jsx-runtime/index.d.ts",
+            "import": "./jsx-runtime/index.mjs",
+            "require": "./jsx-runtime/index.js"
+          },
+          "./jsx": "./jsx.d.ts",
+          "./dist/*": "./dist/*",
+          "./package.json": "./package.json"
+        },
+        "buildOptions": {
+          "name": "Vue",
+          "formats": [
+            "esm-bundler",
+            "esm-bundler-runtime",
+            "cjs",
+            "global",
+            "global-runtime",
+            "esm-browser",
+            "esm-browser-runtime"
+          ]
+        },
+        "repository": {
+          "type": "git",
+          "url": "git+https://github.com/vuejs/core.git"
+        },
+        "keywords": [
+          "vue"
+        ],
+        "author": "Evan You",
+        "license": "MIT",
+        "bugs": {
+          "url": "https://github.com/vuejs/core/issues"
+        },
+        "homepage": "https://vuejs.org/",
+        "dependencies": {
+          "@vue/shared": "3.5.41",
+          "@vue/runtime-dom": "3.5.41",
+          "@vue/server-renderer": "3.5.41",
+          "@vue/compiler-sfc": "3.5.41",
+          "@vue/compiler-dom": "3.5.41"
+        },
+        "peerDependencies": {
+          "typescript": "*"
+        },
+        "peerDependenciesMeta": {
+          "typescript": {
+            "optional": true
+          }
+        }
+      },
+      "metadataIdentity": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\package.json",
+        "size": 2769,
+        "sha256": "f4b4f0bcc14f8d48db601ba33f408211438d86e914c08f7169836ad618ae1893"
+      },
+      "files": [
+        {
+          "path": "LICENSE",
+          "size": 1091,
+          "sha256": "1bb85cc9b13b81ef41c81c51866172fc345e0503c86726a6755b796590b70175"
+        },
+        {
+          "path": "README.md",
+          "size": 3759,
+          "sha256": "8285ba17b0496f460c19b7135d9e60672155696e98b1b2c36679552ff4af189f"
+        },
+        {
+          "path": "compiler-sfc/index.browser.js",
+          "size": 46,
+          "sha256": "bcac58b9da93b9c20bab46751dc36ce1ecf6e209b2661681eb6d4e16750c9c6c"
+        },
+        {
+          "path": "compiler-sfc/index.browser.mjs",
+          "size": 34,
+          "sha256": "3feec212c0aeb91e5a6e62caaf9f128954590210f8c302910ea377c088f6b61a"
+        },
+        {
+          "path": "compiler-sfc/index.d.mts",
+          "size": 34,
+          "sha256": "3feec212c0aeb91e5a6e62caaf9f128954590210f8c302910ea377c088f6b61a"
+        },
+        {
+          "path": "compiler-sfc/index.d.ts",
+          "size": 34,
+          "sha256": "3feec212c0aeb91e5a6e62caaf9f128954590210f8c302910ea377c088f6b61a"
+        },
+        {
+          "path": "compiler-sfc/index.js",
+          "size": 75,
+          "sha256": "a2226c3eedb827ce90fabd18413c8b6d4008a99269f403f86f160b733c546970"
+        },
+        {
+          "path": "compiler-sfc/index.mjs",
+          "size": 61,
+          "sha256": "cc4731212a5542b09972f5f5b80072afa0387941242bd25d5d3a46d8bb920e38"
+        },
+        {
+          "path": "compiler-sfc/package.json",
+          "size": 50,
+          "sha256": "a83b1667cc1faa734ace9d48d68f5ee4666e8a09160dfc26ab4b9edc60a80c0f"
+        },
+        {
+          "path": "compiler-sfc/register-ts.js",
+          "size": 111,
+          "sha256": "4244727c942ef8afefa2969ea9e4179d885ffb53d91f962812fcb18a405a6ec9"
+        },
+        {
+          "path": "dist/vue.cjs.js",
+          "size": 2296,
+          "sha256": "033c70f903ab358d3e1a2b0474c21a63960e341266d84931d34420b43fb17846"
+        },
+        {
+          "path": "dist/vue.cjs.prod.js",
+          "size": 1774,
+          "sha256": "4f042b4caee7d78cdb841837e46e6b2e14711c37e9705627d02ec92f4776cf0b"
+        },
+        {
+          "path": "dist/vue.d.mts",
+          "size": 299,
+          "sha256": "c0191592be8eb7906f99ac4b8798d80a585b94001ea1a5f50d6ce5b0d13a5c62"
+        },
+        {
+          "path": "dist/vue.d.ts",
+          "size": 299,
+          "sha256": "c0191592be8eb7906f99ac4b8798d80a585b94001ea1a5f50d6ce5b0d13a5c62"
+        },
+        {
+          "path": "dist/vue.esm-browser.js",
+          "size": 558968,
+          "sha256": "aa5615cc54088d6259ceaaebb12731076a4a4740ce42887e6c8890a7ef4f843d"
+        },
+        {
+          "path": "dist/vue.esm-browser.prod.js",
+          "size": 171457,
+          "sha256": "ebc65a001c486a0980412c5fa7942c4a8acd357123cedba602b070873680088d"
+        },
+        {
+          "path": "dist/vue.esm-bundler.js",
+          "size": 2188,
+          "sha256": "cd68bd8d6de76462a98977f9f60efd9e86d0cbd52ea90386d8be397d91b2360a"
+        },
+        {
+          "path": "dist/vue.global.js",
+          "size": 591450,
+          "sha256": "14625269265de97b5c344b8fcfb7136c0c9ab09f7dbadc909a4967d14eca05fb"
+        },
+        {
+          "path": "dist/vue.global.prod.js",
+          "size": 166624,
+          "sha256": "45c5186437878319a4b86339f475e8e2f0b27e1752f9e6387ebb15854425847f"
+        },
+        {
+          "path": "dist/vue.runtime.esm-browser.js",
+          "size": 388491,
+          "sha256": "3a7ae618665b2cacc25396cf81250f76c5060a2e54fcfda1dbcf9fac2e8f9bdd"
+        },
+        {
+          "path": "dist/vue.runtime.esm-browser.prod.js",
+          "size": 109722,
+          "sha256": "d7040d22ac82eb0bddbd14b8ebe7497c92624bd34c27ed25ec0ee416b45a7fe9"
+        },
+        {
+          "path": "dist/vue.runtime.esm-bundler.js",
+          "size": 580,
+          "sha256": "ed4a516c8aa4931c5683370ddc63846da8898b5fdf6638dae6912874948a1028"
+        },
+        {
+          "path": "dist/vue.runtime.global.js",
+          "size": 414799,
+          "sha256": "45c904194aaf24112c8f4fc4386b87e107a32eede80c410ce93be459ebdee088"
+        },
+        {
+          "path": "dist/vue.runtime.global.prod.js",
+          "size": 107671,
+          "sha256": "09c9eb6ab2ea0157865aa220e86d81de34bdc7924ac4c5ab77e60f0c8c125f90"
+        },
+        {
+          "path": "index.js",
+          "size": 171,
+          "sha256": "a5287f6056bc5c2c569d318063ee043f55a0d323fa7262f64456d58fd574f928"
+        },
+        {
+          "path": "index.mjs",
+          "size": 27,
+          "sha256": "be2f35590bee45e69850d0d8d48f0b8c8f5c0ef0ecf8a7265ab12fb7add6584d"
+        },
+        {
+          "path": "jsx-runtime/index.d.ts",
+          "size": 848,
+          "sha256": "318d19118bf6bf8d088441c948990f53cafc79ed581b78f3d41a0f7a3f5f145c"
+        },
+        {
+          "path": "jsx-runtime/index.js",
+          "size": 303,
+          "sha256": "ecfc9a7d11e53cb941f553cae0db0ffebfd87f978ac6a764a1c3dbb421a8b88f"
+        },
+        {
+          "path": "jsx-runtime/index.mjs",
+          "size": 265,
+          "sha256": "815c8dded0137fc15ba8b58dce6d712d16ed3d73701cd1e2a26b56e4832f19a6"
+        },
+        {
+          "path": "jsx-runtime/package.json",
+          "size": 75,
+          "sha256": "87b52004c4020c95aeafaaa23f6e21765219547828e2c9f3a94cd9530dd4b614"
+        },
+        {
+          "path": "jsx.d.ts",
+          "size": 741,
+          "sha256": "8a35ec19c6c699c98fd16fc80ae6964d80139c5a8e62ec4a5c60902c1da3285c"
+        },
+        {
+          "path": "node_modules/.bin/tsc",
+          "size": 1921,
+          "sha256": "ef5208ecf8fab1be54defc08e4c0b1a900f555d15c9b5b74b9bfffa8d5a0a6f7"
+        },
+        {
+          "path": "node_modules/.bin/tsc.CMD",
+          "size": 886,
+          "sha256": "d5e02f73efe0a4d112dd1f3c6893a1a9e24f15d7dde4abf715e6e2073c75bd27"
+        },
+        {
+          "path": "node_modules/.bin/tsc.ps1",
+          "size": 1709,
+          "sha256": "ddadfc2b647d2e79b87c0e060dd28451bc224386c32b12969c3d29584fc121df"
+        },
+        {
+          "path": "node_modules/.bin/tsserver",
+          "size": 1951,
+          "sha256": "af8f0b8c336d402295742b89463006a566349e3ff92b1ee380e290024358d953"
+        },
+        {
+          "path": "node_modules/.bin/tsserver.CMD",
+          "size": 896,
+          "sha256": "35c18272d238c96db6029e45fda8b5d60c9c984d0006a486cd6696e3e8db6f84"
+        },
+        {
+          "path": "node_modules/.bin/tsserver.ps1",
+          "size": 1729,
+          "sha256": "7552c5ed76bd0288427f6902a50601dc49a5f7a5d79f8dc703a767c4d1a514e8"
+        },
+        {
+          "path": "package.json",
+          "size": 2769,
+          "sha256": "f4b4f0bcc14f8d48db601ba33f408211438d86e914c08f7169836ad618ae1893"
+        },
+        {
+          "path": "server-renderer/index.d.mts",
+          "size": 37,
+          "sha256": "ddf4fc11a9d155f1d58084838ad0eb640d38b6b7724fac14a1e782efaaa2966c"
+        },
+        {
+          "path": "server-renderer/index.d.ts",
+          "size": 37,
+          "sha256": "ddf4fc11a9d155f1d58084838ad0eb640d38b6b7724fac14a1e782efaaa2966c"
+        },
+        {
+          "path": "server-renderer/index.js",
+          "size": 49,
+          "sha256": "0e7735be4e65399d20d9ea65840a0cd0eef7f935fd1b224e6c45b576be12ac13"
+        },
+        {
+          "path": "server-renderer/index.mjs",
+          "size": 37,
+          "sha256": "ddf4fc11a9d155f1d58084838ad0eb640d38b6b7724fac14a1e782efaaa2966c"
+        },
+        {
+          "path": "server-renderer/package.json",
+          "size": 50,
+          "sha256": "a83b1667cc1faa734ace9d48d68f5ee4666e8a09160dfc26ab4b9edc60a80c0f"
+        }
+      ],
+      "directories": [
+        "compiler-sfc",
+        "dist",
+        "jsx-runtime",
+        "node_modules",
+        "node_modules/.bin",
+        "server-renderer"
+      ],
+      "links": [],
+      "fileCount": 43,
+      "totalBytes": 2536414
+    }
+  ]
+}

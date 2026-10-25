@@ -10,12 +10,32 @@ function check(value: unknown, message: string): asserts value {
   if (!value) throw new Error(message);
 }
 const curve: FanNode[] = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 25 }, { tempC: 100, dutyPercent: 90 }];
-const launcher: FanHostLauncher = { start: async () => ({ pid: 943, executable: 'no-io-fixture.exe' }), stop: async () => {} };
+/** A replacement Host is a fresh process/session; do not carry the predecessor's closeCalled bit. */
+function launcherFor(host: NoIoHost): FanHostLauncher {
+  let starts = 0;
+  return {
+    start: async () => {
+      starts += 1;
+      if (starts > 1) {
+        host.closed = false;
+        host.opened = false;
+        host.events = false;
+        host.lease = null;
+        host.stateName = 'Stopped';
+        host.powerState = 'Unknown';
+        host.generation = 0;
+        host.attempt = 0;
+      }
+      return { pid: 943 + starts, executable: 'no-io-fixture.exe' };
+    },
+    stop: async () => {},
+  };
+}
 const coldNative = (generation = 1, resumeReady = false): PowerLifecycleState => ({ generation, phase: 'ready', resumeReady,
   hardwareWritesAllowed: true, inputReady: true, hibernateAvailable: true });
 
 function make(host: NoIoHost, read: () => Promise<PowerLifecycleState | null>) { return new FanHostLifecycle({ enabled: true,
-  launcher, adapter: host, heartbeatIntervalMs: 0, resumeWaitDeadlineMs: 800, readNativePowerState: read }); }
+  launcher: launcherFor(host), adapter: host, heartbeatIntervalMs: 0, resumeWaitDeadlineMs: 800, readNativePowerState: read }); }
 async function reject(work: Promise<unknown>, code: string) { await work.then(() => { throw new Error(`expected ${code}`); },
   error => check(error instanceof FanApiError && error.errorCode === code, `preserve ${code}: ${String(error)}`)); }
 async function main() {
@@ -51,7 +71,9 @@ async function main() {
   check(wake.calls.filter(c => c === 'enable').length === before + 1, 'real wake writes once after admission');
   await wakeLife.close();
 
-  // Zero is NOT a free pass for a true wake, even if an old Host still says Ready/Open.
+  // A new successor with a current awake boundary has no Host-side resume receipt to
+  // borrow. Manual control must use the original Open/OpenEvents chain. A prior/foreign
+  // power receipt remains a hard negative and must not be borrowed by the successor.
   for (const mode of ['wake-fact', 'generation-2', 'observed-sleep', 'real-old-receipt', 'contradictory-zero'] as const) {
     const old = new NoIoHost(); old.opened = old.events = true; old.stateName = 'Ready';
     let staleNative: PowerLifecycleState | null = null;
@@ -61,8 +83,23 @@ async function main() {
     if (mode === 'real-old-receipt') { old.attempt = 1; }
     if (mode === 'contradictory-zero') { const original = old.snapshot.bind(old); old.snapshot = () => ({ ...original(), powerOperationGeneration: 2 }); }
     if (mode === 'observed-sleep') { staleLife.observePowerBoundary('suspending', 1); staleLife.observePowerBoundary('resuming', 1); staleLife.observePowerBoundary('resume-ready', 1); }
-    await reject(staleLife.start({ manualRecovery: true }), 'HC_RESUME_RESULT_EXPIRED');
-    check(!old.calls.includes('acquire') && !old.calls.includes('enable'), `${mode}: no writes from stale/no receipt`);
+    let manualError: unknown = null;
+    try {
+      await staleLife.start({ manualRecovery: true });
+      await staleLife.apply(curve);
+    } catch (error) {
+      manualError = error;
+    }
+    const attemptedWrite = old.calls.includes('acquire') || old.calls.includes('enable');
+    if (mode === 'real-old-receipt' || mode === 'contradictory-zero') {
+      check(manualError instanceof FanApiError && manualError.errorCode === 'HC_RESUME_RESULT_EXPIRED',
+        `${mode}: foreign/old resume receipt remains rejected`);
+      check(!attemptedWrite, `${mode}: rejected receipt must not write`);
+    } else {
+      check(manualError === null && old.calls.includes('open') && old.calls.includes('events')
+        && old.calls.includes('acquire') && old.calls.includes('enable'),
+        `${mode}: fresh successor must reach original Open/OpenEvents/acquire/enable`);
+    }
     await staleLife.close();
   }
   // Expiry and real terminal resume errors must survive; never become a 15s Ready deadline.

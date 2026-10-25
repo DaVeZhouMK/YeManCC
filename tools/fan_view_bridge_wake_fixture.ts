@@ -7,7 +7,8 @@ import { FanApiError, type FanApiAdapter, type FanState, type FanNode, type FanL
 import type { PowerLifecycleState } from '../src/bridge/api';
 export { resolveFanEntryAction };
 const family = new URL(location.href).searchParams.get('family') || 'ROGAlly';
-const curveFamilies = new Set(['ROGAlly', 'ClawA2VM', 'LegionGoTablet']);
+const coldHostStartup = new URL(location.href).searchParams.get('cold') === '1';
+const curveFamilies = new Set(['ROGAlly', 'ClawA2VM', 'ClawCG3EM', 'LegionGoTablet']);
 const curves = {
   soft: [{tempC:0,dutyPercent:0},{tempC:40,dutyPercent:0},{tempC:70,dutyPercent:20},{tempC:100,dutyPercent:80}],
   balanced: [{tempC:0,dutyPercent:0},{tempC:40,dutyPercent:20},{tempC:70,dutyPercent:45},{tempC:100,dutyPercent:90}],
@@ -23,7 +24,7 @@ const fx = {
   },
   trace: [] as {op:string;generation:number;nodes?:FanNode[]}[],
   native: {generation:0,phase:'ready',inputReady:true,resumeReady:true,hardwareWritesAllowed:true,hibernateAvailable:true} as PowerLifecycleState,
-  slowResumeMs: 0, fault: false, throwState: false, enableFailures: 0, heartbeatFailure: false,
+  slowResumeMs: 0, fault: false, throwState: false, enableFailures: 0, heartbeatFailure: false, stopFailures: 0,
   lastControlActive: false, lastNavDuty: 0,
   note(op:string,nodes?:readonly FanNode[]) { this.trace.push({op,generation:this.native.generation,nodes:nodes?.map(n=>({...n}))}); },
 };
@@ -31,13 +32,13 @@ class Boundary implements FanApiAdapter {
   enabled = true;
   lease: FanLease|null = null;
   nextLease = 0;
-  state = 'AwaitingControl';
+  state = coldHostStartup ? 'Stopped' : 'AwaitingControl';
   terminalFault = false;
   opened = false;
   eventsOpened = false;
   writes = false;
   writesObserved = false;
-  closeComplete = true;
+  closeComplete = !coldHostStartup;
   restored = false;
   resumeGeneration = 0;
   private operationEpoch = 0;
@@ -49,14 +50,19 @@ class Boundary implements FanApiAdapter {
       hcVirtualCloseReturned:this.closeComplete,hcDeviceManagerStopCompleted:this.closeComplete,
       oemPhysicalOwnershipConfirmed:false,oemOwnershipStatus:'fixture-no-physical-proof',
       lease:this.lease?{...this.lease}:null,leaseGeneration:this.lease?.generation??null,
-      controlAccepting:!this.terminalFault&&!fx.fault&&this.opened&&this.eventsOpened&&this.state!=='Resuming',
-      resumePhase:this.state,resumePhaseGeneration:this.resumeGeneration,retryAfterMs:250};
+      // Mirrors FanHostEngine.IsControlAccepting: cold AwaitingControl can
+      // accept an explicit Open; it does not prove HC already opened.
+      controlAccepting:!this.terminalFault&&!fx.fault&&['Ready','AwaitingControl'].includes(this.state),
+      resumePhase:this.state,resumePhaseGeneration:this.resumeGeneration,retryAfterMs:250,
+      ...(coldHostStartup?{fanCapabilitySupported:true,closeCalled:this.state==='Stopped'&&this.closeComplete,
+        powerState:this.resumeGeneration===0?'Unknown':this.state==='Suspended'?'Suspended':this.state==='Resuming'?'Resuming':'On',
+        powerOperationGeneration:this.resumeGeneration,powerOperationAttempt:this.resumeGeneration===0?0:1,powerOperationStatus:null}:{} )};
   }
   async handshake() { fx.note('handshake');return {ok:true,supported:true,deviceClass:'HandheldCompanion.Devices.'+family,
     fanRoute:curveFamilies.has(family)?'ProfileCurve':'GenericDuty',fanRouteWriteReady:true,
     deviceIdentity:{manufacturer:family==='GPDWin5'?'GPD':'fixture',model:family,product:family}}; }
-  async getState() { fx.note('state');if(fx.throwState)throw new Error('HOST_STATE_TIMEOUT');return this.snapshot(); }
-  async open() { fx.note('Open');await fx.waitAt('Open');if(fx.fault||this.terminalFault)throw new FanApiError('FAULT_LOCKED',409,'FAULT_LOCKED');this.opened=true;this.closeComplete=false;return this.snapshot(); }
+  async getState() { fx.note('state');const snapshot=this.snapshot();await fx.waitAt('state');if(fx.throwState)throw new Error('HOST_STATE_TIMEOUT');return snapshot; }
+  async open() { const epoch=this.operationEpoch;fx.note('Open');await fx.waitAt('Open');if(epoch!==this.operationEpoch){fx.note('Open-superseded');throw new FanApiError('HC_RESUME_SUPERSEDED',409,'HC_RESUME_SUPERSEDED');}if(fx.fault||this.terminalFault)throw new FanApiError('FAULT_LOCKED',409,'FAULT_LOCKED');this.opened=true;this.closeComplete=false;return this.snapshot(); }
   async openEvents() { fx.note('OpenEvents');this.eventsOpened=true;this.state='AwaitingControl';return this.snapshot(); }
   async acquireControl() { fx.note('acquire');await fx.waitAt('acquire');if(!this.opened||!this.eventsOpened)throw new Error('fixture-HC-session-not-open');this.lease={leaseId:'fixture-'+(++this.nextLease),generation:this.nextLease};return {...this.lease}; }
   async heartbeat(id:string) { fx.note('heartbeat');await fx.waitAt('heartbeat');if(fx.heartbeatFailure||this.lease?.leaseId!==id)throw new FanApiError('LEASE_INVALID',409,'LEASE_INVALID');return {...this.lease}; }
@@ -85,12 +91,16 @@ class Boundary implements FanApiAdapter {
     return this.snapshot();
   }
   closed(state:string) {this.operationEpoch++;this.state=state;this.opened=false;this.eventsOpened=false;this.writes=false;this.restored=false;this.closeComplete=true;this.lease=null;}
-  async close() {fx.note('Close');this.closed('Stopped');this.terminalFault=false;return this.snapshot();}
+  async close() {fx.note('Close');await fx.waitAt('Close');this.closed('Stopped');this.terminalFault=false;return this.snapshot();}
   async shutdown() {fx.note('shutdown');}
 }
 const boundary = new Boundary();
 export const fanHostLifecycle = new FanHostLifecycle({enabled:true,adapter:boundary,
-  launcher:{async start(){fx.note('launch');return {pid:1234,executable:'fixture-FanHost.exe'};},async stop(){fx.note('stop');}},
+  onControlDisplay:(active,curve)=>{
+    const observe=(window as unknown as {__fanControlDisplay?: (active:boolean,curve:readonly FanNode[])=>void}).__fanControlDisplay;
+    observe?.(active,curve);
+  },
+  launcher:{async start(){fx.note('launch');await fx.waitAt('launch');return {pid:1234,executable:'fixture-FanHost.exe'};},async stop(){fx.note('stop');if(fx.stopFailures-- > 0)throw new Error('fixture-exact-exit-not-confirmed');}},
   heartbeatIntervalMs:5000,resumeWaitDeadlineMs:1500,readNativePowerState:async()=>{fx.note('power-read');return {...fx.native};},
   readNativeActivity:async()=>null,requestManualWake:async(g)=>{
     fx.note('fanManualWake');
@@ -108,7 +118,26 @@ Object.assign(fx,{
       window.dispatchEvent(new CustomEvent('ipc:power.suspending',{detail:{generation}}));await fanHostLifecycle.suspend();}
     setNative(generation,'suspended');
   },
-  async autoWake(){const g=fx.native.generation;setNative(g,'ready');fanHostLifecycle.observePowerBoundary('resuming',g);fanHostLifecycle.observePowerBoundary('resume-ready',g);await fanHostLifecycle.resume().catch(()=>{fx.note('resume-call-deferred');});},
+  async autoWake(){const g=fx.native.generation;setNative(g,'ready');fanHostLifecycle.observePowerBoundary('resuming',g);fanHostLifecycle.observePowerBoundary('resume-ready',g);window.dispatchEvent(new CustomEvent('ipc:power.resumed',{detail:{generation:g}}));await fanHostLifecycle.resume().catch(()=>{fx.note('resume-call-deferred');});},
+  sharedGeneration: 2,
+  sharedPhase: 'suspended',
+  async filteredPhysicalCycle(generation: number) {
+    // Same shared Suspended transaction, a new REAL Fan sleep/wake cycle.
+    setNative(generation, 'suspended');boundary.closed('Suspended');boundary.resumeGeneration=generation;
+    fanHostLifecycle.setPowerGeneration(generation);fanHostLifecycle.observePowerBoundary('suspending',generation);
+    window.dispatchEvent(new CustomEvent('ipc:fan.suspending',{detail:{generation}}));
+    setNative(generation,'ready');fanHostLifecycle.observePowerBoundary('resume-ready',generation);
+    window.dispatchEvent(new CustomEvent('ipc:fan.resume-ready',{detail:{generation}}));
+    try { await fanHostLifecycle.resume(); }
+    catch (error) {
+      // Production's Fan-ready handler is non-blocking. Its finite resume wait
+      // may hand off to the existing owner while the same curve remains pending.
+      // The browser test still waits for real control and one resume/enable below.
+      if (!(error instanceof Error) || !error.message.startsWith('FAN_RESUME_WAIT_DEADLINE:')
+          || !fanHostLifecycle.recoveryActive || !fanHostLifecycle.hasControlIntent) throw error;
+      fx.note('filtered-resume-wait-handed-off');
+    }
+  },
   setNative,
 });
 (window as any).__chain=fx;

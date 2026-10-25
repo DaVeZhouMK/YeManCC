@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-22",
+  "timezone": "Asia/Hong_Kong",
+  "id": "decky-native-prewarm-startup-orders-20261022",
+  "fieldArchive": "日志/微星G3E/YeManCC-logs-20261022-135631-Xbox全屏-启动bug.zip",
+  "userRequirements": [
+    "Native YMCC owns Decky preparation; remove duplicated BAT implementation",
+    "YMCC first; desktop Steam later; user manually enters Big Picture",
+    "YMCC first; Steam enters Big Picture using its own setting",
+    "Steam already running before YMCC; join through verified mode transition/FSE as applicable",
+    "Committed Ready repairs transient preparation and reconnects current healthy session",
+    "OFF, fault OFF, exact session, resource identity and crash budgets retain priority",
+    "Remove BAT linked-application startup; another form now owns it"
+  ],
+  "fieldFacts": [
+    "13:53:13.608 enabled Decky remained at ymcc-startup-observation-only",
+    "Existing successful BAT must retain original YMCC background launch/privilege behavior"
+  ],
+  "softwareFixture": "Actual source-extracted production preparation, admission, mode-change and Ready callbacks plus production Runtime/Setup; memory Steam/digest ports, owned inert files/children only",
+  "physicalValidation": false
+}

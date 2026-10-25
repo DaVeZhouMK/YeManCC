@@ -1,0 +1,117 @@
+{
+  "schema": 1,
+  "dll": {
+    "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9",
+    "bytes": 25600,
+    "gitBlob": "54260fc8370d30686e695e79f0c4662a55e8906f",
+    "defaultSource": "G:/YeManCC-Work/Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/AutomaticCalibration/NativeBinaryAudit/2026-10-17T08-48-22-182Z-d73227/binary/GamepadMotion.dll",
+    "fixedHcCommits": [
+      "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "06c0b9544db2b1f39abf9cd3796225ccfb096103"
+    ]
+  },
+  "references": [
+    {
+      "file": "reference/historical-GamepadMotion.cs",
+      "sha256": "7ba36f0dcb0e280d526e5b09e95888af58b98927b3c83001858817ec12fb23ed",
+      "declarationLines": [
+        298,
+        359
+      ]
+    },
+    {
+      "file": "reference/a250-GamepadMotion.cs",
+      "sha256": "7a7a4917f5bdeb818874bb159be8b0f4be6a7ce19625a533ce2254264d9d7b60"
+    }
+  ],
+  "abiAudit": "G:/YeManCC-Work/Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/AutomaticCalibration/NativeBinaryAudit/2026-10-17T08-48-22-182Z-d73227/abi-assessment.json",
+  "exports": [
+    {
+      "name": "CreateGamepadMotion",
+      "rva": "0x35D0"
+    },
+    {
+      "name": "DeleteGamepadMotion",
+      "rva": "0x3600"
+    },
+    {
+      "name": "GetAutoCalibrationConfidence",
+      "rva": "0x3610"
+    },
+    {
+      "name": "GetAutoCalibrationIsSteady",
+      "rva": "0x3630"
+    },
+    {
+      "name": "GetCalibratedGyro",
+      "rva": "0x3640"
+    },
+    {
+      "name": "GetCalibrationMode",
+      "rva": "0x3660"
+    },
+    {
+      "name": "GetCalibrationOffset",
+      "rva": "0x3670"
+    },
+    {
+      "name": "GetGravity",
+      "rva": "0x36D0"
+    },
+    {
+      "name": "GetOrientation",
+      "rva": "0x36F0"
+    },
+    {
+      "name": "GetPlayerSpaceGyro",
+      "rva": "0x3720"
+    },
+    {
+      "name": "GetProcessedAcceleration",
+      "rva": "0x3800"
+    },
+    {
+      "name": "GetWorldSpaceGyro",
+      "rva": "0x3820"
+    },
+    {
+      "name": "PauseContinuousCalibration",
+      "rva": "0x3A70"
+    },
+    {
+      "name": "ProcessMotion",
+      "rva": "0x3A80"
+    },
+    {
+      "name": "ResetContinuousCalibration",
+      "rva": "0x3A90"
+    },
+    {
+      "name": "ResetGamepadMotion",
+      "rva": "0x3B10"
+    },
+    {
+      "name": "ResetMotion",
+      "rva": "0x3B20"
+    },
+    {
+      "name": "SetAutoCalibrationConfidence",
+      "rva": "0x3B60"
+    },
+    {
+      "name": "SetCalibrationMode",
+      "rva": "0x3B70"
+    },
+    {
+      "name": "SetCalibrationOffset",
+      "rva": "0x3B80"
+    },
+    {
+      "name": "StartContinuousCalibration",
+      "rva": "0x3C00"
+    }
+  ],
+  "previousDirectRunner": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/gamepad_motion_binary_selftest.mjs",
+  "previousFixture": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/fixtures/gamepad_motion_binary",
+  "sessionScope": "Actual current production Session/Owner headers; synthetic keys/clocks and memory Calibration values; no main/PBT/persistence."
+}

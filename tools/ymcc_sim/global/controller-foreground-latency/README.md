@@ -1,0 +1,15 @@
+# Native foreground shielding latency
+
+`controller.foreground-shield-field` executes the full production native TU with inert IO and the actual helper with inert imported boundaries. ROGX morning/afternoon field evidence requires recognition and destructive refresh permission to remain separate: VID0B05/PID1B4C HID game nodes receive no native foreground hide, stop/start or USB-root fallback. The helper independently refuses old callers before device reads/mutation. Virtual HidHide target planning still recognizes that source without refreshing it. Shared-node deduplication remains an explicit PID1ABE model; MSI journal continuation and GPD policies remain separate. Removing the ROGX quarantine must fail its zero-write oracle. Original USB-only identification, missing journal continuation and duplicate-refresh counterexamples remain. Software checks do not prove installed drivers, physical game delivery or sleep continuity.
+
+Run `tools/ymcc_sim/ymcc_sim.ps1 -Domain global -Mode run -Profile full -Tests controller.native-foreground-latency -EvidenceDir <new-directory>`.
+
+The fixture extracts the actual production snapshot reader, path parser, native foreground lease and one-shot launch/poll consumers. It checks a single complete read with `--cancel`, strict rejection of partial/malformed output, and publication only after all required fields arrive. The existing CLI writer and application/device authority remain outside this fixture.
+
+Launch, file identity, process wait and terminal observations are inert boundaries. A running helper must return immediately with its exact handle retained; a second request cannot relaunch or replace it; existing maintenance consumes that handle once. Launch failure, nonzero child exit, missing location and forbidden ROG/GPD root refresh remain failures. No product Main, CLI, Host, driver, device, registry, Steam or system sleep is executed.
+
+Release and Checked execute the same source consumers. Two Release counterexamples restore the original four-command reader and the original 5000 ms wait respectively; each must fail its original performance/ownership check. Checks count modeled IO operations and wait arguments; they do not measure hardware recovery time.
+
+`field-record.json` preserves the ordinary exported archive identity and a small set of literal observations. CLI stdout and OS outcomes in `fixture.cpp` are source-derived test inputs. Existing game-input delivery and seamless sleep continuity remain unverified.
+
+The CLI grammar is verified against official HidHide tag `v1.5.230.0`, `HidHideCLI/src/CommandInterpreter.cpp` (`Start`, `ExecuteCommands`, multiple command execution and cancel before `ApplyConfigurationChanges`) and `HidHideCLI/src/Commands.cpp` (`DevList`, `AppList`, `CloakState`, `InvState`). The shipped CLI has file version 1.5.230.0 and SHA256 `9dd283fedfbd301e1a574a3d4b8663f6274ccb5c896f468ed55a6239f9ade270`. This is the CLI identity, distinct from the installed driver version. The production consumer retains the already selected and serialized CLI launcher; it does not install or replace it.

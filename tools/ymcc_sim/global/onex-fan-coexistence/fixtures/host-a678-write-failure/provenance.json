@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "id": "host-a678-write-failure",
+  "scope": "Exact prior source-built software candidate and its actual backend; not the installed f8 backend. Main never started; no credentials.",
+  "files": [
+    {
+      "path": "YeManFanHost.dll",
+      "sha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "bytes": 1668096
+    },
+    {
+      "path": "YeManFanBackend.dll",
+      "sha256": "6d2bcbd48498b7826db64d77b6d5d9d3f45bb91917d816b97c7a830a1eaa84db",
+      "bytes": 30720
+    }
+  ]
+}

@@ -1,0 +1,29 @@
+/* Simulation layout on the generated production HUD typography. All values share one selected-world snapshot. */
+.preview-telemetry.ymcc-hud {
+ --hud-accent:hsl(195 62% 72%); --hud-secondary:rgba(225,233,242,.82); --hud-gap:8px;
+ position:absolute;left:12px;top:12px;z-index:2;width:356px;max-width:calc(100% - 24px);padding:10px 13px 11px;
+ border:1px solid rgba(178,213,232,.27);border-radius:9px;background:rgba(16,22,31,.93);font-size:15px;
+ box-shadow:0 3px 12px #0004;pointer-events:none;
+}
+.preview-telemetry .monitor-heading { display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:6px;line-height:17px; }
+.preview-telemetry .monitor-heading>span:first-child { display:flex;align-items:center;gap:6px;white-space:nowrap; }
+.preview-telemetry .monitor-heading b { font-size:12px;font-weight:650;color:var(--hud-accent); }
+.preview-telemetry .monitor-heading small { font-size:11px;color:var(--hud-secondary); }
+.preview-telemetry #preview-bottleneck { font-size:11px;line-height:17px;color:var(--hud-secondary);white-space:nowrap; }
+.monitor-mode-dot { width:6px;height:6px;border-radius:50%;background:var(--auto); }
+.arena[data-policy="stock"] .monitor-mode-dot { background:var(--stock); }
+.arena[data-policy="manual"] .monitor-mode-dot { background:var(--manual); }
+.preview-telemetry .monitor-overview { display:grid;grid-template-columns:1.12fr 1fr 1fr;align-items:end;gap:12px;padding-bottom:8px;border-bottom:1px solid rgba(232,242,252,.14); }
+.preview-telemetry .monitor-overview .hud-fps strong { width:auto;min-width:0;max-width:none;font-size:32px;line-height:34px;font-weight:700;letter-spacing:-.03em; }
+.preview-telemetry .monitor-overview .hud-metric { gap:1px; }
+.preview-telemetry .monitor-overview .hud-metric>b, .preview-telemetry .monitor-tdp .hud-value-digits { font-size:25px;line-height:32px;font-weight:650; }
+.preview-telemetry .monitor-overview .hud-metric-label, .preview-telemetry .hud-fps-label { color:var(--hud-accent);font-size:12px;line-height:16px; }
+.preview-telemetry .monitor-grid { display:grid;grid-template-columns:1.12fr 1fr 1fr;gap:12px;border:0;padding:7px 0 0; }
+.preview-telemetry .monitor-grid>div { display:flex;flex-direction:column;align-items:flex-start;gap:2px;min-width:0; }
+.preview-telemetry .monitor-grid .hud-metric-label { font-size:12px;line-height:16px;color:var(--hud-secondary); }
+.preview-telemetry .monitor-grid b, .preview-telemetry .monitor-grid strong { font-size:19px;line-height:23px;font-weight:650;color:var(--ink); }
+.preview-telemetry .monitor-grid small, .preview-telemetry .monitor-tdp small { font-size:11px;margin-left:3px;color:var(--hud-secondary); }
+.preview-telemetry .monitor-grid [data-capped="true"] { color:var(--manual); }
+.preview-telemetry .quality-metrics, .preview-telemetry .minimum-readback { display:none; }
+.preview-telemetry .preview-readout[hidden] { display:none; }
+@media(max-width:979px) { .preview-telemetry.ymcc-hud { display:block;width:330px;font-size:14px; } }

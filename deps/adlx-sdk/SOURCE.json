@@ -1,0 +1,57 @@
+{
+  "schema": 1,
+  "repository": "https://github.com/GPUOpen-LibrariesAndSDKs/ADLX",
+  "commit": "32b5a740d42295c5dfe9026b9f52683da0f3af91",
+  "sdkVersion": "2.0.0.125",
+  "note": "Official unmodified header dependency closure only. Runtime amdadlx64.dll is supplied by installed AMD driver; never bundled.",
+  "files": {
+    "ADLX.h": {
+      "sha256": "a7fd218b772f7955d5e88fbb14ceae5f3a281be5bdc7bdb6ae0372fc36dbbd36",
+      "bytes": 17156
+    },
+    "I3DSettings3.h": {
+      "sha256": "982e1724a1bd5bbbca5101faa3185c4776899b2f44020ae53a78b4e7fdf394fa",
+      "bytes": 49264
+    },
+    "ADLXDefines.h": {
+      "sha256": "ceddbbf3b1a2fe92c1614cc1fcef4d37a2d9d02668bfcef07f3596dde8e3b17f",
+      "bytes": 61167
+    },
+    "ISystem.h": {
+      "sha256": "7fe4d9874b2f0a2c4852b4516d49ef1f2006c0b814b22ee6d2d986ae13c2fbd0",
+      "bytes": 80987
+    },
+    "ADLXStructures.h": {
+      "sha256": "e19a1384ed226b9da29848e625dd122fb3cf29bbc208df62dd244947087ef63e",
+      "bytes": 8877
+    },
+    "I3DSettings2.h": {
+      "sha256": "24b654e6d5cc90df39562d34dc4ba282943d7a0362a15cbb12f9eae255fb1d2d",
+      "bytes": 17306
+    },
+    "ICollections.h": {
+      "sha256": "2f38e038a12b000955d47345cbf33f5155eef874e7bdfe7431a1408080cde1f9",
+      "bytes": 10922
+    },
+    "ADLXVersion.h": {
+      "sha256": "7532d1dc988602f6593ee632855d23e3057a25dce1da1a11a038b1265bd8bdd4",
+      "bytes": 438
+    },
+    "I3DSettings1.h": {
+      "sha256": "96cafb020425c80359c510c9621d37f4e9ab7771abc38080d78a411be2129694",
+      "bytes": 15251
+    },
+    "I3DSettings.h": {
+      "sha256": "d8e76c9f2bfd044baf3c9a9b0d9bf3772834717d823552ab5cb6bbaf20d45fd4",
+      "bytes": 172824
+    },
+    "IChangedEvent.h": {
+      "sha256": "cca43de0a038a381cb937944441a7de7809d14fe5c935353b2623330a26527d2",
+      "bytes": 2276
+    },
+    "ADLX SDK License Agreement.pdf": {
+      "sha256": "c62178b9d30f75450088c5238193644b45ab5a23442f70f5a3f6b09b951180a6",
+      "bytes": 126195
+    }
+  }
+}

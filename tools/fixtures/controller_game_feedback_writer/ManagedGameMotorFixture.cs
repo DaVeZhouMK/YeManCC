@@ -1,0 +1,51 @@
+// Fixture endpoint only. No production command or actual SDK object is added.
+internal static partial class Program
+{
+    private static bool XboxFixtureProfile => _managedSession?.ManagedPersona == "elite" && _managedFault != "game-unsupported";
+    private static bool SteamFixtureProfile => _managedSession?.ManagedPersona == "steamdeck";
+    private static readonly List<object> _gameMotorEvents = new();
+    private static int _gameMotorFrames;
+    private static HMController? _gameOldController;
+    private static Action<HMController, HMOutputPacket>? _gameOldCallback;
+    private sealed partial class HostSession
+    {
+        public HMController? GameMotorFixtureController => _controller;
+    }
+    private static void GameMotorOnDecoded(string command, ulong sequence)
+    {
+        if (!_managedFault.StartsWith("game-", StringComparison.Ordinal)) return;
+        var controller = _managedSession?.GameMotorFixtureController;
+        if (command == "QUIESCE" && _managedFault == "game-unbind-old" && controller is not null)
+        {
+            _gameOldController = controller;
+            _gameOldCallback = controller.SnapshotFixtureOutput();
+        }
+        if (command != "SUBMIT_FRAME") return;
+        ++_gameMotorFrames;
+        if (_managedFault == "game-unbind-old" && _gameMotorFrames > 1)
+        {
+            var oldBytes = GameMotorPacket(0xFE, 0xDC);
+            _gameOldCallback?.Invoke(_gameOldController!, new HMOutputPacket((HMOutputSource)0, 2, oldBytes, 0x11223346));
+            _gameMotorEvents.Add(new { command, sequence, kind = "copied-old-callback", hadCallback = _gameOldCallback is not null });
+            return;
+        }
+        if (controller is null) return;
+        bool zero = _managedFault == "game-zero-unbind" && _gameMotorFrames == 2;
+        bool replay = _managedFault == "game-replay" && _gameMotorFrames == 2;
+        bool ledOnly = XboxFixtureProfile && _managedFault == "game-xinput-led-only" && _gameMotorFrames == 2;
+        if (_gameMotorFrames != 1 && !zero && !replay && !ledOnly) return;
+        byte left = zero || ledOnly ? (byte)0 : (byte)0x12;
+        byte right = zero || ledOnly ? (byte)0 : (byte)0xA5;
+        uint sdkSequence = zero ? 0x11223345u : 0x11223344u;
+        var packet = GameMotorPacket(left, right);
+        _gameMotorEvents.Add(new { command, sequence, kind = "sdk-event", left, right, sdkSequence, reportSource = XboxFixtureProfile ? 2 : SteamFixtureProfile ? 1 : 0, reportId = XboxFixtureProfile ? 0 : SteamFixtureProfile ? 0xEB : 2, bodyBytes = packet.Length, payloadBase64 = Convert.ToBase64String(packet) });
+        controller.EmitFixtureOutput(XboxFixtureProfile ? (byte)2 : SteamFixtureProfile ? (byte)1 : (byte)0, XboxFixtureProfile ? (byte)0 : SteamFixtureProfile ? (byte)0xEB : (byte)2, packet, sdkSequence);
+        // The SDK owns a borrowed buffer: consumers must not retain its memory.
+        Array.Fill(packet, (byte)0xEE);
+    }
+    private static byte[] GameMotorPacket(byte left, byte right)
+    {
+        if(XboxFixtureProfile){if(_managedFault == "game-xinput-raw")return new byte[]{0,left,0,right};byte flags=(byte)(_managedFault == "game-xinput-led-and-motor"?3:_managedFault == "game-xinput-led-only" && _gameMotorFrames==2?1:2);return new byte[]{123,6,left,right,flags};}
+        var bytes = new byte[63];if(SteamFixtureProfile){bytes[5]=left;bytes[7]=right;bytes[8]=2;}else{bytes[0]=3;bytes[2]=right;bytes[3]=left;}return bytes;
+    }
+}

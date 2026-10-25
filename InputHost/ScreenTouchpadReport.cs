@@ -6,44 +6,67 @@ using HIDMaestro;
 internal static partial class Program
 {
     private readonly record struct ScreenPad(bool Active, bool Click, short X, short Y, ushort Pressure);
-    // Single Host submitter; reuse the data-only report instead of allocating 250 arrays/s.
+    // Single Host submitter; reuse the data-only report for every submission.
     private static readonly byte[] ScreenPadReportBuffer = new byte[64];
     private static uint _screenPadPacketCounter;
     private static bool _screenPadOwnsReport;
-    // Locked SDK 1.7.0's SubmitRawReport does NOT refresh its idle-pump state.
-    // Without a one-time ownership handoff it republishes stale neutral frames
-    // every 4ms over live touches. Pin this seam to the already SHA-locked DLL;
-    // no SDK replacement, new timer or additional producer is introduced.
-    private static readonly FieldInfo? ScreenPadIdleCts = typeof(HMController).GetField("_idleCts",BindingFlags.Instance|BindingFlags.NonPublic);
-    private static readonly FieldInfo? ScreenPadIdleThread = typeof(HMController).GetField("_idleThread",BindingFlags.Instance|BindingFlags.NonPublic);
+    private static readonly YeManInputHost.Diagnostics.SteamDeckPadSubmissionEvidence ScreenPadSubmissionEvidence = new();
+    // SDK 2.0 uses DeviceClock instead of the old idle CTS. Raw report
+    // sequencing still has one writer: stop that clock through the reviewed
+    // barrier before taking its last encoded counter, for both FRAME and OFF.
     private static readonly FieldInfo? ScreenPadLastEncoded = typeof(HMController).GetField("_extendedReportBuffer",BindingFlags.Instance|BindingFlags.NonPublic);
-    private static uint TakeScreenPadReportOwnership(HMController controller)
+    private static uint TakeScreenPadReportOwnership(HMController controller, bool allowMissingIdleThread = false)
     {
-        if(ScreenPadIdleCts?.GetValue(controller) is not CancellationTokenSource cts ||
-           ScreenPadIdleThread is null || ScreenPadLastEncoded?.GetValue(controller) is not byte[] prior || prior.Length!=64)
-            throw new InvalidOperationException("locked-steamdeck-idle-contract-missing");
-        cts.Cancel();
-        if(ScreenPadIdleThread.GetValue(controller) is Thread thread && thread.IsAlive && !thread.Join(100))
-            throw new InvalidOperationException("steamdeck-idle-handoff-timeout");
-        return BinaryPrimitives.ReadUInt32LittleEndian(prior.AsSpan(4));
+        if(!YeManInputHost.Diagnostics.HostControllerIdleCtsRelease.TryStopInputClock(controller,out var detail))
+            throw new InvalidOperationException("steamdeck-idle-handoff:"+detail);
+        if(ScreenPadLastEncoded?.GetValue(controller) is byte[] prior && prior.Length==64)
+            return BinaryPrimitives.ReadUInt32LittleEndian(prior.AsSpan(4));
+        // A partial prepare without an allocated report can be released after
+        // the same clock barrier; ordinary publication still needs its report.
+        if(allowMissingIdleThread)return 0;
+        throw new InvalidOperationException("locked-steamdeck-report-contract-missing");
     }
-    private static void SubmitSteamDeckWithScreenPads(HMController controller,HMProfile profile,CommandEnvelope envelope)
+    // Use the same checked handoff before terminal neutral. SDK Dispose ignores
+    // its own Join timeout, so it must not be the first idle-writer barrier.
+    private static void StopSteamDeckIdleForRelease(HMController controller)
     {
-        if((envelope.ScreenPadsPresent || envelope.ScreenButtons!=0) && !_screenPadOwnsReport)
+        if (_screenPadOwnsReport) return;
+        _screenPadPacketCounter = TakeScreenPadReportOwnership(controller, allowMissingIdleThread: true);
+        _screenPadOwnsReport = true;
+    }
+    private static void SubmitSteamDeckWithScreenPads(HMController controller,HMProfile profile,CommandEnvelope envelope, bool observePadData = false, bool isNeutralCommand = false,
+        HostSession? signalSession = null, CommandEnvelope? signalCause = null, string signalReason = "live-frame")
+    {
+        if(!_screenPadOwnsReport)
         {
             _screenPadPacketCounter=TakeScreenPadReportOwnership(controller);
             _screenPadOwnsReport=true;
         }
-        if(_screenPadOwnsReport)
-            controller.SubmitRawReport(BuildSteamDeckScreenPadReport(profile,envelope,unchecked(++_screenPadPacketCounter),ScreenPadReportBuffer));
-        else controller.SubmitState(BuildSteamDeckState(profile,envelope));
+        var report = BuildSteamDeckScreenPadReport(profile,envelope,unchecked(++_screenPadPacketCounter),ScreenPadReportBuffer);
+        // Observe the FINAL reused SD buffer only after the existing ownership barrier and encoder.
+        // No diagnostic owns the clock/buffer or changes the packet counter/SDK arguments.
+        var signalAttempt = signalSession is null ? default : signalSession.BeginVirtualSignalEvidenceSafely(
+            controller, signalCause, envelope, signalReason, _screenPadPacketCounter, report, null);
+        try { controller.SubmitRawReport(report); }
+        catch (Exception ex)
+        {
+            signalSession?.CompleteVirtualSignalEvidenceSafely(signalAttempt, ex);
+            throw;
+        }
+        signalSession?.CompleteVirtualSignalEvidenceSafely(signalAttempt, null);
+        var left = envelope.ScreenPadLeft; var right = envelope.ScreenPadRight;
+        ScreenPadSubmissionEvidence.Record(observePadData, report,
+            new(left.Active,left.Click,left.X,left.Y,left.Pressure),
+            new(right.Active,right.Click,right.X,right.Y,right.Pressure),
+            envelope.Sequence,envelope.SampleSequence,envelope.MonotonicTick,isNeutralCommand);
     }
     private static readonly (HMButton Button, int Bit)[] DeckButtonBits =
     {
         (HMButton.RightBumper,2),(HMButton.LeftBumper,3),(HMButton.Y,4),
         (HMButton.Circle,5),(HMButton.Square,6),(HMButton.Cross,7),
         (HMButton.Back,12),(HMButton.Guide,13),(HMButton.Start,14),
-        (HMButton.LeftPaddle,15),(HMButton.RightPaddle,16),
+        (HMButton.LeftPaddle2,15),(HMButton.RightPaddle2,16),
+        (HMButton.LeftPaddle,41),(HMButton.RightPaddle,42),
         (HMButton.LeftStick,22),(HMButton.RightStick,26)
     };
     private static bool TryReadScreenPads(JsonElement e, out ScreenPad left, out ScreenPad right)
@@ -75,16 +98,16 @@ internal static partial class Program
         data[0]=1;data[2]=9;data[3]=64;
         BinaryPrimitives.WriteUInt32LittleEndian(data.AsSpan(4),counter);
         // Keep all existing stick/trigger/IMU/button semantics; only pad fields are new.
-        var state=BuildSteamDeckState(profile,e);
-        var axes=state.Axes ?? throw new InvalidOperationException("steam-deck-axes-missing");
+        var fields=BuildSteamDeckStateFields(profile,e);
         ulong buttons=0;
-        foreach(var map in DeckButtonBits) if((state.Buttons & map.Button)!=0) buttons|=1UL<<map.Bit;
-        if(axes[HMAxis.Rz]>0) buttons|=1;
-        if(axes[HMAxis.Z]>0) buttons|=2;
-        if(state.Hat is HMHat.North or HMHat.NorthEast or HMHat.NorthWest) buttons|=1UL<<8;
-        if(state.Hat is HMHat.East or HMHat.NorthEast or HMHat.SouthEast) buttons|=1UL<<9;
-        if(state.Hat is HMHat.West or HMHat.NorthWest or HMHat.SouthWest) buttons|=1UL<<10;
-        if(state.Hat is HMHat.South or HMHat.SouthEast or HMHat.SouthWest) buttons|=1UL<<11;
+        foreach(var map in DeckButtonBits) if((fields.Buttons & map.Button)!=0) buttons|=1UL<<map.Bit;
+        // SDK 1.12 issue #64: digital trigger bits follow the quantized trigger byte.
+        if(TriggerToByte(fields.Rz)>0) buttons|=1;
+        if(TriggerToByte(fields.Z)>0) buttons|=2;
+        if(fields.Hat is HMHat.North or HMHat.NorthEast or HMHat.NorthWest) buttons|=1UL<<8;
+        if(fields.Hat is HMHat.East or HMHat.NorthEast or HMHat.SouthEast) buttons|=1UL<<9;
+        if(fields.Hat is HMHat.West or HMHat.NorthWest or HMHat.SouthWest) buttons|=1UL<<10;
+        if(fields.Hat is HMHat.South or HMHat.SouthEast or HMHat.SouthWest) buttons|=1UL<<11;
         static void Write16(byte[] d,int offset,short v)=>BinaryPrimitives.WriteInt16LittleEndian(d.AsSpan(offset),v);
         void Pad(ScreenPad pad,int offset,int pressureOffset,int touchBit,int clickBit)
         {
@@ -101,18 +124,34 @@ internal static partial class Program
         if((e.ScreenButtons&16)!=0)buttons|=1UL<<42; // R4
         if((e.ScreenButtons&32)!=0)buttons|=1UL<<16; // R5
         BinaryPrimitives.WriteUInt64LittleEndian(data.AsSpan(8),buttons);
-        Write16(data,24,state.AccelX);Write16(data,26,state.AccelY);Write16(data,28,state.AccelZ);
-        Write16(data,30,state.GyroPitch);Write16(data,32,state.GyroYaw);Write16(data,34,state.GyroRoll);
-        static short Stick(float v,bool y)=> (short)Math.Clamp((int)Math.Round(
-            (Math.Clamp(v,0f,1f)-0.5f)*(y?-1f:1f)*2f*32767f),-32767,32767);
-        Write16(data,48,Stick(axes[HMAxis.X],false));Write16(data,50,Stick(axes[HMAxis.Y],true));
-        Write16(data,52,Stick(axes[HMAxis.Rx],false));Write16(data,54,Stick(axes[HMAxis.Ry],true));
-        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(44),(ushort)Math.Round(Math.Clamp(e.LtRaw,0f,1f)*32767f));
-        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(46),(ushort)Math.Round(Math.Clamp(e.RtRaw,0f,1f)*32767f));
+        Write16(data,24,fields.AccelX);Write16(data,26,fields.AccelY);Write16(data,28,fields.AccelZ);
+        Write16(data,30,fields.GyroPitch);Write16(data,32,fields.GyroYaw);Write16(data,34,fields.GyroRoll);
+        // HC SteamDeckTarget ImuOffset+12..18: the existing raw report path
+        // carries the admitted w/x/y/z quaternion without a new SDK API.
+        if(e.ImuAdmitted && e.ImuQuaternionPresent) {
+            Write16(data,36,QuantizeMotionAxis(e.ImuQuatW,short.MaxValue));
+            Write16(data,38,QuantizeMotionAxis(e.ImuQuatX,short.MaxValue));
+            Write16(data,40,QuantizeMotionAxis(e.ImuQuatY,short.MaxValue));
+            Write16(data,42,QuantizeMotionAxis(e.ImuQuatZ,short.MaxValue));
+        }
+        // SDK 2.0 WireArith.Linear quantizes the clamped unit value in
+        // double precision before adding the signed minimum. Rounding a
+        // centered float product differs by one at half-step boundaries.
+        static short Stick(float v,bool y) {
+            double unit=float.IsNaN(v)?0.5:Math.Clamp((double)v,0.0,1.0);
+            if(y)unit=1.0-unit;
+            return (short)(-32767+(int)Math.Round(unit*65534.0));
+        }
+        static ushort Trigger(float v)=>(ushort)Math.Round(
+            (float.IsNaN(v)?0.0:Math.Clamp((double)v,0.0,1.0))*32767.0);
+        Write16(data,48,Stick(fields.X,false));Write16(data,50,Stick(fields.Y,true));
+        Write16(data,52,Stick(fields.Rx,false));Write16(data,54,Stick(fields.Ry,true));
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(44),Trigger(fields.Z));
+        BinaryPrimitives.WriteUInt16LittleEndian(data.AsSpan(46),Trigger(fields.Rz));
         return data;
     }
     // Sony hid-playstation common data: points at 32/36, click buttons[2] bit 1.
-    // Existing DualSense/Edge raw-report path; never a mouse replacement.
+    // Current Edge raw-report path; never a mouse replacement.
     private const int DualSenseTouchWidth=1920,DualSenseTouchHeight=1080;
     private static void WriteDualSenseScreenPads(byte[] data,CommandEnvelope e)
     {
@@ -130,45 +169,12 @@ internal static partial class Program
         int y=(int)Math.Round((32767.0-Math.Clamp((int)p.Y,-32767,32767))*(height-1)/65534.0);
         data[offset+1]=(byte)x;data[offset+2]=(byte)(((x>>8)&0x0F)|((y&0x0F)<<4));data[offset+3]=(byte)(y>>4);
     }
-    // Sony-authored hid-playstation: DS4 has a 1920x942 surface and a USB
-    // touch packet count/timestamp before two contact records. Keep two IDs
-    // even for a fully released packet so consumers cannot retain stale touches.
-    private const int Ds4TouchHeight=942;
-    private static void WriteDs4ScreenPads(byte[] data,CommandEnvelope e,long counter)
-    {
-        data[32]=1;data[33]=(byte)counter;
-        WriteSonyContact(data,34,e.ScreenPadsPresent?e.ScreenPadLeft:default,1,Ds4TouchHeight);
-        WriteSonyContact(data,38,e.ScreenPadsPresent?e.ScreenPadRight:default,2,Ds4TouchHeight);
-        if(e.ScreenPadsPresent && (e.ScreenPadLeft.Click || e.ScreenPadRight.Click))data[6]|=0x02;
-    }
-    private static bool RunDs4ScreenPadSelfTest()
-    {
-        using var context=new HMContext();context.LoadDefaultProfiles();var profile=context.GetProfile("dualshock-4-v2");
-        if(profile is null)return false;
-        var e=new CommandEnvelope("SUBMIT_FRAME","ds4pad",1,"selftest",1,1,"target","owner",
-            "dualshock4","dualshock-4-v2","nonce",1,LockedCoreSha256){Buttons=0x0100,LtRaw=.25f,ImuAdmitted=true,
-            ImuGyroX=123,ImuAccelZ=1,ScreenButtons=1};
-        var baseline=BuildDs4V2DataOnlyReport(profile,e,5);var random=new Random(20261008);
-        for(int n=0;n<512;n++) {
-            var left=new ScreenPad(true,n%3==0,(short)random.Next(-32767,-16),(short)random.Next(-32767,32768),8192);
-            var right=new ScreenPad(n%2==0,n%2==0 && n%5==0,(short)random.Next(17,32768),(short)random.Next(-32767,32768),8192);
-            var wire=BuildDs4V2DataOnlyReport(profile,e with{ScreenPadsPresent=true,ScreenPadLeft=left,ScreenPadRight=right},5);
-            if(wire[32]!=1 || wire[33]!=5 || wire[34]!=1 || wire[38]!=(right.Active?2:0x82) || (wire[6]&2)!=((left.Click||right.Click)?2:0))return false;
-            for(int i=0;i<63;i++)if(i!=6 && (i<34||i>41) && wire[i]!=baseline[i])return false;
-            if((wire[6]&~2)!=(baseline[6]&~2))return false;
-            var (lx,ly)=ReadDualSenseContact(wire,34);var (rx,ry)=ReadDualSenseContact(wire,38);
-            if(lx<0||lx>959||ly<0||ly>=942||right.Active&&(rx<960||rx>=1920||ry<0||ry>=942))return false;
-        }
-        var released=BuildDs4V2DataOnlyReport(profile,e,6);
-        if(released[32]!=1||released[33]!=6||released[34]!=0x81||released[38]!=0x82||(released[6]&3)!=1)return false;
-        Console.WriteLine("ds4-screenpad: OK 512 frames; two half-surface contacts, packed 1920x942 coordinates, shared click, release, PS/IMU/frame counter unchanged; no hardware touched");return true;
-    }
     private static (int X,int Y) ReadDualSenseContact(byte[] data,int offset) =>
         (data[offset+1]|((data[offset+2]&15)<<8),(data[offset+2]>>4)|(data[offset+3]<<4));
-    private static bool RunDualSenseScreenPadSelfTest()
+    private static bool RunEdgeScreenPadSelfTest()
     {
-        using var context=new HMContext();context.LoadDefaultProfiles();int count=0;
-        foreach(var persona in new[]{"dualsense","dualsense-edge"})
+        using var context=new SdkDataOnlyProfiles();context.LoadDefaultProfiles();int count=0;
+        foreach(var persona in new[]{"dualsense-edge"})
         {
             var profile=context.GetProfile(persona);if(profile is null)return false;
             var e=new CommandEnvelope("SUBMIT_FRAME","selftest",1,"selftest",1,1,"target","owner",
@@ -198,14 +204,14 @@ internal static partial class Program
         }
         Console.WriteLine($"dualsense-screenpad: OK {count} frames; packed coordinates, two contacts on one surface, click/release, buttons/IMU/Edge paddles unchanged; no hardware touched");return true;
     }
-    private static bool RunNativeDualSenseFixtureTest(JsonElement root,HMContext context)
+    private static bool RunNativeDualSenseFixtureTest(JsonElement root,SdkDataOnlyProfiles context)
     {
         var messages=root.GetProperty("dualSenseMessages").EnumerateArray().Select(v=>v.GetString()!).ToArray();
-        if(messages.Length!=6)return false;
+        if(messages.Length!=3)return false;
         for(int n=0;n<messages.Length;n++)
         {
             if(!TryParseEnvelope(messages[n],out var e,out var error)||e is null){Console.WriteLine("native-ds-screenpad: parser FAIL "+error);return false;}
-            var persona=n<3?"dualsense":"dualsense-edge";var i=n%3;
+            var persona="dualsense-edge";var i=n;
             if(e.Persona!=persona || e.ScreenPadsPresent!=(i<2))return false;
             var profile=context.GetProfile(persona);if(profile is null)return false;
             var wire=BuildDualSenseDataOnlyReport(profile,e,n+1,MapDsEdgePaddles(e.BackButtons));
@@ -213,27 +219,28 @@ internal static partial class Program
             if(i==0 && ReadDualSenseContact(wire,32)!=(598,153))return false;
             if(i<2 && ReadDualSenseContact(wire,36)!=(1646,743))return false;
         }
-        Console.WriteLine("native-ds-screenpad: OK actual native assembler -> pipe -> strict Host parser -> DualSense/Edge HID coordinates/click -> release (6 frames)");return true;
+        Console.WriteLine("native-ds-screenpad: OK actual native assembler -> pipe -> strict Host parser -> Edge HID coordinates/click -> release (3 frames)");return true;
     }
-    private static bool RunNativePsDualFixtureTest(JsonElement root,HMContext context)
+    private static bool RunNativePsDualFixtureTest(JsonElement root,SdkDataOnlyProfiles context)
     {
         var messages=root.GetProperty("psDualMessages").EnumerateArray().Select(v=>v.GetString()!).ToArray();
-        if(messages.Length!=9)return false;
-        for(int n=0;n<9;n++) {
+        if(messages.Length!=3)return false;
+        for(int n=0;n<messages.Length;n++) {
             if(!TryParseEnvelope(messages[n],out var e,out var error)||e is null){Console.WriteLine("ps-dual parser FAIL "+error);return false;}
-            var phase=n%3;var isDs4=e.Persona=="dualshock4";
-            var profile=context.GetProfile(isDs4?"dualshock-4-v2":e.Persona);if(profile is null)return false;
-            var wire=isDs4?BuildDs4V2DataOnlyReport(profile,e,n+1):BuildDualSenseDataOnlyReport(profile,e,n+1);
-            var lo=isDs4?34:32;var ro=isDs4?38:36;var button=isDs4?6:9;
+            if(e.Persona!="dualsense-edge")return false;
+            var phase=n%3;
+            var profile=context.GetProfile("dualsense-edge");if(profile is null)return false;
+            var wire=BuildDualSenseDataOnlyReport(profile,e,n+1);
+            const int lo=32,ro=36,button=9;
             if(wire[lo]!=(phase<2?1:0x81)||wire[ro]!=(phase<2?2:0x82)||(wire[button]&2)!=(phase==1?2:0))return false;
             if((wire[button]&1)!=(phase<2?1:0))return false;
             if(phase<2) {
                 var (lx,ly)=ReadDualSenseContact(wire,lo);var (rx,ry)=ReadDualSenseContact(wire,ro);
-                if(lx>959||rx<960||rx>1919||ly<0||ry>=(isDs4?942:1080))return false;
+                if(lx>959||rx<960||rx>1919||ly<0||ry>=1080)return false;
                 if(e.ScreenPadLeft.X>=0||e.ScreenPadRight.X<=0)return false;
             }
         }
-        Console.WriteLine("native-PS-dual: OK 9 native half-map -> BUS -> pipe -> strict Host parser -> PS5/Edge/PS4 native HID frames; guide/shared click/release, no hardware touched");return true;
+        Console.WriteLine("native-PS-dual: OK 3 native half-map -> BUS -> pipe -> strict Host parser -> Edge native HID frames; guide/shared click/release, no hardware touched");return true;
     }
     private static bool RunNativeScreenPadFixtureTest(string path)
     {
@@ -241,7 +248,7 @@ internal static partial class Program
         if(!doc.RootElement.GetProperty("ok").GetBoolean()) return false;
         var messages=doc.RootElement.GetProperty("messages").EnumerateArray().Select(v=>v.GetString()!).ToArray();
         if(messages.Length!=3) return false;
-        using var context=new HMContext();context.LoadDefaultProfiles();
+        using var context=new SdkDataOnlyProfiles();context.LoadDefaultProfiles();
         var profile=context.GetProfile("steam-deck-composite");if(profile is null) return false;
         for(int i=0;i<3;i++)
         {
@@ -261,7 +268,7 @@ internal static partial class Program
     }
     private static bool RunSteamDeckScreenPadSelfTest()
     {
-        using var context=new HMContext();context.LoadDefaultProfiles();
+        using var context=new SdkDataOnlyProfiles();context.LoadDefaultProfiles();
         var profile=context.GetProfile("steam-deck-composite");if(profile is null) return false;
         var e=new CommandEnvelope("SUBMIT_FRAME","selftest",1,"selftest",1,1,"target","owner",
             "steamdeck","steam-deck-composite","selftest-nonce",1,LockedCoreSha256);
@@ -278,11 +285,16 @@ internal static partial class Program
         {
             float Axis()=>(float)(random.NextDouble()*2-1);
             var test=e with {Buttons=random.Next(65536),BackButtons=random.Next(4),Lx=Axis(),Ly=Axis(),Rx=Axis(),Ry=Axis(),
-                LtRaw=(float)random.NextDouble(),RtRaw=(float)random.NextDouble(),ImuAdmitted=(i&1)!=0,
+                LtRaw=(float)random.NextDouble(),RtRaw=(float)random.NextDouble(),ImuAdmitted=(i&1)!=0,ImuQuaternionPresent=(i&2)!=0,
                 ImuAccelX=Axis(),ImuAccelY=Axis(),ImuAccelZ=Axis(),ImuGyroX=Axis()*100,ImuGyroY=Axis()*100,ImuGyroZ=Axis()*100};
             var st=BuildSteamDeckState(profile,test);var stAxes=st.Axes!;Array.Clear(golden);
             encode.Invoke(null,new object[]{spec,st,stAxes[HMAxis.X],stAxes[HMAxis.Y],stAxes[HMAxis.Rx],stAxes[HMAxis.Ry],
                 stAxes[HMAxis.Z],stAxes[HMAxis.Rz],golden,encoder});
+            // The SDK state has no quaternion properties. Preserve its full
+            // 64-byte baseline and apply the independently specified raw-only delta.
+            static short Q(double v) => (short)Math.Clamp(Math.Truncate(v*32767.0),-32768.0,32767.0);
+            var q=test.ImuAdmitted && test.ImuQuaternionPresent?new[]{test.ImuQuatW,test.ImuQuatX,test.ImuQuatY,test.ImuQuatZ}:new double[4];
+            for(int k=0;k<4;k++)BinaryPrimitives.WriteInt16LittleEndian(golden.AsSpan(36+k*2),Q(q[k]));
             var actual=BuildSteamDeckScreenPadReport(profile,test,i);
             if(!golden.AsSpan().SequenceEqual(actual))
             {
@@ -308,17 +320,15 @@ internal static partial class Program
             good.RootElement.GetRawText().Replace("\"x\":0","\"x\":1"),
             good.RootElement.GetRawText().Replace("\"pressure\":8192","\"pressure\":32768")})
         {using var doc=JsonDocument.Parse(bad);if(TryReadScreenPads(doc.RootElement,out _,out _)) return false;}
-        // A real BCL thread models the stock idle producer without constructing
-        // any HIDMaestro device. Verify cancellation, join, and counter continuity.
+        // No SDK constructor or device clock is started in this report test.
+        // The separate clock-barrier fixture exercises live BCL-thread joins,
+        // timeouts and self-join; this case covers the partial no-writer handoff
+        // and reads the counter only after the SAME production barrier returns.
         var fake=(HMController)System.Runtime.CompilerServices.RuntimeHelpers.GetUninitializedObject(typeof(HMController));
-        using var idleCts=new CancellationTokenSource();var idleBuffer=new byte[64];
-        BinaryPrimitives.WriteUInt32LittleEndian(idleBuffer.AsSpan(4),12345);
-        int writes=0;var idleThread=new Thread(()=> {while(!idleCts.Token.WaitHandle.WaitOne(1)) Interlocked.Increment(ref writes);});
-        ScreenPadIdleCts!.SetValue(fake,idleCts);ScreenPadIdleThread!.SetValue(fake,idleThread);ScreenPadLastEncoded!.SetValue(fake,idleBuffer);
-        idleThread.Start();
-        if(TakeScreenPadReportOwnership(fake)!=12345 || idleThread.IsAlive) return false;
-        int stable=Volatile.Read(ref writes);Thread.Sleep(12);if(Volatile.Read(ref writes)!=stable) return false;
-        Console.WriteLine("screenpads: OK 512 stock-codec parity frames + independent coordinates/click/pressure + release + strict parser + idle-writer handoff/counter continuity; no hardware touched");
+        var idleBuffer=new byte[64];BinaryPrimitives.WriteUInt32LittleEndian(idleBuffer.AsSpan(4),12345);
+        ScreenPadLastEncoded!.SetValue(fake,idleBuffer);
+        if(TakeScreenPadReportOwnership(fake,true)!=12345)return false;
+        Console.WriteLine("screenpads: OK 512 stock-codec parity frames + independent coordinates/click/pressure + release + strict parser + no-writer counter continuity; clock barrier has separate actual-consumer fixture; no hardware touched");
         return true;
     }
 }

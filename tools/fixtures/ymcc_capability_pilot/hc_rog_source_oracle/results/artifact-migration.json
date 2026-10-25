@@ -1,0 +1,269 @@
+{
+  "CompletedUtc": "2026-10-18T07:46:42.9231732+00:00",
+  "OriginalPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\ymcc_capability_pilot\\hc_rog_source_oracle\\.artifacts",
+  "DestinationPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-pilot\\oracle-prep\\hc-rog-source-oracle-artifacts",
+  "OriginalIgnored": true,
+  "OriginalRule": ".artifacts/ in oracle .gitignore",
+  "ResolvedPathsVerified": true,
+  "ReparsePoints": 0,
+  "FileCount": 51,
+  "AllFileHashesVerified": true,
+  "OriginalDirectoryRemoved": true,
+  "Files": [
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle\\release\\HcRogSourceOracle.deps.json",
+      "Sha256": "AFE9524DAE0D607F557F4FA64EFB91218CF515DBF8BCB10BC328ABD80E3443B5",
+      "Length": 445
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle\\release\\HcRogSourceOracle.dll",
+      "Sha256": "2B2894793BE612E3133040F2DFE9D2D18402E8245DFC40559F0CC7D3AA5FE4B7",
+      "Length": 17408
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle\\release\\HcRogSourceOracle.pdb",
+      "Sha256": "465F676081A2B05D3C8689AB37A4665E937E29CAF60B8ED1D5E74D83C53F064B",
+      "Length": 13512
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.dll",
+      "Sha256": "2B2894793BE612E3133040F2DFE9D2D18402E8245DFC40559F0CC7D3AA5FE4B7",
+      "Length": 17408
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.pdb",
+      "Sha256": "465F676081A2B05D3C8689AB37A4665E937E29CAF60B8ED1D5E74D83C53F064B",
+      "Length": 13512
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.deps.json",
+      "Sha256": "EE8AE27EE7AEF53EA1B7C159A593910D3472953E9240A2785144FAD4DF5C6771",
+      "Length": 891
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.dll",
+      "Sha256": "0A4BFFC32C0F0B69B435F307E35285088DAAF03DEBCE52DF49A5BFCA7E7C7438",
+      "Length": 46592
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.exe",
+      "Sha256": "A796EFA431CF13BB14460FEEE6397A4819017041914C46B92EF19D4571ABA9DE",
+      "Length": 162816
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.pdb",
+      "Sha256": "897FBDEC3E7670F02A3E94BAFCF66774CF0849D6856D2D8414D44708E10EED26",
+      "Length": 16024
+    },
+    {
+      "RelativePath": "build\\bin\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.runtimeconfig.json",
+      "Sha256": "C230A317A54DD960BCBEB5F347F52E18DC665A26F7EFDA2159FCED9A5AC7E097",
+      "Length": 342
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\HcRogSourceOracle.csproj.nuget.dgspec.json",
+      "Sha256": "52925E6C50B820D5462F15834B0498E1D96262E894DA7534BF66FF86F921DC8C",
+      "Length": 21993
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\HcRogSourceOracle.csproj.nuget.g.props",
+      "Sha256": "F970DF645C3C9650E149643F828877285C6EC90CF5EEAA00FB07C63D62C869BB",
+      "Length": 1436
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\HcRogSourceOracle.csproj.nuget.g.targets",
+      "Sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5",
+      "Length": 150
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\project.assets.json",
+      "Sha256": "64FB8E414A7A810C5D23F98F2C943B9589378861286A4173D5BE75FB0918033A",
+      "Length": 21305
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\project.nuget.cache",
+      "Sha256": "1FD981E50BFF4C4F403C88179932C9CA711725EBB13DEA15E2C7E36F7631A777",
+      "Length": 284
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "Sha256": "93D67476196EBFC80D1D7D8844B91146CFD678D105F5CE635EB900CA40610C9B",
+      "Length": 200
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.AssemblyInfo.cs",
+      "Sha256": "65478408A76E14233FBDFF831F6E048903A06AE47BFB67BA3A81DD1953720E11",
+      "Length": 1027
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.AssemblyInfoInputs.cache",
+      "Sha256": "C05BD025F721A837A7B32283941A83756EF24427AB7F8B5930CCAF08B424269D",
+      "Length": 66
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.assets.cache",
+      "Sha256": "FA4C94521A73CEC65010555127CBB1290026C4ADA1E5F018A7B794869589BCC7",
+      "Length": 253
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.csproj.CoreCompileInputs.cache",
+      "Sha256": "BD4B975EBC61A13E81FF4D21128906B4AF6322B6DDE634B9F2D3A6646D4E25D7",
+      "Length": 66
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.csproj.FileListAbsolute.txt",
+      "Sha256": "0CDCA570D50A56183AD0C40560D3FF4D76D59543DC0BB06E865EC755E83D4C4E",
+      "Length": 2051
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.dll",
+      "Sha256": "2B2894793BE612E3133040F2DFE9D2D18402E8245DFC40559F0CC7D3AA5FE4B7",
+      "Length": 17408
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.GeneratedMSBuildEditorConfig.editorconfig",
+      "Sha256": "B5C33CE44FA802E838F0458B46DDA38785DA1FE086D2FBA52B2DAEC479CF7777",
+      "Length": 912
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\HcRogSourceOracle.pdb",
+      "Sha256": "465F676081A2B05D3C8689AB37A4665E937E29CAF60B8ED1D5E74D83C53F064B",
+      "Length": 13512
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\ref\\HcRogSourceOracle.dll",
+      "Sha256": "F3E3B92E9B498A02F6D4A60E284BEF3F9EF27358C8D172BD6BF805D9D003D348",
+      "Length": 9216
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle\\release\\refint\\HcRogSourceOracle.dll",
+      "Sha256": "F3E3B92E9B498A02F6D4A60E284BEF3F9EF27358C8D172BD6BF805D9D003D348",
+      "Length": 9216
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\HcRogSourceOracle.Verification.csproj.nuget.dgspec.json",
+      "Sha256": "29F2DE390E875DD085CB2B825801E484E38AC61E750E85AACC1DBA7D3FA3348B",
+      "Length": 44271
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\HcRogSourceOracle.Verification.csproj.nuget.g.props",
+      "Sha256": "F970DF645C3C9650E149643F828877285C6EC90CF5EEAA00FB07C63D62C869BB",
+      "Length": 1436
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\HcRogSourceOracle.Verification.csproj.nuget.g.targets",
+      "Sha256": "971CC9B535384849B5C661D776CD7A80833A416265E32E8968E06C367368B8B5",
+      "Length": 150
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\project.assets.json",
+      "Sha256": "F78C8FF662D5BF07F7F635297363E969CC0AF01EDB38E03FA8F006BFF0440DF5",
+      "Length": 22263
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\project.nuget.cache",
+      "Sha256": "5D68CF97F297F590AC59C9C0F15A23279077AA00D01E2E58F43F30341201B067",
+      "Length": 311
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "Sha256": "93D67476196EBFC80D1D7D8844B91146CFD678D105F5CE635EB900CA40610C9B",
+      "Length": 200
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\apphost.exe",
+      "Sha256": "A796EFA431CF13BB14460FEEE6397A4819017041914C46B92EF19D4571ABA9DE",
+      "Length": 162816
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSou.7B236064.Up2Date",
+      "Sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "Length": 0
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.AssemblyInfo.cs",
+      "Sha256": "7A4E4DA0463DD2EC8EC988D2E90DACA5578A606709810C786CC2D85626D450D2",
+      "Length": 1066
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.AssemblyInfoInputs.cache",
+      "Sha256": "8F0C24C5AC7F9193F4FF78492A8526F3A70D8858020D6CE4DE6C6625A489D62A",
+      "Length": 66
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.assets.cache",
+      "Sha256": "CCB18C5B512B9689F7A908805000592C91F2B286D1B998CC845750C107DD8C3E",
+      "Length": 253
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.csproj.AssemblyReference.cache",
+      "Sha256": "F1FC5D3036B9077E5CC11DE6204658CC089B90763595A580DEF90D73541646BD",
+      "Length": 641
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.csproj.CoreCompileInputs.cache",
+      "Sha256": "005BB4CB3DD20E8EBA4AE99E3014BF8D46BA5659C4BD9D1E2419CEE4B4358561",
+      "Length": 66
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.csproj.FileListAbsolute.txt",
+      "Sha256": "60093ACBA7D965799CE44B9F1B5373240B2579277DAF89E722C781FC5CFD192F",
+      "Length": 3777
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.dll",
+      "Sha256": "0A4BFFC32C0F0B69B435F307E35285088DAAF03DEBCE52DF49A5BFCA7E7C7438",
+      "Length": 46592
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.GeneratedMSBuildEditorConfig.editorconfig",
+      "Sha256": "FCA073619ACB5DA27B7441DAEC62C4A3A8CA17DEF647D893E23EB5A439E385C4",
+      "Length": 923
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.genruntimeconfig.cache",
+      "Sha256": "4A276F2C957A11554CB00D476D2A5EB86ACC65111F13982E8353ADF7052685CA",
+      "Length": 66
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\HcRogSourceOracle.Verification.pdb",
+      "Sha256": "897FBDEC3E7670F02A3E94BAFCF66774CF0849D6856D2D8414D44708E10EED26",
+      "Length": 16024
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\ref\\HcRogSourceOracle.Verification.dll",
+      "Sha256": "E029E4A029F70F4990130310D05E5480FF69F6310BFD267FFC6D627773D610FF",
+      "Length": 13312
+    },
+    {
+      "RelativePath": "build\\obj\\HcRogSourceOracle.Verification\\release\\refint\\HcRogSourceOracle.Verification.dll",
+      "Sha256": "E029E4A029F70F4990130310D05E5480FF69F6310BFD267FFC6D627773D610FF",
+      "Length": 13312
+    },
+    {
+      "RelativePath": "dotnet-home\\.dotnet\\10.0.400.aspNetCertificateSentinel",
+      "Sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "Length": 0
+    },
+    {
+      "RelativePath": "dotnet-home\\.dotnet\\10.0.400.dotnetFirstUseSentinel",
+      "Sha256": "E3B0C44298FC1C149AFBF4C8996FB92427AE41E4649B934CA495991B7852B855",
+      "Length": 0
+    },
+    {
+      "RelativePath": "tmp\\Microsoft.NET.Workload_23124_20261018_154008_418.log",
+      "Sha256": "2F2402A9E77ACAF02F16B2360A5FDA38CCBC7AA696A3D541130031BF85FA15CA",
+      "Length": 1447
+    },
+    {
+      "RelativePath": "tmp\\Microsoft.NET.Workload_23680_20261018_153856_832.log",
+      "Sha256": "FB60D95AE87CF6F89876CA9B0C2872FDE3F4093A1C93A2F9D5B1FE9DF8C91AA7",
+      "Length": 1446
+    },
+    {
+      "RelativePath": "tmp\\Microsoft.NET.Workload_23680_20261018_153856_871.log",
+      "Sha256": "6EB672A6C57B0C0A09F0AC07CB695FF2FA9780BB78116D859ACD9FA9FECFE764",
+      "Length": 1447
+    }
+  ]
+}

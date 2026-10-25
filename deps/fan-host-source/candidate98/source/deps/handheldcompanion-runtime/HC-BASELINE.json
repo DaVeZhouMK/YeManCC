@@ -1,0 +1,88 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "HC-BINARY-BATCH12-20260831",
+  "role": "shared-source-baseline",
+  "upstreamProjectVersion": "0.32.3.2",
+  "sourceDirectory": "source",
+  "sourceFileCount": 1048,
+  "sourceFilesIndex": "source-files.sha256",
+  "sourceFilesIndexSha256": "9105B05655C280F99FFFFDB214C165955CED5EF3463719D681E7ABECF7E904D1",
+  "omittedFromFrozenReference": {
+    "fileCount": 195,
+    "byteCount": 50844610,
+    "index": "omitted-from-freeze.sha256",
+    "indexSha256": "11B83EECC47EE90CA9B91474C9BFCC0CED0C513ACC0206D9C8B23307D7ACB5D0",
+    "categories": [
+      "obj"
+    ],
+    "reason": "NuGet and compiler cache/output; intentionally not imported as source or runtime assets"
+  },
+  "projectFile": "HandheldCompanion.csproj",
+  "projectFileSha256": "B9A72FF635C04A5AE7D1B95472F0F062AECC1B7C20A3C02713E9415C98815B16",
+  "coreFiles": {
+    "App.xaml.cs": "DCADCFC1D2C4B95A8B4F647BC633D6AF20B0A504E2410292785824BC0599D931",
+    "Devices/IDevice.cs": "FBAED1DFD329E3328376488B8EC70C3A7FDCF97D70DCB37F1525EE33AA169C20",
+    "Managers/SystemManager.cs": "8986AC3AE2767406AB29FBDC3DEB4581160A54105639EB94E0A6006310A815E9"
+  },
+  "upstreamFreezeManifest": "source/FREEZE-MANIFEST.md",
+  "fanReconciliation": {
+    "task": "FAN-936-R4",
+    "date": "2026-10-02",
+    "route": "in-place-baseline-update",
+    "scope": "fan-msi-only",
+    "rationale": "Align the mainline dependency source with the pinned Fan HC candidate so the shipped HC DLL is reproducible from an in-tree source baseline; only Fan-owned MSI files are replaced in place. FAN-936-R4 corrected the MSI fan-table wire contract in ClawA1M.cs (accept the real 31-byte payload form) without touching other vendor paths.",
+    "candidateSourceTree": "Isolated/Tasks/Fan/hc-candidate-920v16",
+    "files": [
+      {
+        "path": "Devices/MSI/ClawA1M.cs",
+        "owner": "fan-msi",
+        "previousSha256": "FA7E4A2C2F6B56BA019689361769127875BE4DE0985351001839A48614D08748",
+        "newSha256": "DA840996BE6D53E2E18B254776056ABF7F5DF76203B11079C2C4F7F147CBC904"
+      },
+      {
+        "path": "WMI.cs",
+        "owner": "fan-msi",
+        "previousSha256": "854DCD0628FD39A3A1B3C3219FF0191C90426718D7ABA9B4CAD043309C439EA5",
+        "newSha256": "AF494693430DA49DF15B2E6AA638277A2651380FFE4FC8083EA1AADE8CFA4E5C"
+      }
+    ],
+    "unchanged": {
+      "baselineId": "HC-BINARY-BATCH12-20260831",
+      "upstreamProjectVersion": "0.32.3.2",
+      "sourceFileCount": 1048,
+      "projectFileSha256": "B9A72FF635C04A5AE7D1B95472F0F062AECC1B7C20A3C02713E9415C98815B16"
+    },
+    "notUpdatedByFanScope": {
+      "reason": "Remaining dependency-vs-candidate deltas belong to other work lines or to candidate identity and must not be overwritten by Fan work; they are disclosed, not replaced.",
+      "files": [
+        "Devices/ASUS/AsusACPI.cs",
+        "Devices/ASUS/ROGAlly.cs",
+        "Inputs/AxisState.cs",
+        "Managers/InputsManager.cs",
+        "HandheldCompanion.csproj"
+      ]
+    }
+  },
+  "policy": {
+    "fanHostResourceBaseline": "current-mainline-fan-host",
+    "fanHostPayloadManifestIsSeparate": true,
+    "runtimeMaterializationAuthorized": false,
+    "inputCapabilityAuthorized": false,
+    "missingSourceFilesAreBehaviorDrift": false,
+    "allowedBehavioralException": "HWiNFO shared-memory temperature source"
+  },
+  "releaseSourceIndexReconciliation": {
+    "date": "2026-10-08",
+    "scope": "Metadata only; no source or runtime/fan payload bytes changed.",
+    "previousDeclaredIndexSha256": "C36DB46BEC3A2DFAABCFDF1262750EC5E5C4E760F6BB6466668B6902BF7422B2",
+    "actualBeforeIndexSha256": "22F6789B88DA6645FCE5205AB14E827F41EEF77D9C362641C09F049B08D605E6",
+    "approvedCurrentSourceEvidence": "Docs/Tasks/Fan/FAN-920/FAN-937R-MAINLINE-SOFTWARE-CLOSEOUT-ADJUDICATION-20261004.md section 1.1; FAN-936-R4-602E02CC-INDEPENDENT-REVIEW-20261003.md",
+    "changes": [
+      {
+        "path": "Devices/MSI/ClawA1M.cs",
+        "oldIndexHash": "CE3C367AF730B8FD8DF8BF41DE32952EC15B8B8320F0257DE58CC5D7B6062918",
+        "approvedCurrentHash": "3A67B506AB11B2236B046696B2055E6F6D95C1794672B15300B30314A7643821"
+      }
+    ]
+  }
+}

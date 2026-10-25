@@ -1,0 +1,34 @@
+{
+  "schema": 1,
+  "observedOn": "2026-10-22",
+  "userReport": [
+    "ordinary controller SteamDeck mouse selection refuses identity/not-connected",
+    "error leaves UI unusable; allow fallback"
+  ],
+  "archive": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261022-174243-G3E-陀螺仪失效 -  游戏重连无效 - 风扇小图标停转了.zip",
+  "exportOutputTarget": {
+    "backMapping": false,
+    "buttonMappingEnabled": true,
+    "closure": "UNENCLOSED",
+    "descriptorHash": null,
+    "gyroEnabled": true,
+    "persona": "steamdeck",
+    "revision": 0,
+    "schemaVersion": 1,
+    "visibilityPolicy": "hidden"
+  },
+  "exportMouse": {
+    "mouseBackend": "joyxoff",
+    "mouseMode": "off",
+    "mouseToggle": true
+  },
+  "errorReceiptFoundInArchive": false,
+  "exclusiveRootCauseEstablished": false,
+  "sourceConsumerRegressions": [
+    "failed-preflight-preserves-working-joyxoff",
+    "unmutated-steam-failure-restores-original-joyxoff",
+    "unrelated-topology-change-keeps-exact-device-authority",
+    "pending-steam-operation-never-blocks-read-or-cache"
+  ],
+  "physicalAcceptance": false
+}

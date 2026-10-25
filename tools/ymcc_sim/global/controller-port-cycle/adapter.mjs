@@ -1,0 +1,8 @@
+import path from 'node:path';import {fileURLToPath} from 'node:url';
+import {toolchainFiles} from '../inputhost-protocol/adapter.mjs';
+export const MODULE='tools/ymcc_sim/global/controller-port-cycle';
+export const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
+export const PRODUCT=['tools/external_controller_port_cycle_selftest.ps1','tools/external_controller_port_cycle_selftest.csproj','tools/external_controller_port_cycle_selftest.cs','InputHost/ExternalControllerPortCycle.cs','InputHost/ParentProcessLifetime.cs'];
+export const SHARED='deps/ymcc-shared-runtime/bin/Nefarius.Utilities.DeviceManagement.dll';
+export const INPUTS=[...PRODUCT,...['adapter.mjs','run.mjs','Run-Original.ps1','runner.test.mjs'].map(name=>MODULE+'/'+name),'tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/host-process.ps1'];
+export function getControllerPortCycleAdapters(repo=REPO){return[{id:'controller.external-port-cycle',domain:'controller',title:'Actual injected port refresh owner, model/USB/location admission and bounded return without creating a target',kind:'node',path:MODULE+'/run.mjs',args:['--evidence-dir','{outDir}/port-cycle'],timeoutMs:240000,profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['port-cycle/result.json'],evidenceInputs:INPUTS,artifactInputs:[...toolchainFiles(repo),path.resolve(repo,SHARED)],referenceInputs:['native/external_controller_priority_runtime.h'],referenceMeaning:'Producer provenance only; standalone Main invokes only the actual ExternalControllerPortCycle.SelfTest with inert IO.'}];}

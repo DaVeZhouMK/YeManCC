@@ -4,6 +4,7 @@
 #include <fstream>
 #include <string>
 #include <string_view>
+#include "log_jsonl_boundary.h"
 
 namespace ymcc::logging {
 // Caller serializes access. One bounded CRT stream buffer per domain, no new
@@ -62,8 +63,7 @@ private:
     bool open() {
         if (stream_.is_open()) return stream_.good();
         stream_.clear();
-        stream_.open(std::filesystem::path(path_), std::ios::binary | std::ios::app);
-        if (!stream_) { close(); return false; }
+        if (!openJsonLineAppend(stream_, std::filesystem::path(path_))) { close(); return false; }
         std::error_code ec;
         const auto size = std::filesystem::file_size(std::filesystem::path(path_), ec);
         bytes_ = ec ? 0 : size;

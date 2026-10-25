@@ -1,0 +1,107 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Frozen original whole Shutdown, actual contiguous Init-through-DSU prefix and fence helpers. Diagnostic negative only. No candidate or accepted product fix.",
+  "mainSha256": "3ee8847d99483335908d0e0c265885165c9bde90764244de56f77f29c3994992",
+  "fragments": {
+    "shutdown": {
+      "text": "static void inputCaptureShutdown() {\r\n    onexX2OwnerStop();\r\n    {\r\n        std::lock_guard<std::mutex> tickLock(g_inputCaptureBusTickMx);\r\n        inputCaptureWindowsProcessingRetire();\r\n        oemVendorHidShutdown();\r\n        inputCaptureLegionMotionSessionRevoke();\r\n    }\r\n    if (!g_inputCaptureReady) return;\r\n    inputCaptureDrainQueuedSamples();\r\n    inputCaptureAppend({{\"t\", (unsigned long long)GetTickCount64()}, {\"kind\", \"stop\"}});\r\n    {\r\n        std::lock_guard<std::mutex> lock(g_inputCaptureMx);\r\n        if (g_inputCaptureLog.is_open()) {\r\n            g_inputCaptureLog.flush();\r\n            g_inputCaptureLog.close();\r\n        }\r\n        g_inputCaptureSampleWrites = 0;\r\n    }\r\n    // 传感器对象在专职 STA 线程释放（HC StopListening），随后收尾线程。\r\n    const bool sensorOwnerSettled=inputCaptureSensorThreadShutdown();\r\n    g_inputCaptureSensorsSuspended = false;\r\n    if(sensorOwnerSettled) g_inputCaptureSink.reset();\r\n    if (g_gmDll) {\r\n        if (g_gm) {\r\n            auto del = (GmDelete)GetProcAddress(g_gmDll, \"DeleteGamepadMotion\");\r\n            if (del) del(g_gm);\r\n            g_gm = nullptr;\r\n        }\r\n        // The independent controller owner has already retired above. A failed\r\n        // Windows Create must not leak this DLL reference on normal shutdown.\r\n        FreeLibrary(g_gmDll); g_gmDll = nullptr;\r\n    }\r\n    g_gmPlayer = nullptr;\r\n    g_gmWorld = nullptr;\r\n    g_gmProcess = nullptr;\r\n    g_gmGetCal = nullptr;\r\n    g_gmGetGravity = nullptr;\r\n    g_gmGetProcessedAcceleration = nullptr;\r\n    g_gmGetOrientation = nullptr;\r\n    g_gmGetOffset = nullptr;\r\n    g_gmGetConf = nullptr;\r\n    g_gmIsSteady = nullptr;\r\n    g_gmSetMode = nullptr;\r\n    g_gmStartCal = nullptr;\r\n    g_gmPauseCal = nullptr;\r\n    g_gmResetCal = nullptr;\r\n    g_gmSetOffset = nullptr;\r\n    g_gmResetMotionApi = nullptr;\r\n    g_controllerGmCreate = nullptr;\r\n    g_controllerGmDelete = nullptr;\r\n    g_inputCaptureReady = false;\r\n    const InputHostVirtualIntentMutation intentMutation;\r\n    g_realStickTest = {};\r\n    g_realStickTestAdmissionLogged = false;\r\n}",
+      "line": 46459,
+      "sha256": "af6f48d2ecb491d26587e6974046635d02339b8e269bc53de2e1ea229b1d56a6"
+    },
+    "initPrefix": {
+      "text": "static void inputCaptureInit() {\r\n    // New-process static initialization supplies the open fence. This delayed\r\n    // worker may only initialize diagnostics; an observed app-exit fence stays raised.\r\n    inputHostResetExitFence(\"capture-init\");\r\n    if (g_inputCaptureReady) return;\r\n    if (!inputCaptureAssetsPresent()) {\r\n        writeLog(\"INFO\", \"input-capture skipped: no gyro-motion/virtual-gamepad folders\");\r\n        publishStartupInputState(ymcc::StartupInputState::Failed, \"input-assets-unavailable\");\r\n        return;\r\n    }\r\n    // 7.50 i2：DSU UDP 服务随 capture 启动（HC DSUServer.Start 在 VirtualManager\r\n    // 打开虚拟手柄时；此处 feature 存在即启动以便 DSU 客户端随时连接）。\r\n    if (dsu_start())\r\n        appendNativeLifecycleLog(\"dsu-server-started\", {{\"port\", 26760}, {\"protocol\", \"dsu-1001\"}});",
+      "line": 44819,
+      "sha256": "e767d757437add5901c6484c50bf1a4dd4d25750b20458c9e96032ded03e0854"
+    },
+    "resetFence": {
+      "text": "static void inputHostResetExitFence(const char* owner) {\r\n    // The process default is open. Capture initialization may reset diagnostic\r\n    // counters, but must never reopen a terminal fence raised by app exit.\r\n    const bool previousRaised = g_inputHostExitFence.load(std::memory_order_acquire);\r\n    if (previousRaised) {\r\n        appendNativeLifecycleLog(\"input-host-exit-fence\", {\r\n            {\"phase\", \"reset-refused\"}, {\"reason\", \"terminal-process-exit\"},\r\n            {\"previousRaised\", true}, {\"owner\", owner ? owner : \"unknown\"},\r\n            {\"refusals\", g_inputHostExitFenceRefusals.load(std::memory_order_acquire)}\r\n        });\r\n        return;\r\n    }\r\n    g_inputHostExitFenceRefusals.store(0, std::memory_order_release);\r\n    g_inputHostExitFenceRefusalRows.store(0, std::memory_order_release);\r\n    appendNativeLifecycleLog(\"input-host-exit-fence\", {\r\n        {\"phase\", \"reset\"},\r\n        {\"resetScope\", \"diagnostic-counters-only\"},\r\n        {\"previousRaised\", previousRaised},\r\n        {\"owner\", owner ? owner : \"unknown\"},\r\n        {\"refusals\", 0ULL}\r\n    });\r\n}",
+      "line": 24814,
+      "sha256": "b0357011d8b2751c07df1415743d966101e72f4dc07368b17190fc07fce55eb0"
+    },
+    "readFence": {
+      "text": "static bool inputHostExitFenceRaised() {\r\n    return g_inputHostExitFence.load(std::memory_order_acquire);\r\n}",
+      "line": 24536,
+      "sha256": "6e27b2f7dc472f8f181ce5815536bc7c54817bf811f25cfec5a4d229cfd87636"
+    }
+  },
+  "initSourceAudit": {
+    "execution": "SOURCE_AUDIT_ONLY; full Init/GM loader/sensor functions NOT executed",
+    "readyAssignmentLine": 44918,
+    "orderedPreReadySites": [
+      {
+        "source": "native/main.cpp",
+        "line": 44831,
+        "site": "dsu_start()"
+      },
+      {
+        "source": "native/main.cpp",
+        "line": 44908,
+        "site": "inputCaptureLoadGamepadMotion();"
+      },
+      {
+        "source": "native/main.cpp",
+        "line": 44910,
+        "site": "inputCaptureSensorThreadEnsure()"
+      },
+      {
+        "source": "native/main.cpp",
+        "line": 44911,
+        "site": "std::make_shared<InputCaptureSensorSink>()"
+      },
+      {
+        "source": "native/main.cpp",
+        "line": 44914,
+        "site": "inputCaptureSensorThreadPost(SensorThreadRequest::Start)"
+      }
+    ],
+    "resourcesPossibleBeforeReady": [
+      "DSU starts before the remaining resource acquisition",
+      "GM DLL and object; DLL alone is retained when Create returns null",
+      "sensor wake event can remain when CreateThread fails",
+      "sensor owner thread before sink allocation and Start request",
+      "sink before Start request failure throws with ready still false"
+    ],
+    "queueAndLogLimit": "Init clears queue and truncates via a temporary ofstream before ready. Partial cases seed no queued samples or open capture log; normal-ready cases test their memory cleanup. Real file/queue leaves are not executed.",
+    "sensorFailureLimit": "Actual sensor Shutdown source retains owner/wake on failed wait; this fixture models its boolean result. Real STA wait/release is UNKNOWN.",
+    "outOfScope": [
+      "HidHide exemptions/cloak",
+      "config/crash-recovery side effects",
+      "other full-Init transitive owners",
+      "real DSU sockets or clients"
+    ],
+    "functionIdentities": {
+      "inputCaptureShutdown": {
+        "line": 46459,
+        "sha256": "af6f48d2ecb491d26587e6974046635d02339b8e269bc53de2e1ea229b1d56a6"
+      },
+      "inputCaptureInit": {
+        "line": 44819,
+        "sha256": "e00a24ada651145a05419aa9ac1089ff8a257562bb6738ac6e34fd03c00031cc"
+      },
+      "inputCaptureLoadGamepadMotion": {
+        "line": 22942,
+        "sha256": "0664ffe90160c77626f0dfd08ea24347bff63f9aa8bd3a8c096e46cbe71faa49"
+      },
+      "inputCaptureSensorThreadEnsure": {
+        "line": 20554,
+        "sha256": "ee01d7291ba7ad699e9920491d8a4229bf2779c84192e35cc3ba56ca851f0a19"
+      },
+      "inputCaptureSensorThreadPost": {
+        "line": 20537,
+        "sha256": "165e72e71e417c6af063574353259d35dde4a5710a0af5be49781bf9c3bd67ef"
+      },
+      "inputCaptureSensorThreadShutdown": {
+        "line": 20568,
+        "sha256": "d4db254e9afce77bfe95974a98e6e918ac279e381c56d76c9aaf9245b82b2320"
+      },
+      "inputHostResetExitFence": {
+        "line": 24814,
+        "sha256": "b0357011d8b2751c07df1415743d966101e72f4dc07368b17190fc07fce55eb0"
+      },
+      "inputHostExitFenceRaised": {
+        "line": 24536,
+        "sha256": "6e27b2f7dc472f8f181ce5815536bc7c54817bf811f25cfec5a4d229cfd87636"
+      }
+    }
+  }
+}

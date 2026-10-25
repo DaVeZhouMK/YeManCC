@@ -1,0 +1,22 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>HcRogSourceOracle.Verification</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <IsPackable>false</IsPackable>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../HcRogSourceOracle.csproj" />
+    <Compile Include="OracleParityChecks.cs" />
+    <Compile Include="AsusWriterRecordingBoundary.cs" />
+    <!-- Compile the ACTUAL mainline writer. Do not substitute a copied/reimplemented writer. -->
+    <Compile Include="../../../../../FanLab/fan-backend/Asus/AsusFanCurveWriter.cs" Link="Actual/AsusFanCurveWriter.cs" />
+    <EmbeddedResource Include="../../../../../FanLab/fan-backend/Asus/AsusFanCurveWriter.cs" LogicalName="Actual.AsusFanCurveWriter.cs" />
+  </ItemGroup>
+</Project>

@@ -7,6 +7,8 @@ export interface DropdownOption {
   label: string;
   sub?: string;
   disabled?: boolean;
+  /** Optional visual grouping; headers are never selectable or gamepad targets. */
+  group?: string;
 }
 
 const props = defineProps<{
@@ -24,6 +26,8 @@ const props = defineProps<{
   width?: string;
   /** Optional class for the teleported popup (the menu is rendered under body). */
   popupClass?: string;
+  /** Keep popups beside a locally mounted editor, including a shadow preview. */
+  teleportTo?: string | HTMLElement;
   /** Optional unified gamepad spatial-navigation coordinates for the trigger. */
   gpRow?: number | string;
   gpCol?: number | string;
@@ -63,6 +67,9 @@ function colorVar(): string {
 }
 
 function getGlobalUiScale(): number {
+  // A full-height performance editor has its own visual scale; keep its teleported menu in that scale.
+  const localScale = Number.parseFloat(triggerEl.value?.closest<HTMLElement>('[data-performance-editor-scale]')?.dataset.performanceEditorScale ?? '');
+  if (Number.isFinite(localScale) && localScale > 0) return Math.max(.1, Math.min(4, localScale));
   const rootValue = Number.parseFloat(
     getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'),
   );
@@ -128,7 +135,15 @@ function openMenu(fromGamepad = false) {
     if (!el) return;
     if (fromGamepad) focusGamepadElement(el);
     else {
-      el.scrollIntoView({ block: 'nearest' });
+      // Reveal the selected option inside its popup only. Native
+      // scrollIntoView also scrolls clipped shell/underlying page ancestors.
+      const menu = menuEl.value;
+      if (menu) {
+        const r = el.getBoundingClientRect(), box = menu.getBoundingClientRect();
+        const scale = box.height / menu.offsetHeight || 1;
+        if (r.top < box.top) menu.scrollTop += (r.top - box.top) / scale;
+        else if (r.bottom > box.bottom) menu.scrollTop += (r.bottom - box.bottom) / scale;
+      }
       el.focus({ preventScroll: true });
     }
   });
@@ -141,7 +156,7 @@ function closeMenu() {
 function restoreTriggerFocus() {
   const trigger = triggerEl.value;
   if (!trigger) return;
-  focusGamepadElement(trigger);
+  focusGamepadElement(trigger, { scroll: 'preserve' });
 }
 
 // 计算弹层 fixed 定位（对齐 trigger；空间不足则向上翻转）
@@ -150,7 +165,31 @@ function computePosition() {
   if (!r) return;
   const scale = getGlobalUiScale();
   const menuWidth = getMenuWidth(r.width, scale);
-  const placement = getGamepadPopupPlacement(r, menuWidth, 360 * scale, 6 * scale);
+  let placement = getGamepadPopupPlacement(r, menuWidth, 360 * scale, 6 * scale);
+  const targetRoot = props.teleportTo instanceof HTMLElement ? props.teleportTo.getRootNode() : null;
+  if (targetRoot instanceof ShadowRoot && targetRoot.host instanceof HTMLElement) {
+    // A transformed shadow host owns its fixed-position coordinate system.
+    // Convert the trigger from screen pixels back to that host's layout pixels.
+    const host = targetRoot.host;
+    const bounds = host.getBoundingClientRect();
+    const sx = bounds.width / host.offsetWidth || 1;
+    const sy = bounds.height / host.offsetHeight || 1;
+    const anchorTop = (r.top - bounds.top) / sy;
+    const anchorBottom = (r.bottom - bounds.top) / sy;
+    const width = Math.min(getMenuWidth(r.width / sx, scale), host.clientWidth - 16);
+    const left = Math.max(8, Math.min((r.right - bounds.left) / sx - width, host.clientWidth - width - 8));
+    const below = Math.max(0, host.clientHeight - anchorBottom - 6 * scale - 8);
+    const above = Math.max(0, anchorTop - 6 * scale - 8);
+    const placeAbove = below < 360 * scale && above > below;
+    placement = {
+      above: placeAbove,
+      style: {
+        position: 'fixed', left: `${left}px`, width: `${width}px`,
+        ...(placeAbove ? { bottom: `${host.clientHeight - anchorTop + 6 * scale}px` } : { top: `${anchorBottom + 6 * scale}px` }),
+        maxHeight: `${Math.max(1, Math.min(360 * scale, placeAbove ? above : below))}px`,
+      },
+    };
+  }
   menuStyle.value = {
     ...placement.style,
     '--dd-accent': colorVar(),
@@ -202,6 +241,12 @@ function move(dir: 1 | -1) {
 
 function onTriggerKey(e: KeyboardEvent) {
   if (props.disabled) return;
+  if (e.key === 'Escape' && open.value) {
+    e.preventDefault();
+    closeMenu();
+    restoreTriggerFocus();
+    return;
+  }
   if (e.key === 'Enter' || e.key === ' ' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     openMenu(true);
@@ -248,6 +293,15 @@ function onScroll(e: Event) {
   if (!open.value) return;
   const t = e.target as HTMLElement;
   if (menuEl.value && menuEl.value.contains(t)) return;
+  // Only an ancestor scroll can move this anchor; independent marquees cannot.
+  if (t instanceof HTMLElement && rootEl.value && !t.contains(rootEl.value)) return;
+  // A controller focus move can queue the owner's scroll event immediately
+  // before A opens this popup. Keep the focused menu attached to its anchor.
+  if (t instanceof HTMLElement && rootEl.value && t.contains(rootEl.value)
+      && menuEl.value?.contains(document.activeElement)) {
+    computePosition();
+    return;
+  }
   closeMenu();
 }
 
@@ -309,7 +363,7 @@ function onGpNav(e: Event) {
       </svg>
     </button>
 
-    <Teleport to="body">
+    <Teleport :to="teleportTo || 'body'">
       <Transition name="dd-pop">
         <div
           v-if="open"
@@ -320,15 +374,17 @@ function onGpNav(e: Event) {
           tabindex="-1"
           @keydown="onMenuKey"
         >
+          <template v-for="(o, i) in options" :key="String(o.value)">
+          <div v-if="o.group && (i === 0 || options[i - 1].group !== o.group)" class="dd-group-heading" role="presentation">{{ o.group }}</div>
           <button
-            v-for="(o, i) in options"
-            :key="String(o.value)"
             type="button"
             class="dd-option"
             :class="{ 'dd-opt-selected': o.value === modelValue, 'dd-opt-disabled': o.disabled }"
             :data-hl="i === highlight"
             role="option"
             :aria-selected="o.value === modelValue"
+            :disabled="o.disabled"
+            :aria-disabled="o.disabled || undefined"
             @mouseenter="highlight = i"
             @click="select(i)"
           >
@@ -340,6 +396,7 @@ function onGpNav(e: Event) {
               <path d="M3.5 8.5l3 3 6-7" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
             </svg>
           </button>
+          </template>
         </div>
       </Transition>
     </Teleport>
@@ -434,6 +491,17 @@ function onGpNav(e: Event) {
   flex-direction: column;
   gap: var(--dd-popup-menu-gap, 2px);
 }
+.dd-group-heading {
+  margin-top: var(--dd-popup-menu-padding, 5px);
+  padding: .5em var(--dd-popup-option-px, 12px) .35em;
+  border-top: 1px solid rgba(225, 233, 242, .13);
+  color: var(--text-dim);
+  font-size: calc(var(--dd-popup-font-size, 14px) * .78);
+  line-height: 1.4;
+  letter-spacing: .08em;
+  pointer-events: none;
+}
+.dd-group-heading:first-child { margin-top: 0; border-top: 0; padding-top: .25em; }
 .dd-option {
   display: flex;
   align-items: center;
@@ -455,7 +523,7 @@ function onGpNav(e: Event) {
   transition: background 0.1s, color 0.1s;
 }
 .dd-option[data-hl='true'] {
-  background: rgba(46, 166, 255, 0.14);
+  background: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
 }
 .dd-opt-selected {
   color: var(--dd-accent);

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue';
 import { ICONS } from '@/icons';
+import classicMouse from '../assets/mouse-classic.png';
 
 const props = defineProps<{ name: string; strokeWidth?: number }>();
 const lightIconNames = new Set(['gauge', 'gamepad', 'rotate']);
@@ -8,7 +9,8 @@ const resolvedStrokeWidth = computed(() => props.strokeWidth ?? (lightIconNames.
 </script>
 
 <template>
-  <svg
+  <span v-if="name === 'mouse'" class="app-icon app-icon-mouse-classic" :style="{maskImage: 'url('+classicMouse+')', WebkitMaskImage: 'url('+classicMouse+')'}" aria-hidden="true"/>
+  <svg v-else
     class="app-icon"
     viewBox="0 0 24 24"
     fill="none"
@@ -27,4 +29,5 @@ const resolvedStrokeWidth = computed(() => props.strokeWidth ?? (lightIconNames.
   height: 1em;
   display: block;
 }
+.app-icon-mouse-classic{background:currentColor;mask-size:contain;-webkit-mask-size:contain;mask-position:center;-webkit-mask-position:center;mask-repeat:no-repeat;-webkit-mask-repeat:no-repeat;}
 </style>

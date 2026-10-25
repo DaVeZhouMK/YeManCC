@@ -42,6 +42,7 @@ PRELUDE = r"""
 #include "log_frequency_policy.h"
 #include "buffered_domain_log.h"
 using json = nlohmann::json;
+static void flushTdpObservationLogs(bool = false) {}
 namespace fspath = std::filesystem;
 static std::wstring g_fixtureRoot, g_exportRoot;
 static std::wstring yemancc_data_dir() { return g_fixtureRoot; }
@@ -172,6 +173,21 @@ int wmain(int argc, wchar_t** argv) {
     for(int i=0;i<100;++i)failWriter.append(failedPath,"retained",2000,false,10,cannotRotate);
     check("failed-rotation-not-retried-per-row",attempts==1);failWriter.append(failedPath,"next",3001,true,10,cannotRotate);check("failed-rotation-retries-once-after-one-second",attempts==2);failWriter.close();
     std::ifstream preserved(failedPath);std::stringstream full;full<<preserved.rdbuf();check("failed-rotation-keeps-active-evidence",full.str().starts_with(std::string(50,'x')) && full.str().find("retained")!=std::string::npos && full.str().find("next")!=std::string::npos);
+    reset(root,L"writer-identity");g_domainLogEnabled[1]=true;
+    appendDomainLog("virtual","identity-fixture",{{"pid",12345},{"writerPid",0},{"hostRunId","fixture-host"}});
+    flushDomainLogs();const auto identity=readRows(fspath::path(g_fixtureRoot)/L"virtual-gamepad.log");
+    check("domain-writer-pid-identifies-writer-without-overwriting-business-pid",
+        identity.size()==1 && identity[0]["writerPid"]==GetCurrentProcessId() && identity[0]["pid"]==12345 && identity[0]["hostRunId"]=="fixture-host");
+    reset(root,L"buffered-tail-reopen");g_domainLogEnabled[1]=true;
+    const auto partialPath=fspath::path(g_fixtureRoot)/L"virtual-gamepad.log";
+    const std::string oldTail="{\"event\":\"interrupted\",\"data\":";
+    {std::ofstream seed(partialPath,std::ios::binary);seed<<oldTail;}
+    appendDomainLog("virtual","next-process",{{"value",9}});flushDomainLogs(true);
+    std::ifstream tail(partialPath,std::ios::binary);std::string first,second;std::getline(tail,first);std::getline(tail,second);tail.close();
+    check("buffered-reopen-preserves-incomplete-tail-and-next-json",first==oldTail && json::parse(second)["value"]==9);
+    appendDomainLog("virtual","third-process",{{"value",10}});flushDomainLogs(true);
+    std::ifstream third(partialPath);unsigned lineCount=0;for(std::string line;std::getline(third,line);)++lineCount;third.close();
+    check("buffered-clean-reopen-adds-no-empty-row",lineCount==3);
     reset(root,L"unwritable");g_domainLogEnabled[1]=true;g_fixtureRoot=(root/L"missing-writer-parent"/L"nested").wstring();bool survived=true;try{appendDomainLog("virtual","fixture-sample",{{"x",1}});}catch(...){survived=false;}check("writer-io-failure-never-changes-caller-control-flow",survived && !g_domainLogStreams[1].isOpen());
     flushDomainLogs(true);unsigned failures=0;for(const auto& c:checks)if(!c["pass"].get<bool>())++failures;
     std::cout<<json({{"checks",checks},{"failures",failures},{"scope","EXTRACTED_REAL_LOG_STARTUP_IPC_AND_DOMAIN_WRITER_FIXTURE_SETTINGS_AND_PATHS_ONLY"}}).dump(2)<<std::endl;
@@ -191,7 +207,7 @@ def main() -> int:
     source = source_bytes.decode('utf-8-sig').replace('\r\n','\n')
     # Normal text-file newline normalization, not textual backslash replacement.
     source = source_bytes.decode('utf-8-sig').replace(chr(13)+chr(10),chr(10))
-    bound = {rel:(ROOT/rel).read_bytes() for rel in ['native/log_frequency_policy.h','native/buffered_domain_log.h']}
+    bound = {rel:(ROOT/rel).read_bytes() for rel in ['native/log_frequency_policy.h','native/buffered_domain_log.h','native/log_jsonl_boundary.h']}
     (run/'bound-main.cpp').write_bytes(source_bytes)
     for rel,content in bound.items():(run/('bound-'+pathlib.Path(rel).name)).write_bytes(content)
     functions = [extract(source,x) for x in SIGNATURES]
@@ -215,7 +231,7 @@ def main() -> int:
     current_bytes=source_path.read_bytes();current=current_bytes.decode('utf-8-sig').replace(chr(13)+chr(10),chr(10))
     signatures_stable=all(extract(current,x)==f for x,f in zip(SIGNATURES,functions))
     handlers_stable=all(extract(current,'ipc_on("'+name+'", [](const json& a) -> json {')==f for name,f in handlers.items())
-    export_all=extract(source,'ipc_on("logs.exportAll", [](const json&) -> json {')
+    export_all=extract(source,'ipc_on("logs.exportAll", [](const json& exportArgs) -> json {')
     native_flush=extract(source,'static void flushNativeLifecycleLogs(bool closeDetail) {')
     default_checks={
         'native-domain-array-default-off':'g_domainLogEnabled[2] = { false, false }' in source,

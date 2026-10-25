@@ -130,6 +130,9 @@ async function invoke(cmd: string, a: Record<string, any>): Promise<any> {
       return String(a.path).toLowerCase().endsWith('yemanfanhost.exe');
     case 'fs.mkdir':
       return true;
+    case 'fs.readTextRange':
+      if (String(a.path).toLowerCase().endsWith('yemanfanhost.session')) return { content: TOKEN, offset: 0, size: Buffer.byteLength(TOKEN) };
+      throw new Error('unexpected read path: ' + String(a.path));
     case 'fs.readTextFile':
       if (String(a.path).toLowerCase().endsWith('yemanfanhost.session')) return TOKEN;
       throw new Error('unexpected read path: ' + String(a.path));
@@ -178,6 +181,8 @@ win.chrome = {
   },
 };
 (globalThis as any).window = win;
+// The real shared UI lifecycle expects document when a native window fixture exists.
+(globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: 'visible', hidden: false, createElement: () => ({ content: {}, style: {} }) });
 
 // 必须动态 import：ipc.ts 在模块加载时捕获 window.chrome.webview。
 const { NativeFanHostLauncher, resolveFanHostConfig } = await import('../src/bridge/fanHost');

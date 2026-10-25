@@ -1,5 +1,7 @@
+import { isControllerPersona, type ControllerPersona } from './controllerPersona';
+
 export type ClosureState = 'CLOSED' | 'UNENCLOSED' | 'NOT-OBSERVED' | 'NOT-APPLICABLE';
-export type InputPersona = 'disabled' | 'dualshock4' | 'xbox360' | 'steamdeck' | 'dualsense' | 'elite' | 'dualsense-edge';
+export type InputPersona = ControllerPersona;
 
 export interface OutputTargetConfigV1 { schemaVersion: 1; revision: number; closure: ClosureState; persona: InputPersona; descriptorHash: string | null; buttonMappingEnabled: boolean; gyroEnabled: boolean; visibilityPolicy: 'hidden' | 'project-only' | 'unavailable'; /** 背键映射 Phase A（背键映射A任务书 2026-09-14 S5）：字段保留（旧包兼容）；**2026-09-24 operator 裁决后不再参与门控**——背键映射改为「人格支持即常开」（steamdeck/elite/dualsense-edge，真 Deck 仍不挂）。 */ backMapping: boolean; /** GP-FAMILY-CAPABILITY-4 R1-2：OEM→虚拟背键映射（类型已接入输出配置）。可空、默认空；缺省 ⇒ 零映射、行为不变。键名 = canonical OEM key，值 = left/right/both/off。 */ oemRearMap?: OemRearMapV1; }
 /** GP-FAMILY-CAPABILITY-4 C4-D2：通用 OEM→rear mapper（可空、默认空）。
@@ -15,8 +17,11 @@ export interface GyroMotionConfigV1 {
   /** Effective motion gate. A persisted false value must never preview/publish gyro. */
   enabled?: boolean;
   provider: string | null; unit: string | null; calibrationId: string | null;
-  outputMode: 'virtual-stick' | 'ds4-imu' | 'disabled';
+  /** Motion action contribution only; raw IMU remains part of normal persona reports. */
+  outputMode: 'virtual-stick' | 'disabled';
   motionInput?: 'local-space' | 'player-space' | 'world-space' | 'joystick-steering';
+  /** Physical Legion Tablet/Tablet2 IMU source: 0 left (default), 1 right. Go S is fixed to 0; other models ignore this field. */
+  controllerSensorIndex?: 0 | 1;
   /** HC Profile.SteeringAxis (Roll/Yaw/Auto). Roll keeps LocalSpace (Z,X);
    *  Yaw applies SwapYawRoll so LocalSpace consumes (-Y,X); Auto resolves by
    *  sensor family (Windows/SerialUSBIMU -> Yaw, Controller -> accelerometer). */
@@ -299,16 +304,14 @@ export function normalizeGyroTelemetry(value: unknown): GyroTelemetryV1 | null {
 export function validateInputSnapshot(snapshot: { schemaVersion?: unknown; revision?: unknown; outputTarget?: Partial<OutputTargetConfigV1>; gyroMotion?: Partial<GyroMotionConfigV1>; capability?: Partial<InputCapabilityManifestV1> }): InputContractValidation {
   if (snapshot.schemaVersion !== 1 || !Number.isSafeInteger(snapshot.revision) || (snapshot.revision as number) < 0) return { ok: false, reason: 'revision-invalid' };
   const target = snapshot.outputTarget;
-  if (!target || target.schemaVersion !== 1 || !['disabled', 'dualshock4', 'xbox360', 'steamdeck', 'dualsense', 'elite', 'dualsense-edge'].includes(target.persona as string)) return { ok: false, reason: 'schema-invalid' };
+  if (!target || target.schemaVersion !== 1 || !isControllerPersona(target.persona)) return { ok: false, reason: 'schema-invalid' };
   if (target.persona === 'disabled' && (target.buttonMappingEnabled || target.gyroEnabled)) return { ok: false, reason: 'persona-conflict' };
   if (target.persona !== 'disabled' && !target.descriptorHash && target.closure === 'CLOSED') return { ok: false, reason: 'asset-missing' };
   const motion = snapshot.gyroMotion;
+  if (motion?.outputMode !== undefined && motion.outputMode !== 'virtual-stick' && motion.outputMode !== 'disabled') return { ok: false, reason: 'persona-conflict' };
   const motionEnabled = motion && typeof motion.enabled === 'boolean' ? motion.enabled : undefined;
   if (motionEnabled !== undefined && motionEnabled !== target.gyroEnabled) return { ok: false, reason: 'persona-conflict' };
   if (target.gyroEnabled && (motionEnabled !== true || motion?.closure !== 'CLOSED')) return { ok: false, reason: 'parity-missing' };
-  // HC has no Xbox 360 IMU report persona. Virtual-stick gyro is a separate
-  // action contribution; selecting the DS4 IMU transport for X360 is invalid.
-  if (target.persona === 'xbox360' && motion?.outputMode === 'ds4-imu') return { ok: false, reason: 'persona-conflict' };
   if (motion?.closure === 'CLOSED' && (!motion.provider || motion.unit !== 'deg/s' || !motion.calibrationId)) return { ok: false, reason: 'parity-missing' };
   if (snapshot.capability?.realRuntimeAuthorized && !snapshot.capability.hcAssetId) return { ok: false, reason: 'asset-missing' };
   if (target.closure !== 'CLOSED' || snapshot.gyroMotion?.closure === 'UNENCLOSED') return { ok: false, reason: 'unclosed' };

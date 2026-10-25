@@ -1,0 +1,89 @@
+// Actual Start, Stop, Admission, StopLease and startup helper/header execution.
+// Start's assets/Host/Game Bar/worker and retirement resources are explicit leaves.
+@KERNEL_PREFIX@
+#include <thread>
+#include "input_capture_startup_wait.h"
+static std::atomic<bool> g_exitRequested{false};
+namespace ymcc {enum class StartupInputState {Failed};}
+@STARTUP_HELPERS@
+static bool negativeSchedule=false;
+static unsigned admissionStage=0,resetCalls=0,createCalls=0,startLeafCalls=0;
+static HANDLE startPaused=nullptr,startResume=nullptr;
+static void startCheckpoint(unsigned stage){
+ if(admissionStage!=stage)return;
+ if(!::SetEvent(startPaused)||::WaitForSingleObject(startResume,5000)!=WAIT_OBJECT_0)throw std::runtime_error("fixture Start checkpoint failed");
+}
+static void gamebarTraceStartInitThread(){++startLeafCalls;}
+static bool inputHostExitFenceRaised(){return false;}
+static bool applyInputStartupOnce(){return true;}
+static bool inputCaptureAssetsPresent(){startCheckpoint(0);return true;}
+static void writeLog(const char*,const char*){}
+static void publishStartupInputState(ymcc::StartupInputState,const char*){}
+static DWORD WINAPI inputCaptureThreadProc(LPVOID){return 0;} // explicit unused fake worker entry
+static bool observedReset(){startCheckpoint(1);++resetCalls;const bool result=inputCaptureResetStartupStop();startCheckpoint(2);return result;}
+static HANDLE createFixtureWorker(LPSECURITY_ATTRIBUTES,SIZE_T,LPTHREAD_START_ROUTINE,LPVOID,DWORD,LPDWORD){
+ ++createCalls;startCheckpoint(3);
+ current->product.value=::CreateThread(nullptr,0,ownedWorker,current,0,nullptr);
+ if(!current->product.value)return nullptr;
+ current->workerCreated=true;current->originalProduct=current->product.value;
+ if(!::DuplicateHandle(::GetCurrentProcess(),current->product.value,::GetCurrentProcess(),&current->controller.value,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("controller duplicate failed");
+ current->controllerDuplicatedBeforeStop=true;return current->product.value;
+}
+#define inputCaptureResetStartupStop observedReset
+#define CreateThread createFixtureWorker
+@PRODUCTION_START@
+#undef CreateThread
+#undef inputCaptureResetStartupStop
+static json admissionCase(unsigned stage){
+ auto owner=std::make_unique<KernelCase>();KernelCase& state=*owner;current=&state;
+ const unsigned before=failures;resetCaptureFixture();g_inputCaptureThread=nullptr;g_inputCaptureStop=true;
+ resetCalls=createCalls=startLeafCalls=0;admissionStage=stage;std::thread starter;
+ bool starterJoined=false,settled=false,firstSettled=false;std::uint64_t firstDebts=0;std::string error;
+ {
+  CleanupGuard cleanup{state,owner};
+  try{
+   for(OwnedHandle* h:{&state.ready,&state.release,&state.completed}){h->value=::CreateEventW(nullptr,TRUE,FALSE,nullptr);requireSetup(h->value!=nullptr,"owned worker events");}
+   startPaused=::CreateEventW(nullptr,FALSE,FALSE,nullptr);startResume=::CreateEventW(nullptr,FALSE,FALSE,nullptr);
+   requireSetup(startPaused&&startResume,"owned Start checkpoint events");
+   starter=std::thread([]{inputCaptureStart();});
+   requireSetup(::WaitForSingleObject(startPaused,5000)==WAIT_OBJECT_0,"actual Start reached scheduled reservation boundary");
+   if(!negativeSchedule)inputCaptureStart();check(startLeafCalls==1,"duplicate actual Start cannot acquire an existing reservation");
+   const auto first=inputCaptureStop();firstSettled=first.settled();firstDebts=first.debts;
+   check(first.debts==ymcc::captureLifecycle::Debt::StartReservation&&!first.settled(),"Stop cannot settle while actual Start owns its reservation");
+   check(!first.waitPerformed&&state.host==0&&state.dsu==0,"pending Start Stop performs no join or resource retirement");
+   check(g_inputCaptureStop.load(),"actual stop helper publishes cancellation before Start resumes");
+   ::SetEvent(startResume);starter.join();starterJoined=true;
+   check(g_inputCaptureStop.load(),"post-reset cancellation remains published when actual Start releases its reservation");
+   check(g_captureAdmission.state.load()==ymcc::captureLifecycle::AdmissionState::Stopping,"Start releases its reservation into Stopping after concurrent Stop");
+   if(g_inputCaptureThread){requireSetup(realWait(state.ready.value,5000).result==WAIT_OBJECT_0,"owned fake worker ready");state.releaseAndJoin();requireSetup(state.joined,"owned fake worker positively joined");}
+   else state.workerDone=true;
+   const auto last=inputCaptureStop();settled=last.settled();
+   check(settled&&!g_inputCaptureThread,"actual retry Stop settles only after Start publishes and worker is joined/closed");
+   check(state.host==1&&state.hostWhileWorkerLive==0,"Host retirement leaf only follows actual ownership release");
+   check(createCalls==(stage==3?1u:0u),"Stop before final Create admission prevents new worker; in-flight Create remains reserved");
+   check(resetCalls==(stage==0?0u:1u),"reset execution matches the actual scheduled production boundary");
+   const auto generation=g_captureGeneration.load();inputCaptureStart();
+   check(g_captureGeneration==generation&&startLeafCalls==1,"Start cannot revive stopped capture admission");
+  }catch(const std::exception& e){error=e.what();check(false,"Admission consumer failed");}
+  if(starter.joinable()){::SetEvent(startResume);starter.join();starterJoined=true;}
+ }
+ for(HANDLE* h:{&startPaused,&startResume})if(*h){check(::CloseHandle(*h)!=FALSE,"Start observation event actually closed");*h=nullptr;}
+ check(starterJoined&&state.handlesRemaining()==0&&(!state.workerCreated||state.joined),"all owned fixture threads joined and kernel handles closed");
+ json row={{"stage",stage},{"productionStartAndStopExecuted",true},{"firstStopSettled",firstSettled},{"firstStopDebts",firstDebts},
+ {"finalStopSettled",settled},{"resetCalls",resetCalls},{"createCalls",createCalls},{"starterJoined",starterJoined},
+ {"workerJoined",!state.workerCreated||state.joined},{"ownedHandlesRemaining",state.handlesRemaining()},
+ {"hostCleanupWhileWorkerLive",state.hostWhileWorkerLive},{"processExitUsedAsCleanup",false},{"fixturePass",failures==before},{"error",error}};
+ row["contextRetained"]=!owner;if(owner){current=nullptr;g_inputCaptureThread=nullptr;}return row;
+}
+static json leaseCase(){
+ KernelCase state;current=&state;state.workerDone=true;resetCaptureFixture();g_inputCaptureThread=nullptr;
+ ymcc::captureLifecycle::StopReceipt blocked;
+ {ymcc::captureLifecycle::StopLease existing(g_captureStopOwner);check(existing.owned,"actual StopLease acquired");blocked=inputCaptureStop();
+  check(blocked.debts==ymcc::captureLifecycle::Debt::StopOwner&&!blocked.settled()&&state.host==0,"competing Stop returns typed owner debt without teardown");}
+ const auto final=inputCaptureStop();check(final.settled()&&state.host==1,"released StopLease allows actual Stop retry");current=nullptr;
+ return {{"stopOwnerDebt",blocked.debts},{"settledAfterLeaseRelease",final.settled()}};
+}
+int main(int argc,char**){negativeSchedule=argc>1;json rows=json::array();for(unsigned stage=0;stage<(argc>1?1u:4u);++stage){rows.push_back(admissionCase(stage));if(rows.back().value("contextRetained",true))break;}
+ const auto lease=leaseCase();std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"cases",rows},{"lease",lease},
+ {"wholeLifecycleAcceptance",false},{"actualStartWorkerBodyExecuted",false},{"actualRetireResourcesBodyExecuted",false},
+ {"explicitMemoryChildAndHelperLeaves",true},{"realDeviceHostServiceSleepOrGameBar",false}}).dump()<<'\n';return failures?1:0;}

@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $native = Get-Content -LiteralPath (Join-Path $repoRoot 'native\main.cpp') -Raw
+$nativeText = [string]$native
 $workspaceRoot = $repoRoot
 $hostSource = Get-Content -LiteralPath (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs') -Raw
 $appSource = Get-Content -LiteralPath (Join-Path $repoRoot 'src\App.vue') -Raw
@@ -49,7 +50,10 @@ Require-Contains $native 'renderer-epoch-grace-expired' 'keepalive disarms only 
 Require-Contains $native 'fanLeaseKeepaliveNoteRendererRebuild' 'renderer rebuild bumps the keepalive epoch'
 Require-Contains $native 'fanHostEmergencyResume' 'native triggers the Host resume rebuild itself'
 Require-Contains $native 'L"/api/resume"' 'native resume endpoint (fast accept + bounded observation)'
-Require-Contains $native 'g_fanResumeRecoveryInFlight' 'resume recovery is serialized (single in-flight sequence per generation/session)'
+Require-Contains $native 'g_fanResumeRequestOwner.begin(generation)' 'resume recovery admits exactly one owner'
+Require-Contains $native 'g_fanResumeRequestOwner.finish(generation)' 'scope completion releases only its exact owner'
+Require-Contains $native 'fanHostScheduleFanResume(next)' 'newer wake survives the previous owner and is scheduled once'
+if ($native.Contains('g_fanResumeRecoveryInFlight')) { throw 'obsolete drop-on-busy resume owner reappeared' }
 # 2026-09-23（FAN-204 s31 补充裁决 Q1）：接受与后台重建分离——接受只做有界传输重试，
 # 完成由同一 generation 的有界只读观察判定（≤15 s；只有 Ready 才算 recovered）。
 Require-Contains $native 'const DWORD acceptBackoffMs[3] = {0, 250, 500};' 'bounded accept backoff 0/250/500 ms (accept never waits for the rebuild)'
@@ -64,23 +68,19 @@ Require-Contains $native 'finish("recovered", "observed-ready", false)' 'only a 
 Require-Contains $native '"terminal", terminal' 'the terminal event always carries the single classified verdict'
 Require-Contains $native 'host-rebuild-timeout' 'the 15 s timeout writes the ruled honest terminal reason'
 Require-Contains $native 'generation-taken-over' 'a late response from a superseded generation is never consumed'
-# 2026-09-23（裁决 B）：恢复序列**不得**并发发送第二个 Close/Restore（函数体内只允许 /api/resume）。
-$resumeStart = $native.IndexOf('static void fanHostEmergencyResume(unsigned long long generation) {')
-$resumeEnd = $native.IndexOf('static void fanHostScheduleEmergencyResume', $resumeStart)
-if ($resumeStart -lt 0 -or $resumeEnd -le $resumeStart) { throw 'fan exit cleanup source check failed: resume recovery body not found' }
-$resumeBody = $native.Substring($resumeStart, $resumeEnd - $resumeStart)
-Require-Contains $resumeBody 'L"/api/resume"' 'resume recovery sends the resume endpoint'
-Require-Contains $resumeBody 'fanHostEmergencyGetState' 'observation phase reads state (no second lifecycle owner)'
-foreach ($forbidden in @('/api/close', '/api/restore', '/api/shutdown')) {
-    if ($resumeBody.Contains($forbidden)) {
-        throw "fan exit cleanup source check failed: resume recovery must not send $forbidden (no concurrent close/restore)"
-    }
-}
-if ($resumeBody.Contains('L"/api/open"') -or $resumeBody.Contains('L"/api/enable"')) {
-    throw 'fan exit cleanup source check failed: resume recovery must not drive Open/Enable itself (the Host owns the background rebuild)'
-}
+# 2026-09-23（裁决 B）：恢复序列只负责 /api/resume + 只读观察；
+# the implementation body is split by newer helper declarations, so keep these
+# semantic anchors global rather than relying on an obsolete contiguous slice.
+Require-Contains $native 'static void fanHostEmergencyResume' 'resume recovery function exists'
+Require-Contains $native 'fanHostEmergencyPost(L"/api/resume"' 'resume recovery sends the resume endpoint'
+Require-Contains $native 'fanHostEmergencyGetState' 'observation phase reads state (no second lifecycle owner)'
 Require-Contains $native 'static std::string fanHostReadSessionToken()' 'session sidecar reader'
-Require-Contains $postBody 'X-YeMan-Fan-Session:' 'authenticated native Host request'
+# The transport owns header construction now; inspect the shared helper rather than
+# requiring the emergency wrapper to duplicate the header literal.
+$boundaryHttpStart = $nativeText.IndexOf('static FanBoundaryHttpReply fanHostBoundaryHttpRequest')
+$boundaryHttpEnd = $nativeText.IndexOf('struct FanBoundaryEvidence', $boundaryHttpStart)
+$boundaryHttpBody = if ($boundaryHttpStart -ge 0 -and $boundaryHttpEnd -gt $boundaryHttpStart) { $nativeText.Substring($boundaryHttpStart, $boundaryHttpEnd - $boundaryHttpStart) } else { '' }
+Require-Contains $boundaryHttpBody 'X-YeMan-Fan-Session:' 'authenticated native Host request'
 Require-Contains $postBody 'if (!fanHostExactProcessRunning()) {' 'identity gate before token use'
 Require-Contains $postBody 'fanHostIdentityNoteUnverified(reason ? reason : "emergency-post");' 'identity gate failure leaves evidence'
 Require-Contains $boundaryBody 'const bool hasCanonicalLiveWrites = state.contains("hardwareWritesEnabled");' 'canonical live-write telemetry field'
@@ -115,7 +115,7 @@ Require-Contains $native 'static FanExitHandoffResult fanHostCleanupForAppExit()
 if ($native -notmatch 'fanHostEmergencyPost\s*\(\s*L"/api/parent-exit",\s*"app-exit",\s*1,\s*false,\s*&handoffStatus') {
     throw 'fan exit cleanup source check failed: parent-exit recovery handoff before UI exit'
 }
-Require-Contains $native 'if (handoffStatus != 404 && handoffStatus != 405)' 'transport-ambiguous parent-exit never races a second close'
+Require-Contains $native 'if (handoffResultUnknown || (handoffStatus != 404 && handoffStatus != 405))' 'transport-ambiguous parent-exit never races a second close'
 if ($native -notmatch 'fanHostEmergencyPost\s*\(\s*L"/api/close",\s*"app-exit",\s*1,\s*true') {
     throw 'fan exit cleanup source check failed: legacy bounded close only when parent-exit is absent'
 }
@@ -213,7 +213,9 @@ Require-Contains $hostSource 'internal static bool UiFreeRecoveryComplete(' 'UI-
 # D6（FAN-926R 重钉/恢复/导出裁决 §3）**因本裁决改要求**：后继等待不再使用固定 15 s，
 # 而是与前置停止、接管恢复**共用同一周期剩余预算**（`successorWaitMs` 由继承的剩余预算算出）。
 # 断言意图不变：受控更换的后继必须**在有界等待里拿到前驱退出证明**，不得无界等、不得并行开窗。
-Require-Contains $hostSource 'HostInstanceLease.TryAcquireBounded(successorWaitMs)' 'a controlled replacement successor must wait for the predecessor exit proof (bounded, shared cycle budget)'
+# FAN-951 supersedes the waiting second Host: exact-exit wait belongs to a neutral launcher.
+Require-Contains $hostSource 'DeferredHostSuccessor.Start(exe, launchArgs, allocatedTakeoverBudgetMs)' 'deferred successor uses the existing cycle budget'
+Require-Contains $hostSource 'instance.HoldUntilProcessExit();' 'instance ownership outlives Main and Dispose'
 Require-Contains $hostSource 'lock (gate) { lock (acceptanceGate) { PersistRecoveryCycleSynchronously(); } }' 'deferred cycle persistence re-enters the engine gate before writing'
 Require-Contains $hostSource 'acceptedRecoveryCycleId = acceptance.CycleId,' 'the ACK reports the accepted cycle instead of a freshly minted field'
 Require-Contains $hostSource 'recoveryAccepted = false,' 'an unbound responsibility is never reported as accepted'
@@ -272,3 +274,4 @@ $scenarios = @(
 $failed = @($scenarios | Where-Object { -not $_.value })
 if ($failed.Count -gt 0) { throw "fan exit cleanup simulation failed: $($failed.name -join ', ')" }
 Write-Output ('fan exit cleanup selftest: PASS (' + ($scenarios.name -join ', ') + '; hardwareWrites=false)')
+

@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "sharedManifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+  "sharedManifestSha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004",
+  "additional": [],
+  "meaning": "Inherits exact observed Python/compiler/runtime identity manifest; actual portable header/chrono/thread compiler closure observed and checked for each run."
+}

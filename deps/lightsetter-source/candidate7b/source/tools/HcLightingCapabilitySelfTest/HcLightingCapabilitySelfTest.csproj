@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors><EnableDefaultCompileItems>false</EnableDefaultCompileItems><StartupObject>LightingCatalogHarness</StartupObject><LightingProgramSource Condition="'$(LightingProgramSource)' == ''">$(MSBuildThisFileDirectory)../../FanLab/LightSetter/Program.cs</LightingProgramSource></PropertyGroup>
+ <ItemGroup><Compile Include="Program.cs"/><Compile Include="$(LightingProgramSource)" Link="ProductionProgram.cs"/>
+ <Compile Include="../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs"/>
+ <Compile Include="../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs"/>
+ <Compile Include="../../FanLab/LightSetter/OneXLightingSession.cs" Link="OneXLightingSession.cs"/>
+ <Compile Include="../../FanLab/LightSetter/LightingAssemblyPins.cs" Link="LightingAssemblyPins.cs"/>
+ <Compile Include="../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs"/><Compile Include="../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs"/><Compile Include="../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs"/>
+ <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs"/>
+ <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs"/>
+ <Compile Include="../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs"/>
+ <Compile Include="../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs"/>
+ </ItemGroup></Project>

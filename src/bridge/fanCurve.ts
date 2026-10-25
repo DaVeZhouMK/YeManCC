@@ -57,7 +57,7 @@ export function normalizeFanNodes(
 export function validateFanNodes(nodes: readonly FanNode[]): boolean {
   if (nodes.length !== 4 || nodes[0].tempC !== 0) return false;
   return nodes.every((node, index) => {
-    if (![node.tempC, node.dutyPercent].every(Number.isFinite)) return false;
+    if (!Number.isFinite(node.tempC) || !Number.isFinite(node.dutyPercent)) return false;
     if (node.tempC < 0 || node.tempC > 100 || (index === 2 && node.tempC > 85) ||
         node.dutyPercent < 0 || node.dutyPercent > 100) return false;
     if (index === 0) return true;

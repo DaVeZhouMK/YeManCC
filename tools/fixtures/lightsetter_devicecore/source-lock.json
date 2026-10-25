@@ -1,0 +1,26 @@
+{
+  "schema": 1,
+  "baselineId": "HC-BINARY-BATCH12-20260831",
+  "pinnedSource": "deps/handheldcompanion-runtime/source",
+  "files": {
+    "Devices/OneXAOKZOE.cs": "DA6FF4ABE3BDF6D2879F6681921867EF10B62759D4DADC2EB0B18D12D7B39B3B",
+    "Devices/IDevice.cs": "FBAED1DFD329E3328376488B8EC70C3A7FDCF97D70DCB37F1525EE33AA169C20",
+    "Devices/OneXPlayer/OneXPlayerX1Mini.cs": "2BCC0688AC0CB65091F29432A2351E00D724259778FFB3891AC9CA82A05852C0"
+  },
+  "functions": [
+    "BuildV1Command",
+    "SendV1Brightness",
+    "SendV1SolidColor",
+    "SendV1Rainbow",
+    "WithReportID",
+    "SetLedColor",
+    "SetLedBrightness"
+  ],
+  "changes": [
+    "HidDevice alias to terminal interface",
+    "Color alias to BCL RGB value",
+    "minimal base class and capability/transport constructor scaffolding"
+  ],
+  "generatedSha256": "e4904be4ee0cf0a9ba2d32f73a5bfaa7a4b6413d2fdcaaf97439312b18e031c3",
+  "physicalDeviceVerified": false
+}

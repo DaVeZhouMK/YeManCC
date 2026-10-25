@@ -1,0 +1,28 @@
+// Copied receipt controls, bound to one actual positive/FAIL run by SHA.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import test from 'node:test';
+import {inspect,validate,originalContract,ORIGINAL_ROW_IDS} from './typed-legacy-async-request-regression.mjs';
+const file=process.env.YMCC_TYPED_ASYNC_RECEIPT,digest=process.env.YMCC_TYPED_ASYNC_RECEIPT_SHA256;assert(file&&/^[a-f0-9]{64}$/.test(digest??''),'ACTUAL_RECEIPT_IDENTITY_REQUIRED');const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');assert.equal(sha(file),digest);const raw=JSON.parse(fs.readFileSync(file,'utf8')),pins=JSON.parse(fs.readFileSync(path.join(path.dirname(file),'SOURCE-PINS.json'),'utf8')),repo=path.resolve(import.meta.dirname,'../../../..'),legacy='tools/decky_binding_cancel_selftest.cpp';assert.equal(sha(path.join(repo,legacy)),pins.find(r=>r.path===legacy)?.sha256);originalContract(fs.readFileSync(path.join(repo,legacy),'utf8'));
+const reject=(label,mutate)=>test(label,()=>{const copy=structuredClone(raw);mutate(copy);assert.throws(()=>inspect(copy));});
+test('actual verdict is derived from all original conditions, not process exit alone',()=>{const summary=inspect(raw);assert.equal(summary.typedRows,6);if(raw.passed)assert.equal(validate(raw).typedFailed,0);else{assert(summary.typedFailed>0||summary.calibrationPassed!==true||summary.strictParentHandlesEqual!==true||summary.strictParentThreadsEqual!==true,'FAIL must retain an actual failed requirement');assert.throws(()=>validate(raw));}});
+reject('missing original condition cannot pass',r=>r.originalTypedRows[0].originalAssertions.pop());
+reject('changed original ordering cannot pass',r=>r.originalTypedRows[0].originalAssertions.reverse());
+reject('original negative verdict cannot be promoted by positive process outcome',r=>{r.originalTypedRows[0].passed=true;r.originalTypedRows[0].originalPredicate=true;r.originalTypedRows[0].originalAssertions[7].passed=false;});
+reject('forced child death does not prove callback owner release',r=>{r.originalTypedRows[0].passed=true;r.originalTypedRows[0].originalPredicate=true;r.originalTypedRows[0].originalAssertions.forEach(a=>a.passed=true);r.originalTypedRows[0].afterStopAsync.callbackOwnersReleasedObserved=false;});
+reject('callback return reason cannot be synthesized as success',r=>{r.originalTypedRows[0].passed=true;r.originalTypedRows[0].originalPredicate=true;r.originalTypedRows[0].originalAssertions.forEach(a=>a.passed=true);r.originalTypedRows[0].afterStopAsync.reason=null;});
+reject('native20s is strict',r=>r.elapsedMs=20000);
+reject('callback release1500ms contract cannot expand',r=>r.originalTypedRows[0].callbackCloseDeadlineMs=1600);
+reject('no real AsyncRequest weak owner is rejected',r=>r.originalTypedRows[0].activeAsync.weakCount=0);
+reject('no real owned Client pending IO is rejected',r=>r.originalTypedRows[0].beforeOff.pendingIo=0);
+reject('owner resources cannot be hidden by a zero-process claim',r=>r.originalTypedRows[0].atExit.handles=1);
+reject('fatal reason must be retained before late explicit shutdown',r=>r.originalTypedRows[2].faultBeforeLate='');
+reject('late callback recreation is rejected',r=>r.originalTypedRows[0].lateCreatesAfter++);
+reject('old CEF may not be killed with owned binding child',r=>r.originalTypedRows[0].cefUnaffected=false);
+reject('falsely claimed parent handle equality is rejected even on an original FAIL receipt',r=>r.strictParentHandlesEqual=!(r.parentHandlesBefore===r.parentHandlesAfter));
+reject('parent thread equality stays strict',r=>r.parentThreadsAfter++);
+reject('extra native case cannot match a target-error mask',r=>r.originalTypedRows.push({id:'unexpected',passed:false}));
+test('both direct current AsyncRequest consumers must pass',()=>{for(let i=0;i<2;++i){const copy=structuredClone(raw);copy.directAsyncRequestConsumers[i].passed=false;assert.throws(()=>inspect(copy));}});
+test('all four actual negative controls must pass',()=>{for(let i=0;i<4;++i){const copy=structuredClone(raw);copy.negativeControls[i].passed=false;assert.throws(()=>inspect(copy));}});
+reject('retained callback negative requires actual original closed=false',r=>{r.negativeControls.find(x=>x.retentionNegative).originalClosedPredicateWhileRetained=true;});
+reject('actual new request must survive old canceled-token callbacks',r=>{r.negativeControls.find(x=>x.id.includes('old-cancel')).lateOldCallbacksDidNotAffectActualNewRequest=false;});
+reject('real HANDLE_CLOSING callbacks are required',r=>r.directAsyncRequestConsumers[0].atExit.handleClosingCallbacks=0);
+reject('legacy branch cannot be classified as typed',r=>r.productCallbackMode='legacy');

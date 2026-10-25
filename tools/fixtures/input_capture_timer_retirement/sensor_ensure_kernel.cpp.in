@@ -1,0 +1,65 @@
+// Real private Win32 HANDLE leaves. Only injected failures are substituted;
+// all success paths call the actual kernel APIs and independently count joins/closes.
+namespace port {
+struct Record {HANDLE handle=nullptr,quit=nullptr;bool thread=false,owned=true,joined=false;};
+static std::vector<std::unique_ptr<Record>> records;
+static thread_local Record* current=nullptr;
+static unsigned eventAttempts=0,threadAttempts=0,eventsCreated=0,eventsClosed=0,threadsCreated=0,threadsClosed=0,joins=0,auxCreated=0,auxClosed=0;
+static unsigned stopCommands=0,startCommands=0,shutdownCommands=0,orphanOwners=0;
+static std::atomic<unsigned> workerTimeouts{0};
+static bool failEvent=false,failThread=false,failClose=false,overrideWait=false;
+static DWORD waitValue=WAIT_FAILED;
+static Record* find(HANDLE h){for(auto& r:records)if(r->handle==h&&r->owned)return r.get();return nullptr;}
+static DWORD WINAPI trampoline(LPVOID value){current=static_cast<Record*>(value);return inputCaptureSensorThreadProc(nullptr);}
+static HANDLE event(LPSECURITY_ATTRIBUTES a,BOOL manual,BOOL initial,LPCWSTR name){
+    ++eventAttempts;if(failEvent){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return nullptr;}
+    auto r=std::make_unique<Record>();r->handle=::CreateEventW(a,manual,initial,name);
+    if(!r->handle)return nullptr;auto h=r->handle;++eventsCreated;records.push_back(std::move(r));return h;
+}
+static HANDLE thread(LPSECURITY_ATTRIBUTES a,SIZE_T stack,LPTHREAD_START_ROUTINE proc,LPVOID arg,DWORD flags,LPDWORD id){
+    ++threadAttempts;if(failThread){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return nullptr;}
+    check(proc==inputCaptureSensorThreadProc&&arg==nullptr&&flags==0,"actual Ensure uses explicitly substituted no-device threadproc");
+    auto r=std::make_unique<Record>();r->thread=true;r->quit=::CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    if(!r->quit)return nullptr;++auxCreated;r->handle=::CreateThread(a,stack,trampoline,r.get(),flags,id);
+    if(!r->handle){check(::CloseHandle(r->quit)!=FALSE,"failed kernel create closes private control event");++auxClosed;return nullptr;}
+    auto h=r->handle;++threadsCreated;records.push_back(std::move(r));return h;
+}
+static void joined(Record* r){if(!r->joined){r->joined=true;++joins;}}
+static DWORD wait(HANDLE h,DWORD ms){
+    auto r=find(h);if(!r){SetLastError(ERROR_INVALID_HANDLE);return WAIT_FAILED;}
+    if(r->thread&&overrideWait){SetLastError(ERROR_INVALID_HANDLE);return waitValue;}
+    const auto result=::WaitForSingleObject(h,ms);if(r->thread&&result==WAIT_OBJECT_0)joined(r);return result;
+}
+static BOOL close(HANDLE h){
+    auto r=find(h);if(!r)return FALSE;if(r->thread&&failClose){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+    if(r->thread)check(r->joined&&::WaitForSingleObject(h,0)==WAIT_OBJECT_0,"kernel thread terminal and independently joined before close");
+    const auto ok=::CloseHandle(h);if(!ok)return FALSE;r->owned=false;
+    if(r->thread){++threadsClosed;check(::CloseHandle(r->quit)!=FALSE,"private worker control event actually closed");++auxClosed;r->quit=nullptr;}else ++eventsClosed;
+    return TRUE;
+}
+static BOOL signal(HANDLE h){return ::SetEvent(h);}
+static void finish(HANDLE h){auto r=find(h);if(!r||!r->thread)return;check(::SetEvent(r->quit)!=FALSE,"controller releases only owned private worker");const auto result=::WaitForSingleObject(h,2500);check(result==WAIT_OBJECT_0,"actual kernel helper terminal join before exit");if(result==WAIT_OBJECT_0)joined(r);}
+static void cleanupOrphans(){for(auto& r:records)if(r->owned&&r->thread){++orphanOwners;finish(r->handle);close(r->handle);}}
+static unsigned owned(){unsigned n=0;for(auto& r:records)n+=r->owned;return n;}
+}
+static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept {
+    // Explicit replacement leaf: no COM apartment, SensorManager, sensor, device,
+    // product DLL, Host, service, driver, network, timer or power operation.
+    const HANDLE waits[]={port::current->quit,g_sensorThreadWake};
+    for(;;){
+        const auto state=::WaitForMultipleObjects(2,waits,FALSE,4000);
+        if(state==WAIT_OBJECT_0)break;
+        if(state!=WAIT_OBJECT_0+1){++port::workerTimeouts;break;}
+        bool shutdown=false;
+        while(auto ticket=g_sensorThreadMailbox.take()){
+            const auto req=ticket->request;
+            if(req==SensorThreadRequest::Start)++port::startCommands;
+            if(req==SensorThreadRequest::Stop)++port::stopCommands;
+            if(req==SensorThreadRequest::Shutdown){++port::shutdownCommands;shutdown=true;}
+            g_sensorThreadMailbox.complete(ticket);
+            if(shutdown)break;
+        }
+        if(shutdown)break;
+    }
+    g_sensorThreadMailbox.close();return 0;
+}

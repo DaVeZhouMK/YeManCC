@@ -1,0 +1,57 @@
+// Finite rejection controls consume only an explicit hash-bound actual receipt.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import test from 'node:test';
+import {originalAssertions,validate,CASE_IDS} from './typed-legacy-health-close-regression.mjs';
+const rawPath=process.env.YMCC_TYPED_HEALTH_CLOSE_RECEIPT,digest=process.env.YMCC_TYPED_HEALTH_CLOSE_RECEIPT_SHA256;assert(rawPath&&/^[0-9a-f]{64}$/.test(digest??''),'ACTUAL_RECEIPT_IDENTITY_REQUIRED');const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');assert.equal(sha(rawPath),digest);const raw=JSON.parse(fs.readFileSync(rawPath,'utf8')),pins=JSON.parse(fs.readFileSync(path.join(path.dirname(rawPath),'SOURCE-PINS.json'),'utf8')),repo=path.resolve(import.meta.dirname,'../../../..'),legacy='tools/decky_sidebar_health_close_selftest.cpp';assert.equal(sha(path.join(repo,legacy)),pins.find(r=>r.path===legacy)?.sha256);const expected=originalAssertions(fs.readFileSync(path.join(repo,legacy),'utf8'));
+const rejects=(label,mutate)=>test(label,()=>{const copy=structuredClone(raw);mutate(copy);assert.throws(()=>validate(copy,expected));});
+test('actual11 including the unnamed original image equality assertion',()=>{assert.equal(expected.length,11);assert.equal(expected[3].originalUnnamedCountedAssertion,true);assert.equal(validate(raw,expected).passedOriginalAssertions,11);});
+test('each of11 original assertions is required',()=>{for(let i=0;i<11;++i){const copy=structuredClone(raw);copy.assertions[i].passed=false;assert.throws(()=>validate(copy,expected));}});
+rejects('missing original check is rejected',r=>r.assertions.splice(3,1));
+rejects('changed original sequence is rejected',r=>r.assertions.reverse());
+test('all additional consumer and negative cases are required',()=>{for(let i=0;i<CASE_IDS.length;++i){const copy=structuredClone(raw);copy.cases[i].passed=false;assert.throws(()=>validate(copy,expected));}});
+rejects('extra unexpected error remains a failure',r=>r.cases.push({id:'unexpected',passed:false}));
+rejects('raw error cannot be hidden by positive counts',r=>r.error='unexpected');
+rejects('native original15s is strict',r=>r.elapsedMs=15000);
+rejects('original termination1000ms is strict',r=>r.assertions[5].measurements.offMs=1000);
+rejects('parent handle equality is strict',r=>r.parentHandlesAfter++);
+rejects('parent thread equality is strict',r=>r.parentThreadsAfter++);
+rejects('nonzero pending IO cannot be hidden',r=>r.atExit.client.pendingIo=1);
+rejects('nonzero owned Job cannot be hidden',r=>r.jobsAtExit.push({activeProcesses:1}));
+rejects('missing real typed operation cannot pass',r=>r.cases[0].measurements.client.processId=0);
+rejects('unowned loader process cannot pass',r=>r.cases[0].measurements.jobs=[]);
+rejects('false ABI-only terminal is rejected',r=>r.assertions[4].measurements.event.bootstrapStage='synthetic');
+rejects('unconsumed CDP negative cannot pass',r=>r.contextExit.server.barriers=0);
+rejects('marker without actual readback cannot pass',r=>r.contextExit.server.readbacks=0);
+rejects('missing original teardown consumer cannot pass',r=>r.contextExit.server.teardowns=0);
+rejects('missing complete bootstrap/watch cannot pass',r=>r.contextExit.server.bootstraps=0);
+rejects('CDP source failure cannot pass',r=>r.contextExit.server.errors.push('unexpected'));
+rejects('missing actual peer reset control cannot pass',r=>delete r.contextExit.server.peerDisconnects);
+rejects('unrelated socket errors cannot stand in for actual reset',r=>r.contextExit.server.peerDisconnects=[{code:10060,runId:'',serial:0}]);
+rejects('normal runtime disconnect cannot stand in for pre-reply reset',r=>r.contextExit.server.peerDisconnects=[{code:10054,runId:'foreign',serial:1}]);
+rejects('context not naturally exited cannot pass',r=>r.contextExit.exitCode=82);
+rejects('registry identity boundary cannot be silently promoted',r=>r.identityBoundary='full installed acceptance');
+rejects('private storage scope cannot be removed',r=>r.settingsBoundary='installed settings');
+rejects('legacy callback branch cannot pass typed evidence',r=>r.productCallbackMode='legacy');
+rejects('unproven UI cold initialization cannot waive resources',r=>delete r.coldWindowCalibration);
+rejects('unexplained UI cold retained handle cannot be hidden',r=>r.coldWindowCalibration[0].afterHandles++);
+
+rejects('actual rebind stress cannot retain parent handles',r=>r.actualWorkerStress.afterHandles++);
+rejects('actual rebind stress cannot omit a cycle',r=>r.actualWorkerStress.rows.pop());
+rejects('actual bootstrap reply is required in each rebind',r=>r.actualWorkerStress.rows[3].actualBootstrapReply=false);
+rejects('old owned worker exit is required in each rebind',r=>r.actualWorkerStress.rows[5].oldOwnedWorkerExited=false);
+rejects('rebind cannot replace the live owned Loader',r=>r.actualWorkerStress.rows[7].afterLoader++);
+rejects('rebind stress cannot waive direct AsyncRequest acceptance',r=>r.actualWorkerStress.formalAsyncGateWaived=true);
+
+rejects('retained frontend fatal handling must be proved',r=>r.retainedFrontendHealth.passed=false);
+rejects('retained frontend health cannot omit a case',r=>r.retainedFrontendHealth.cases.pop());
+rejects('retained frontend cannot launch an owned Loader',r=>r.retainedFrontendHealth.ordinaryLoaderStarted=true);
+rejects('retained foreign context protection is required',r=>r.retainedFrontendHealth.cases[2].passed=false);
+rejects('retained normal fatal off remains below1500ms',r=>r.retainedFrontendHealth.cases[4].detail.offMs=1500);
+rejects('retained old-run rejection is required',r=>r.retainedFrontendHealth.cases[6].passed=false);
+
+rejects('queued fatal must survive a real1700ms owner delay',r=>r.retainedFrontendHealth.cases[3].detail.held.queuedWithoutUiPumpMs=1699);
+rejects('queued fatal forbids transport repair',r=>r.retainedFrontendHealth.cases[3].detail.held.transportRejected=false);
+rejects('queued fatal forbids committed Ready rebind',r=>r.retainedFrontendHealth.cases[3].detail.held.resumeRejected=false);
+rejects('queued fatal retains its actual broker run',r=>r.retainedFrontendHealth.cases[3].detail.held.runAfter='f'.repeat(32));
+rejects('queued fatal cannot add a binding plan',r=>r.retainedFrontendHealth.cases[3].detail.held.plansAfter++);
+rejects('terminal owned binding must exit before owner dispatch',r=>r.retainedFrontendHealth.cases[3].detail.held.oldWorkerExitedBeforeOwner=false);
+rejects('new actual session must invalidate queued fatal',r=>r.retainedFrontendHealth.cases[8].passed=false);

@@ -1,0 +1,205 @@
+{
+  "scope": "Synthetic offline negative controls; no physical device observation. Every case expects zero exact joins.",
+  "cases": [
+    {
+      "name": "wrong-host",
+      "side": "host",
+      "changes": {
+        "request.hostInstanceId": "other-host"
+      }
+    },
+    {
+      "name": "wrong-run",
+      "side": "host",
+      "changes": {
+        "request.runId": "other-run"
+      }
+    },
+    {
+      "name": "wrong-epoch",
+      "side": "host",
+      "changes": {
+        "request.epoch": 4
+      }
+    },
+    {
+      "name": "wrong-protocol-power",
+      "side": "host",
+      "changes": {
+        "request.powerGeneration": 2
+      }
+    },
+    {
+      "name": "wrong-command-sequence",
+      "side": "host",
+      "changes": {
+        "request.commandSequence": 9
+      }
+    },
+    {
+      "name": "wrong-wire-sample",
+      "side": "host",
+      "changes": {
+        "wireSampleSequence": 8,
+        "canonical.sampleSequence": 8,
+        "request.sampleSequence": 8
+      }
+    },
+    {
+      "name": "wrong-wire-tick-same-bucket",
+      "side": "host",
+      "changes": {
+        "wireMonotonicTick": 101002,
+        "canonical.monotonicTick": 101002
+      }
+    },
+    {
+      "name": "wrong-native-wire-sample",
+      "side": "native",
+      "changes": {
+        "wireSampleSequence": 8
+      }
+    },
+    {
+      "name": "wrong-native-request-sample",
+      "side": "native",
+      "changes": {
+        "request.sampleSequence": 6
+      }
+    },
+    {
+      "name": "native-clock-unknown",
+      "side": "native",
+      "changes": {
+        "wireClockKnown": false
+      }
+    },
+    {
+      "name": "host-clock-unknown",
+      "side": "host",
+      "changes": {
+        "wireTickKnown": false
+      }
+    },
+    {
+      "name": "bad-native-bucket",
+      "side": "native",
+      "changes": {
+        "sampleBucket": 100
+      }
+    },
+    {
+      "name": "bad-host-bucket",
+      "side": "host",
+      "changes": {
+        "sampleBucket": 100
+      }
+    },
+    {
+      "name": "not-attempted",
+      "side": "native",
+      "changes": {
+        "submitAttempted": false
+      }
+    },
+    {
+      "name": "host-heartbeat",
+      "side": "host",
+      "changes": {
+        "selection": "window-heartbeat",
+        "joinEligible": true
+      }
+    },
+    {
+      "name": "host-truncated-binding",
+      "side": "host",
+      "changes": {
+        "request.bindingTextTruncated": true
+      }
+    },
+    {
+      "name": "missing-actual-protocol-power",
+      "side": "native",
+      "remove": [
+        "protocolPowerGeneration"
+      ]
+    },
+    {
+      "name": "missing-host-wire-sample",
+      "side": "host",
+      "remove": [
+        "wireSampleSequence"
+      ]
+    },
+    {
+      "name": "missing-host-canonical-sample",
+      "side": "host",
+      "remove": [
+        "canonical.sampleSequence"
+      ]
+    },
+    {
+      "name": "missing-native-tuple-host",
+      "side": "native",
+      "remove": [
+        "request.hostInstanceId"
+      ]
+    },
+    {
+      "name": "no-wiretime-fallback-to-observer",
+      "side": "native",
+      "remove": [
+        "wireMonotonicTick"
+      ]
+    },
+    {
+      "name": "no-host-wiretime-fallback-to-clock",
+      "side": "host",
+      "remove": [
+        "wireMonotonicTick"
+      ]
+    },
+    {
+      "name": "non-request-sequence-context",
+      "side": "host",
+      "changes": {
+        "request.commandSequenceSource": "last-accepted-command-context"
+      }
+    },
+    {
+      "name": "host-request-sample-conflict",
+      "side": "host",
+      "changes": {
+        "request.sampleSequence": 6
+      }
+    },
+    {
+      "name": "persona-context-conflict",
+      "side": "host",
+      "changes": {
+        "request.persona": "xbox-elite-v2"
+      }
+    },
+    {
+      "name": "profile-identity-conflict",
+      "side": "host",
+      "changes": {
+        "request.profileIdentity": "other-profile"
+      }
+    },
+    {
+      "name": "missing-native-profile",
+      "side": "native",
+      "remove": [
+        "request.profileIdentity"
+      ]
+    },
+    {
+      "name": "missing-host-persona",
+      "side": "host",
+      "remove": [
+        "request.persona"
+      ]
+    }
+  ]
+}

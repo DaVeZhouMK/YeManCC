@@ -15,6 +15,8 @@ $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
 $D = Get-SimDefaults
+$testPowerShell = Join-Path $PSHOME 'pwsh.exe'
+if(-not (Test-Path -LiteralPath $testPowerShell -PathType Leaf)){throw 'This test suite requires the current PowerShell 7 runtime'}
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'api-contract' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -235,7 +237,7 @@ $peOk = $false; $peDetail = 'not-run'
 $pPE = 8899
   $sandPE = Join-Path $OutDir 'sandbox-ac14'; New-Item -ItemType Directory -Force -Path $sandPE | Out-Null
   $tfPE = Join-Path $sandPE 'ac14.session'; New-SimFanSessionToken $tfPE | Out-Null
-  $dummy = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru -WindowStyle Hidden
+  $dummy = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoProfile', '-Command', 'Start-Sleep -Seconds 300') -PassThru -WindowStyle Hidden
   $prPE = Start-Process -FilePath $D.hostExe -ArgumentList @('--port', "$pPE", '--protocol-version', '2', '--session-token-file', $tfPE, '--mock-handshake', '--parent-pid', "$($dummy.Id)") -PassThru -WindowStyle Hidden
   $rPE = Wait-SimHostReady -Port $pPE -TokenPath $tfPE -TimeoutSec 60
   # 先把探针宿主推进到"不可安全收尾"的故障态（与掌机上 FaultLocked 时父进程退出同构），
@@ -500,7 +502,9 @@ Check-C 'AC15c-neg' $fx2.name $fx2.ok $fx2.detail
 #   ① 重建窗内每次 heartbeat 都在预算内（<2 s）拿到**可判定 409**，零传输失败、零非 409；
 #   ② 结构化字段齐全：code=POWER_RESUMING、details.controlAccepting=false、details.retryAfterMs>0、
 #      details.generation>=0、details.resumePhase=Resuming、details.gateWaited=false、
-#      details.hcCalled=false、details.waitedForGateMs<50（真的没等门）；
+#      details.hcCalled=false、0<=details.waitedForGateMs<50（只计实际 gate 获取）；
+#      details.fastRejectElapsedMs 含全部同步诊断且 <2 s，details.diagnosticWriteMs 如实记录诊断耗时。
+#      HTTP 探针仍使用原 1800 ms 超时与 <2 s 判据；不能用 gate 的零等待掩盖慢诊断/慢响应。
 #   ③ **不延长旧 lease**：details.leaseRenewed=false 且 details.leaseExtensionMs=0；
 #   ④ ≤15.5 s 收敛到 Ready、持锁期不报 Ready、窗内至少 3 次 Resuming 心跳（窗口真的被覆盖）。
 # 两个负例（必须让上面某条断言失败，证明夹具非空转）：
@@ -510,7 +514,7 @@ Check-C 'AC15c-neg' $fx2.name $fx2.ok $fx2.detail
 #            AcquireControl 冲突并卡死宿主（另一种更危险的缺陷形态），不属本夹具断言范围。
 function Invoke-Ac15dFixture {
   param([string]$Mode)
-  $dOk = $false; $dName = "AC15d-$Mode"; $dDetail = 'not-run'
+  $dOk = $false; $dName = "AC15d-$Mode"; $dDetail = 'not-run'; $jObjD = $null
   # 三种模式**各用独立端口**：同一个端口连续三次起停会撞上上一轮的 LISTEN/TIME_WAIT，
   # 使后一轮的宿主绑定失败并立刻退出（2026-09-24 实测 AC15d-legacy 因此报 "host not ready"）。
   $pD = switch ($Mode) { 'legacy' { 8891 } 'renew' { 8892 } default { 8897 } }
@@ -556,6 +560,8 @@ function Invoke-Ac15dFixture {
           hasDetails = ($null -ne $det)
           gateWaited = $(if ($det) { $det.gateWaited } else { $null })
           waitedForGateMs = $(if ($det) { $det.waitedForGateMs } else { $null })
+          fastRejectElapsedMs = $(if ($det) { $det.fastRejectElapsedMs } else { $null })
+          diagnosticWriteMs = $(if ($det) { $det.diagnosticWriteMs } else { $null })
           hcCalled = $(if ($det) { $det.hcCalled } else { $null })
           controlAccepting = $(if ($det) { $det.controlAccepting } else { $null })
           retryAfterMs = $(if ($det) { $det.retryAfterMs } else { $null })
@@ -583,7 +589,12 @@ function Invoke-Ac15dFixture {
     $structD = @($inWinD | Where-Object {
         $_.hasDetails -and "$($_.code)" -eq 'POWER_RESUMING' -and $_.gateWaited -eq $false -and $_.hcCalled -eq $false -and
         $_.controlAccepting -eq $false -and "$($_.resumePhase)" -eq 'Resuming' -and [int]$_.retryAfterMs -gt 0 -and
-        [int]$_.generation -ge 0 -and [int]$_.waitedForGateMs -lt 50 -and "$($_.hbState)" -eq 'Resuming'
+        [int]$_.generation -ge 0 -and $null -ne $_.waitedForGateMs -and
+        [double]$_.waitedForGateMs -ge 0 -and [double]$_.waitedForGateMs -lt 50 -and
+        $null -ne $_.fastRejectElapsedMs -and [double]$_.fastRejectElapsedMs -ge [double]$_.waitedForGateMs -and
+        [double]$_.fastRejectElapsedMs -lt 2000 -and $null -ne $_.diagnosticWriteMs -and
+        [double]$_.diagnosticWriteMs -ge 0 -and [double]$_.diagnosticWriteMs -le [double]$_.fastRejectElapsedMs -and
+        "$($_.hbState)" -eq 'Resuming'
       }).Count
     $noRenewD = @($inWinD | Where-Object { $_.leaseRenewed -eq $false -and [int]$_.leaseExtensionMs -eq 0 }).Count
     $accFastD = ($accD.status -eq 200) -and ($accD.json.resumeAccepted -eq $true) -and ($accMsD -lt 2000)
@@ -605,14 +616,26 @@ function Invoke-Ac15dFixture {
     $dDetail = ("mode={0} acceptMs={1} acceptDecidable={2} | heartbeats={3} inWindow={4} undecidable={5} badStatus={6} slow={7} maxHbMs={8} | structOk={9} notRenewed={10} staleAfterReady={11} resumingHb={12} readyDuringHold={13} | windowSec={14:F1} ready={15} | fastOk={16} converges={17}" -f
       $Mode, $accMsD, $accDecidableD, $hbsD.Count, $inWinD.Count, $undD, $badStD, $slowD, $maxHbMsD, $structD, $noRenewD, $staleAfterReadyOk, $resumingHbD, $readyDuringHoldD, $windowSecD, $readySeenD, $fastOkD, $convergesD)
     $jObjD = [ordered]@{ mode = $Mode; ok = $dOk; name = $dName; detail = $dDetail; acceptMs = $accMsD; heartbeats = @($hbsD); inWindow = $inWinD.Count; undecidable = $undD; badStatus = $badStD; slow = $slowD; maxHbMs = $maxHbMsD; structOk = $structD; notRenewed = $noRenewD; staleAfterReadyOk = $staleAfterReadyOk; staleAfterReady = $staleAfterReady; windowSec = $windowSecD; ready = $readySeenD; fastOk = $fastOkD; converges = $convergesD }
-    [IO.File]::WriteAllText((Join-Path $OutDir ("ac15d-{0}.json" -f $Mode)), ($jObjD | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
-    if ($env:YMCC_AC15D_JSON) { [IO.File]::WriteAllText($env:YMCC_AC15D_JSON, ($jObjD | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false))) }
+
   } else {
     $dDetail = ("heartbeat-race sandbox host not ready (exited={0})" -f $prD.HasExited)
   }
-  if ($null -ne $prD -and -not $prD.HasExited) {
-    $null = Send-SimFanApi -Method POST -Path '/api/shutdown' -Base $baseD -Token $tokD -Body '{}' -TimeoutMs 5000
-    Stop-Process -Id $prD.Id -Force -ErrorAction SilentlyContinue
+  # A forced stop is not a passing cleanup. Record the natural process exit before publishing the verdict.
+  $naturalExitD = $false; $exitCodeD = $null
+  if ($null -ne $prD) {
+    if (-not $prD.HasExited) {
+      $null = Send-SimFanApi -Method POST -Path '/api/shutdown' -Base $baseD -Token $tokD -Body '{}' -TimeoutMs 5000
+      $naturalExitD = $prD.WaitForExit(5000)
+    } else { $naturalExitD = $true }
+    if ($naturalExitD) { $exitCodeD = $prD.ExitCode }
+  }
+  $dOk = $dOk -and $naturalExitD -and ($exitCodeD -eq 0)
+  $dDetail += (" | naturalExit={0} exitCode={1}" -f $naturalExitD, $exitCodeD)
+  if ($null -ne $jObjD) {
+    $jObjD.ok = $dOk; $jObjD.detail = $dDetail
+    $jObjD.naturalExit = $naturalExitD; $jObjD.exitCode = $exitCodeD
+    [IO.File]::WriteAllText((Join-Path $OutDir ("ac15d-{0}.json" -f $Mode)), ($jObjD | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false)))
+    if ($env:YMCC_AC15D_JSON) { [IO.File]::WriteAllText($env:YMCC_AC15D_JSON, ($jObjD | ConvertTo-Json -Depth 6), (New-Object Text.UTF8Encoding($false))) }
   }
   Start-Sleep -Milliseconds 800
   return [pscustomobject]@{ ok = $dOk; name = $dName; detail = $dDetail }

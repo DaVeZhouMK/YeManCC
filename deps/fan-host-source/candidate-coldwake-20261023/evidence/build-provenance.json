@@ -1,0 +1,9 @@
+{
+  "scope": "existing actual isolated mainline Release build; no rebuild or runtime execution",
+  "artifactRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-ROGX-ColdAfterWake-20261023\\repair\\final-v2\\build\\bin\\YeManFanHost\\release_win-x64",
+  "buildEvidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Fan-ROGX-ColdAfterWake-20261023\\repair\\final-v2\\build",
+  "metadataToolSha256": "8c39971504944b817a103ccb0ec774485038d291815f906091916304920d4817",
+  "preparationToolSha256": "163892c8508426d90f08a6495a79f8ad08f4f10b59e71a1ac1c5fd3b9df4891e",
+  "isolatedBuildTargetsSha256": "14a709d1fc8dfa9bfb45043a860cc76bda2d5d111668c862bc024d96d0e1feb5",
+  "projectSourceRebuildReproducibilityProven": false
+}

@@ -1,0 +1,6 @@
+--- a/FanLab/real-host/Program.cs
++++ b/FanLab/real-host/Program.cs
+@@
+                     error = ex.GetType().FullName,
++                    dependencyFailures = YeMan.SharedRuntime.RuntimeDependencyContract.DescribeFailure(ex, stage),
+                     exceptionChain = Unwrap(ex).Select((current, depth) => new

@@ -1,0 +1,14 @@
+#include "../native/msi_native_rear_keyboard.h"
+#include <iostream>
+#include <cstdlib>
+using namespace ymcc::msi::nativeRear;
+static unsigned checks=0;static void check(bool ok,const char* message){++checks;if(!ok){std::cerr<<"FAIL "<<message<<"\n";std::exit(1);}}
+int main(){
+ for(unsigned bits=0;bits<1024;++bits){Facts f{bool(bits&1),bool(bits&2),bool(bits&4),bool(bits&8),bool(bits&16),bool(bits&32),bool(bits&64),bool(bits&128),bool(bits&256),bool(bits&512),2};check(allowed(f)==(bits==(1|2|4|256|512)),"ordinary MSI only; all virtual/managed/return/exit gates remain closed");}
+ Plan plan;Token t;check(plan.request(true,2,100,t)&&plan.current(t),"first ordinary demand queues preparation");check(!plan.request(true,2,200,t),"BUS never duplicates in-flight intent");plan.complete(t,Result::Prepared,600);for(unsigned i=0;i<100;++i)check(!plan.request(true,2,700+i,t),"written bank is not rewritten every BUS tick");
+ check(!plan.request(false,2,1000,t)&&!plan.current(t),"entering SD invalidates native token without SD IO");check(plan.request(true,2,1100,t)&&plan.current(t),"real return to ordinary can prepare separate bank");const auto old=t;plan.complete(t,Result::SourceWait,1200);check(!plan.request(true,2,2699,t)&&plan.request(true,2,2700,t),"missing source waits on existing clock without worker sleep");plan.complete(t,Result::SourceWait,2800);check(plan.request(true,2,4300,t),"third missing-source attempt allowed");plan.complete(t,Result::SourceWait,4400);check(!plan.request(true,2,10000,t)&&plan.attempts()==3,"missing source has finite three-attempt budget");
+ check(plan.request(true,3,11000,t)&&!plan.current(old),"power token starts new eligible epoch and cancels prior receipt");const auto text=reason(t);Token parsed;check(parse(text,parsed)&&parsed.epoch==t.epoch&&parsed.power==t.power,"ordinary intent carries exact epoch and power");for(const auto* invalid:{"msi-native-rear-keyboard:","msi-native-rear-keyboard:0:1","msi-native-rear-keyboard:1:0","msi-native-rear-keyboard:-1:2","msi-native-rear-keyboard:1:2:3","msi-native-rear-keyboard:99999999999999999999:1","msi-mode-write:1:dinput"})check(!parse(invalid,parsed),"malformed or mode intent never gets native fence exception");
+ Plan failed;check(failed.request(true,2,1,t),"failure case admitted");failed.complete(t,Result::Failed,2);check(!failed.request(true,2,5000,t),"partial firmware write is not retried");
+ Plan timed;check(timed.request(true,2,1,t),"timeout case admitted");timed.complete(t,Result::SourceWait,2);check(!timed.request(true,2,12002,t),"source deadline is not extended");
+ std::cout<<"MSI_NATIVE_REAR_PLAN_OK checks="<<checks<<" hardware_io=none sd_route=unchanged\n";
+}

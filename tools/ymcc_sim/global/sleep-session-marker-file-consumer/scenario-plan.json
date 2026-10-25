@@ -1,0 +1,573 @@
+{
+  "schemaVersion": 1,
+  "provenance": {
+    "kind": "literal normative17 cases preserved from before original failure reproduction",
+    "originalPlanSha256": "43af8768c8514646c271df7d1c1c465a66dbbfccfe43fd6211730d1aa0097708",
+    "originalCaseExpectationsUnchanged": true
+  },
+  "newTargetFunctions": [
+    "sessionMarkerPath",
+    "sessionMarkerWrite",
+    "sessionMarkerCheckAtBoot",
+    "sessionMarkerMarkClean"
+  ],
+  "previousActualCallerSupports": [
+    "sgHasMarkerFiles",
+    "sgCleanupBeforeExit"
+  ],
+  "additionalPureSupports": [
+    "trim_ascii"
+  ],
+  "cases": [
+    {
+      "id": "fresh-boot-creates-unclean-marker",
+      "stages": [
+        {
+          "label": "fresh-boot-creates-unclean-marker",
+          "action": "fresh",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "unclean-prior-is-read-and-replaced",
+      "stages": [
+        {
+          "label": "unclean-prior-is-read-and-replaced",
+          "action": "prior-unclean",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": true,
+              "priorToken": "88@12",
+              "abnormalLogs": 1,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-prior-does-not-report-abnormal",
+      "stages": [
+        {
+          "label": "clean-prior-does-not-report-abnormal",
+          "action": "prior-clean",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "whitespace-prior-token-is-trimmed",
+      "stages": [
+        {
+          "label": "whitespace-prior-token-is-trimmed",
+          "action": "prior-whitespace",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": true,
+              "priorToken": "88@12",
+              "abnormalLogs": 1,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "empty-prior-is-replaced",
+      "stages": [
+        {
+          "label": "empty-prior-is-replaced",
+          "action": "prior-empty",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "damaged-unclean-prior-is-retained-as-diagnostic",
+      "stages": [
+        {
+          "label": "damaged-unclean-prior-is-retained-as-diagnostic",
+          "action": "prior-damaged",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": true,
+              "priorToken": "broken@@marker",
+              "abnormalLogs": 1,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-write-persists-terminal-marker",
+      "stages": [
+        {
+          "label": "clean-write-persists-terminal-marker",
+          "action": "clean",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200,clean",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-success-is-idempotent",
+      "stages": [
+        {
+          "label": "clean-success-is-idempotent",
+          "action": "clean-twice",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200,clean",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "boot-open-refusal-can-retry",
+      "stages": [
+        {
+          "label": "boot-open-refusal-can-retry",
+          "action": "boot-refused-retry",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "initial": {
+              "markerType": "directory",
+              "markerBytes": "",
+              "currentToken": "",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            },
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-open-refusal-cannot-claim-clean",
+      "stages": [
+        {
+          "label": "clean-open-refusal-cannot-claim-clean",
+          "action": "clean-refused",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "afterRefusal": {
+              "markerType": "directory",
+              "markerBytes": "",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            },
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "clean-open-refusal-recovers-on-next-call",
+      "stages": [
+        {
+          "label": "clean-open-refusal-recovers-on-next-call",
+          "action": "clean-refused-retry",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "afterRefusal": {
+              "markerType": "directory",
+              "markerBytes": "",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            },
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@300,clean",
+              "currentToken": "100@300",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-process-recognizes-clean-predecessor",
+      "stages": [
+        {
+          "label": "cross-clean-writer",
+          "action": "clean",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200,clean",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        },
+        {
+          "label": "cross-clean-reader",
+          "action": "restart",
+          "pid": 101,
+          "tick": 300,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "101@300",
+              "currentToken": "101@300",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "new-process-reports-unclean-predecessor",
+      "stages": [
+        {
+          "label": "cross-unclean-writer",
+          "action": "fresh",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        },
+        {
+          "label": "cross-unclean-reader",
+          "action": "restart",
+          "pid": 101,
+          "tick": 300,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "101@300",
+              "currentToken": "101@300",
+              "priorUnclean": true,
+              "priorToken": "100@100",
+              "abnormalLogs": 1,
+              "cleanLogs": 0,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "missing-marker-before-clean-is-recreated",
+      "stages": [
+        {
+          "label": "missing-marker-before-clean-is-recreated",
+          "action": "missing-before-clean",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200,clean",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 0,
+              "cleanupDone": false,
+              "cancelCalls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "actual-cleanup-persists-terminal-marker",
+      "stages": [
+        {
+          "label": "actual-cleanup-persists-terminal-marker",
+          "action": "cleanup",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "returned": true,
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@200,clean",
+              "currentToken": "100@200",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 0,
+              "cleanupDone": true,
+              "cancelCalls": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "actual-cleanup-write-refusal-remains-incomplete",
+      "stages": [
+        {
+          "label": "actual-cleanup-write-refusal-remains-incomplete",
+          "action": "cleanup-refused",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "returned": false,
+            "afterRefusal": {
+              "markerType": "directory",
+              "markerBytes": "",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 1
+            },
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@100",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 1
+            }
+          }
+        }
+      ]
+    },
+    {
+      "id": "actual-cleanup-retries-file-write-after-refusal",
+      "stages": [
+        {
+          "label": "actual-cleanup-retries-file-write-after-refusal",
+          "action": "cleanup-refused-retry",
+          "pid": 100,
+          "tick": 100,
+          "expected": {
+            "firstReturned": false,
+            "secondReturned": true,
+            "afterRefusal": {
+              "markerType": "directory",
+              "markerBytes": "",
+              "currentToken": "100@100",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 0,
+              "writeFailureLogs": 1,
+              "cleanupDone": false,
+              "cancelCalls": 1
+            },
+            "final": {
+              "markerType": "file",
+              "markerBytes": "100@300,clean",
+              "currentToken": "100@300",
+              "priorUnclean": false,
+              "priorToken": "",
+              "abnormalLogs": 0,
+              "cleanLogs": 1,
+              "writeFailureLogs": 1,
+              "cleanupDone": true,
+              "cancelCalls": 2
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "expectedOriginalFailedCases": [
+    "clean-open-refusal-cannot-claim-clean",
+    "clean-open-refusal-recovers-on-next-call",
+    "actual-cleanup-write-refusal-remains-incomplete",
+    "actual-cleanup-retries-file-write-after-refusal"
+  ],
+  "ports": {
+    "actualOwnedFiles": true,
+    "actualStandardStreamCreateTruncateWriteFlushRead": true,
+    "pathSelectorMemory": true,
+    "clockAndPidMemory": true,
+    "lifecycleLogMemory": true,
+    "otherResumeAndCancelBusinessPortsMemory": true,
+    "actualFullCleanupCallerAndMarkerQuery": true,
+    "realUserData": false,
+    "realNT": false,
+    "realSleep": false,
+    "HostSteam": false,
+    "physicalDevices": false
+  },
+  "wholeGoalComplete": false
+}

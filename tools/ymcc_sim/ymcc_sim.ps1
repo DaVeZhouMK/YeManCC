@@ -1,4 +1,8 @@
-﻿# =============================================================================
+﻿# [AI:VERIFY] 模拟按改动影响与需要选择；是否测试不改变 src/router.ts [AI:MAP] 中的用户行为约定，既有专项门禁看对应入口。
+# 先查 registry.json 与 global/adapters.mjs；global -Mode inventory/plan 看覆盖/计划，-Mode run -Tests <已登记ID> 定向执行。
+# 执行前核对场景真实作用与现有边界，保留本轮源码/载荷与失败证据；模拟、启动集成、安装和实机结果分别记录。
+# 自愈须考虑实际开销；无法自愈须留下原因/未恢复状态，缺覆盖按需补能重现问题的夹具，勿靠放宽判定通过。
+# =============================================================================
 # ymcc_sim.ps1 - YMCC global simulator front door (2026-09-22)
 #
 #   powershell -ExecutionPolicy Bypass -File tools\ymcc_sim\ymcc_sim.ps1 -Domain sleep   -Mode forms
@@ -25,7 +29,7 @@
 # =============================================================================
 [CmdletBinding()]
 param(
-  [ValidateSet('sleep', 'gamepad', 'full', 'msi', 'doctor')][string]$Domain = 'doctor',
+  [ValidateSet('sleep', 'gamepad', 'full', 'msi', 'fan', 'global', 'doctor')][string]$Domain = 'doctor',
   [switch]$Route,     # print the resolved domain command line and exit 0
   [switch]$Elevate,   # re-run this same invocation in an elevated session
   [Parameter(ValueFromRemainingArguments = $true)][string[]]$Rest
@@ -46,8 +50,12 @@ $domainMap = [ordered]@{
   gamepad = (Join-Path $simRoot 'domains\gamepad\gamepad_domain.ps1')
   full    = (Join-Path $simRoot 'domains\full\full_domain.ps1')
   msi     = (Join-Path $simRoot 'domains\msi\msi_domain.ps1')
+  fan     = (Join-Path $simRoot 'domains\fan\fan_domain.ps1')
+  global  = (Join-Path $simRoot 'domains\global\global_domain.ps1')
 }
-$childArgs = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File')
+$childEngine = Join-Path $PSHOME 'pwsh.exe'
+if (-not (Test-Path -LiteralPath $childEngine)) { $childEngine = Join-Path $PSHOME 'powershell.exe' }
+$childArgs = @('-NoLogo', '-NoProfile', '-NonInteractive', '-File')
 
 function Get-ChildCommandLine([string]$DomainName) {
   $script = $domainMap[$DomainName]
@@ -60,11 +68,11 @@ function Invoke-ElevatedSelf {
   # Re-run the exact same front-door invocation elevated. Used when a domain
   # must start the app (requireAdministrator manifest). One UAC prompt.
   $self = $PSCommandPath
-  $argList = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$self`"", '-Domain', $Domain)
+  $argList = @('-NoLogo', '-NoProfile', '-File', "`"$self`"", '-Domain', $Domain)
   foreach ($r in @($Rest)) { if ($null -ne $r -and "$r" -ne '') { $argList += "`"$r`"" } }
   Write-Host '提权重入：将在 UAC 确认后以管理员会话重新运行本次调用。' -ForegroundColor Yellow
   try {
-    $p = Start-Process -FilePath 'powershell.exe' -ArgumentList ($argList -join ' ') -Verb RunAs -PassThru
+    $p = Start-Process -FilePath $childEngine -ArgumentList ($argList -join ' ') -Verb RunAs -WindowStyle Hidden -PassThru
   } catch {
     Write-Host ('提权被取消或失败：{0}' -f $_.Exception.Message) -ForegroundColor Red
     return 3
@@ -79,7 +87,7 @@ function Show-Doctor {
   $ok = $true
 
   $core = Get-SimFileIdentity (Join-Path $simRoot 'lib\sim_core.ps1') 'core'
-  $ok = (Add-SimCheck $run 'DOCTOR' 'core library present' $core.exists ("{0} bytes={1}" -f $core.sha256.Substring(0, 16), $core.bytes)) -and $ok
+  $ok = (Add-SimCheck $run 'DOCTOR' 'core library present' $core.exists ("{0} bytes={1}" -f $core.sha256.Substring(0, [Math]::Min(16, $core.sha256.Length)), $core.bytes)) -and $ok
   $ok = (Add-SimCheck $run 'DOCTOR' 'registry.json present' (Test-Path -LiteralPath $registryPath) $registryPath) -and $ok
 
   $reg = $null
@@ -90,19 +98,25 @@ function Show-Doctor {
 
   foreach ($k in $domainMap.Keys) {
     $id = Get-SimFileIdentity $domainMap[$k] $k
-    $ok = (Add-SimCheck $run 'DOCTOR' ("domain script: {0}" -f $k) $id.exists ("{0} bytes={1}" -f $id.sha256.Substring(0, 16), $id.bytes)) -and $ok
+    $ok = (Add-SimCheck $run 'DOCTOR' ("domain script: {0}" -f $k) $id.exists ("{0} bytes={1}" -f $id.sha256.Substring(0, [Math]::Min(16, $id.sha256.Length)), $id.bytes)) -and $ok
   }
 
   # install-tree targets the simulator needs at runtime
-  foreach ($name in @('appExe', 'hostExe', 'hostDll', 'mockFlag', 'settingsPath', 'sessionTokenPath')) {
+  foreach ($name in @('appExe', 'hostExe', 'hostDll', 'settingsPath')) {
     $p = $d[$name]
     $id = Get-SimFileIdentity $p $name
-    $ok = (Add-SimCheck $run 'DOCTOR' ("target: {0}" -f $name) $id.exists ("{0} bytes={1}" -f $id.sha256.Substring(0, 16), $id.bytes)) -and $ok
+    $ok = (Add-SimCheck $run 'DOCTOR' ("target: {0}" -f $name) $id.exists ("{0} bytes={1}" -f $id.sha256.Substring(0, [Math]::Min(16, $id.sha256.Length)), $id.bytes)) -and $ok
   }
 
+  # Explicit --mock-handshake is authoritative; the obsolete flag is neither required nor created.
+  $flagPresent = Test-Path -LiteralPath $d.mockFlag -PathType Leaf
+  Add-SimCheck $run 'DOCTOR' 'legacy mock flag observation (explicit CLI mode is required)' $true $(if ($flagPresent) { 'present; ignored by Host startup' } else { 'absent; expected for a release payload' }) | Out-Null
+  # Token contents and hashes are not needed by a read-only environment inventory.
+  $tokenPresent = Test-Path -LiteralPath $d.sessionTokenPath -PathType Leaf
+  Add-SimCheck $run 'DOCTOR' 'legacy token presence observation (not required for sandbox runs)' $true $(if ($tokenPresent) { 'present; content not read' } else { 'absent; sandbox creates its own capability' }) | Out-Null
   # the gamepad facility we wrap (owned by the input line - never modified here)
   $sl = Get-SimFileIdentity $d.selfloopTool 'selfloop'
-  $ok = (Add-SimCheck $run 'DOCTOR' 'wrapped gamepad tool present' $sl.exists ("{0} bytes={1}" -f $sl.sha256.Substring(0, 16), $sl.bytes)) -and $ok
+  $ok = (Add-SimCheck $run 'DOCTOR' 'wrapped gamepad tool present' $sl.exists ("{0} bytes={1}" -f $sl.sha256.Substring(0, [Math]::Min(16, $sl.sha256.Length)), $sl.bytes)) -and $ok
 
   # sleep forms library
   $formsPath = Join-Path $simRoot 'domains\sleep\sleep_forms.json'
@@ -162,7 +176,7 @@ if (-not (Test-Path -LiteralPath $routing.script)) {
   exit 3
 }
 $line = (@($childArgs + $routing.script) + $routing.args) -join ' '
-$line = 'powershell ' + $line
+$line = $childEngine + ' ' + $line
 Write-Host '=== ymcc_sim（YMCC 全局模拟器）===' -ForegroundColor White
 Write-Host ("domain={0}  route={1}" -f $Domain, $line) -ForegroundColor Gray
 
@@ -173,5 +187,5 @@ if ($Route) {
 
 # splat the domain args so each token reaches the child as its own argument
 $childRest = @($routing.args)
-& powershell.exe @childArgs $routing.script @childRest
+& $childEngine @childArgs $routing.script @childRest
 exit $LASTEXITCODE

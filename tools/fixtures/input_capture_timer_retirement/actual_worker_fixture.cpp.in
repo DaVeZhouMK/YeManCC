@@ -1,0 +1,233 @@
+// Executes the complete frozen production callback/worker/WorkerFault.
+// OS, logging, startup-delay, capture-init/shutdown, BUS and Host leaves are memory ports.
+#include <json.hpp>
+#include <atomic>
+#include <array>
+#include <algorithm>
+#include <type_traits>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <exception>
+#include <future>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "input_timer_evidence.h"
+#include "input_capture_completion.h"
+using json=nlohmann::json;
+using UINT=unsigned; using UINT32=std::uint32_t; using DWORD=unsigned long;
+using DWORD_PTR=std::uintptr_t; using HANDLE=void*; using LPVOID=void*;
+using LONG=long;
+constexpr bool FALSE=false;
+using HRESULT=long; using MMRESULT=unsigned; using LONGLONG=long long;
+struct LARGE_INTEGER {LONGLONG QuadPart=0;};
+#define CALLBACK
+#define WINAPI
+constexpr unsigned TIME_PERIODIC=1, TIME_KILL_SYNCHRONOUS=0x0100;
+constexpr unsigned TIMERR_NOERROR=0, TIMERR_NOCANDO=97;
+constexpr unsigned COINIT_MULTITHREADED=0, TIMER_ALL_ACCESS=0x1f0003;
+constexpr DWORD WAIT_OBJECT_0=0, WAIT_TIMEOUT=258;
+static bool FAILED(HRESULT hr){return hr<0;}
+namespace ymcc {enum class StartupInputState {Failed};}
+namespace callbackCost {enum class Source {multimedia,waitableFallback}; struct Scope {template<class... A> Scope(A&&...) {}};}
+struct Event {std::atomic<bool> closed{false};};
+struct Scenario {
+    bool tail=false; unsigned fault=0; Event event;
+    bool cancelFails=false,closeFails=false,periodFails=false;
+    std::mutex mutex; std::condition_variable cv;
+    bool atGate=false, release=false, initContinue=false, killEntered=false, workerDone=false;
+    bool gateTimedOut=false; std::atomic<bool> stopAtCancel{false}; std::thread callback;
+    std::atomic<unsigned> sequence{0},active{0},bus{0},lateBus{0},closedEventSignals{0};
+    std::atomic<unsigned> flags{0},callbackDoneOrder{0},cancelReturnOrder{0},shutdownOrder{0},eventCloseOrder{0};
+    std::atomic<unsigned> shutdowns{0},faultLogs{0},killCalls{0},eventCreates{0},eventCloses{0},periodBalance{0},comBalance{0};
+    unsigned next(){return sequence.fetch_add(1)+1;}
+    template<class Pred> bool wait(Pred pred, unsigned ms=2000){
+        std::unique_lock<std::mutex> lock(mutex);
+        return cv.wait_for(lock,std::chrono::milliseconds(ms),pred);
+    }
+    void checkpoint(){
+        std::unique_lock<std::mutex> lock(mutex);atGate=true;cv.notify_all();
+        if(!cv.wait_for(lock,std::chrono::seconds(2),[&]{return release;}))gateTimedOut=true;
+    }
+    void releaseAll(){std::lock_guard<std::mutex> lock(mutex);release=true;initContinue=true;cv.notify_all();}
+};
+static Scenario* current=nullptr;
+static std::atomic<bool> g_domainLogEnabled[2];
+@GLOBALS@
+static unsigned long long currentPowerGeneration(){return 91;}
+static unsigned long long GetTickCount64(){return current->sequence.load()+1000;}
+static DWORD GetCurrentThreadId(){return 17;}
+static bool tickCostEnabled(){return false;}
+static auto tickCostEpochUs(std::chrono::steady_clock::time_point){return 0ull;}
+static auto tickCostThreadCycleSample(){return 0ull;}
+static auto tickCostElapsedUs(std::chrono::steady_clock::time_point){return 0ull;}
+static constexpr int kTickCostTickTotal=0;
+static void tickCostAccumulate(int,unsigned long long){}
+static void inputCaptureRefreshEffectiveTickPeriod(){}
+static void ymccLogBusTickThreadRole(){if(!current->tail)current->checkpoint();}
+static void inputCaptureBusTick(){++current->bus;if(current->shutdownOrder.load())++current->lateBus;++g_inputCaptureBusTickGlobal;}
+static bool SetEvent(HANDLE handle){
+    if(current->tail)current->checkpoint();
+    auto* event=static_cast<Event*>(handle);
+    if(event->closed.load())++current->closedEventSignals;
+    return !event->closed.load();
+}
+@SCOPE@
+@CALLBACK@
+static void ymccLogThreadRole(const char*){}
+static void skipDisabledStartupInputGate(){}
+// Explicit fake startup-delay leaf: return immediately to reach retirement
+// schedules. No production StartupWait/CV or startup synchronization is tested.
+static void inputCaptureAwaitStartupDelay(){}
+static void Sleep(DWORD){}
+static HRESULT CoInitializeEx(LPVOID,unsigned){++current->comBalance;return 0;}
+static void CoUninitialize(){--current->comBalance;}
+static MMRESULT timeBeginPeriod(unsigned){++current->periodBalance;return 0;}
+static MMRESULT timeEndPeriod(unsigned){if(current->periodFails)return TIMERR_NOCANDO;--current->periodBalance;return 0;}
+static HANDLE CreateEventW(LPVOID,bool,bool,LPVOID){++current->eventCreates;return &current->event;}
+static UINT timeSetEvent(UINT,UINT,void(CALLBACK*callback)(UINT,UINT,DWORD_PTR,DWORD_PTR,DWORD_PTR),DWORD_PTR user,UINT flags){
+    current->flags=flags;
+    current->callback=std::thread([=]{++current->active;callback(22,0,user,0,0);--current->active;current->callbackDoneOrder=current->next();});
+    return 22;
+}
+static MMRESULT timeKillEvent(UINT){
+    if(current->cancelFails){++current->killCalls;{std::lock_guard<std::mutex> lock(current->mutex);current->killEntered=true;current->cv.notify_all();}return TIMERR_NOCANDO;}
+    ++current->killCalls;current->stopAtCancel=g_inputCaptureStop.load(std::memory_order_acquire);
+    {std::lock_guard<std::mutex> lock(current->mutex);current->killEntered=true;current->cv.notify_all();}
+    if((current->flags.load()&TIME_KILL_SYNCHRONOUS)&&current->callback.joinable())current->callback.join();
+    current->cancelReturnOrder=current->next();return 0;
+}
+static bool CloseHandle(HANDLE handle){
+    if(current->closeFails)return false;
+    if(handle==&current->event){static_cast<Event*>(handle)->closed=true;++current->eventCloses;current->eventCloseOrder=current->next();}
+    return true;
+}
+static HANDLE CreateWaitableTimerExW(LPVOID,LPVOID,DWORD,DWORD){return nullptr;}
+static HANDLE CreateWaitableTimerW(LPVOID,bool,LPVOID){return nullptr;}
+static bool SetWaitableTimer(HANDLE,LARGE_INTEGER*,long,LPVOID,LPVOID,bool){return true;}
+static bool CancelWaitableTimer(HANDLE){return true;}
+static DWORD WaitForSingleObject(HANDLE,DWORD){return WAIT_OBJECT_0;}
+static void appendNativeLifecycleLog(const char*,const json&){}
+static void writeLog(const char*,const std::string&){}
+static void inputCaptureAppend(const json&){++current->faultLogs;}
+static void publishStartupInputState(ymcc::StartupInputState,const char*){}
+static void inputCaptureInit(){
+    if(!current->wait([]{return current->initContinue;}))throw std::runtime_error("fixture init gate timed out");
+    if(current->fault==1)throw std::runtime_error("fixture owned init failed");
+    if(current->fault==2)throw 123;
+}
+struct RealStick {bool virtualTargetEnabled=false,motionEnabled=false,enabled=false;};
+static RealStick g_realStickTest;
+static const char* inputHostConfiguredPersona(){return "disabled";}
+static void inputCaptureRefreshRealStickSettings(bool){}
+static void initializeStartupInputGate(){}
+static void onexX2OwnerTick(){}
+static void inputHostRunQueuedLifecycleWork(){}
+static void inputCaptureDrainQueuedSamples(){}
+static void inputHostDisplayIdleAuditTick(){}
+static void observeStartupInputGate(){}
+static void inputCaptureShutdown(){g_captureShutdownAttempted.store(true);++current->shutdowns;current->shutdownOrder=current->next();}
+static void inputCaptureEmergencyCleanup(){inputCaptureShutdown();}
+static constexpr UINT32 kInputCaptureGamepadPublishIntervalMs=8;
+static constexpr DWORD kInputCaptureCoordinatorYieldMs=4;
+@FAULT@
+@WORKER@
+static unsigned checks=0,failures=0;
+static void check(bool condition,const char*name){++checks;if(!condition){++failures;std::cerr<<"CHECK_FAILED "<<name<<'\n';}}
+static json run(bool tail,unsigned fault,bool expectLegacy){
+    Scenario scenario;scenario.tail=tail;scenario.fault=fault;current=&scenario;
+    g_captureMmTimerRetired=true;g_captureResolutionOwed=false;g_captureRetainedEvents.fill(nullptr);g_captureEventOverflow=false;
+    g_inputCaptureStop.store(false);g_domainLogEnabled[1].store(true);
+    std::unique_lock<std::mutex> busLock(g_inputCaptureBusTickMx,std::defer_lock);
+    if(tail)busLock.lock();
+    std::thread worker([&]{inputCaptureThreadProc(nullptr);{std::lock_guard<std::mutex> lock(scenario.mutex);scenario.workerDone=true;scenario.cv.notify_all();}});
+    const bool gateSeen=scenario.wait([&]{return scenario.atGate;});
+    check(gateSeen,"actual callback reached scheduled checkpoint");
+    if(busLock.owns_lock())busLock.unlock();
+    if(!fault)g_inputCaptureStop.store(true,std::memory_order_release);
+    {std::lock_guard<std::mutex> lock(scenario.mutex);scenario.initContinue=true;scenario.cv.notify_all();}
+    const bool killSeen=scenario.wait([&]{return scenario.killEntered;});
+    check(killSeen,"actual worker reached cancellation");
+    const bool completedBeforeRelease=scenario.wait([&]{return scenario.workerDone;},expectLegacy?1000:30);
+    const bool closedBeforeRelease=scenario.event.closed.load();
+    const unsigned shutdownBeforeRelease=scenario.shutdownOrder.load();
+    const unsigned activeBeforeRelease=scenario.active.load();
+    scenario.releaseAll();
+    const bool workerJoined=scenario.wait([&]{return scenario.workerDone;});
+    if(worker.joinable())worker.join();
+    if(scenario.callback.joinable())scenario.callback.join();
+    check(workerJoined,"owned worker completed after unconditional release");
+    check(!scenario.gateTimedOut,"fixture checkpoint did not timeout");
+    check(scenario.active.load()==0,"owned callback exited");
+    check(scenario.killCalls.load()==1,"one cancellation for actual path");
+    check(scenario.shutdowns.load()==1,"one actual worker shutdown leaf");
+    check(scenario.eventCreates.load()==1&&scenario.eventCloses.load()==1,"owned event closed once");
+    check(scenario.periodBalance.load()==0&&scenario.comBalance.load()==0,"worker period and COM leaves balanced");
+    check(g_captureMmTimerRetired.load()&&!g_captureResolutionOwed.load()&&!g_captureEventOverflow.load(),"production worker atomic retirement responsibilities settled");
+    check(std::all_of(g_captureRetainedEvents.begin(),g_captureRetainedEvents.end(),[](HANDLE h){return h==nullptr;}),"successful event closure leaves no retained event");
+    check(scenario.faultLogs.load()==(fault?1u:0u),"actual WorkerFault selected expected catch path");
+    check((scenario.flags.load()&TIME_PERIODIC)!=0,"periodic cadence retained");
+    check(activeBeforeRelease==1,"real callback thread remained in owned checkpoint");
+    const bool unsafe=scenario.closedEventSignals.load()>0||scenario.lateBus.load()>0;
+    if(expectLegacy){
+        check(completedBeforeRelease&&closedBeforeRelease&&shutdownBeforeRelease>0,"legacy worker positively retired before callback release");
+        check(scenario.closedEventSignals.load()==1,"legacy actual callback signalled retired event");
+        check(scenario.lateBus.load()==((!tail&&fault)?1u:0u),"legacy late BUS matches actual stop and try-lock branch");
+        check(scenario.eventCloseOrder.load()<scenario.callbackDoneOrder.load(),"legacy event close preceded actual callback completion");
+        check(unsafe,"legacy current source retirement gap reproduced");
+    }else{
+        check(!completedBeforeRelease&&!closedBeforeRelease&&!shutdownBeforeRelease,"candidate kept resources while callback gated");
+        check(!unsafe,"candidate no closed-event signal or retired BUS admission");
+        check(scenario.stopAtCancel.load(),"cancellation observes terminal capture stop");
+        check(scenario.bus.load()==0,"terminal callback does not enter capture BUS leaf");
+        check(scenario.callbackDoneOrder.load()<scenario.cancelReturnOrder.load(),"actual callback completed before synchronous cancellation returned");
+        check(scenario.cancelReturnOrder.load()<scenario.shutdownOrder.load()&&scenario.shutdownOrder.load()<scenario.eventCloseOrder.load(),"actual worker retired resources after callback cancellation");
+    }
+    return {{"tail",tail},{"fault",fault},{"sourceFlags",scenario.flags.load()},{"stopAtCancel",scenario.stopAtCancel.load()},{"busCalls",scenario.bus.load()},{"unsafeObserved",unsafe},
+      {"actualCallbackExecuted",true},{"actualWorkerExecuted",true},{"actualWorkerFaultExecuted",fault!=0},
+      {"completedBeforeCallbackRelease",completedBeforeRelease},{"closedEventSignals",scenario.closedEventSignals.load()},
+      {"lateBus",scenario.lateBus.load()},{"callbackDoneOrder",scenario.callbackDoneOrder.load()},
+      {"cancelReturnOrder",scenario.cancelReturnOrder.load()},{"shutdownOrder",scenario.shutdownOrder.load()},
+      {"eventCloseOrder",scenario.eventCloseOrder.load()},{"ownedActiveCallbacksAfter",scenario.active.load()},
+      {"ownedThreadsJoined",workerJoined},{"remainingFixtureEvents",scenario.eventCreates.load()-scenario.eventCloses.load()},
+      {"gateTimedOut",scenario.gateTimedOut}};
+}
+static json runDebt(unsigned kind){
+    Scenario scenario;current=&scenario;scenario.cancelFails=kind==0;scenario.closeFails=kind==1;scenario.periodFails=kind==2;
+    g_captureMmTimerRetired=true;g_captureResolutionOwed=false;g_captureRetainedEvents.fill(nullptr);g_captureEventOverflow=false;
+    g_inputCaptureStop=false;
+    std::thread worker([&]{inputCaptureThreadProc(nullptr);{std::lock_guard<std::mutex> lock(scenario.mutex);scenario.workerDone=true;scenario.cv.notify_all();}});
+    const bool gate=scenario.wait([&]{return scenario.atGate;});check(gate,"debt schedule callback entered owned checkpoint");
+    g_inputCaptureStop=true;scenario.releaseAll();
+    const bool done=scenario.wait([&]{return scenario.workerDone;});
+    if(worker.joinable())worker.join();if(scenario.callback.joinable())scenario.callback.join();
+    const bool retained=g_captureRetainedEvents[0]==&scenario.event;
+    const bool period=g_captureResolutionOwed.load(),mm=g_captureMmTimerRetired.load();
+    check(done&&!scenario.gateTimedOut&&scenario.active==0,"debt schedule actual worker and callback positively joined");
+    check(kind==0?!mm:mm,"MM cancellation result is preserved by actual worker");
+    check(retained==(kind!=2),"failed cancel or event close retains the actual event identity");
+    check(period==(kind==2),"failed timeEndPeriod retains actual atomic responsibility");
+    check(!g_captureEventOverflow.load(),"expected event reservation has no overflow");
+    // Controller disposal of explicit memory leaves after positive joins. This
+    // is not production retirement or proof that a failed real MM timer stopped.
+    const auto retainedBefore=g_captureRetainedEvents;scenario.closeFails=false;scenario.periodFails=false;
+    if(retained){(void)CloseHandle(&scenario.event);g_captureRetainedEvents.fill(nullptr);}
+    if(period){(void)timeEndPeriod(1);g_captureResolutionOwed=false;}
+    check(scenario.event.closed&&scenario.periodBalance==0&&scenario.comBalance==0,"controller disposes only owned memory leaves after joins");
+    return {{"failureKind",kind},{"productionWorkerExecuted",true},{"mmTimerRetired",mm},{"eventRetained",retained},
+       {"periodOwed",period},{"ownedThreadsJoined",done},{"remainingFixtureEvents",scenario.eventCreates.load()-scenario.eventCloses.load()},
+       {"controllerCleanupOnly",true},{"realFailedMmTimerRetirementProven",false},{"processExitUsedAsCleanup",false}};
+}
+int main(int argc,char**argv){
+    const bool legacy=argc==2&&std::string(argv[1])=="legacy";json cases=json::array();
+    for(bool tail:{false,true})for(unsigned fault:{0u,1u,2u})cases.push_back(run(tail,fault,legacy));
+    json debts=json::array();if(argc==3&&std::string(argv[2])=="debts")for(unsigned kind:{0u,1u,2u})debts.push_back(runDebt(kind));
+    std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"expectedLegacy",legacy},
+      {"cases",cases},{"debtCases",debts},{"realWinmmOrDeviceCalls",false},{"realOwnedFixtureThreads",true},
+      {"productionControlFunctionsExecuted",true},{"productionCaptureShutdownBodyExecuted",false}}).dump()<<'\n';
+    return failures?1:0;
+}

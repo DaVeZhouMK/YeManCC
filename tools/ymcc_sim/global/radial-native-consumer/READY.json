@@ -1,0 +1,201 @@
+{
+  "schemaVersion": 1,
+  "atUtc": "2026-10-19T19:59:08.254Z",
+  "status": "PUBLIC_PORT_READY_FOR_PARENT_REVIEW",
+  "id": "controller.radial-native-consumer",
+  "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\radial-native-consumer",
+  "writeScope": "tools/ymcc_sim/global/radial-native-consumer/",
+  "allChangesAreNewLeafOnly": true,
+  "registryWritten": false,
+  "sharedRunnerWritten": false,
+  "productSourceWritten": false,
+  "nativeCompiledThisTurn": false,
+  "nativeExecutedThisTurn": false,
+  "globalProducerOrAuditExecuted": false,
+  "oldFrozen12Reexecuted": false,
+  "oldFrozenDeliveryPreserved": {
+    "schemaVersion": 1,
+    "status": "PASS",
+    "frozenFilesVerified": 84,
+    "frozenIndexSha256": "4f8367fd0d67df7d987f27744d1aea500c29ecb274fc53954c30e989ea3ab9a6",
+    "frozenFilesReexecuted": false,
+    "frozenFilesModified": false,
+    "sharedHelperIdentityAfter": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74",
+    "sharedHelperUnchanged": true
+  },
+  "registrationExport": "getRadialNativeConsumerAdapters",
+  "registrationModule": "tools/ymcc_sim/global/radial-native-consumer/adapter.mjs",
+  "kind": "powershell",
+  "ownedJob": "existing shared host-process.ps1 gated kill-on-close job",
+  "selectedPowerShell": {
+    "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe",
+    "sha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+  },
+  "toolDeclaration": {
+    "files": 1191,
+    "coreFiles": 533,
+    "coreCompleteDirectories": 3,
+    "powershellFiles": 658,
+    "powershellCompleteDirectories": 1,
+    "sharedCap": 3072,
+    "membersDropped": 0,
+    "osOrLoadedModuleClosureClaimed": false,
+    "independentOfUiManifestAtRuntime": true
+  },
+  "actualProductSources": [
+    {
+      "path": "native/radial_overlay.h",
+      "sha256": "abd051d4f5492fdb2e85171ea24e5b5f7812c883b80e0acd5af4bb7312776d7e"
+    },
+    {
+      "path": "native/radial_input_region.h",
+      "sha256": "5361fca72bff3b73ff802c8c4cd2c26ab80e978c99af7df2f709fcee66f0f093"
+    },
+    {
+      "path": "deps/json/json.hpp",
+      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    }
+  ],
+  "actualSourceMembers": 14,
+  "fullOverlayClassCompiled": false,
+  "mainIncluded": false,
+  "completeProductionDefinitions": 13,
+  "fixedPositiveCases": 12,
+  "fixedSemanticSourceFaults": 2,
+  "expectedFaultNaturalExit": 23,
+  "smallChecks": {
+    "status": "PASS",
+    "contractTests": 13,
+    "nodeSyntaxFiles": 6,
+    "powershellParserScripts": 1,
+    "allProcessNaturalExits": 0,
+    "report": {
+      "path": "tools/ymcc_sim/global/radial-native-consumer/maintenance-evidence/checks-02/report.json",
+      "sha256": "e0f8babcd02b89cbf4c6b026d4164e1e02af943941b4596aa87dad8c4a26ee58"
+    },
+    "nativeBehaviorAccepted": false
+  },
+  "maintenanceBefore": {
+    "newLeafAbsent": true,
+    "historicalScripts": [
+      {
+        "name": "prepare.mjs",
+        "sha256": "82c4c1c2b9b3e5dee24cf3fd3dfc7925577076dda31debd122758cc2210f4bea"
+      },
+      {
+        "name": "run.mjs",
+        "sha256": "3b42e14d4df211e2fe89f0996604ddfd88b38c963609d4167015ed617a625422"
+      },
+      {
+        "name": "verify.mjs",
+        "sha256": "90cf439c3d83a7bf58b7695b31bf840c8b6f705654b02117ebf18cdb15f2c50b"
+      }
+    ],
+    "historicalTemplates": [
+      {
+        "name": "MemoryPorts.hpp",
+        "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+      },
+      {
+        "name": "ConsumerCases.hpp",
+        "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02"
+      }
+    ],
+    "sharedHelper": {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    }
+  },
+  "maintenanceAfter": {
+    "sourceIdentities": [
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/ConsumerCases.hpp",
+        "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02",
+        "bytes": 16117
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/MemoryPorts.hpp",
+        "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da",
+        "bytes": 7554
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/README.md",
+        "sha256": "c6462e143778238ed739f997ce6319156e219d9209802c33837a2c108355a934",
+        "bytes": 6509
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/Run-Radial.ps1",
+        "sha256": "c010dff45d49a24e2ec45edbe37d2ddd2a791041ac1b87953adc90b0d9d888f5",
+        "bytes": 3438
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/adapter.mjs",
+        "sha256": "31c5ae7a4e6fae4542e92ecbeda0a8d57fa68ea62f3b1da40ed3f1933202e39e",
+        "bytes": 2107
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/check.mjs",
+        "sha256": "5442160929b51b356a180af817dc88a4ddbed89bd958410922fa5103c71e0078",
+        "bytes": 2899
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/contract.test.mjs",
+        "sha256": "bbfa217dca0c638160e9c6e3522a144ff375de6510a81c3d36025f49a3793d79",
+        "bytes": 11796
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/extraction-contract.json",
+        "sha256": "83045abbff11f13860f7d88bda54e8b6c6557e827ef9def0fd1b37569a4a45a1",
+        "bytes": 5378
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/helper.mjs",
+        "sha256": "e51c7fb675a2de68c10ac3c10f19bbdd2cd878d36c3d3cb7c0bb42795d524520",
+        "bytes": 13756
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/maintenance-origin.json",
+        "sha256": "34d753e879aae95e11b3e9647db7a46e587231bf70144ce8d307cfe03322c6eb",
+        "bytes": 1355
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/plan.json",
+        "sha256": "c813ffa711250a9892d36900d94b8afdb7a21831b20623e1f893d190622437b8",
+        "bytes": 1675
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/prepare.mjs",
+        "sha256": "ad2e3341282084642831a04facc536c636ab7f3860afee70369c79d440b5a318",
+        "bytes": 6500
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/run.mjs",
+        "sha256": "2286b04ac04320e7d63e4a744a4d6f03febaaf2052a8c2b7c9f4d80b825b4c28",
+        "bytes": 10269
+      },
+      {
+        "path": "tools/ymcc_sim/global/radial-native-consumer/toolchain-inputs.json",
+        "sha256": "e0da09b62151fdb926f2967840a1ec8668b8044c8c0a25bafcabc39ba50e3b39",
+        "bytes": 346957
+      }
+    ],
+    "templatesUnchanged": true
+  },
+  "pending": [
+    "Parent review and sole registry ID registration",
+    "Parent next unique formal producer executing original12 plus both targeted source faults",
+    "Current formal source/tool/receipt audit after execution"
+  ],
+  "openCoverage": [
+    "Overlay::create",
+    "Overlay::pad",
+    "Overlay::pointer/inputProc",
+    "actual Win32/COM/WinRT and Surface implementations",
+    "main dispatcher and global owner-return callbacks",
+    "actual host action/TDP consumers",
+    "Unicode transport: memory ports are ASCII-only",
+    "real GDI geometry/rasterization",
+    "proc timer/suspend and other unselected branches"
+  ],
+  "goalComplete": false
+}

@@ -1,18 +1,38 @@
 #pragma once
+#include <string>
 #include <string_view>
 
 // Pure log classification only. This policy never admits, retries or stops a device.
 namespace ymcc::logging {
 enum class NativeLane { suppressed, event, detail };
 
-constexpr NativeLane nativeLane(bool baseEvent, bool successfulFrameReceipt, bool detailedEnabled) noexcept {
-    if (baseEvent && !successfulFrameReceipt) return NativeLane::event;
+constexpr NativeLane nativeLane(bool baseEvent, bool streamingRecord, bool detailedEnabled) noexcept {
+    if (baseEvent && !streamingRecord) return NativeLane::event;
     return detailedEnabled ? NativeLane::detail : NativeLane::suppressed;
 }
 
 // Both records are streaming samples; neither may force a flush per BUS frame.
 constexpr bool inputSampleKind(std::string_view kind) noexcept {
     return kind == "sample" || kind == "controller-family-imu";
+}
+
+// Repeated snapshots are detailed samples; first/change/new power generation
+// are event evidence. Fixed instances only: no unbounded per-device key map.
+struct SnapshotLogState {
+    std::string signature;
+    unsigned long long generation = 0;
+    bool known = false;
+    bool observe(std::string_view next, unsigned long long nextGeneration) {
+        if (known && generation == nextGeneration && signature == next) return false;
+        signature.assign(next); generation = nextGeneration; known = true;
+        return true;
+    }
+};
+
+// Generic device-tree notifications are samples unless they carry sleep intent.
+// Arrival/removal messages stay factual events regardless of their frequency.
+constexpr bool sleepDeviceTreeSample(unsigned long long code, bool userStandby, bool ageEligible) noexcept {
+    return code == 7 /* DBT_DEVNODES_CHANGED */ && !userStandby && !ageEligible;
 }
 
 // Markers are explicit opt-ins, not mere file existence. No locale/config side effects.

@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "scope": "historical complete exit-fence function bundle only",
+  "functions": {
+    "inputHostLifecycleWorkIsCleanup": "static bool inputHostLifecycleWorkIsCleanup(const std::string& reason) {\r\n    return reason == \"virtual-target-disabled\" ||\r\n        reason == \"startup-owned-return\" ||\r\n        reason == \"quarantine-endpoint-absent\" ||\r\n        reason == \"frame-receipt-fault\" ||\r\n        reason.rfind(\"fault-stop:\", 0) == 0;\r\n}",
+    "inputHostExitFenceBlocks": "static bool inputHostExitFenceBlocks(bool fenceRaised, const std::string& reason) {\r\n    return fenceRaised && !inputHostLifecycleWorkIsCleanup(reason);\r\n}",
+    "inputHostExitFenceRaised": "static bool inputHostExitFenceRaised() {\r\n    return g_inputHostExitFence.load(std::memory_order_acquire);\r\n}",
+    "inputHostRaiseExitFence": "static void inputHostRaiseExitFence(const char* trigger) {\r\n    if (g_inputHostExitFence.exchange(true, std::memory_order_acq_rel)) return;\r\n    unsigned long long dropped = 0;\r\n    unsigned long long keptCleanup = 0, keptSlotCancellation = 0;\r\n    std::string droppedReasons;\r\n    {\r\n        std::lock_guard<std::mutex> lock(g_inputHostLifecycleWorkMx);\r\n        std::deque<std::string> kept;\r\n        for (auto& item : g_inputHostLifecycleWorkQueue) {\r\n            // Keep only an already queued slot-step so its serial owner can\r\n            // cancel the in-memory plan. New slot work remains fence-rejected.\r\n            if (inputHostLifecycleWorkIsCleanup(item)) {\r\n                kept.push_back(item);\r\n                ++keptCleanup;\r\n                continue;\r\n            }\r\n            if (item == \"slot0-handoff-step\") {\r\n                kept.push_back(item);\r\n                ++keptSlotCancellation;\r\n                continue;\r\n            }\r\n            ++dropped;\r\n            if (droppedReasons.size() < 160) {\r\n                if (!droppedReasons.empty()) droppedReasons += \"|\";\r\n                droppedReasons += item;\r\n            }\r\n        }\r\n        g_inputHostLifecycleWorkQueue.swap(kept);\r\n        g_inputHostLifecycleWorkRequested.store(!g_inputHostLifecycleWorkQueue.empty(), std::memory_order_release);\r\n    }\r\n    appendNativeLifecycleLog(\"input-host-exit-fence\", {\r\n        {\"phase\", \"raised\"},\r\n        {\"trigger\", trigger ? trigger : \"unknown\"},\r\n        {\"droppedQueued\", dropped},\r\n        {\"keptCleanupQueued\", keptCleanup},\r\n        {\"keptSlotCancellationQueued\", keptSlotCancellation},\r\n        {\"droppedReasons\", droppedReasons},\r\n        {\"refusals\", 0ULL},\r\n        {\"exitSessionId\", g_exitSessionId}   // 批138：与退出/fan 行同 ID\r\n    });\r\n}",
+    "inputHostResetExitFence": "static void inputHostResetExitFence(const char* owner) {\r\n    const bool previousRaised = g_inputHostExitFence.exchange(false, std::memory_order_acq_rel);\r\n    g_inputHostExitFenceRefusals.store(0, std::memory_order_release);\r\n    g_inputHostExitFenceRefusalRows.store(0, std::memory_order_release);\r\n    appendNativeLifecycleLog(\"input-host-exit-fence\", {\r\n        {\"phase\", \"reset\"},\r\n        {\"previousRaised\", previousRaised},\r\n        {\"owner\", owner ? owner : \"unknown\"},\r\n        {\"refusals\", 0ULL}\r\n    });\r\n}"
+  },
+  "functionHashes": {
+    "inputHostLifecycleWorkIsCleanup": "550c9295a664b1738a14e24f62bef8cd9d5e64c925e2ed9bf68bb4ebaebbc077",
+    "inputHostExitFenceBlocks": "8ebb545ddc4cef3757a5283622ff4f8ea437b5cd8473d8836077890f5829cc97",
+    "inputHostExitFenceRaised": "6e27b2f7dc472f8f181ce5815536bc7c54817bf811f25cfec5a4d229cfd87636",
+    "inputHostRaiseExitFence": "d9b338911a1660ae1f235f58a3c1b966cd99acebdcd5da4f3e01168ea6fad229",
+    "inputHostResetExitFence": "c5f7f30506ad46f8935b0732fd4613870ac5a968f056cf46fc53f61adac380a6"
+  },
+  "globals": [
+    "static std::atomic<bool> g_inputHostExitFence{false};",
+    "static std::atomic<unsigned long long> g_inputHostExitFenceRefusals{0};",
+    "static std::atomic<unsigned long long> g_inputHostExitFenceRefusalRows{0};"
+  ]
+}

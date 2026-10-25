@@ -1,0 +1,1385 @@
+{
+  "schemaVersion": 1,
+  "gameMotorReceiptContract": "capabilities/CONTROLLER-GAME-MOTOR-RECEIPT.json",
+  "scope": "All physical controller input, touch, motion, feedback, virtual output and physical visibility; chassis OEM chords are one subset.",
+  "goalComplete": false,
+  "status": "standard-input-provider-to-final-frame-connected;per-controller-and-feedback-binding-pending",
+  "authorization": "Review-only contract. This document does not authorize drivers, device visibility writes, UI changes or hardware IO.",
+  "identityRules": [
+    "Select capabilities by actual physical source/container/interface and protocol; never infer an external controller from chassis DMI.",
+    "Virtual output is never recycled as physical source; source switches and reconnects require new live leases.",
+    "Registration, decoded samples, virtual submission acceptance and physical hiding confirmation are separate facts."
+  ],
+  "stages": [
+    {
+      "id": "physical-source",
+      "status": "standard-provider-label-bound;physical-container-and-per-controller-identity-binding-pending",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideBuildSourceInterfaceInventory("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureOnGamepad("
+        }
+      ],
+      "boundaries": [
+        "actual VID/PID/interface/container",
+        "physical-versus-virtual classification",
+        "source ownership and reconnect generation"
+      ],
+      "evidence": [
+        "controller.persona",
+        "controller.inputhost-optional-trigger-protocol"
+      ],
+      "evidenceMeaning": "Navigation to related software contracts or exact standalone source only. No exact global registration or bound D runtime receipt for these HidHide functions was located in the pinned review; retain UNKNOWN and physical acceptance separately.",
+      "consumerEvidence": [
+        {
+          "consumer": {
+            "file": "native/main.cpp",
+            "anchor": "hidHideBuildSourceInterfaceInventory("
+          },
+          "exactStandaloneConsumer": {
+            "file": "tools/msi_virtual_auxiliary_cloak_plan_selftest.mjs",
+            "anchor": "const names=['ascii_lower'",
+            "scope": "Original inventory and wrapper extracted; SetupDi/ancestry/probe leaves are synthetic, not physical discovery."
+          },
+          "relatedRegisteredIds": [
+            "controller.persona",
+            "controller.inputhost-optional-trigger-protocol"
+          ],
+          "exactGlobalTestId": null,
+          "receiptState": "UNKNOWN_NOT_LOCATED_IN_REVIEWED_D_EVIDENCE",
+          "receipt": null,
+          "review": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-capability-controller-motion-receipt-map-20261022-r1/MAPPING.json",
+            "sha256": "2b695fe8815329a8a447b9e0d5bfadace8c2648ec7fa8d5cf0bd98fd397403ee",
+            "pointer": "/points/0"
+          },
+          "requiredBinding": [
+            "wrapper-inventory-source-test-binding.json /actualFunctions/hidHideBuildSourceInterfaceInventory",
+            "wrapper-inventory-source-test-binding.json /parentCandidateSha256",
+            "wrapper-inventory-result.json"
+          ],
+          "remainingBoundary": "Hardwired MSI R9 evidence root; actual interface/container/device observation and current-source execution not established."
+        }
+      ]
+    },
+    {
+      "id": "buttons-axes-backbuttons",
+      "status": "standard-frame-and-oem-profile-catalog-connected;vendor-transport-and-touch-bindings-pending",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "OemChordProfileId"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureOnGamepad("
+        },
+        {
+          "file": "capabilities/HcOemInputCapabilityBinding.h",
+          "anchor": "class InputBindingCache"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemUnifiedInputBindingFor"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "oemBoundChordProfileIdFor"
+        }
+      ],
+      "boundaries": [
+        "standard buttons/sticks/triggers and OEM/backbutton reports remain separate capabilities",
+        "only exact implemented protocol admits extra controls",
+        "controller touchpads/touch contacts require their actual source protocol and current owner; an emulated screen touch surface is a separate capability",
+        "OEM model/profile/catalog binding is for existing chassis OEM sources; it does not authorize extras on an external controller from host DMI. Vendor transport, source authority and complete lifecycle ownership remain pending."
+      ],
+      "evidence": [
+        "controller.signal-consumer",
+        "controller.input-diagnostics",
+        "controller.unified-oem-input-binding",
+        "controller.unified-oem-input-consumers",
+        "controller.machine-model-capabilities"
+      ]
+    },
+    {
+      "id": "controller-motion-calibration",
+      "status": "legion-provider-decoder-lease-bank-session-final-binding-connected;other-provider-and-joint-lifecycle-pending",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "legionMotionDecodeReport("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureLegionMotion("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureControllerCalibrationSourceKey("
+        },
+        {
+          "file": "capabilities/HcControllerMotionCapabilityCatalog.h",
+          "anchor": "class ModelBindingCache"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "legionMotionBoundSource"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "sample.source.capabilityToken==binding.token()"
+        }
+      ],
+      "boundaries": [
+        "physical controller identity and sensor bank",
+        "source lifetime/raw/power/capture generations",
+        "do not admit controller-preferred source declarations into Windows sensor route"
+      ],
+      "evidence": [
+        "tools/legion_motion_consumer_selftest.mjs",
+        "tools/controller_motion_evidence_consumer_selftest.mjs",
+        "tools/controller_motion_auto_calibration_consumer_selftest.mjs",
+        "controller.unified-motion-providers"
+      ]
+    },
+    {
+      "id": "game-feedback-and-physical-actuators",
+      "status": "manual-touch-physical-writers-total-bound;sony-and-steam-classic-source-bound-game-writers-connected;source-epoch-software-and-physical-acceptance-separate",
+      "consumers": [
+        {
+          "file": "src/bridge/controllerFeedbackCapabilities.ts",
+          "anchor": "outputCallbackBound: false"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "physicalFeedbackFinish("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputCaptureStampFeedbackSourceLocked"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostConsumeGameMotorReplyLocked"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "GameFeedbackFrameDispatchScope"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "nativeWriteBoundGameFeedbackCommand"
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "physicalFeedbackStopTarget"
+        }
+      ],
+      "boundaries": [
+        "The reviewed Sony USB classic and Steam Deck composite classic motor target profiles use only the declared original sampled XInput/MSI physical providers; other protocols remain unsupported.",
+        "The original admitted sample supplies the physical SourceToken; revoke, expiry and zero use the existing serial and physical-owner lifecycle.",
+        "Persisted settings, catalog declarations and API success do not establish frontend runtime readiness or physical effect."
+      ],
+      "evidence": [
+        "controller.feedback-capabilities",
+        "Host OutputReceived classic motor decode and actual native fast/DOM receipt verified in software; physical game-output transport and arbitration still required"
+      ]
+    },
+    {
+      "id": "virtual-submission",
+      "status": "unified-standard-input-route-feeds-existing-final-fences;full-target-and-hide-receipts-pending",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionMayIssue("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "inputHostFrameSubmissionRequestCurrent("
+        },
+        {
+          "file": "InputHost/Program.cs",
+          "anchor": "TrySubmitFrame"
+        }
+      ],
+      "boundaries": [
+        "preserve current source ticket, source epoch and final submission fence",
+        "neutralize stale or missing source without replaying old input"
+      ],
+      "evidence": [
+        "controller.unified-standard-input",
+        "controller.inputhost-optional-trigger-protocol",
+        "controller.inputhost-cpu-cost-window"
+      ]
+    },
+    {
+      "id": "physical-visibility-return",
+      "status": "existing-consumer;pending-total-receipt-binding",
+      "consumers": [
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideApplyPhysicalTransaction("
+        },
+        {
+          "file": "native/main.cpp",
+          "anchor": "hidHideShouldReturnApplication("
+        }
+      ],
+      "boundaries": [
+        "touch only owned physical visibility and application entries",
+        "verified visibility transaction and ownership journal",
+        "failure, source loss, shutdown and return must preserve other owners"
+      ],
+      "evidence": [
+        "physical-visibility acceptance separate; assigned hiding AI verifies actual receipts"
+      ],
+      "evidenceMeaning": "Navigation to related software contracts or exact standalone source only. No exact global registration or bound D runtime receipt for these HidHide functions was located in the pinned review; retain UNKNOWN and physical acceptance separately.",
+      "consumerEvidence": [
+        {
+          "consumer": {
+            "file": "native/main.cpp",
+            "anchor": "hidHideApplyPhysicalTransaction("
+          },
+          "exactStandaloneConsumer": {
+            "file": "tools/msi_auxiliary_visibility_lifecycle_selftest.mjs",
+            "anchor": "const sourceApply=selected('hidHideApplyPhysicalTransaction');",
+            "scope": "Only the original active-journal branch, refresh/reapply/reconcile and late-hide paths; complete initial apply is not executed by this extraction."
+          },
+          "relatedRegisteredIds": [
+            "controller.coordinator-lifecycle",
+            "controller.coordinator-native-managed-pipe"
+          ],
+          "exactGlobalTestId": null,
+          "receiptState": "UNKNOWN_NOT_LOCATED_IN_REVIEWED_D_EVIDENCE",
+          "receipt": null,
+          "review": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-capability-controller-motion-receipt-map-20261022-r1/MAPPING.json",
+            "sha256": "2b695fe8815329a8a447b9e0d5bfadace8c2648ec7fa8d5cf0bd98fd397403ee",
+            "pointer": "/points/1"
+          },
+          "requiredBinding": [
+            "lifecycle-integration-tests/{baseline,candidate}-source-test-binding.json /sourceStableThroughExecution",
+            "lifecycle-integration-tests/{baseline,candidate}-result.json"
+          ],
+          "remainingBoundary": "Full initial apply, CLI/driver acceptance and ownership persistence remain UNKNOWN; related coordinator/pipe receipts do not replace exact apply evidence."
+        },
+        {
+          "consumer": {
+            "file": "native/main.cpp",
+            "anchor": "hidHideShouldReturnApplication("
+          },
+          "exactStandaloneConsumer": {
+            "file": "tools/common_visibility_return_selftest.mjs",
+            "anchor": "'hidHideShouldReturnApplication'",
+            "scope": "Original application predicate, restore and exact dependencies; fake external CLI/driver/pipe leaves, no real return."
+          },
+          "relatedRegisteredIds": [
+            "controller.coordinator-lifecycle",
+            "controller.coordinator-native-managed-pipe"
+          ],
+          "exactGlobalTestId": null,
+          "receiptState": "UNKNOWN_NOT_LOCATED_IN_REVIEWED_D_EVIDENCE",
+          "receipt": null,
+          "review": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-capability-controller-motion-receipt-map-20261022-r1/MAPPING.json",
+            "sha256": "2b695fe8815329a8a447b9e0d5bfadace8c2648ec7fa8d5cf0bd98fd397403ee",
+            "pointer": "/points/2"
+          },
+          "sourceContract": {
+            "caseCount": 11,
+            "assertions": 97,
+            "positiveConfigurations": [
+              "Release",
+              "Checked"
+            ],
+            "negativeConfiguration": "Release",
+            "negativeFailureCount": 10,
+            "negativeCaseIds": [
+              "nonMSI-cli-false-owned-still-hidden",
+              "nonMSI-readback-unknown-cli-rejected",
+              "nonMSI-host-ack-unknown-malformed-pipe",
+              "nonMSI-CLI-ACK-is-not-config-return",
+              "nonMSI-carried-duty-reattached-not-erased"
+            ]
+          },
+          "requiredBinding": [
+            "RESULT.json /results",
+            "RESULT.json /traceComparisons",
+            "RESULT.json /sourceInputs",
+            "RESULT.json /sourceDrift",
+            "RESULT.json /physicalPersistenceBoundary"
+          ],
+          "remainingBoundary": "Durable Session/BeforeHide/AfterRestore settlement is an external return-true stub in this fixture; physical return and exact D terminal remain UNKNOWN."
+        }
+      ]
+    }
+  ],
+  "futureAiReview": {
+    "required": [
+      "Read capabilities/EXECUTION-CHAINS.json, INTEGRATION-STATUS.json and this document before treating the total library as complete.",
+      "Trace each route from actual physical source through current consumer, virtual submit and owned hide/return; unimplemented bindings remain gaps.",
+      "Retain before-failures and reject stale source/payload receipts.",
+      "Record incomplete/no-input execution separately from complete-path cost; no whole-process CPU claim from local selector timings."
+    ],
+    "performanceFields": [
+      "completed route and actual consumer",
+      "call/frame count",
+      "source/bank and generation",
+      "fail/reject/neutralize/release outcome",
+      "sampling window and cost unit",
+      "no-device/no-source versus complete-path classification"
+    ]
+  },
+  "sourceInventory": {
+    "sourceBaseline": "HC-BINARY-BATCH12-20260831",
+    "sourceIndex": "deps/handheldcompanion-runtime/source-files.sha256",
+    "sourceRoot": "deps/handheldcompanion-runtime/source",
+    "sourceIndexSha256": "9105b05655c280f99ffffdb214c165955ced5ef3463719d681e7abecf7e904d1",
+    "fileCount": 29,
+    "classDeclarationCount": 28,
+    "dummyFiles": 6,
+    "meaning": "All frozen Controllers C# files are retained and verified; base/helper/dummy declarations are not physical support or runtime admission.",
+    "files": [
+      {
+        "file": "Controllers/Asus/XboxAdaptiveController.cs",
+        "sha256": "d9fce86c614220f7d7f0632e0e4a709489ea880c80d0d0509456f992f1c53147",
+        "classes": [
+          {
+            "name": "XboxAdaptiveController",
+            "namespace": "HandheldCompanion.Controllers.MSI",
+            "abstract": false,
+            "bases": "XInputController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/ControllerCapabilities.cs",
+        "sha256": "bcf923b79e565d71e0b1b5a8ed8b0d38204b8872d50698c17ce164719a838d50",
+        "classes": [],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/ControllerState.cs",
+        "sha256": "a5e3ae2bb501fc556be8988a3dde9331a2b5b524acadabfffd050b41b7b184ca",
+        "classes": [
+          {
+            "name": "ControllerState",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": "ICloneable, IDisposable"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "RightStickTouch",
+          "LeftStickTouch",
+          "RightPadTouch",
+          "LeftPadTouch"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/DInputController.cs",
+        "sha256": "4da5ebde0dcb3918eb3e7aed7dfde511ad25eb9f97187d0800c8297f4c1ab9be",
+        "classes": [
+          {
+            "name": "DInputController",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": "IController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummyDualSenseController.cs",
+        "sha256": "ef3520e5aac17fe82005ffd474fb3c4f76ce2f1f12dea43bf9f8058ef07b9f3e",
+        "classes": [
+          {
+            "name": "DummyDualSenseController",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "DualSenseController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "TouchpadClick",
+          "TouchpadTouch",
+          "B5"
+        ],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummyDualShock4Controller.cs",
+        "sha256": "a2394bd5ecefde784cf3cddc9bb20b1cc951821aa75c6b7d0b4bd5ceb700f9bb",
+        "classes": [
+          {
+            "name": "DummyDualShock4Controller",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "DualShock4Controller"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummySteamDeckController.cs",
+        "sha256": "f4541cf15e1cf87cb783f428c3c68c777d74f9df10b7aed671b6b3072f14595a",
+        "classes": [
+          {
+            "name": "DummySteamDeckController",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "NeptuneController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummySwitchProController.cs",
+        "sha256": "ec741dfc0db44adf51087b13a0e90a48b391f0413e0204f70ea353c9136564f4",
+        "classes": [
+          {
+            "name": "DummySwitchProController",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "NintendoSwitchProController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummyXbox360Controller.cs",
+        "sha256": "1ef93b343c767ac5c7be7295c9722619f4d288cd630aac0d83b520603b44a6e9",
+        "classes": [
+          {
+            "name": "DummyXbox360Controller",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "Xbox360Controller"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Dummies/DummyXboxElite2Controller.cs",
+        "sha256": "c515dc37e3daa84f94c748aaf55c304541b70ea852b8563b5a7cf1105cd34d7e",
+        "classes": [
+          {
+            "name": "DummyXboxElite2Controller",
+            "namespace": "HandheldCompanion.Controllers.Dummies",
+            "abstract": false,
+            "bases": "Xbox360Controller"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "L4",
+          "R4",
+          "L5",
+          "R5"
+        ],
+        "reviewState": "test-dummy;not-physical-controller",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/GameSir/TarantulaProController.cs",
+        "sha256": "fa5fab8da436d773bd1bd4a4b9b50769ff5ecee371bc3708db896ebb8b79c76a",
+        "classes": [
+          {
+            "name": "TarantulaProController",
+            "namespace": "HandheldCompanion.Controllers.GameSir",
+            "abstract": false,
+            "bases": "XInputController"
+          }
+        ],
+        "literalCapabilities": [
+          "MotionSensor"
+        ],
+        "sourceButtonsMentioned": [
+          "R4",
+          "L4",
+          "L5",
+          "B5",
+          "B6",
+          "B7",
+          "B8",
+          "B9",
+          "B10",
+          "B11"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/IController.cs",
+        "sha256": "4a9da4fe7e2f257df5c78b9af843f0bf424c80d92410a675e3e59c0c3ae68c8a",
+        "classes": [
+          {
+            "name": "IController",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": "IDisposable"
+          }
+        ],
+        "literalCapabilities": [
+          "None",
+          "MotionSensor"
+        ],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "Start",
+          "Back",
+          "Special",
+          "L1",
+          "R1",
+          "LeftStickClick",
+          "RightStickClick",
+          "R2Soft",
+          "LeftStickUp",
+          "LeftStickDown",
+          "LeftStickLeft",
+          "LeftStickRight",
+          "RightStickUp",
+          "RightStickDown",
+          "RightStickLeft",
+          "RightStickRight",
+          "None",
+          "RightStickTouch",
+          "RightPadClick",
+          "RightPadClickUp",
+          "RightPadClickDown",
+          "RightPadClickLeft",
+          "RightPadClickRight",
+          "TouchpadTouch",
+          "LeftPadTouch",
+          "RightPadTouch",
+          "VolumeUp",
+          "VolumeDown",
+          "LeftPadClick",
+          "LeftPadClickDown",
+          "LeftPadClickUp",
+          "LeftPadClickRight",
+          "LeftPadClickLeft",
+          "L4",
+          "L5",
+          "R4",
+          "R5"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Lenovo/LegionController.cs",
+        "sha256": "f22da7be57adfd962176cb2e58a2c33259658d700c0cda2975204cdd5a1e5f77",
+        "classes": [
+          {
+            "name": "LegionController",
+            "namespace": "HandheldCompanion.Controllers.Lenovo",
+            "abstract": false,
+            "bases": "LegionControllerBase"
+          }
+        ],
+        "literalCapabilities": [
+          "MotionSensor"
+        ],
+        "sourceButtonsMentioned": [
+          "RightPadTouch",
+          "RightPadClick",
+          "RightPadClickDown",
+          "R4",
+          "R5",
+          "L4",
+          "L5",
+          "B5",
+          "B6",
+          "B7",
+          "B8",
+          "B9",
+          "B10",
+          "B11",
+          "Special",
+          "OEM1",
+          "OEM2"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Lenovo/LegionControllerBase.cs",
+        "sha256": "eeaf9cc036e91cd4cac85be49891be0383441e07d68756e23a67268e4dde6260",
+        "classes": [
+          {
+            "name": "LegionControllerBase",
+            "namespace": "HandheldCompanion.Controllers.Lenovo",
+            "abstract": true,
+            "bases": "XInputController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "OEM1",
+          "Start",
+          "OEM2",
+          "Back"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Lenovo/LegionControllerS.cs",
+        "sha256": "46dc972bf2fa09b710d52fe472469a316db85775c70cb52c81f8cbbccfbb13b2",
+        "classes": [
+          {
+            "name": "LegionControllerS",
+            "namespace": "HandheldCompanion.Controllers.Lenovo",
+            "abstract": false,
+            "bases": "LegionControllerBase"
+          }
+        ],
+        "literalCapabilities": [
+          "MotionSensor"
+        ],
+        "sourceButtonsMentioned": [
+          "RightPadClick",
+          "RightPadTouch",
+          "R4",
+          "L4",
+          "Special",
+          "OEM1",
+          "OEM2"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/MSI/DClawController.cs",
+        "sha256": "fe9f0909538e2af4ad3b2e67ce6fbbbe1cd3d46d8c1273d9e9f211b8fb812035",
+        "classes": [
+          {
+            "name": "DClawController",
+            "namespace": "HandheldCompanion.Controllers.MSI",
+            "abstract": false,
+            "bases": "DInputController"
+          }
+        ],
+        "literalCapabilities": [
+          "Rumble"
+        ],
+        "sourceButtonsMentioned": [
+          "OEM3",
+          "OEM4",
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "DPadUp",
+          "DPadRight",
+          "DPadDown",
+          "DPadLeft",
+          "L1",
+          "R1",
+          "L2Full",
+          "R2Full",
+          "Back",
+          "Start",
+          "LeftStickClick",
+          "RightStickClick",
+          "L2Soft",
+          "R2Soft",
+          "Special"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/MSI/XClawController.cs",
+        "sha256": "b64739313540d2c5a0dead9baa0e4e0167f80a520f4498efc8048a2686fe4fb7",
+        "classes": [
+          {
+            "name": "XClawController",
+            "namespace": "HandheldCompanion.Controllers.MSI",
+            "abstract": false,
+            "bases": "XInputController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/OpenXInput.cs",
+        "sha256": "dd113d58fedc2e421b2db325c751ab17a1a306deba7423ba0372adc9e42d2f32",
+        "classes": [
+          {
+            "name": "OpenXInput",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": null
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/RumbleConverter.cs",
+        "sha256": "c38c4063afe4ca14c9fc52429f28b905391c30752dfddd7c9d8fa979e42fbbd1",
+        "classes": [
+          {
+            "name": "RumbleConverter",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": null
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/SDL/DualSenseController.cs",
+        "sha256": "631c73803a52ff87b239ce192a1d1d033beddc8b859e2d5dcd49bc980f982a42",
+        "classes": [
+          {
+            "name": "DualSenseController",
+            "namespace": "HandheldCompanion.Controllers.SDL",
+            "abstract": false,
+            "bases": "DualShock4Controller"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "Back",
+          "Start",
+          "LeftPadClick",
+          "RightPadClick",
+          "LeftPadTouch",
+          "RightPadTouch",
+          "TouchpadClick",
+          "TouchpadTouch"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/SDL/DualShock4Controller.cs",
+        "sha256": "4dbe9ef89d8926dd001f24ed4ea70f5fcc16dd045133f46d095d15f7aaf7a4ba",
+        "classes": [
+          {
+            "name": "DualShock4Controller",
+            "namespace": "HandheldCompanion.Controllers.SDL",
+            "abstract": false,
+            "bases": "SDLController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "L1",
+          "R1",
+          "Back",
+          "Start",
+          "L2Soft",
+          "L2Full",
+          "R2Soft",
+          "R2Full",
+          "Special",
+          "LeftPadClick",
+          "RightPadClick",
+          "LeftPadTouch",
+          "RightPadTouch"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/SDL/NintendoSwitchProController.cs",
+        "sha256": "e1bda613b95dc6c7e4dda389d1aafcdfd6dee4bf2940a1bf2c7f7f289cdfcd16",
+        "classes": [
+          {
+            "name": "NintendoSwitchProController",
+            "namespace": "HandheldCompanion.Controllers.SDL",
+            "abstract": false,
+            "bases": "SDLController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/SDL/Xbox360Controller.cs",
+        "sha256": "7e18b5cb1b2430610e10958a760f42f5f54ca2e448afe301a46e8a2b1d02d50c",
+        "classes": [
+          {
+            "name": "Xbox360Controller",
+            "namespace": "HandheldCompanion.Controllers.SDL",
+            "abstract": false,
+            "bases": "SDLController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "L1",
+          "R1",
+          "Back",
+          "Start",
+          "L2Soft",
+          "L2Full",
+          "R2Soft",
+          "R2Full",
+          "Special"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/SDLController.cs",
+        "sha256": "c9a1302e1700947e789381b527c1c3419f1b3e424cd27f36ce1cb55259b5c5a1",
+        "classes": [
+          {
+            "name": "SDLController",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": "IController"
+          }
+        ],
+        "literalCapabilities": [
+          "MotionSensor",
+          "None",
+          "Rumble"
+        ],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "LeftPadClick",
+          "LeftPadTouch",
+          "TouchpadClick",
+          "TouchpadTouch",
+          "RightPadClick",
+          "RightPadTouch",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "Start",
+          "Back",
+          "L1",
+          "R1",
+          "Special",
+          "LeftStickClick",
+          "RightStickClick",
+          "L4",
+          "R4",
+          "L5",
+          "R5",
+          "B5",
+          "B6",
+          "B7",
+          "B8",
+          "B9",
+          "B10",
+          "L2Soft",
+          "L2Full",
+          "R2Soft",
+          "R2Full"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Steam/GordonController.cs",
+        "sha256": "edf96d0aaf78653378f6854c3e8768cc8f625d96cae46b9ffb57c491a49e3bf5",
+        "classes": [
+          {
+            "name": "GordonController",
+            "namespace": "HandheldCompanion.Controllers.Steam",
+            "abstract": false,
+            "bases": "SteamController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "L4",
+          "R4",
+          "LeftPadClick",
+          "LeftPadTouch",
+          "LeftPadClickUp",
+          "LeftPadClickDown",
+          "LeftPadClickLeft",
+          "LeftPadClickRight",
+          "RightPadClick",
+          "RightPadTouch",
+          "RightPadClickUp",
+          "RightPadClickDown",
+          "RightPadClickLeft",
+          "RightPadClickRight",
+          "TouchpadClick",
+          "TouchpadTouch",
+          "RightStickClick",
+          "RightStickUp",
+          "RightStickDown",
+          "RightStickLeft",
+          "RightStickRight",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "Start",
+          "Back",
+          "Special",
+          "L2Soft",
+          "R2Soft",
+          "L2Full",
+          "R2Full",
+          "L1",
+          "R1",
+          "LeftStickClick"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Steam/NeptuneController.cs",
+        "sha256": "406e99a0991193896773f58d66898ba328fd4074cfc720155f382d3d70e330e8",
+        "classes": [
+          {
+            "name": "NeptuneController",
+            "namespace": "HandheldCompanion.Controllers.Steam",
+            "abstract": false,
+            "bases": "SteamController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "L4",
+          "R4",
+          "L5",
+          "R5",
+          "Special2",
+          "LeftStickTouch",
+          "RightStickTouch",
+          "LeftPadClick",
+          "LeftPadTouch",
+          "LeftPadClickUp",
+          "LeftPadClickDown",
+          "LeftPadClickLeft",
+          "LeftPadClickRight",
+          "RightPadClick",
+          "RightPadTouch",
+          "RightPadClickUp",
+          "RightPadClickDown",
+          "RightPadClickLeft",
+          "RightPadClickRight",
+          "TouchpadClick",
+          "TouchpadTouch",
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "Start",
+          "Back",
+          "Special",
+          "L2Soft",
+          "R2Soft",
+          "L2Full",
+          "R2Full",
+          "L1",
+          "R1",
+          "LeftStickClick",
+          "RightStickClick"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Steam/SteamController.cs",
+        "sha256": "fcc4ea5bfafa1aa4bdcaa4ddf290cdea8abddac1a084d650ce8054acc68a786a",
+        "classes": [
+          {
+            "name": "SteamController",
+            "namespace": "HandheldCompanion.Controllers.Steam",
+            "abstract": true,
+            "bases": "IController"
+          }
+        ],
+        "literalCapabilities": [
+          "MotionSensor",
+          "Rumble"
+        ],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "L1",
+          "R1",
+          "Back",
+          "Start",
+          "L2Soft",
+          "L2Full",
+          "R2Soft",
+          "R2Full",
+          "L4",
+          "L5",
+          "R4",
+          "R5",
+          "Special",
+          "Special2",
+          "LeftStickTouch",
+          "RightStickTouch",
+          "LeftPadTouch",
+          "RightPadTouch",
+          "LeftPadClick",
+          "RightPadClick",
+          "LeftPadClickUp",
+          "LeftPadClickDown",
+          "LeftPadClickLeft",
+          "LeftPadClickRight",
+          "RightPadClickUp",
+          "RightPadClickDown",
+          "RightPadClickLeft",
+          "RightPadClickRight",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "LeftStickClick",
+          "LeftStickUp",
+          "LeftStickDown",
+          "LeftStickLeft",
+          "LeftStickRight",
+          "OEM1",
+          "RightStickClick",
+          "RightStickUp",
+          "RightStickDown",
+          "RightStickLeft",
+          "RightStickRight"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/XInputController.cs",
+        "sha256": "e9ff686f305077feb70e9692ba11a908413daa88ffc0346d5e79816b64bbd1bb",
+        "classes": [
+          {
+            "name": "XInputController",
+            "namespace": "HandheldCompanion.Controllers",
+            "abstract": false,
+            "bases": "IController"
+          }
+        ],
+        "literalCapabilities": [
+          "Rumble"
+        ],
+        "sourceButtonsMentioned": [
+          "B1",
+          "B2",
+          "B3",
+          "B4",
+          "Start",
+          "Back",
+          "L2Soft",
+          "R2Soft",
+          "L2Full",
+          "R2Full",
+          "LeftStickClick",
+          "RightStickClick",
+          "L1",
+          "R1",
+          "DPadUp",
+          "DPadDown",
+          "DPadLeft",
+          "DPadRight",
+          "Special"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      },
+      {
+        "file": "Controllers/Zotac/ZoneController.cs",
+        "sha256": "2b9be7f309b79b218adcbda3a79da4cb6bdf6be6a0d6e7b16e8d4a9166a10c30",
+        "classes": [
+          {
+            "name": "ZoneController",
+            "namespace": "HandheldCompanion.Controllers.Zotac",
+            "abstract": false,
+            "bases": "XInputController"
+          }
+        ],
+        "literalCapabilities": [],
+        "sourceButtonsMentioned": [
+          "B5",
+          "B6",
+          "B7",
+          "B8"
+        ],
+        "reviewState": "pending-consumer-qualified-review",
+        "availability": "source-declaration-only;not-runtime-admission"
+      }
+    ]
+  },
+  "runtimeBindings": {
+    "standardInputProviders": 2,
+    "sourceAliases": [
+      "xinput",
+      "xinput-any-connected",
+      "msi-dinput"
+    ],
+    "policy": "capabilities/hc-controller-input-policy.json",
+    "dispatcher": "capabilities/HcControllerInputCapabilityCatalog.h",
+    "actualConsumer": "inputHostFrameSubmissionSample",
+    "sourceAvailability": "live original sample/window and final fences",
+    "perControllerExtras": false,
+    "controllerMotion": false,
+    "gameFeedback": false,
+    "allControllerConsumersConnected": false,
+    "oemInput": {
+      "dispatcher": "capabilities/HcOemInputCapabilityBinding.h",
+      "actualConsumers": [
+        "oemBackMappingRefreshGate",
+        "gamepadOemPressedKeys",
+        "oem.keys.get"
+      ],
+      "registration": "existing total-library model identity to original profile/key-table references",
+      "canonicalCapturePredicates": true,
+      "liveGatesCached": false,
+      "allVendorTransportsAndActionsConnected": false,
+      "physicalAccepted": false
+    },
+    "legionMotionProviders": {
+      "models": 4,
+      "protocols": 2,
+      "dispatcher": "capabilities/HcControllerMotionCapabilityCatalog.h",
+      "sourceToken": "Source.capabilityToken retained in samples, leases and diagnostic banks; native consumers require a current nonzero binding",
+      "originalDecoder": "native/legion_input_protocol.h unchanged",
+      "allPhysicalControllerMotionConnected": false,
+      "physicalAccepted": false
+    },
+    "physicalFeedback": {
+      "registeredProviders": 2,
+      "scope": "native manual and touch physical feedback only",
+      "dispatcher": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+      "actualConsumers": [
+        "nativePhysicalFeedbackReady",
+        "nativePhysicalFeedbackStart",
+        "msiDinputFeedbackWrite",
+        "physicalFeedbackStopTarget",
+        "physicalFeedbackFinish"
+      ],
+      "sourceSelection": "observed physical MSI main-source record or physical XInput slot; never chassis DMI for provider selection",
+      "retainedBinding": "PhysicalFeedbackTarget.unifiedBinding; Receipt.capabilityToken identifies chosen writer only",
+      "softwarePositiveCasesPerDiagnosticConfiguration": 64,
+      "softwarePositiveChecksPerDiagnosticConfiguration": 299,
+      "diagnosticConfigurations": 2,
+      "compiledSourceFaults": 9,
+      "msiActualSourceLeaseFrameWriteExecuted": true,
+      "platformAndWin32IoControlled": true,
+      "gameOutputCallbackBound": false,
+      "allControllerFeedbackConnected": false,
+      "physicalAcceptance": false,
+      "msiStopFailure": {
+        "actualZeroResultConsumed": true,
+        "failedSameSourceOwnerRetained": true,
+        "existingBoundedRetry": true,
+        "noRecurringTimerAfterBudget": true,
+        "existingSourceEdgeWakeHelper": "msiDinputFeedbackWakePendingStop",
+        "sourcePublicationHooks": "checked original callsites; wake helper and scheduler execute against controlled source events",
+        "replacementDeviceCannotReceiveOldZero": true,
+        "hardwareZeroObservation": false
+      }
+    }
+  },
+  "gameMotorSoftwareConsumption": {
+    "capabilityId": "controller.feedback.game.dualsense-edge-usb-classic",
+    "sourceConnected": true,
+    "supportedVirtualTargets": [
+      {
+        "profileIdentity": "dualsense-edge",
+        "protocol": "dualsense-usb-classic-v1",
+        "reportSource": 0,
+        "reportId": 2,
+        "bodyBytes": 63,
+        "motorSemantics": "independent classic left/right rumble; zero pair stops this game owner"
+      }
+    ],
+    "supportedPhysicalSources": [
+      {
+        "inputCapabilityId": "controller.input.xinput.standard",
+        "actualInputAliases": [
+          "xinput",
+          "xinput-any-connected"
+        ],
+        "writerCapabilityId": "controller.feedback.xinput.physical"
+      },
+      {
+        "inputCapabilityId": "controller.input.msi-dinput.standard",
+        "actualInputAliases": [
+          "msi-dinput"
+        ],
+        "writerCapabilityId": "controller.feedback.msi-dinput.physical"
+      }
+    ],
+    "consumers": [
+      {
+        "file": "native/main.cpp",
+        "anchor": "inputCaptureStampFeedbackSourceLocked"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "inputHostConsumeGameMotorReplyLocked"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "GameFeedbackFrameDispatchScope"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "nativeWriteBoundGameFeedbackCommand"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "physicalFeedbackStopTarget"
+      }
+    ],
+    "sourceRule": "The same admitted frame retains its original physical SourceToken; machine family/DMI and an arbitrary current slot never grant writing permission.",
+    "headers": [
+      "native/game_feedback_source_ticket.h",
+      "native/game_feedback_dispatch.h",
+      "native/game_feedback_diagnostics.h"
+    ],
+    "diagnostics": {
+      "existingEvent": "input-host-submit-stats",
+      "field": "gameMotorDispatch",
+      "consumer": "nativeGameFeedbackDiagnosticsSnapshot",
+      "counters": "process lifetime, game operations only",
+      "costGate": "existing tickCostEnabled",
+      "clockWhenDisabled": "no new observation clock reads",
+      "availabilityAuthority": false
+    },
+    "physicalAcceptance": false,
+    "wholeProcessCpuReduction": null,
+    "excludedFromThisSupport": [
+      "Bluetooth Sony raw output",
+      "adaptive triggers or audio haptic stream",
+      "game-controller lighting",
+      "unsupported physical input aliases or unbound sources",
+      "Steam Deck haptic and timed pulse protocols; classic rumble is declared separately",
+      "Xbox HID/BT and impulse-trigger protocols; exact source2 classical rumble is declared separately"
+    ],
+    "softwareAcceptanceEvidenceRecordedSeparately": true
+  },
+  "additionalGameMotorSoftwareConsumption": [
+    {
+      "capabilityId": "controller.feedback.game.steam-deck-usb-classic-rumble",
+      "profileIdentity": "steam-deck-composite",
+      "protocol": "steam-deck-usb-classic-rumble-v1",
+      "sourceConnected": true,
+      "contract": "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
+      "supportedPhysicalSources": [
+        "controller.feedback.xinput.physical",
+        "controller.feedback.msi-dinput.physical"
+      ],
+      "softwareAcceptanceEvidenceRecordedSeparately": true,
+      "physicalAcceptance": false,
+      "wholeProcessCpuReduction": null
+    },
+    {
+      "capabilityId": "controller.feedback.game.xbox-elite-v2-xinput-classic",
+      "profileIdentity": "xbox-elite-v2",
+      "protocol": "xbox-elite-v2-xinput-classic-v1",
+      "sourceConnected": true,
+      "contract": "capabilities/CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT.json",
+      "supportedPhysicalSources": [
+        "controller.feedback.xinput.physical",
+        "controller.feedback.msi-dinput.physical"
+      ],
+      "softwareAcceptanceEvidenceRecordedSeparately": true,
+      "physicalAcceptance": false,
+      "wholeProcessCpuReduction": null
+    }
+  ],
+  "msiRearConfiguration": {
+    "scope": "Existing enabled MSI SD rear mapping dependency only; native keyboard is record-only",
+    "metadata": "capabilities/hc-device-catalog.json#domains/controllerConfiguration",
+    "protocol": {
+      "vendor": 3504,
+      "xinput": 6401,
+      "dinput": 6402,
+      "firmware": "exact eight-source table",
+      "factory": "native/msi_rear_protocol.h::reports"
+    },
+    "binding": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+    "consumers": [
+      "msiClawEnsureM12Remap"
+    ],
+    "nativeKeyboardDefaultWritesEnabled": false,
+    "sharedProfileFields": true,
+    "originalMappingReadback": false,
+    "automaticRestoreEstablished": false,
+    "physicalAcceptance": false,
+    "recordOnlyConsumers": [
+      "msiNativeRearPrepareKeyboard"
+    ],
+    "nativeKeyboardConsumerSourceUnchanged": true
+  }
+}

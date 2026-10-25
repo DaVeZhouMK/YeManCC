@@ -58,6 +58,9 @@
             </button>
           </div>
         </header>
+        <div id="media-download-progress" class="media-download-progress hidden" role="status" aria-live="polite">
+          <span id="media-download-label"></span><button id="media-download-now" class="button" type="button">立即补齐壁纸</button><progress id="media-download-bar" max="1" aria-label="动态壁纸下载进度"></progress>
+        </div>
         <nav class="page-tabs" aria-label="游戏库页面">
           <button class="page-tab active" data-tab="not-in-steam" type="button">
             等待加入 <strong id="count-not-in-steam">[0个]</strong></button
@@ -226,20 +229,13 @@
         <p id="edit-path" class="path"></p>
         <div class="edit-layout">
           <section class="edit-artwork-panel" aria-label="指定封面、横版与壁纸">
-            <div class="edit-section-heading" aria-hidden="true">
-              <div>
-                <span class="eyebrow">游戏视觉</span>
-                <h3>指定封面、横版与壁纸</h3>
-              </div>
-              <p id="artwork-search-hint" class="path"></p>
-            </div>
+            <p id="artwork-search-hint" class="path hidden"></p>
             <div class="artwork-panes">
               <section
                 class="artwork-pane"
                 data-artwork-type="cover"
                 data-artwork-editable="true"
               >
-                <h3>封面</h3>
                 <div
                   id="artwork-cover-preview"
                   class="artwork-dropzone"
@@ -257,7 +253,6 @@
                 data-artwork-type="long"
                 data-artwork-editable="true"
               >
-                <h3>横版</h3>
                 <div
                   id="artwork-long-preview"
                   class="artwork-dropzone"
@@ -271,7 +266,6 @@
                 </div>
               </section>
               <section class="artwork-pane" data-artwork-type="wallpaper" data-artwork-editable="true">
-                <h3>壁纸</h3>
                 <div
                   id="artwork-wallpaper-preview"
                   class="artwork-dropzone"
@@ -373,6 +367,12 @@
               >
                 保存内容</button
               ><button
+                id="edit-add-to-steam"
+                class="button steam"
+                type="button"
+              >
+                加入Steam</button
+              ><button
                 id="edit-back-button"
                 class="button back-danger"
                 type="button"
@@ -448,6 +448,14 @@
             <h2 id="artwork-search-title">选择封面</h2>
             <p id="artwork-search-summary" class="path"></p>
           </div>
+          <label id="artwork-video-quality-row" class="video-download-quality hidden">
+            <span>下载清晰度</span>
+            <select id="artwork-video-quality" aria-label="动态壁纸下载清晰度">
+              <option value="720">720p 优先（默认）</option>
+              <option value="480">480p 优先</option>
+              <option value="1080">1080p 优先</option>
+            </select>
+          </label>
           <button id="artwork-search-close" class="icon-button" type="button">
             ×
           </button>

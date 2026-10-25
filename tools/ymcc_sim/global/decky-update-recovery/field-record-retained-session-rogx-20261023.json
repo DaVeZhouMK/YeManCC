@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "id": "decky-retained-session-repair-rogx-20261023",
+  "archive": {
+    "path": "G:/YeManCC-Work/日志/ROG-Xbox-2025/YeManCC-logs-20261023-083438-ROGX.zip",
+    "sha256": "9421ba1a7405eff0c5657d7970388262666d4bf24abd3d39f29181bd46f3dc0e"
+  },
+  "timeZone": "Asia/Hong_Kong",
+  "observed": {
+    "processPid": 16612,
+    "steamPid": 10504,
+    "steamBirth": "134371887935955323",
+    "officialLoaderVersion": "v3.3.0",
+    "frontendBuild": "f0750298c7e469f1caa6b23948d4cf04e7cb49731abac0d5e1a75cff273e5b6c",
+    "previousYmccOffAt": "2026-10-23T08:28:14.021",
+    "retainedAttachAt": "2026-10-23T08:28:32.722",
+    "ownedLoaderPid": 0,
+    "automaticDecision": "steam-ui-refresh-requires-user",
+    "snapshotReadyAt": "2026-10-23T08:28:59.447",
+    "bindingStoppedAt": "2026-10-23T08:29:17.686",
+    "failureAt": "2026-10-23T08:29:18.430",
+    "runtime": {
+      "enabled": true,
+      "steamKnown": true,
+      "steamRunning": true,
+      "pid": 0,
+      "phase": "unavailable",
+      "reason": "mirror-bootstrap-session-changed",
+      "revision": 7
+    },
+    "officialWsErrorsFrom": "2026-10-23T08:28:13",
+    "officialWsErrorsThrough": "2026-10-23T08:34:29"
+  },
+  "provenGap": "Exact production UI/native repairable predicate excludes the final field state, leaving no manual fallback.",
+  "notProven": "Archive has no per-field session diff; do not claim root/account/PID/birth cause or automatic successful recovery.",
+  "required": [
+    "manual recovery remains reachable for this exact enabled failure",
+    "fresh session/context/resources/port/OFF validation before dispatch",
+    "automatic page rebuild and Loader reinjection stay denied",
+    "uncertain outcomes do not replay"
+  ],
+  "scope": "Software regression of manual fallback only; no installed or physical acceptance",
+  "automaticRecoveryFixed": false,
+  "installed": false
+}

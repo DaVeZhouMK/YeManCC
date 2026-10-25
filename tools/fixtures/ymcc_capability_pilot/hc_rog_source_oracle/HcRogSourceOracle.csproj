@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>HcRogSourceOracle</AssemblyName>
+    <RootNamespace>Ymcc.CapabilityPilot.HcReference</RootNamespace>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <CheckForOverflowUnderflow>false</CheckForOverflowUnderflow>
+    <IsPackable>false</IsPackable>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="HcRogSourceOracle.cs" />
+    <Compile Include="Generated/HcRogSourceOracle.g.cs" />
+    <EmbeddedResource Include="Generated/HcRogSourceOracle.g.cs" LogicalName="Reference.HcRogSourceOracle.g.cs" />
+  </ItemGroup>
+</Project>

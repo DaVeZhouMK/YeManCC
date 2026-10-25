@@ -1,0 +1,122 @@
+{
+  "schemaVersion": 1,
+  "id": "controller.host-exit-owned",
+  "sourceFiles": [
+    "deps/json/json.hpp",
+    "native/exit_cleanup_wait.h",
+    "native/input_capture_completion.h",
+    "native/input_host_exit_owner_runtime.h",
+    "native/input_host_exit_retirement.h",
+    "native/input_host_pipe_transport.h",
+    "native/input_host_process_retirement.h",
+    "native/main.cpp",
+    "native/virtual_controller_runtime_contract.h",
+    "native/virtual_controller_stop_runtime.h",
+    "native/virtual_start_protection.h",
+    "tools/fixtures/input_host_exit_completion_gates/fixture.cpp.in",
+    "tools/fixtures/input_host_exit_completion_gates/source-contract.json",
+    "tools/fixtures/input_host_exit_retirement/suite.cpp.in",
+    "tools/fixtures/input_host_native_exit_parent/README.md",
+    "tools/fixtures/input_host_native_exit_parent/suite.cpp.in",
+    "tools/fixtures/input_host_process_retirement/environment.hpp",
+    "tools/fixtures/input_host_process_retirement/suite.cpp.in",
+    "tools/input_host_exit_completion_gates_selftest.py",
+    "tools/input_host_exit_retirement_selftest.py",
+    "tools/input_host_native_exit_parent_selftest.py",
+    "tools/input_host_process_retirement_selftest.py",
+    "tools/input_pipe_retirement_memory_selftest.cpp",
+    "tools/input_pipe_test_allocation_fault.h",
+    "tools/input_timer_evidence_adapter_selftest.py",
+    "tools/ymcc_sim/global/controller-signal-evidence/adapter.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/consumer-runner.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/consumer-schema.json",
+    "tools/ymcc_sim/global/controller-signal-evidence/current-registration.test.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/environment.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/execution-probe.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/exit-fence-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/historical-inputs.json",
+    "tools/ymcc_sim/global/controller-signal-evidence/managed-terminal-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/managed-terminal-registration.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/managed-terminal.test.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/native-exit-source-closure.json",
+    "tools/ymcc_sim/global/controller-signal-evidence/owned-cleanup-composition-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/owned-workspace.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/owner-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/partial-init-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/primary-thread-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/primary-thread-registration.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/primary-thread.test.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/receipts.test.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/registration.test.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/run.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/sensor-ensure-receipts.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/source-fragments.mjs",
+    "tools/ymcc_sim/global/controller-signal-evidence/tool-inputs.json",
+    "tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json",
+    "tools/ymcc_sim/global/extra-adapters.mjs",
+    "tools/ymcc_sim/global/runner.mjs"
+  ],
+  "originalEvidence": [
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\retirement-helper\\r2\\RESULT.json",
+      "sha256": "8c5248d0c5be5efc45e5eb65c721a627c89dc4a0769625ed46a438cacf5ec10c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\parent\\r6\\RESULT.json",
+      "sha256": "4156b1022ed26d39c3e165185729ea09d38bc515840c4bcad737369de37b03f8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\completion-gates\\consumer\\RESULT.json",
+      "sha256": "d83a33eb753da35f0d8496ccff90a4527d7ef1ade42e1fb42479b2fe5919b2ab"
+    }
+  ],
+  "historicalFailure": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitParent23\\r4\\RESULT.json",
+    "sha256": "4b1130eec8a9f997b26447e007dfc28e21b9b3db8a997c1db18fd2fe1b4d69cd"
+  },
+  "completionContract": "tools/fixtures/input_host_exit_completion_gates/source-contract.json",
+  "wholeLifecycleAcceptance": false,
+  "sourceApprovalMeaning": "Current exact source selected only as offline test input. No whole-main/product/hardware approval.",
+  "routes": {
+    "helper": {
+      "consumer": "tools/input_host_exit_retirement_selftest.py",
+      "arg": "--out"
+    },
+    "parent": {
+      "consumer": "tools/input_host_native_exit_parent_selftest.py",
+      "arg": "--out"
+    },
+    "gates": {
+      "consumer": "tools/input_host_exit_completion_gates_selftest.py",
+      "arg": "--output-root"
+    }
+  },
+  "helperNames": [
+    "real-once-force-exits-process-and-creation-thread-checked-close",
+    "missing-authority-gate-0",
+    "missing-authority-gate-1",
+    "missing-authority-gate-2",
+    "missing-authority-gate-3",
+    "identity-reject-0",
+    "identity-reject-1",
+    "identity-reject-2",
+    "real-wait-failed-without-synchronize-never-force",
+    "explicit-unknown-wait-never-force",
+    "accepted-force-without-exit-retains-owner-and-never-renews-budget",
+    "rejected-force-spends-once-and-rechecks-with-zero-budget",
+    "real-process-close-failure-after-force-retains-owner-then-closes-without-force"
+  ],
+  "parentScenarios": [
+    "healthy-ordinary",
+    "unprotected-uncooperative",
+    "protected-primary-pipe"
+  ],
+  "gateRoutes": {
+    "current": 0,
+    "historical-before-host-gate": 88,
+    "delete-ready-host-gate": 48,
+    "delete-no-window-host-gate": 40
+  },
+  "permanentOsBlockStatus": "UNKNOWN"
+}

@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "scopeVersion": 2,
+  "positiveCases": [
+    {
+      "id": "ownership-claim-suppresses-parent",
+      "expected": "PASS"
+    },
+    {
+      "id": "close-enters-return",
+      "expected": "PASS"
+    },
+    {
+      "id": "held-button-blocks-return",
+      "expected": "PASS"
+    },
+    {
+      "id": "held-trigger-blocks-return",
+      "expected": "PASS"
+    },
+    {
+      "id": "held-axis-blocks-return",
+      "expected": "PASS"
+    },
+    {
+      "id": "neutral-releases-without-replay",
+      "expected": "PASS"
+    },
+    {
+      "id": "next-parent-action-admitted",
+      "expected": "PASS"
+    },
+    {
+      "id": "reopen-before-neutral-keeps-owner",
+      "expected": "PASS"
+    },
+    {
+      "id": "retired-ready-keeps-current",
+      "expected": "PASS"
+    },
+    {
+      "id": "retired-close-keeps-current",
+      "expected": "PASS"
+    },
+    {
+      "id": "queued-parent-action-current",
+      "expected": "PASS"
+    },
+    {
+      "id": "queued-parent-action-after-claim",
+      "expected": "PASS"
+    }
+  ],
+  "positiveNaturalExit": 0,
+  "sourceFaults": [
+    {
+      "id": "neutral-and-to-or",
+      "case": "held-button-blocks-return",
+      "expectedNaturalExit": 23,
+      "expectedAssertion": "held-button-must-keep-main-return-gate"
+    },
+    {
+      "id": "queued-radial-gate-removed",
+      "case": "queued-parent-action-after-claim",
+      "expectedNaturalExit": 23,
+      "expectedAssertion": "queued-parent-action-must-not-execute-after-radial-claim"
+    }
+  ],
+  "positiveIsCurrentPatchedProduct": true,
+  "oldFailureKeptOutsideRuntime": true
+}

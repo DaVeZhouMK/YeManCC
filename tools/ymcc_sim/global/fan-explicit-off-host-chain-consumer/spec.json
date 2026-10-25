@@ -1,0 +1,1149 @@
+{
+  "schemaVersion": 1,
+  "id": "fan.explicit-off-host-chain-consumer",
+  "module": "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer",
+  "originalTs": "tools/fan_explicit_off_host_chain_selftest.ts",
+  "originalTsSha256": "b2a7c55e059bec6757f70553075ae9dd5617a15a436f94fca909f1927ee78ae0",
+  "originalManaged": "tools/FanRepeatedSleepIntentSelfTest/Program.cs",
+  "originalManagedSha256": "1de26c1493a8406b43d32b795104c89f5c83bc829bba3f9e194196c0d7ec4752",
+  "originalPs1": "tools/fan_repeated_sleep_intent_selftest.ps1",
+  "originalPs1NotExecuted": true,
+  "originalManagedStaticCheckStatements": [
+    "    Check(\"first-sleep-freezes-exact-user-curve\", CurveJson(Field(engine, \"suspendedCurve\")) == CurveJson(desired));",
+    "    Check(\"sleep-clears-live-curve\", Field(engine, \"activeCurve\") is null);",
+    "    Check(\"real-resume-worker-enters-delayed-rebuild\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "    Check(\"interrupted-resume-has-no-live-curve\", Field(engine, \"activeCurve\") is null);",
+    "    Check(\"resleep-keeps-frozen-user-curve\", CurveJson(Field(engine, \"suspendedCurve\")) == CurveJson(desired));",
+    "    Check(\"resleep-keeps-write-gate-suspended\", P(Call(engine, \"Snapshot\")!, \"State\") == \"Suspended\");",
+    "    Check(\"superseded-worker-terminates-within-bound\", firstWorker.Wait(4000));",
+    "    Check(\"old-worker-cannot-publish-ready\", P(Call(engine, \"Snapshot\")!, \"State\") == \"Suspended\");",
+    "    Check(\"superseded-worker-leaves-no-running-flag\", Equals(Field(engine, \"automaticResumeInProgress\"), false));",
+    "    Check(\"latest-resume-rebuilds-without-renderer\", Wait(() => Events().Contains(\"power.resume-auto-rebuild.success\")));",
+    "    Check(\"latest-cycle-restores-ready\", P(after, \"State\") == \"Ready\");",
+    "    Check(\"latest-cycle-restores-exact-user-curve\", CurveJson(Field(engine, \"activeCurve\")) == CurveJson(desired));",
+    "    Check(\"latest-cycle-not-silent-await-user\", !Events().Contains(\"power.resume-sync-completed\"));",
+    "    Check(\"committed-resume-clears-frozen-copy\", Field(engine, \"suspendedCurve\") is null);",
+    "    Check(\"committed-resume-revokes-own-placeholder-lease\", P(after, \"Lease\") == \"null\");",
+    "    Check(\"newer-live-curve-wins-over-old-frozen-curve\", CurveJson(Field(latest, \"suspendedCurve\")) == CurveJson(desired));",
+    "    Check(\"frozen-copy-does-not-alias-live-array\", !ReferenceEquals(Field(latest, \"suspendedCurve\"), desired));",
+    "    Check(\"duplicate-suspend-is-read-only\", ReferenceEquals(frozen, Field(latest, \"suspendedCurve\")));",
+    "        Check(endpoint + \"-clears-retained-intent\", Field(off, \"suspendedCurve\") is null);",
+    "            Check(endpoint + \"-cannot-auto-reenable\", P(Call(off, \"Snapshot\")!, \"PowerOperationOutcome\") == \"await-user\" && Field(off, \"activeCurve\") is null);",
+    "        Check(endpoint + \"-fixture-enters-pending-rebuild\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "        Check(endpoint + \"-returns-with-no-retained-intent\", Field(cancelled, \"suspendedCurve\") is null);",
+    "        Check(endpoint + \"-old-worker-terminates\", ((Task)Field(cancelled, \"resumeTask\")!).Wait(4000));",
+    "        Check(endpoint + \"-old-worker-cannot-reenable\", Field(cancelled, \"activeCurve\") is null && !Events().Contains(\"api.enable.success\"));",
+    "        Check(endpoint + \"-old-worker-cannot-report-restored\", P(Call(cancelled, \"Snapshot\")!, \"PowerOperationOutcome\") != \"restored\");",
+    "    Check(\"sleep-off-preserves-sleep-phase\", P(sleepOffAfter, \"State\") == \"Suspended\" && P(sleepOffAfter, \"PowerState\") == \"Suspended\");",
+    "    Check(\"sleep-off-performs-no-restore-or-hc-action\", !Events().Any(e => e.StartsWith(\"restore.\") || e.StartsWith(\"hc-operation.\") || e == \"api.enable.success\"));",
+    "    Check(\"sleep-off-does-not-invent-oem-proof\", P(sleepOffBefore, \"OemRestoreConfirmed\") == P(sleepOffAfter, \"OemRestoreConfirmed\"));",
+    "    Check(\"sleep-off-next-wake-does-not-reenable\", P(Call(sleepOff, \"Snapshot\")!, \"PowerOperationOutcome\") == \"await-user\" && Field(sleepOff, \"activeCurve\") is null);",
+    "    Check(\"manual-restart-fixture-enters-pending-rebuild\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "    Check(\"manual-restart-is-reachable-before-old-worker-exits\", CurveJson(Field(manual, \"activeCurve\")) == CurveJson(newCurve));",
+    "    Check(\"manual-restart-old-worker-terminates\", oldManualWorker.Wait(4000));",
+    "    Check(\"old-worker-does-not-overwrite-new-manual-curve\", CurveJson(Field(manual, \"activeCurve\")) == CurveJson(newCurve));",
+    "    Check(\"old-worker-does-not-fault-new-manual-control\", P(Call(manual, \"Snapshot\")!, \"State\") == \"Ready\" && P(Call(manual, \"Snapshot\")!, \"UnknownState\") == \"False\");",
+    "    Check(\"new-manual-control-publishes-admissible-receipt\", P(Call(manual, \"Snapshot\")!, \"ControlAccepting\") == \"True\");",
+    "    Check(\"old-bound-waiter-cannot-borrow-new-manual-success\", cancelledWaiterRejected);",
+    "    Check(\"cancel-after-acquire-reaches-owned-placeholder-stage\", leaseStage.Wait(4000));",
+    "    Check(\"cancel-after-acquire-revokes-only-worker-placeholder\", Wait(() => Field(leaseCancel, \"state\")!.GetType().GetProperty(\"Lease\")!.GetValue(Field(leaseCancel, \"state\")) is null, 500));",
+    "    Check(\"cancel-after-acquire-and-old-worker-both-terminate\", offAfterAcquire.Wait(4000) && afterAcquireWorker.Wait(4000));",
+    "    Check(\"cancel-after-acquire-never-enables-old-curve\", Field(leaseCancel, \"activeCurve\") is null && !Events().Contains(\"api.enable.success\"));",
+    "    Check(\"manual-owner-can-acquire-without-waiting-old-15s-lease\", freshLeaseAvailable);",
+    "    Check(\"announced-sleep-enters-real-delayed-resume\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "    Check(\"sleep-announcement-does-not-wait-for-worker\", announceTimer.ElapsedMilliseconds < 100);",
+    "    Check(\"announced-sleep-stops-old-worker-within-bound\", sleepInterruptedWorker.Wait(4000));",
+    "    Check(\"announced-sleep-old-worker-performs-no-enable\", !Events().Contains(\"api.enable.success\"));",
+    "    Check(\"announced-sleep-does-not-leave-false-running-flag\", Equals(Field(announcedSleep, \"automaticResumeInProgress\"), false));",
+    "    Check(\"announced-sleep-retires-old-operation-owner\", Field(announcedSleep, \"activeResumeOperation\") is null);",
+    "    Check(\"announced-sleep-bound-waiter-gets-own-superseded\", oldSleepWaitRejected);",
+    "    Check(\"executed-sleep-still-preserves-user-curve\", CurveJson(Field(announcedSleep, \"suspendedCurve\")) == CurveJson(desired));",
+    "    Check(\"executed-sleep-keeps-suspended-phase\", P(Call(announcedSleep, \"Snapshot\")!, \"State\") == \"Suspended\");",
+    "    Check(\"later-owner-fixture-pauses-old-real-worker\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "    Check(\"retired-old-worker-exits-without-running-new-work\", retiredWorker.Wait(4000));",
+    "    Check(\"old-worker-keeps-later-owner-reference\", ReferenceEquals(Field(laterOwner, \"activeResumeOperation\"), replacementOwner));",
+    "    Check(\"old-worker-keeps-later-owner-running-flag\", Equals(Field(laterOwner, \"automaticResumeInProgress\"), true));",
+    "    Check(\"old-worker-keeps-later-operation-status\", P(Call(laterOwner, \"Snapshot\")!, \"PowerOperationStatus\") == \"pending\");",
+    "    Check(\"cancel-old-resume-cannot-revoke-new-client-lease\", ReferenceEquals(protectedLease, Field(newClientOwner, \"state\")!.GetType().GetProperty(\"Lease\")!.GetValue(Field(newClientOwner, \"state\"))));",
+    "        Check(\"cancel-http-listener-ready\", Wait(() => Events().Contains(\"listener.ready\")));",
+    "        Check(\"cancel-http-missing-session-is-401\", (int)missing.StatusCode == 401);",
+    "        Check(\"cancel-http-wrong-session-is-401\", (int)wrong.StatusCode == 401);",
+    "        Check(\"unauthorized-cancel-keeps-retained-intent\", CurveJson(Field(httpEngine, \"suspendedCurve\")) == CurveJson(desired));",
+    "        Check(\"authenticated-cancel-http-200-explicit-receipt\", (int)accepted.StatusCode == 200 && receipt.RootElement.GetProperty(\"controlIntentCancelled\").GetBoolean());",
+    "        Check(\"authenticated-cancel-clears-retained-intent\", Field(httpEngine, \"suspendedCurve\") is null);",
+    "        Check(\"authenticated-cancel-http-has-no-hardware-action\", !Events().Any(e => e.StartsWith(\"restore.\") || e.StartsWith(\"hc-operation.\") || e == \"api.enable.success\"));",
+    "            Check(\"bridge-http-chain-enters-real-pending-resume\", Wait(() => Events().Contains(\"power.resume-mock-slow-rebuild-window\")));",
+    "                Check(\"bridge-http-empty-resume-has-no-old-control-intent\", Field(httpEngine, \"suspendedCurve\") is null && P(Call(httpEngine, \"Snapshot\")!, \"PowerOperationOutcome\") == \"await-user\");",
+    "            Check(args.Length > 4 ? \"actual-bridge-control-contract-\" + args[4] : \"actual-bridge-off-then-manual-on-is-reachable\", finished && node.ExitCode == 0);",
+    "        Check(\"cancel-http-listener-stops-within-bound\", serving.Wait(4000));",
+    "    Check(\"never-enabled-session-does-not-invent-curve\", P(Call(cold, \"Snapshot\")!, \"State\") == \"AwaitingControl\" && Field(cold, \"activeCurve\") is null);"
+  ],
+  "originalManagedStaticCheckStatementCount": 68,
+  "modes": [
+    {
+      "mode": "allowed",
+      "mandatory": true,
+      "checks": 82,
+      "originalManagedCheckNames": [
+        "first-sleep-freezes-exact-user-curve",
+        "sleep-clears-live-curve",
+        "real-resume-worker-enters-delayed-rebuild",
+        "interrupted-resume-has-no-live-curve",
+        "resleep-keeps-frozen-user-curve",
+        "resleep-keeps-write-gate-suspended",
+        "superseded-worker-terminates-within-bound",
+        "old-worker-cannot-publish-ready",
+        "superseded-worker-leaves-no-running-flag",
+        "latest-resume-rebuilds-without-renderer",
+        "latest-cycle-restores-ready",
+        "latest-cycle-restores-exact-user-curve",
+        "latest-cycle-not-silent-await-user",
+        "committed-resume-clears-frozen-copy",
+        "committed-resume-revokes-own-placeholder-lease",
+        "newer-live-curve-wins-over-old-frozen-curve",
+        "frozen-copy-does-not-alias-live-array",
+        "duplicate-suspend-is-read-only",
+        "Disable-clears-retained-intent",
+        "Disable-cannot-auto-reenable",
+        "Restore-clears-retained-intent",
+        "Restore-cannot-auto-reenable",
+        "Release-clears-retained-intent",
+        "Release-cannot-auto-reenable",
+        "Close-clears-retained-intent",
+        "Disable-fixture-enters-pending-rebuild",
+        "Disable-returns-with-no-retained-intent",
+        "Disable-old-worker-terminates",
+        "Disable-old-worker-cannot-reenable",
+        "Disable-old-worker-cannot-report-restored",
+        "Restore-fixture-enters-pending-rebuild",
+        "Restore-returns-with-no-retained-intent",
+        "Restore-old-worker-terminates",
+        "Restore-old-worker-cannot-reenable",
+        "Restore-old-worker-cannot-report-restored",
+        "Release-fixture-enters-pending-rebuild",
+        "Release-returns-with-no-retained-intent",
+        "Release-old-worker-terminates",
+        "Release-old-worker-cannot-reenable",
+        "Release-old-worker-cannot-report-restored",
+        "sleep-off-preserves-sleep-phase",
+        "sleep-off-performs-no-restore-or-hc-action",
+        "sleep-off-does-not-invent-oem-proof",
+        "sleep-off-next-wake-does-not-reenable",
+        "manual-restart-fixture-enters-pending-rebuild",
+        "manual-restart-is-reachable-before-old-worker-exits",
+        "manual-restart-old-worker-terminates",
+        "old-worker-does-not-overwrite-new-manual-curve",
+        "old-worker-does-not-fault-new-manual-control",
+        "new-manual-control-publishes-admissible-receipt",
+        "old-bound-waiter-cannot-borrow-new-manual-success",
+        "cancel-after-acquire-reaches-owned-placeholder-stage",
+        "cancel-after-acquire-revokes-only-worker-placeholder",
+        "cancel-after-acquire-and-old-worker-both-terminate",
+        "cancel-after-acquire-never-enables-old-curve",
+        "manual-owner-can-acquire-without-waiting-old-15s-lease",
+        "announced-sleep-enters-real-delayed-resume",
+        "sleep-announcement-does-not-wait-for-worker",
+        "announced-sleep-stops-old-worker-within-bound",
+        "announced-sleep-old-worker-performs-no-enable",
+        "announced-sleep-does-not-leave-false-running-flag",
+        "announced-sleep-retires-old-operation-owner",
+        "announced-sleep-bound-waiter-gets-own-superseded",
+        "executed-sleep-still-preserves-user-curve",
+        "executed-sleep-keeps-suspended-phase",
+        "later-owner-fixture-pauses-old-real-worker",
+        "retired-old-worker-exits-without-running-new-work",
+        "old-worker-keeps-later-owner-reference",
+        "old-worker-keeps-later-owner-running-flag",
+        "old-worker-keeps-later-operation-status",
+        "cancel-old-resume-cannot-revoke-new-client-lease",
+        "cancel-http-listener-ready",
+        "cancel-http-missing-session-is-401",
+        "cancel-http-wrong-session-is-401",
+        "unauthorized-cancel-keeps-retained-intent",
+        "authenticated-cancel-http-200-explicit-receipt",
+        "authenticated-cancel-clears-retained-intent",
+        "authenticated-cancel-http-has-no-hardware-action",
+        "bridge-http-chain-enters-real-pending-resume",
+        "actual-bridge-control-contract-allowed",
+        "cancel-http-listener-stops-within-bound",
+        "never-enabled-session-does-not-invent-curve"
+      ],
+      "expectedTsOk": true,
+      "controlWriteAllowed": true
+    },
+    {
+      "mode": "empty-resume",
+      "mandatory": true,
+      "checks": 83,
+      "originalManagedCheckNames": [
+        "first-sleep-freezes-exact-user-curve",
+        "sleep-clears-live-curve",
+        "real-resume-worker-enters-delayed-rebuild",
+        "interrupted-resume-has-no-live-curve",
+        "resleep-keeps-frozen-user-curve",
+        "resleep-keeps-write-gate-suspended",
+        "superseded-worker-terminates-within-bound",
+        "old-worker-cannot-publish-ready",
+        "superseded-worker-leaves-no-running-flag",
+        "latest-resume-rebuilds-without-renderer",
+        "latest-cycle-restores-ready",
+        "latest-cycle-restores-exact-user-curve",
+        "latest-cycle-not-silent-await-user",
+        "committed-resume-clears-frozen-copy",
+        "committed-resume-revokes-own-placeholder-lease",
+        "newer-live-curve-wins-over-old-frozen-curve",
+        "frozen-copy-does-not-alias-live-array",
+        "duplicate-suspend-is-read-only",
+        "Disable-clears-retained-intent",
+        "Disable-cannot-auto-reenable",
+        "Restore-clears-retained-intent",
+        "Restore-cannot-auto-reenable",
+        "Release-clears-retained-intent",
+        "Release-cannot-auto-reenable",
+        "Close-clears-retained-intent",
+        "Disable-fixture-enters-pending-rebuild",
+        "Disable-returns-with-no-retained-intent",
+        "Disable-old-worker-terminates",
+        "Disable-old-worker-cannot-reenable",
+        "Disable-old-worker-cannot-report-restored",
+        "Restore-fixture-enters-pending-rebuild",
+        "Restore-returns-with-no-retained-intent",
+        "Restore-old-worker-terminates",
+        "Restore-old-worker-cannot-reenable",
+        "Restore-old-worker-cannot-report-restored",
+        "Release-fixture-enters-pending-rebuild",
+        "Release-returns-with-no-retained-intent",
+        "Release-old-worker-terminates",
+        "Release-old-worker-cannot-reenable",
+        "Release-old-worker-cannot-report-restored",
+        "sleep-off-preserves-sleep-phase",
+        "sleep-off-performs-no-restore-or-hc-action",
+        "sleep-off-does-not-invent-oem-proof",
+        "sleep-off-next-wake-does-not-reenable",
+        "manual-restart-fixture-enters-pending-rebuild",
+        "manual-restart-is-reachable-before-old-worker-exits",
+        "manual-restart-old-worker-terminates",
+        "old-worker-does-not-overwrite-new-manual-curve",
+        "old-worker-does-not-fault-new-manual-control",
+        "new-manual-control-publishes-admissible-receipt",
+        "old-bound-waiter-cannot-borrow-new-manual-success",
+        "cancel-after-acquire-reaches-owned-placeholder-stage",
+        "cancel-after-acquire-revokes-only-worker-placeholder",
+        "cancel-after-acquire-and-old-worker-both-terminate",
+        "cancel-after-acquire-never-enables-old-curve",
+        "manual-owner-can-acquire-without-waiting-old-15s-lease",
+        "announced-sleep-enters-real-delayed-resume",
+        "sleep-announcement-does-not-wait-for-worker",
+        "announced-sleep-stops-old-worker-within-bound",
+        "announced-sleep-old-worker-performs-no-enable",
+        "announced-sleep-does-not-leave-false-running-flag",
+        "announced-sleep-retires-old-operation-owner",
+        "announced-sleep-bound-waiter-gets-own-superseded",
+        "executed-sleep-still-preserves-user-curve",
+        "executed-sleep-keeps-suspended-phase",
+        "later-owner-fixture-pauses-old-real-worker",
+        "retired-old-worker-exits-without-running-new-work",
+        "old-worker-keeps-later-owner-reference",
+        "old-worker-keeps-later-owner-running-flag",
+        "old-worker-keeps-later-operation-status",
+        "cancel-old-resume-cannot-revoke-new-client-lease",
+        "cancel-http-listener-ready",
+        "cancel-http-missing-session-is-401",
+        "cancel-http-wrong-session-is-401",
+        "unauthorized-cancel-keeps-retained-intent",
+        "authenticated-cancel-http-200-explicit-receipt",
+        "authenticated-cancel-clears-retained-intent",
+        "authenticated-cancel-http-has-no-hardware-action",
+        "bridge-http-chain-enters-real-pending-resume",
+        "bridge-http-empty-resume-has-no-old-control-intent",
+        "actual-bridge-control-contract-empty-resume",
+        "cancel-http-listener-stops-within-bound",
+        "never-enabled-session-does-not-invent-curve"
+      ],
+      "expectedTsOk": true,
+      "controlWriteAllowed": true
+    },
+    {
+      "mode": "sleep",
+      "mandatory": true,
+      "checks": 82,
+      "originalManagedCheckNames": [
+        "first-sleep-freezes-exact-user-curve",
+        "sleep-clears-live-curve",
+        "real-resume-worker-enters-delayed-rebuild",
+        "interrupted-resume-has-no-live-curve",
+        "resleep-keeps-frozen-user-curve",
+        "resleep-keeps-write-gate-suspended",
+        "superseded-worker-terminates-within-bound",
+        "old-worker-cannot-publish-ready",
+        "superseded-worker-leaves-no-running-flag",
+        "latest-resume-rebuilds-without-renderer",
+        "latest-cycle-restores-ready",
+        "latest-cycle-restores-exact-user-curve",
+        "latest-cycle-not-silent-await-user",
+        "committed-resume-clears-frozen-copy",
+        "committed-resume-revokes-own-placeholder-lease",
+        "newer-live-curve-wins-over-old-frozen-curve",
+        "frozen-copy-does-not-alias-live-array",
+        "duplicate-suspend-is-read-only",
+        "Disable-clears-retained-intent",
+        "Disable-cannot-auto-reenable",
+        "Restore-clears-retained-intent",
+        "Restore-cannot-auto-reenable",
+        "Release-clears-retained-intent",
+        "Release-cannot-auto-reenable",
+        "Close-clears-retained-intent",
+        "Disable-fixture-enters-pending-rebuild",
+        "Disable-returns-with-no-retained-intent",
+        "Disable-old-worker-terminates",
+        "Disable-old-worker-cannot-reenable",
+        "Disable-old-worker-cannot-report-restored",
+        "Restore-fixture-enters-pending-rebuild",
+        "Restore-returns-with-no-retained-intent",
+        "Restore-old-worker-terminates",
+        "Restore-old-worker-cannot-reenable",
+        "Restore-old-worker-cannot-report-restored",
+        "Release-fixture-enters-pending-rebuild",
+        "Release-returns-with-no-retained-intent",
+        "Release-old-worker-terminates",
+        "Release-old-worker-cannot-reenable",
+        "Release-old-worker-cannot-report-restored",
+        "sleep-off-preserves-sleep-phase",
+        "sleep-off-performs-no-restore-or-hc-action",
+        "sleep-off-does-not-invent-oem-proof",
+        "sleep-off-next-wake-does-not-reenable",
+        "manual-restart-fixture-enters-pending-rebuild",
+        "manual-restart-is-reachable-before-old-worker-exits",
+        "manual-restart-old-worker-terminates",
+        "old-worker-does-not-overwrite-new-manual-curve",
+        "old-worker-does-not-fault-new-manual-control",
+        "new-manual-control-publishes-admissible-receipt",
+        "old-bound-waiter-cannot-borrow-new-manual-success",
+        "cancel-after-acquire-reaches-owned-placeholder-stage",
+        "cancel-after-acquire-revokes-only-worker-placeholder",
+        "cancel-after-acquire-and-old-worker-both-terminate",
+        "cancel-after-acquire-never-enables-old-curve",
+        "manual-owner-can-acquire-without-waiting-old-15s-lease",
+        "announced-sleep-enters-real-delayed-resume",
+        "sleep-announcement-does-not-wait-for-worker",
+        "announced-sleep-stops-old-worker-within-bound",
+        "announced-sleep-old-worker-performs-no-enable",
+        "announced-sleep-does-not-leave-false-running-flag",
+        "announced-sleep-retires-old-operation-owner",
+        "announced-sleep-bound-waiter-gets-own-superseded",
+        "executed-sleep-still-preserves-user-curve",
+        "executed-sleep-keeps-suspended-phase",
+        "later-owner-fixture-pauses-old-real-worker",
+        "retired-old-worker-exits-without-running-new-work",
+        "old-worker-keeps-later-owner-reference",
+        "old-worker-keeps-later-owner-running-flag",
+        "old-worker-keeps-later-operation-status",
+        "cancel-old-resume-cannot-revoke-new-client-lease",
+        "cancel-http-listener-ready",
+        "cancel-http-missing-session-is-401",
+        "cancel-http-wrong-session-is-401",
+        "unauthorized-cancel-keeps-retained-intent",
+        "authenticated-cancel-http-200-explicit-receipt",
+        "authenticated-cancel-clears-retained-intent",
+        "authenticated-cancel-http-has-no-hardware-action",
+        "bridge-http-chain-enters-real-pending-resume",
+        "actual-bridge-control-contract-sleep",
+        "cancel-http-listener-stops-within-bound",
+        "never-enabled-session-does-not-invent-curve"
+      ],
+      "expectedTsOk": true,
+      "controlWriteAllowed": false
+    },
+    {
+      "mode": "stale-native",
+      "mandatory": true,
+      "checks": 82,
+      "originalManagedCheckNames": [
+        "first-sleep-freezes-exact-user-curve",
+        "sleep-clears-live-curve",
+        "real-resume-worker-enters-delayed-rebuild",
+        "interrupted-resume-has-no-live-curve",
+        "resleep-keeps-frozen-user-curve",
+        "resleep-keeps-write-gate-suspended",
+        "superseded-worker-terminates-within-bound",
+        "old-worker-cannot-publish-ready",
+        "superseded-worker-leaves-no-running-flag",
+        "latest-resume-rebuilds-without-renderer",
+        "latest-cycle-restores-ready",
+        "latest-cycle-restores-exact-user-curve",
+        "latest-cycle-not-silent-await-user",
+        "committed-resume-clears-frozen-copy",
+        "committed-resume-revokes-own-placeholder-lease",
+        "newer-live-curve-wins-over-old-frozen-curve",
+        "frozen-copy-does-not-alias-live-array",
+        "duplicate-suspend-is-read-only",
+        "Disable-clears-retained-intent",
+        "Disable-cannot-auto-reenable",
+        "Restore-clears-retained-intent",
+        "Restore-cannot-auto-reenable",
+        "Release-clears-retained-intent",
+        "Release-cannot-auto-reenable",
+        "Close-clears-retained-intent",
+        "Disable-fixture-enters-pending-rebuild",
+        "Disable-returns-with-no-retained-intent",
+        "Disable-old-worker-terminates",
+        "Disable-old-worker-cannot-reenable",
+        "Disable-old-worker-cannot-report-restored",
+        "Restore-fixture-enters-pending-rebuild",
+        "Restore-returns-with-no-retained-intent",
+        "Restore-old-worker-terminates",
+        "Restore-old-worker-cannot-reenable",
+        "Restore-old-worker-cannot-report-restored",
+        "Release-fixture-enters-pending-rebuild",
+        "Release-returns-with-no-retained-intent",
+        "Release-old-worker-terminates",
+        "Release-old-worker-cannot-reenable",
+        "Release-old-worker-cannot-report-restored",
+        "sleep-off-preserves-sleep-phase",
+        "sleep-off-performs-no-restore-or-hc-action",
+        "sleep-off-does-not-invent-oem-proof",
+        "sleep-off-next-wake-does-not-reenable",
+        "manual-restart-fixture-enters-pending-rebuild",
+        "manual-restart-is-reachable-before-old-worker-exits",
+        "manual-restart-old-worker-terminates",
+        "old-worker-does-not-overwrite-new-manual-curve",
+        "old-worker-does-not-fault-new-manual-control",
+        "new-manual-control-publishes-admissible-receipt",
+        "old-bound-waiter-cannot-borrow-new-manual-success",
+        "cancel-after-acquire-reaches-owned-placeholder-stage",
+        "cancel-after-acquire-revokes-only-worker-placeholder",
+        "cancel-after-acquire-and-old-worker-both-terminate",
+        "cancel-after-acquire-never-enables-old-curve",
+        "manual-owner-can-acquire-without-waiting-old-15s-lease",
+        "announced-sleep-enters-real-delayed-resume",
+        "sleep-announcement-does-not-wait-for-worker",
+        "announced-sleep-stops-old-worker-within-bound",
+        "announced-sleep-old-worker-performs-no-enable",
+        "announced-sleep-does-not-leave-false-running-flag",
+        "announced-sleep-retires-old-operation-owner",
+        "announced-sleep-bound-waiter-gets-own-superseded",
+        "executed-sleep-still-preserves-user-curve",
+        "executed-sleep-keeps-suspended-phase",
+        "later-owner-fixture-pauses-old-real-worker",
+        "retired-old-worker-exits-without-running-new-work",
+        "old-worker-keeps-later-owner-reference",
+        "old-worker-keeps-later-owner-running-flag",
+        "old-worker-keeps-later-operation-status",
+        "cancel-old-resume-cannot-revoke-new-client-lease",
+        "cancel-http-listener-ready",
+        "cancel-http-missing-session-is-401",
+        "cancel-http-wrong-session-is-401",
+        "unauthorized-cancel-keeps-retained-intent",
+        "authenticated-cancel-http-200-explicit-receipt",
+        "authenticated-cancel-clears-retained-intent",
+        "authenticated-cancel-http-has-no-hardware-action",
+        "bridge-http-chain-enters-real-pending-resume",
+        "actual-bridge-control-contract-stale-native",
+        "cancel-http-listener-stops-within-bound",
+        "never-enabled-session-does-not-invent-curve"
+      ],
+      "expectedTsOk": true,
+      "controlWriteAllowed": false
+    },
+    {
+      "mode": "empty-apply",
+      "mandatory": false,
+      "checks": 83,
+      "originalManagedCheckNames": [
+        "first-sleep-freezes-exact-user-curve",
+        "sleep-clears-live-curve",
+        "real-resume-worker-enters-delayed-rebuild",
+        "interrupted-resume-has-no-live-curve",
+        "resleep-keeps-frozen-user-curve",
+        "resleep-keeps-write-gate-suspended",
+        "superseded-worker-terminates-within-bound",
+        "old-worker-cannot-publish-ready",
+        "superseded-worker-leaves-no-running-flag",
+        "latest-resume-rebuilds-without-renderer",
+        "latest-cycle-restores-ready",
+        "latest-cycle-restores-exact-user-curve",
+        "latest-cycle-not-silent-await-user",
+        "committed-resume-clears-frozen-copy",
+        "committed-resume-revokes-own-placeholder-lease",
+        "newer-live-curve-wins-over-old-frozen-curve",
+        "frozen-copy-does-not-alias-live-array",
+        "duplicate-suspend-is-read-only",
+        "Disable-clears-retained-intent",
+        "Disable-cannot-auto-reenable",
+        "Restore-clears-retained-intent",
+        "Restore-cannot-auto-reenable",
+        "Release-clears-retained-intent",
+        "Release-cannot-auto-reenable",
+        "Close-clears-retained-intent",
+        "Disable-fixture-enters-pending-rebuild",
+        "Disable-returns-with-no-retained-intent",
+        "Disable-old-worker-terminates",
+        "Disable-old-worker-cannot-reenable",
+        "Disable-old-worker-cannot-report-restored",
+        "Restore-fixture-enters-pending-rebuild",
+        "Restore-returns-with-no-retained-intent",
+        "Restore-old-worker-terminates",
+        "Restore-old-worker-cannot-reenable",
+        "Restore-old-worker-cannot-report-restored",
+        "Release-fixture-enters-pending-rebuild",
+        "Release-returns-with-no-retained-intent",
+        "Release-old-worker-terminates",
+        "Release-old-worker-cannot-reenable",
+        "Release-old-worker-cannot-report-restored",
+        "sleep-off-preserves-sleep-phase",
+        "sleep-off-performs-no-restore-or-hc-action",
+        "sleep-off-does-not-invent-oem-proof",
+        "sleep-off-next-wake-does-not-reenable",
+        "manual-restart-fixture-enters-pending-rebuild",
+        "manual-restart-is-reachable-before-old-worker-exits",
+        "manual-restart-old-worker-terminates",
+        "old-worker-does-not-overwrite-new-manual-curve",
+        "old-worker-does-not-fault-new-manual-control",
+        "new-manual-control-publishes-admissible-receipt",
+        "old-bound-waiter-cannot-borrow-new-manual-success",
+        "cancel-after-acquire-reaches-owned-placeholder-stage",
+        "cancel-after-acquire-revokes-only-worker-placeholder",
+        "cancel-after-acquire-and-old-worker-both-terminate",
+        "cancel-after-acquire-never-enables-old-curve",
+        "manual-owner-can-acquire-without-waiting-old-15s-lease",
+        "announced-sleep-enters-real-delayed-resume",
+        "sleep-announcement-does-not-wait-for-worker",
+        "announced-sleep-stops-old-worker-within-bound",
+        "announced-sleep-old-worker-performs-no-enable",
+        "announced-sleep-does-not-leave-false-running-flag",
+        "announced-sleep-retires-old-operation-owner",
+        "announced-sleep-bound-waiter-gets-own-superseded",
+        "executed-sleep-still-preserves-user-curve",
+        "executed-sleep-keeps-suspended-phase",
+        "later-owner-fixture-pauses-old-real-worker",
+        "retired-old-worker-exits-without-running-new-work",
+        "old-worker-keeps-later-owner-reference",
+        "old-worker-keeps-later-owner-running-flag",
+        "old-worker-keeps-later-operation-status",
+        "cancel-old-resume-cannot-revoke-new-client-lease",
+        "cancel-http-listener-ready",
+        "cancel-http-missing-session-is-401",
+        "cancel-http-wrong-session-is-401",
+        "unauthorized-cancel-keeps-retained-intent",
+        "authenticated-cancel-http-200-explicit-receipt",
+        "authenticated-cancel-clears-retained-intent",
+        "authenticated-cancel-http-has-no-hardware-action",
+        "bridge-http-chain-enters-real-pending-resume",
+        "bridge-http-empty-resume-has-no-old-control-intent",
+        "actual-bridge-control-contract-empty-apply",
+        "cancel-http-listener-stops-within-bound",
+        "never-enabled-session-does-not-invent-curve"
+      ],
+      "expectedTsOk": true,
+      "controlWriteAllowed": false
+    }
+  ],
+  "fault": {
+    "source": "src/bridge/fanHost.ts",
+    "before": "  private async rearmAfterWakeForControlAdmission(reason: string, allowManualRescue = false): Promise<void> {",
+    "addedLine": "    if (this.stateValue === 'suspended' && allowManualRescue) return;",
+    "mode": "allowed",
+    "expectedManagedFailure": "actual-bridge-control-contract-allowed",
+    "expectedManagedChecks": 82,
+    "expectedOtherManagedPassed": 81,
+    "expectedTsError": "Error: Fan Host 当前不可控制: suspended",
+    "preExecutionPrediction": "D:\\Codex\\2026-10-19\\wo-z\\work\\explicit-off-host-chain-b0-20261019\\fault-prerun-prediction.json",
+    "originalSourceSha256": "b4fede80ba42ee19c7a2d6e86a12d1206335bdde6ac2f0a5667fd00da53146f4",
+    "privateFaultSha256": "eb2435fef77558cad867dd718461b0cac695ff3ef4d2ad61474c801b4beeb8fd"
+  },
+  "sources": [
+    "FanLab/DeviceCoreSharedDependencies.cs",
+    "FanLab/RuntimeDependencyContract.cs",
+    "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+    "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+    "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+    "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+    "FanLab/fan-backend/YeManFanBackend.csproj",
+    "FanLab/real-host/DeferredHostSuccessor.cs",
+    "FanLab/real-host/Directory.Build.props",
+    "FanLab/real-host/FanCapabilityPolicy.cs",
+    "FanLab/real-host/G1FanContractAdapter.cs",
+    "FanLab/real-host/HostProcessLifetime.cs",
+    "FanLab/real-host/MsiFamilyFanCurve.cs",
+    "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+    "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+    "FanLab/real-host/MsiWmiClassRegistration.cs",
+    "FanLab/real-host/MsiWmiPayloadResource.cs",
+    "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+    "FanLab/real-host/Program.cs",
+    "FanLab/real-host/Section18CandidateFakes.cs",
+    "FanLab/real-host/Section18CandidateLifecycle.cs",
+    "FanLab/real-host/Section19CandidateLifecycle.cs",
+    "FanLab/real-host/Section20CandidateLifecycle.cs",
+    "FanLab/real-host/Section21CandidateLifecycle.cs",
+    "FanLab/real-host/Section22CandidateLifecycle.cs",
+    "FanLab/real-host/Section23CandidateLifecycle.cs",
+    "FanLab/real-host/YeManFanHost.csproj",
+    "FanLab/real-host/YeManFanHost.json",
+    "PowerControl/GameTitlePolicy.json",
+    "capabilities/AsusFanCapabilitySession.cs",
+    "capabilities/FanCapabilityCatalog.cs",
+    "capabilities/HcDeviceCapabilityCatalog.cs",
+    "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+    "capabilities/HcLightingCapabilityCatalog.cs",
+    "capabilities/HcLightingCapabilityCatalog.generated.cs",
+    "native/ProcessEfficiency.cs",
+    "package.json",
+    "src/bridge/aiFanMock.ts",
+    "src/bridge/api.ts",
+    "src/bridge/autofloat.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/controllerShortcutRules.ts",
+    "src/bridge/cpuProfiles.ts",
+    "src/bridge/fanApi.ts",
+    "src/bridge/fanCurve.ts",
+    "src/bridge/fanDiagnostics.ts",
+    "src/bridge/fanFeature.ts",
+    "src/bridge/fanHost.ts",
+    "src/bridge/fanHost/capabilityAdmission.ts",
+    "src/bridge/fanHost/deployment.ts",
+    "src/bridge/fanHost/startupConfiguration.ts",
+    "src/bridge/fanHostInstallerAsset.json",
+    "src/bridge/fanHostInstallerRepair.ts",
+    "src/bridge/fanSessionEvidence.ts",
+    "src/bridge/frameRateLimits.ts",
+    "src/bridge/frameRateModel.ts",
+    "src/bridge/gameCorePolicy.ts",
+    "src/bridge/gamePolicyHysteresis.ts",
+    "src/bridge/gamePolicyTarget.ts",
+    "src/bridge/gamedetect.ts",
+    "src/bridge/gamingHomePolicy.ts",
+    "src/bridge/hardwareCoordinator.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/ipc.ts",
+    "src/bridge/monitorAppliedTdp.ts",
+    "src/bridge/monitorCoreTiles.ts",
+    "src/bridge/monitorData.ts",
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorFpsHardware.ts",
+    "src/bridge/monitorFrameTime.ts",
+    "src/bridge/monitorHudFreshness.ts",
+    "src/bridge/monitorNativeDemand.ts",
+    "src/bridge/monitorPayloadDecoder.ts",
+    "src/bridge/monitorSnapshotBudget.ts",
+    "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/monitorTopProjection.ts",
+    "src/bridge/performanceControls.ts",
+    "src/bridge/performanceSchedule.ts",
+    "src/bridge/powerSource.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/rtssOverlay.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/bridge/tdpCircuitBreaker.ts",
+    "src/bridge/tdpRuntimeState.ts",
+    "src/bridge/tdpStaticDiagnostics.ts",
+    "src/bridge/topmon.ts",
+    "src/bridge/uiLifecycle.ts",
+    "src/bridge/yeman.ts",
+    "src/radial/availability.ts",
+    "src/radial/testingState.ts",
+    "src/robust/repairModel.ts",
+    "src/scheduler.ts",
+    "tools/FanRepeatedSleepIntentSelfTest/FanRepeatedSleepIntentSelfTest.csproj",
+    "tools/FanRepeatedSleepIntentSelfTest/Program.cs",
+    "tools/fan_cold_start_manual_continuation_selftest.ts",
+    "tools/fan_explicit_off_host_chain_selftest.ts",
+    "tools/fan_hc_sta_thread_identity_selftest.cs",
+    "tools/fan_repeated_sleep_intent_selftest.ps1",
+    "tools/fan_sta_dispatch_binding_selftest.cs",
+    "tools/fixtures/fan_no_io_host.ts",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/BoundaryGuard.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Backend/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Backend/YeManFanBackend.AssemblyInfo.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Harness/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Harness/FanRepeatedSleepIntentSelfTest.AssemblyInfo.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Harness/FanRepeatedSleepIntentSelfTest.GlobalUsings.g.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Host/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Host/YeManFanHost.AssemblyInfo.cs",
+    "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/generated/Host/YeManFanHost.GlobalUsings.g.cs",
+    "tools/ymcc_sim/global/fan-failed-read-identity-consumer/assert-format.mjs",
+    "tools/ymcc_sim/global/fan-failed-read-identity-consumer/contract.mjs",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tsconfig.json",
+    "tsconfig.node.json"
+  ],
+  "reviewedSourceHashes": [
+    {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "sha256": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee"
+    },
+    {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "sha256": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78"
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8"
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "sha256": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e"
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+    },
+    {
+      "path": "FanLab/DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+    },
+    {
+      "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+      "sha256": "ef89f0f1059d68f35e15f717bf24eb60a9942b22fc46ebb555a972fa417fae58"
+    },
+    {
+      "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+    },
+    {
+      "path": "FanLab/real-host/Directory.Build.props",
+      "sha256": "17638e7d1d252b85bdd00f08a3cd888f20910c16b51536eca21df0f88a5e1480"
+    },
+    {
+      "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+      "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+    },
+    {
+      "path": "FanLab/real-host/G1FanContractAdapter.cs",
+      "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+    },
+    {
+      "path": "FanLab/real-host/HostProcessLifetime.cs",
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392"
+    },
+    {
+      "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+    },
+    {
+      "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "sha256": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549"
+    },
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "sha256": "276068d4031942fbc550b1ecd98f55903ff0307c0e8193b236770e187adc9eb6"
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateFakes.cs",
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+      "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+    },
+    {
+      "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+    },
+    {
+      "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+    },
+    {
+      "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+    },
+    {
+      "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+    },
+    {
+      "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.csproj",
+      "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0"
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "path": "FanLab/RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+    },
+    {
+      "path": "native/ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+    },
+    {
+      "path": "package.json",
+      "sha256": "d674fca2e2699011912e086ece46af6b8aafd44e43d8d11d6b8a5ee50de985e7"
+    },
+    {
+      "path": "PowerControl/GameTitlePolicy.json",
+      "sha256": "82a1c3ec6c62a746cafbb1b7b85533036c17ac61b8645d30360545bc3f533dc4"
+    },
+    {
+      "path": "src/bridge/aiFanMock.ts",
+      "sha256": "7d6d250039f78b44200f524ba9a085ab9789348c192b179294b25d7448100ac7"
+    },
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+    },
+    {
+      "path": "src/bridge/autofloat.ts",
+      "sha256": "c81b3b8ae4565145f31353befc62232462b16085e945e9e3f3a89d1c79b6e237"
+    },
+    {
+      "path": "src/bridge/controllerPersona.ts",
+      "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+    },
+    {
+      "path": "src/bridge/controllerShortcutRules.ts",
+      "sha256": "cb850b5828df07bb0fbeae017d147b828639b70f91c4e7e0d7a095b6b62d2dfc"
+    },
+    {
+      "path": "src/bridge/cpuProfiles.ts",
+      "sha256": "be7d197a7655ca6a01e8ad9fca9776f7548a15c83eef2bdfb16e6a0df9056784"
+    },
+    {
+      "path": "src/bridge/fanApi.ts",
+      "sha256": "2f8c1de17935b9ff016a2deaefb041cf52e5a763aacaea194593da120e8a59a2"
+    },
+    {
+      "path": "src/bridge/fanCurve.ts",
+      "sha256": "a5679d7a7024101932ede8daef756a625d254bae44200a3a0c708000aaaa9d9a"
+    },
+    {
+      "path": "src/bridge/fanDiagnostics.ts",
+      "sha256": "427617ae42ae7d5474631fdf034ce2fe80694dbc92c1b16868c1a5ded04d8918"
+    },
+    {
+      "path": "src/bridge/fanFeature.ts",
+      "sha256": "17f447f88957db8bce18db66fdcf095d8309159202fac27a94cf8caad4d1cfe7"
+    },
+    {
+      "path": "src/bridge/fanHost.ts",
+      "sha256": "b4fede80ba42ee19c7a2d6e86a12d1206335bdde6ac2f0a5667fd00da53146f4"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerAsset.json",
+      "sha256": "26c84052d51d29bcf27789652f79c000ba3cbd8c77d995717e9688b38c641936"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerRepair.ts",
+      "sha256": "7890e2ac4d246fe9bc30edb3d391b74aec1202c618aff3b7fbfcabd8c0668145"
+    },
+    {
+      "path": "src/bridge/fanSessionEvidence.ts",
+      "sha256": "1f64ca84057429cfef1e4f297d632e24c0f74685034a0cb3cc07ff161a266827"
+    },
+    {
+      "path": "src/bridge/frameRateLimits.ts",
+      "sha256": "c4554ac2064f422c604244a6ff4465f731e3055e54163e4b70d458c93ac58d27"
+    },
+    {
+      "path": "src/bridge/frameRateModel.ts",
+      "sha256": "e8494c827db9f5d86661ff4ec366e019c0b93e79475e6de21f863d4490111f3f"
+    },
+    {
+      "path": "src/bridge/gameCorePolicy.ts",
+      "sha256": "07c76a6447c213f4b9b87759b7d06c5ac9967ef73fe57bee366daada828bf838"
+    },
+    {
+      "path": "src/bridge/gamedetect.ts",
+      "sha256": "6e137e758786ae47df7936dc2de9544219acb38bc7db1e13994cf136256903a1"
+    },
+    {
+      "path": "src/bridge/gamePolicyHysteresis.ts",
+      "sha256": "adadbee7224b36e725e71bcf787e6c21864e8cfcf6e0a673ca041c5934382701"
+    },
+    {
+      "path": "src/bridge/gamePolicyTarget.ts",
+      "sha256": "6f4651aab3231de59daf48d6cb6a11c5188885e3dc68d5c9fa4901acef39df83"
+    },
+    {
+      "path": "src/bridge/gamingHomePolicy.ts",
+      "sha256": "5a55fb0f37f5a5bb64123a6eb2a7bd4c4fa6c159643cc6e456e01b52b2301acd"
+    },
+    {
+      "path": "src/bridge/hardwareCoordinator.ts",
+      "sha256": "98e4bee792e3d98c57b449657a174738c7ef19cdf1efa2b8fec2bb6c7212cba0"
+    },
+    {
+      "path": "src/bridge/hcInputUtils.ts",
+      "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+    },
+    {
+      "path": "src/bridge/inputConfigHash.ts",
+      "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+    },
+    {
+      "path": "src/bridge/inputStartupPolicy.ts",
+      "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+    },
+    {
+      "path": "src/bridge/ipc.ts",
+      "sha256": "78a2a5c370b2d11312b7cade48402b001456bcbe0d39a2faffb7c26c71fa52b6"
+    },
+    {
+      "path": "src/bridge/monitorAppliedTdp.ts",
+      "sha256": "09ca9e6801bfcf3933cf10a74f51a674531c8a60a6d7d42d4a33d66c3061f3b2"
+    },
+    {
+      "path": "src/bridge/monitorCoreTiles.ts",
+      "sha256": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e"
+    },
+    {
+      "path": "src/bridge/monitorData.ts",
+      "sha256": "a33b814e52baa2a43e7aa64b6fe99ff47759d674021cfa0b4eac703be3aede6e"
+    },
+    {
+      "path": "src/bridge/monitorDisplayFeed.ts",
+      "sha256": "fbd20173626d2a94f62255b5502f0ded49f51774799db26bb9ad464af35edfa8"
+    },
+    {
+      "path": "src/bridge/monitorFpsHardware.ts",
+      "sha256": "9e0e9e35178fd428f4f1e6d9348b2db4614395d7c0c497077161cdddc0554692"
+    },
+    {
+      "path": "src/bridge/monitorFrameTime.ts",
+      "sha256": "5a07e28a7013e787d6cf4d735bd604230cf5747537423c03bb27c035ddc598dc"
+    },
+    {
+      "path": "src/bridge/monitorHudFreshness.ts",
+      "sha256": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee"
+    },
+    {
+      "path": "src/bridge/monitorNativeDemand.ts",
+      "sha256": "8e2cc37ff20d17f05856c0d8b22ec000099c44b39da4ff9c2a4184a4b334c6b5"
+    },
+    {
+      "path": "src/bridge/monitorPayloadDecoder.ts",
+      "sha256": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotBudget.ts",
+      "sha256": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotSignals.ts",
+      "sha256": "68a9b98d765b563721ee5045fbaa6f4034c6174102319cf57eea18ed4beec976"
+    },
+    {
+      "path": "src/bridge/monitorTopProjection.ts",
+      "sha256": "e3d741e5bd88760c457c8e37e520674281042112a2c7bef344fa2712c6b81a84"
+    },
+    {
+      "path": "src/bridge/performanceControls.ts",
+      "sha256": "6e576f791dc903402ca11dd19f96a3d622672f87f8d04eaa86ec7bf00b5cddc9"
+    },
+    {
+      "path": "src/bridge/performanceSchedule.ts",
+      "sha256": "6310b7c07d7a3052148a92806a591d4da173d1379e65a636e0e68841b31bd776"
+    },
+    {
+      "path": "src/bridge/powerSource.ts",
+      "sha256": "32c052caa385e033c6d0f0a959a87125cd2ec8319679fb19eaf7e34d15f6a30d"
+    },
+    {
+      "path": "src/bridge/quickAppDefaults.ts",
+      "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+    },
+    {
+      "path": "src/bridge/rtssOverlay.ts",
+      "sha256": "2d3e7fb809eeabecd3055ed1c1c1f5e443ff8e1ad7577c36337ae00dce5493a9"
+    },
+    {
+      "path": "src/bridge/settingsRepository.ts",
+      "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+    },
+    {
+      "path": "src/bridge/settingsSnapshot.ts",
+      "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+    },
+    {
+      "path": "src/bridge/tdpCircuitBreaker.ts",
+      "sha256": "e0e181771869c411576746e15f19a8c4515fcd2043c5735f8c189a5e2f913e00"
+    },
+    {
+      "path": "src/bridge/tdpRuntimeState.ts",
+      "sha256": "c021f00359d3887abfb31aca707def2555ba1fbebfcb318a0fc44959072f0860"
+    },
+    {
+      "path": "src/bridge/tdpStaticDiagnostics.ts",
+      "sha256": "4e3a576453ae1bef5e9f1b4ee86314566e0d02a9bdce5fc0e190604629e039ee"
+    },
+    {
+      "path": "src/bridge/topmon.ts",
+      "sha256": "5936cc3610c75478721ed32d3f08ef8afa9a822e28024562cca6c89ad4242244"
+    },
+    {
+      "path": "src/bridge/uiLifecycle.ts",
+      "sha256": "4358563359424025d2c8a8688ab3c658f3eaa412b4cf0260a0c3f151517a9443"
+    },
+    {
+      "path": "src/bridge/yeman.ts",
+      "sha256": "377f920f50a9c2613fc271d2676d7d47e784d85d35aa1ef915d9490251faeccd"
+    },
+    {
+      "path": "src/radial/availability.ts",
+      "sha256": "1b873833125c8727bab698793e8d83367d639baca64b42a294975176f9eecfd4"
+    },
+    {
+      "path": "src/robust/repairModel.ts",
+      "sha256": "a9b2a1267074dac35513d9ed342d43c9cfe3736a17ef87d4dd177190c0934a65"
+    },
+    {
+      "path": "src/scheduler.ts",
+      "sha256": "5e5d4c31e641a3bdfe0cfa4a403047a6ac723e3ae1e398e6aba8a243a80a95f4"
+    },
+    {
+      "path": "tools/fan_explicit_off_host_chain_selftest.ts",
+      "sha256": "b2a7c55e059bec6757f70553075ae9dd5617a15a436f94fca909f1927ee78ae0"
+    },
+    {
+      "path": "tools/fan_repeated_sleep_intent_selftest.ps1",
+      "sha256": "27728ee371bc0865767ce25df18c10ad65656fa78647e3e467858ad308fadf68"
+    },
+    {
+      "path": "tools/FanRepeatedSleepIntentSelfTest/FanRepeatedSleepIntentSelfTest.csproj",
+      "sha256": "c732f6a4d959b042bdc20fe34e3e83522da318bd2b17a6fba4ffdcd108745110"
+    },
+    {
+      "path": "tools/FanRepeatedSleepIntentSelfTest/Program.cs",
+      "sha256": "1de26c1493a8406b43d32b795104c89f5c83bc829bba3f9e194196c0d7ec4752"
+    },
+    {
+      "path": "tools/fixtures/fan_no_io_host.ts",
+      "sha256": "27f61b5a8703e713c7ef61c08ceebbae13f7e63b7ba70d576e65bf34d4fe2a3f"
+    },
+    {
+      "path": "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+      "sha256": "c5e844b9ecf161b0a7406612a90bf1398153136750c44a454aaf12c44ecac589"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tsconfig.json",
+      "sha256": "3914d1b26bf7beff106ec3a249e214be0b0979015bd4465572e7347897f1531b"
+    },
+    {
+      "path": "tsconfig.node.json",
+      "sha256": "9e2abb169ea87b7190613a1d4da57ca608463a453bd4231fa3aeee5e308370dd"
+    },
+    {
+      "path": "tools/fan_sta_dispatch_binding_selftest.cs",
+      "sha256": "d5b876acf7a85234d9b050c0c60fca35f6def04e3222d0af09fe2d1d3b92f4a2"
+    },
+    {
+      "path": "tools/fan_hc_sta_thread_identity_selftest.cs",
+      "sha256": "7fbece8eeb4d200e943dfdfc6d18aebf52b7a1a0fb0f184990fa1e5e4b57f189"
+    },
+    {
+      "path": "tools/fan_cold_start_manual_continuation_selftest.ts",
+      "sha256": "2576bad64578f73ec195c40694dc0d4dbe7ecaf52a4e1c3dc473828d570336ab"
+    },
+    {
+      "path": "src/bridge/fanHost/capabilityAdmission.ts",
+      "sha256": "f1f64c14a03f3b233ec3004c04f42e51fcc1a345c86dbc8c378ccdc8480ee8ef"
+    },
+    {
+      "path": "src/bridge/fanHost/deployment.ts",
+      "sha256": "2524655a2cb6e4a1bc05f8771718621cc8a0b9af295c81a1413195f11a6f8eb1"
+    },
+    {
+      "path": "src/bridge/fanHost/startupConfiguration.ts",
+      "sha256": "6afaa2666057245295bae56a563524b0ce839394ab36fca0e02ee71bf6cfc919"
+    },
+    {
+      "path": "src/radial/testingState.ts",
+      "sha256": "bcd59a9cf78056887b88f7dfcd729d00e8dc93b54ab4acffef4578a67a5ecf88"
+    }
+  ],
+  "actualOriginalTsCompilerInputs": 101,
+  "publicBusinessNeverRun": false,
+  "physicalAcceptance": false,
+  "fullGoalComplete": false,
+  "historicalOriginalTsSha256": "cca250364b46462d4908487584034303fbbe75f4567242ae5e11fcf826dd4c0e",
+  "supplementalHostContract": {
+    "schemaVersion": 1,
+    "originalManagedSourceCount": 41,
+    "originalPositiveChecks": 412,
+    "originalExactFaultChecks": 1,
+    "originalOtherFaultChecks": 81,
+    "originalNativePowerChecks": 13,
+    "observerSha256": "b6d7e1263a8c75fb27c48232768bc5d9fa83fe4a90abbc1d7e0dc30fd8015a3d",
+    "managed": [
+      {
+        "name": "payload-binding",
+        "source": "tools/ymcc_sim/global/fan-explicit-off-host-chain-consumer/PayloadBindingProbe.cs",
+        "checks": 12,
+        "scope": "Actual current Host declaration gate; synthetic manifest inputs only, no DLL integrity or HC loading",
+        "sha256": "9c9c1d908d987683ca52bb0be4a9ca6a5b3f7b4963786174a36f7922b863590a"
+      },
+      {
+        "name": "sta-dispatch",
+        "source": "tools/fan_sta_dispatch_binding_selftest.cs",
+        "checks": 12,
+        "scope": "Original STA12 assertions, direct original dedicated fixture with corrected exact factory literal; no compiler mapping, real WPF STA ownership with inert device and no HC initialization",
+        "sha256": "d5b876acf7a85234d9b050c0c60fca35f6def04e3222d0af09fe2d1d3b92f4a2"
+      },
+      {
+        "name": "sta-thread-identity",
+        "source": "tools/fan_hc_sta_thread_identity_selftest.cs",
+        "checks": 10,
+        "scope": "Unmodified original current Host sampler and STA identity; actual Windows thread ID observation, no HC initialization",
+        "sha256": "7fbece8eeb4d200e943dfdfc6d18aebf52b7a1a0fb0f184990fa1e5e4b57f189"
+      }
+    ],
+    "manualContinuation": {
+      "source": "tools/fan_cold_start_manual_continuation_selftest.ts",
+      "sha256": "2576bad64578f73ec195c40694dc0d4dbe7ecaf52a4e1c3dc473828d570336ab",
+      "checks": 16,
+      "scope": "Original16 actual manual continuation scenarios; only final auth fixture barrier corrected, launcher/handshake timeline observed without asserting a total launcher count; no control mutation after authentication refusal"
+    }
+  },
+  "publicBusinessNeverRunAtCreation": true,
+  "lastKnownFormalPublicRun": "D:/C34/2026-10-20T04-40-49-864Z-f14f3279/result.json"
+}

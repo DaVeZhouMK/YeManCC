@@ -1,0 +1,419 @@
+{
+  "schemaVersion": 1,
+  "runtimeId": "YMCC-DEVICECORE-20261018-v1",
+  "assemblyName": "HandheldCompanion",
+  "sourceRuntimeId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "sourceDirectory": "deps/hc-runtime-upstream/HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "sourceManifestSha256": "4a97af7fb2e37763f2fe896da97412c3b1a9d19c22de2b4ae83ba1a6d5e83b63",
+  "replacements": [
+    {
+      "path": "HandheldCompanion.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.dll",
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+      "bytes": 2774016,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Windows.SDK.NET.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Windows.SDK.NET.dll",
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+      "bytes": 1074688,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "iNKORE.UI.WPF.Modern.Controls.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/iNKORE.UI.WPF.Modern.Controls.dll",
+      "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+      "bytes": 547328,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "iNKORE.UI.WPF.Modern.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/iNKORE.UI.WPF.Modern.dll",
+      "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+      "bytes": 272896,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SDL3-CS.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SDL3-CS.dll",
+      "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+      "bytes": 47616,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "HandheldCompanion.deps.json",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.deps.json",
+      "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+      "bytes": 59901,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "HandheldCompanion.json",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.json",
+      "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+      "bytes": 379,
+      "modifiedByYmcc": true
+    }
+  ],
+  "exclusions": [
+    {
+      "path": "PresentationCore.dll",
+      "reason": "Private WPF framework duplicate; Host and LightSetter require Microsoft.WindowsDesktop.App and resolve its PresentationCore. Candidate full metadata load plus actual path callback pass without the private copy."
+    },
+    {
+      "path": "XInputPlus/Loader/XInputPlusInjector.dll",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/Loader/XInputPlusInjector64.dll",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/Dinput.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/Dinput8.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/XInput1_3.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/Dinput.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/Dinput8.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/XInput1_3.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "libVIIPER.dll",
+      "reason": "No reachable VIIPER native/service start from current approved headless device lifecycle. Keep HC VirtualManager/ViiperServerManager/service/Target startup forbidden; stock HIDMaestro has independent output closure."
+    },
+    {
+      "path": "ucrtbased.dll",
+      "reason": "No normal or delay PE import and no dynamic loader name reference in the approved retained native closure; re-audit when adding native payloads."
+    },
+    {
+      "path": "SDL3.dll",
+      "reason": "Approved headless device/Host receiver closure is native-SDL-free after BCL passive timers and zero-handle touchpad guards. Fresh-process exact IL/actual getter+InitializeInputOutput probes have zero SDL imports; nonzero query tails remain original. Passive finalizers/exit hooks absent and current Host does not dispose controllers or start SDL services."
+    },
+    {
+      "path": "LibreHardwareMonitorLib.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Microsoft.Extensions.Logging.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Drivers.HidHide.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Utilities.DeviceManagement.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Vicius.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Newtonsoft.Json.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "RAMSPDToolkit-NDD.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Resources/Intel/KX/KX.exe",
+      "reason": "HC Intel processor helper is outside current FanHost/LightSetter device lifecycle; KX constructor and launch are not device/factory reachable. ProcessManager only contains a filter-name literal. Native YMCC power paths do not consume this HC copy."
+    },
+    {
+      "path": "JoyShockLibrary.dll",
+      "reason": "Legacy JSL active-service/disconnect imports have no current approved device/factory/passive lifecycle callers. InputHost uses independent HIDMaestro; retain full HC imports as inactive declarations without supplying the unused native payload."
+    },
+    {
+      "path": "IGCL_Wrapper.dll",
+      "reason": "HC IGCL dynamic-loader static initializer is outside current device/factory lifecycle. HC GPUManager startup and full GPU service use remain outside the headless consumer contract."
+    },
+    {
+      "path": "Resources/AMD/ADLX_Wrapper.dll",
+      "reason": "HC ADLX imports are outside current device/factory lifecycle. HC GPUManager startup/shutdown and full GPU service use remain outside the headless consumer contract."
+    },
+    {
+      "path": "Resources/XInputPlus.ini",
+      "reason": "Original Hook/XInputPlus injection workflow and payloads were already excluded. This configuration is consumed only by that same forbidden workflow."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Sensors.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ShellExtensions.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.Asio.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.Midi.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.WinForms.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Reloaded.Memory.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "YamlDotNet.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    }
+  ],
+  "retainedHardwarePolicy": {
+    "ecAndFirmware": "Keep existing EC register methods, firmware gates, OpenLib/InpOut/MSI/UEFI/PawnIO transports; do not rewrite or activate untestable hardware here.",
+    "inputSdk": "External HIDMaestro/output SDKs are independent third parties; preserve their active dependency closure.",
+    "modernUiLibrary": "Headless UI leaf: type/resource closure reduced, neutral strings retained, current HC cross-library references preserved. Exact SettingsCard arrow glyph F2AF folding plus unused immutable theme/icon initializer subsets; all retained field values verified. Current development binding identity retained. HC App/UI startup, windows, templates and rendering remain outside this device profile.",
+    "sdl": "Native SDL remains absent. SDL3-CS retains the exact current consumer ABI: 92 CLR types, preserved structure/enum/marshalling layouts, 33 real native entry points and required private delegates. Only unreferenced APIs/delegate initializer groups are trimmed; HC and nonzero native branches remain unchanged.",
+    "applicationLibraries": "Actual leaf slicing applied to non-reflection companion libraries; all 26 strong reflection/serialization/logging families keep their original binary bytes. Rewritten DLLs are explicitly YMCC derivatives bound by exact hashes, not original publisher-signed files. All preserved leaf IL and native layouts are compared; no ReadyToRun payload was present in the inspected original leaf files.",
+    "transportLeaves": "Managed wrappers keep audited native ABI/layout/PInvoke and lifecycle entries. SharpDX core/DirectInput/Direct3D9 now retain exact originals, including unmanaged delegate, reflection and shadow contracts. No native hardware library changed; no Bluetooth/ViGEm omission activated."
+  },
+  "physicalDeviceVerified": false,
+  "forbiddenEntryPoints": [
+    "HC ordinary App/UI entry point",
+    "ProfileManager.Start",
+    "UpdateProfileWrapper",
+    "HC XInputPlus/Hook/profile injection workflow",
+    "HC VIIPER/SDL controller service startup outside the approved YMCC host profile",
+    "App.StartNonUIInit",
+    "ControllerManager.Start",
+    "VirtualManager.Start/QuerySettings/SetVIIPERStatus/SetControllerModeCore",
+    "ViiperServerManager.Start/RestartInternal/SetPort",
+    "ViiperService.Initialize and HC Target Connect/Attach",
+    "Diagnostic construction outside the fixed HC IDevice class set",
+    "Direct HC SDLController active Tick/IsConnected/IsWireless/UserIndex/ToString/vibration/light/Dispose calls or HC controller shutdown/service startup outside the approved Host device lifecycle",
+    "HC GPUManager.Start/Stop and full IGCL/ADLX GPU services",
+    "HC Processors.Intel.KX construction/launch outside approved device lifecycle",
+    "HC legacy JSL active-controller services and SafeJslDisconnect wrappers"
+  ],
+  "softwareValidation": [
+    "path-based-load-all-types",
+    "actual-HC-software-callback-parity",
+    "rooted-WinRT-member-and-interface-preservation",
+    "BCL-passive-timer-prefix-zero-SDL-native-load",
+    "actual-passive-zero-handle-query-and-input-output-dispatch-with-zero-SDL-imports",
+    "independent-passive-receiver-and-lifetime-native-SDL-closure",
+    "full-consumer-UI-reference-and-retained-method-audit",
+    "actual-retained-UI-static-field-values-parity",
+    "shared-device-resolver-positive-negative-real-loads",
+    "all-retained-cross-library-TypeRef-MemberRef-ExportedType-closure",
+    "retained-leaf-IL-EH-locals-and-native-layout-parity",
+    "both-production-log-configurations-initialize-and-write-real-files",
+    "C++-emitted-installer-validator-split-shared-runtime-positive-negative",
+    "transport-native-ABI-layout-PInvoke-lifecycle-positive-negative-and-retained-IL-parity",
+    "lossless-complete-JSON-value-equality-and-duplicate-key-rejection",
+    "sdk-unreferenced-compiler-RVA-only-preserving-all-types-methods-ABI-and-dynamic-marshalling",
+    "ui-second-pass-complete-call-closure-DP-interface-map-and-retained-IL"
+  ],
+  "sourceBindingActivated": true,
+  "installedDeploymentPerformed": false,
+  "modifiedStrongNameIdentity": {
+    "assemblies": [
+      "iNKORE.UI.WPF.Modern",
+      "iNKORE.UI.WPF.Modern.Controls"
+    ],
+    "publicKeyToken": "538ea1f68f629a04",
+    "purpose": "Development binding identity only; no publisher authentication or release signature",
+    "authenticode": "NotSigned"
+  },
+  "passiveControllerTimer": {
+    "implementation": "Internal BCL Stopwatch/QPC helper",
+    "changedOriginalMethod": "SDLController default constructor; two timer call tokens only",
+    "counterUnit": "raw QPC ticks",
+    "frequencyUnit": "QPC ticks per second",
+    "extraDlls": 0,
+    "deviceProtocolChanged": false,
+    "softwareValidation": "Actual 57-byte field-initializer prefix in a fresh physically no-SDL process; all non-framework native imports blocked; original baseline fails on SDL timer, candidate has zero attempts."
+  },
+  "passiveControllerQueries": {
+    "changedOriginalMethods": [
+      "SDLController.GetTouchpads",
+      "SDLController.GetTouchpadFingers"
+    ],
+    "zeroHandle": "Return zero before native SDL query; native NULL oracle returns zero",
+    "nonzeroHandle": "Preserve original query instructions; denied-call probes verify the original call is retained",
+    "actualInitializeInputOutputReceivers": 2,
+    "deviceConstructorsExecuted": false,
+    "fullDummyConstructorsExecuted": false,
+    "extraDlls": 0
+  },
+  "sharedDependencies": {
+    "directory": "PowerControl/ymcc-shared-runtime",
+    "manifestSha256": "4bd622f2aed6cc045f14e11844208b0f081cdce8c9d1af495b3ad8af15c81362",
+    "files": [
+      {
+        "path": "LibreHardwareMonitorLib.dll",
+        "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+        "bytes": 1204224
+      },
+      {
+        "path": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7",
+        "bytes": 65872
+      },
+      {
+        "path": "Microsoft.Extensions.Logging.Abstractions.dll",
+        "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+        "bytes": 66896
+      },
+      {
+        "path": "Nefarius.Drivers.HidHide.dll",
+        "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f",
+        "bytes": 223232
+      },
+      {
+        "path": "Nefarius.Utilities.DeviceManagement.dll",
+        "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c",
+        "bytes": 328192
+      },
+      {
+        "path": "Nefarius.Vicius.Abstractions.dll",
+        "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa",
+        "bytes": 20992
+      },
+      {
+        "path": "Newtonsoft.Json.dll",
+        "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+        "bytes": 723368
+      },
+      {
+        "path": "RAMSPDToolkit-NDD.dll",
+        "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+        "bytes": 253952
+      }
+    ]
+  },
+  "interopAbiRepair": {
+    "date": "2026-10-19",
+    "scope": "Exact original small third-party dependencies; COM, native callbacks, reflection, input/transport and common runtime API compatibility",
+    "policy": "Use exact frozen upstream originals for restored ABI owners and companions; do not trim COM slots, unmanaged callbacks or dynamic shadow/reflection contracts",
+    "restoredFiles": [
+      "NAudio.Core.dll",
+      "NAudio.Vorbis.dll",
+      "NAudio.Wasapi.dll",
+      "NAudio.WinMM.dll",
+      "WpfScreenHelper.dll",
+      "Interop.IWshRuntimeLibrary.dll",
+      "Microsoft.WindowsAPICodePack.Shell.dll",
+      "Microsoft.WindowsAPICodePack.Core.dll",
+      "SharpDX.dll",
+      "SharpDX.DirectInput.dll",
+      "SharpDX.Direct3D9.dll",
+      "BlackSharp.Core.dll",
+      "GameLib.Core.dll",
+      "Gma.System.MouseKeyHook.dll",
+      "GongSolutions.WPF.DragDrop.dll",
+      "GregsStack.InputSimulatorStandard.dll",
+      "Microsoft.Extensions.DependencyInjection.dll",
+      "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "Microsoft.Extensions.Diagnostics.dll",
+      "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "Microsoft.Extensions.FileProviders.Physical.dll",
+      "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "Microsoft.Extensions.Http.dll",
+      "Microsoft.Extensions.Http.Polly.dll",
+      "Microsoft.Extensions.Primitives.dll",
+      "NVorbis.dll",
+      "Polly.dll",
+      "PrecisionTimer.NET.dll",
+      "SharpDX.XInput.dll",
+      "WindowsInput.dll",
+      "hidapi.net.dll",
+      "Nefarius.Utilities.Bluetooth.dll",
+      "Nefarius.ViGEm.Client.dll",
+      "PInvoke.Windows.Core.dll"
+    ],
+    "reason": "Actual old-runtime ManagerFactory failure reproduced; retained Shell/shortcut/DPI interfaces also show method-order removal. Exact upstream libraries replace these shortened contracts. Remaining ordinary third-party slices are now original copies: eleven additional native/callback owners failed the whole-assembly ABI policy; restoring the other small leaves avoids retaining an unproven truncated API surface.",
+    "physicalDeviceVerified": false,
+    "compatibilityReserveRestores": {
+      "files": [
+        "SharpDX.dll",
+        "SharpDX.DirectInput.dll",
+        "SharpDX.Direct3D9.dll"
+      ],
+      "reason": "Current HC enum callback and reflected joystick format already pass. Full upstream Include shadow surface is absent from trimmed core/D3D and restored by originals; preserve the complete small ABI family per compatibility-first objective. This is not a claim that current fan consumers failed on these three DLLs.",
+      "additionalBinaryBytes": 625152,
+      "currentConsumerRegression": "Actual pure-managed callback delegate and joystick format parity with native imports denied; malformed ABI/attribute/delegate fixtures rejected",
+      "hardwareAccessPerformed": false
+    },
+    "remainingSmallThirdPartyOriginals": {
+      "files": [
+        "BlackSharp.Core.dll",
+        "GameLib.Core.dll",
+        "Gma.System.MouseKeyHook.dll",
+        "GongSolutions.WPF.DragDrop.dll",
+        "GregsStack.InputSimulatorStandard.dll",
+        "Microsoft.Extensions.DependencyInjection.dll",
+        "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+        "Microsoft.Extensions.Diagnostics.dll",
+        "Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "Microsoft.Extensions.FileProviders.Physical.dll",
+        "Microsoft.Extensions.FileSystemGlobbing.dll",
+        "Microsoft.Extensions.Http.dll",
+        "Microsoft.Extensions.Http.Polly.dll",
+        "Microsoft.Extensions.Primitives.dll",
+        "NVorbis.dll",
+        "Polly.dll",
+        "PrecisionTimer.NET.dll",
+        "SharpDX.XInput.dll",
+        "WindowsInput.dll",
+        "hidapi.net.dll",
+        "Nefarius.Utilities.Bluetooth.dll",
+        "Nefarius.ViGEm.Client.dll",
+        "PInvoke.Windows.Core.dll"
+      ],
+      "additionalBinaryBytes": 914872,
+      "observedHardwareFailureClaimed": false,
+      "evidence": "Whole supplied upstream COM inventory plus per-library shape diagnostics; actual native callbacks not invoked",
+      "retainedSpecialDerivatives": [
+        "HandheldCompanion.dll",
+        "Microsoft.Windows.SDK.NET.dll",
+        "SDL3-CS.dll",
+        "iNKORE.UI.WPF.Modern.Controls.dll",
+        "iNKORE.UI.WPF.Modern.dll"
+      ],
+      "consumerConfigurationsPreserved": [
+        "HandheldCompanion.deps.json",
+        "HandheldCompanion.json"
+      ]
+    }
+  }
+}

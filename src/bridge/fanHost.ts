@@ -1,8 +1,22 @@
-import { app, fs, http, proc, shell, powerLifecycle, type PowerLifecycleState, type FanActivitySnapshot, type FanManualWakeResult } from './api';
-import { resolveFanSnapshotGeneration, isNoPowerOperationReceipt, isColdUnopenedFanHost, isCompleteAdmissibleHcSession, hasBlockingFanTransition, hasFailedFanOperation, type FanSnapshotGenerationEvidence } from './fanSessionEvidence';
+import { resolveFanHostConfig, joinWindowsPath, parseJson, type FanHostConfig, type FanHostPayloadManifest } from './fanHost/startupConfiguration';
+import { resolveFanHostDeployment, type FanHostDeploymentIo } from './fanHost/deployment';
+import { evaluateFanDeviceGate, type FanDeviceGateResult } from './fanHost/capabilityAdmission';
+// [LIFECYCLE:FAN:ENTRY] 先读 ./fanHost/README.md，按节点联读准入/取消/成功与原验证。
+// Stable public entry: existing App/UI/tests keep importing from './fanHost'.
+export { FAN_HOST_PROTOCOL_VERSION, FAN_HOST_DEFAULT_PORT, HC_FAN_DEPENDENCY_MANIFEST, resolveFanHostConfig } from './fanHost/startupConfiguration';
+export type { FanHostDependency, FanHostConfig } from './fanHost/startupConfiguration';
+export { resolveFanHostDeployment } from './fanHost/deployment';
+export type { FanHostDeploymentIo, FanHostDeploymentDecision } from './fanHost/deployment';
+export { evaluateFanDeviceGate } from './fanHost/capabilityAdmission';
+export type { FanDeviceGateResult } from './fanHost/capabilityAdmission';
+import { setFanNavigationControl } from './fanFeature';
+import { app as nativeApp, fs as nativeFs, http, proc as nativeProc, shell as nativeShell, powerLifecycle, type PowerLifecycleState, type FanActivitySnapshot, type FanManualWakeResult } from './api';
+import { resolveFanSnapshotGenerationValues, isNoPowerOperationReceipt, isColdUnopenedFanHost, isCompleteAdmissibleHcSession, hasBlockingFanTransition, hasFailedFanOperation, type FanSnapshotGenerationEvidence } from './fanSessionEvidence';
 import { ensureFanHostInstaller } from './fanHostInstallerRepair';
 import {
   createFanApiAdapter,
+  isFanReplayCurve,
+  isFanHttpTransportFailure,
   FanApiError,
   type FanApiAdapter,
   type FanHandshake,
@@ -10,9 +24,42 @@ import {
   type FanNode,
   type FanState,
 } from './fanApi';
-import { fanDiagnosticLog, fanLifecycleEvidence, setFanDiagnosticPowerGeneration } from './fanDiagnostics';
+import { fanDiagnosticLog, fanDiagnosticLogLazy, fanLifecycleEvidence, setFanDiagnosticPowerGeneration } from './fanDiagnostics';
 import { FanCoordinatorGate, type FanCoordinatorPowerEvent } from './hardwareCoordinator';
 import { parseAiFanMockSession, aiFanMockArguments, aiFanMockHandshakeAllowed, aiFanMockStateAllowed, aiFanRuntimeEvidence, type AiFanMockSession } from './aiFanMock';
+
+// Fan startup must release its pending UI owner if one native reply is lost.
+// These deadlines retire only the IPC observer: an unknown write/launch is never
+// declared cancelled or automatically repeated here. Existing exact-image and
+// authenticated resident adoption still reconcile the next explicit request.
+const FAN_STARTUP_READ_TIMEOUT_MS = 5000;
+const FAN_STARTUP_MUTATION_TIMEOUT_MS = 15000;
+const fs = {
+  ...nativeFs,
+  exists: (path: string) => nativeFs.exists(path, FAN_STARTUP_READ_TIMEOUT_MS),
+  readTextFile: (path: string, maxBytes = 1 << 20) => nativeFs.readTextFile(path, maxBytes,
+    { timeoutMs: FAN_STARTUP_READ_TIMEOUT_MS, bounded: true }),
+  mkdir: (path: string) => nativeFs.mkdir(path, FAN_STARTUP_MUTATION_TIMEOUT_MS),
+  writeTextFileAtomic: (path: string, content: string) =>
+    nativeFs.writeTextFileAtomic(path, content, FAN_STARTUP_MUTATION_TIMEOUT_MS),
+};
+const app = {
+  ...nativeApp,
+  dataDir: () => nativeApp.dataDir(FAN_STARTUP_READ_TIMEOUT_MS),
+  pid: () => nativeApp.pid(FAN_STARTUP_READ_TIMEOUT_MS),
+};
+const proc = {
+  ...nativeProc,
+  identity: (pid: number) => nativeProc.identity(pid, FAN_STARTUP_READ_TIMEOUT_MS),
+  terminateExact: (pid: number, processCreated: string, path: string) =>
+    nativeProc.terminateExact(pid, processCreated, path, FAN_STARTUP_MUTATION_TIMEOUT_MS),
+  terminateTree: (pid: number) => nativeProc.terminateTree(pid, FAN_STARTUP_MUTATION_TIMEOUT_MS),
+};
+const shell = {
+  ...nativeShell,
+  hidden: (program: string, args: string[] = []) =>
+    nativeShell.hidden(program, args, FAN_STARTUP_MUTATION_TIMEOUT_MS),
+};
 
 /**
  * Real-host integration boundary.
@@ -21,8 +68,6 @@ import { parseAiFanMockSession, aiFanMockArguments, aiFanMockHandshakeAllowed, a
  * second gate makes the real Host independently reversible from the UI import.
  */
 export const FAN_REAL_HOST_ENABLED = true;
-export const FAN_HOST_PROTOCOL_VERSION = 2;
-export const FAN_HOST_DEFAULT_PORT = 8765;
 const FAN_HOST_V3_ADAPTER_FILE = 'YeManFanHcAdapter.dll';
 // 租约协议完整性（第七十七批 C/E-③，2026-09-12 用户批准）：Host 端 lease
 // TTL=15s（FanLab\real-host\Program.cs MonoMs()+15000），续租是协调层【架构需求】
@@ -135,99 +180,6 @@ export function resolveFanEntryAction(phase: FanHostPhase): FanEntryAction {
   return phase === 'stopped' || phase === 'disabled' ? 'idle' : 'adopt-resident-session';
 }
 
-export interface FanHostDependency {
-  file: string;
-  sha256?: string;
-  version?: string;
-}
-
-/** Runtime dependency manifest. Files are copied only in a separately
- * authorized host package; this source tree does not bundle HC assemblies. */
-export const HC_FAN_DEPENDENCY_MANIFEST: readonly FanHostDependency[] = [
-  { file: 'YeManFanHost.exe' },
-  { file: 'YeManFanHost.dll' },
-  { file: 'YeManFanHost.deps.json' },
-  { file: 'YeManFanHost.runtimeconfig.json' },
-  { file: 'HandheldCompanion.deps.json' },
-  { file: 'Microsoft.Windows.SDK.NET.dll' },
-  { file: 'WinRT.Runtime.dll' },
-  { file: 'Sentry.dll' },
-  { file: 'Shared.dll' },
-  { file: 'Serilog.dll' },
-  { file: 'Serilog.Extensions.Logging.dll' },
-  { file: 'Serilog.Extensions.Logging.File.dll' },
-  { file: 'Serilog.Formatting.Compact.dll' },
-  { file: 'Serilog.Sinks.Async.dll' },
-  { file: 'Serilog.Sinks.Console.dll' },
-  { file: 'Serilog.Sinks.RollingFile.dll' },
-  {
-    file: 'HandheldCompanion.dll',
-    version: '0.32.4.0',
-    sha256: '886ac06bce514538f379fad8dfe66a25ae954da6dac44a9690d04830142d957b',
-  },
-  { file: 'GamepadMotion.dll' },
-  // HC loads LibreHardwareMonitor through OpenLibSys on EC-based devices
-  // such as GPD Win5. Preflight it so handshake cannot hide an Open failure.
-  { file: 'LibreHardwareMonitorLib.dll', sha256: 'f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf' },
-  { file: 'hidapi.net.dll', sha256: '5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17' },
-  { file: 'hidapi.dll', sha256: 'ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4' },
-  // HC IDevice.GetCurrent references the full device factory. These files
-  // are its small non-UI bootstrap closure and must be present before the
-  // Host is allowed to load HandheldCompanion.dll.
-  { file: 'WindowsInput.dll', sha256: '5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711' },
-  { file: 'GregsStack.InputSimulatorStandard.dll', sha256: '453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee' },
-  { file: 'Gma.System.MouseKeyHook.dll', sha256: 'fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485' },
-  { file: 'HidLibrary.dll', sha256: '00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa' },
-  { file: 'Nefarius.Utilities.DeviceManagement.dll', sha256: 'b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c' },
-  { file: 'Nefarius.Utilities.Bluetooth.dll', sha256: '010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433' },
-  { file: 'Nefarius.Vicius.Abstractions.dll', sha256: '51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa' },
-  { file: 'PInvoke.Kernel32.dll', sha256: '3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44' },
-  { file: 'PInvoke.Windows.Core.dll', sha256: '28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c' },
-  { file: 'SharpDX.dll', sha256: '518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd' },
-  { file: 'SharpDX.Direct3D9.dll', sha256: '69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55' },
-  { file: 'SharpDX.DirectInput.dll', sha256: '35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f' },
-  { file: 'SharpDX.XInput.dll', sha256: '350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3' },
-  { file: 'Serilog.Sinks.File.dll' },
-  { file: 'Serilog.Settings.Configuration.dll' },
-  // These must be the HC-pinned Windows runtime-target implementations, not
-  // their generic lib/net10.0 reference counterparts. The Host resolves HC
-  // manually and therefore cannot let the normal deps resolver choose them.
-  { file: 'System.Management.dll', sha256: '01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb' },
-  { file: 'System.IO.Ports.dll', sha256: 'bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b' },
-  { file: 'System.ServiceProcess.ServiceController.dll', sha256: '3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8' },
-];
-
-export interface FanHostConfig {
-  /** Native command-line capability only; normal production config has no value. */
-  aiMockSession?: AiFanMockSession;
-  hostExecutable: string;
-  hostDirectory: string;
-  hcRuntimeDirectory: string;
-  hcAssemblyPath: string;
-  authorizationPath: string;
-  allowHardwareWrites: boolean;
-  confirmationToken: string;
-  baseUrl: string;
-  protocolVersion: number;
-  dependencies: readonly FanHostDependency[];
-  sessionToken: string;
-  sessionTokenPath: string;
-}
-
-function trimWindowsPath(value: string): string {
-  return value.replace(/[\\/]+$/, '');
-}
-
-function joinWindowsPath(root: string, child: string): string {
-  return `${trimWindowsPath(root)}\\${child}`;
-}
-
-function parseJson<T>(raw: string): T {
-  // PowerShell UTF-8 output may include a BOM; JSON.parse rejects it even
-  // though Windows/.NET JSON readers accept the same file.
-  return JSON.parse(raw.replace(/^\uFEFF/, '')) as T;
-}
-
 function createSessionToken(): string {
   const bytes = new Uint8Array(32);
   try {
@@ -306,46 +258,6 @@ export function isLegacyUnauthenticatedFanHostHealth(
   }
 }
 
-export function resolveFanHostConfig(
-  powerControlDir = 'C:\\SOFT\\YeMan\\PowerControl',
-): FanHostConfig {
-  const hostDirectory = joinWindowsPath(powerControlDir, 'fan-host-v2');
-  // The payload manifest is the only source of truth for the HC runtime path.
-  // Keep the historical directory as a pre-read fallback; start() resolves
-  // the manifest before any ACL, dependency, or HC-load operation.
-  const hcRuntimeDirectory = joinWindowsPath(powerControlDir, 'handheldcompanion-runtime');
-  return {
-    hostDirectory,
-    hcRuntimeDirectory,
-    hostExecutable: joinWindowsPath(hostDirectory, 'YeManFanHost.exe'),
-    hcAssemblyPath: joinWindowsPath(hcRuntimeDirectory, 'HandheldCompanion.dll'),
-    authorizationPath: joinWindowsPath(hostDirectory, 'YeManFanHost.authorization.md'),
-    // The Host still requires the authorization record and confirmation token;
-    // a missing/invalid record keeps it in read-only handshake mode.
-    allowHardwareWrites: true,
-    // The Host validates a per-launch random confirmation equal to its
-    // protected loopback session token. Never keep a reusable write password
-    // in the shipped frontend source.
-    confirmationToken: '',
-    baseUrl: `http://127.0.0.1:${FAN_HOST_DEFAULT_PORT}`,
-    protocolVersion: FAN_HOST_PROTOCOL_VERSION,
-    dependencies: HC_FAN_DEPENDENCY_MANIFEST,
-    // Loaded from the protected sidecar on first start. Keeping this empty in
-    // the resolved config prevents a new token from invalidating an existing
-    // resident Host during every UI process restart.
-    sessionToken: '',
-    sessionTokenPath: joinWindowsPath(hostDirectory, 'YeManFanHost.session'),
-  };
-}
-
-type FanHostPayloadManifest = {
-  schemaVersion?: unknown;
-  runtimeManifest?: unknown;
-  /** FAN-927 §2：部署代描述的一部分（与 runtime manifest 的 runtimeId 必须一致）。 */
-  runtimeId?: unknown;
-  files?: unknown;
-};
-
 async function resolveRuntimeFromPayloadManifest(config: FanHostConfig): Promise<void> {
   const manifestPath = joinWindowsPath(config.hostDirectory, 'YeManFanHost.payload.json');
   if (!(await fs.exists(manifestPath))) return;
@@ -365,167 +277,6 @@ async function resolveRuntimeFromPayloadManifest(config: FanHostConfig): Promise
     config.hcRuntimeDirectory = runtimeDirectory;
     config.hcAssemblyPath = joinWindowsPath(runtimeDirectory, 'HandheldCompanion.dll');
   } catch { /* dependency validation reports the authoritative failure */ }
-}
-
-/**
- * FAN-927 §2（2026-09-27 用户批准）：**完整文件校验归部署边界**。
- *
- * 这里只有：① 两个**小清单**的摘要（允许的固定开销）；② 一份小"部署记录"的匹配。
- * 正常开启不再逐文件 `exists`、不再为每个文件起一次 `certutil`、不再运行安装脚本、
- * 不再遍历依赖目录。触发一次完整验证（安装脚本进程内 SHA-256）仅限：新装/更新/回滚部署、
- * 包代描述变更、记录缺失或不匹配、显式修复——其中也包含便携包/旧安装的**首次明确开启**一次
- * 快速批量初始化。
- *
- * 明确接受的信任调整：部署记录证明该包代在部署时完整，不保证每个 DLL 此刻仍与发布字节相同；
- * 绕过更新流程只改 DLL 并保持清单不变的离线替换不再由每次开启的全量哈希发现。完整性由
- * 构建、部署与修复环节负责。
- */
-const FAN_HOST_PAYLOAD_MANIFEST_FILE = 'YeManFanHost.payload.json';
-const FAN_HOST_RUNTIME_MANIFEST_FILE = 'HandheldCompanion.runtime.json';
-const FAN_HOST_DEPLOYMENT_RECORD_FILE = 'YeManFanHost.deployment.json';
-const FAN_HOST_DEPLOYMENT_RECORD_SCHEMA = 1;
-/**
- * 部署验证规则版本：任何改变"一个包代是否算已完整验证"判据的改动都必须提升它，
- * 使既有记录自动失效并触发一次重新验证。这是"运行不遍历 DLL"的唯一替代物。
- */
-const FAN_HOST_VALIDATION_RULES_VERSION = 1;
-
-interface FanHostDeploymentIdentity {
-  payloadRoot: string;
-  runtimeRoot: string;
-  payloadManifestSha256: string;
-  runtimeManifestSha256: string;
-  runtimeId: string;
-}
-
-interface FanHostDeploymentRecord extends FanHostDeploymentIdentity {
-  schemaVersion: number;
-  validationRulesVersion: number;
-  result: string;
-}
-
-function normalizeDeploymentPath(value: string): string {
-  return value.replace(/[\\/]+$/, '').replace(/\//g, '\\').toLowerCase();
-}
-
-/**
- * FAN-927 §2：部署边界判定所需的**全部** I/O。生产为真实 `fs`/安装脚本；
- * 自测注入替身，以便用**实际调用次数**证明"记录命中 ⇒ 逐文件 certutil=0、
- * 安装全验证进程=0、全文件遍历/哈希=0"。
- */
-export interface FanHostDeploymentIo {
-  exists(path: string): Promise<boolean>;
-  readTextFile(path: string, maxBytes: number): Promise<string>;
-  sha256File(path: string): Promise<string>;
-  /** 完整验证（新装/更新/回滚/修复/无记录首次开启）。只允许在记录未命中时调用。 */
-  runInstaller(config: FanHostConfig, fanStateDirectory: string): Promise<void>;
-}
-
-/** 只对**单个小清单**取摘要；失败/不可读一律返回 null（fail-closed）。 */
-async function hashDeploymentFile(io: FanHostDeploymentIo, path: string): Promise<string | null> {
-  try {
-    const digest = await io.sha256File(path);
-    return typeof digest === 'string' && /^[0-9a-f]{64}$/i.test(digest.trim())
-      ? digest.trim().toLowerCase()
-      : null;
-  } catch {
-    return null;
-  }
-}
-
-async function readDeploymentRecord(
-  io: FanHostDeploymentIo,
-  recordPath: string,
-): Promise<FanHostDeploymentRecord | null> {
-  try {
-    if (!(await io.exists(recordPath))) return null;
-    const raw = await io.readTextFile(recordPath, 64 * 1024);
-    const record = parseJson<FanHostDeploymentRecord>(raw);
-    if (!record || typeof record !== 'object') return null;
-    if (record.schemaVersion !== FAN_HOST_DEPLOYMENT_RECORD_SCHEMA) return null;
-    if (typeof record.payloadRoot !== 'string' || typeof record.runtimeRoot !== 'string') return null;
-    if (typeof record.payloadManifestSha256 !== 'string' || typeof record.runtimeManifestSha256 !== 'string') return null;
-    if (typeof record.runtimeId !== 'string' || typeof record.result !== 'string') return null;
-    return record;
-  } catch {
-    return null;
-  }
-}
-
-function deploymentRecordMatches(record: FanHostDeploymentRecord, identity: FanHostDeploymentIdentity): boolean {
-  return record.result === 'ok'
-    && record.validationRulesVersion === FAN_HOST_VALIDATION_RULES_VERSION
-    && record.payloadRoot === identity.payloadRoot
-    && record.runtimeRoot === identity.runtimeRoot
-    && record.payloadManifestSha256 === identity.payloadManifestSha256
-    && record.runtimeManifestSha256 === identity.runtimeManifestSha256
-    && record.runtimeId === identity.runtimeId;
-}
-
-/** 当前包代描述。只读 payload manifest（取摘要 + runtimeId）与 runtime manifest（取摘要）。 */
-async function currentDeploymentIdentity(
-  io: FanHostDeploymentIo,
-  config: FanHostConfig,
-): Promise<FanHostDeploymentIdentity | null> {
-  const payloadManifestPath = joinWindowsPath(config.hostDirectory, FAN_HOST_PAYLOAD_MANIFEST_FILE);
-  const runtimeManifestPath = joinWindowsPath(config.hcRuntimeDirectory, FAN_HOST_RUNTIME_MANIFEST_FILE);
-  const payloadManifestSha256 = await hashDeploymentFile(io, payloadManifestPath);
-  if (!payloadManifestSha256) return null;
-  const runtimeManifestSha256 = await hashDeploymentFile(io, runtimeManifestPath);
-  if (!runtimeManifestSha256) return null;
-  let runtimeId = '';
-  try {
-    const manifest = parseJson<FanHostPayloadManifest>(await io.readTextFile(payloadManifestPath, 2 * 1024 * 1024));
-    runtimeId = typeof manifest.runtimeId === 'string' ? manifest.runtimeId.trim() : '';
-  } catch {
-    return null;
-  }
-  if (!runtimeId) return null;
-  return {
-    payloadRoot: normalizeDeploymentPath(config.hostDirectory),
-    runtimeRoot: normalizeDeploymentPath(config.hcRuntimeDirectory),
-    payloadManifestSha256,
-    runtimeManifestSha256,
-    runtimeId,
-  };
-}
-
-/** FAN-927 §2：部署边界判定的**唯一**实现（唯一副作用 = 必要时调用一次完整验证）。 */
-export type FanHostDeploymentDecision = 'record-hit' | 'initialized';
-
-export async function resolveFanHostDeployment(
-  config: FanHostConfig,
-  fanStateDirectory: string,
-  io: FanHostDeploymentIo,
-): Promise<FanHostDeploymentDecision> {
-  const recordPath = joinWindowsPath(fanStateDirectory, FAN_HOST_DEPLOYMENT_RECORD_FILE);
-  const identity = await currentDeploymentIdentity(io, config);
-  if (!identity) {
-    throw new Error(`Fan Host 部署身份不可读：缺少或无法解析 ${FAN_HOST_PAYLOAD_MANIFEST_FILE}/${FAN_HOST_RUNTIME_MANIFEST_FILE}`);
-  }
-  const record = await readDeploymentRecord(io, recordPath);
-  if (record && deploymentRecordMatches(record, identity)) {
-    fanDiagnosticLog('lifecycle.deployment-record-hit', {
-      runtimeId: identity.runtimeId,
-      payloadRoot: identity.payloadRoot,
-      recordPath,
-    });
-    return 'record-hit';
-  }
-  fanDiagnosticLog('lifecycle.deployment-record-miss', {
-    reason: record ? 'identity-mismatch' : 'record-absent',
-    runtimeId: identity.runtimeId,
-    recordPath,
-  });
-  // 新装/更新/回滚、包代描述变更、记录缺失或不匹配、显式修复、portable 首次明确开启：
-  // 只在这里做**一次**完整验证（安装脚本进程内 SHA-256），成功即继续。
-  await io.runInstaller(config, fanStateDirectory);
-  const confirmed = await readDeploymentRecord(io, recordPath);
-  if (!confirmed || !deploymentRecordMatches(confirmed, identity)) {
-    throw new Error('Fan Host 部署记录未生成或与当前包代不一致，拒绝启动（完整性由部署/修复环节负责）');
-  }
-  fanDiagnosticLog('lifecycle.deployment-record-written', { runtimeId: identity.runtimeId, recordPath });
-  return 'initialized';
 }
 
 export interface FanHostProcess {
@@ -555,6 +306,24 @@ export class NativeFanHostLauncher implements FanHostLauncher {
   constructor(private readonly onStage?: (stage: string) => void) {}
 
   async start(config: FanHostConfig): Promise<FanHostProcess> {
+    try { return await this.startCore(config); }
+    catch (error) {
+      const timeout = error instanceof Error && /^IPC command timed out: (?:fs\.(?:exists|readTextRange|mkdir|writeTextFileAtomic)|app\.(?:dataDir|fanStateDir|pid)|shell\.hidden|proc\.findExact|process\.identity)$/.test(error.message);
+      // Lost metadata/launch acknowledgement cannot strand a reachable,
+      // authenticated exact-image owner. Probe/adopt it once; never replay
+      // the uncertain file write/launch, enter AI->real fallback, or bypass
+      // the lifecycle handshake/Open/control admission that follows start().
+      if (!timeout || config.aiMockSession || !isSessionToken(config.sessionToken)) throw error;
+      const adopted = await this.tryAdoptAuthenticatedResidentHost(config).catch(() => undefined);
+      if (!adopted) throw error;
+      config.confirmationToken = config.sessionToken;
+      this.onStage?.('resident-host-adopted');
+      fanDiagnosticLog('lifecycle.start-stage', { stage: 'resident-host-adopted-after-ipc-timeout', pid: adopted.pid });
+      return adopted;
+    }
+  }
+
+  private async startCore(config: FanHostConfig): Promise<FanHostProcess> {
     let rawSession: unknown;
     try { rawSession = await app.aiFanMockSession(); }
     catch (error) {
@@ -664,8 +433,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
       // 在这里生成新令牌会覆盖运行中的 Host 已加载的 sidecar ⇒ native 发新值而 Host 仍持
       // 旧值 ⇒ /api/parent-exit 必然 401（§2 C2）。换代必须先让旧 owner 结算；否则
       // fail-closed，把它保留为唯一恢复 owner（不杀进程、不重写 sidecar、不起第二 owner）。
-      const residentBeforeRotate = await proc.findExact(config.hostExecutable)
-        .catch(() => ({ found: false, pid: 0 }));
+      const residentBeforeRotate = await proc.findExact(config.hostExecutable);
       if (residentBeforeRotate.found) {
         fanDiagnosticLog('lifecycle.credential-rotation-refused', {
           pid: residentBeforeRotate.pid,
@@ -819,6 +587,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
         return null;
       }
     }
+    if (stateResponse?.status === 403) throw terminalFanHttpRefusal(stateResponse.status);
     if (!stateResponse || stateResponse.status === 401) {
       // 203/Fan b141（FAN925B §4.3 / CP-05）：401 只说明"这一次尝试未获接受"，**不是**
       // "常驻 Host 是旧代"的判据，也**不是**走无认证 Close / 重写 sidecar / 杀端口 owner /
@@ -856,8 +625,8 @@ export class NativeFanHostLauncher implements FanHostLauncher {
   private async resolveAdoptableHostPid(config: FanHostConfig): Promise<number> {
     const owner = await this.findExactHostOwner(config);
     if (owner > 0) return owner;
-    const resident = await proc.findExact(config.hostExecutable).catch(() => ({ found: false, pid: 0 }));
     if (owner < 0) return -1;
+    const resident = await proc.findExact(config.hostExecutable).catch(() => ({ found: false, pid: 0 }));
     return resident.found ? resident.pid : 0;
   }
 
@@ -868,7 +637,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
    * unauthenticated compatibility close.
    */
   private async recoverPreviousHostBeforePayloadMutation(config: FanHostConfig): Promise<void> {
-    const resident = await proc.findExact(config.hostExecutable).catch(() => ({ found: false, pid: 0 }));
+    const resident = await proc.findExact(config.hostExecutable);
     if (!resident.found) return;
     if (config.sessionToken) {
       await this.recoverPreviousHost(config);
@@ -944,9 +713,9 @@ export class NativeFanHostLauncher implements FanHostLauncher {
    * startup cannot turn a valid device into a hidden Fan route.
    */
   private async waitForReady(config: FanHostConfig): Promise<void> {
-    const deadline = Date.now() + 5000;
+    const deadline = monotonicNowMs() + 5000;
     let lastError = 'Fan Host health endpoint 未就绪';
-    while (Date.now() < deadline) {
+    while (monotonicNowMs() < deadline) {
       try {
         const response = await http.request(`${config.baseUrl}/health`, {
           method: 'GET',
@@ -980,6 +749,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
     let health: any;
     try {
       const response = await http.request(`${config.baseUrl}/health`, { method: 'GET', headers: { 'X-YeMan-Fan-Session': config.sessionToken } });
+      if (response.status === 403) throw terminalFanHttpRefusal(response.status);
       if (response.status === 401) {
         // A 401 with our sidecar token has two meanings: an old pre-token Host
         // (which will answer /health without a header), or a token mismatch
@@ -1009,7 +779,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
       if (response.status < 200 || response.status >= 300) return;
       health = JSON.parse(response.body || '{}');
     } catch (error) {
-      if (error instanceof Error && error.message.startsWith('旧 Fan Host')) throw error;
+      if (isTerminalFanControlRefusal(error) || (error instanceof Error && error.message.startsWith('旧 Fan Host'))) throw error;
       // The listener can disappear while the resident Host still owns an
       // HC/EC session. Detect the exact executable independently of HTTP and
       // block a second hardware Host until the resident process is reachable
@@ -1080,6 +850,8 @@ export class NativeFanHostLauncher implements FanHostLauncher {
         });
         closeResult = JSON.parse(closeResponse.body || '{}');
       } catch { /* recover the original Host operation by observation only */ }
+      const closeRefusal = closeResponse ? terminalFanHttpRefusal(closeResponse.status, closeResult) : null;
+      if (closeRefusal) throw closeRefusal;
       if (!closeResponse || closeResponse.status < 200 || closeResponse.status >= 300 ||
           closeResult?.state?.hcCloseCleanupPending === true) {
         closeResult = { state: await this.waitForRemoteHcCloseCleanup(config) };
@@ -1111,6 +883,7 @@ export class NativeFanHostLauncher implements FanHostLauncher {
         }
       }
     } catch (error) {
+      if (isTerminalFanControlRefusal(error)) throw error;
       throw new Error(`旧 Fan Host 无法安全退出：${error instanceof Error ? error.message : String(error)}`);
     }
     if (!previousInstance) {
@@ -1125,8 +898,9 @@ export class NativeFanHostLauncher implements FanHostLauncher {
   private async captureHostProcess(config: FanHostConfig, pid: number, adopted = false): Promise<FanHostProcess> {
     const instance = await this.resolveExactHostInstance(config, pid);
     // Never publish an owner that can never settle its exit. An unreadable
-    // identity rejects this startup; a later explicit start may authenticate
-    // and capture the resident again. No unbound termination is authorized.
+    // identity rejects this startup; a transport timeout alone may enter the
+    // existing authenticated resident reconciliation. No identity is invented
+    // and no unbound termination is authorized.
     if (!instance) throw new Error('Fan Host 实例身份暂不可确认，请重试；保留现有宿主，不执行猜测终止');
     return { pid, executable: config.hostExecutable, processCreated: instance.processCreated,
       ...(adopted ? { adopted: true } : {}) };
@@ -1140,7 +914,12 @@ export class NativeFanHostLauncher implements FanHostLauncher {
     pid: number,
   ): Promise<{ pid: number; processCreated: string; path: string } | null> {
     if (pid <= 0) return null;
-    const identity = await proc.identity(pid).catch(() => null);
+    const identity = await proc.identity(pid).catch((error: unknown) => {
+      // Preserve a transport timeout for start()'s one authenticated resident
+      // reconciliation. An actual unreadable/invalid identity still stays null.
+      if (error instanceof Error && error.message === 'IPC command timed out: process.identity') throw error;
+      return null;
+    });
     const created = typeof identity?.processCreated === 'string' ? identity.processCreated.trim() : '';
     if (identity?.valid !== true || !created || created === '0') return null;
     if (!identity.path || identity.path.toLowerCase() !== config.hostExecutable.toLowerCase()) return null;
@@ -1154,8 +933,8 @@ export class NativeFanHostLauncher implements FanHostLauncher {
   private async confirmExactPreviousHostExit(
     instance: { pid: number; processCreated: string; path: string },
   ): Promise<void> {
-    const deadline = Date.now() + FAN_PREVIOUS_HOST_EXIT_OBSERVE_MS;
-    while (Date.now() < deadline) {
+    const deadline = monotonicNowMs() + FAN_PREVIOUS_HOST_EXIT_OBSERVE_MS;
+    while (monotonicNowMs() < deadline) {
       const identity = await proc.identity(instance.pid).catch(() => null);
       const created = typeof identity?.processCreated === 'string' ? identity.processCreated.trim() : '';
       if (identity?.valid === true && created && created !== '0' && created !== instance.processCreated) {
@@ -1219,10 +998,9 @@ export class NativeFanHostLauncher implements FanHostLauncher {
       // in that window; keep the old process as the only recovery owner.
       throw new Error('旧 Fan Host 进程仍在运行但没有可验证监听端口，已阻止修改载荷');
     }
-    const identity = await proc.identity(ownerPid).catch(() => null);
-    const exactPath = identity?.path && identity.path.toLowerCase() === config.hostExecutable.toLowerCase();
-    if (identity?.valid !== true || !exactPath) {
-      throw new Error('旧 Fan Host 会话令牌失效且端口不属于当前 YeManFanHost，已阻止接管');
+    const previousInstance = await this.resolveExactHostInstance(config, ownerPid);
+    if (!previousInstance) {
+      throw new Error('旧 Fan Host 实例身份无法确证，已阻止接管');
     }
     const closeResponse = await http.request(`${config.baseUrl}/api/close`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}', timeoutMs: 45000,
@@ -1246,37 +1024,35 @@ export class NativeFanHostLauncher implements FanHostLauncher {
     if (shutdownResponse.status >= 300 && shutdownResponse.status !== 404) {
       throw new Error(`旧 Fan Host legacy shutdown 返回 ${shutdownResponse.status}`);
     }
-    const deadline = Date.now() + 4000;
-    while (Date.now() < deadline) {
-      try {
-        const response = await http.request(`${config.baseUrl}/health`, { method: 'GET' });
-        if (response.status >= 200 && response.status < 300) {
-          await new Promise((resolve) => setTimeout(resolve, 100));
-          continue;
-        }
-      } catch { return; }
-      await new Promise((resolve) => setTimeout(resolve, 100));
-    }
-    throw new Error('旧 Fan Host legacy shutdown 后端口仍被占用，已阻止新的硬件接管');
+    // A lost listener does not prove this exact HC owner exited. Keep the
+    // same bounded instance confirmation used by authenticated migration.
+    await this.confirmExactPreviousHostExit(previousInstance);
   }
 
   private async waitForRemoteHcCloseCleanup(config: FanHostConfig): Promise<FanState> {
-    const deadline = Date.now() + 16000;
-    while (Date.now() < deadline) {
+    const deadline = monotonicNowMs() + 16000;
+    while (monotonicNowMs() < deadline) {
       try {
         const response = await http.request(`${config.baseUrl}/api/state`, {
           method: 'GET',
           headers: config.sessionToken ? { 'X-YeMan-Fan-Session': config.sessionToken } : {},
           timeoutMs: 750,
         });
-        const remote = JSON.parse(response.body || '{}')?.state;
+        if (response.status === 401 || response.status === 403) throw terminalFanHttpRefusal(response.status);
+        const payload = JSON.parse(response.body || '{}');
+        const refusal = terminalFanHttpRefusal(response.status, payload);
+        if (refusal) throw refusal;
+        const remote = payload?.state;
         // A successful HTTP response with an empty/malformed body is not a
         // lifecycle acknowledgement. Wait for a real Host state object so a
         // proxy/error page cannot make the next /api/close concurrent with
         // the original request.
         if (response.status >= 200 && response.status < 300 && remote &&
             typeof remote === 'object' && remote.hcCloseCleanupPending !== true) return remote as FanState;
-      } catch { /* preserve the old Host and continue polling */ }
+      } catch (error) {
+        if (isTerminalFanControlRefusal(error)) throw error;
+        // Unknown reads remain bounded observations of the original Close.
+      }
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
     }
     throw new Error('旧 Host HC Close 资源清理在等待窗口内未完成');
@@ -1286,8 +1062,8 @@ export class NativeFanHostLauncher implements FanHostLauncher {
     if (this.aiOwnedPids.has(process.pid)) {
       // Shutdown already asked the owned mock to exit. Give that exact native
       // process handle a bounded grace window, not a global image-name kill.
-      const deadline = Date.now() + 7000;
-      while (Date.now() < deadline) {
+      const deadline = monotonicNowMs() + 7000;
+      while (monotonicNowMs() < deadline) {
         const owned = parseAiFanMockSession(await app.aiFanMockSession());
         if (!owned || owned.hostPid === 0) { this.aiOwnedPids.delete(process.pid); return; }
         if (owned.hostPid !== process.pid) throw new Error('AI_FAN_STOP_IDENTITY_CHANGED');
@@ -1302,120 +1078,6 @@ export class NativeFanHostLauncher implements FanHostLauncher {
     });
     this.aiOwnedPids.delete(process.pid);
   }
-}
-
-export interface FanDeviceGateResult {
-  allowed: boolean;
-  /** The route is mapped and may be shown, but writes are blocked until the
-   * Host reports a route-specific restore/readback capability. */
-  writeReady: boolean;
-  deviceFamily?: 'gpd-win5' | 'rog-xbox' | 'hc-mapped-fan';
-  reason: string;
-}
-
-const DEVICE_PROFILES = [
-  {
-    family: 'gpd-win5' as const,
-    factoryTypes: new Set(['HandheldCompanion.Devices.GPDWin5']),
-    manufacturers: new Set(['gpd']),
-  },
-  {
-    family: 'rog-xbox' as const,
-    factoryTypes: new Set([
-      'HandheldCompanion.Devices.XboxROGAlly',
-      'HandheldCompanion.Devices.XboxROGAllyX',
-    ]),
-    // The HC factory type is the authoritative route gate. Manufacturer/model
-    // metadata is checked when present but is not hard-coded because ROG Xbox
-    // firmware reports different product strings across BIOS revisions.
-    manufacturers: new Set<string>(),
-  },
-];
-
-function normalizedIdentity(identity: Record<string, unknown> | null | undefined): Record<string, string> {
-  const source = identity ?? {};
-  const out: Record<string, string> = {};
-  // Host readback uses HC field names (`ManufacturerName`, `SystemModel`,
-  // `ProductName`, `Version`), while persisted WMI/preflight data uses the
-  // short lowercase names. Normalize both forms or a restart/recovery would
-  // incorrectly turn a previously accepted device into “风扇不支持”.
-  const aliases: Record<string, string[]> = {
-    manufacturer: ['manufacturer', 'ManufacturerName'],
-    model: ['model', 'SystemModel'],
-    product: ['product', 'ProductName'],
-    bios: ['bios', 'Version'],
-    ecRevision: ['ecRevision', 'EcRevision', 'ECRevision'],
-  };
-  for (const [key, names] of Object.entries(aliases)) {
-    const value = names.map((name) => source[name]).find((candidate) => typeof candidate === 'string' && candidate.trim());
-    if (typeof value === 'string' && value.trim()) out[key] = value.trim().toLowerCase();
-  }
-  return out;
-}
-
-function identityMatches(
-  actual: Record<string, string>,
-  saved: Record<string, string> | null,
-): boolean {
-  if (!saved) return true;
-  const keys = Object.keys(saved);
-  if (keys.length === 0) return true;
-  return keys.every((key) => actual[key] === saved[key]);
-}
-
-export function evaluateFanDeviceGate(
-  handshake: FanHandshake,
-  savedIdentity?: Record<string, unknown> | null,
-): FanDeviceGateResult {
-  if (!handshake.ok || !handshake.supported) {
-    const reason = handshake.reason
-      ? handshake.reason
-        .replace(/HandheldCompanion/gi, '设备数据组件')
-        .replace(/\bHC\b/gi, '设备数据')
-        .replace(/\bfactory\b/gi, '设备类型')
-      : '握手未确认设备支持';
-    return { allowed: false, writeReady: false, reason };
-  }
-  const profile = DEVICE_PROFILES.find((candidate) =>
-    typeof handshake.deviceClass === 'string' && candidate.factoryTypes.has(handshake.deviceClass),
-  );
-  // Batch-03 mapped HC fan routes are admitted by a successful handshake even
-  // when that device family has not yet had a dedicated real-machine session.
-  // The runtime Host still keeps hardware control behind its explicit write
-  // session; a failed/unknown handshake never reaches this branch.
-  if (!profile && typeof handshake.fanRoute === 'string' && handshake.fanRoute.trim()) {
-    return {
-      allowed: true,
-      writeReady: handshake.fanRouteWriteReady === true,
-      deviceFamily: 'hc-mapped-fan',
-      reason: handshake.fanRouteWriteReady === true
-        ? `已识别可写风扇路线：${handshake.fanRoute}`
-        : `已识别风扇路线，但尚未完成写入/恢复验证：${handshake.fanRoute}`,
-    };
-  }
-  if (!profile) {
-    return {
-      allowed: false,
-      writeReady: false,
-      reason: '未识别风扇映射路由（源码可达/授权/实机验证三项均未建立；不作设备不支持结论）',
-    };
-  }
-
-  const actual = normalizedIdentity(handshake.deviceIdentity);
-  if (profile.manufacturers.size > 0 && actual.manufacturer && !profile.manufacturers.has(actual.manufacturer)) {
-    return { allowed: false, writeReady: false, reason: '设备制造商与设备类型路由不一致' };
-  }
-  const saved = savedIdentity ? normalizedIdentity(savedIdentity) : null;
-  if (!identityMatches(actual, saved)) {
-    return { allowed: false, writeReady: false, reason: '当前设备身份与已保存 Fan 配置不匹配' };
-  }
-  const writeReady = handshake.fanRouteWriteReady === true;
-  return {
-    allowed: true,
-    writeReady,
-    deviceFamily: profile.family,
-    reason: writeReady ? '设备身份与风扇数据路线通过，可写' : '设备身份已识别，但真实写入/恢复验证未完成',
-  };
 }
 
 /**
@@ -1459,6 +1121,17 @@ function hasCompletedHcCloseBoundary(state: FanState, requireDeviceManagerStop: 
   if (!('hcVirtualCloseReturned' in state) || state.hcVirtualCloseReturned !== true) return false;
   return !requireDeviceManagerStop ||
     ('hcDeviceManagerStopCompleted' in state && state.hcDeviceManagerStopCompleted === true);
+}
+
+/** FAN-948: retirement is exact HC resource evidence, never an OEM restore
+ * acknowledgement. It may retain FaultLocked/unknown release while the owner
+ * is demonstrably unable to write; replacement still needs exact process exit. */
+function hasRetiredHcResourceBoundary(state: FanState): boolean {
+  return hasCompletedHcCloseBoundary(state, true)
+    && state.hcCloseCleanupPending === false
+    && state.openCalled === false && state.openEventsCalled === false
+    && state.hardwareWritesEnabled === false && state.hardwareWrites === false
+    && state.controlAccepting === false;
 }
 
 function hasAcceptedStoppedHcCloseEvidence(state: unknown): boolean {
@@ -1541,11 +1214,19 @@ export function unsupportedFanControlError(remote: FanState): FanApiError | null
     ? remote.lastError : 'HC 当前设备未声明可用风扇能力', 409, 'FAN_UNSUPPORTED');
 }
 
+/** Resource/OEM failure may have entered cleanup; observe before any replay. */
+function isFanResourceObservationFailure(error: unknown): boolean {
+  return error instanceof FanApiError && error.status === 409
+    && /^(?:HC_SESSION_ROUTE_LOST|OEM_RESTORE_FAILED|HC_OPEN_EVENTS_SUPERSEDED|HC_OPEN_EVENTS_POWER_SUPERSEDED)$/.test(error.errorCode ?? '');
+}
+
 function isNonRetryableControlError(error: unknown): boolean {
 
   if (!(error instanceof FanApiError)) return false;
-  if (error.status === 401 || error.status === 403) return true;
-  return /^(?:FAN_UNSUPPORTED|FAULT_LOCKED|API_SESSION_REQUIRED|HOST_CLOSING|HC_CLOSE_PENDING|POWER_SUSPENDED|POWER_SUSPENDING|FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER|HC_RESUME_RESULT_EXPIRED|HC_RESUME_SUPERSEDED|HC_RESUME_REBUILD_FAILED)$/.test(error.errorCode ?? '');
+  // A server/HC failure can follow a submitted write. Never immediately replay it.
+  if (isFanResourceObservationFailure(error)) return true;
+  if (error.status === 401 || error.status === 403 || (error.status >= 500 && error.status <= 599)) return true;
+  return /^(?:HC_OPERATION_BUSY|FAN_HTTP_RESULT_UNKNOWN|FAN_CURVE_WRITE_FAILED|FAN_MSI_WMI_PREREQUISITE_FAILED|FAN_UNSUPPORTED|FAN_DEVICE_GATE_DENIED|FAN_PROTOCOL_INCOMPATIBLE|FAN_API_RESPONSE_INVALID|FAULT_LOCKED|API_SESSION_REQUIRED|HOST_CLOSING|HC_CLOSE_PENDING|POWER_SUSPENDED|POWER_SUSPENDING|FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER|HC_RESUME_RESULT_EXPIRED|HC_RESUME_SUPERSEDED|HC_RESUME_REBUILD_FAILED)$/.test(error.errorCode ?? '');
 }
 
 /**
@@ -1565,7 +1246,9 @@ function isLeaseInvalidError(error: unknown): boolean {
  */
 interface FanResumeWaitOutcome {
   ok: boolean;
-  reason: 'accepted' | 'cancelled' | 'superseded' | 'deadline' | 'terminal-failed';
+  reason: 'accepted' | 'hc-open-required' | 'cancelled' | 'superseded' | 'deadline' | 'terminal-failed';
+  /** Ends only the read wait; the rearm owner must still perform actual HC Open. */
+  openRequiredSnapshot?: FanState;
   detail: string;
   probes: number;
   elapsedMs: number;
@@ -1590,6 +1273,90 @@ interface FanResumeWaitTask {
  */
 type FanRecoveryState = 'idle' | 'queued' | 'recovering' | 'controlled' | 'needs-attention' | 'cancelled';
 
+/** Failure-triggered work on the existing recovery owner; no steady-state poller. */
+interface FanControlSelfHeal {
+  context: FanAdmissionContext;
+  session: number;
+  deadlineAt: number;
+  probesLeft: number;
+  probeLimit: 5 | 10;
+  writesLeft: number;
+  observeOnly: boolean;
+  startupRequired?: boolean;
+  /** The uncertain request prepared HC; this curve has not been submitted. */
+  preparationPath?: '/api/open' | '/api/open-events' | '/api/acquire-control';
+  /** Read-only reconciliation when failed rearm leaves local phase resuming. */
+  observeReadyWake?: boolean;
+  /** At most one replacement after this exact owner proves HC resource retirement. */
+  retiredOwner?: FanHostProcess;
+}
+
+function controlSelfHealMode(error: unknown): 'retry-safe' | 'observe-only' | null {
+  if (isTerminalFanControlRefusal(error)) return null;
+  if (isFanResourceObservationFailure(error)) return 'observe-only';
+  if (error instanceof FanApiError) {
+    // A locally validated malformed state reply is still a read failure. It
+    // permits bounded observation, never curve replay or relaxed validation.
+    if (error.errorCode === 'FAN_API_RESPONSE_INVALID' && error.requestPath === '/api/state') return 'observe-only';
+    // Only explicit pre-write refusals permit automatic resubmission. An absent
+    // or unusable receipt may mean the original write committed: observe only.
+    // A fault latch may outlive HC resource retirement. Observe it first; only
+    // the existing exact-retirement/exit path may authorize a replacement.
+    if (error.errorCode === 'FAULT_LOCKED' || error.errorCode === 'HC_SESSION_UNAVAILABLE' || error.errorCode === 'HC_RESUME_REBUILD_FAILED' || error.errorCode === 'FAN_HTTP_RESULT_UNKNOWN' || error.errorCode === 'FAN_CURVE_WRITE_FAILED'
+        || error.status === 0 || (error.status >= 500 && error.status <= 599)) return 'observe-only';
+    // These exact preparation routes reject before lease/curve submission.
+    // A readable listener alone still cannot satisfy the existing HC write gate.
+    if (error.status === 409 && ((error.errorCode === 'HOST_EVENTS_NOT_OPEN' && error.requestPath === '/api/acquire-control')
+        || (error.errorCode === 'HOST_NOT_OPEN' && error.requestPath === '/api/open-events'))) return 'retry-safe';
+    // HC_OPERATION_BUSY is an explicit unsubmitted STA admission, not a lost write.
+    if (/^(?:LEASE_INVALID|HC_CLOSE_PENDING|POWER_RESUMING|HC_OPERATION_BUSY)$/.test(error.errorCode ?? '')) return 'retry-safe';
+    return null;
+  }
+  // A local cleanup deadline follows an already submitted Close, not an
+  // unsubmitted control write. Reconcile its owner without another Close.
+  if (isHcCloseCleanupPending(error)) return 'observe-only';
+  return isFanHttpTransportFailure(error) ? 'observe-only' : null;
+}
+
+/** Trust only the request route captured locally by the actual HTTP adapter. */
+function unconfirmedFanPreparationPath(error: unknown): FanControlSelfHeal['preparationPath'] {
+  if (!(error instanceof FanApiError) || error.errorCode !== 'FAN_HTTP_RESULT_UNKNOWN') return undefined;
+  return error.requestPath === '/api/open' || error.requestPath === '/api/open-events' || error.requestPath === '/api/acquire-control'
+    ? error.requestPath : undefined;
+}
+
+/** Preserve a declared raw-HTTP refusal before cleanup observation or exit fallback. */
+function terminalFanHttpRefusal(status: number, payload?: unknown): FanApiError | null {
+  const error = payload && typeof payload === 'object' ? (payload as { error?: { code?: unknown } }).error : undefined;
+  const code = typeof error?.code === 'string' ? error.code : undefined;
+  if (status === 401 || status === 403)
+    return new FanApiError(`Fan Host 请求被拒绝 (${status})`, status, code);
+  if (status >= 200 && status < 300 && !(payload && typeof payload === 'object' && (payload as { ok?: unknown }).ok === false)) return null;
+  if (!code) return null;
+  const refusal = new FanApiError(code, status, code);
+  return isTerminalFanControlRefusal(refusal) ? refusal : null;
+}
+
+/** A declared refusal cannot authorize another automatic control path. */
+function isTerminalFanControlRefusal(error: unknown): boolean {
+  if (isExternalFanControlConflict(error)) return true;
+  if (!(error instanceof FanApiError)) return false;
+  return error.status === 401 || error.status === 403
+    // A malformed state GET is an observation failure, never a write grant.
+    // Invalid handshake/unknown routes retain the declared refusal boundary.
+    || (error.errorCode === 'FAN_API_RESPONSE_INVALID' && error.requestPath !== '/api/state')
+    || /^(?:API_SESSION_REQUIRED|FAN_UNSUPPORTED|FAN_DEVICE_GATE_DENIED|FAN_PROTOCOL_INCOMPATIBLE|FAN_ROUTE_CONFLICT|HC_OPENLIB_CONFLICT|EXTERNAL_FAN_OWNER)$/.test(error.errorCode ?? '');
+}
+
+/** Last authenticated HC power attempt, bound to the exact local observation frame. */
+interface FanHostPowerReceipt {
+  generation: number;
+  attempt: number;
+  session: number;
+  process: FanHostProcess | null;
+  epoch: number;
+}
+
 /**
  * G7（FAN-926R 执行单 §3.2/§3.3）：一次控制请求的**有限任务上下文**。
  * 绑定本地电源代次、控制意图版本、Host 实例（pid）与单调绝对截止；`deadlineAt`
@@ -1600,13 +1367,41 @@ interface FanAdmissionContext {
   intentRevision: number;
   generation: number;
   hostPid: number;
+  /** A crossed automatic write can resume only after this HC power attempt retires. */
+  supersededPowerAttempt?: number;
+  /** Exact local process owner captured at admission, never just a reusable PID. */
+  hostProcess?: FanHostProcess | null;
   deadlineAt?: number;
+  unboundSessionRestartAttempted?: boolean;
+  /** Failed queued mutation provenance; read/admission failures do not set it. */
+  failedMutationEpoch?: number;
+  failedMutationSession?: number;
   /** FAN-933：唤醒后「新控制接入」的 rearm 还要看 HC 会话是否真的重开
    * （openCalled/openEventsCalled）。既有 apply 准入不带此要求，避免改变原有语义。 */
   requireHcOpen?: boolean;
+  /** Only rearm may end a read wait on an explicit idle resume and then Open. */
+  allowIdleHcOpen?: boolean;
   /** Explicit user control may rescue a stale Suspended snapshot after the
    * renderer is demonstrably interactive. Automatic wake never sets this. */
   manualRecovery?: boolean;
+}
+
+/** Internal continuation; no hardware request has been submitted by this step. */
+class FanManualNativeWakePending extends Error {
+  constructor(readonly context: FanAdmissionContext) { super('FAN_MANUAL_NATIVE_WAKE_PENDING'); }
+}
+
+class FanManualUnboundSessionRequired extends Error {
+  constructor() { super('FAN_MANUAL_UNBOUND_SESSION_REQUIRED'); }
+}
+
+
+interface FanIdleIntentObservation {
+  revision: number;
+  generation: number;
+  session: number;
+  hostPid: number;
+  recoveryToken: number;
 }
 
 /**
@@ -1616,6 +1411,8 @@ interface FanAdmissionContext {
 interface FanHeartbeatAttempt {
   intentRevision: number;
   epoch: number;
+  session: number;
+  hostProcess: FanHostProcess | null;
   leaseId: string;
   generation: number;
   hostPid: number;
@@ -1670,6 +1467,8 @@ export interface FanHostLifecycleOptions {
   fanGuardIntervalMs?: number;
   onDeviceIdentity?: (identity: Record<string, unknown>) => void;
   onState?: (state: FanHostLifecycleState) => void;
+  /** Display-only observer. No timers, transport or hardware work. */
+  onControlDisplay?: (active: boolean, curve: readonly FanNode[]) => void;
   /**
    * R2（§4.2）测试用受控时钟：恢复期等待的绝对截止（默认 15 s）。
    * 生产恒为默认值；自测用它把"一直 Resuming 到截止"的用例压到秒级。
@@ -1682,15 +1481,24 @@ export interface FanHostLifecycleOptions {
    */
   readNativeActivity?: () => Promise<FanActivitySnapshot | null>;
   /** R4: one bounded authoritative read on explicit control after a missed wake edge. */
-  readNativePowerState?: () => Promise<PowerLifecycleState | null>;
+  readNativePowerState?: (timeoutMs?: number) => Promise<PowerLifecycleState | null>;
   /** Fan-only native promotion for an interactive click after a stale Suspended phase. */
   requestManualWake?: (generation?: number) => Promise<FanManualWakeResult | null>;
 }
 
 /**
- * Serializes Host lifecycle, lease ownership and OEM restore. The class is
- * usable with a fake adapter/launcher for regression tests, while the product
- * singleton remains disabled and therefore performs zero native operations.
+ * [LIFECYCLE:FAN:CORE] 现行节点约定；修改本链路须同步本块、对应入口注释及现有验证。
+ * 责任：本类协调渲染侧单队列/单恢复任务；Host 串行管理 HC 会话，跨进程互斥另行核验。
+ * 开启：start/startInternal → 身份与认证 → 本代 Open/OpenEvents；旧实例退出未证不得另起 Host。
+ * 接管：apply/applyPreset → 本代准入/租约 → 曲线写入确认；握手、意图、租约均不单独证明受控。
+ * 稳态：沿既有心跳续租与只读状态检查；页面镜像不另建硬件写入或常驻自愈循环。
+ * 睡眠：observePowerBoundary/suspend 撤旧写许可与续租、保留有效曲线意图；旧回包不得跨代提交。
+ * 唤醒：resume/rearm → noteRecoveryIntentPending → runRecoveryTick；同代合并、瞬态退避、终态待处理。
+ * 自愈：retainControlForSelfHeal → runControlSelfHeal；有限预算见 FAN:HEAL，不改成持续唤醒重试。
+ * 关闭：disable 入队前撤意图/恢复并按原路线交还；close 另执行 HC Close 与精确退出确认。
+ * 收敛：settleRecoveryTaskIfAny 结束恢复；软件受控、HC 清理、OEM 物理交还分别判定，未知不冒充成功。
+ * 验证：tools/fan_{wake_open_progress,control_self_heal,startup_cleanup_self_heal,control_display_evidence}_selftest.ts。
+ * UI 防连点/状态约定见 FanView.vue 的 FAN:UI；后续纠错就地更新，保留原失败证据。
  */
 export class FanHostLifecycle {
   private readonly enabled: boolean;
@@ -1698,6 +1506,11 @@ export class FanHostLifecycle {
   private readonly adapter: FanApiAdapter;
   private readonly launcher: FanHostLauncher;
   private readonly onState?: (state: FanHostLifecycleState) => void;
+  private readonly onControlDisplay?: (active: boolean, curve: readonly FanNode[]) => void;
+  private controlDisplayRemote: FanState | undefined;
+  private controlDisplayActive = false;
+  private controlDisplayCurve: FanNode[] = [];
+  private controlDisplayRetryPending = false;
   // The coordinator is the fan-domain admission boundary. FanHost remains
   // the HC device-session owner; this gate only translates coordinator power,
   // epoch and write permission into the existing HC route.
@@ -1709,7 +1522,7 @@ export class FanHostLifecycle {
   private readonly resumeWaitDeadlineMs: number;
   /** FAN-927 §3/§5：native 活动记录读取（见 FanHostLifecycleOptions.readNativeActivity）。 */
   private readonly readNativeActivity: () => Promise<FanActivitySnapshot | null>;
-  private readonly readNativePowerState: () => Promise<PowerLifecycleState | null>;
+  private readonly readNativePowerState: (timeoutMs?: number) => Promise<PowerLifecycleState | null>;
   private readonly requestManualWake: (generation?: number) => Promise<FanManualWakeResult | null>;
   /** Only one native Fan manual-wake promotion per power generation. */
   private manualWakeRequestedGeneration = 0;
@@ -1717,6 +1530,10 @@ export class FanHostLifecycle {
   private deviceClassValue: string | null = null;
   private savedIdentity: Record<string, unknown> | null;
   private stateValue: FanHostLifecycleState;
+  /** Reused factory: disabled detail logging needs no state payload object. */
+  private readonly stateDiagnosticDetails = (): { state: FanHostLifecycleState; generation: number } => ({
+    state: this.stateValue, generation: this.powerGeneration,
+  });
   /**
    * FAN-926R UX-1（2026-09-27，用户反馈"按阶段显示文字"）：最近一次启动**阶段**的只读观测
    * （`launcher-enter` / `runtime-dependencies-verified` / `host-process-launched` …）。
@@ -1726,20 +1543,34 @@ export class FanHostLifecycle {
    */
   private startStageValue: string | null = null;
   private process: FanHostProcess | null = null;
+  /** Only recorded after launcher.stop confirms this exact owner's exit. */
+  private lastExitedProcess: FanHostProcess | null = null;
   // HC Close is settled, but the exact process exit must still be retried.
   private closedHostAwaitingExit = false;
   private lease: FanLease | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** One timer renewal may be queued/in-flight; never accumulate maintenance behind user work. */
   private timerHeartbeatPending: Promise<void> | null = null;
+  /** Stable lazy-diagnostic factory; avoids a new closure on every 5s heartbeat tick. */
+  private readonly heartbeatSuccessDetails = (): { state: FanHostLifecycleState } => ({ state: this.state });
   private opened = false;
   private eventsOpened = false;
   private operation: Promise<unknown> = Promise.resolve();
+  /** Exact queued startup receipt; manual continuation never launches a second owner. */
+  private intentRecoveryStartup: Promise<{ gate: FanDeviceGateResult; process: FanHostProcess | null; session: number } | null> | null = null;
+  /** Read-only telemetry never owns the hardware queue; only its latest reply may publish display state. */
+  private stateReadSequence = 0;
+  private stateObservationRevision = 0;
+  /** Native edges and adopted power facts order same-generation IPC replies. */
+  private powerObservationRevision = 0;
+  private powerObservationKey: string | null = null;
   // App startup and FanView mount can request the same start in one turn.
   // Serialize those requests and share the in-flight result; otherwise a
   // failed deployment can produce repeated shutdown/retry cycles and obscure
   // the first actionable error.
   private startPromise: Promise<FanDeviceGateResult> | null = null;
+  private startPromiseManualRecovery = false;
+  private startPromiseBoundary: { cancellationRevision: number; generation: number; stagedIntentRevision: number } | null = null;
   /**
    * A manual control request arriving while ordinary startup is already in
    * flight must not inherit that request's non-manual semantics.  Keep one
@@ -1747,12 +1578,14 @@ export class FanHostLifecycle {
    * either being swallowed by `startPromise` or spawning parallel starts.
    */
   private startUpgradePromise: Promise<FanDeviceGateResult> | null = null;
+  private startUpgradeIntent: Pick<FanAdmissionContext, 'intentRevision' | 'generation'> | null = null;
   /**
    * `power.resume-ready` and the committed `power.resumed` compensation can
    * arrive close together.  They are one Fan recovery transaction, not two
    * HC opens.  Share the in-flight resume body across both edges.
    */
   private resumePromise: Promise<void> | null = null;
+  private resumePromiseGeneration: number | null = null;
   private desiredCurve: FanNode[] | null = null;
   private sessionGeneration = 0;
   private powerGeneration = 0;
@@ -1762,11 +1595,28 @@ export class FanHostLifecycle {
   private initialAwakePowerGeneration: number | null = null;
   private observedPowerTransition = false;
   private explicitOpenBinding: { sessionGeneration: number; powerGeneration: number } | null = null;
+  // An acknowledged original Open may outlive a cancelled curve request.
+  // This is session provenance, never HC-ready or permission to write.
+  private explicitOpenOrigin: { sessionGeneration: number; powerGeneration: number; processId: number; acknowledged: boolean } | null = null;
+  // A current native wake can admit a NEW cold Host's original HC Open,
+  // even though that Host correctly has no receipt for a prior sleep.
+  // This is not HC readiness or permission to submit a curve.
+  private coldOpenAdmission: { sessionGeneration: number; powerGeneration: number; processId: number } | null = null;
   private writeReady = false;
   // The globally-owned lifecycle, not a mounted FanView, remembers the last
   // acknowledged curve. This keeps a full OEM -> fresh HC session -> replay
   // transaction possible after KeepAlive evicts the fan page during sleep.
   private activeCurve: FanNode[] | null = null;
+  // Immutable write provenance only; current health still comes from a fresh GET.
+  private activeCurveReceipt: { curve: FanNode[]; leaseId: string; leaseGeneration?: number;
+    generation: number; session: number; process: FanHostProcess | null; revision: number;
+    writeEvidenceQualified: boolean } | null = null;
+  // The serialized mutation path reuses one completion cell, not one allocation
+  // per curve. The returned response is tied to its actual submitted owner.
+  private readonly controlWriteCompletion = {
+    response: null as FanState | null, revision: 0, session: 0,
+    process: null as FanHostProcess | null, epoch: 0, recoveryToken: 0, powerLineRevision: 0,
+  };
   private resumeCurve: FanNode[] | null = null;
   private coordinatorSession: string | null = null;
   private coordinatorRequestSequence = 0;
@@ -1777,16 +1627,23 @@ export class FanHostLifecycle {
    * 已 Suspended」的陈旧短路口都必须先 rearm，不能再直接放行。
    */
   private admittedPowerGeneration = -1;
+  private observedHostPowerReceipt: FanHostPowerReceipt | null = null;
   /** FAN-933 §2.1(5)：同一 Host + 同一 generation 只允许一个在途 rearm。 */
   private rearmTask: { generation: number; intentRevision: number; sessionGeneration: number; promise: Promise<void> } | null = null;
   // ── R2（FAN-926R 唤醒租约与有界等待裁决 §4.2/§4.3）──────────────────────────────
   /** 同一 Host 实例/恢复代际**只共享一个**等待任务；重复通知合并到同一个 promise。 */
   private resumeWaitTask: FanResumeWaitTask | null = null;
+  private readonly admissionWaitCancellations = new Set<() => void>();
   /**
    * 控制意图版本。新曲线/预设、disable/close、新一代 suspend 都会 +1，使**旧的**
    * 恢复重放/等待立即失效（§4.3：新意图优先于旧 resume 保存的曲线）。
    */
-  private controlIntentRevision = 0;
+  private controlIntentRevisionValue = 0;
+  /** Only accepted staged controls can supersede an automatic failure without a power edge. */
+  private stagedControlIntentRevision = 0;
+  // OFF/Close cancels callers even before they have submitted their curve.
+  // Power adoption and ordinary new curves retain their existing revision rules.
+  private controlCancellationRevisionValue = 0;
   private aiMockCloseReceipt: Record<string, unknown> | null = null;
   /** Last confirmed AI mock Close only; no lease/token or real HC evidence. */
   getAiMockCloseReceipt(): Record<string, unknown> | null {
@@ -1797,6 +1654,9 @@ export class FanHostLifecycle {
    * 一律失效——旧成功不覆盖新 lease，旧失败不清新 lease、不触发重放。
    */
   private heartbeatEpoch = 0;
+  // OFF/Close still need a committed in-flight receipt for ordered cleanup.
+  // Power/authority boundaries invalidate those acquisitions as well as timers.
+  private acquisitionBoundaryEpoch = 0;
   /**
    * G7（执行单 §3.3.1）：最近一次真正取代当前请求的睡眠/关闭电源代次；
    * 同代重复通知幂等，不重复失效（也不会误取消刚建立的本代 waiter）。
@@ -1808,7 +1668,7 @@ export class FanHostLifecycle {
    * 意图登记在这里（§3「分开恢复请求与设备写入许可」），由 owner 在真实睡眠、认证、
    * 设备互斥与 HC 会话检查成立后再推动写入。
    */
-  private recoveryIntent: { generation: number; reason: string; manual: boolean } | null = null;
+  private recoveryIntent: { generation: number; reason: string; manual: boolean; selfHeal?: FanControlSelfHeal } | null = null;
   private recoveryState: FanRecoveryState = 'idle';
   /** 只允许一个在途退避节拍；见 scheduleRecoveryTick。 */
   private recoveryRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -1821,6 +1681,7 @@ export class FanHostLifecycle {
    * 后自行退出，绝不写入。
    */
   private recoveryTask: Promise<void> = Promise.resolve();
+  private selfHealReadCancel: (() => void) | null = null;
   // A pending explicit request can share the write completed by its recovery
   // owner. This receipt is only for that exact intent/generation/Host session,
   // never a cache for later manual actions or proof of physical ownership.
@@ -1830,6 +1691,12 @@ export class FanHostLifecycle {
   } | null = null;
   /** 令旧 tick 失效的单调令牌（cancelRecovery/settle 时 +1）。 */
   private recoveryToken = 0;
+  // Event-owned AC/DC work: one pending notification, no steady-state poller.
+  private powerLineReplayRevision = 0;
+  private powerLineReplayPending: { reason: string; revision: number; context: FanAdmissionContext;
+    session: number; epoch: number } | null = null;
+  private powerLineReplayTask: Promise<boolean> | null = null;
+  private powerLineReplayTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(options: FanHostLifecycleOptions = {}) {
     this.enabled = options.enabled === true;
@@ -1844,9 +1711,10 @@ export class FanHostLifecycle {
       : RESUME_WAIT_DEADLINE_MS;
     this.onDeviceIdentity = options.onDeviceIdentity;
     this.onState = options.onState;
+    this.onControlDisplay = options.onControlDisplay;
     this.readNativeActivity = options.readNativeActivity ?? defaultReadNativeActivity;
     this.readNativePowerState = options.readNativePowerState
-      ?? (() => powerLifecycle.get(1000).catch(() => null));
+      ?? ((timeoutMs = 1000) => powerLifecycle.getForFan(timeoutMs).catch(() => null));
     this.requestManualWake = options.requestManualWake
       ?? ((generation) => powerLifecycle.manualFanWake(generation).catch(() => null));
     this.stateValue = this.enabled ? 'stopped' : 'disabled';
@@ -1875,6 +1743,10 @@ export class FanHostLifecycle {
     }
   }
   get controlReady(): boolean { return this.writeReady; }
+  /** Read-only terminal cancellation receipt, not hardware/write permission. */
+  get controlCancellationRevision(): number { return this.controlCancellationRevisionValue; }
+  /** Current write-intent generation for external serialized owners. */
+  get controlIntentRevision(): number { return this.controlIntentRevisionValue; }
   /** FAN-932：只读暴露「是否已有活动控制意图」，供 App 层自动启动编排做去重判定。
    * 仅转发内部 `hasActiveControlIntent()`（activeCurve/resumeCurve/desiredCurve 非空），
    * 不改变任何生命周期语义，也不构成第二条启动路径。 */
@@ -1888,6 +1760,10 @@ export class FanHostLifecycle {
    * 不改变任何生命周期语义，也不构成第二条恢复路径。 */
   get recoveryActive(): boolean {
     return this.recoveryIntent !== null && this.recoveryState !== 'needs-attention';
+  }
+
+  get recoveryNeedsAttention(): boolean {
+    return this.recoveryIntent !== null && this.recoveryState === 'needs-attention';
   }
 
   /**
@@ -1929,7 +1805,9 @@ export class FanHostLifecycle {
     const localGenerationBefore = Math.max(0, Math.floor(this.powerGeneration));
     const localStateBefore = this.stateValue;
     const localRecoveryBefore = this.needsManualRecoveryForControl();
+    const powerObservation = this.powerObservationRevision;
     const snapshot = await this.readNativePowerState().catch(() => null);
+    if (powerObservation !== this.powerObservationRevision) return this.needsManualRecoveryForControl();
     if (!snapshot) {
       // A missing power snapshot is not evidence that a live control intent is
       // safe to interpret as "turn off". Keep the user's click on the recovery
@@ -1974,18 +1852,41 @@ export class FanHostLifecycle {
    * and registers intent; runRecoveryTick still requires a safe native phase
    * and Host Open/OpenEvents before any write.
    */
-  async requestRecoveryAfterObservedHostState(reason: string): Promise<boolean> {
+  requestRecoveryAfterObservedHostState(reason: string): Promise<boolean>;
+  requestRecoveryAfterObservedHostState(reason: string, options: { discardSuperseded: true }): Promise<boolean | null>;
+  async requestRecoveryAfterObservedHostState(reason: string, options?: { discardSuperseded: true }): Promise<boolean | null> {
     if (!this.enabled || this.isDisabledState() || !this.hasActiveControlIntent()) return false;
 
     // An existing owner (including needs-attention) remains the sole recovery
     // authority. Telemetry must not reset its backoff or silently clear a terminal state.
     if (this.recoveryIntent !== null) return true;
 
-    const snapshot = await this.readNativePowerState().catch(() => null);
+    const revision = this.controlIntentRevisionValue, powerGeneration = this.powerGeneration;
+    const session = this.sessionGeneration, hostPid = this.process?.pid ?? 0, token = this.recoveryToken;
+    const powerObservation = this.powerObservationRevision;
+    const snapshot = await this.observeAdmissionRead(() => this.readNativePowerState().catch(() => null), 1000);
+    // This observation is not a recovery owner. OFF, a new curve/session or a
+    // real power edge can retire it while native IPC is pending.
+    if (!this.enabled || this.isDisabledState() || !this.hasActiveControlIntent()
+        || revision !== this.controlIntentRevisionValue || powerGeneration !== this.powerGeneration
+        || session !== this.sessionGeneration || hostPid !== (this.process?.pid ?? 0)
+        || token !== this.recoveryToken || powerObservation !== this.powerObservationRevision)
+      return options?.discardSuperseded === true ? null : false;
     if (!snapshot) return false;
-    this.synchronizeObservedPowerSnapshot(snapshot);
-
     const generation = Math.max(0, Math.floor(snapshot.generation));
+    if (!Number.isSafeInteger(snapshot.generation) || generation <= 0) return false;
+    if (generation < Math.max(0, Math.floor(this.powerGeneration)))
+      return options?.discardSuperseded === true ? null : false;
+    // Another current observation may have installed the sole owner while we
+    // waited. Reuse it without changing its reason, attempts or backoff.
+    if (this.recoveryIntent !== null) return true;
+    this.synchronizeObservedPowerSnapshot(snapshot);
+    // State/display subscribers may cancel control or adopt a newer boundary.
+    if (token !== this.recoveryToken || generation !== this.powerGeneration
+        || !this.enabled || this.isDisabledState() || !this.hasActiveControlIntent())
+      return options?.discardSuperseded === true ? null : false;
+    if (this.recoveryIntent !== null) return true;
+
     const powerCycleAdvanced = generation > this.admittedPowerGeneration;
     const wakeBoundaryObserved = snapshot.phase === 'suspending'
       || snapshot.phase === 'suspended'
@@ -2010,14 +1911,38 @@ export class FanHostLifecycle {
     return this.recoveryIntent?.generation === generation;
   }
 
-  /**
-   * Adopt a current native power snapshot when a one-shot renderer event was
-   * missed. This is deliberately a read-side reconciliation: it never calls
-   * HC, never sends `/api/resume`, and never grants a write.
-   */
+  /** Equal boundary facts are idempotent; changed facts retire older IPC reads. */
+  private notePowerObservation(generation: number, phase: string): void {
+    const key = `${generation}:${phase}`;
+    if (key === this.powerObservationKey) return;
+    this.powerObservationKey = key;
+    this.powerObservationRevision += 1;
+  }
+
+  /** Retry only an IPC read crossed by a newer boundary, at most once.
+   * This preserves the user's startup without consuming an obsolete sleep fact. */
+  private async readPowerSnapshotForSynchronization(): Promise<PowerLifecycleState | null> {
+    const deadline = monotonicNowMs() + 1000;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const remaining = Math.ceil(deadline - monotonicNowMs());
+      if (remaining <= 0) return null;
+      const revision = this.powerObservationRevision;
+      const snapshot = await this.observeAdmissionRead(() => this.readNativePowerState(remaining).catch(() => null), remaining);
+      if (revision === this.powerObservationRevision) return snapshot;
+    }
+    return null;
+  }
+
+  /** Adopt native power facts after a missed event. This read-side sync never
+   * calls HC, sends `/api/resume`, or grants a write. */
   private synchronizeObservedPowerSnapshot(snapshot: PowerLifecycleState | null): void {
-    if (!snapshot || !Number.isSafeInteger(snapshot.generation) || snapshot.generation < 0) return;
+    // Generation zero is an initial awake baseline, never a sleep transaction.
+    if (!snapshot || !Number.isSafeInteger(snapshot.generation) || snapshot.generation < this.powerGeneration
+        || (snapshot.generation === 0 && snapshot.phase !== 'ready')) return;
     const generation = snapshot.generation;
+    this.notePowerObservation(generation,
+      snapshot.phase === 'suspending' || snapshot.phase === 'suspended' ? 'sleep'
+        : snapshot.resumeReady === true ? 'wake-ready' : snapshot.phase);
     // FAN-943: native/main.cpp initializes g_powerGeneration to 1, whereas a
     // fresh Host has no power operation (generation=attempt=0). Adopting the
     // initial awake snapshot must not invent a sleep cycle for that open Host.
@@ -2037,7 +1962,7 @@ export class FanHostLifecycle {
       this.powerGeneration = generation;
       this.coordinator.observePowerGeneration(generation);
       this.coordinatorSession = null;
-      this.controlIntentRevision += 1;
+      this.controlIntentRevisionValue += 1;
       this.cancelResumeWait('observed-native-power');
       this.invalidateHeartbeatEpoch();
       this.stopHeartbeat();
@@ -2092,8 +2017,10 @@ export class FanHostLifecycle {
   setPowerGeneration(generation: number): void {
     if (Number.isFinite(generation) && generation > this.powerGeneration) {
       this.explicitOpenBinding = null;
+      this.explicitOpenOrigin = null;
       this.initialAwakePowerGeneration = null;
       this.powerGeneration = generation;
+      this.notePowerObservation(generation, 'generation');
       // Advance the coordinator epoch without pretending that the machine has
       // resumed. The native power event that follows owns the phase change.
       this.coordinator.observePowerGeneration(generation);
@@ -2101,21 +2028,24 @@ export class FanHostLifecycle {
       // G7（执行单 §3.3.1）：新的电源代次/Host 真正取代当前请求——同步失效旧等待与旧重放，
       // 并让**在途**心跳回包失效（§4）。同代的 resume-ready/resumed 不进入这个分支，
       // 因此不会误取消刚建立的本代 waiter/lease。
-      this.controlIntentRevision += 1;
+      this.controlIntentRevisionValue += 1;
       this.cancelResumeWait('new-power-generation');
       this.invalidateHeartbeatEpoch();
       setFanDiagnosticPowerGeneration(generation);
       fanDiagnosticLog('lifecycle.power-generation', { generation });
+      this.publishControlDisplay();
     }
   }
 
   /** Feed the native power transaction into the single fan-domain gate. */
   observePowerBoundary(event: FanCoordinatorPowerEvent, generation: number): void {
     if (!Number.isSafeInteger(generation) || generation < 0) return;
+    if (generation < this.powerGeneration) return;
     if (event === 'suspending' || event === 'resuming'
         || event === 'manual-resume-start' || event === 'shutdown') {
       this.observedPowerTransition = true;
       this.explicitOpenBinding = null;
+      this.explicitOpenOrigin = null;
       this.initialAwakePowerGeneration = null;
     }
     try {
@@ -2123,7 +2053,7 @@ export class FanHostLifecycle {
       fanDiagnosticLog('coordinator.power-boundary', {
         event,
         generation,
-        phase: this.coordinator.snapshot().phase,
+        phase: this.coordinator.currentPhase,
       });
     } catch (error) {
       fanDiagnosticLog('coordinator.power-boundary-rejected', {
@@ -2136,6 +2066,11 @@ export class FanHostLifecycle {
     // G7（执行单 §3.3.1）：App 的**真实** suspend/shutdown 通知走这条生产入口
     // （App.vue: setPowerGeneration + observePowerBoundary('suspending')），不是直接调
     // suspend()。取消与心跳失效必须落在这里，否则"真实电源入口"仍能继续入队。
+    this.notePowerObservation(generation,
+      event === 'suspending' ? 'sleep'
+        : event === 'resuming' || event === 'manual-resume-start' ? 'resuming'
+          : event === 'resume-ready' || event === 'manual-resume-ready'
+            || (event === 'resumed' && this.coordinator.isWakeReady(generation)) ? 'wake-ready' : event);
     this.applyPowerBoundaryIntent(event, generation);
   }
 
@@ -2158,12 +2093,13 @@ export class FanHostLifecycle {
       this.invalidateHeartbeatEpoch();
       this.stopHeartbeat();
       this.lease = null;
+      this.publishControlDisplay();
       return;
     }
     if (event !== 'suspending' && event !== 'shutdown') return;
     if (this.supersededPowerGeneration === generation) return;
     this.supersededPowerGeneration = generation;
-    this.controlIntentRevision += 1;
+    this.controlIntentRevisionValue += 1;
     this.cancelResumeWait(event);
     // §4：生产 suspending 边界立即停未来心跳 tick，并使旧心跳 epoch 失效。
     this.invalidateHeartbeatEpoch();
@@ -2172,10 +2108,16 @@ export class FanHostLifecycle {
     // 同步丢弃本代旧 token（不做 release/restore、不清控制意图、不动 desiredCurve）；
     // G8 的迟到回包保护仍由 heartbeatEpoch 失效承担。唤醒后 resume 一次 fresh acquire。
     this.lease = null;
+    // A native Close owns the hardware operation. Mirror only its sleep
+    // boundary locally, as suspend() already does, so page observation and
+    // automatic resume cannot each replay an apparently still-active curve.
+    this.resumeCurve = this.desiredCurve ? cloneFanNodes(this.desiredCurve) : null;
+    this.activeCurve = null;
+    if (!this.isDisabledState() && this.state !== 'stopped') this.setState('suspended');
     fanLifecycleEvidence('lifecycle.power-boundary-supersede', {
       event,
       generation,
-      intentRevision: this.controlIntentRevision,
+      intentRevision: this.controlIntentRevisionValue,
       state: this.stateValue,
     });
   }
@@ -2195,7 +2137,7 @@ export class FanHostLifecycle {
     fanDiagnosticLog('coordinator.fan-session-begin', {
       session,
       generation,
-      phase: this.coordinator.snapshot().phase,
+      phase: this.coordinator.currentPhase,
     });
   }
 
@@ -2208,13 +2150,13 @@ export class FanHostLifecycle {
     const session = this.coordinatorSession;
     if (!session) throw new Error('FAN_COORDINATOR_SESSION_REQUIRED');
     const generation = Math.max(0, Math.floor(this.powerGeneration));
-    if (this.coordinator.snapshot().phase !== 'ready') {
+    if (this.coordinator.currentPhase !== 'ready') {
       this.coordinator.admitHcReady(session, generation);
     }
     fanDiagnosticLog('coordinator.fan-session-ready', {
       session,
       generation,
-      phase: this.coordinator.snapshot().phase,
+      phase: this.coordinator.currentPhase,
     });
   }
 
@@ -2242,14 +2184,86 @@ export class FanHostLifecycle {
     }
     fanDiagnosticLog('coordinator.write-revoked', {
       reason,
-      phase: this.coordinator.snapshot().phase,
+      phase: this.coordinator.currentPhase,
       generation: this.powerGeneration,
     });
   }
 
   /** Read host telemetry without changing ownership or hardware state. */
-  async getState(): Promise<FanState> {
-    return this.enqueue(() => this.adapter.getState());
+  getState(): Promise<FanState>;
+  getState(options: { discardSuperseded: true }): Promise<FanState | null>;
+  async getState(options?: { discardSuperseded: true }): Promise<FanState | null> {
+    // A slow page GET must not hold up an explicit apply/OFF, lease renewal or
+    // the only HC Close owner. The Host already serves read-only published
+    // snapshots; hardware mutations still use the original serialized queue.
+    // Drain earlier work without inserting this read into its tail. Native
+    // receipt observation must not see a pre-enable GET interleaved inside the
+    // already admitted control request. Later controls never await this GET.
+    const read = ++this.stateReadSequence;
+    const requestedRevision = this.controlIntentRevisionValue, requestedGeneration = this.powerGeneration;
+    const requestedEpoch = this.heartbeatEpoch;
+    let preceding: Promise<unknown>;
+    do {
+      preceding = this.operation;
+      await preceding;
+      // A page observation retired while waiting must not become a fresh GET.
+      // Mandatory confirmations still drain prior controls and report their result.
+      if (options?.discardSuperseded === true && (read !== this.stateReadSequence
+          || requestedRevision !== this.controlIntentRevisionValue || requestedGeneration !== this.powerGeneration
+          || requestedEpoch !== this.heartbeatEpoch)) return null;
+    } while (preceding !== this.operation);
+    const observation = this.stateObservationRevision;
+    const revision = this.controlIntentRevisionValue, generation = this.powerGeneration, session = this.sessionGeneration;
+    const hostPid = this.process?.pid ?? 0;
+    const hostProcess = this.process, readEpoch = this.heartbeatEpoch;
+    let remote: FanState;
+    try {
+      remote = await this.adapter.getState();
+    } catch (error) {
+      // A retired page observation cannot start another recovery after a newer
+      // control/observation committed. Current and mandatory errors still report.
+      const current = this.isStateObservationCurrent(read, observation, revision, generation, session, hostPid, hostProcess, readEpoch);
+      if (options?.discardSuperseded === true && !current) return null;
+      if (current && isTerminalFanControlRefusal(error)) {
+        const refusalEpoch = this.parkTerminalControlRefusal(revision, generation, hostProcess, readEpoch, error);
+        // The refusal retires its own heartbeat epoch; a display subscriber may
+        // then hand ownership to another page, manual intent or power generation.
+        if (options?.discardSuperseded === true && refusalEpoch !== undefined && !this.isStateObservationCurrent(
+          read, observation, revision, generation, session, hostPid, hostProcess, refusalEpoch)) return null;
+      }
+      // A completed current curve can outlive its missing status reply. Reuse
+      // the single bounded owner for read-only reconciliation, never resubmit
+      // control because a GET failed or reported a pre-write refusal.
+      const receipt = this.activeCurveReceipt;
+      if (current && receipt?.writeEvidenceQualified && receipt.curve === this.activeCurve
+          && receipt.revision === revision && receipt.generation === generation
+          && receipt.session === session && receipt.process === hostProcess
+          && receipt.leaseId === this.lease?.leaseId && receipt.leaseGeneration === this.lease?.generation) {
+        this.retainControlForSelfHeal(this.admissionContext('state-read-self-heal', revision), receipt.curve, error, true);
+      }
+      throw error;
+    }
+    const current = this.isStateObservationCurrent(read, observation, revision, generation, session, hostPid, hostProcess, readEpoch);
+    if (current) {
+      this.observeControlDisplay(remote);
+      // This publication advances the observation once before calling subscribers.
+      // A subscriber may retire this page read before its packet is returned.
+      if (options?.discardSuperseded === true && !this.isStateObservationCurrent(
+        read, observation + 1, revision, generation, session, hostPid, hostProcess, readEpoch)) return null;
+    }
+    // Page observations silently retire stale reads; mandatory post-write
+    // callers retain their original snapshot-return contract and own intent checks.
+    return current || options?.discardSuperseded !== true ? remote : null;
+  }
+
+  private isStateObservationCurrent(
+    read: number, observation: number, revision: number, generation: number, session: number, hostPid: number,
+    hostProcess: FanHostProcess | null, epoch: number,
+  ): boolean {
+    return read === this.stateReadSequence && observation === this.stateObservationRevision
+      && revision === this.controlIntentRevisionValue && generation === this.powerGeneration
+      && session === this.sessionGeneration && hostPid === (this.process?.pid ?? 0)
+      && hostProcess === this.process && epoch === this.heartbeatEpoch;
   }
 
   /** Update the native-resolved sidecar directory before the first start. */
@@ -2278,16 +2292,21 @@ export class FanHostLifecycle {
   }
 
   private setState(next: FanHostLifecycleState): void {
+    this.stateObservationRevision += 1;
     this.stateValue = next;
     // UX-1：启动阶段只在 starting/handshaking 期间有意义；一旦进入其它状态就清空，
     // 避免界面把过期阶段当成当前进度。
     if (next !== 'starting' && next !== 'handshaking') this.startStageValue = null;
-    fanDiagnosticLog('lifecycle.state', { state: next, generation: this.powerGeneration });
-    this.onState?.(next);
+    fanDiagnosticLogLazy('lifecycle.state', this.stateDiagnosticDetails);
+    try { this.onState?.(next); }
+    catch (error) { fanDiagnosticLog('lifecycle.state-observer-failed', { error: describeUnknownError(error) }); }
+    this.publishControlDisplay();
   }
 
   private advanceSessionGeneration(): number {
     this.explicitOpenBinding = null;
+    this.explicitOpenOrigin = null;
+    this.coldOpenAdmission = null;
     this.sessionGeneration += 1;
     return this.sessionGeneration;
   }
@@ -2298,13 +2317,17 @@ export class FanHostLifecycle {
    * with that authoritative snapshot; otherwise a retry can skip Open or
    * OpenEvents and hit HOST_EVENTS_NOT_OPEN forever.
    */
-  private syncRemoteSessionState(remote: FanState | undefined): void {
+  private syncRemoteSessionState(remote: FanState | undefined, generationEvidence?: FanSnapshotGenerationEvidence): void {
     if (!remote) return;
-    const evidence = this.snapshotGenerationEvidence(remote);
+    const evidence = generationEvidence ?? this.snapshotGenerationEvidence(remote);
     if (evidence.freshness === 'stale' || evidence.freshness === 'future' || evidence.freshness === 'invalid') {
       fanDiagnosticLog('lifecycle.session-snapshot-untrusted-ignored', { freshness: evidence.freshness, remoteGeneration: evidence.generation, generation: this.powerGeneration });
       return;
     }
+    const attempt = remote.powerOperationAttempt;
+    this.observedHostPowerReceipt = evidence.freshness === 'current' && typeof attempt === 'number' && Number.isSafeInteger(attempt) && attempt >= 0
+      ? { generation: this.powerGeneration, attempt, session: this.sessionGeneration,
+          process: this.process, epoch: this.heartbeatEpoch } : null;
     if (remote.state === 'Stopped' || remote.state === 'Suspended') {
       this.opened = false;
       this.eventsOpened = false;
@@ -2312,7 +2335,56 @@ export class FanHostLifecycle {
     if (typeof remote.openCalled === 'boolean') this.opened = remote.openCalled;
     if (typeof remote.openEventsCalled === 'boolean') this.eventsOpened = remote.openEventsCalled;
     if (!this.opened || !this.eventsOpened) this.explicitOpenBinding = null;
-    this.adoptAuthoritativeLeaseState(remote);
+    this.adoptAuthoritativeLeaseState(remote, evidence);
+    this.observeControlDisplay(remote, evidence);
+  }
+
+  private observeControlDisplay(remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence): void {
+    this.stateObservationRevision += 1;
+    if (!this.onControlDisplay) return;
+    const evidence = generationEvidence ?? this.snapshotGenerationEvidence(remote);
+    const freshness = evidence.freshness;
+    if (freshness === 'stale' || freshness === 'future' || freshness === 'invalid') return;
+    this.controlDisplayRemote = remote;
+    this.publishControlDisplay(evidence);
+  }
+
+  // Optimization eligibility only: incomplete evidence still uses normal writes.
+  // Compatibility callbacks prove their documented software scope, not physical RPM.
+  private hasReplayReuseWriteEvidence(value: unknown): boolean {
+    return value === 'transported' || value === 'compat-route-callback-returned-no-scope';
+  }
+
+  private rememberActiveCurveReceipt(applied: FanState): void {
+    this.activeCurveReceipt = this.activeCurve && this.lease ? {
+      curve: this.activeCurve, leaseId: this.lease.leaseId, leaseGeneration: this.lease.generation,
+      generation: this.powerGeneration, session: this.sessionGeneration, process: this.process,
+      revision: this.controlIntentRevisionValue,
+      writeEvidenceQualified: this.hasReplayReuseWriteEvidence(applied.lastControlWriteEvidence),
+    } : null;
+  }
+
+  private publishControlDisplay(generationEvidence?: FanSnapshotGenerationEvidence): void {
+    if (!this.onControlDisplay) return;
+    const remote = this.controlDisplayRemote;
+    const active = this.stateValue === 'ready' && this.desiredCurve !== null &&
+      remote !== undefined && this.remoteFanControlHealthy(remote, generationEvidence);
+    const curve = active ? (this.activeCurve ?? this.desiredCurve ?? []) : [];
+    if (!this.controlDisplayRetryPending && active === this.controlDisplayActive && curve.length === this.controlDisplayCurve.length &&
+        curve.every((node, i) => node.tempC === this.controlDisplayCurve[i].tempC &&
+          node.dutyPercent === this.controlDisplayCurve[i].dutyPercent)) return;
+    this.controlDisplayActive = active;
+    this.controlDisplayCurve = cloneFanNodes(curve);
+    const delivery = this.controlDisplayCurve;
+    // Reserve the value before calling subscribers so same-value reentry stays quiet.
+    // A failed projection retries only on another existing publication opportunity.
+    this.controlDisplayRetryPending = false;
+    try { this.onControlDisplay(active, delivery); }
+    catch (error) {
+      // A nested power/state callback may already have delivered a newer value.
+      if (this.controlDisplayCurve === delivery) this.controlDisplayRetryPending = true;
+      fanDiagnosticLog('lifecycle.control-display-failed', { error: describeUnknownError(error) });
+    }
   }
 
   /**
@@ -2327,8 +2399,8 @@ export class FanHostLifecycle {
    * 会话令牌）返回的快照；别的实例/未绑定的请求在传输层就会被 401/403 拒绝并走错误路径，
    * 不会以"权威空 lease"的形式进入这里。
    */
-  private adoptAuthoritativeLeaseState(remote: FanState): void {
-    const evidence = this.snapshotGenerationEvidence(remote);
+  private adoptAuthoritativeLeaseState(remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence): void {
+    const evidence = generationEvidence ?? this.snapshotGenerationEvidence(remote);
     const authoritativeGeneration = evidence.generation;
     if (evidence.freshness === 'stale' || evidence.freshness === 'future' || evidence.freshness === 'invalid') {
       fanDiagnosticLog('lifecycle.lease-snapshot-stale-ignored', {
@@ -2365,9 +2437,26 @@ export class FanHostLifecycle {
    * HOST_EVENTS_NOT_OPEN 拒绝（Program.cs L6202-6203），"自动恢复"不成立。
    * 成功路径各自已有 syncRemoteSessionState，故这里只覆盖失败路径。
    */
-  private async resyncSessionFromHost(): Promise<void> {
-    const remote = await this.adapter.getState().catch(() => null);
-    if (remote) this.syncRemoteSessionState(remote);
+  private async resyncSessionFromHost(intentRevision: number, generation: number,
+    hostProcess: FanHostProcess | null, epoch: number): Promise<void> {
+    // A failed request can outlive OFF, a new curve or a power edge. Its
+    // readback cannot become a snapshot owned by that later request.
+    if (intentRevision !== this.controlIntentRevisionValue || generation !== this.powerGeneration
+        || hostProcess !== this.process || epoch !== this.heartbeatEpoch || !this.enabled) return;
+    const session = this.sessionGeneration;
+    let remote: FanState | null = null;
+    // Preserve the normal 5s HTTP + 1s IPC budget, but retire obsolete reads.
+    try { remote = await this.observeAdmissionRead(() => this.adapter.getState(), 6000); }
+    catch (error) {
+      if (isTerminalFanControlRefusal(error)) {
+        if (session === this.sessionGeneration)
+          this.parkTerminalControlRefusal(intentRevision, generation, hostProcess, epoch, error);
+        throw error;
+      }
+    }
+    if (remote && intentRevision === this.controlIntentRevisionValue && generation === this.powerGeneration
+        && hostProcess === this.process && epoch === this.heartbeatEpoch
+        && session === this.sessionGeneration && this.enabled) this.syncRemoteSessionState(remote);
   }
 
   /**
@@ -2378,18 +2467,32 @@ export class FanHostLifecycle {
    * 放行恢复写（"获得等待资格"也**不等于**获得写权）。
    */
   private hasWakeContext(generation = Math.max(0, Math.floor(this.powerGeneration))): boolean {
-    if (this.coordinator.snapshot().phase === 'resuming') return true;
+    if (this.coordinator.currentPhase === 'resuming') return true;
     return this.coordinator.isWakeReady(generation);
   }
 
   /** G7（§3.2）：把一次控制请求绑定到本地电源代次/意图版本/Host 实例的**有限**上下文。 */
   private admissionContext(action: string, intentRevision: number, generation = Math.max(0, Math.floor(this.powerGeneration))): FanAdmissionContext {
-    return { action, intentRevision, generation, hostPid: this.process?.pid ?? 0 };
+    return { action, intentRevision, generation, hostPid: this.process?.pid ?? 0, hostProcess: this.process };
+  }
+
+  /** Transfer only a latest manual request whose exact predecessor already exited. */
+  private adoptConfirmedExitForManualControl(context: FanAdmissionContext, successor: FanHostProcess | null): boolean {
+    if (!this.enabled || this.isDisabledState()
+        || (context.action !== 'apply' && context.action !== 'apply-preset')
+        || context.intentRevision !== this.controlIntentRevisionValue
+        || context.generation !== Math.max(0, Math.floor(this.powerGeneration))) return false;
+    const predecessor = context.hostProcess;
+    if (!predecessor || predecessor !== this.lastExitedProcess || context.hostPid !== predecessor.pid
+        || successor !== this.process || (successor === null && this.stateValue !== 'stopped')) return false;
+    context.hostProcess = successor;
+    context.hostPid = successor?.pid ?? 0;
+    return true;
   }
 
   /** G7（§3.3.2）：任务身份 = 意图版本 + 电源代次 + Host 实例。 */
   private isAdmissionContextCurrent(context: FanAdmissionContext): boolean {
-    return context.intentRevision === this.controlIntentRevision
+    return context.intentRevision === this.controlIntentRevisionValue
       && context.generation === Math.max(0, Math.floor(this.powerGeneration))
       && context.hostPid === (this.process?.pid ?? 0);
   }
@@ -2404,7 +2507,7 @@ export class FanHostLifecycle {
       action: context.action,
       stage,
       intentRevision: context.intentRevision,
-      currentIntentRevision: this.controlIntentRevision,
+      currentIntentRevision: this.controlIntentRevisionValue,
       generation: context.generation,
       currentGeneration: this.powerGeneration,
       state: this.state,
@@ -2425,10 +2528,58 @@ export class FanHostLifecycle {
    */
   private resumeAdmissionWait(action: string, context: FanAdmissionContext): Promise<void> | null {
     if (!this.enabled || this.isDisabledState()) return null;
+    // A second start() can restore the local resuming mirror after the first
+    // cold Host check. Carry ONLY that exact Host/session's Open admission,
+    // and recheck native power before even the first device Open.
+    if (context.requireHcOpen !== true && this.coldOpenAdmissionMatches(context.generation)) {
+      return this.runColdOpenAdmission(context);
+    }
     // 廉价先决条件：不在睡眠/恢复窗就完全不必探测（普通 apply 零额外请求）。
     // §3.2：本规则只约束**唤醒恢复入口**；正常醒着的显式首次开启仍走既有握手/授权合同。
     if (!this.isSleepWindow()) return null;
-    return this.runResumeAdmissionWait(action, context);
+    return this.runResumeAdmissionWait(action, context).then(() => undefined);
+  }
+
+  private coldOpenAdmissionMatches(generation: number): boolean {
+    const binding = this.coldOpenAdmission;
+    return binding !== null && binding.powerGeneration === generation
+      && binding.powerGeneration === this.powerGeneration
+      && binding.sessionGeneration === this.sessionGeneration
+      && binding.processId > 0 && binding.processId === this.process?.pid;
+  }
+
+  private async runColdOpenAdmission(context: FanAdmissionContext): Promise<void> {
+    const probe = await this.readCurrentRecoveryState(context, RESUME_WAIT_MIN_PROBE_TIMEOUT_MS);
+    const ownership = this.recoveryReadOwnership(context, probe);
+    if (ownership === 'superseded') throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:cold-open-state-probe');
+    if (ownership === 'wake-changed') throw new FanApiError('POWER_RESUMING: 冷启动状态读取跨越唤醒，等待当前会话', 409, 'POWER_RESUMING');
+    if (probe.failure) throw probe.failure;
+    const remote = probe.remote;
+    this.assertAdmissionContextCurrent(context, 'cold-open-state-probe');
+    if (!remote) this.rejectResumeAdmission(context.action, 'probe-unavailable', 'cold-open-state-unavailable', context);
+    if (!this.coldOpenAdmissionMatches(context.generation) || !isColdUnopenedFanHost(remote)) {
+      this.coldOpenAdmission = null;
+      // A warm/closed/dirty or transitioning Host uses the original receipt
+      // rules. A cold exception can never bypass its lifecycle obligations.
+      return this.runResumeAdmissionWait(context.action, context).then(() => undefined);
+    }
+    const native = await this.readPowerSnapshotForSynchronization();
+    this.assertAdmissionContextCurrent(context, 'cold-open-native-probe');
+    if (native?.generation !== context.generation || native.phase !== 'ready'
+        || native.hardwareWritesAllowed !== true || !this.coordinator.isWakeReady(context.generation)
+        || !this.coldOpenAdmissionMatches(context.generation)) {
+      this.coldOpenAdmission = null;
+      if (native) this.synchronizeObservedPowerSnapshot(native);
+      this.assertAdmissionContextCurrent(context, 'cold-open-native-invalidated');
+      this.rejectResumeAdmission(context.action, 'superseded', 'cold-open-native-not-ready', context);
+    }
+    fanLifecycleEvidence('lifecycle.resume-admission-accepting', {
+      action: context.action, generation: context.generation,
+      intentRevision: context.intentRevision, scope: 'same-cold-host-original-hc-open-only',
+      hcOpenRequired: true, hostResumeReceiptCreated: false, controlWriteGranted: false,
+    });
+    // applyMutation still executes actual Open/OpenEvents/acquire first.
+    // advanceSessionGeneration invalidates this binding as soon as Open enters.
   }
 
   /**
@@ -2436,19 +2587,71 @@ export class FanHostLifecycle {
    * 共用等待；`superseded`/`terminal` 与探测失败/null 都**终止本请求且不写**（后两者过去
    * 直接 return，调用方随后继续入队，这正是唤醒边沿写入的病灶）。
    */
-  private async runResumeAdmissionWait(action: string, context: FanAdmissionContext): Promise<void> {
+  private async readCurrentRecoveryState(context: FanAdmissionContext, timeoutMs: number,
+    project?: (remote: FanState) => void): Promise<{
+    remote: FanState | null; failure: unknown; probes: number; wakeChanged: boolean; hostProcess: FanHostProcess | null; session: number; epoch: number;
+  }> {
+    const deadlineAt = Math.min(context.deadlineAt ?? Infinity, monotonicNowMs() + timeoutMs);
+    // Preserve HTTP's 250ms minimum and 1000ms IPC delivery allowance, but
+    // bound/cancel the local observer independently of a missing reply.
+    const observationDeadlineAt = Math.min(context.deadlineAt ?? Infinity,
+      monotonicNowMs() + Math.max(250, timeoutMs) + 1000);
+    let probes = 0;
+    // A same-generation wake retires its read, not the user's current intent.
+    // Refresh at most once within this probe's original budget, never spin.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      this.assertAdmissionContextCurrent(context, 'recovery-read-entry');
+      if (context.hostProcess !== undefined && context.hostProcess !== this.process)
+        throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:recovery-read-process');
+      const remaining = deadlineAt - monotonicNowMs();
+      if (attempt > 0 && remaining <= 0) break;
+      const process = this.process, session = this.sessionGeneration, epoch = this.heartbeatEpoch;
+      let remote: FanState | null = null, failure: unknown = null;
+      const budget = Math.max(1, Math.floor(Math.min(timeoutMs, remaining)));
+      try { remote = await this.observeAdmissionRead(() => this.adapter.getState(budget),
+        Math.max(1, Math.min(observationDeadlineAt - monotonicNowMs(), Math.max(250, budget) + 1000))); }
+      catch (error) { failure = error; }
+      probes += 1;
+      this.assertAdmissionContextCurrent(context, 'recovery-read-return');
+      if (process !== this.process || session !== this.sessionGeneration)
+        throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:recovery-read');
+      if (epoch === this.heartbeatEpoch) {
+        if (remote && project) {
+          project(remote);
+          this.assertAdmissionContextCurrent(context, 'recovery-read-projection');
+          if (process !== this.process || session !== this.sessionGeneration)
+            throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:recovery-read-projection');
+          // A subscriber may advance a same-generation wake. Refresh only the
+          // read, within this same two-attempt/deadline budget, not the intent.
+          if (epoch !== this.heartbeatEpoch) continue;
+        }
+        return { remote, failure, probes, wakeChanged: false, hostProcess: process, session, epoch };
+      }
+    }
+    return { remote: null, probes, wakeChanged: true, hostProcess: this.process, session: this.sessionGeneration, epoch: this.heartbeatEpoch,
+      failure: new FanApiError('POWER_RESUMING: 风扇恢复读回跨越唤醒边界，保留意图等待当前会话', 409, 'POWER_RESUMING') };
+  }
+
+  /** Also fence the microtask gap after the read/projection helper returns. */
+  private recoveryReadOwnership(context: FanAdmissionContext, read: { hostProcess: FanHostProcess | null; session: number; epoch: number }): 'current' | 'wake-changed' | 'superseded' {
+    if (!this.isAdmissionContextCurrent(context) || read.hostProcess !== this.process || read.session !== this.sessionGeneration) return 'superseded';
+    return read.epoch === this.heartbeatEpoch ? 'current' : 'wake-changed';
+  }
+
+  private async runResumeAdmissionWait(action: string, context: FanAdmissionContext): Promise<FanState | undefined> {
     // §3.3.4：截止从**第一次准入探测**起算；探测/协调等待/队列内重入共用同一绝对截止。
     const deadlineAt = context.deadlineAt ?? (context.deadlineAt = monotonicNowMs() + this.resumeWaitDeadlineMs);
     const remaining = deadlineAt - monotonicNowMs();
     const probeTimeout = remaining > 0
       ? Math.max(1, Math.floor(Math.min(RESUME_WAIT_MIN_PROBE_TIMEOUT_MS, remaining)))
       : 1;
-    let probeFailure: unknown = null;
-    const remote = await this.adapter.getState(probeTimeout).catch((error: unknown) => {
-      probeFailure = error;
-      fanDiagnosticLog('lifecycle.resume-wait-probe-failed', { action, error: describeUnknownError(error) });
-      return null;
+    let manualUnboundRestart = false;
+    const probe = await this.readCurrentRecoveryState(context, probeTimeout, remote => {
+      manualUnboundRestart = (action === 'apply' || action === 'apply-preset') && this.manualUnboundHcSessionNeedsRestart(remote);
+      if (!unsupportedFanControlError(remote) && !manualUnboundRestart) this.syncRemoteSessionState(remote);
     });
+    const remote = probe.remote, probeFailure = probe.failure;
+    if (probeFailure) fanDiagnosticLog('lifecycle.resume-wait-probe-failed', { action, error: describeUnknownError(probeFailure) });
     // §3.3.2：await 返回后、采纳远端状态（syncRemoteSessionState）**之前**先复核任务身份。
     this.assertAdmissionContextCurrent(context, 'admission-probe');
     if (!remote) {
@@ -2467,7 +2670,33 @@ export class FanHostLifecycle {
       fanLifecycleEvidence('lifecycle.resume-admission-rejected', { action, reason: 'terminal-failed', detail: 'FAN_UNSUPPORTED', generation: context.generation });
       throw unsupported;
     }
-    this.syncRemoteSessionState(remote);
+    // Reuse this authenticated recovery probe; normal awake writes add no
+    // state request. An orphan original Open must be retired by the queue's
+    // exact Close/exit owner before the direct curve/preset opens a successor.
+    const readOwnership = this.recoveryReadOwnership(context, probe);
+    if (readOwnership === 'superseded') throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:admission-read-owner');
+    if (readOwnership === 'wake-changed')
+      return this.settleResumeWait(action, await this.runBoundedResumeWait(context, deadlineAt));
+    if (manualUnboundRestart) {
+      if (context.unboundSessionRestartAttempted) throw new Error('FAN_MANUAL_HC_SESSION_RESTART_UNCONFIRMED');
+      context.manualRecovery = true;
+      let retry = false;
+      await this.enqueueManualControlStartup(context, async () => {
+        const options = { manualRecovery: true, reason: 'manual-unbound-direct-control' };
+        const resumed = retry;
+        retry = true;
+        // Native may have completed its real Close while we waited. Re-read
+        // through original start admission instead of retiring an old snapshot.
+        const gate = resumed ? await this.startInternal(options, true, context)
+          : await this.restartUnboundHcSessionForManualControl(options, true, context);
+        return gate;
+      });
+      this.assertAdmissionContextCurrent(context, 'manual-unbound-direct-control');
+      return;
+    }
+    if (context.allowIdleHcOpen
+        && (this.idleResumeNeedsHcOpen(remote, context.generation)
+          || this.resumedHalfOpenHcSessionNeedsOpen(remote, context.generation))) return remote;
     const verdict = this.classifyControlAdmission(remote, context.requireHcOpen === true, context.manualRecovery === true);
     if (verdict === 'accepting') {
       fanLifecycleEvidence('lifecycle.resume-admission-accepting', {
@@ -2485,7 +2714,7 @@ export class FanHostLifecycle {
     if (verdict === 'superseded') {
       this.rejectResumeAdmission(action, 'superseded', String(remote.state ?? remote.powerState ?? 'superseded'), context);
     }
-    this.settleResumeWait(action, await this.runBoundedResumeWait(context, deadlineAt));
+    return this.settleResumeWait(action, await this.runBoundedResumeWait(context, deadlineAt));
   }
 
   /** G7（§3.2）：不允许写入的准入结论——先落免门证据，再以明确非重试错误终止本请求。 */
@@ -2509,7 +2738,8 @@ export class FanHostLifecycle {
   }
 
   /** §4.2/§3.2：等待未成功 ⇒ 以明确、**可重试**的错误终止本请求（不写硬件）。 */
-  private settleResumeWait(action: string, outcome: FanResumeWaitOutcome): void {
+  private settleResumeWait(action: string, outcome: FanResumeWaitOutcome): FanState | undefined {
+    if (outcome.reason === 'hc-open-required' && outcome.openRequiredSnapshot) return outcome.openRequiredSnapshot;
     if (outcome.ok) return;
     if (outcome.detail === 'FAN_UNSUPPORTED') throw new FanApiError('HC 当前设备未声明可用风扇能力', 409, 'FAN_UNSUPPORTED');
     throw new Error(`FAN_RESUME_WAIT_${outcome.reason.toUpperCase().replace(/-/g, '_')}:${outcome.detail}`);
@@ -2520,7 +2750,7 @@ export class FanHostLifecycle {
    * §3.3.3：意图版本进入 key——已 cancelled 但尚未退出的同 key waiter 不会被新意图复用。
    */
   private resumeWaitKey(context: FanAdmissionContext): string {
-    return `fan-resume-wait-${this.sessionGeneration}-${context.generation}-${context.intentRevision}-${context.hostPid}`;
+    return `fan-resume-wait-${this.sessionGeneration}-${context.generation}-${context.intentRevision}-${context.hostPid}-${context.requireHcOpen === true}-${context.allowIdleHcOpen === true}`;
   }
 
   private runBoundedResumeWait(context: FanAdmissionContext, deadlineAt: number): Promise<FanResumeWaitOutcome> {
@@ -2548,6 +2778,7 @@ export class FanHostLifecycle {
    * 循环检查点（≤ 一个校验过的间隔，250–1000 ms），并只写一条 cancelled 证据。
    */
   private cancelResumeWait(reason: string): void {
+    for (const cancel of this.admissionWaitCancellations) cancel();
     const task = this.resumeWaitTask;
     if (!task || task.cancelled) return;
     task.cancel(reason);
@@ -2586,15 +2817,21 @@ export class FanHostLifecycle {
       if (remaining <= 0) {
         return failed('deadline', lastDetail);
       }
-      let remote: FanState | null = null;
-      let failure: unknown = null;
+      // A retired wake reply may spend one bounded read refresh, never a write.
+      let probe: Awaited<ReturnType<FanHostLifecycle['readCurrentRecoveryState']>>;
       try {
-        // §3.3.4：GET 超时取**剩余余额**上限，不得以 max(500, remaining) 超出最后余额。
-        remote = await this.adapter.getState(Math.max(1, Math.floor(Math.min(remaining, RESUME_WAIT_MAX_PROBE_TIMEOUT_MS))));
+        probe = await this.readCurrentRecoveryState(context,
+          Math.max(1, Math.floor(Math.min(remaining, RESUME_WAIT_MAX_PROBE_TIMEOUT_MS))), remote => {
+            if (!unsupportedFanControlError(remote)) this.syncRemoteSessionState(remote);
+          });
       } catch (error) {
-        failure = error;
+        if (task.cancelled) return failed('cancelled', task.cancelled);
+        if (error instanceof Error && error.message.startsWith('FAN_CONTROL_INTENT_SUPERSEDED:'))
+          return failed('superseded', 'read-owner-changed');
+        throw error;
       }
-      probes += 1;
+      const remote = probe.remote, failure = probe.failure;
+      probes += probe.probes;
       if (task.cancelled) return failed('cancelled', task.cancelled);
       if (!this.isAdmissionContextCurrent(context)) return failed('superseded', 'context-changed');
       if (failure) {
@@ -2605,29 +2842,41 @@ export class FanHostLifecycle {
         lastDetail = describeUnknownError(failure);
       } else if (remote) {
         if (unsupportedFanControlError(remote)) return failed('terminal-failed', 'FAN_UNSUPPORTED');
-        this.syncRemoteSessionState(remote);
-        const verdict = this.classifyControlAdmission(remote, context.requireHcOpen === true, context.manualRecovery === true);
-        if (verdict === 'accepting') {
-          return done({ ok: true, reason: 'accepted', detail: 'control-accepting', probes, elapsedMs: monotonicNowMs() - startedAt, intervalMs });
+        const readOwnership = this.recoveryReadOwnership(context, probe);
+        if (readOwnership === 'superseded') return failed('superseded', 'projection-owner-changed');
+        if (readOwnership === 'current') {
+          if (context.allowIdleHcOpen
+              && (this.idleResumeNeedsHcOpen(remote, context.generation)
+                || this.resumedHalfOpenHcSessionNeedsOpen(remote, context.generation))) {
+            return done({ ok: false, reason: 'hc-open-required', detail: 'original-hc-open-required', openRequiredSnapshot: remote,
+              probes, elapsedMs: monotonicNowMs() - startedAt, intervalMs });
+          }
+          const verdict = this.classifyControlAdmission(remote, context.requireHcOpen === true, context.manualRecovery === true);
+          if (verdict === 'accepting') {
+            return done({ ok: true, reason: 'accepted', detail: 'control-accepting', probes, elapsedMs: monotonicNowMs() - startedAt, intervalMs });
+          }
+          if (verdict === 'superseded') {
+            return failed('superseded', String(remote.state ?? remote.powerState ?? 'superseded'));
+          }
+          if (verdict === 'terminal') {
+            return failed('terminal-failed', `${remote.state ?? 'unknown'}/${remote.resumePhase ?? 'unknown'}`);
+          }
+          // §4.2：宿主建议间隔经校验后限于 250–1000 ms；非法/缺失一律 250 ms（不忙轮询）。
+          const suggested = Number(remote.retryAfterMs);
+          intervalMs = Number.isFinite(suggested) && suggested >= RESUME_WAIT_MIN_INTERVAL_MS && suggested <= RESUME_WAIT_MAX_INTERVAL_MS
+            ? Math.floor(suggested)
+            : RESUME_WAIT_MIN_INTERVAL_MS;
+          lastDetail = `${remote.resumePhase ?? remote.state ?? 'Resuming'}`;
+        } else {
+          intervalMs = RESUME_WAIT_MIN_INTERVAL_MS;
+          lastDetail = 'recovery-read-wake-changed';
         }
-        if (verdict === 'superseded') {
-          return failed('superseded', String(remote.state ?? remote.powerState ?? 'superseded'));
-        }
-        if (verdict === 'terminal') {
-          return failed('terminal-failed', `${remote.state ?? 'unknown'}/${remote.resumePhase ?? 'unknown'}`);
-        }
-        // §4.2：宿主建议间隔经校验后限于 250–1000 ms；非法/缺失一律 250 ms（不忙轮询）。
-        const suggested = Number(remote.retryAfterMs);
-        intervalMs = Number.isFinite(suggested) && suggested >= RESUME_WAIT_MIN_INTERVAL_MS && suggested <= RESUME_WAIT_MAX_INTERVAL_MS
-          ? Math.floor(suggested)
-          : RESUME_WAIT_MIN_INTERVAL_MS;
-        lastDetail = `${remote.resumePhase ?? remote.state ?? 'Resuming'}`;
       }
       const sleepFor = Math.min(intervalMs, deadlineAt - monotonicNowMs());
       if (sleepFor <= 0) {
         return failed('deadline', lastDetail);
       }
-      await sleepMs(sleepFor);
+      await this.waitForAdmissionDelay(sleepFor);
     }
   }
 
@@ -2636,8 +2885,9 @@ export class FanHostLifecycle {
    * 不杀 Host、不把设备标成不支持、不延长宿主恢复总预算。§4.4：唯一终态证据免门落盘。
    */
   private finishResumeWait(action: string, outcome: FanResumeWaitOutcome): FanResumeWaitOutcome {
-    const evidence = outcome.ok
-      ? 'lifecycle.resume-wait-completed'
+    const evidence = outcome.reason === 'hc-open-required'
+      ? 'lifecycle.resume-admission-accepting'
+      : outcome.ok ? 'lifecycle.resume-wait-completed'
       : outcome.reason === 'cancelled' || outcome.reason === 'superseded'
         ? 'lifecycle.resume-wait-cancelled'
         : 'lifecycle.resume-wait-terminal-failed';
@@ -2664,16 +2914,17 @@ export class FanHostLifecycle {
   }
 
   private snapshotGenerationEvidence(remote: FanState): FanSnapshotGenerationEvidence {
-    return resolveFanSnapshotGeneration(remote, {
-      powerGeneration: this.powerGeneration,
-      initialAwakeGeneration: this.initialAwakePowerGeneration,
-      explicitOpenGeneration: this.explicitOpenBinding?.sessionGeneration === this.sessionGeneration
+    return resolveFanSnapshotGenerationValues(
+      remote,
+      this.powerGeneration,
+      this.initialAwakePowerGeneration,
+      this.explicitOpenBinding?.sessionGeneration === this.sessionGeneration
         ? this.explicitOpenBinding.powerGeneration : null,
-    });
+    );
   }
 
-  private hostPowerGenerationForAdmission(remote: FanState): number | null {
-    return this.snapshotGenerationEvidence(remote).generation;
+  private hostPowerGenerationForAdmission(remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence): number | null {
+    return (generationEvidence ?? this.snapshotGenerationEvidence(remote)).generation;
   }
 
   private bindExplicitHcOpen(remote: FanState, generation: number): void {
@@ -2692,7 +2943,7 @@ export class FanHostLifecycle {
    * 这时是"只读等待"（`waiting`），不是"新一代睡眠已接管"。只有**没有**可信本代唤醒
    * 依据（真睡眠/任意 Suspended）才算 `superseded`。
    */
-  private classifyControlAdmission(remote: FanState, requireHcOpen = false, allowSuspendedWait = false): 'waiting' | 'accepting' | 'superseded' | 'terminal' {
+  private classifyControlAdmission(remote: FanState, requireHcOpen = false, allowSuspendedWait = false, generationEvidence?: FanSnapshotGenerationEvidence): 'waiting' | 'accepting' | 'superseded' | 'terminal' {
     if (remote.unknownState === true) return 'terminal';
     if (remote.hcCloseCleanupPending === true) return 'terminal';
     const state = String(remote.state ?? '');
@@ -2704,7 +2955,7 @@ export class FanHostLifecycle {
       return wakeContext || allowSuspendedWait ? 'waiting' : 'superseded';
     }
     // FAN-943: positive power receipts must match exactly; neither old nor future Ready is current.
-    const evidence = this.snapshotGenerationEvidence(remote);
+    const evidence = generationEvidence ?? this.snapshotGenerationEvidence(remote);
     if (evidence.freshness === 'invalid') return 'terminal';
     const mismatchedGeneration = evidence.freshness === 'stale' || evidence.freshness === 'future';
     const phase = String(remote.resumePhase ?? state);
@@ -2729,13 +2980,13 @@ export class FanHostLifecycle {
    * Suspending/Suspended/Resuming、unknownState=false、hcCloseCleanupPending=false，
    * 且 openCalled/openEventsCalled 都为 true。
    */
-  private remoteControlAdmissible(remote: FanState): boolean {
+  private remoteControlAdmissible(remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence): boolean {
     if (remote.unknownState === true || remote.hcCloseCleanupPending === true) return false;
     const state = String(remote.state ?? '');
     const powerState = String(remote.powerState ?? '');
     if (powerState === 'Suspending' || powerState === 'Suspended' || powerState === 'Resuming') return false;
     if (state !== 'AwaitingControl' && state !== 'Ready') return false;
-    return this.classifyControlAdmission(remote, true) === 'accepting';
+    return this.classifyControlAdmission(remote, true, false, generationEvidence) === 'accepting';
   }
 
   /**
@@ -2863,7 +3114,7 @@ export class FanHostLifecycle {
     // §2.1(1)：未到本代 resume-ready（或冷启动 generation=0）时只给可重试的"恢复中"，
     // 不发 HTTP、不碰 HC。
     if (generation > 0 && !this.coordinator.isWakeReady(generation)) {
-      const context = this.admissionContext('start-explicit-control', this.controlIntentRevision, generation);
+      const context = this.admissionContext('start-explicit-control', this.controlIntentRevisionValue, generation);
       context.manualRecovery = manualRecovery;
       manualRescueStarted = await this.observeCurrentNativeWakeForControl(context, manualRecovery);
     }
@@ -2890,7 +3141,7 @@ export class FanHostLifecycle {
     // §2.1(5)：同一 Host + 同一 generation 只允许一个在途 rearm；自动启动/手动点击/
     // renderer 重建同时到达时共用同一个 promise，不重复 `/api/resume`。
     const existing = this.rearmTask;
-    const intentRevision = this.controlIntentRevision;
+    const intentRevision = this.controlIntentRevisionValue;
     const sessionGeneration = this.sessionGeneration;
     if (existing && existing.generation === generation) {
       if (existing.intentRevision === intentRevision && existing.sessionGeneration === sessionGeneration) return existing.promise;
@@ -2905,6 +3156,7 @@ export class FanHostLifecycle {
       if (this.rearmTask === existing) this.rearmTask = null;
       return this.rearmAfterWakeForControlAdmission(reason, manualRecovery);
     }
+    const failureContext = this.admissionContext('rearm-self-heal', intentRevision, generation);
     const task = { generation, intentRevision, sessionGeneration, promise: this.runRearmAfterWake(generation, reason, manualRecovery) };
     this.rearmTask = task;
     try {
@@ -2917,26 +3169,156 @@ export class FanHostLifecycle {
           && /^FAN_RESUME_WAIT_DEADLINE:/.test(describeUnknownError(error))) {
         this.noteRecoveryIntentPending(reason, generation, manualRecovery);
       }
+      // Committed native wake can fail before resumeInternal owns the error.
+      // Retain observation only for this exact pre-await process/session.
+      if (sessionGeneration === this.sessionGeneration) this.retainControlForSelfHeal(failureContext,
+        this.desiredCurve ?? this.resumeCurve ?? this.activeCurve ?? undefined, error);
       throw error;
     } finally {
       if (this.rearmTask === task) this.rearmTask = null;
     }
   }
 
+  private idleResumeNeedsHcOpen(remote: FanState, generation: number, generationEvidence?: FanSnapshotGenerationEvidence): boolean {
+    return ((remote.powerOperationStatus === 'superseded' && remote.powerOperationOutcome === 'user-cancelled')
+        || (remote.powerOperationStatus === 'completed' && remote.powerOperationOutcome === 'await-user'))
+      && this.hostPowerGenerationForAdmission(remote, generationEvidence) === generation
+      && remote.state === 'AwaitingControl' && remote.powerState === 'On'
+      && remote.unknownState === false && remote.hcCloseCleanupPending === false && remote.closeCalled === false
+      && remote.hardwareWritesEnabled === false && remote.lease === null
+      && typeof remote.openCalled === 'boolean' && remote.openEventsCalled === false;
+  }
+
+  /**
+   * FAN-996 follow-up: a real /api/resume may return a completed same-generation
+   * shell with `controlAccepting=true` while HC Open/OpenEvents never ran. This
+   * is not an accepting control session and must take the direct Open/OpenEvents
+   * path instead of consuming the whole resume waiter until HC_RESUME_RESULT_EXPIRED.
+   * `recoveryReadbackRequired` keeps this narrow to the observed incomplete
+   * resume contract; a normal idle `await-user` receipt remains handled above.
+   */
+  private resumedHalfOpenHcSessionNeedsOpen(remote: FanState, generation: number, generationEvidence?: FanSnapshotGenerationEvidence): boolean {
+    return this.hostPowerGenerationForAdmission(remote, generationEvidence) === generation
+      && remote.state === 'AwaitingControl' && remote.resumePhase === 'AwaitingControl'
+      && remote.powerState === 'On'
+      && remote.powerOperationStatus === 'completed'
+      && remote.powerOperationGeneration === generation
+      && remote.recoveryReadbackRequired === true
+      && remote.controlAccepting === true
+      && remote.openCalled === false && remote.openEventsCalled === false
+      && remote.hardwareWritesEnabled === false && remote.hardwareWrites !== true
+      && (remote.lease === null || remote.lease === undefined)
+      && remote.unknownState === false && remote.hcCloseCleanupPending === false;
+  }
+
+  private isUnleasedOriginalHcOpen(remote: FanState): boolean {
+    return isNoPowerOperationReceipt(remote) && remote.fanCapabilitySupported === true
+      && ['Open', 'Ready', 'AwaitingControl'].includes(remote.state) && remote.resumePhase === remote.state
+      && remote.openCalled === true && typeof remote.openEventsCalled === 'boolean' && remote.closeCalled === false
+      && remote.unknownState === false && remote.hcCloseCleanupPending === false
+      && remote.hardwareWritesEnabled === false && remote.hardwareWrites === false && remote.lease === null
+      && (remote.state === 'Open' ? remote.controlAccepting === false && remote.openEventsCalled === false : remote.controlAccepting === true);
+  }
+
+  private beginOriginalHcOpen(): NonNullable<FanHostLifecycle['explicitOpenOrigin']> {
+    const origin = { sessionGeneration: this.sessionGeneration, powerGeneration: this.powerGeneration,
+      processId: this.process?.pid ?? 0, acknowledged: false };
+    this.explicitOpenOrigin = origin;
+    return origin;
+  }
+
+  private acknowledgeOriginalHcOpen(remote: FanState, origin: NonNullable<FanHostLifecycle['explicitOpenOrigin']>): void {
+    // OFF/new curve retires the write intent, not the actual Open acknowledgement.
+    // New sleep, another Host or another session retires this exact origin object.
+    if (this.explicitOpenOrigin === origin && origin.powerGeneration === this.powerGeneration
+        && origin.sessionGeneration === this.sessionGeneration && origin.processId > 0
+        && origin.processId === this.process?.pid && this.isUnleasedOriginalHcOpen(remote)) origin.acknowledged = true;
+  }
+
+  private hasCurrentOriginalHcOpenOrigin(generation: number): boolean {
+    const origin = this.explicitOpenOrigin;
+    return !!origin?.acknowledged && origin.powerGeneration === generation && generation === this.powerGeneration
+      && origin.sessionGeneration === this.sessionGeneration && origin.processId > 0 && origin.processId === this.process?.pid;
+  }
+
+  private ownOriginalHcOpenNeedsCompletion(remote: FanState, generation: number): boolean {
+    return this.hasCurrentOriginalHcOpenOrigin(generation) && this.isUnleasedOriginalHcOpen(remote);
+  }
+
+  /** Current native write admission applies equally to unopened and already-ready Host sessions. */
+  private async requireNativeWriteReadyForAdmission(context: FanAdmissionContext, reason: string): Promise<void> {
+    const { generation } = context;
+    let native = await this.readPowerSnapshotForSynchronization();
+    this.assertAdmissionContextCurrent(context, `${reason}-native-probe`);
+    if (context.manualRecovery && native?.generation === generation && native.hardwareWritesAllowed !== true) {
+      const admitted = await this.requestManualWake(generation).catch(() => null);
+      this.assertAdmissionContextCurrent(context, `${reason}-manual-wake`);
+      // No acknowledgement is an unknown result. Read current native facts
+      // without repeating the promotion; all generation/write gates still apply.
+      if (admitted === null || (admitted.ok === true && admitted.generation === generation)) {
+        native = await this.readPowerSnapshotForSynchronization();
+        this.assertAdmissionContextCurrent(context, `${reason}-native-recheck`);
+      }
+    }
+    if (native?.generation !== generation || native.phase !== 'ready' || native.hardwareWritesAllowed !== true) {
+      throw new Error(`FAN_MANUAL_WAKE_NOT_READY:${reason}`);
+    }
+  }
+
+  private async completeHcOpenForAdmission(probe: FanState, context: FanAdmissionContext): Promise<void> {
+    const { generation } = context;
+    this.assertAdmissionContextCurrent(context, 'idle-resume-open-admission');
+    if (!this.idleResumeNeedsHcOpen(probe, generation)
+        && !this.resumedHalfOpenHcSessionNeedsOpen(probe, generation)
+        && !this.ownOriginalHcOpenNeedsCompletion(probe, generation)) {
+      throw new Error('FAN_MANUAL_HC_OPEN_UNCONFIRMED:idle-resume');
+    }
+    await this.requireNativeWriteReadyForAdmission(context, 'idle-resume');
+    if (!probe.openCalled) {
+      const opened = await this.adapter.open();
+      this.assertAdmissionContextCurrent(context, 'idle-resume-open');
+      this.syncRemoteSessionState(opened);
+    }
+    const events = probe.openEventsCalled ? probe : await this.adapter.openEvents();
+    this.assertAdmissionContextCurrent(context, 'idle-resume-open-events');
+    this.bindExplicitHcOpen(events, generation);
+    this.syncRemoteSessionState(events);
+    if (!this.remoteControlAdmissible(events)) throw new Error('FAN_MANUAL_HC_OPEN_UNCONFIRMED:idle-resume');
+    this.beginCoordinatorSession();
+    this.admitCoordinatorHcReady();
+    this.setState('awaiting-control');
+    fanLifecycleEvidence('lifecycle.resume-admission-accepting', {
+      action: 'idle-host-open', generation, state: this.state,
+      reason: 'open-events-confirmed', ok: true,
+    });
+  }
+
   private async runRearmAfterWake(generation: number, reason: string, manualRecovery = false): Promise<void> {
-    const context = this.admissionContext('rearm-after-wake', this.controlIntentRevision, generation);
+    const context = this.admissionContext('rearm-after-wake', this.controlIntentRevisionValue, generation);
     context.requireHcOpen = true;
+    context.allowIdleHcOpen = true;
     context.manualRecovery = manualRecovery;
     // (2) 先只读探测：已经可接管就直接沿用现有控制门，不发 `/api/resume`。
-    const probe = await this.adapter.getState(RESUME_WAIT_MIN_PROBE_TIMEOUT_MS).catch((error: unknown) => {
-      if (isNonRetryableControlError(error) || isExternalFanControlConflict(error)) throw error;
-      return null;
-    });
-    this.assertAdmissionContextCurrent(context, 'rearm-probe');
-    if (probe) {
+    const observed = await this.readCurrentRecoveryState(context, RESUME_WAIT_MIN_PROBE_TIMEOUT_MS, probe => {
       const unsupported = unsupportedFanControlError(probe);
       if (unsupported) throw unsupported;
+      if (manualRecovery && reason === 'manual-missed-wake-edge' && this.manualUnboundHcSessionNeedsRestart(probe))
+        throw new FanManualUnboundSessionRequired();
       this.syncRemoteSessionState(probe);
+    });
+    if (observed.wakeChanged) {
+      this.noteRecoveryIntentPending(reason, generation, manualRecovery);
+      throw observed.failure;
+    }
+    if (observed.failure && (isNonRetryableControlError(observed.failure) || isExternalFanControlConflict(observed.failure)))
+      throw observed.failure;
+    const probe = observed.remote;
+    this.assertAdmissionContextCurrent(context, 'rearm-probe');
+    const readOwnership = this.recoveryReadOwnership(context, observed);
+    if (readOwnership === 'superseded') throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:rearm-read-owner');
+    if (readOwnership === 'wake-changed') {
+      this.noteRecoveryIntentPending(reason, generation, manualRecovery);
+      throw new FanApiError('POWER_RESUMING: 风扇恢复快照跨越唤醒边界，等待当前会话', 409, 'POWER_RESUMING');
     }
     // FAN-944: native may have slept BEFORE this Host existed. A never-opened
     // Host cannot return a resume receipt for that earlier sleep. Recheck the
@@ -2948,6 +3330,10 @@ export class FanHostLifecycle {
       if (native?.generation === generation && native.phase === 'ready' && native.hardwareWritesAllowed === true) {
         this.opened = false; this.eventsOpened = false; this.lease = null;
         this.beginCoordinatorSession();
+        this.coldOpenAdmission = {
+          sessionGeneration: this.sessionGeneration, powerGeneration: generation,
+          processId: this.process?.pid ?? 0,
+        };
         this.setState('awaiting-control');
         fanLifecycleEvidence('lifecycle.cold-host-hc-open-deferred', {
           generation, remoteState: probe.state, nativePhase: native.phase,
@@ -2956,14 +3342,28 @@ export class FanHostLifecycle {
         return;
       }
     }
+    // Explicit OFF or an empty completed resume can leave the awake Host
+    // without an open HC session. Requested control must reach the original
+    // Open/OpenEvents chain rather than wait for a no-op /resume. A cancelled
+    // old waiter keeps its own terminal receipt; this is a new control request.
+    // Resolve after state synchronization/callbacks; reuse only this pure admission segment.
+    const probeEvidence = probe ? this.snapshotGenerationEvidence(probe) : undefined;
+    if (probe && (this.idleResumeNeedsHcOpen(probe, generation, probeEvidence)
+      || this.resumedHalfOpenHcSessionNeedsOpen(probe, generation, probeEvidence)
+      || this.ownOriginalHcOpenNeedsCompletion(probe, generation))) {
+      await this.completeHcOpenForAdmission(probe, context);
+      return;
+    }
     // FAN-938 R7：手动救援已经观察到本地/系统的睡眠边界时，远端 Ready 可能只是
     // 睡眠前的陈旧快照。不能把它当作本代 HC 会话已经重开，否则会跳过 `/api/resume`
     // 和 Open/OpenEvents，正是“看起来 Ready、实际唤醒后风扇不再写入”的漏口。
-    const hostGeneration = probe ? this.hostPowerGenerationForAdmission(probe) : null;
+    const hostGeneration = probeEvidence?.generation ?? null;
     const manualBoundaryNeedsFreshHostResume = manualRecovery
-      && this.coordinator.snapshot().phase === 'resuming'
+      && this.coordinator.currentPhase === 'resuming'
       && hostGeneration !== generation;
-    if (probe && this.remoteControlAdmissible(probe) && !manualBoundaryNeedsFreshHostResume) {
+    if (probe && this.remoteControlAdmissible(probe, probeEvidence) && !manualBoundaryNeedsFreshHostResume) {
+      // A completed Host resume is session evidence, never native write permission.
+      await this.requireNativeWriteReadyForAdmission(context, 'ready-resume');
       // R4: an already-open Host still needs its renderer coordinator rebound after sleep.
       if (manualRecovery && !this.coordinator.isWakeReady(generation)) {
         this.observePowerBoundary('manual-resume-ready', generation);
@@ -3004,7 +3404,8 @@ export class FanHostLifecycle {
     //     直接调用 runResumeAdmissionWait 而不是 resumeAdmissionWait：后者只在
     //     coordinator 仍处 suspending/suspended/resuming 时才武装，而本场景恰恰可能在
     //     `power.resumed` 之后（phase 已离开 resuming），那正是本次事故的漏口。
-    await this.runResumeAdmissionWait('rearm-after-wake', context);
+    const openRequired = await this.runResumeAdmissionWait('rearm-after-wake', context);
+    if (openRequired) await this.completeHcOpenForAdmission(openRequired, context);
     this.assertAdmissionContextCurrent(context, 'rearm-completed');
     if (manualRecovery && !this.coordinator.isWakeReady(generation)) {
       // The remote Host has now proved its HC session. This is the only point
@@ -3032,6 +3433,9 @@ export class FanHostLifecycle {
    */
   private noteRecoveryIntentPending(reason: string, generation: number, manual = false): void {
     if (!this.enabled || this.isDisabledState() || generation <= 0) return;
+    // A real lifecycle request supersedes the limited failure episode. It must
+    // retain the original wake owner, budget and actual HC admission semantics.
+    if (this.recoveryIntent?.selfHeal) this.cancelRecovery('lifecycle-replaces-self-heal');
     const existing = this.recoveryIntent;
     if (existing !== null && existing.generation === generation) {
       existing.reason = reason;
@@ -3046,6 +3450,417 @@ export class FanHostLifecycle {
       reason, generation, manual, recoveryState: this.recoveryState, recoveryAttempts: this.recoveryAttempts,
     });
     if (!this.recoveryRetryTimer) this.scheduleRecoveryTick(this.nextRecoveryBackoff());
+  }
+
+  /** Park the existing owner while still inside the rejected queue operation. */
+  private parkTerminalControlRefusal(intentRevision: number, generation: number,
+    hostProcess: FanHostProcess | null, epoch: number, error: unknown): number | undefined {
+    if (!this.enabled || this.isDisabledState() || intentRevision !== this.controlIntentRevisionValue
+        || generation !== this.powerGeneration || hostProcess !== this.process || epoch !== this.heartbeatEpoch) return;
+    this.invalidateHeartbeatEpoch();
+    const refusalEpoch = this.heartbeatEpoch;
+    this.stopHeartbeat();
+    if (!this.recoveryIntent && generation > 0 && this.hasActiveControlIntent())
+      this.recoveryIntent = { generation, reason: 'control-terminal-refusal', manual: false };
+    this.stopRecoveryLoop('control-terminal-refusal');
+    // Invalidate a read already in flight, not only its next scheduled tick.
+    this.recoveryToken += 1;
+    if (this.recoveryIntent) {
+      this.recoveryState = 'needs-attention';
+      fanLifecycleEvidence('lifecycle.self-heal-needs-attention', {
+        generation, reason: error instanceof FanApiError ? error.errorCode : 'terminal-control-refusal',
+      });
+    }
+    // Refusal invalidates this renderer's control proof, not the hardware intent.
+    // Publish last so a subscriber cannot have its newer state overwritten here.
+    this.controlDisplayRemote = undefined;
+    this.publishControlDisplay();
+    return refusalEpoch;
+  }
+
+  /** Retain a failed explicit request without a second writer or another timer. */
+  /** Retire the old queued writer before an uncertain manual operation releases its queue. */
+  private retireLifecycleAfterUncertainMutation(context: FanAdmissionContext, error: unknown): void {
+    if (this.recoveryIntent && !this.recoveryIntent.selfHeal && controlSelfHealMode(error) === 'observe-only'
+        && error instanceof FanApiError
+        && (error.requestPath === '/api/enable' || error.requestPath === '/api/preset' || unconfirmedFanPreparationPath(error) !== undefined)
+        && this.enabled && !this.isDisabledState() && this.process
+        && context.hostProcess === this.process && this.isAdmissionContextCurrent(context)
+        && context.failedMutationEpoch === this.heartbeatEpoch && context.failedMutationSession === this.sessionGeneration) {
+      this.cancelRecovery('uncertain-control-replaces-lifecycle');
+    }
+  }
+
+  /** [LIFECYCLE:FAN:HEAL] 单次故障最多30秒/10轮观察/2次安全写机会，重试共享原预算。
+   * 未知写结果先观察，满足现有续接判据才可写；身份/代次/意图变化后旧结果不得提交。
+   * 耗尽进入 needs-attention，停自动重试并保留新手动请求；新显式意图的预算由 refreshSelfHealForExplicitIntent 管理。 */
+  private retainControlForSelfHeal(context: FanAdmissionContext, nodes: readonly FanNode[] | undefined, error: unknown,
+    forceObserveOnly = false): void {
+    const failureMode = controlSelfHealMode(error);
+    const mode = forceObserveOnly && failureMode ? 'observe-only' : failureMode;
+    const existing = this.recoveryIntent?.selfHeal;
+    // A new explicit request may reuse this owner, then lose its own receipt.
+    // Reclassify before the de-duplication return without resetting its budget.
+    // An already uncertain write must never gain a later preparation shortcut.
+    if (existing && mode === 'observe-only' && !existing.observeOnly && nodes?.length
+        && this.enabled && !this.isDisabledState() && this.process
+        && context.hostProcess === this.process && existing.context.hostProcess === this.process
+        && existing.session === this.sessionGeneration && this.isAdmissionContextCurrent(context)
+        && this.isAdmissionContextCurrent(existing.context)) {
+      existing.observeOnly = true;
+      existing.preparationPath = unconfirmedFanPreparationPath(error);
+    }
+    if (nodes?.length) this.retireLifecycleAfterUncertainMutation(context, error);
+    if (!mode || (this.recoveryIntent && (this.recoveryState !== 'needs-attention' || this.recoveryIntent.selfHeal))
+        || !nodes?.length || !this.enabled || this.isDisabledState()
+        || !this.process || context.hostProcess !== this.process
+        || !this.isAdmissionContextCurrent(context)) return;
+    if (this.recoveryIntent) this.cancelRecovery('bounded-self-heal-after-lifecycle');
+    // Generation 0 is the initial awake session. The existing tick still needs
+    // current native Ready/write permission; OEM feedback cannot grant it.
+    this.desiredCurve = cloneFanNodes(nodes);
+    const startupRequired = (error instanceof FanApiError && error.errorCode === 'HC_CLOSE_PENDING')
+      || context.action === 'manual-close-self-heal';
+    const observeReadyWake = mode === 'observe-only' && (context.action === 'rearm-self-heal'
+      || context.action === 'recovery-self-heal'
+      || (error instanceof FanApiError && error.errorCode === 'HC_RESUME_REBUILD_FAILED'));
+    this.recoveryIntent = { generation: context.generation, reason: 'control-failure-self-heal', manual: false,
+      selfHeal: { context: { ...context }, session: this.sessionGeneration,
+        deadlineAt: monotonicNowMs() + 30_000, probesLeft: startupRequired ? 10 : 5,
+        probeLimit: startupRequired ? 10 : 5, writesLeft: 2, observeOnly: mode === 'observe-only', startupRequired, observeReadyWake,
+        preparationPath: unconfirmedFanPreparationPath(error) } };
+    this.recoveryAttempts = 0;
+    this.recoveryState = 'queued';
+    fanLifecycleEvidence('lifecycle.self-heal-registered', { generation: context.generation, mode,
+      reason: error instanceof FanApiError ? error.errorCode : 'transport-timeout' });
+    this.scheduleRecoveryTick(this.nextRecoveryBackoff());
+  }
+
+  private refreshSelfHealForExplicitIntent(context?: FanAdmissionContext): void {
+    const previous = this.recoveryIntent?.selfHeal;
+    if (!previous || !this.recoveryIntent) return;
+    context ??= this.admissionContext('apply', this.controlIntentRevisionValue);
+    // A new curve can arrive after exact exit but before the successor launch
+    // returns. Keep the exact predecessor marker for the existing adoption rule.
+    if (previous.startupRequired && !context.hostProcess && previous.context.hostProcess
+        && this.lastExitedProcess === previous.context.hostProcess) {
+      context = { ...context, hostProcess: previous.context.hostProcess, hostPid: previous.context.hostPid };
+    }
+    this.recoveryIntent.selfHeal = { context: { ...context }, session: this.sessionGeneration,
+      observeOnly: false, probesLeft: previous.startupRequired ? 10 : 5, probeLimit: previous.startupRequired ? 10 : 5,
+      writesLeft: 2, deadlineAt: monotonicNowMs() + 30_000, startupRequired: previous.startupRequired,
+      observeReadyWake: previous.observeReadyWake === true && previous.session === this.sessionGeneration
+        && previous.context.generation === context.generation && previous.context.hostProcess === context.hostProcess };
+    this.stopRecoveryLoop('new-explicit-self-heal-intent');
+    this.recoveryAttempts = 0;
+    this.recoveryState = 'queued';
+    this.scheduleRecoveryTick(this.nextRecoveryBackoff());
+  }
+
+  private assertSelfHealStartupCurrent(owner?: FanControlSelfHeal): void {
+    if (!owner) return;
+    if (this.recoveryIntent?.selfHeal !== owner)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:self-heal-startup-owner');
+    if (monotonicNowMs() >= owner.deadlineAt) throw new Error('FAN_SELF_HEAL_STARTUP_DEADLINE');
+  }
+
+  private cancelRecoveryForManualStartup(reason: string, owner?: FanControlSelfHeal): void {
+    if (!owner) this.cancelRecovery(reason);
+    else this.assertSelfHealStartupCurrent(owner);
+  }
+
+  private cancelSelfHealRead(): void {
+    const cancel = this.selfHealReadCancel;
+    this.selfHealReadCancel = null;
+    cancel?.();
+  }
+
+  /** Bound only a read observer; an underlying device operation is never declared cancelled. */
+  private async observeSelfHealRead<T>(heal: FanControlSelfHeal, maximumMs: number,
+    read: (timeoutMs: number) => Promise<T>, completionAllowanceMs = 0): Promise<T> {
+    const remaining = heal.deadlineAt - monotonicNowMs();
+    if (remaining <= 0) throw new Error('FAN_SELF_HEAL_READ_TIMEOUT');
+    const budget = Math.max(1, Math.floor(Math.min(maximumMs, remaining)));
+    const observerBudget = Math.max(1, Math.floor(Math.min(remaining, budget + completionAllowanceMs)));
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel!: () => void;
+    const stopped = new Promise<never>((_resolve, reject) => {
+      cancel = () => reject(new Error('FAN_SELF_HEAL_READ_CANCELLED'));
+      timer = setTimeout(() => reject(new Error('FAN_SELF_HEAL_READ_TIMEOUT')), observerBudget);
+    });
+    this.selfHealReadCancel = cancel;
+    try {
+      return await Promise.race([read(budget), stopped]);
+    } finally {
+      clearTimeout(timer);
+      if (this.selfHealReadCancel === cancel) this.selfHealReadCancel = null;
+    }
+  }
+
+  private async runControlSelfHeal(token: number, heal: FanControlSelfHeal): Promise<void> {
+    const readEpoch = this.heartbeatEpoch;
+    // A failed mutation in this exact authority may observe native Ready
+    // even if a later telemetry notification regressed the local phase.
+    const observeReadyWake = heal.observeReadyWake === true || (heal.context.failedMutationEpoch === readEpoch
+      && heal.context.failedMutationSession === heal.session);
+    const ownsTask = () => token === this.recoveryToken && this.recoveryIntent?.selfHeal === heal;
+    const current = () => ownsTask() && this.enabled && !this.isDisabledState()
+      && this.sessionGeneration === heal.session && this.process === heal.context.hostProcess
+      && this.isAdmissionContextCurrent(heal.context);
+    const attention = (reason: string) => {
+      if (!ownsTask()) return;
+      this.stopRecoveryLoop(reason);
+      this.recoveryState = 'needs-attention';
+      fanLifecycleEvidence('lifecycle.self-heal-needs-attention', { generation: heal.context.generation, reason });
+    };
+    const retry = () => {
+      if (!current()) { if (ownsTask()) this.cancelRecovery('self-heal-superseded'); return; }
+      // A known refusal consumed the last write opportunity. Do not schedule
+      // reads or another startup that cannot submit any control. Unknown write
+      // results still need their remaining read-only reconciliation budget.
+      if (!heal.observeOnly && heal.writesLeft <= 0) { attention('write-budget-exhausted'); return; }
+      // Fast failures must not exhaust a 30s episode in its first 4s. Grant
+      // one slow observation stage, sharing the original deadline/write budget.
+      // Unknown writes remain observe-only; no steady-state poller is added.
+      if (heal.probesLeft <= 0 && heal.probeLimit === 5 && monotonicNowMs() < heal.deadlineAt) {
+        heal.probesLeft = 5;
+        heal.probeLimit = 10;
+      }
+      if (heal.probesLeft <= 0 || monotonicNowMs() >= heal.deadlineAt) { attention('budget-exhausted'); return; }
+      this.recoveryState = 'queued';
+      this.scheduleRecoveryTick(Math.min(this.nextRecoveryBackoff(), Math.max(0, heal.deadlineAt - monotonicNowMs())));
+    };
+    if (heal.startupRequired && ownsTask() && !current()
+        && this.adoptConfirmedExitForManualControl(heal.context, this.process)) heal.session = this.sessionGeneration;
+    if (!current()) { if (ownsTask()) this.cancelRecovery('self-heal-superseded'); return; }
+    if (!heal.observeOnly && heal.writesLeft <= 0) { attention('write-budget-exhausted'); return; }
+    if (heal.probesLeft <= 0 || monotonicNowMs() >= heal.deadlineAt) { attention('budget-exhausted'); return; }
+    heal.probesLeft -= 1;
+    this.recoveryAttempts += 1;
+    this.recoveryState = 'recovering';
+    let writeAttempted = false;
+    let startupAttempted = false;
+    const writeCurve = async (curve: readonly FanNode[]) => {
+      if (heal.writesLeft <= 0) { attention('write-budget-exhausted'); return; }
+      await this.enqueue(async () => {
+        if (!current() || readEpoch !== this.heartbeatEpoch || monotonicNowMs() >= heal.deadlineAt) return;
+        // Original cold Open owns one session increment. An unrelated increment
+        // is still a superseding boundary, never a reason to trust a late write.
+        const expectedSession = this.sessionGeneration + (this.opened ? 0 : 1);
+        heal.writesLeft -= 1;
+        writeAttempted = true;
+        heal.preparationPath = undefined;
+        const ownsWriteSession = () => ownsTask() && this.sessionGeneration === expectedSession
+          && this.process === heal.context.hostProcess && this.isAdmissionContextCurrent(heal.context);
+        let applied: FanState;
+        try {
+          applied = await this.applyMutation(cloneFanNodes(curve), heal.context.intentRevision);
+          this.assertControlWriteCompletionCurrent(applied);
+        }
+        catch (error) {
+          // A successful original Open may advance our own session before an
+          // Enable acknowledgement is lost. Keep that exact identity for reads,
+          // so reconciliation remains possible without repeating the write.
+          if (ownsWriteSession()) heal.session = this.sessionGeneration;
+          throw error;
+        }
+        if (!ownsWriteSession()) return;
+        heal.session = this.sessionGeneration;
+        this.completedRecoveryWrite = { generation: heal.context.generation, intentRevision: heal.context.intentRevision,
+          hostSession: this.coordinatorSession, curve: this.activeCurve, response: applied };
+        this.settleRecoveryTaskIfAny('self-heal-curve-written');
+        fanLifecycleEvidence('lifecycle.self-heal-completed', { generation: heal.context.generation, mode: 'retry-safe' });
+      });
+      retry();
+    };
+    try {
+      // Native readiness is independent of an OEM physical acknowledgement.
+      // A failed rearm may leave local resuming; current native Ready allows
+      // bounded reads there, never replay or startup without retirement proof.
+      // Missing either software snapshot remains unknown, never permission to write.
+      const native = await this.observeSelfHealRead(heal, 1000, timeoutMs => this.readNativePowerState(timeoutMs));
+      if (!current()) { retry(); return; }
+      if (readEpoch !== this.heartbeatEpoch) { retry(); return; }
+      // The lifecycle successor accepts only positive power generations.
+      if (native && Number.isSafeInteger(native.generation) && native.generation > 0
+          && native.generation >= heal.context.generation
+          && (native.generation > heal.context.generation || native.phase === 'suspending'
+            || native.phase === 'suspended' || native.phase === 'resuming' || (this.isSleepWindow() && !heal.startupRequired && !observeReadyWake))) {
+        // A missed real power edge belongs to the existing lifecycle owner.
+        // Retire this episode; do not wait on the old generation or issue a
+        // second Close from this read-only observation.
+        this.synchronizeObservedPowerSnapshot(native);
+        // State/display subscribers may have cancelled or replaced this owner.
+        if (!ownsTask()) return;
+        this.noteRecoveryIntentPending('self-heal-observed-power-transition', this.powerGeneration);
+        return;
+      }
+      if (!native || native.generation !== heal.context.generation || native.phase !== 'ready'
+          || native.hardwareWritesAllowed !== true || (this.isSleepWindow() && !heal.startupRequired && !observeReadyWake)) { retry(); return; }
+      if (monotonicNowMs() >= heal.deadlineAt) { attention('deadline'); return; }
+      // http.request already allows another 1000ms for IPC completion.
+      const remote = await this.observeSelfHealRead(heal, RESUME_WAIT_MIN_PROBE_TIMEOUT_MS,
+        timeoutMs => this.adapter.getState(timeoutMs), 1000);
+      if (!current()) { retry(); return; }
+      if (readEpoch !== this.heartbeatEpoch) { retry(); return; }
+      if (monotonicNowMs() >= heal.deadlineAt) { attention('deadline'); return; }
+      // No feedback alone never authorizes replay. A terminal owner that has
+      // actually retired HC can instead take the original exact-exit startup.
+      // Keep the same deadline/budgets and permit only one such replacement.
+      // Proven resource retirement also applies to a known unsubmitted retry
+      // or a newer explicit curve; the preceding failure class is not a gate.
+      if (!heal.retiredOwner && heal.writesLeft > 0
+          && (remote.state === 'Stopped' || remote.state === 'FaultLocked' || remote.state === 'ListenerFaultLocked')
+          && hasRetiredHcResourceBoundary(remote) && remote.lease === null && !hasBlockingFanTransition(remote)) {
+        heal.retiredOwner = this.process!;
+        heal.startupRequired = true;
+        heal.observeOnly = false;
+      }
+      if (heal.startupRequired && !heal.observeOnly) {
+        if (remote.hcCloseCleanupPending === true) { retry(); return; }
+        // A completed process-close receipt can honestly retain generation 0
+        // and unknown OEM ownership. It is startup evidence, never a write grant.
+        // Reuse the original authenticated startup + exact-exit owner, which
+        // rechecks every permission instead of promoting this observed snapshot.
+        const context = { ...heal.context, action: 'apply' };
+        startupAttempted = true;
+        await this.enqueueManualControlStartup(context, () => {
+          this.assertSelfHealStartupCurrent(heal);
+          // The accepted retirement belongs to this process object. Preserve
+          // it through the queue; a later read must not reopen the old writer.
+          if (heal.retiredOwner && this.process === heal.retiredOwner) this.closedHostAwaitingExit = true;
+          return this.startInternal(
+            { manualRecovery: true, reason: 'pending-cleanup-self-heal' }, true, context,
+            this.controlCancellationRevisionValue, heal);
+        });
+        if (!ownsTask() || context.hostProcess !== this.process || !this.isAdmissionContextCurrent(context)) return;
+        heal.context = context;
+        heal.session = this.sessionGeneration;
+        heal.startupRequired = false;
+        const curve = this.desiredCurve;
+        if (!curve?.length) { this.cancelRecovery('self-heal-no-curve'); return; }
+        await writeCurve(curve);
+        return;
+      }
+      if (heal.observeOnly && heal.preparationPath) {
+        // Recover only this session's original Open. A readable listener alone
+        // never proves a delayed Open or permits another Open request.
+        const origin = this.explicitOpenOrigin;
+        if (heal.preparationPath === '/api/open' && origin) this.acknowledgeOriginalHcOpen(remote, origin);
+        if (heal.preparationPath === '/api/open' && remote.openEventsCalled === false
+            && this.ownOriginalHcOpenNeedsCompletion(remote, heal.context.generation)) {
+          await this.enqueue(async () => {
+            if (!current() || readEpoch !== this.heartbeatEpoch || monotonicNowMs() >= heal.deadlineAt) return;
+            const native = await this.observeSelfHealRead(heal, 1000, timeoutMs => this.readNativePowerState(timeoutMs));
+            if (!current() || readEpoch !== this.heartbeatEpoch || monotonicNowMs() >= heal.deadlineAt
+                || native?.generation !== heal.context.generation || native.phase !== 'ready' || native.hardwareWritesAllowed !== true) return;
+            // After submission an unknown Events result must also be observed,
+            // never sent twice merely because its response disappeared.
+            heal.preparationPath = '/api/open-events';
+            try {
+              const events = await this.adapter.openEvents();
+              if (!current() || readEpoch !== this.heartbeatEpoch || monotonicNowMs() >= heal.deadlineAt) return;
+              this.bindExplicitHcOpen(events, heal.context.generation);
+              this.syncRemoteSessionState(events);
+            }
+            catch (error) {
+              if (error instanceof FanApiError && error.errorCode === 'HC_OPERATION_BUSY') heal.preparationPath = '/api/open';
+              throw error;
+            }
+          });
+          retry();
+          return;
+        }
+        if (this.hasCurrentOriginalHcOpenOrigin(heal.context.generation))
+          this.bindExplicitHcOpen(remote, heal.context.generation);
+      }
+      const evidence = this.snapshotGenerationEvidence(remote);
+      if (evidence.freshness !== 'current') { retry(); return; }
+      const unsupported = unsupportedFanControlError(remote);
+      if (unsupported) throw unsupported;
+      this.syncRemoteSessionState(remote, evidence);
+      // Display subscribers can retire this read or install a newer recovery owner.
+      if (!current() || readEpoch !== this.heartbeatEpoch) { retry(); return; }
+      const curve = this.desiredCurve;
+      if (!curve?.length) { this.cancelRecovery('self-heal-no-curve'); return; }
+      const remoteCurve = remote.activeCurve;
+      const confirmed = this.remoteFanControlHealthy(remote, evidence)
+        && this.hasReplayReuseWriteEvidence(remote.lastControlWriteEvidence)
+        && Array.isArray(remoteCurve) && remoteCurve.length === curve.length
+        && remoteCurve.every((node, i) => node && typeof node === 'object'
+          && node.tempC === curve[i].tempC && node.dutyPercent === curve[i].dutyPercent);
+      if (confirmed) {
+        // Lost acknowledgement, already applied: resume maintenance with zero
+        // Open/Close/enable replay. This remains software, not physical RPM proof.
+        this.activeCurve = cloneFanNodes(curve);
+        this.rememberActiveCurveReceipt(remote);
+        this.setState('ready');
+        // State observers can advance sleep/OFF before maintenance is resumed.
+        if (!current() || readEpoch !== this.heartbeatEpoch) { retry(); return; }
+        this.startHeartbeat();
+        this.settleRecoveryTaskIfAny('self-heal-readback-confirmed');
+        fanLifecycleEvidence('lifecycle.self-heal-completed', { generation: heal.context.generation, mode: 'readback' });
+        return;
+      }
+      // A completed newer HC wake retires the old uncertain write's scope.
+      // A wake notification alone, or the same attempt, cannot authorize replay.
+      const previousAttempt = heal.context.supersededPowerAttempt;
+      if (heal.observeOnly && previousAttempt !== undefined && heal.context.generation > 0
+          && remote.powerOperationGeneration === heal.context.generation
+          && remote.resumePhaseGeneration === heal.context.generation
+          && remote.powerOperationStatus === 'completed' && typeof remote.powerOperationAttempt === 'number' && Number.isSafeInteger(remote.powerOperationAttempt)
+          && remote.powerOperationAttempt > previousAttempt && remote.lease === null
+          && ((remote.state === 'AwaitingControl' && remote.hardwareWritesEnabled === false)
+            || (remote.state === 'Ready' && remote.hardwareWritesEnabled === true))
+          && this.remoteControlAdmissible(remote, evidence)) {
+        this.noteRecoveryIntentPending('self-heal-newer-host-wake', this.powerGeneration);
+        return;
+      }
+      // A confirmed preparatory receipt is not an uncertain curve write.
+      // Lost acquire needs its actual lease; absence cannot authorize reacquire.
+      if (heal.observeOnly && heal.preparationPath && this.remoteControlAdmissible(remote, evidence)
+          && (heal.preparationPath !== '/api/acquire-control' || (this.lease && remote.lease?.leaseId === this.lease.leaseId)))
+        heal.observeOnly = false;
+      if (heal.observeOnly || !this.remoteControlAdmissible(remote, evidence)) { retry(); return; }
+      await writeCurve(curve);
+    } catch (error) {
+      if (!current()) {
+        if (startupAttempted && ownsTask()) attention('startup-unconfirmed');
+        else retry();
+        return;
+      }
+      const mode = controlSelfHealMode(error);
+      // A submitted write stays uncertain even when its reply crosses a wake.
+      // Retain read-only reconciliation before the old-epoch early return.
+      if ((writeAttempted || startupAttempted) && mode === 'observe-only') {
+        heal.observeOnly = true;
+        heal.preparationPath = unconfirmedFanPreparationPath(error);
+        if (writeAttempted && readEpoch === this.heartbeatEpoch) {
+          heal.context.failedMutationEpoch = readEpoch;
+          heal.context.failedMutationSession = heal.session;
+        }
+        heal.startupRequired = false;
+      }
+      // The old reply cannot quarantine a newer wake epoch. Let the existing
+      // bounded tick observe its current native facts and hand off normally.
+      if (readEpoch !== this.heartbeatEpoch) { retry(); return; }
+      if (isTerminalFanControlRefusal(error)) {
+        this.parkTerminalControlRefusal(heal.context.intentRevision, heal.context.generation,
+          heal.context.hostProcess ?? null, readEpoch, error);
+        return;
+      }
+      // State GET timeouts are read-only. They do not turn a known refused
+      // control request into an uncertain hardware write.
+      if (isExternalFanControlConflict(error) || (error instanceof FanApiError && (error.status === 401 || error.status === 403))
+          || (isNonRetryableControlError(error) && mode === null)) { attention('terminal-refusal'); return; }
+      if (error instanceof FanApiError && error.errorCode === 'HC_CLOSE_PENDING') {
+        heal.startupRequired = true;
+        // Slow HC cleanup gets low-frequency reads through the original 30s
+        // deadline. Grant the extra five probes once, never on every error.
+        if (heal.probeLimit === 5) { heal.probesLeft += 5; heal.probeLimit = 10; }
+      }
+      retry();
+    }
   }
 
   private nextRecoveryBackoff(): number {
@@ -3069,6 +3884,7 @@ export class FanHostLifecycle {
   }
 
   private stopRecoveryLoop(reason: string): void {
+    this.cancelSelfHealRead();
     if (this.recoveryRetryTimer) {
       clearTimeout(this.recoveryRetryTimer);
       this.recoveryRetryTimer = null;
@@ -3080,7 +3896,8 @@ export class FanHostLifecycle {
     }
   }
 
-  /** close/disable/新代次取代：清定时器 + 意图 + 进度，并令任何在途旧 tick 失效。 */
+  /** [LIFECYCLE:FAN:CANCEL] close/disable/取代本任务时清定时器与意图、推进 token；
+   * 旧 await 返回仍须核验身份/代次/意图，不能复活已取消控制；本动作不证明硬件已交还。 */
   private cancelRecovery(reason: string): void {
     const generation = this.recoveryIntent?.generation ?? null;
     this.stopRecoveryLoop(reason);
@@ -3092,8 +3909,10 @@ export class FanHostLifecycle {
     this.recoveryToken += 1;
   }
 
-  /** 本代恢复任务达成（曲线已按原机型写入成功，或明确无最新曲线）时收敛 owner。 */
+  /** [LIFECYCLE:FAN:SETTLE] 本代写入成功或确认无最新曲线后收敛恢复 owner，撤旧 tick；
+   * 结束恢复不等于 OEM 物理交还，交还证据继续由原路线独立结算。 */
   private settleRecoveryTaskIfAny(reason = 'settled'): void {
+    this.cancelSelfHealRead();
     if (this.recoveryRetryTimer) {
       clearTimeout(this.recoveryRetryTimer);
       this.recoveryRetryTimer = null;
@@ -3107,6 +3926,7 @@ export class FanHostLifecycle {
     this.recoveryIntent = null;
     this.recoveryAttempts = 0;
     this.recoveryState = 'controlled';
+    this.schedulePowerLineReplay();
   }
 
   /**
@@ -3154,6 +3974,10 @@ export class FanHostLifecycle {
       this.stopRecoveryLoop('no-intent');
       return;
     }
+    if (intent.selfHeal) {
+      await this.runControlSelfHeal(token, intent.selfHeal);
+      return;
+    }
     // 新睡眠/唤醒代次：收敛到最新代次（保留用户意图），不直接取消。
     const latestGeneration = Math.max(0, Math.floor(this.powerGeneration));
     if (latestGeneration > 0 && latestGeneration !== intent.generation) {
@@ -3164,6 +3988,9 @@ export class FanHostLifecycle {
     this.recoveryState = 'recovering';
     // 每轮**只**自增一次尝试计数（旧实现未就绪分支与 catch 分支各加一次，导致双计数）。
     this.recoveryAttempts += 1;
+    let recoveryIntentRevision = this.controlIntentRevisionValue;
+    let recoveryEpoch = this.heartbeatEpoch;
+    let writePowerReceipt: FanHostPowerReceipt | null = null;
     try {
       // FAN-938 R6.1 §3：Host 进程丢失 → 转入已有安全启动/旧实例核验路径，不静默停止 owner。
       // startInternal() 内部先 assertReachableBeforeShortCircuit（可达性续证 + 有界等待旧
@@ -3181,7 +4008,7 @@ export class FanHostLifecycle {
         }
       }
       if (!this.coordinator.isWakeReady(generation)) {
-        const context = this.admissionContext('recover-owner', this.controlIntentRevision, generation);
+        const context = this.admissionContext('recover-owner', this.controlIntentRevisionValue, generation);
         context.manualRecovery = intent.manual;
         const adopted = await this.observeCurrentNativeWakeForControl(context, intent.manual);
         if (token !== this.recoveryToken || !this.recoveryIntent) return;
@@ -3207,15 +4034,23 @@ export class FanHostLifecycle {
         return;
       }
       // R6 §P1：**先写成功再收敛**。旧实现在写入前 settle，写入失败后再无人接手（1 次尝试 0 成功）。
-      const intentRevision = this.controlIntentRevision;
+      const intentRevision = this.controlIntentRevisionValue;
+      const writeEpoch = this.heartbeatEpoch;
       await this.enqueue(async () => {
         // An explicit writer, close or newer sleep can finish while this owner
         // waits for the queue. Recheck at execution, not only before enqueue.
         if (token !== this.recoveryToken || !this.recoveryIntent
+            || writeEpoch !== this.heartbeatEpoch
             || !this.isResumeReplayCurrent(generation, intentRevision)) return false;
         const latestCurve = this.desiredCurve;
         if (!latestCurve) return false;
+        const receipt = this.observedHostPowerReceipt;
+        if (receipt?.generation === generation && receipt.session === this.sessionGeneration
+            && receipt.process === this.process && receipt.epoch === this.heartbeatEpoch) writePowerReceipt = receipt;
+        recoveryIntentRevision = intentRevision;
+        recoveryEpoch = writeEpoch;
         const response = await this.applyMutation(cloneFanNodes(latestCurve));
+        this.assertControlWriteCompletionCurrent(response);
         if (token === this.recoveryToken && this.recoveryIntent
             && this.isResumeReplayCurrent(generation, intentRevision)) {
           this.completedRecoveryWrite = {
@@ -3233,13 +4068,23 @@ export class FanHostLifecycle {
       this.scheduleRecoveryTick(this.nextRecoveryBackoff());
     } catch (error) {
       if (token !== this.recoveryToken || !this.recoveryIntent) return;
-      if (isNonRetryableControlError(error) || isExternalFanControlConflict(error)) {
+      // A declared refusal belongs to its old wake; uncertain writes still reconcile.
+      const oldRefusal = recoveryEpoch !== this.heartbeatEpoch && isTerminalFanControlRefusal(error);
+      const newerStagedIntent = recoveryEpoch === this.heartbeatEpoch && generation === this.powerGeneration
+        && recoveryIntentRevision !== this.controlIntentRevisionValue
+        && this.stagedControlIntentRevision === this.controlIntentRevisionValue;
+      if (!oldRefusal && !newerStagedIntent && (isNonRetryableControlError(error) || isExternalFanControlConflict(error))) {
         // 终态：保留意图（recoveryActive=false）并等待下一次手动请求实际重查。
         this.stopRecoveryLoop('needs-attention');
         this.recoveryState = 'needs-attention';
         fanDiagnosticLog('lifecycle.recovery-needs-attention', {
           generation, error: describeUnknownError(error),
         });
+        const failureContext = this.admissionContext('recovery-self-heal', recoveryIntentRevision, generation);
+        if (writePowerReceipt && writePowerReceipt.epoch !== this.heartbeatEpoch
+            && writePowerReceipt.process === this.process && writePowerReceipt.session === this.sessionGeneration
+            && writePowerReceipt.generation === generation) failureContext.supersededPowerAttempt = writePowerReceipt.attempt;
+        this.retainControlForSelfHeal(failureContext, this.desiredCurve ?? undefined, error);
         return;
       }
       // 瞬态失败（含 POWER_RESUMING）保留意图继续退避。
@@ -3269,54 +4114,279 @@ export class FanHostLifecycle {
     return next;
   }
 
+  private waitForAdmissionDelay(ms: number): Promise<void> {
+    return new Promise((resolve) => {
+      const done = () => { clearTimeout(timer); this.admissionWaitCancellations.delete(done); resolve(); };
+      const timer = setTimeout(done, Math.max(1, ms));
+      this.admissionWaitCancellations.add(done);
+    });
+  }
+
+  /** Bound only a read observer; native/Host work keeps its own lifetime. */
+  private async observeAdmissionRead<T>(read: () => Promise<T>, timeoutMs: number): Promise<T | null> {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let cancel!: () => void;
+    const stopped = new Promise<null>((resolve) => {
+      cancel = () => resolve(null);
+      timer = setTimeout(cancel, timeoutMs);
+    });
+    this.admissionWaitCancellations.add(cancel);
+    try {
+      return await Promise.race([read(), stopped]);
+    } finally {
+      clearTimeout(timer);
+      this.admissionWaitCancellations.delete(cancel);
+    }
+  }
+
+  private readManualNativeWaitSnapshot(timeoutMs: number): Promise<PowerLifecycleState | null> {
+    return this.observeAdmissionRead(() => this.readNativePowerState(timeoutMs).catch(() => null), timeoutMs);
+  }
+
+  private async waitForManualNativeWriteBoundary(context: FanAdmissionContext): Promise<void> {
+    const deadline = context.deadlineAt ?? (context.deadlineAt = monotonicNowMs() + this.resumeWaitDeadlineMs);
+    let interval = RESUME_WAIT_MIN_INTERVAL_MS;
+    for (;;) {
+      this.assertAdmissionContextCurrent(context, 'manual-native-wait');
+      const remaining = deadline - monotonicNowMs();
+      if (remaining <= 0) throw new Error('FAN_MANUAL_NATIVE_WAIT_DEADLINE');
+      // One transient read at a time, with backoff; never create an awake poller.
+      await this.waitForAdmissionDelay(Math.min(interval, remaining));
+      this.assertAdmissionContextCurrent(context, 'manual-native-wait-delay');
+      const budget = deadline - monotonicNowMs();
+      if (budget <= 0) throw new Error('FAN_MANUAL_NATIVE_WAIT_DEADLINE');
+      const native = await this.readManualNativeWaitSnapshot(Math.max(1, Math.floor(Math.min(1000, budget))));
+      this.assertAdmissionContextCurrent(context, 'manual-native-wait-probe');
+      if (monotonicNowMs() >= deadline) throw new Error('FAN_MANUAL_NATIVE_WAIT_DEADLINE');
+      if (native && (native.generation !== context.generation || native.phase === 'suspending'
+          || (native.phase === 'ready' && native.hardwareWritesAllowed !== true))) {
+        throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
+      }
+      if (native?.generation === context.generation && native.phase === 'ready' && native.hardwareWritesAllowed === true) return;
+      if (native && native.phase !== 'resuming') throw new Error('FAN_MANUAL_WAKE_NOT_READY:changed-native-boundary');
+      interval = Math.min(RESUME_WAIT_MAX_INTERVAL_MS, interval * 2);
+    }
+  }
+
+  private async enqueueWithManualNativeWakeWait<T>(work: () => Promise<T>): Promise<T> {
+    let pendingContext: FanAdmissionContext | null = null;
+    let deadline: number | undefined;
+    for (;;) {
+      try {
+        return await this.enqueue(async () => {
+          if (pendingContext) this.assertAdmissionContextCurrent(pendingContext, 'manual-native-wait-queue-entry');
+          return work();
+        });
+      } catch (error) {
+        if (!(error instanceof FanManualNativeWakePending)) throw error;
+        pendingContext = error.context;
+        deadline ??= pendingContext.deadlineAt ?? monotonicNowMs() + this.resumeWaitDeadlineMs;
+        pendingContext.deadlineAt = Math.min(deadline, pendingContext.deadlineAt ?? deadline);
+        // The queued operation has settled. OFF/new curve/sleep need not wait
+        // for native's existing async Close worker to finish before cancelling.
+        await this.waitForManualNativeWriteBoundary(pendingContext);
+      }
+    }
+  }
+
+  private assertStartupCancellationCurrent(revision: number): void {
+    if (revision !== this.controlCancellationRevisionValue)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:start-cancelled');
+  }
+
+  private assertStartUpgradeCurrent(intent: Pick<FanAdmissionContext, 'intentRevision' | 'generation'>): void {
+    if (!this.enabled || this.isDisabledState() || intent.intentRevision !== this.controlIntentRevisionValue
+        || intent.generation !== this.powerGeneration)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:start-upgrade');
+  }
+
+  private async enqueueOwnedStartup(options: FanHostStartOptions, logBegin = false,
+    upgradeIntent?: Pick<FanAdmissionContext, 'intentRevision' | 'generation'>): Promise<FanDeviceGateResult> {
+    // OFF/Close can arrive before this work reaches the queue or while a read
+    // waits. Capture submission ownership, not whichever revision exists later.
+    const cancellationRevision = this.controlCancellationRevisionValue;
+    const startup = this.enqueueWithManualNativeWakeWait(async () => {
+      this.assertStartupCancellationCurrent(cancellationRevision);
+      if (upgradeIntent) this.assertStartUpgradeCurrent(upgradeIntent);
+      if (logBegin) fanDiagnosticLog('lifecycle.start-begin', {
+        state: this.state,
+        manualRecovery: options.manualRecovery === true,
+        reason: options.reason ?? null,
+      });
+      const gate = await this.startInternal(options, true, undefined, cancellationRevision);
+      return { gate, process: this.process, session: this.sessionGeneration };
+    });
+    this.intentRecoveryStartup = startup;
+    try { return (await startup).gate; }
+    finally { if (this.intentRecoveryStartup === startup) this.intentRecoveryStartup = null; }
+  }
+
   async start(options: FanHostStartOptions = {}): Promise<FanDeviceGateResult> {
     if (this.startPromise) {
-      if (!options.manualRecovery) return this.startPromise;
-      // The ordinary startup may have been admitted before the user's first
-      // click.  Waiting on it and returning the same promise would lose the
-      // explicit manual-recovery context forever.  Queue exactly one upgraded
-      // pass after the ordinary operation settles; repeated clicks share it.
-      if (!this.startUpgradePromise) {
-        const inFlight = this.startPromise;
+      const inFlight = this.startPromise;
+      const startedStagedIntent = this.startPromiseBoundary?.stagedIntentRevision;
+      const sameManualBoundary = this.startPromiseManualRecovery
+        && this.startPromiseBoundary?.cancellationRevision === this.controlCancellationRevisionValue
+        && this.startPromiseBoundary?.generation === this.powerGeneration;
+      if (!options.manualRecovery) return inFlight;
+      const intent = { intentRevision: this.controlIntentRevisionValue, generation: this.powerGeneration };
+      if (sameManualBoundary) {
+        try { return await inFlight; }
+        catch (error) {
+          // A distinct accepted staged request owns its next admission after failure.
+          // Unchanged intent still shares the original refusal and successful startup.
+          const newerStagedIntent = startedStagedIntent !== undefined
+            && startedStagedIntent !== this.stagedControlIntentRevision
+            && this.stagedControlIntentRevision === intent.intentRevision;
+          if (!newerStagedIntent && (!(error instanceof Error) || !error.message.startsWith('FAN_CONTROL_INTENT_SUPERSEDED:'))) throw error;
+          this.assertStartUpgradeCurrent(intent);
+        }
+      }
+      // An ordinary startup or a manual startup from before OFF/Close/new power
+      // cannot own this new manual request. Wait for that exact owner to settle,
+      // then queue one current pass. Repeated requests at the same boundary
+      // still share the existing promise; no parallel startup is admitted.
+      if (!this.startUpgradePromise || this.startUpgradeIntent?.intentRevision !== intent.intentRevision
+          || this.startUpgradeIntent?.generation !== intent.generation) {
         const upgrade = inFlight.catch(() => undefined).then(() => {
+          this.assertStartUpgradeCurrent(intent);
           // FAN-941: another ordinary start can already own startPromise here.
           // Re-entering start() would then join this same upgrade promise and
           // wait on itself forever. Keep the explicit pass on the existing
           // serialized queue; startInternal rechecks the live Host before any
           // launch or HC admission. Never create a second startup owner.
-          return this.enqueue(() => this.startInternal({
+          return this.enqueueOwnedStartup({
             manualRecovery: true,
             reason: options.reason ?? 'manual-start-upgrade',
-          }));
+          }, false, intent);
         });
         this.startUpgradePromise = upgrade;
+        this.startUpgradeIntent = intent;
       }
       const upgrade = this.startUpgradePromise;
       try {
         return await upgrade;
       } finally {
-        if (this.startUpgradePromise === upgrade) this.startUpgradePromise = null;
+        if (this.startUpgradePromise === upgrade) {
+          this.startUpgradePromise = null;
+          this.startUpgradeIntent = null;
+        }
       }
     }
-    const pending = this.enqueue(async () => {
-      fanDiagnosticLog('lifecycle.start-begin', {
-        state: this.state,
-        manualRecovery: options.manualRecovery === true,
-        reason: options.reason ?? null,
-      });
-      // E9（六十八批 T0 删减，HC 锚点：IDevice.cs:410-423 事件驱动 SetFanControl；生命周期零原创）
-      // 单次启动：不进入重试窗，失败即抛错。
-      return this.startInternal(options);
-    });
+    // Single queued start: share its exact process/session receipt with a
+    // first manual mutation that arrived before the launcher established a PID.
+    const pending = this.enqueueOwnedStartup(options, true);
     this.startPromise = pending;
+    this.startPromiseManualRecovery = options.manualRecovery === true;
+    this.startPromiseBoundary = {
+      cancellationRevision: this.controlCancellationRevisionValue,
+      generation: this.powerGeneration,
+      stagedIntentRevision: this.stagedControlIntentRevision,
+    };
     try {
       return await pending;
     } finally {
-      if (this.startPromise === pending) this.startPromise = null;
+      if (this.startPromise === pending) {
+        this.startPromise = null;
+        this.startPromiseManualRecovery = false;
+        this.startPromiseBoundary = null;
+      }
     }
   }
 
-  private async startInternal(options: FanHostStartOptions = {}): Promise<FanDeviceGateResult> {
+  private manualUnboundHcSessionNeedsRestart(
+    remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence,
+  ): boolean {
+    const evidence = generationEvidence ?? this.snapshotGenerationEvidence(remote);
+    return evidence.generation === 0 && evidence.freshness === 'stale'
+      && this.isUnleasedOriginalHcOpen(remote)
+      && !this.hasCurrentOriginalHcOpenOrigin(this.powerGeneration);
+  }
+
+  private async restartUnboundHcSessionForManualControl(options: FanHostStartOptions, allowRestart: boolean, controlContext?: FanAdmissionContext, selfHealOwner?: FanControlSelfHeal): Promise<FanDeviceGateResult> {
+    if (!allowRestart || controlContext?.unboundSessionRestartAttempted) throw new Error('FAN_MANUAL_HC_SESSION_RESTART_UNCONFIRMED');
+    const context = controlContext ?? this.admissionContext('manual-unbound-hc-session', this.controlIntentRevisionValue);
+    context.deadlineAt ??= monotonicNowMs() + this.resumeWaitDeadlineMs;
+    let native = await this.readNativePowerState().catch(() => null);
+    this.assertAdmissionContextCurrent(context, 'manual-unbound-native-probe');
+    if (native?.generation === context.generation && native.phase === 'suspended') {
+      const admitted = await this.requestManualWake(context.generation).catch(() => null);
+      this.assertAdmissionContextCurrent(context, 'manual-unbound-native-wake');
+      // No acknowledgement is an unknown result. Read current native facts
+      // without repeating the promotion; all generation/write gates still apply.
+      if (admitted === null || (admitted.ok === true && admitted.generation === context.generation)) {
+        native = await this.readNativePowerState().catch(() => null);
+        this.assertAdmissionContextCurrent(context, 'manual-unbound-native-recheck');
+      }
+    }
+    if (native?.generation === context.generation && native.phase === 'resuming') {
+      throw new FanManualNativeWakePending(context);
+    }
+    // Handshake is reachability, not permission to close a device while the
+    // system is committing sleep. Existing explicit native rescue owns stale
+    // Suspended recovery; this path requires its actual ready/write boundary.
+    if (native?.generation !== context.generation || native.phase !== 'ready' || native.hardwareWritesAllowed !== true) {
+      throw new Error('FAN_MANUAL_WAKE_NOT_READY:unbound-hc-session');
+    }
+    if (controlContext) controlContext.unboundSessionRestartAttempted = true;
+    // Curve/preset already registered its intent before entering this queue.
+    // Standalone ON owns a new intent; a direct mutation retains its exact one.
+    if (!controlContext) this.controlIntentRevisionValue += 1;
+    const revision = this.controlIntentRevisionValue;
+    this.cancelResumeWait('manual-unbound-hc-session');
+    this.cancelRecoveryForManualStartup('manual-unbound-hc-session', selfHealOwner);
+    fanLifecycleEvidence('lifecycle.resume-admission-rejected', {
+      action: 'manual-unbound-hc-session', generation: context.generation,
+      reason: 'retire-unproven-session-before-original-open', physicalOwnershipClaimed: false,
+    });
+    // Already on the Fan queue. Use its one authenticated Close/exact-exit
+    // owner, never enqueue public close behind ourselves or borrow Ready=0.
+    const closeFailureContext = this.admissionContext('manual-close-self-heal', revision);
+    const closeFailureSession = this.sessionGeneration, closeFailureEpoch = this.heartbeatEpoch;
+    try { await this.closeInternal(); }
+    catch (error) {
+      if (!selfHealOwner && closeFailureSession === this.sessionGeneration && closeFailureEpoch === this.heartbeatEpoch)
+        this.retainControlForSelfHeal(closeFailureContext,
+          this.desiredCurve ?? this.resumeCurve ?? this.activeCurve ?? undefined, error);
+      throw error;
+    }
+    this.assertIntentStillCurrent(revision, 'manual-unbound-session-retired');
+    if (this.powerGeneration !== context.generation) throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:manual-unbound-generation');
+    return this.startInternal(options, false, controlContext, this.controlCancellationRevisionValue, selfHealOwner);
+  }
+
+  private acceptCurrentHandshake(handshake: FanHandshake): FanDeviceGateResult {
+    // Candidate runtimes may change the public protocol independently of HC's
+    // version. Compare with this session's configured contract before Open.
+    // Legacy replies without a version retain their existing optional contract.
+    if (handshake.protocolVersion !== undefined && handshake.protocolVersion !== this.config.protocolVersion) {
+      this.writeReady = false;
+      throw new FanApiError('Fan Host 协议版本与当前会话不兼容', 409, 'FAN_PROTOCOL_INCOMPATIBLE', '/api/handshake');
+    }
+    const gate = this.config.aiMockSession
+      ? { allowed: aiFanMockHandshakeAllowed(handshake), writeReady: aiFanMockHandshakeAllowed(handshake), reason: 'AI-only mock handshake; zero real hardware writes' }
+      : evaluateFanDeviceGate(handshake, this.savedIdentity);
+    if (gate.allowed) {
+      if (!this.config.aiMockSession) this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
+      this.writeReady = gate.writeReady;
+      if (typeof handshake.deviceClass === 'string' && handshake.deviceClass) this.deviceClassValue = handshake.deviceClass;
+      if (!this.config.aiMockSession && handshake.deviceIdentity) this.onDeviceIdentity?.(handshake.deviceIdentity);
+    }
+    return gate;
+  }
+
+  private assertStartupReadCurrent(generation: number, owner: FanHostProcess | null,
+    session: number, epoch: number, cancellationRevision: number): void {
+    if (!this.enabled || this.isDisabledState() || generation !== this.powerGeneration || owner !== this.process
+        || session !== this.sessionGeneration || epoch !== this.heartbeatEpoch
+        || cancellationRevision !== this.controlCancellationRevisionValue)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:startup-read');
+  }
+
+  private async startInternal(options: FanHostStartOptions = {}, allowUnboundSessionRestart = true, controlContext?: FanAdmissionContext,
+    startupCancellationRevision = this.controlCancellationRevisionValue, selfHealOwner?: FanControlSelfHeal): Promise<FanDeviceGateResult> {
+    this.assertStartupCancellationCurrent(startupCancellationRevision);
+    this.assertSelfHealStartupCurrent(selfHealOwner);
     if (!this.enabled) {
       this.setState('disabled');
       this.writeReady = false;
@@ -3327,7 +4397,8 @@ export class FanHostLifecycle {
     // 不发 HC/Host 写请求；后续仍由同一条 rearm owner 负责恢复。
     let observedPower: PowerLifecycleState | null = null;
     if (options.manualRecovery || this.process) {
-      observedPower = await this.readNativePowerState().catch(() => null);
+      observedPower = await this.readPowerSnapshotForSynchronization();
+      this.assertStartupCancellationCurrent(startupCancellationRevision);
       this.synchronizeObservedPowerSnapshot(observedPower);
     }
     // R-B（§32.3/§33.4/§34.4，2026-09-15）：短路前可达性续证。本地 state
@@ -3337,24 +4408,75 @@ export class FanHostLifecycle {
     if (this.closedHostAwaitingExit && this.process && !options.manualRecovery) {
       throw new Error('Fan Host 已关闭但进程退出尚未确认，请明确重试');
     }
-    const reachable = this.closedHostAwaitingExit ? null : await this.assertReachableBeforeShortCircuit();
+    const reachable = this.closedHostAwaitingExit ? null : await this.assertReachableBeforeShortCircuit(
+      options.manualRecovery === true, startupCancellationRevision);
+    this.assertStartupCancellationCurrent(startupCancellationRevision);
+    // The reachability snapshot is immutable for this admission pass. Reuse
+    // one generation-evidence object across all branches below.
+    const reachableGenerationEvidence = reachable ? this.snapshotGenerationEvidence(reachable) : null;
+    // FAN-948: a reachable listener is not write readiness. Pending cleanup
+    // belongs to its original Host owner: observe/retry later, never duplicate
+    // Close or report the stale local Ready gate as successful admission.
+    if (reachable?.hcCloseCleanupPending === true) {
+      this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
+      const error = new FanApiError('HC_CLOSE_PENDING: 风扇资源仍在清理，控制尚未建立', 409, 'HC_CLOSE_PENDING');
+      if (options.manualRecovery) this.retainControlForSelfHeal(
+        controlContext ?? this.admissionContext('apply', this.controlIntentRevisionValue),
+        this.desiredCurve ?? this.resumeCurve ?? this.activeCurve ?? undefined, error);
+      throw error;
+    }
+    // FAN-996: an adopted generation-zero Open/half-open HC shell has no
+    // sleep receipt. It must never enter the ordinary stale-generation rearm,
+    // which would manufacture /api/resume and return HC_RESUME_RESULT_EXPIRED
+    // before the user's first usable control. Retire that exact shell and run
+    // the original Open/OpenEvents chain for both startup and explicit control.
+    if (reachable && this.manualUnboundHcSessionNeedsRestart(reachable, reachableGenerationEvidence ?? undefined)) {
+      if (options.manualRecovery) {
+        return this.restartUnboundHcSessionForManualControl(options, allowUnboundSessionRestart, controlContext, selfHealOwner);
+      }
+      // Ordinary boot/adoption only records the reachable shell. It must not
+      // invent a resume receipt; the first explicit control owns the safe
+      // Close → Open/OpenEvents replacement.
+      this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
+      this.setState('awaiting-control');
+      return { allowed: true, writeReady: false, reason: 'Fan Host 已握手，等待手动接管未绑定 HC 会话' };
+    }
+    const residentFault = reachable && (reachable.state === 'FaultLocked'
+      || reachable.state === 'ListenerFaultLocked' || reachable.unknownState === true || hasFailedFanOperation(reachable));
+    if (residentFault && !options.manualRecovery) {
+      this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
+      throw new FanApiError('FAULT_LOCKED: 风扇宿主处于故障状态，请手动重新开启', 409, 'FAULT_LOCKED');
+    }
     // FAN-941: reachability is not recovery from a terminal Host fault. An
     // explicit retry owns one authenticated Close and only restarts after its
     // existing lifecycle/exit proof; an OEM physical measurement is secondary.
+    // The previous Close may have returned an unproven vendor release but
+    // finished all HC resource cleanup. Do not post a second virtual Close or
+    // wait for a nonexistent physical/OEM acknowledgement to retire this owner.
+    // Completed resource retirement is terminal even when the Host honestly
+    // reports Stopped instead of FaultLocked. It cannot reopen its engine.
+    if (options.manualRecovery && this.process && reachable
+        && (residentFault || reachable.state === 'Stopped') && hasRetiredHcResourceBoundary(reachable)) {
+      this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
+      this.closedHostAwaitingExit = true;
+    }
     if (options.manualRecovery && this.process && (this.closedHostAwaitingExit || (reachable
-        && (reachable.state === 'FaultLocked' || reachable.unknownState === true)
-        && reachable.hcCloseCleanupPending === false))) {
+        && residentFault))) {
       if (!this.closedHostAwaitingExit && observedPower?.phase === 'suspending'
           && observedPower.generation === this.powerGeneration) {
         // Preserve the existing system sleep boundary. A terminal manual
         // retry is not permission to call HC Close while sleep is committing.
-        throw new FanApiError('POWER_SUSPENDING', 409, '系统正在进入睡眠，保留手动意图，唤醒后可重试');
+        throw new FanApiError('POWER_SUSPENDING: 系统正在进入睡眠，保留手动意图，唤醒后可重试', 409, 'POWER_SUSPENDING');
       }
-      if (reachable) this.syncRemoteSessionState(reachable);
-      this.controlIntentRevision += 1;
-      const retryRevision = this.controlIntentRevision;
+      if (controlContext) this.assertAdmissionContextCurrent(controlContext, 'manual-terminal-retry-entry');
+      if (reachable) this.syncRemoteSessionState(reachable, reachableGenerationEvidence ?? undefined);
+      // A standalone manual start owns a new intent. When apply/preset already
+      // registered one, replacement must retain it; incrementing here cancels
+      // the very request that is waiting to write on the successor Host.
+      if (!controlContext) this.controlIntentRevisionValue += 1;
+      const retryRevision = this.controlIntentRevisionValue;
       this.cancelResumeWait('manual-terminal-retry');
-      this.cancelRecovery('manual-terminal-retry');
+      this.cancelRecoveryForManualStartup('manual-terminal-retry', selfHealOwner);
       // Reuse the existing native whitelist and field projection; a new
       // event name would disappear when detailed logging is disabled.
       fanLifecycleEvidence('lifecycle.resume-admission-rejected', {
@@ -3363,7 +4485,15 @@ export class FanHostLifecycle {
       });
       // startInternal already owns this.operation. Calling public close()
       // here would enqueue behind itself and deadlock.
-      await this.closeInternal();
+      const closeFailureContext = this.admissionContext('manual-close-self-heal', retryRevision);
+      const closeFailureSession = this.sessionGeneration, closeFailureEpoch = this.heartbeatEpoch;
+      try { await this.closeInternal(); }
+      catch (error) {
+        if (!selfHealOwner && closeFailureSession === this.sessionGeneration && closeFailureEpoch === this.heartbeatEpoch)
+          this.retainControlForSelfHeal(closeFailureContext,
+            this.desiredCurve ?? this.resumeCurve ?? this.activeCurve ?? undefined, error);
+        throw error;
+      }
       this.assertIntentStillCurrent(retryRevision, 'manual-terminal-retry');
     }
     // FAN-933：常驻 Host 的会话若属于**上一个电源周期**（唤醒让代次前进、HC 已按顺序
@@ -3373,16 +4503,28 @@ export class FanHostLifecycle {
     const currentGeneration = Math.max(0, Math.floor(this.powerGeneration));
     const residentSessionFromOlderPowerCycle = this.process !== null && currentGeneration > 0
       && this.admittedPowerGeneration < currentGeneration;
-    if (residentSessionFromOlderPowerCycle) {
+    const interruptedOriginalOpen = options.manualRecovery === true && reachable?.openEventsCalled === false
+      && this.ownOriginalHcOpenNeedsCompletion(reachable, currentGeneration);
+    // A failed initial Open can leave a genuinely unopened Host while the
+    // recovery owner has reached needs-attention. A fresh explicit request may
+    // re-enter the existing cold-Open admission after native power is rechecked;
+    // waiting for a resume receipt from this empty session cannot make progress.
+    const retryUnopenedAfterRecoveryFailure = options.manualRecovery === true
+      && this.recoveryState === 'needs-attention' && reachable !== null
+      && isColdUnopenedFanHost(reachable);
+    // A failed first handshake cannot become a permanent read-only resident shortcut.
+    // An explicit retry reuses the original single-writer launcher/adoption and gate.
+    const needsFreshHandshake = options.manualRecovery === true && !this.writeReady;
+    if (!needsFreshHandshake && (residentSessionFromOlderPowerCycle || interruptedOriginalOpen || retryUnopenedAfterRecoveryFailure)) {
       await this.rearmAfterWakeForControlAdmission(
         options.reason ?? 'start-resident-session-stale', options.manualRecovery === true,
       );
       return { allowed: true, writeReady: this.writeReady, reason: '唤醒后已重新接管风扇会话' };
     }
-    if (this.state === 'ready' || this.state === 'awaiting-control') {
+    if (!needsFreshHandshake && (this.state === 'ready' || this.state === 'awaiting-control')) {
       return { allowed: true, writeReady: this.writeReady, reason: this.writeReady ? 'Fan Host 已运行' : 'Fan Host 已握手，但真实写入尚未验证' };
     }
-    if (this.state === 'suspended' && this.process) {
+    if (!needsFreshHandshake && this.state === 'suspended' && this.process) {
       // FAN-933：Suspended + 常驻 Host 不再直接续证放行——远端 HC 会话仍是关闭态。
       // 明确要求接管时先按当前 generation 做一次受控 rearm，等本代真正可接管再放行。
       await this.rearmAfterWakeForControlAdmission(
@@ -3390,10 +4532,14 @@ export class FanHostLifecycle {
       );
       return { allowed: true, writeReady: this.writeReady, reason: '唤醒后已重新接管风扇会话' };
     }
+    this.assertSelfHealStartupCurrent(selfHealOwner);
     this.setState('starting');
     try {
       this.process = await this.launcher.start(this.config);
       this.advanceSessionGeneration();
+      const handshakeGeneration = this.powerGeneration, handshakeProcess = this.process;
+      const handshakeSession = this.sessionGeneration, handshakeEpoch = this.heartbeatEpoch;
+      this.assertStartupReadCurrent(handshakeGeneration, handshakeProcess, handshakeSession, handshakeEpoch, startupCancellationRevision);
       if ('setSessionToken' in this.adapter && typeof this.adapter.setSessionToken === 'function') {
         this.adapter.setSessionToken(this.config.sessionToken);
       }
@@ -3402,6 +4548,7 @@ export class FanHostLifecycle {
       try {
         handshake = await this.adapter.handshake();
       } catch (firstError) {
+        this.assertStartupReadCurrent(handshakeGeneration, handshakeProcess, handshakeSession, handshakeEpoch, startupCancellationRevision);
         // The Host may have started between two native IPC continuations. A
         // single token rebind closes that narrow startup race without ever
         // weakening the Host's session check or hardware write gate.
@@ -3411,11 +4558,15 @@ export class FanHostLifecycle {
         if (!('setSessionToken' in this.adapter) || typeof this.adapter.setSessionToken !== 'function') throw firstError;
         this.adapter.setSessionToken(this.config.sessionToken);
         await new Promise<void>((resolve) => setTimeout(resolve, 50));
-        handshake = await this.adapter.handshake();
+        this.assertStartupReadCurrent(handshakeGeneration, handshakeProcess, handshakeSession, handshakeEpoch, startupCancellationRevision);
+        try { handshake = await this.adapter.handshake(); }
+        catch (retryError) {
+          this.assertStartupReadCurrent(handshakeGeneration, handshakeProcess, handshakeSession, handshakeEpoch, startupCancellationRevision);
+          throw retryError;
+        }
       }
-      const gate = this.config.aiMockSession
-        ? { allowed: aiFanMockHandshakeAllowed(handshake), writeReady: aiFanMockHandshakeAllowed(handshake), reason: 'AI-only mock handshake; zero real hardware writes' }
-        : evaluateFanDeviceGate(handshake, this.savedIdentity);
+      this.assertStartupReadCurrent(handshakeGeneration, handshakeProcess, handshakeSession, handshakeEpoch, startupCancellationRevision);
+      const gate = this.acceptCurrentHandshake(handshake);
       if (!gate.allowed) {
         this.writeReady = false;
         if (!this.process?.adopted) await this.stopProcessOnly();
@@ -3425,25 +4576,63 @@ export class FanHostLifecycle {
         fanDiagnosticLog('lifecycle.start-device-gate-denied', {
           reason: gate.reason ?? 'gate-denied',
         });
-        throw new Error(`Fan Host 设备门拒绝：${gate.reason ?? 'gate-denied'}`);
+        throw new FanApiError(`Fan Host 设备门拒绝：${gate.reason ?? 'gate-denied'}`, 409, 'FAN_DEVICE_GATE_DENIED');
       }
-      if (!this.config.aiMockSession) this.savedIdentity = handshake.deviceIdentity ?? this.savedIdentity;
-      this.writeReady = gate.writeReady;
-      if (typeof handshake.deviceClass === 'string' && handshake.deviceClass) {
-        this.deviceClassValue = handshake.deviceClass;
-      }
-      if (!this.config.aiMockSession && handshake.deviceIdentity) this.onDeviceIdentity?.(handshake.deviceIdentity);
       if (this.process?.adopted) {
-        const remote = await this.adapter.getState().catch(() => null);
-        this.syncRemoteSessionState(remote ?? undefined);
+        const readRevision = this.controlIntentRevisionValue, readGeneration = this.powerGeneration;
+        const readProcess = this.process, readEpoch = this.heartbeatEpoch, readSession = this.sessionGeneration;
+        let remote: FanState | null = null;
+        try { remote = await this.adapter.getState(); }
+        catch (error) {
+          this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, startupCancellationRevision);
+          if (isTerminalFanControlRefusal(error)) {
+            if (readSession === this.sessionGeneration)
+              this.parkTerminalControlRefusal(readRevision, readGeneration, readProcess, readEpoch, error);
+            throw error;
+          }
+        }
+        this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, startupCancellationRevision);
+        // This adopted snapshot feeds sync, the unbound-session branch, and
+        // the resident-health branch below. Resolve its evidence once.
+        const generationEvidence = remote ? this.snapshotGenerationEvidence(remote) : null;
+        this.syncRemoteSessionState(remote ?? undefined, generationEvidence ?? undefined);
+        // FAN-996: the first adoption can begin from local `stopped`, so the
+        // short-circuit check above has no remote snapshot. Handle the same
+        // generation-zero Open/half-open shell immediately after handshake;
+        // otherwise the later sleep-window branch invents /api/resume.
+        if (remote && this.manualUnboundHcSessionNeedsRestart(remote, generationEvidence ?? undefined)) {
+          if (options.manualRecovery) {
+            return this.restartUnboundHcSessionForManualControl(options, allowUnboundSessionRestart, controlContext, selfHealOwner);
+          }
+          // Keep ordinary auto-start/adoption side-effect free. A direct user
+          // control will re-enter with manualRecovery and own the replacement.
+          this.syncRemoteSessionState(remote, generationEvidence ?? undefined);
+          this.setState('awaiting-control');
+          return { allowed: true, writeReady: false, reason: 'Fan Host 已握手，等待手动接管未绑定 HC 会话' };
+        }
         if (!remote || isSuspendedFanState(remote.state, remote.powerState)) {
           // An adopted Host with no readable snapshot is treated as still in
           // the sleep window. Never open writes until coordinator resume.
-          this.coordinator.markSuspended();
-          this.setState('suspended');
+          let explicitRearmReady = false;
+          if (remote && options.manualRecovery && gate.writeReady) {
+            const native = await this.readNativePowerState().catch(() => null);
+            this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, startupCancellationRevision);
+            explicitRearmReady = native?.generation === readGeneration && native.phase === 'ready'
+              && native.hardwareWritesAllowed === true;
+          }
+          if (explicitRearmReady) {
+            // HC Suspended needs rearm; its receipt cannot overwrite native's
+            // current ready boundary before the original rearm owns HC recovery.
+            this.setState('suspended');
+            await this.rearmAfterWakeForControlAdmission(
+              options.reason ?? 'manual-adopted-suspended-admission', true);
+          } else {
+            this.coordinator.markSuspended();
+            this.setState('suspended');
+          }
           return gate;
         }
-        if (this.remoteFanControlHealthy(remote) && this.lease) {
+        if (this.remoteFanControlHealthy(remote, generationEvidence ?? undefined) && this.lease) {
           this.beginCoordinatorSession();
           this.admitCoordinatorHcReady();
           this.setState('ready');
@@ -3473,6 +4662,9 @@ export class FanHostLifecycle {
       this.setState('awaiting-control');
       return gate;
     } catch (error) {
+      // This read owned an adopted process, never a newer owned replacement.
+      if (error instanceof Error && (error.message === 'FAN_CONTROL_INTENT_SUPERSEDED:startup-read'
+          || error.message === 'FAN_CONTROL_INTENT_SUPERSEDED:recovery-read')) throw error;
       // FAN-941: a child rejected before any HC session operation can still
       // be reclaimed through its exact process handle. Preserve Open/lease
       // evidence for authenticated Close once hardware may have been touched.
@@ -3485,7 +4677,13 @@ export class FanHostLifecycle {
         fanDiagnosticLog('lifecycle.start-adopt-keep-resident', {
           error: error instanceof Error ? error.message : String(error),
         });
-        const remote = await this.adapter.getState().catch(() => null);
+        // Keep the existing owner, but do not reconcile a declared refusal
+        // through another endpoint or reinterpret it as an unreadable session.
+        if (isTerminalFanControlRefusal(error)) throw error;
+        const readGeneration = this.powerGeneration, readProcess = this.process;
+        const readSession = this.sessionGeneration, readEpoch = this.heartbeatEpoch;
+        const remote = await this.readHostStateForRecovery();
+        this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, startupCancellationRevision);
         this.syncRemoteSessionState(remote ?? undefined);
         if (isSuspendedFanState(remote?.state, remote?.powerState)) {
           this.coordinator.markSuspended();
@@ -3504,7 +4702,11 @@ export class FanHostLifecycle {
         throw error;
       }
       await this.safeAbortAfterStart();
-      if (this.state === 'starting' && !this.process && !this.opened && !this.eventsOpened && !this.lease) {
+      // A failed handshake can already have retired this exact owned child.
+      // Clear its startup mirror too, so the next manual request (or an
+      // existing transient retry) can reach startInternal again.
+      if ((this.state === 'starting' || this.state === 'handshaking')
+          && !this.process && !this.opened && !this.eventsOpened && !this.lease) {
         this.writeReady = false;
         this.stopHeartbeat();
         this.setState('stopped');
@@ -3533,30 +4735,48 @@ export class FanHostLifecycle {
    * 旧进程退出（≤5s，释放 HostInstanceLease，防 spawn 被 recoverPreviousHost
    * fail-closed 阻断）→ 重置 stopped → 上层走 launcher.start 自愈。
    */
-  private async assertReachableBeforeShortCircuit(): Promise<FanState | null> {
+  private async assertReachableBeforeShortCircuit(manualRecovery = false,
+    cancellationRevision = this.controlCancellationRevisionValue): Promise<FanState | null> {
+    this.assertStartupCancellationCurrent(cancellationRevision);
+    // A retained terminal mirror must inspect its authenticated owner before
+    // launcher adoption; otherwise the manual retry reuses the stopped engine.
+    const manualTerminalOwner = manualRecovery && this.process !== null
+      && (this.state === 'fault-locked' || this.state === 'conflict-locked'
+        || this.state === 'unknown' || this.state === 'stopped');
     if (this.state !== 'ready' && this.state !== 'awaiting-control' &&
-        !(this.state === 'suspended' && this.process)) {
+        !(this.state === 'suspended' && this.process) && !manualTerminalOwner) {
       return null;
     }
+    const readRevision = this.controlIntentRevisionValue, readGeneration = this.powerGeneration;
+    const readProcess = this.process, readEpoch = this.heartbeatEpoch, readSession = this.sessionGeneration;
     let remote: FanState | null = null;
     try {
       remote = await this.adapter.getState(1500);
     } catch (error) {
+      this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, cancellationRevision);
+      if (isTerminalFanControlRefusal(error)) {
+        this.parkTerminalControlRefusal(readRevision, readGeneration, readProcess, readEpoch, error);
+        throw error;
+      }
       // An authenticated refusal is not proof that the owned Host disappeared.
       if (isNonRetryableControlError(error) || isExternalFanControlConflict(error)) throw error;
       remote = null;
     }
+    this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, cancellationRevision);
     if (remote) return remote; // 可达，短路放行
     fanDiagnosticLog('lifecycle.stale-state-respawn', { from: this.state });
     // B4'（§34.4）：旧 Host 进程可能仍在父死 handoff 窗口存活（已停监听未退出），
     // 持有 HostInstanceLease 会阻断新 spawn。有界等待其退出。
-    const deadline = Date.now() + 5000;
-    while (Date.now() < deadline) {
+    const deadline = monotonicNowMs() + 5000;
+    while (monotonicNowMs() < deadline) {
       const resident = await proc.findExact(this.config.hostExecutable).catch(() => ({ found: false, pid: 0 }));
+      this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, cancellationRevision);
       if (!resident.found) break;
       await new Promise((resolve) => setTimeout(resolve, 100));
+      this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, cancellationRevision);
     }
     const still = await proc.findExact(this.config.hostExecutable).catch(() => ({ found: false, pid: 0 }));
+    this.assertStartupReadCurrent(readGeneration, readProcess, readSession, readEpoch, cancellationRevision);
     if (still.found) {
       fanDiagnosticLog('lifecycle.stale-host-reclaim-timeout', { pid: still.pid });
     }
@@ -3575,11 +4795,12 @@ export class FanHostLifecycle {
   apply(nodes: readonly FanNode[]): Promise<FanState> {
     // R2（§4.3）：新曲线是**新的用户意图**——先同步使旧恢复等待/旧重放失效（入队前），
     // 再由 mutateWithBoundedRetry 做统一准入与实际入队；不让旧 waiter 占队 15 s 才被取消。
-    this.controlIntentRevision += 1;
-    const intentRevision = this.controlIntentRevision;
+    this.controlIntentRevisionValue += 1;
+    const intentRevision = this.controlIntentRevisionValue;
     this.cancelResumeWait('new-curve-intent');
     const context = this.admissionContext('apply', intentRevision);
     if (this.isSleepWindow() || this.recoveryIntent !== null) this.desiredCurve = cloneFanNodes(nodes);
+    this.refreshSelfHealForExplicitIntent(context);
     return this.mutateWithBoundedRetry(
       context,
       () => {
@@ -3588,15 +4809,19 @@ export class FanHostLifecycle {
       },
       (attempt, error) => fanDiagnosticLog('lifecycle.apply-failure', { attempt, state: this.state, error: describeUnknownError(error) }),
       'Fan 曲线应用失败',
-    );
+    ).catch((error: unknown) => {
+      this.retainControlForSelfHeal(context, nodes, error);
+      throw error;
+    });
   }
 
   applyPreset(name: 'soft' | 'balanced' | 'aggressive', nodes?: readonly FanNode[]): Promise<FanState> {
-    this.controlIntentRevision += 1;
-    const intentRevision = this.controlIntentRevision;
+    this.controlIntentRevisionValue += 1;
+    const intentRevision = this.controlIntentRevisionValue;
     this.cancelResumeWait('new-preset-intent');
     const context = this.admissionContext('apply-preset', intentRevision);
     if (nodes && (this.isSleepWindow() || this.recoveryIntent !== null)) this.desiredCurve = cloneFanNodes(nodes);
+    if (nodes) this.refreshSelfHealForExplicitIntent(context);
     return this.mutateWithBoundedRetry(
       context,
       () => {
@@ -3605,7 +4830,16 @@ export class FanHostLifecycle {
       },
       (attempt, error) => fanDiagnosticLog('lifecycle.preset-failure', { attempt, state: this.state, preset: name, error: describeUnknownError(error) }),
       'Fan 预设应用失败',
-    );
+    ).catch((error: unknown) => {
+      const receipt = this.activeCurveReceipt;
+      // A name-only preset has a curve only after this exact write resolved it.
+      const retained = nodes ?? (receipt?.revision === context.intentRevision
+        && receipt.generation === context.generation && receipt.session === this.sessionGeneration
+        && receipt.process === context.hostProcess && receipt.curve === this.activeCurve
+        ? receipt.curve ?? undefined : undefined);
+      this.retainControlForSelfHeal(context, retained, error);
+      throw error;
+    });
   }
 
   /**
@@ -3614,11 +4848,25 @@ export class FanHostLifecycle {
    * 与 HC 会话检查成立）后应用这个最新版本。返回 false 表示当前没有恢复任务，
    * 调用方应走正常 apply 路径（本方法绝不成为第二条写入路径）。
    */
+  /** Stage a newer explicit curve while the page's original HC call settles.
+   * It retires unsubmitted old writes; it does not launch, admit, or write.
+   * The page then re-enters the existing start/apply path with its latest epoch.
+   */
+  stagePendingControlCurve(nodes: readonly FanNode[]): void {
+    this.controlIntentRevisionValue += 1;
+    this.cancelResumeWait('new-pending-curve-intent');
+    this.desiredCurve = cloneFanNodes(nodes);
+    this.stagedControlIntentRevision = this.controlIntentRevisionValue;
+    this.refreshSelfHealForExplicitIntent();
+  }
+
   stageRecoveryCurve(nodes: readonly FanNode[]): boolean {
     if (this.recoveryIntent === null) return false;
-    this.controlIntentRevision += 1;
+    this.controlIntentRevisionValue += 1;
     this.cancelResumeWait('new-recovery-curve-intent');
     this.desiredCurve = cloneFanNodes(nodes);
+    this.stagedControlIntentRevision = this.controlIntentRevisionValue;
+    this.refreshSelfHealForExplicitIntent();
     fanDiagnosticLog('lifecycle.recovery-curve-staged', {
       generation: this.recoveryIntent.generation,
       recoveryState: this.recoveryState,
@@ -3633,14 +4881,46 @@ export class FanHostLifecycle {
    * 不重试，交由新意图自己的调用完成。
    */
   private assertIntentStillCurrent(intentRevision: number, action: string): void {
-    if (intentRevision === this.controlIntentRevision) return;
+    if (intentRevision === this.controlIntentRevisionValue) return;
     fanDiagnosticLog('lifecycle.control-intent-superseded', {
       action,
       intentRevision,
-      currentIntentRevision: this.controlIntentRevision,
+      currentIntentRevision: this.controlIntentRevisionValue,
       state: this.state,
     });
     throw new Error(`FAN_CONTROL_INTENT_SUPERSEDED:${action}`);
+  }
+
+  /** All direct manual replacements publish the same exact startup receipt.
+   * A newer curve/preset joins that owner while Close/exit/launch is pending. */
+  private async enqueueManualControlStartup(context: FanAdmissionContext,
+    work: () => Promise<FanDeviceGateResult>): Promise<void> {
+    const startup = this.enqueueWithManualNativeWakeWait(async () => {
+      if (this.process === null) this.adoptConfirmedExitForManualControl(context, null);
+      this.assertAdmissionContextCurrent(context, 'manual-control-startup-queue-entry');
+      const gate = await work();
+      return { gate, process: this.process, session: this.sessionGeneration };
+    });
+    // Share this existing startup owner with a newer curve that arrives during
+    // Close/exit/launch. It may adopt only this exact completed startup receipt.
+    this.intentRecoveryStartup = startup;
+    let started: Awaited<typeof startup>;
+    try { started = await startup; }
+    finally { if (this.intentRecoveryStartup === startup) this.intentRecoveryStartup = null; }
+    // Close/new curve/new sleep may arrive while Close or launch awaits. Never
+    // rebind a cancelled request to a newer owner's PID or intent revision.
+    this.assertIntentStillCurrent(context.intentRevision, 'manual-control-startup-complete');
+    if (!started.gate.allowed) throw new Error(started.gate.reason);
+    if (started.process !== this.process) throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:manual-control-startup-process');
+    context.hostPid = started.process?.pid ?? 0;
+    context.hostProcess = started.process;
+    this.assertAdmissionContextCurrent(context, 'manual-control-successor-bound');
+  }
+
+  /** One queued replacement owned by this exact manual curve/preset intent. */
+  private async reopenTerminalHostForControl(context: FanAdmissionContext): Promise<void> {
+    return this.enqueueManualControlStartup(context, () => this.startInternal(
+      { manualRecovery: true, reason: 'manual-terminal-retry' }, true, context));
   }
 
   /**
@@ -3667,9 +4947,99 @@ export class FanHostLifecycle {
   ): Promise<T> {
     let lastError: unknown;
     for (let attempt = 0; attempt < 2; attempt += 1) {
+      // The first admitted operation keeps its existing queue order. A retry
+      // belongs to the original intent, never the intent current at re-entry.
+      if (attempt > 0) this.assertIntentStillCurrent(context.intentRevision, 'control-retry-entry');
       // R4: explicit controls can recover a lost one-shot wake event, outside the queue.
       // Normal awake operations and automatic resume do not add this IPC read.
       const explicitControl = context.action === 'apply' || context.action === 'apply-preset';
+      const startup = this.intentRecoveryStartup;
+      if (attempt === 0 && explicitControl && startup) {
+        // Join the existing Close/exit/start owner before probing its listener.
+        // A predecessor-bound request may transfer only after that exact owner
+        // exited; an initial PID-less request retains the original startup rule.
+        const started = await startup.catch(() => null);
+        this.assertIntentStillCurrent(context.intentRevision, 'intent-startup-complete');
+        if (started?.gate.allowed && started.process === this.process && started.session === this.sessionGeneration
+            && context.generation === this.powerGeneration) {
+          if (context.hostPid === 0 || this.adoptConfirmedExitForManualControl(context, started.process)) {
+            context.hostPid = started.process?.pid ?? 0;
+            context.hostProcess = started.process;
+          }
+        } else if (this.process === null && this.adoptConfirmedExitForManualControl(context, null)) {
+          // The older intent retired its Host but was superseded before launch.
+          // The latest request now owns one fresh manual startup on the queue.
+          await this.reopenTerminalHostForControl(context);
+        }
+        this.assertAdmissionContextCurrent(context, 'intent-startup-complete');
+      }
+      // T0 manual-control invariant: a reachable Host in a terminal local
+      // state must enter the existing authenticated Close -> exit -> re-open
+      // path before applyMutation checks ready/awaiting-control. Without this
+      // handoff, a valid handshake is followed by an immediate local
+      // "current state is fault-locked" throw, so the user click can never
+      // reach the recovery owner. The recovery path still enforces native
+      // sleep, HC cleanup, authentication, and write admission.
+      // A settled, rejected handshake can retain the original resident owner.
+      // Re-enter the normal launcher identity/adoption + handshake path; a
+      // local startup mirror must not block the next explicit curve/preset.
+      const terminalManualState = attempt === 0 && explicitControl &&
+        (this.closedHostAwaitingExit || this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown'
+          || ((this.state === 'starting' || this.state === 'handshaking' || !this.writeReady) && this.process !== null));
+      if (terminalManualState) {
+        context.manualRecovery = true;
+        fanLifecycleEvidence('lifecycle.manual-terminal-retry-requested', {
+          action: context.action,
+          generation: context.generation,
+          state: this.state,
+          reason: this.writeReady ? 'explicit-control-reopens-terminal-host' : 'explicit-control-refreshes-unconfirmed-handshake',
+        });
+        await this.reopenTerminalHostForControl(context);
+      }
+      // The renderer can still hold a local ready mirror after a resident Host
+      // has faulted. Probe the authoritative state once for an explicit curve
+      // request so that remote FaultLocked/unknown reaches the same manual
+      // Close -> exit -> re-open owner before the write point rejects it.
+      // A newly launched Host has no prior HC session whose remote terminal
+      // state can diverge from this bridge. Skip the extra read on the first
+      // manual enable to keep the normal path handshake -> Open -> OpenEvents
+      // -> lease -> write. Retain the probe for an adopted/reused Host or a
+      // process that already crossed a prior HC session boundary, where the
+      // FAN-1034 remote FaultLocked rescue is actually needed.
+      // Local Ready/lease/curve can lag a remote FaultLocked state. Keep the
+      // FAN-1034 rescue probe on established/adopted/half-open sessions; omit
+      // it only before the first HC Open of a freshly launched Host.
+      const remoteTerminalProbeEligible = this.process?.adopted === true
+        || this.opened || this.eventsOpened || this.lease !== null || this.activeCurve !== null;
+      if (attempt === 0 && explicitControl && !terminalManualState && remoteTerminalProbeEligible
+          && (this.state === 'ready' || this.state === 'awaiting-control')) {
+        // A same-generation wake retires this read, not the accepted manual intent.
+        // Reuse the current-session probe and its original two-read/deadline bound.
+        const probe = await this.readCurrentRecoveryState(context, RESUME_WAIT_MIN_PROBE_TIMEOUT_MS);
+        const ownership = this.recoveryReadOwnership(context, probe);
+        if (ownership === 'superseded') throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:manual-terminal-remote-probe');
+        const remote = ownership === 'current' ? probe.remote : null;
+        if (ownership === 'current' && probe.failure && isTerminalFanControlRefusal(probe.failure)) {
+          this.parkTerminalControlRefusal(context.intentRevision, context.generation, probe.hostProcess, probe.epoch, probe.failure);
+          throw probe.failure;
+        }
+        this.assertAdmissionContextCurrent(context, 'manual-terminal-remote-probe');
+        const remoteTerminal = remote !== null && (
+          remote.state === 'FaultLocked' || remote.state === 'ListenerFaultLocked'
+          || remote.unknownState === true || hasFailedFanOperation(remote)
+          || (remote.state === 'Stopped' && hasRetiredHcResourceBoundary(remote)));
+        if (remoteTerminal) {
+          this.syncRemoteSessionState(remote);
+          context.manualRecovery = true;
+          fanLifecycleEvidence('lifecycle.manual-terminal-retry-requested', {
+            action: context.action,
+            generation: context.generation,
+            state: remote.state,
+            reason: 'remote-terminal-host-probe',
+          });
+          await this.reopenTerminalHostForControl(context);
+        }
+      }
       const manualRecoveryWindow = this.isSleepWindow()
         || this.state === 'suspended'
         || this.recoveryIntent?.manual === true
@@ -3689,11 +5059,31 @@ export class FanHostLifecycle {
         });
         const adopted = await this.observeCurrentNativeWakeForControl(context, true);
         if (adopted && this.process) {
-          await this.rearmAfterWakeForControlAdmission('manual-missed-wake-edge', true);
+          try {
+            await this.rearmAfterWakeForControlAdmission('manual-missed-wake-edge', true);
+          } catch (error) {
+            if (!(error instanceof FanManualUnboundSessionRequired)) throw error;
+            await this.enqueueManualControlStartup(context, () => this.startInternal(
+              { manualRecovery: true, reason: 'manual-unbound-missed-wake-edge' }, true, context,
+            ));
+          }
         } else if (!adopted) {
           this.noteRecoveryIntentPending('manual-missed-wake-edge', context.generation, true);
         }
         this.assertAdmissionContextCurrent(context, 'manual-wake-rearm');
+      }
+      // A previous ON can have completed Open before OFF/new curve cancelled
+      // its remaining steps. Only that exact current session may finish Events;
+      // rearm checks native permission and never asks it for a phantom resume.
+      if (attempt === 0 && explicitControl && !this.eventsOpened && this.hasCurrentOriginalHcOpenOrigin(context.generation)) {
+        context.manualRecovery = true;
+        // Stay behind the previous HC call; a new curve may arrive while its
+        // OpenEvents is still awaiting. Never race a second subscription/restore.
+        await this.enqueue(async () => {
+          this.assertAdmissionContextCurrent(context, 'original-open-queue-entry');
+          await this.rearmAfterWakeForControlAdmission('manual-original-open-completion', true);
+        });
+        this.assertAdmissionContextCurrent(context, 'original-open-completion');
       }
       // 每一次尝试都从**同一份**准入上下文出发（含首次与队列内重入的共用截止）。
       const admission = this.resumeAdmissionWait(context.action, context);
@@ -3707,8 +5097,9 @@ export class FanHostLifecycle {
         // 再写，也不得让后到的意图穿过队列）。陈旧回包的保护落在**每个 await 边界**：
         // 准入探测后、协调等待每次回包后、以及唤醒重放最终写前（replayResumeCurve）。
         const result = await this.enqueue(async () => {
+          if (attempt > 0) this.assertIntentStillCurrent(context.intentRevision, 'control-retry-queue');
           const recovered = this.completedRecoveryWrite;
-          if ((context.action === 'apply' || context.action === 'apply-preset')
+          if ((context.action === 'apply' || context.action === 'apply-preset' || context.action === 'resume')
               && recovered && recovered.generation === context.generation
               && recovered.intentRevision === context.intentRevision
               && recovered.hostSession === this.coordinatorSession
@@ -3717,7 +5108,17 @@ export class FanHostLifecycle {
             this.completedRecoveryWrite = null;
             return recovered.response as T;
           }
-          const written = await mutate();
+          const mutationEpoch = this.heartbeatEpoch;
+          const mutationSession = this.sessionGeneration + (this.opened ? 0 : 1);
+          let written: T;
+          try { written = await mutate(); }
+          catch (error) {
+            context.failedMutationEpoch = mutationEpoch;
+            context.failedMutationSession = mutationSession;
+            if (explicitControl || context.action === 'power-line-reapply') this.retireLifecycleAfterUncertainMutation(context, error);
+            throw error;
+          }
+          if (written !== undefined) this.assertControlWriteCompletionCurrent(written);
           // Settle inside the same queue operation as the successful write.
           // Otherwise the next queued owner can run before this await resumes
           // and write the identical staged curve a second time.
@@ -3739,6 +5140,7 @@ export class FanHostLifecycle {
         // FAN-941: this cancelled request must not retry its old curve. The
         // continuous recovery owner keeps its separate newer-generation policy.
         if (error instanceof Error && error.message.startsWith('FAN_CONTROL_INTENT_SUPERSEDED:')) throw error;
+        this.assertIntentStillCurrent(context.intentRevision, 'control-failure');
         onFailure(attempt, error);
         lastError = error;
         if (context.manualRecovery && (attempt === 1 || isNonRetryableControlError(error))) {
@@ -3757,6 +5159,13 @@ export class FanHostLifecycle {
         // §3.3.6：只有合法 `POWER_RESUMING` 才允许释放队列、回到协调等待后重入一次；
         // 其余瞬态失败沿用 R2 的单次重试（不再用队列内 500 ms 延时充当慢恢复兜底）。
         if (isPowerResumingError(error)) {
+          // A wake may start inside Ready publication before any RPC. Keep the
+          // original curve/preset closure through the existing finite native wait.
+          if (explicitControl && this.isSleepWindow() && !this.coordinator.isWakeReady(context.generation)) {
+            await this.waitForManualNativeWriteBoundary(context);
+            await this.observeCurrentNativeWakeForControl(context, true);
+            this.assertAdmissionContextCurrent(context, 'control-retry-native-wake');
+          }
           fanLifecycleEvidence('lifecycle.resume-wait-queue-reentry', {
             action: context.action,
             generation: context.generation,
@@ -3768,11 +5177,11 @@ export class FanHostLifecycle {
     throw lastError instanceof Error ? lastError : new Error(finalMessage);
   }
 
-  private async applyMutation(nodes: readonly FanNode[], intentRevision = this.controlIntentRevision): Promise<FanState> {
+  private async applyMutation(nodes: readonly FanNode[], intentRevision = this.controlIntentRevisionValue): Promise<FanState> {
     if (this.closedHostAwaitingExit) throw new Error('Fan Host 旧实例退出尚未确认，请明确重试');
     // Preserve requests already admitted in queue order; only an intent arriving
     // during this operation's await boundaries cancels its not-yet-submitted write.
-    const admittedIntentRevision = this.controlIntentRevision;
+    const admittedIntentRevision = this.controlIntentRevisionValue;
     if (this.state === 'stopped') {
       const gate = await this.startInternal();
       if (!gate.allowed) throw new Error(gate.reason);
@@ -3783,6 +5192,9 @@ export class FanHostLifecycle {
     }
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
     this.ensureCoordinatorSession();
+    const failureGeneration = this.powerGeneration;
+    const failureProcess = this.process;
+    const failureEpoch = this.heartbeatEpoch;
     try {
       if (!this.opened) {
         this.advanceSessionGeneration();
@@ -3790,7 +5202,9 @@ export class FanHostLifecycle {
         // throw; recovery must therefore attempt OEM restore even when the
         // promise rejects before the normal success assignment.
         this.opened = true;
+        const origin = this.beginOriginalHcOpen();
         const opened = await this.adapter.open();
+        this.acknowledgeOriginalHcOpen(opened, origin);
         this.syncRemoteSessionState(opened);
         this.assertIntentStillCurrent(admittedIntentRevision, 'enable-after-open');
       }
@@ -3803,21 +5217,42 @@ export class FanHostLifecycle {
         this.syncRemoteSessionState(eventsOpened);
         this.assertIntentStillCurrent(admittedIntentRevision, 'enable-after-open-events');
       }
-      await this.ensureLeaseForMutation();
+      await this.ensureLeaseForMutation(admittedIntentRevision);
       // FAN-941: disable/Close can cancel intent while HC Open or lease acquisition awaits.
       // Retain the opened session for ordered cleanup, but never submit the cancelled curve.
       this.assertIntentStillCurrent(admittedIntentRevision, 'enable-before-write');
       this.admitCoordinatorHcReady();
+      const writeSession = this.sessionGeneration, writeProcess = this.process;
+      const writeEpoch = this.heartbeatEpoch, writeRecoveryToken = this.recoveryToken;
       this.setState('ready');
+      this.assertControlWriteAdmissionCurrent(admittedIntentRevision, writeSession, writeProcess, writeEpoch, writeRecoveryToken);
       this.admitCoordinatorWrite('enable');
+      const writePowerLineRevision = this.powerLineReplayRevision;
       const applied = await this.adapter.enable(nodes, this.lease?.leaseId);
+      // A successful hardware reply belongs to the submitted old request.
+      // OFF/new sleep/new curve may have retired it while the reply was in flight.
+      this.assertIntentStillCurrent(admittedIntentRevision, 'enable-after-write');
+      this.assertControlWriteReceiptCurrent(writeSession, writeProcess, writeEpoch, writeRecoveryToken);
       // E9（六十八批 T0 删减，HC 锚点：IDevice.cs:410-423 事件驱动 SetFanControl；生命周期零原创）
       // 写曲线后仅更新曲线句柄；续租心跳由 ensureLeaseForMutation 维护（第七十七批 C）；
       // fan-guard / emit 保活不复活（E9 删除面）。
       this.activeCurve = cloneFanNodes(nodes);
-      if (intentRevision === this.controlIntentRevision) this.desiredCurve = cloneFanNodes(nodes);
+      if (intentRevision === this.controlIntentRevisionValue) this.desiredCurve = cloneFanNodes(nodes);
+      this.rememberActiveCurveReceipt(applied);
+      this.observeControlDisplay(applied);
+      // Display subscribers may synchronously hand control to a newer owner.
+      this.assertIntentStillCurrent(admittedIntentRevision, 'enable-after-display');
+      this.assertControlWriteReceiptCurrent(writeSession, writeProcess, writeEpoch, writeRecoveryToken);
+      this.rememberControlWriteCompletion(applied, admittedIntentRevision, writeSession, writeProcess, writeEpoch, writeRecoveryToken, writePowerLineRevision);
       return applied;
     } catch (error) {
+      // The later queued owner owns cleanup/session reconciliation. Do not
+      // let this retired reply resync over its power or control state.
+      if (error instanceof Error && error.message.startsWith('FAN_CONTROL_INTENT_SUPERSEDED:')) throw error;
+      if (isTerminalFanControlRefusal(error)) {
+        this.parkTerminalControlRefusal(admittedIntentRevision, failureGeneration, failureProcess, failureEpoch, error);
+        throw error;
+      }
       // FAN-927 §4.4：Host 在写入点明确拒绝 LEASE_INVALID，说明本请求曲线**未执行**。
       // 丢弃已知失效的本地 lease，让 mutateWithBoundedRetry 的那一次重试走 fresh acquire
       // 并重提同一曲线；超时/断连（结果未知）不在此列。
@@ -3830,16 +5265,16 @@ export class FanHostLifecycle {
       // 保持当前状态 + 抛错；不再 recoverAfterMutationFailure。
       // 920 F-3：但 Host 可能已在本次失败中关闭了 HC 会话，必须按权威快照回灌
       // 会话标志，否则 apply()/applyPreset() 的那次重试会跳过 Open/OpenEvents。
-      await this.resyncSessionFromHost();
+      await this.resyncSessionFromHost(admittedIntentRevision, failureGeneration, failureProcess, failureEpoch);
       throw error;
     }
   }
 
-  private async applyPresetMutation(name: 'soft' | 'balanced' | 'aggressive', nodes?: readonly FanNode[], intentRevision = this.controlIntentRevision): Promise<FanState> {
+  private async applyPresetMutation(name: 'soft' | 'balanced' | 'aggressive', nodes?: readonly FanNode[], intentRevision = this.controlIntentRevisionValue): Promise<FanState> {
     if (this.closedHostAwaitingExit) throw new Error('Fan Host 旧实例退出尚未确认，请明确重试');
     // Preserve requests already admitted in queue order; only an intent arriving
     // during this operation's await boundaries cancels its not-yet-submitted write.
-    const admittedIntentRevision = this.controlIntentRevision;
+    const admittedIntentRevision = this.controlIntentRevisionValue;
     if (this.state === 'stopped') {
       const gate = await this.startInternal();
       if (!gate.allowed) throw new Error(gate.reason);
@@ -3850,11 +5285,16 @@ export class FanHostLifecycle {
     }
     if (!this.writeReady) throw new Error('当前风扇数据路线已识别，但真实写入/恢复尚未验证');
     this.ensureCoordinatorSession();
+    const failureGeneration = this.powerGeneration;
+    const failureProcess = this.process;
+    const failureEpoch = this.heartbeatEpoch;
     try {
       if (!this.opened) {
         this.advanceSessionGeneration();
         this.opened = true;
+        const origin = this.beginOriginalHcOpen();
         const opened = await this.adapter.open();
+        this.acknowledgeOriginalHcOpen(opened, origin);
         this.syncRemoteSessionState(opened);
         this.assertIntentStillCurrent(admittedIntentRevision, 'preset-after-open');
       }
@@ -3867,22 +5307,44 @@ export class FanHostLifecycle {
         this.syncRemoteSessionState(eventsOpened);
         this.assertIntentStillCurrent(admittedIntentRevision, 'preset-after-open-events');
       }
-      await this.ensureLeaseForMutation();
+      await this.ensureLeaseForMutation(admittedIntentRevision);
       // FAN-941: disable/Close can cancel intent while HC Open or lease acquisition awaits.
       // Retain the opened session for ordered cleanup, but never submit the cancelled curve.
       this.assertIntentStillCurrent(admittedIntentRevision, 'preset-before-write');
       this.admitCoordinatorHcReady();
+      const writeSession = this.sessionGeneration, writeProcess = this.process;
+      const writeEpoch = this.heartbeatEpoch, writeRecoveryToken = this.recoveryToken;
       this.setState('ready');
+      this.assertControlWriteAdmissionCurrent(admittedIntentRevision, writeSession, writeProcess, writeEpoch, writeRecoveryToken);
       this.admitCoordinatorWrite('preset');
+      const writePowerLineRevision = this.powerLineReplayRevision;
       const applied = await this.adapter.applyPreset(name, this.lease?.leaseId, nodes);
+      this.assertIntentStillCurrent(admittedIntentRevision, 'preset-after-write');
+      this.assertControlWriteReceiptCurrent(writeSession, writeProcess, writeEpoch, writeRecoveryToken);
       // E9（六十八批 T0 删减，HC 锚点：IDevice.cs:410-423 事件驱动 SetFanControl；生命周期零原创）
       // 写曲线后仅更新曲线句柄；续租心跳由 ensureLeaseForMutation 维护（第七十七批 C）。
-      if (nodes) {
-        this.activeCurve = cloneFanNodes(nodes);
-        if (intentRevision === this.controlIntentRevision) this.desiredCurve = cloneFanNodes(nodes);
+      // A name-only preset was resolved by this Host, not by the caller's old curve.
+      const appliedNodes = nodes ?? (isFanReplayCurve(applied.activeCurve) ? applied.activeCurve : null);
+      this.activeCurve = appliedNodes ? cloneFanNodes(appliedNodes) : null;
+      if (intentRevision === this.controlIntentRevisionValue) {
+        this.desiredCurve = appliedNodes ? cloneFanNodes(appliedNodes) : null;
+        if (!nodes) this.resumeCurve = null;
       }
+      this.rememberActiveCurveReceipt(applied);
+      this.observeControlDisplay(applied);
+      // Display subscribers may synchronously hand control to a newer owner.
+      this.assertIntentStillCurrent(admittedIntentRevision, 'preset-after-display');
+      this.assertControlWriteReceiptCurrent(writeSession, writeProcess, writeEpoch, writeRecoveryToken);
+      this.rememberControlWriteCompletion(applied, admittedIntentRevision, writeSession, writeProcess, writeEpoch, writeRecoveryToken, writePowerLineRevision);
       return applied;
     } catch (error) {
+      // The later queued owner owns cleanup/session reconciliation. Do not
+      // let this retired reply resync over its power or control state.
+      if (error instanceof Error && error.message.startsWith('FAN_CONTROL_INTENT_SUPERSEDED:')) throw error;
+      if (isTerminalFanControlRefusal(error)) {
+        this.parkTerminalControlRefusal(admittedIntentRevision, failureGeneration, failureProcess, failureEpoch, error);
+        throw error;
+      }
       // FAN-927 §4.4：Preset 归并到与 apply 同一路径——写入点 LEASE_INVALID 同样只允许
       // 一次重新 acquire + 重提（由 mutateWithBoundedRetry 的那一次重试完成）。
       if (isLeaseInvalidError(error)) {
@@ -3894,29 +5356,49 @@ export class FanHostLifecycle {
       // 保持当前状态 + 抛错；不再 recoverAfterMutationFailure。
       // 920 F-3：但 Host 可能已在本次失败中关闭了 HC 会话，必须按权威快照回灌
       // 会话标志，否则 apply()/applyPreset() 的那次重试会跳过 Open/OpenEvents。
-      await this.resyncSessionFromHost();
+      await this.resyncSessionFromHost(admittedIntentRevision, failureGeneration, failureProcess, failureEpoch);
       throw error;
     }
   }
 
   /** Disable the curve, restore OEM control and release the lease. */
   async disable(): Promise<FanState> {
+    this.controlCancellationRevisionValue += 1;
     // R2（§4.3）：明确关闭是**终止性用户意图**——同步使旧恢复等待/旧重放失效（入队前）。
-    this.controlIntentRevision += 1;
+    this.controlIntentRevisionValue += 1;
     this.cancelResumeWait('disable');
     // FAN-938 R5 §3：disable 是终止性意图，取消 Fan 恢复 owner（不再持续重试）。
     this.cancelRecovery('disable');
+    // OFF is terminal even while the serialized queue is still settling an
+    // older request. Do not leave a curve for a new wake event to adopt.
+    this.activeCurve = null;
+    this.resumeCurve = null;
+    this.desiredCurve = null;
+    this.revokeCoordinatorWrites('disable');
+    this.publishControlDisplay();
+    this.invalidateHeartbeatEpoch(true);
+    this.stopHeartbeat();
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.disable-begin', { state: this.state });
       // E9（六十八批 T0 删减，HC 锚点：IDevice.cs:410-423 事件驱动 SetFanControl；生命周期零原创）
       // 不再 disarm fan-guard（保活循环已删）。
       if (this.state === 'disabled' || this.state === 'stopped' || this.state === 'suspended') {
+        if (this.process) {
+          // Cancel the resident Host's cached intent without an OEM write or
+          // new Open. Local cancellation alone cannot stop its wake worker.
+          const cancelled = await this.adapter.disable(undefined, { controlIntentOnly: true });
+          if (cancelled.hardwareWritesEnabled === true || cancelled.hardwareWrites === true) {
+            // The local phase may lag a completed Host resume. In that case
+            // cancellation is followed by the original real release contract.
+            this.syncRemoteSessionState(cancelled);
+            await this.restoreAndRelease();
+          }
+        }
         // A disable click is also an explicit cancellation of any deferred
         // post-sleep replay. Do not retain a curve that the user has already
         // asked to return to OEM control.
+        // OFF cleared its intent before queuing. A later ON may already be staged.
         this.activeCurve = null;
-        this.resumeCurve = null;
-        this.desiredCurve = null;
         return { state: this.state, powerState: 'Unknown', hardwareWrites: false, hardwareWritesObserved: false };
       }
       if (this.state === 'fault-locked' || this.state === 'conflict-locked' || this.state === 'unknown') {
@@ -3924,7 +5406,6 @@ export class FanHostLifecycle {
         // 不再 recoverLockedHostBeforeStart：保持当前状态 + 抛错。
         throw new Error(`Fan Host 当前处于 ${this.state}，保持当前状态，不做关闭恢复`);
       }
-      this.revokeCoordinatorWrites('disable');
       try {
         if (this.lease || this.opened) await this.restoreAndRelease();
       } catch (error) {
@@ -3938,9 +5419,8 @@ export class FanHostLifecycle {
       // resident HC device remains open until sleep or application exit;
       // keeping the remote Open/OpenEvents flags avoids re-running
       // subscriptions on the next enable.
+      // Retiring the old control session cannot cancel a newer pending ON.
       this.activeCurve = null;
-      this.resumeCurve = null;
-      this.desiredCurve = null;
       this.setState('awaiting-control');
       return this.adapter.getState();
     });
@@ -3950,24 +5430,33 @@ export class FanHostLifecycle {
     // Capture before enqueue: off/new intent can arrive while this renewal
     // waits behind a hardware operation, not only while its HTTP reply waits.
     const attempt: FanHeartbeatAttempt = {
-      intentRevision: this.controlIntentRevision,
+      intentRevision: this.controlIntentRevisionValue,
       epoch: this.heartbeatEpoch,
+      session: this.sessionGeneration,
+      hostProcess: this.process,
       leaseId: this.lease?.leaseId ?? '',
       generation: Math.max(0, Math.floor(this.powerGeneration)),
       hostPid: this.process?.pid ?? 0,
     };
+    // Retain the exact process reference without allocating error-only context
+    // during successful maintenance. Build that context only at the handoff.
+    const selfHealProcess = attempt.hostProcess;
     // 租约协议完整性（第七十七批 C-①，2026-09-12 用户批准）：真续租——调用
     // Host /api/heartbeat 延长 TTL=15s 租约并回写 expiresAt/generation。
-    // 失败仅清本地 lease 惰性重建（下次 mutation 重新 acquire），不置锁
-    // （E9 删除面维持；HC 无锁对照）。
+    // 明确失效清本地 lease 后惰性重建；回执未知保留原 token 供 Host 再验证。
+    // 两者均不置锁（E9 删除面维持；HC 无锁对照）。
     // G8（FAN-926R 执行单 §4）：每次心跳捕获 lease 身份/Host 实例/代际/心跳代次；
     // 回包（成功与失败）只有**仍匹配**时才允许更新或清理自己的 lease。
     return this.enqueue(async () => {
+      // Retire the queued predecessor before any cleanup of current maintenance.
+      // A current missing lease still takes its original unavailable/stop path.
+      if (!this.isHeartbeatIntentCurrent(attempt)
+          || (this.lease !== null && this.lease.leaseId !== attempt.leaseId))
+        throw new Error('FAN_HEARTBEAT_SUPERSEDED');
       if (this.state !== 'ready' || !this.lease) {
         this.stopHeartbeat();
         throw new Error('Fan lease 不可用');
       }
-      if (!this.isHeartbeatResultCurrent(attempt)) throw new Error('FAN_HEARTBEAT_SUPERSEDED');
       let renewed: FanLease;
       try {
         renewed = await this.adapter.heartbeat(attempt.leaseId);
@@ -3983,9 +5472,40 @@ export class FanHostLifecycle {
           throw error;
         }
         fanDiagnosticLog('lifecycle.heartbeat-failure', { state: this.state, error: describeUnknownError(error) });
+        // A missing acknowledgement does not invalidate the issued token.
+        // Keep its unchanged receipt and the existing cadence; the next Host
+        // request still validates the token/expiry before any device operation.
+        // Never infer renewal success or replay a curve from this uncertainty.
+        if (isTerminalFanControlRefusal(error)) {
+          this.parkTerminalControlRefusal(attempt.intentRevision, attempt.generation, selfHealProcess, attempt.epoch, error);
+          throw error;
+        }
+        // A declared current session fault cannot renew this issued lease.
+        // Retire its cadence and let the one bounded owner inspect HC retirement;
+        // an unknown transport/server result still preserves its lease below.
+        if (error instanceof FanApiError && error.status === 409
+            && (error.errorCode === 'FAULT_LOCKED' || error.errorCode === 'HC_SESSION_UNAVAILABLE')) {
+          this.invalidateHeartbeatEpoch();
+          attempt.epoch = this.heartbeatEpoch;
+          this.lease = null;
+          this.stopHeartbeat();
+          this.publishControlDisplay();
+          this.retainControlForSelfHeal({
+            action: 'heartbeat-self-heal', intentRevision: attempt.intentRevision, generation: attempt.generation,
+            hostPid: attempt.hostPid, hostProcess: selfHealProcess,
+          }, this.desiredCurve ?? this.activeCurve ?? undefined, error);
+          throw error;
+        }
+        if (controlSelfHealMode(error) === 'observe-only'
+            || (error instanceof FanApiError && error.errorCode === 'HC_OPERATION_BUSY')) throw error;
+        // Retire old reads with the local lease proof. Only this verified
+        // failure may continue its repair in the new epoch.
+        this.invalidateHeartbeatEpoch();
+        attempt.epoch = this.heartbeatEpoch;
         this.lease = null;
         this.stopHeartbeat();
-        // 租约协议完整性第四件（批85 F7-a，2026-09-12 用户授权）：心跳失败后
+        this.publishControlDisplay();
+        // 租约协议完整性第四件（批85 F7-a，2026-09-12 用户授权）：排除未知回执后的失败
         // 若仍有活跃曲线（activeCurve），自动重新 acquireControl → 重写曲线
         // （applyMutation 内含 ensureLeaseForMutation 重新 acquire + 重启心跳）。
         // 失败只记 lifecycle.lease-reacquire-failed，不置锁（E9 删除面：无
@@ -4000,21 +5520,33 @@ export class FanHostLifecycle {
           fanDiagnosticLog('lifecycle.lease-reacquire-deferred-suspend', { state: this.state });
           throw error;
         }
+        if (this.recoveryIntent !== null) {
+          fanDiagnosticLog('lifecycle.lease-reacquire-deferred-owner', { state: this.state, recoveryState: this.recoveryState });
+          throw error;
+        }
         // 920 F-3：Host 可能已在本次心跳失败中关闭了 HC 会话（route-lost 的
         // RecoverAfterHardwareFailure → RestoreHardware(close: true) 会清
         // OpenCalled/OpenEventsCalled）。先按权威快照回灌，下面的自愈重写才会
         // 重新 Open/OpenEvents，而不是写进一个已关闭的会话。
-        await this.resyncSessionFromHost();
+        await this.resyncSessionFromHost(attempt.intentRevision, attempt.generation, selfHealProcess, attempt.epoch);
         // The readback is another await boundary. An off/close/new curve
         // arriving there must not revive the previous autonomous write.
-        if (!this.isHeartbeatIntentCurrent(attempt)) throw error;
-        const curve = this.activeCurve ? cloneFanNodes(this.activeCurve) : null;
+        if (!this.isHeartbeatIntentCurrent(attempt) || this.recoveryIntent !== null) throw error;
+        const curve = this.activeCurve ? cloneFanNodes(this.desiredCurve ?? this.activeCurve) : null;
         if (curve) {
+          // The original repair may Open its own HC session once. Capture that
+          // exact increment before the await; never adopt an arbitrary later one.
+          const repairSession = this.sessionGeneration + (this.opened ? 0 : 1);
           try {
-            await this.applyMutation(curve);
+            const applied = await this.applyMutation(curve);
+            this.assertControlWriteCompletionCurrent(applied);
             fanDiagnosticLog('lifecycle.lease-reacquired', { state: this.state });
             if (this.lease) return { ...this.lease };
           } catch (reacquireError) {
+            if (this.isHeartbeatIntentCurrent(attempt, repairSession)) this.retainControlForSelfHeal({
+              action: 'heartbeat-self-heal', intentRevision: attempt.intentRevision, generation: attempt.generation,
+              hostPid: attempt.hostPid, hostProcess: selfHealProcess,
+            }, curve, reacquireError);
             fanDiagnosticLog('lifecycle.lease-reacquire-failed', {
               state: this.state,
               error: reacquireError instanceof Error ? reacquireError.message : String(reacquireError),
@@ -4034,20 +5566,23 @@ export class FanHostLifecycle {
         return this.lease ? { ...this.lease } : { ...renewed };
       }
       this.lease = renewed;
-      fanDiagnosticLog('lifecycle.heartbeat-success', { state: this.state });
+      fanDiagnosticLogLazy('lifecycle.heartbeat-success', this.heartbeatSuccessDetails);
       return { ...this.lease };
     });
   }
 
   /** G8（§4）：使所有**在途**心跳回包失效（不停止未来的 tick）。 */
-  private invalidateHeartbeatEpoch(): void {
+  private invalidateHeartbeatEpoch(retainPendingAcquisitionForCleanup = false): void {
     this.heartbeatEpoch += 1;
+    if (!retainPendingAcquisitionForCleanup) this.acquisitionBoundaryEpoch = this.heartbeatEpoch;
   }
 
   /** G8（§4）：回包是否仍属于**本代**心跳（代次/电源代次/Host 实例/自己认领的 lease）。 */
-  private isHeartbeatIntentCurrent(attempt: FanHeartbeatAttempt): boolean {
-    return attempt.intentRevision === this.controlIntentRevision
+  private isHeartbeatIntentCurrent(attempt: FanHeartbeatAttempt, expectedSession = attempt.session): boolean {
+    return attempt.intentRevision === this.controlIntentRevisionValue
       && attempt.epoch === this.heartbeatEpoch
+      && expectedSession === this.sessionGeneration
+      && attempt.hostProcess === this.process
       && attempt.generation === Math.max(0, Math.floor(this.powerGeneration))
       && attempt.hostPid === (this.process?.pid ?? 0);
   }
@@ -4058,7 +5593,9 @@ export class FanHostLifecycle {
 
   /** 协调层协议完整性：lease 存活期间 5s 周期续租（TTL=15s 的续租侧义务）。 */
   private startHeartbeat(): void {
-    this.stopHeartbeat();
+    // Curve updates do not renew the Host TTL. Preserve the existing cadence
+    // so frequent manual work cannot postpone its next heartbeat indefinitely.
+    if (this.heartbeatTimer !== null) return;
     this.heartbeatTimer = setInterval(() => {
       if (this.timerHeartbeatPending) return;
       const pending = this.heartbeat().then(() => undefined, () => undefined);
@@ -4077,8 +5614,9 @@ export class FanHostLifecycle {
   }
 
   async suspend(): Promise<void> {
+    this.explicitOpenOrigin = null;
     // R2（§4.3）：新一代睡眠必须让上一代的等待/重放**立即**失效（入队前同步取消）。
-    this.controlIntentRevision += 1;
+    this.controlIntentRevisionValue += 1;
     this.cancelResumeWait('suspend');
     return this.enqueue(async () => {
       fanDiagnosticLog('lifecycle.suspend-begin', { state: this.state });
@@ -4125,6 +5663,18 @@ export class FanHostLifecycle {
     return this.adoptNativeIntentSnapshot('renderer-reattach');
   }
 
+  private captureIdleIntentObservation(): FanIdleIntentObservation {
+    return { revision: this.controlIntentRevisionValue, generation: this.powerGeneration,
+      session: this.sessionGeneration, hostPid: this.process?.pid ?? 0, recoveryToken: this.recoveryToken };
+  }
+
+  private isIdleIntentObservationCurrent(observation: FanIdleIntentObservation): boolean {
+    return this.enabled && !this.isDisabledState() && !this.hasActiveControlIntent()
+      && observation.revision === this.controlIntentRevisionValue && observation.generation === this.powerGeneration
+      && observation.session === this.sessionGeneration && observation.hostPid === (this.process?.pid ?? 0)
+      && observation.recoveryToken === this.recoveryToken;
+  }
+
   /**
    * FAN-927 §3/§5：向 native 读一次活动记录并把**已确认的**意图同步成本地曲线句柄。
    * 只读一次、无依据即返回 false；不启动 Host、不发 HTTP、不写硬件。
@@ -4133,9 +5683,13 @@ export class FanHostLifecycle {
     reason: string,
     preloaded?: FanActivitySnapshot | null,
   ): Promise<boolean> {
+    const observation = this.captureIdleIntentObservation();
     const snapshot = preloaded !== undefined
       ? preloaded
       : await this.readNativeActivity().catch(() => null);
+    // Native intent is a read receipt, never a new user command. Retire it
+    // before copying its curve if OFF, a new control or another owner won.
+    if (!this.isIdleIntentObservationCurrent(observation)) return false;
     if (!snapshot || (snapshot.active !== true && snapshot.recoverable !== true)) {
       fanDiagnosticLog('lifecycle.intent-snapshot-unusable', {
         reason,
@@ -4169,7 +5723,9 @@ export class FanHostLifecycle {
    * 不要求记录里带曲线——已有意图但曲线句柄缺失是"只恢复协调状态"的既有语义。
    */
   private async adoptRecoverableControlIntent(): Promise<boolean> {
+    const observation = this.captureIdleIntentObservation();
     const snapshot = await this.readNativeActivity().catch(() => null);
+    if (!this.isIdleIntentObservationCurrent(observation)) return false;
     const confirmed = snapshot?.active === true || snapshot?.recoverable === true;
     if (!confirmed) {
       fanDiagnosticLog('lifecycle.intent-snapshot-unusable', {
@@ -4206,16 +5762,80 @@ export class FanHostLifecycle {
   async reapplyActiveCurve(reason: string): Promise<boolean> {
     if (!this.enabled || this.isDisabledState()) return false;
     const curve = this.desiredCurve ?? this.activeCurve;
-    if (!curve || curve.length === 0) return false;
-    if (this.state !== 'ready' && this.state !== 'awaiting-control') return false;
-    try {
-      await this.apply(cloneFanNodes(curve));
-      fanDiagnosticLog('lifecycle.power-line-reapply', { reason, state: this.state, nodeCount: curve.length });
-      return true;
-    } catch (error) {
-      fanDiagnosticLog('lifecycle.power-line-reapply-failed', { reason, error: describeUnknownError(error) });
-      return false;
+    if (!curve?.length || (this.state !== 'ready' && this.state !== 'awaiting-control')) return false;
+    this.powerLineReplayPending = { reason, revision: ++this.powerLineReplayRevision,
+      context: this.admissionContext('power-line-reapply', this.controlIntentRevisionValue),
+      session: this.sessionGeneration, epoch: this.heartbeatEpoch };
+    // An automatic notification never refreshes an explicit self-heal budget.
+    if (this.recoveryIntent || this.powerLineReplayTask) return false;
+    return this.runPowerLineReplay();
+  }
+
+  private powerLineReplayIsCurrent(event: NonNullable<FanHostLifecycle['powerLineReplayPending']>): boolean {
+    return this.enabled && !this.isDisabledState() && this.hasActiveControlIntent()
+      && event.context.hostProcess === this.process && this.isAdmissionContextCurrent(event.context)
+      && event.session === this.sessionGeneration && event.epoch === this.heartbeatEpoch;
+  }
+
+  private schedulePowerLineReplay(): void {
+    if (!this.powerLineReplayPending || this.powerLineReplayTimer || this.powerLineReplayTask || this.recoveryIntent) return;
+    // Let the original writer and its reusable completion receipt drain first.
+    const timer = setTimeout(() => {
+      this.powerLineReplayTimer = null;
+      void this.runPowerLineReplay();
+    }, 0);
+    (timer as unknown as { unref?: () => void }).unref?.();
+    this.powerLineReplayTimer = timer;
+  }
+
+  private runPowerLineReplay(): Promise<boolean> {
+    if (this.powerLineReplayTask) return this.powerLineReplayTask;
+    const event = this.powerLineReplayPending;
+    if (!event || this.recoveryIntent) return Promise.resolve(false);
+    // A direct notification has taken the scheduled callback's work.
+    if (this.powerLineReplayTimer !== null) {
+      clearTimeout(this.powerLineReplayTimer);
+      this.powerLineReplayTimer = null;
     }
+    this.powerLineReplayPending = null;
+    const task = Promise.resolve().then(async () => {
+      if (!this.powerLineReplayIsCurrent(event)) return false;
+      const completion = this.controlWriteCompletion;
+      // A real write dispatched after the notification already used the live
+      // power-side template. Readback-only recovery does not grant this stamp.
+      if (completion.response && completion.powerLineRevision >= event.revision
+          && completion.revision === event.context.intentRevision && completion.session === event.session
+          && completion.process === event.context.hostProcess && completion.epoch === event.epoch) return true;
+      const curve = this.desiredCurve ?? this.activeCurve;
+      if (!curve?.length) return false;
+      try {
+        await this.mutateWithBoundedRetry(event.context, async () => {
+          if (!this.powerLineReplayIsCurrent(event))
+            throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:power-line-replay');
+          if (this.recoveryIntent) {
+            this.powerLineReplayPending ??= event;
+            throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:power-line-replay-owned');
+          }
+          return this.applyMutation(cloneFanNodes(curve), event.context.intentRevision);
+        }, (attempt, error) => fanDiagnosticLog('lifecycle.power-line-reapply-attempt-failed', {
+          reason: event.reason, attempt, error: describeUnknownError(error),
+        }), 'Fan 电源档重应用失败');
+        fanDiagnosticLog('lifecycle.power-line-reapply', { reason: event.reason, state: this.state, nodeCount: curve.length });
+        return true;
+      } catch (error) {
+        this.retainControlForSelfHeal(event.context, curve, error);
+        fanDiagnosticLog('lifecycle.power-line-reapply-failed', { reason: event.reason, error: describeUnknownError(error) });
+        return false;
+      }
+    });
+    this.powerLineReplayTask = task;
+    const finish = () => {
+      if (this.powerLineReplayTask !== task) return;
+      this.powerLineReplayTask = null;
+      this.schedulePowerLineReplay();
+    };
+    void task.then(finish, finish);
+    return task;
   }
 
   /**
@@ -4226,47 +5846,75 @@ export class FanHostLifecycle {
   async reattachExistingControlSession(): Promise<boolean> {
     if (!this.enabled || this.isDisabledState()) return false;
     if (!this.desiredCurve) return false;
-    const revision = this.controlIntentRevision;
+    const revision = this.controlIntentRevisionValue;
     const generation = this.powerGeneration;
     const sessionGeneration = this.sessionGeneration;
-    const stillCurrent = () => revision === this.controlIntentRevision && generation === this.powerGeneration
-      && sessionGeneration === this.sessionGeneration && !this.isDisabledState();
+    const hostProcess = this.process;
+    const boundaryEpoch = this.acquisitionBoundaryEpoch;
+    const sameHostBoundary = () => generation === this.powerGeneration && sessionGeneration === this.sessionGeneration
+      && hostProcess === this.process && boundaryEpoch === this.acquisitionBoundaryEpoch;
+    const stillCurrent = () => revision === this.controlIntentRevisionValue && sameHostBoundary() && !this.isDisabledState();
     // A cached token proves neither current Host readiness nor current ownership.
-    const remote = await this.adapter.getState().catch(() => null);
-    if (!remote || !stillCurrent() || unsupportedFanControlError(remote)
-        || this.classifyControlAdmission(remote, true) !== 'accepting') return false;
-    this.syncRemoteSessionState(remote);
-    if (this.lease) {
-      if (!this.remoteFanControlHealthy(remote)) return false;
-      this.startHeartbeat(); return true;
-    }
-    const state = String(remote.state ?? '').toLowerCase();
-    const sessionReady = state === 'ready' && String(remote.protocolVersion ?? '') === '2'
-      && (this.config.aiMockSession ? aiFanMockStateAllowed(remote) && remote.mockControlEnabled === true : remote.hardwareWritesEnabled === true)
-      && remote.openCalled === true && remote.openEventsCalled === true;
-    if (!sessionReady) return false;
-    try {
-      const acquired = await this.adapter.acquireControl();
-      if (!stillCurrent()) {
-        // Release only the token returned by THIS acquisition. The Host rejects
-        // it if a newer owner has already taken over; never restore a cached token.
-        await this.adapter.releaseControl(acquired.leaseId).catch(() => undefined);
+    // Lease acquisition and its stale-result release are ownership mutations.
+    // Keep them on the same queue as manual apply/OFF/Close so a late
+    // reattach cannot release a lease already adopted by a newer control.
+    return this.enqueue(async () => {
+      if (!stillCurrent()) return false;
+      const readEpoch = this.heartbeatEpoch;
+      let remote: FanState | null = null;
+      try { remote = await this.adapter.getState(); }
+      catch (error) {
+        if (isTerminalFanControlRefusal(error)) {
+          if (stillCurrent()) this.parkTerminalControlRefusal(revision, generation, hostProcess, readEpoch, error);
+          throw error;
+        }
+      }
+      const generationEvidence = remote ? this.snapshotGenerationEvidence(remote) : null;
+      if (!remote || !stillCurrent() || unsupportedFanControlError(remote)
+          || this.classifyControlAdmission(remote, true, false, generationEvidence ?? undefined) !== 'accepting') return false;
+      this.syncRemoteSessionState(remote, generationEvidence ?? undefined);
+      if (!stillCurrent()) return false;
+      if (this.lease) {
+        if (!this.remoteFanControlHealthy(remote, generationEvidence ?? undefined)) return false;
+        this.startHeartbeat(); return true;
+      }
+      const state = String(remote.state ?? '').toLowerCase();
+      const sessionReady = state === 'ready' && String(remote.protocolVersion ?? '') === '2'
+        && (this.config.aiMockSession ? aiFanMockStateAllowed(remote) && remote.mockControlEnabled === true : remote.hardwareWritesEnabled === true)
+        && remote.openCalled === true && remote.openEventsCalled === true;
+      if (!sessionReady) return false;
+      const acquireEpoch = this.heartbeatEpoch;
+      try {
+        const acquired = await this.adapter.acquireControl();
+        if (!stillCurrent()) {
+          // Only the same Host/power boundary can retire this new acquisition
+          // before a queued newer intent. A wake/owner change owns its cleanup.
+          if (sameHostBoundary()) await this.adapter.releaseControl(acquired.leaseId).catch(() => undefined);
+          return false;
+        }
+        this.lease = acquired;
+        // Existing control was proved by the authenticated read above; acquire
+        // returns only a lease, so mirror that lease into this display receipt.
+        this.observeControlDisplay({ ...remote, lease: acquired, leaseGeneration: acquired.generation });
+        if (!stillCurrent()) return false;
+        this.startHeartbeat();
+        fanLifecycleEvidence('lifecycle.renderer-lease-acquired', {
+          state: this.state,
+          generation: this.powerGeneration,
+        });
+        return true;
+      } catch (error) {
+        if (isTerminalFanControlRefusal(error)) {
+          if (stillCurrent()) this.parkTerminalControlRefusal(revision, generation, hostProcess, acquireEpoch, error);
+          throw error;
+        }
+        fanDiagnosticLog('lifecycle.renderer-lease-acquire-failed', {
+          state: this.state,
+          error: describeUnknownError(error),
+        });
         return false;
       }
-      this.lease = acquired;
-      this.startHeartbeat();
-      fanLifecycleEvidence('lifecycle.renderer-lease-acquired', {
-        state: this.state,
-        generation: this.powerGeneration,
-      });
-      return true;
-    } catch (error) {
-      fanDiagnosticLog('lifecycle.renderer-lease-acquire-failed', {
-        state: this.state,
-        error: describeUnknownError(error),
-      });
-      return false;
-    }
+    });
   }
 
   /**
@@ -4280,8 +5928,9 @@ export class FanHostLifecycle {
   async reattachAfterRendererRestart(): Promise<boolean> {
     if (!this.enabled || this.isDisabledState()) return false;
     if (this.hasActiveControlIntent()) return this.reattachExistingControlSession();
+    const observation = this.captureIdleIntentObservation();
     const snapshot = await this.readNativeActivity().catch(() => null);
-    if (!snapshot) return false;
+    if (!this.isIdleIntentObservationCurrent(observation) || !snapshot) return false;
     if (snapshot.active === true) {
       if (!await this.adoptNativeIntentSnapshot('renderer-reattach', snapshot)) return false;
       return this.reattachExistingControlSession();
@@ -4304,7 +5953,9 @@ export class FanHostLifecycle {
   async recoverAfterUncleanExit(): Promise<boolean> {
     if (!this.enabled || this.isDisabledState()) return false;
     if (this.hasActiveControlIntent()) return false;
+    const observation = this.captureIdleIntentObservation();
     const snapshot = await this.readNativeActivity().catch(() => null);
+    if (!this.isIdleIntentObservationCurrent(observation)) return false;
     if (!snapshot || snapshot.recoverable !== true) {
       fanDiagnosticLog('lifecycle.crash-recovery-nowork', {
         state: this.state,
@@ -4316,12 +5967,28 @@ export class FanHostLifecycle {
     if (curve.length === 0) return false;
     // 先建立/接管会话（一次受控启动或 adopt），再按记录比对设备；不匹配就不写。
     if (this.state === 'stopped') {
-      const gate = await this.startInternal();
-      if (!gate.allowed) {
-        fanDiagnosticLog('lifecycle.crash-recovery-nowork', { state: this.state, reason: gate.reason });
+      // Startup shares the existing control queue. OFF/new manual control
+      // retires this uncommitted recovery before it may create a new owner.
+      const startup = this.enqueue(async () => {
+        if (!this.isIdleIntentObservationCurrent(observation)) return null;
+        const gate = await this.startInternal();
+        return { gate, process: this.process, session: this.sessionGeneration };
+      });
+      this.intentRecoveryStartup = startup;
+      let started: Awaited<typeof startup>;
+      try { started = await startup; }
+      finally { if (this.intentRecoveryStartup === startup) this.intentRecoveryStartup = null; }
+      const gate = started?.gate;
+      if (!gate?.allowed) {
+        fanDiagnosticLog('lifecycle.crash-recovery-nowork', { state: this.state, reason: gate?.reason ?? 'superseded' });
         return false;
       }
     }
+    // Our own startup may replace the process/session. It cannot grant this
+    // old activity receipt a newer control revision or power generation.
+    if (!this.enabled || this.isDisabledState() || this.hasActiveControlIntent()
+        || observation.revision !== this.controlIntentRevisionValue || observation.generation !== this.powerGeneration
+        || observation.recoveryToken !== this.recoveryToken) return false;
     if (snapshot.deviceClass && this.deviceClassValue && snapshot.deviceClass !== this.deviceClassValue) {
       fanLifecycleEvidence('lifecycle.crash-recovery-device-mismatch', {
         recorded: snapshot.deviceClass,
@@ -4331,7 +5998,7 @@ export class FanHostLifecycle {
     }
     this.desiredCurve = cloneFanNodes(curve);
     this.resumeCurve = cloneFanNodes(curve);
-    const intentRevision = this.controlIntentRevision;
+    const intentRevision = this.controlIntentRevisionValue;
     const context = this.admissionContext('recover-after-unclean-exit', intentRevision);
     try {
       await this.mutateWithBoundedRetry(
@@ -4373,13 +6040,35 @@ export class FanHostLifecycle {
     // `fan.resume-ready` and the committed `power.resumed` fallback can be
     // delivered in either order.  Both edges must consume one recovery owner
     // and one Host Open/OpenEvents chain for the same generation.
-    if (this.resumePromise) return this.resumePromise;
+    const generation = Math.max(0, Math.floor(this.powerGeneration));
+    const previous = this.resumePromise;
+    if (previous) {
+      if (this.resumePromiseGeneration === generation) return previous;
+      await this.awaitPreviousResume(previous, generation, this.controlIntentRevisionValue);
+      return this.resume();
+    }
     const pending = this.resumeInternal();
     this.resumePromise = pending;
+    this.resumePromiseGeneration = generation;
     try {
       await pending;
     } finally {
-      if (this.resumePromise === pending) this.resumePromise = null;
+      if (this.resumePromise === pending) {
+        this.resumePromise = null;
+        this.resumePromiseGeneration = null;
+      }
+    }
+  }
+
+  private async awaitPreviousResume(previous: Promise<void>, generation: number, intentRevision: number): Promise<void> {
+    // The previous generation settles only its own result. A confirmed new wake
+    // must enter its own admission after that owner finishes, unless superseded.
+    await previous.catch(() => undefined);
+    this.assertIntentStillCurrent(intentRevision, 'resume-owner-handoff');
+    if (generation !== this.powerGeneration) throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:resume-owner-generation');
+    if (this.resumePromise === previous) {
+      this.resumePromise = null;
+      this.resumePromiseGeneration = null;
     }
   }
 
@@ -4425,9 +6114,14 @@ export class FanHostLifecycle {
     // If the ordinary F5 handler won the race, do not run the compensation's
     // rearm beside it.  Await the shared resume body; after it settles the
     // normal recovery owner remains responsible for any transient failure.
-    if (this.resumePromise) {
-      await this.resumePromise;
-      return;
+    const previous = this.resumePromise;
+    if (previous) {
+      if (this.resumePromiseGeneration === generation) {
+        await previous;
+        return;
+      }
+      await this.awaitPreviousResume(previous, generation, this.controlIntentRevisionValue);
+      return this.resumeAfterCommittedPowerWake(generation);
     }
     // The normal F5 path is Host-owned and has already rebuilt HC before the
     // renderer calls `resume()`.  The committed-edge compensation exists
@@ -4467,7 +6161,7 @@ export class FanHostLifecycle {
     // ——真机 20:13:50 的缺陷正是"宿主重建要 ~10 s，渲染侧 40 ms 内两次尝试就被 POWER_RESUMING
     // 拒完并永久放弃"。这里由 mutateWithBoundedRetry 做一次有界、可取消、同代共享的只读等待，
     // 队列内只执行一次真实写入；disable/close/新睡眠/新曲线能在各自入队点**同步**取消它。
-    const intentRevision = this.controlIntentRevision;
+    const intentRevision = this.controlIntentRevisionValue;
     const context = this.admissionContext('resume', intentRevision, generation);
     // The bounded request is only one attempt of the retained control intent.
     // A confirmed wake can arrive before the Host F5 sender: waiting then times
@@ -4493,6 +6187,8 @@ export class FanHostLifecycle {
           generation, state: this.state, error: describeUnknownError(error),
         });
       }
+      if (requestStillCurrent) this.retainControlForSelfHeal(context,
+        this.desiredCurve ?? this.resumeCurve ?? this.activeCurve ?? undefined, error);
       throw error;
     }
   }
@@ -4502,7 +6198,7 @@ export class FanHostLifecycle {
    * 边界（读快照之前**与**之后、最终写之前）都必须过这一关；被取代/换代即刻停手且不写。
    */
   private isResumeReplayCurrent(generation: number, intentRevision: number): boolean {
-    return intentRevision === this.controlIntentRevision
+    return intentRevision === this.controlIntentRevisionValue
       && generation === Math.max(0, Math.floor(this.powerGeneration));
   }
 
@@ -4510,7 +6206,7 @@ export class FanHostLifecycle {
     fanDiagnosticLog('lifecycle.resume-replay-superseded', {
       state: this.state,
       intentRevision,
-      currentIntentRevision: this.controlIntentRevision,
+      currentIntentRevision: this.controlIntentRevisionValue,
       generation,
       currentGeneration: this.powerGeneration,
     });
@@ -4531,14 +6227,85 @@ export class FanHostLifecycle {
     if (!this.process && (this.state === 'stopped' || this.state === 'fault-locked' || this.state === 'unknown')) {
       await this.startInternal();
     }
-    const remote = await this.adapter.getState().catch(() => null);
+    // An initial ON can reach sleep before its first handshake completes. The
+    // retired reply cannot authorize this wake; refresh the current owner's
+    // handshake once, without another launcher or a manual-rescue permission.
+    if (this.process && !this.writeReady) {
+      const process = this.process, session = this.sessionGeneration, epoch = this.heartbeatEpoch;
+      const cancellationRevision = this.controlCancellationRevisionValue;
+      let handshake: FanHandshake;
+      try { handshake = await this.adapter.handshake(); }
+      catch (error) {
+        this.assertStartupReadCurrent(generation, process, session, epoch, cancellationRevision);
+        throw error;
+      }
+      this.assertStartupReadCurrent(generation, process, session, epoch, cancellationRevision);
+      if (!this.isResumeReplayCurrent(generation, intentRevision)) {
+        this.logResumeReplaySuperseded(generation, intentRevision);
+        return;
+      }
+      const gate = this.acceptCurrentHandshake(handshake);
+      if (!gate.allowed || !gate.writeReady)
+        throw new FanApiError(`Fan Host 恢复握手尚未允许写入：${gate.reason ?? 'gate-denied'}`, 409, 'FAN_DEVICE_GATE_DENIED');
+    }
+    const readProcess = this.process, readEpoch = this.heartbeatEpoch, readSession = this.sessionGeneration;
+    let remote: FanState | null = null;
+    try { remote = await this.adapter.getState(); }
+    catch (error) {
+      // An explicit refusal is not a missing snapshot and cannot authorize a
+      // fallback curve write. Ordinary read uncertainty retains its old path.
+      if (isTerminalFanControlRefusal(error)) {
+        if (readSession === this.sessionGeneration)
+          this.parkTerminalControlRefusal(intentRevision, generation, readProcess, readEpoch, error);
+        throw error;
+      }
+    }
     // §3.3.2：这段只读快照的 await 期间到达的终止性意图/新电源代次必须让旧重放停手，
     // 且**不得采纳**这枚迟到快照（旧回包不能清新 lease、覆盖新 phase）。
-    if (!this.isResumeReplayCurrent(generation, intentRevision)) {
+    if (!this.isResumeReplayCurrent(generation, intentRevision)
+        || readProcess !== this.process || readSession !== this.sessionGeneration || readEpoch !== this.heartbeatEpoch) {
       this.logResumeReplaySuperseded(generation, intentRevision);
       return;
     }
-    this.syncRemoteSessionState(remote ?? undefined);
+    // Multiple native wake notifications can arrive after F5 already wrote.
+    // Reuse only the same live lease/session and the exact curve attested by
+    // this fresh Host snapshot. Manual apply/preset still always submit writes.
+    const curve = this.desiredCurve;
+    const remoteCurve = remote?.activeCurve;
+    const receipt = this.activeCurveReceipt;
+    // The replay decision and the following state sync consume the same
+    // immutable Host snapshot. Resolve its generation evidence once so a
+    // successful wake replay does not parse the same receipt twice.
+    const generationEvidence = remote ? this.snapshotGenerationEvidence(remote) : null;
+    const alreadyApplied = remote !== null && curve !== null && curve.length > 0
+      && this.activeCurve !== null && this.admittedPowerGeneration === generation
+      && receipt !== null && receipt.curve === this.activeCurve && receipt.generation === generation
+      && receipt.session === this.sessionGeneration && receipt.process === this.process
+      && receipt.revision === intentRevision && receipt.leaseId === this.lease?.leaseId
+      && receipt.leaseGeneration === this.lease?.generation
+      && receipt.writeEvidenceQualified && this.hasReplayReuseWriteEvidence(remote.lastControlWriteEvidence)
+      && this.remoteFanControlHealthy(remote, generationEvidence ?? undefined)
+      && this.activeCurve.length === curve.length && this.activeCurve.every((node, i) =>
+        node.tempC === curve[i].tempC && node.dutyPercent === curve[i].dutyPercent)
+      && Array.isArray(remoteCurve) && remoteCurve.length === curve.length
+      && remoteCurve.every((node, i) => node !== null && typeof node === 'object'
+        && node.tempC === curve[i].tempC && node.dutyPercent === curve[i].dutyPercent);
+    this.syncRemoteSessionState(remote ?? undefined, generationEvidence ?? undefined);
+    // Display subscribers can synchronously close control or advance a wake.
+    // The pre-callback reuse decision cannot admit that newer boundary.
+    if (!this.isResumeReplayCurrent(generation, intentRevision)
+        || readProcess !== this.process || readSession !== this.sessionGeneration || readEpoch !== this.heartbeatEpoch) {
+      this.logResumeReplaySuperseded(generation, intentRevision);
+      return;
+    }
+    if (alreadyApplied) {
+      this.beginCoordinatorSession();
+      this.admitCoordinatorHcReady();
+      this.setState('ready');
+      this.resumeCurve = null;
+      fanDiagnosticLog('lifecycle.resume-curve-already-applied', { generation, state: this.state });
+      return;
+    }
     if (this.desiredCurve) {
       // E9（六十八批 T0 删减，HC 锚点：IDevice.cs:410-423 事件驱动 SetFanControl；生命周期零原创）
       // 事件驱动重建：直接以 SetFanControl(true/曲线) 语义重写曲线，无 adapter.resume/协商/观察窗。
@@ -4546,7 +6313,8 @@ export class FanHostLifecycle {
       this.beginCoordinatorSession();
       this.admitCoordinatorHcReady();
       this.setState('awaiting-control');
-      await this.applyMutation(this.desiredCurve as readonly FanNode[], intentRevision);
+      const applied = await this.applyMutation(this.desiredCurve as readonly FanNode[], intentRevision);
+      this.assertControlWriteCompletionCurrent(applied);
       this.resumeCurve = null;
       fanDiagnosticLog('lifecycle.resume-curve-restored', { state: this.state });
       return;
@@ -4558,12 +6326,22 @@ export class FanHostLifecycle {
   }
 
   async close(): Promise<void> {
+    this.controlCancellationRevisionValue += 1;
     this.aiMockCloseReceipt = null;
     // R2（§4.3）：关闭是终止性意图——同步使旧恢复等待/旧重放失效（入队前）。
-    this.controlIntentRevision += 1;
+    this.controlIntentRevisionValue += 1;
     this.cancelResumeWait('close');
     // FAN-938 R5 §3：close 是终止性意图，取消 Fan 恢复 owner（不再持续重试）。
     this.cancelRecovery('close');
+    // Close retires maintenance now, even while HC cleanup/exit is pending.
+    // A later explicit ON starts its own renewal only after control is granted.
+    this.invalidateHeartbeatEpoch(true);
+    this.stopHeartbeat();
+    // Cancel user intent now. Queued device cleanup must preserve any later ON,
+    // including an ON waiting for the predecessor's confirmed exit.
+    this.activeCurve = null;
+    this.resumeCurve = null;
+    this.desiredCurve = null;
     return this.enqueue(() => this.closeInternal());
   }
 
@@ -4595,8 +6373,8 @@ export class FanHostLifecycle {
       this.opened = false;
       this.eventsOpened = false;
       this.activeCurve = null;
-      this.resumeCurve = null;
-      this.desiredCurve = null;
+      // Public Close cancelled intent before queueing; internal replacement
+      // closes only the old session. Neither may erase a later pending curve.
       this.setState('stopped');
       this.coordinator.markStopped();
       this.writeReady = false;
@@ -4654,7 +6432,7 @@ export class FanHostLifecycle {
       this.aiMockCloseReceipt = aiFanRuntimeEvidence(closed);
     } else {
       assertHcSessionClosed(closed, 'Fan Host close');
-      if (!isSafeHostRecoveryState(closed, true)) {
+      if (!isSafeHostRecoveryState(closed, true) && !hasRetiredHcResourceBoundary(closed)) {
         throw new Error(`Fan Host close：远程状态未进入安全停止边界（${String(closed.state ?? 'unknown')}）`);
       }
     }
@@ -4663,24 +6441,35 @@ export class FanHostLifecycle {
     await this.stopProcessOnly();
   }
 
+  /** Unknown transport reads remain observations; a declared refusal stays terminal. */
+  private async readHostStateForRecovery(): Promise<FanState | null> {
+    try { return await this.adapter.getState(); }
+    catch (error) {
+      if (isTerminalFanControlRefusal(error)) throw error;
+      return null;
+    }
+  }
+
   /**
    * 920 F-2b/F-2c：Close 失败后**只观察、不重发**。Host 用显式 pending 标记或
    * 错误文本报告"仍在收尾"时等它结束；否则等它自己确认的安全停止边界。有界窗口
    * 内都未出现则返回 null（调用方保持 fail-closed，不伪造成功）。
    */
   private async observeHostCloseAfterFailure(error: unknown): Promise<FanState | null> {
+    if (isTerminalFanControlRefusal(error)) throw error;
     if (isHcCloseCleanupPending(error)) {
       try {
         await this.waitForHcCloseCleanup();
-      } catch {
+      } catch (waitError) {
+        if (isTerminalFanControlRefusal(waitError)) throw waitError;
         return null;
       }
-      return await this.adapter.getState().catch(() => null);
+      return await this.readHostStateForRecovery();
     }
-    const deadline = Date.now() + 16000;
-    while (Date.now() < deadline) {
-      const remote = await this.adapter.getState().catch(() => null);
-      if (remote && isSafeHostRecoveryState(remote, true)) return remote;
+    const deadline = monotonicNowMs() + 16000;
+    while (monotonicNowMs() < deadline) {
+      const remote = await this.readHostStateForRecovery();
+      if (remote && (isSafeHostRecoveryState(remote, true) || hasRetiredHcResourceBoundary(remote))) return remote;
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
     }
     return null;
@@ -4693,17 +6482,16 @@ export class FanHostLifecycle {
    * retrying /api/close into the same serialized gate.
    */
   private async waitForHcCloseCleanup(): Promise<void> {
-    const deadline = Date.now() + 16000;
-    while (Date.now() < deadline) {
-      const remote = await this.adapter.getState().catch(() => null);
+    const deadline = monotonicNowMs() + 16000;
+    while (monotonicNowMs() < deadline) {
+      const remote = await this.readHostStateForRecovery();
       // A transport proxy or a legacy adapter can return a partial object.
       // Do not treat “pending field absent” as completion while waiting for a
       // real HC Close boundary; require a state label and reject explicit
       // incomplete Close/Stop evidence before retrying /api/close.
-      if (remote && typeof remote.state === 'string' &&
-          remote.hcCloseCleanupPending !== true &&
-          remote.unknownState !== true &&
-          !hasExplicitIncompleteHcCloseEvidence(remote, true)) return;
+      if (remote && (hasRetiredHcResourceBoundary(remote) || (typeof remote.state === 'string' &&
+          remote.hcCloseCleanupPending !== true && remote.unknownState !== true &&
+          !hasExplicitIncompleteHcCloseEvidence(remote, true)))) return;
       await new Promise<void>((resolve) => setTimeout(resolve, 250));
     }
     throw new Error('HC_CLOSE_PENDING: HC Close 资源清理在等待窗口内未完成');
@@ -4742,7 +6530,7 @@ export class FanHostLifecycle {
    * 与远端 remote.powerState === 'suspended' 互为补充。
    */
   private isSleepWindow(): boolean {
-    const phase = this.coordinator.snapshot().phase;
+    const phase = this.coordinator.currentPhase;
     return phase === 'suspending' || phase === 'suspended' || phase === 'resuming';
   }
 
@@ -4827,8 +6615,51 @@ export class FanHostLifecycle {
     // Retain the process handle until the launcher confirms termination. If
     // stop itself fails, callers must remain able to retry close/recovery.
     await this.launcher.stop(process);
+    this.lastExitedProcess = process;
     this.process = null;
     this.closedHostAwaitingExit = false;
+  }
+
+  private rememberControlWriteCompletion(response: FanState, revision: number, session: number,
+    process: FanHostProcess | null, epoch: number, recoveryToken: number, powerLineRevision: number): void {
+    const completion = this.controlWriteCompletion;
+    completion.response = response;
+    completion.revision = revision;
+    completion.session = session;
+    completion.process = process;
+    completion.epoch = epoch;
+    completion.recoveryToken = recoveryToken;
+    completion.powerLineRevision = powerLineRevision;
+  }
+
+  /** Fence the microtask gap between the mutation return and queue completion. */
+  private assertControlWriteCompletionCurrent(response: unknown): void {
+    const completion = this.controlWriteCompletion;
+    if (completion.response !== response)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:control-completion-response');
+    this.assertIntentStillCurrent(completion.revision, 'control-after-completion');
+    this.assertControlWriteReceiptCurrent(completion.session, completion.process, completion.epoch, completion.recoveryToken);
+  }
+
+  /** Ready publication can reenter user control before the hardware RPC. */
+  private assertControlWriteAdmissionCurrent(intentRevision: number, session: number, hostProcess: FanHostProcess | null,
+    epoch: number, recoveryToken: number): void {
+    this.assertIntentStillCurrent(intentRevision, 'control-before-dispatch');
+    if (session !== this.sessionGeneration || hostProcess !== this.process || recoveryToken !== this.recoveryToken)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:control-before-dispatch-owner');
+    // Nothing has been submitted: a new wake is retryable, never an unknown write.
+    if (epoch !== this.heartbeatEpoch)
+      throw new FanApiError('POWER_RESUMING: 风扇写入前发生唤醒，保留当前请求等待恢复', 409, 'POWER_RESUMING');
+  }
+
+  private assertControlWriteReceiptCurrent(session: number, hostProcess: FanHostProcess | null,
+    epoch: number, recoveryToken: number): void {
+    if (session !== this.sessionGeneration || hostProcess !== this.process || recoveryToken !== this.recoveryToken)
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:control-write-receipt-owner');
+    // The old write may have committed, but it proves nothing about control
+    // after the new wake edge. Reconcile before another hardware attempt.
+    if (epoch !== this.heartbeatEpoch)
+      throw new FanApiError('FAN_HTTP_RESULT_UNKNOWN: 风扇写入回执跨越唤醒边界，等待当前状态对账', 0, 'FAN_HTTP_RESULT_UNKNOWN');
   }
 
   /**
@@ -4842,12 +6673,33 @@ export class FanHostLifecycle {
    * `LEASE_INVALID` 时由调用方丢弃本地 lease，`mutateWithBoundedRetry` 的一次有界重试
    * 会走到这里的 fresh acquire 并重提原请求。
    */
-  private async ensureLeaseForMutation(): Promise<void> {
+  private async ensureLeaseForMutation(admittedIntentRevision: number): Promise<void> {
+    this.assertIntentStillCurrent(admittedIntentRevision, 'lease-before-renewal');
     if (this.lease) {
       this.startHeartbeat();
       return;
     }
-    this.lease = await this.adapter.acquireControl();
+    const generation = this.powerGeneration;
+    const session = this.sessionGeneration;
+    const owner = this.process;
+    const epoch = this.heartbeatEpoch, recoveryToken = this.recoveryToken;
+    const acquired = await this.adapter.acquireControl();
+    if (generation !== this.powerGeneration || session !== this.sessionGeneration || owner !== this.process) {
+      // The original owner/sleep boundary owns cleanup. Do not adopt its late
+      // token or release it into a newer session from this retired continuation.
+      throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:acquire-control-owner');
+    }
+    if (this.acquisitionBoundaryEpoch > epoch) {
+      // Never adopt or release this old receipt into a newer power/authority
+      // owner. The same current manual intent may wait and acquire afresh.
+      if (recoveryToken !== this.recoveryToken)
+        throw new Error('FAN_CONTROL_INTENT_SUPERSEDED:acquire-control-boundary');
+      throw new FanApiError('POWER_RESUMING: 风扇控制权申请跨越电源边界，等待当前恢复', 409, 'POWER_RESUMING');
+    }
+    // Same-session cancellation still retains the token for ordered OFF/Close
+    // cleanup (or a newer explicit curve), but may not resurrect maintenance.
+    this.lease = acquired;
+    this.assertIntentStillCurrent(admittedIntentRevision, 'lease-acquired-before-renewal');
     this.startHeartbeat();
   }
 
@@ -4855,8 +6707,8 @@ export class FanHostLifecycle {
   // armFanGuard / disarmFanGuard / emitFanGuardState 已删（guard 保活链不复活）；
   // stopHeartbeat 保留使用——租约续租属协调层协议完整性（第七十七批 C）。
 
-  private remoteFanControlHealthy(remote: FanState): boolean {
-    if (this.classifyControlAdmission(remote, true) !== 'accepting') return false;
+  private remoteFanControlHealthy(remote: FanState, generationEvidence?: FanSnapshotGenerationEvidence): boolean {
+    if (this.classifyControlAdmission(remote, true, false, generationEvidence) !== 'accepting') return false;
     const state = String(remote.state ?? '').toLowerCase();
     // Reusing a resident Host is an HC SystemReady admission, not a mere
     // transport-health check. Protocol-2 state snapshots provide all of this
@@ -4878,7 +6730,10 @@ export class FanHostLifecycle {
 }
 
 /** Product singleton. Importing this module has no native side effects. */
-export const fanHostLifecycle = new FanHostLifecycle({ enabled: FAN_REAL_HOST_ENABLED });
+export const fanHostLifecycle = new FanHostLifecycle({
+  enabled: FAN_REAL_HOST_ENABLED,
+  onControlDisplay: setFanNavigationControl,
+});
 
 export function getFanHostLifecycle(): FanHostLifecycle {
   return fanHostLifecycle;

@@ -59,3 +59,28 @@ pawnio/__pycache__/
 !/redist/HIDMaestroSetup.deps.json
 !/redist/HIDMaestroSetup.manifest.json
 !/redist/HIDMaestroSetup.runtimeconfig.json
+
+# Immutable YMCC theme definitions/defaults, not a live user homebrew profile.
+!steam-appearance/manifest.json
+!steam-appearance/themes/*/theme.json
+!steam-appearance/themes/*/config_USER.json
+# Immutable battery helper runtime metadata; user settings live in LocalAppData.
+!/battery-host/YeManBatteryHost.deps.json
+!/battery-host/YeManBatteryHost.runtimeconfig.json
+!/battery-host/battery-host.payload.json
+
+# Immutable release inputs must survive a clean Git checkout.
+# Keep mutable user JSON ignored; allow only the source-owned contracts below.
+!/GameTitlePolicy.json
+!/settings-baseline.json
+!/settings-defaults-v1.json
+!/MemoryScan/MemoryScanHost.payload.json
+!/decky/plugins/ymcc-sidebar/package.json
+!/decky/plugins/ymcc-sidebar/plugin.json
+!/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.deps.json
+!/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.json
+!/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.runtime.json
+!/light-setter/YeManLightSetter.deps.json
+!/light-setter/YeManLightSetter.json
+!/light-setter/YeManLightSetter.runtimeconfig.json
+!/ymcc-shared-runtime/manifest.json

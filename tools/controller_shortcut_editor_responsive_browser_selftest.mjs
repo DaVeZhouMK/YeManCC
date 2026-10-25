@@ -14,11 +14,11 @@ const baseline=process.env.YMCC_EDITOR_BASELINE;
 fs.mkdirSync(out,{recursive:true});
 const styles=[];
 const mocks={
-  '@/bridge/ipc': 'export function on(){return ()=>{}};export function isNativeRuntime(){return false};export async function invoke(){return {}}',
+  '@/bridge/ipc': 'export function on(){return ()=>{}};export const isNativeRuntime=false;export async function invoke(){return {}}',
   '@/bridge/uiLifecycle': 'export function isUiVisible(){return true};export function onUiVisibilityChange(){return ()=>{}}',
   '@/bridge/yeman': 'export async function summonGet(){return structuredClone(window.__fixture.gamepad)};export async function summonSet(p){window.__fixture.nativeWrites++;Object.assign(window.__fixture.gamepad,p);return summonGet()};export async function oemKeysGet(){return structuredClone(window.__fixture.oem)};export async function setShortcutRecording(){window.__fixture.recordingCalls++;return {ok:true}}',
   '@/bridge/settingsRepository': 'export async function loadSettings(){return structuredClone(window.__fixture.settings)};export async function compareAndSwapInputSettings(){window.__fixture.writes++;return {ok:false,reason:"fixture-only"}}',
-  '@/bridge/api': 'export const fs={},settingsStore={},shell={}',
+  '@/bridge/api': 'export const fs={},settingsStore={},shell={},windowApi={controllerEditorWidth:async()=>({ok:false}),startResize:async()=>false}',
   '@/gamepad/focus': 'export function focusGamepadElement(node){node?.focus()};export function getGamepadPopupPlacement(){return {style:{},above:false}}',
 };
 const result=await build({stdin:{resolveDir:root,loader:'ts',contents:
@@ -76,8 +76,19 @@ async function checkLayout(page,name){
     return {firstRows,client:dialog.clientWidth,scroll:dialog.scrollWidth,clipped,outside,columns:getComputedStyle(document.querySelector('.rule-list')).gridTemplateColumns,fonts:[...document.querySelectorAll('.action-trigger-grid .seg-main')].map(n=>getComputedStyle(n).fontSize)};
   });
   layouts.push({name,...layout});
-  if(!baseline){const [left,right,next]=layout.firstRows;assert(Math.abs(left.y-right.y)<=1&&right.x>left.x+left.width,name+': first two actions must be side by side');assert(next.y>left.y&&Math.abs(next.x-left.x)<=1,name+': next action must begin the next row');assert.equal(layout.columns.split(' ').length,2,name+': actions must stay in two columns');assert(layout.scroll<=layout.client+1,name+': horizontal dialog overflow');assert.deepEqual(layout.clipped,[],name+': clipped control text');assert.deepEqual(layout.outside,[],name+': controls outside dialog');}
+  if(!baseline){const [first,second]=layout.firstRows;const columns=layout.columns.split(' ').length;assert([1,2].includes(columns),name+': readable paged rule columns');assert(columns===1?second.y>first.y:Math.abs(first.y-second.y)<=1,name+': rules follow the displayed grid');assert((await page.locator('.rule-row').count())<=6,name+': one bounded rule page');assert(layout.scroll<=layout.client+1,name+': horizontal dialog overflow');assert.deepEqual(layout.clipped,[],name+': clipped control text');assert.deepEqual(layout.outside,[],name+': controls outside dialog');}
   cases.push(name+': two columns, complete control text and horizontal bounds');
+}
+async function selectRuleByText(page,text){
+  const previous=page.locator('.rule-pagination button').first(),next=page.locator('.rule-pagination button').last();
+  while(await previous.isEnabled())await previous.click();
+  for(let n=0;n<100;n++){
+    const rule=page.locator('.rule-row').filter({hasText:text});
+    if(await rule.count()){await rule.first().click();return;}
+    if(!(await next.isEnabled()))break;
+    await next.click();
+  }
+  throw new Error('Rule not reachable through pagination: '+text);
 }
 try{
   browser=await chromium.launch({headless:true,executablePath:process.env.YMCC_UI_BROWSER_EXE || 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
@@ -85,7 +96,7 @@ try{
     const context=await browser.newContext({viewport:{width:size.width,height:size.height},deviceScaleFactor:size.dpr});
     const page=await context.newPage();page.on('pageerror',error=>errors.push(error.message));
     await page.goto('http://127.0.0.1:'+server.address().port);await page.waitForSelector('.rule-row');
-    const custom=page.locator('.rule-row').filter({hasText:'虚拟手柄开关'});await custom.click();
+    await selectRuleByText(page,'虚拟手柄开关');
     await page.locator('.edit-column .card-head').scrollIntoViewIfNeeded();
     await checkLayout(page,size.name+' / controller');
     for(const [mode,label] of [['keyboard','键盘 + 鼠标'],['oem','背部和专用']]){
@@ -93,18 +104,22 @@ try{
     }
     await page.getByRole('button',{name:'手柄录制',exact:true}).click();
     // Capture the default/native view for exact before/after visual comparisons.
-    await page.locator('.rule-row').filter({hasText:'呼出 YMCC'}).click();
+    await selectRuleByText(page,'呼出 YMCC');
     await page.evaluate(()=>document.querySelector('.editor-dialog').scrollTop=0);
     await page.evaluate(()=>document.fonts.ready);await page.waitForTimeout(160);
     const image=path.join(out,'editor-'+size.name+'.png');await page.screenshot({path:image});screenshots.push(image);
     visualRects.push({name:size.name,dpr:size.dpr,preview:await page.locator('.gamepad-visualizer, .viz').first().boundingBox()});
     // Every available action, including keyboard grids and multi-parameter forms.
     if(size.name==='reference-problem-150'||size.name==='1280x720-100'||size.name==='narrow-extra'){
-      const count=await page.locator('.rule-row').count();
-      for(let i=0;i<count;i++){await page.locator('.rule-row').nth(i).click();await checkLayout(page,size.name+' / action '+i)}
+      let actionIndex=0;
+      for(let p=0;p<100;p++){
+        const count=await page.locator('.rule-row').count();
+        for(let i=0;i<count;i++){await page.locator('.rule-row').nth(i).click();await checkLayout(page,size.name+' / action '+(actionIndex++))}
+        const next=page.locator('.rule-pagination button').last();if(!(await next.isEnabled()))break;await next.click();
+      }
     }
     if(size.name==='reference-problem-150'){
-      await custom.click();
+      await selectRuleByText(page,'虚拟手柄开关');
       for(const trigger of ['按下','长按','松开','双击','连发']){
         await page.locator('.action-trigger-grid .seg-btn').filter({hasText:trigger}).click();
         await checkLayout(page,size.name+' / trigger '+trigger);

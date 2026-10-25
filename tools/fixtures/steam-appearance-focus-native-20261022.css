@@ -1,0 +1,24 @@
+/* Selected unchanged Valve rules read locally on 2026-10-22 from steamui/css/sp.css.
+ * Source SHA256: 7e15a39f83bf145b759131381f7f6191503a9490de939024059c30412a3b6123
+ * Fixed browser fixture only; never loads the installed Steam client. */
+.WYgDg9NyCcMIVuMyZ_NBC{box-sizing:content-box;width:100%;height:100%;margin:0;position:relative;filter:brightness(1) contrast(1);cursor:pointer;transition-property:filter,box-shadow,transform;transition-duration:.6s;transition-timing-function:cubic-bezier(0, 0.73, 0.48, 1);border-top:1px solid rgba(201,201,201,.06);border-bottom:1px solid rgba(0,0,0,.5);box-shadow:0px 4px 8px 0px rgba(0,0,0,.5);transform-origin:50% 50%;transform-style:preserve-3d}
+.WYgDg9NyCcMIVuMyZ_NBC{outline:1px solid #fff}
+.WYgDg9NyCcMIVuMyZ_NBC{overflow:hidden}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC{overflow:visible;border:none;box-shadow:0px 4px 10px 0px rgba(0,0,0,.25);filter:brightness(0.9);transition:filter,box-shadow,transform .1s cubic-bezier(0.16, 0.86, 0.43, 0.99);outline:none}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC::after{content:"";position:absolute;left:0px;right:0px;top:0px;bottom:0px;background:linear-gradient(-45deg, rgba(255, 255, 255, 0.2) 30%, rgba(255, 255, 255, 0.3) 36%, #aaa 49%, #ccc 51%, rgba(255, 255, 255, 0.3) 64%, rgba(255, 255, 255, 0.2) 70%);background-size:300% 100%;z-index:2;opacity:0;transition:opacity .1s cubic-bezier(0.16, 0.86, 0.43, 0.99);mix-blend-mode:overlay;pointer-events:none}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC.gpfocus::after{animation-name:_8N-VOkqAyoF13zvUSqq2-;animation-duration:1s;animation-iteration-count:1;animation-fill-mode:backwards;transition:opacity .3s cubic-bezier(0.17, 0.45, 0.14, 0.83);background-position:-180% 0%;opacity:.8}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC.Focusable:focus{transform:translateZ(15px);transition:filter,box-shadow,transform .3s cubic-bezier(0.16, 0.86, 0.43, 0.99);filter:brightness(1);box-shadow:0px 16px 24px 0px rgba(0,0,0,.5);z-index:12}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC.Focusable:focus._3VOR2AeYATx3qSE0I-Pm-5{transform:translateZ(7px)}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC.Focusable:focus{outline-offset:2px;outline:2px solid hsla(0,0%,100%,.6);animation:_3wk3dC7b5HWGvE5vqjOpdW .4s ease,_1FLuVMQRigt6C36TKGMYbp .4s ease,_2tSbN-Ik0JtgSVuvWRLekE 1.2s ease-in-out .4s 20}
+.WYgDg9NyCcMIVuMyZ_NBC:active,.WYgDg9NyCcMIVuMyZ_NBC.biTV-8rS2M65imVHU15Nv:active,.WYgDg9NyCcMIVuMyZ_NBC.L3xTnr5TfAJU1EhvCDaWm:active{transition-duration:.05s;transition-timing-function:cubic-bezier(0, 0.73, 0.48, 1);filter:brightness(1.2)}
+._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC:hover:not(._3VOR2AeYATx3qSE0I-Pm-5),._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC._2YsY_x7hLyKlUqjX9bhn0R:not(._3VOR2AeYATx3qSE0I-Pm-5){transform:rotateX(3deg) translateZ(15px);filter:brightness(1.1) contrast(0.95) saturate(1);box-shadow:0px 14px 12px 0px rgba(0,0,0,.3);z-index:12}
+.BasicUI ._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC:hover:not(._3VOR2AeYATx3qSE0I-Pm-5),.BasicUI ._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC._2YsY_x7hLyKlUqjX9bhn0R:not(._3VOR2AeYATx3qSE0I-Pm-5){transform:translateZ(15px);filter:brightness(1) contrast(0.95) saturate(1);box-shadow:0px 12px 10px 0px rgba(0,0,0,.5)}
+._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC:hover:not(._3VOR2AeYATx3qSE0I-Pm-5):active,._54PuCatl_tYG836TOs4Mv .WYgDg9NyCcMIVuMyZ_NBC._2YsY_x7hLyKlUqjX9bhn0R:not(._3VOR2AeYATx3qSE0I-Pm-5):active{transition-duration:.05s;transition-timing-function:ease-out;filter:brightness(0.8) contrast(1.05) saturate(1)}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC._3J3TT6n8aRkFb-N931OMLl{box-shadow:none;width:136px;height:64px}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC:hover~._1LJqx_qFOC8199RBQO5kU8{z-index:0}
+.BasicUI .WYgDg9NyCcMIVuMyZ_NBC.gpfocus~._1LJqx_qFOC8199RBQO5kU8{z-index:0}
+
+@keyframes _8N-VOkqAyoF13zvUSqq2-{0%{background-position:0% 0%;opacity:1}100%{background-position:-180% 0%;opacity:.8}}
+@keyframes _3wk3dC7b5HWGvE5vqjOpdW{0%{outline:12px solid}100%{outline:2px solid}}
+@keyframes _1FLuVMQRigt6C36TKGMYbp{0%{outline-color:hsla(0,0%,100%,0)}100%{outline-color:hsla(0,0%,100%,.6)}}
+@keyframes _2tSbN-Ik0JtgSVuvWRLekE{50%{outline:2px solid hsla(0,0%,100%,.24)}}

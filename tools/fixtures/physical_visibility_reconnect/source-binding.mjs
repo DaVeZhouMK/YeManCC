@@ -1,0 +1,6 @@
+import crypto from 'node:crypto';
+export const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+export function end(t,a){let d=0,m='code';for(let i=a;i<t.length;i++){const c=t[i],n=t[i+1];if(m==='line'){if(c==='\n')m='code';continue;}if(m==='block'){if(c==='*'&&n==='/'){m='code';i++;}continue;}if(m==='str'||m==='char'){if(c==='\\'){i++;continue;}if(c===(m==='str'?'"':"'"))m='code';continue;}if(c==='/'&&n==='/'){m='line';i++;continue;}if(c==='/'&&n==='*'){m='block';i++;continue;}if(c==='"'||c==="'"){m=c==='"'?'str':'char';continue;}if(c==='{')d++;else if(c==='}'&&--d===0)return i+1;}throw Error('Unclosed block');}
+export function fn(t,name){const re=new RegExp('^static[^\\n;{]*\\b'+name+'\\s*\\(','mg');const found=[];for(const m of t.matchAll(re)){const a=t.indexOf('{',m.index),s=t.indexOf(';',m.index);if(a<0||(s>=0&&s<a))continue;found.push({start:m.index,end:end(t,a),line:t.slice(0,m.index).split('\n').length});}if(found.length!==1)throw Error('Non-unique function '+name+': '+found.length);const r=found[0];return {...r,name,body:t.slice(r.start,r.end)};}
+export function type(t,name,kind='struct'){const a=t.indexOf(kind+' '+name+' ');if(a<0)throw Error('Missing type '+name);return t.slice(a,end(t,t.indexOf('{',a)))+';';}
+export const names=['hidHideResolvePhysicalIdentities','hidHideGetPhysicalIdentities','hidHideReapplyReconnectedSource'];

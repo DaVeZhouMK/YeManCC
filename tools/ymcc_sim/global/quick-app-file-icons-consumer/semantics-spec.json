@@ -1,0 +1,55 @@
+{
+  "schemaVersion": 1,
+  "id": "game-library.quick-app-icon-semantics-consumer",
+  "timeoutMs": 45000,
+  "productSource": "src/bridge/quickAppIcons.ts",
+  "defaultsSource": "src/bridge/quickAppDefaults.ts",
+  "sourceInputs": [
+    "src/bridge/quickAppIcons.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/views/QuickAppView.vue",
+    "src/components/QuickAppIcon.vue"
+  ],
+  "preservedLegacyFiles": [
+    "run.mjs",
+    "cases.mjs",
+    "spec.json",
+    "README.md"
+  ],
+  "allowedProductRequires": {
+    "quickAppIcons": [
+      "./quickAppDefaults"
+    ],
+    "quickAppDefaults": []
+  },
+  "caseNames": [
+    "defaults-five-baseline-and-freshness",
+    "default-path-case-slashes-and-outer-whitespace",
+    "internal-spaces-and-exact-path-boundaries",
+    "renamed-defaults-keep-path-kind-and-variant",
+    "custom-paths-with-default-names-stay-custom",
+    "computer-browser-select-B",
+    "other-kinds-select-A",
+    "fallback-kind-rules-and-precedence",
+    "unknown-inputs-use-generic-fallback",
+    "preview-table-fixed-intent"
+  ],
+  "faults": [
+    {
+      "id": "fault-remove-slash-normalization",
+      "source": "icons",
+      "before": "return String(value || '').trim().toLowerCase().replace(/[\\\\/]+/g, '/');",
+      "after": "return String(value || '').trim().toLowerCase();",
+      "case": "default-path-case-slashes-and-outer-whitespace",
+      "expected": "SEMANTICS_DEFAULT_PATH_NORMALIZATION"
+    },
+    {
+      "id": "fault-computer-browser-select-A",
+      "source": "icons",
+      "before": "if (kind === 'computer' || kind === 'browser') return 'b';",
+      "after": "if (kind === 'computer' || kind === 'browser') return 'a';",
+      "case": "computer-browser-select-B",
+      "expected": "SEMANTICS_COMPUTER_BROWSER_VARIANT_B"
+    }
+  ]
+}

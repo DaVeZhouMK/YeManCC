@@ -1,0 +1,16 @@
+{
+  "kind": "independent-node-assertion-representation-before-business",
+  "nodeVersion": "v22.14.0",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "nodeSha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b",
+  "generator": "tools/ymcc_sim/global/fan-adopted-start-refusal-consumer/assert-format.mjs",
+  "generatorSha256": "43176daffe03c83e2925cc775c619c11eb0caab628f941c4e3a2717ccfe595ed",
+  "actual": 1,
+  "expected": 0,
+  "message": "cancelled launch continuation sent a handshake",
+  "renderedString": "AssertionError [ERR_ASSERTION]: cancelled launch continuation sent a handshake\n\n1 !== 0\n",
+  "predictedCases": 2,
+  "originalLine": 625,
+  "originalPositiveNotExecuted": true,
+  "sourceFaultNotExecuted": true
+}

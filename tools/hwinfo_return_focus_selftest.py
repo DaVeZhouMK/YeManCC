@@ -5,6 +5,7 @@ from pathlib import Path
 import argparse
 import re
 import subprocess
+import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path('../../Build/Validation/HWiNFO-ReturnFocus-20261009'))
@@ -121,6 +122,8 @@ static Game nativeDetectGame(){return {};}
 static void focusReleaseOwnedTopmost(){g_focusSession.ownedTopmost=false;}
 static void hideWindowAnimated(HWND h){windows.at(h).visible=false;}
 static void focusClearSession(){g_focusSession={};}
+// This regression exercises the common path with no registered LS session.
+static bool focusLosslessReturnBegin(ULONGLONG){return false;}
 namespace ymcc { static void requestWindowForegroundAsync(HWND h){++activations;foreground=h;} }
 '''
 names = ['sgBaseName', 'focusBackgroundMonitorName', 'focusWindowProcessName', 'focusIsBackgroundMonitorWindow',
@@ -193,8 +196,12 @@ vs = Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Au
 assert vs.is_file(), f'compiler setup missing: {vs}'
 exe = out / 'hwinfo_return_focus_native_selftest.exe'
 cmd = out / 'run-hwinfo-return-focus-selftest.cmd'
-cmd.write_text('\r\n'.join([
-    '@echo off', f'call "{vs}" >nul', 'if errorlevel 1 exit /b 1',
+node = Path(r'C:\Users\DaVe\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\bin\node.exe')
+toolchain = repo / 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'
+script = ('import {calibrationToolchainPreamble} from ' + json.dumps(toolchain.as_uri()) +
+          '; process.stdout.write(calibrationToolchainPreamble(' + json.dumps(str(vs)) + '));')
+preamble = subprocess.run([str(node), '--input-type=module', '-e', script], check=True, capture_output=True, text=True).stdout
+cmd.write_text(preamble + '\r\n'.join([
     f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{cpp}" /I"{repo / "native"}" /Fo"{out / "selftest.obj"}" /Fe"{exe}"',
     'if errorlevel 1 exit /b 1', f'"{exe}"', 'exit /b %errorlevel%',
 ]) + '\r\n', 'ascii')

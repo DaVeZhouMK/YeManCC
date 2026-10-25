@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YMCC · 自动与手动调度 · 第二十九版</title><link rel="stylesheet" href="./style.css"><link rel="stylesheet" href="./schedule-controls.css"><script defer src="./app.js"></script></head>
+<body>
+<div class="preview">
+  <header class="preview-bar"><div class="brand">YM<span>CC</span><i></i><span class="version">调度设计 · 第二十九版</span></div><div class="preview-controls"><div class="fixture-control"><label for="fixture">演示条件</label><select id="fixture"><option value="unknown">无机型数据 · 默认 120W</option><option value="reference">演示参考值 · 30W</option><option value="verified">设备范围示例 · 8–35W</option></select></div><div class="power-simulation"><label for="power-source">模拟供电</label><select id="power-source"><option value="ac">插电 AC</option><option value="dc">电池 DC</option></select></div><button type="button" id="theme" class="text-button">浅色</button><details id="preview-tools" class="preview-tools"><summary>预览工具</summary><div class="preview-tool-panel"><div class="core-scenario-control"><label for="core-topology">核心演示</label><select id="core-topology" aria-label="核心演示，非本机拓扑"><option value="unknown">未接入回读</option><option value="hybrid3">三类核心 · 演示</option><option value="hybrid2">两类核心 · 演示</option><option value="unclassified">三类未确认名称 · 演示</option><option value="noSmt">无超线程 · 演示</option><option value="uniform">同构核心 · 演示</option></select></div><div class="preview-tool-actions"><button type="button" id="reset" class="secondary">重置示例</button><button type="button" id="save" class="primary">保存原型草稿</button><button type="button" id="export" class="text-button">导出 ↗</button></div><div class="notice" id="notice" role="status" aria-live="polite">所有修改只作用于此原型。</div></div></details></div></header>
+  
+  <div class="app-shell">
+    <aside class="sidebar"><div class="app-logo">Y<span>野蛮控制中心</span></div><div class="nav-label">设备控制</div><div class="nav-item">设备概览</div><div class="nav-item active">性能调度</div><div class="nav-item">CPU 调度</div><div class="nav-item">TDP 功耗</div><div class="nav-item">风扇控制</div><div class="sidebar-foot"><span class="dot"></span>交互预览</div></aside>
+    <main>
+      <div id="power-status" class="power-status power-status-top" role="status" aria-live="polite" data-side="ac">当前插电 AC 模式</div>
+      <div class="mode-row"><div class="mode-switch" role="group" aria-label="调度模式"><button type="button" data-mode="auto" aria-pressed="true"><span>自动模式</span></button><button type="button" data-mode="manual" aria-pressed="false"><span>手动模式</span></button><button type="button" id="simulation-open" aria-haspopup="dialog"><span>模拟测试/重置</span></button></div></div>
+      <div id="app"></div>
+    </main>
+  </div>
+  
+</div>
+<dialog id="simulation-window" aria-label="模拟测试"><iframe id="simulation-frame" title="模拟测试" allow="gamepad" tabindex="0"></iframe><div id="simulation-fallback" hidden><span>模拟测试暂时未连接</span><button type="button" id="simulation-retry">重新连接</button><button type="button" id="simulation-back">B 返回</button></div></dialog>
+</body>
+</html>
+

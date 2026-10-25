@@ -1,0 +1,26 @@
+{
+  "status": "FAIL",
+  "checks": 1,
+  "models": 1,
+  "failures": [
+    "loki-off-reaches-black-color-writer",
+    "device lighting operation unavailable: SetLedBrightness"
+  ],
+  "hardwareIo": false,
+  "HCAssemblyLoaded": false,
+  "productionEntryPointInvoked": false,
+  "assemblySha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+  "assemblyPath": "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.dll",
+  "targetCalls": [
+    "Program.ExecuteLedAction"
+  ],
+  "dependencyAttempts": [],
+  "nativeAttempts": [],
+  "cases": [
+    {
+      "id": "loki-off-reaches-black-color-writer",
+      "ok": false,
+      "actualTargetCalls": 1
+    }
+  ]
+}

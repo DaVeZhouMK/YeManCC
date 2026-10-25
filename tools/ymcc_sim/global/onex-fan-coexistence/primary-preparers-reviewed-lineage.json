@@ -1,0 +1,1448 @@
+{
+  "schemaVersion": 1,
+  "kind": "reviewed-r64-r65-payload-lineage-not-current-acceptance",
+  "compilationQualifications": {
+    "qualifiedCompilation": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-joined123-compile-lineage-prepare-20261022-r1/normalized-qualified-compilation.json",
+      "sha256": "636932fcafdd98da5a47f5a4b706357680227fbf014695f6e332044c30a66c6b"
+    },
+    "authorityCompilation": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r62-configured-sink-authority-parent-qualification/AUTHORITY-QUALIFICATION.json",
+      "sha256": "b1e5f13029dceddc4fcd542cb1d7341dc864322a524b736058f67d16f05933dd"
+    },
+    "authorityRawApi": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r62-configured-sink-authority-parent-qualification/AUTHORITY-RAW-API-REVIEW.json",
+      "sha256": "76ea7113af263d5368ed37b8356203fd67d00e0b16adfdac710a9fb40b2d712c"
+    },
+    "staCompilation": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r62-configured-sink-authority-parent-qualification/STA-COMPATIBILITY-QUALIFICATION.json",
+      "sha256": "80b13c4dc67cdbb9ec128a52a102bbdcca4f39908e5e9e8fd3f05edd916bd3d2"
+    }
+  },
+  "stages": {
+    "public": {
+      "caseCount": 123,
+      "managedCount": 88,
+      "frameworkCount": 60,
+      "ids": [
+        "joined-auto:ROGAlly:RC71L",
+        "joined-auto:ROGAllyX:RC72LA",
+        "joined-auto:XboxROGAlly:RC73YA",
+        "joined-auto:XboxROGAllyX:RC73XA",
+        "joined-auto:ASUS:unknown-asus",
+        "joined-auto:AYANEOFlipDS:FLIP DS",
+        "joined-auto:AYANEOFlipKB:FLIP KB",
+        "joined-auto:AYANEOFlip1SDS:FLIP 1S DS",
+        "joined-auto:AYANEOFlip1SKB:FLIP 1S KB",
+        "joined-auto:OneXPlayerX1Intel:ONEXPLAYER X1 i",
+        "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1 A",
+        "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1z",
+        "joined-auto:OneXPlayerX1Pro:ONEXPLAYER X1Pro",
+        "joined-auto:OneXPlayerX1Mini:ONEXPLAYER X1 mini",
+        "joined-auto:OneXPlayerApex:ONEXPLAYER APEX",
+        "joined-auto:OneXPlayerG1Intel:ONEXPLAYER G1 i",
+        "joined-auto:OneXPlayerG1AMD:ONEXPLAYER G1 A",
+        "joined-auto:SteamDeck:Jupiter",
+        "joined-auto:SteamDeck:Galileo",
+        "joined-auto:LegionGoTablet:different-product",
+        "joined-auto:LegionGoTablet2:different-product",
+        "joined-auto:LegionGoSZ2:different-product",
+        "joined-auto:LegionGoSZ1:different-product",
+        "joined-auto:ClawA2VM:MS-1T42",
+        "joined-auto:ClawCG3EM:MS-1T91",
+        "joined-auto:GamingZone:G0A1W",
+        "joined-auto:DefaultDevice:unknown-product",
+        "joined-diagnostic:HandheldCompanion.Devices.MinisforumV3",
+        "joined-diagnostic:HandheldCompanion.Devices.LokiMiniPro",
+        "joined-diagnostic:HandheldCompanion.Devices.LokiZero",
+        "joined-diagnostic:HandheldCompanion.Devices.LokiMax6600U",
+        "joined-diagnostic:HandheldCompanion.Devices.LokiMax6800U",
+        "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1",
+        "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1Pro",
+        "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1X",
+        "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA2",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPro",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR1S",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRLite",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021Pro",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOKUN",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOSlide",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXT",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite4500U",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEO2",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEO2S",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipKB",
+        "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipDS",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin2",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_7640U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_8840U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_HX370",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin3",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023_7640U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_8640U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_HX370",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWin5",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2Intel",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+        "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Intel",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1AMD",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Mini",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Pro",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1Intel",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1AMD",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFly",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniAMD",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniIntel",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniPro",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2",
+        "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2Pro",
+        "joined-diagnostic:HandheldCompanion.Devices.ROGAlly",
+        "joined-diagnostic:HandheldCompanion.Devices.ROGAllyX",
+        "joined-diagnostic:HandheldCompanion.Devices.XboxROGAlly",
+        "joined-diagnostic:HandheldCompanion.Devices.XboxROGAllyX",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.ASUS.ASUS",
+        "joined-diagnostic:HandheldCompanion.Devices.SteamDeck",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+        "joined-diagnostic:HandheldCompanion.Devices.ClawA1M",
+        "joined-diagnostic:HandheldCompanion.Devices.ClawA2VM",
+        "joined-diagnostic:HandheldCompanion.Devices.ClawBZ2EM",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.MSI.ClawCG3EM",
+        "joined-diagnostic-refused:HandheldCompanion.Devices.Zotac.GamingZone",
+        "joined-diagnostic:HandheldCompanion.Devices.DefaultDevice",
+        "joined-all-admitted-models-loaded",
+        "joined-native:missing",
+        "joined-native:invalid",
+        "joined-native:long-valid",
+        "joined-native:long-missing",
+        "joined-native:long-invalid",
+        "joined-platform-unsupported-sensors",
+        "joined-retry:validation.acl",
+        "joined-retry:validation.payload",
+        "joined-retry:runtime.temp-root",
+        "joined-retry:board:baseboard:Manufacturer",
+        "joined-retry:device.sensors",
+        "joined-reentrant-handshake",
+        "joined-dispose-during-original-stage",
+        "joined-owner-replacement:device",
+        "joined-owner-replacement:assembly",
+        "joined-disposed-factory-stays-refused"
+      ],
+      "failureMasks": {
+        "first-start": [
+          "joined-auto:AYANEOFlipDS:FLIP DS",
+          "joined-auto:AYANEOFlip1SDS:FLIP 1S DS",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipDS"
+        ],
+        "readiness": [
+          "joined-retry:device.sensors",
+          "joined-reentrant-handshake",
+          "joined-dispose-during-original-stage",
+          "joined-owner-replacement:device",
+          "joined-owner-replacement:assembly",
+          "joined-disposed-factory-stays-refused"
+        ],
+        "continuation": [
+          "joined-retry:board:baseboard:Manufacturer",
+          "joined-retry:device.sensors"
+        ],
+        "native": [
+          "joined-native:missing",
+          "joined-native:invalid",
+          "joined-native:long-missing",
+          "joined-native:long-invalid"
+        ],
+        "native-path": [
+          "joined-native:long-valid"
+        ],
+        "dispatch": [
+          "joined-auto:ROGAlly:RC71L",
+          "joined-auto:ROGAllyX:RC72LA",
+          "joined-auto:XboxROGAlly:RC73YA",
+          "joined-auto:XboxROGAllyX:RC73XA",
+          "joined-auto:ASUS:unknown-asus",
+          "joined-auto:AYANEOFlipDS:FLIP DS",
+          "joined-auto:AYANEOFlipKB:FLIP KB",
+          "joined-auto:AYANEOFlip1SDS:FLIP 1S DS",
+          "joined-auto:AYANEOFlip1SKB:FLIP 1S KB",
+          "joined-auto:OneXPlayerX1Intel:ONEXPLAYER X1 i",
+          "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1 A",
+          "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1z",
+          "joined-auto:OneXPlayerX1Pro:ONEXPLAYER X1Pro",
+          "joined-auto:OneXPlayerX1Mini:ONEXPLAYER X1 mini",
+          "joined-auto:OneXPlayerApex:ONEXPLAYER APEX",
+          "joined-auto:OneXPlayerG1Intel:ONEXPLAYER G1 i",
+          "joined-auto:OneXPlayerG1AMD:ONEXPLAYER G1 A",
+          "joined-auto:SteamDeck:Jupiter",
+          "joined-auto:SteamDeck:Galileo",
+          "joined-auto:LegionGoTablet:different-product",
+          "joined-auto:LegionGoTablet2:different-product",
+          "joined-auto:LegionGoSZ2:different-product",
+          "joined-auto:LegionGoSZ1:different-product",
+          "joined-auto:ClawA2VM:MS-1T42",
+          "joined-auto:ClawCG3EM:MS-1T91",
+          "joined-auto:GamingZone:G0A1W",
+          "joined-auto:DefaultDevice:unknown-product",
+          "joined-diagnostic:HandheldCompanion.Devices.MinisforumV3",
+          "joined-diagnostic:HandheldCompanion.Devices.LokiMiniPro",
+          "joined-diagnostic:HandheldCompanion.Devices.LokiZero",
+          "joined-diagnostic:HandheldCompanion.Devices.LokiMax6600U",
+          "joined-diagnostic:HandheldCompanion.Devices.LokiMax6800U",
+          "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1",
+          "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1Pro",
+          "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1X",
+          "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA2",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPro",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR1S",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRLite",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021Pro",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOKUN",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOSlide",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXT",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite4500U",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEO2",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEO2S",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipKB",
+          "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipDS",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin2",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_7640U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_8840U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_HX370",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin3",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023_7640U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_8640U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_HX370",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWin5",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2Intel",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+          "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Intel",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1AMD",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Mini",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Pro",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1Intel",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1AMD",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFly",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniAMD",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniIntel",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniPro",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2",
+          "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2Pro",
+          "joined-diagnostic:HandheldCompanion.Devices.ROGAlly",
+          "joined-diagnostic:HandheldCompanion.Devices.ROGAllyX",
+          "joined-diagnostic:HandheldCompanion.Devices.XboxROGAlly",
+          "joined-diagnostic:HandheldCompanion.Devices.XboxROGAllyX",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.ASUS.ASUS",
+          "joined-diagnostic:HandheldCompanion.Devices.SteamDeck",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+          "joined-diagnostic:HandheldCompanion.Devices.ClawA1M",
+          "joined-diagnostic:HandheldCompanion.Devices.ClawA2VM",
+          "joined-diagnostic:HandheldCompanion.Devices.ClawBZ2EM",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.MSI.ClawCG3EM",
+          "joined-diagnostic-refused:HandheldCompanion.Devices.Zotac.GamingZone",
+          "joined-diagnostic:HandheldCompanion.Devices.DefaultDevice",
+          "joined-native:missing",
+          "joined-native:invalid",
+          "joined-native:long-valid",
+          "joined-native:long-missing",
+          "joined-native:long-invalid",
+          "joined-platform-unsupported-sensors",
+          "joined-retry:validation.acl",
+          "joined-retry:validation.payload",
+          "joined-retry:runtime.temp-root",
+          "joined-retry:board:baseboard:Manufacturer",
+          "joined-retry:device.sensors",
+          "joined-reentrant-handshake",
+          "joined-dispose-during-original-stage",
+          "joined-owner-replacement:device",
+          "joined-owner-replacement:assembly",
+          "joined-disposed-factory-stays-refused"
+        ]
+      },
+      "budgets": {
+        "business": 60000,
+        "parent": 360000,
+        "generation": 30000,
+        "compile": 120000
+      },
+      "roles": {
+        "positive": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\positive\\SUMMARY.json",
+            "sha256": "a1ce3dc827d5ad76bbc095a709139f4fa7303baa5130427a0a36def1536c9c84"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-positive-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "a8df040a937ed423a67ffa647f9eddd2a73f8fa8e0f6b767ccb8b167e1f6b78f"
+          },
+          "expectedFailureMask": [],
+          "expectedExitCode": 0,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/positive/METADATA-PROCESS.json",
+              "sha256": "dd573db9195e666ea2e54df5d1dde2aed189ea3c63384c85e92de2363eda130d"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/positive/PRELOAD-PROCESS.json",
+              "sha256": "c3ccc588098b5f2006977e1d8720595b97ceceeca9f226de4bf018e349abda1a"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/positive/PUBLIC123-PROCESS.json",
+              "sha256": "5a5ce976c9d7063bd7c4b240b3c20fa13bf70412081a521aaa63874b01d39265"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-positive-r1\\Build\\public-sta-five\\positive\\case\\result.json",
+            "sha256": "2390a5fe5948dc85e8d90aad2c53a7171d8626ad376fe5ebf97013c04d0d49b8"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/positive/LOADED-GRAPH.json",
+            "sha256": "356071f117c57d96e4c3e8bab610a2d431610322817ced362a2d3cce96188fed"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\positive\\tool-launch-000.json",
+            "sha256": "84c10ca52e6604a0a043416ca0fb95ab7eb3e1af2b610322e2baef7b520fdb68"
+          }
+        },
+        "first-start": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\first-start\\SUMMARY.json",
+            "sha256": "032a0a8ab7200540d648aa89ea09c0dc5b05fa840aba8749f0a823cb4edca28b"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-first-start-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "3f5895db10cff4bd0bb3e38cf7963868c0a2e7ff83d43377a317fec9e406a40f"
+          },
+          "expectedFailureMask": [
+            "joined-auto:AYANEOFlipDS:FLIP DS",
+            "joined-auto:AYANEOFlip1SDS:FLIP 1S DS",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipDS"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "4845492673660ea7b751840ff11a74aa956df33ed432f53f83e77c8adecf7b21",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/first-start/METADATA-PROCESS.json",
+              "sha256": "89b9d1b71479c01e45158d77c79d522baf2319c70c102fec3e59c02413930ac2"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/first-start/PRELOAD-PROCESS.json",
+              "sha256": "b441afa7caf60022338a78fdbd5705a444d9b74fa3659a44e665146829e4bd92"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/first-start/PUBLIC123-PROCESS.json",
+              "sha256": "0ac667b867427fda562258f35e53e59767f501ffa850affe4c1d907f38acec8e"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-first-start-r1\\Build\\public-sta-five\\first-start\\case\\result.json",
+            "sha256": "01a1117a9d315cec7ca9c383b4c5fca177a3d8af7fe3b30b5b9e3a4cdc493f35"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/first-start/LOADED-GRAPH.json",
+            "sha256": "f2860c2e006ca3f30387d063f7e7932ffd118b0137839a5bf6758d8472926fce"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\first-start\\tool-launch-000.json",
+            "sha256": "80486a6370bb2dc56bff1ab556a2df7901c7b133cf03248bfc99f0f3ba196c71"
+          }
+        },
+        "readiness": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\readiness\\SUMMARY.json",
+            "sha256": "ea7374e835d353a3f871f5395edaaa5ef4864791a5f7fa1088ac806ff22ff512"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-readiness-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "23b77a2cc914d8fcfd50c5b0a7617830c92d3f2520f9c769a76ee7809aef1322"
+          },
+          "expectedFailureMask": [
+            "joined-retry:device.sensors",
+            "joined-reentrant-handshake",
+            "joined-dispose-during-original-stage",
+            "joined-owner-replacement:device",
+            "joined-owner-replacement:assembly",
+            "joined-disposed-factory-stays-refused"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "69ddf2ead816dc258e26bb70dd39e5a7ca1a9aafbadc9780f15f7a6159c4f649",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/readiness/METADATA-PROCESS.json",
+              "sha256": "2bae33a41848aeafb15fce80639338ee7e5cad76f6ebedc949e2ea4b82440d10"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/readiness/PRELOAD-PROCESS.json",
+              "sha256": "aec6eb9a10590d7f85ba0f0030e2d5074729855bb0a2a03b8dbb7a02847123ba"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/readiness/PUBLIC123-PROCESS.json",
+              "sha256": "0e48435bdc6928d40156ca44f07b84618b3f0d2757d7940cc70fd80bfd8babbd"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-readiness-r1\\Build\\public-sta-five\\readiness\\case\\result.json",
+            "sha256": "22309e63169edcd5cea675a78a09cfbca245854e255c45f165aabe50531b0b05"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/readiness/LOADED-GRAPH.json",
+            "sha256": "3d6385fcf31dce018835dbe5288a191c12f595619b858e4a0b6d15665817f65b"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\readiness\\tool-launch-000.json",
+            "sha256": "9a9fa73e24072bf99129292383b694d742bc004bfd46d42d4e2faf0c626ae57e"
+          }
+        },
+        "continuation": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\continuation\\SUMMARY.json",
+            "sha256": "3aac03277322d504fbdc431cb22958d37e84788424ac925e5a3f4b6974530143"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-continuation-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "de6a7438d0333891aa4619dc2063652c7d025da0ef51778993b974d48ef3921d"
+          },
+          "expectedFailureMask": [
+            "joined-retry:board:baseboard:Manufacturer",
+            "joined-retry:device.sensors"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "bd56ecd51ae5fc50d5a7d1df857332509ca154ce3c9d2cdcfbfe599bca86688a",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/continuation/METADATA-PROCESS.json",
+              "sha256": "aff70f1b0995446e9e28ea9770bdb82fc48a96a9bbd1c717434428707c821a52"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/continuation/PRELOAD-PROCESS.json",
+              "sha256": "0ffacba9f0d1d5df2e2fce0b5330c32829c0c66395c95bb4ad74e00d407e2d9f"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/continuation/PUBLIC123-PROCESS.json",
+              "sha256": "c4624295ec67050e9900b97ccaf9922afa7f7d71336a285a66bee4ec2a96735f"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-continuation-r1\\Build\\public-sta-five\\continuation\\case\\result.json",
+            "sha256": "9c34a1862c6e8d927923a73efe2b2107edaa65644dbb3da30924a3685bd00888"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/continuation/LOADED-GRAPH.json",
+            "sha256": "a0cce116b48fe54738060df052f2efb136b6319d57d289aae04a5d62f179dcb1"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\continuation\\tool-launch-000.json",
+            "sha256": "8130d1856efbcffe23d6718781440797265b36b97c7ecd8e9529ccc465c7acdd"
+          }
+        },
+        "native": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\native\\SUMMARY.json",
+            "sha256": "8670cf7918c4779737ce246cf149ab1f72c32a12afb90a8e7fcc8387e9c93524"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-native-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "2a13752f123859589290d5a56bd5326a167c20d21e16d7e8ed5aad3ddb1d002f"
+          },
+          "expectedFailureMask": [
+            "joined-native:missing",
+            "joined-native:invalid",
+            "joined-native:long-missing",
+            "joined-native:long-invalid"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "db0791ad1748bdd34f597a61edd8811785f648737039f493dedb084b56b900ec",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native/METADATA-PROCESS.json",
+              "sha256": "485a6289e3406e38ceb78cdad84ecda351ca39bbbc4a3ffb22aa25763fd9e414"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native/PRELOAD-PROCESS.json",
+              "sha256": "03b47aa813cf4ba13c010dc26eec0268c793eb9c8a91c97cac5e990e803af03a"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native/PUBLIC123-PROCESS.json",
+              "sha256": "a9fe4badb052e913b787f43af3728dbf05e9c0b4929a16e7d17886d8d26a101f"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-native-r1\\Build\\public-sta-five\\native\\case\\result.json",
+            "sha256": "3fbef7bed23a733a7914df3989855c3267c907ca4e3983814e665e1edf109465"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native/LOADED-GRAPH.json",
+            "sha256": "0e6d86806cb5839ecae7ea01c61a3098fb4dd45a1d8402ef9130b8eff90c184b"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\native\\tool-launch-000.json",
+            "sha256": "1ba2478515fe5f7a10dc19f20dded4c262af84e3551173c31fb254f77a59abfd"
+          }
+        },
+        "native-path": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\native-path\\SUMMARY.json",
+            "sha256": "f7197169709e5512ab1d48983d98a3613b8b4dbaf6227e7ab476d7e022a85007"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-native-path-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "9a5b00dd7f2ce675c696ef05fd07790e7fac7fe60b0f12371069562cddf6f3cd"
+          },
+          "expectedFailureMask": [
+            "joined-native:long-valid"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "d13c4c2b8c191e0cc141dff0c9bb8b0c9b1c494ab7411eab279f64836da3a856",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native-path/METADATA-PROCESS.json",
+              "sha256": "5aa95dac008cc52cc0d1ab2a27792ca3d89989e494039f1eb766429cfd8fe67e"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native-path/PRELOAD-PROCESS.json",
+              "sha256": "8dbb21b2be173e898d3c89a56a755ddd14499cb5c20db07c8ca157f1ec2d48b6"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native-path/PUBLIC123-PROCESS.json",
+              "sha256": "e2049ef745a70a7a5620a08b9441c70e449fa6fa5211c1a26f728d4b9e1dff41"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-native-path-r1\\Build\\public-sta-five\\native-path\\case\\result.json",
+            "sha256": "d1cb9fa420e9d093f81c0b5f1819a2130d10c4c111f4c6436afd48afd3441478"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/native-path/LOADED-GRAPH.json",
+            "sha256": "18a4fe344047f63bc44502265fbfa5206c2c14eb1991f524cb21cf855c7b3873"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\native-path\\tool-launch-000.json",
+            "sha256": "eb897a85c4b23e0b06d853a1491d40072d2ac9bd00e2b6fecd1e2c8d5c47d50d"
+          }
+        },
+        "dispatch": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\dispatch\\SUMMARY.json",
+            "sha256": "defff365226ba6f00bfc8de290d3efd5f8b83fe164a6cb096ff94626d654ffa8"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-dispatch-r1\\public-sta-five\\PREPARED-PLAN.json",
+            "sha256": "7887daf0b764c4e3483ee66d053200f35381e18e1a340c9582701c91cb28d9d5"
+          },
+          "expectedFailureMask": [
+            "joined-auto:ROGAlly:RC71L",
+            "joined-auto:ROGAllyX:RC72LA",
+            "joined-auto:XboxROGAlly:RC73YA",
+            "joined-auto:XboxROGAllyX:RC73XA",
+            "joined-auto:ASUS:unknown-asus",
+            "joined-auto:AYANEOFlipDS:FLIP DS",
+            "joined-auto:AYANEOFlipKB:FLIP KB",
+            "joined-auto:AYANEOFlip1SDS:FLIP 1S DS",
+            "joined-auto:AYANEOFlip1SKB:FLIP 1S KB",
+            "joined-auto:OneXPlayerX1Intel:ONEXPLAYER X1 i",
+            "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1 A",
+            "joined-auto:OneXPlayerX1AMD:ONEXPLAYER X1z",
+            "joined-auto:OneXPlayerX1Pro:ONEXPLAYER X1Pro",
+            "joined-auto:OneXPlayerX1Mini:ONEXPLAYER X1 mini",
+            "joined-auto:OneXPlayerApex:ONEXPLAYER APEX",
+            "joined-auto:OneXPlayerG1Intel:ONEXPLAYER G1 i",
+            "joined-auto:OneXPlayerG1AMD:ONEXPLAYER G1 A",
+            "joined-auto:SteamDeck:Jupiter",
+            "joined-auto:SteamDeck:Galileo",
+            "joined-auto:LegionGoTablet:different-product",
+            "joined-auto:LegionGoTablet2:different-product",
+            "joined-auto:LegionGoSZ2:different-product",
+            "joined-auto:LegionGoSZ1:different-product",
+            "joined-auto:ClawA2VM:MS-1T42",
+            "joined-auto:ClawCG3EM:MS-1T91",
+            "joined-auto:GamingZone:G0A1W",
+            "joined-auto:DefaultDevice:unknown-product",
+            "joined-diagnostic:HandheldCompanion.Devices.MinisforumV3",
+            "joined-diagnostic:HandheldCompanion.Devices.LokiMiniPro",
+            "joined-diagnostic:HandheldCompanion.Devices.LokiZero",
+            "joined-diagnostic:HandheldCompanion.Devices.LokiMax6600U",
+            "joined-diagnostic:HandheldCompanion.Devices.LokiMax6800U",
+            "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1",
+            "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1Pro",
+            "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA1X",
+            "joined-diagnostic:HandheldCompanion.Devices.AOKZOEA2",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPro",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIR1S",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRLite",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEO2021Pro",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOKUN",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOSlide",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXT",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEONEXTLite4500U",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEO2",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEO2S",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipKB",
+            "joined-diagnostic:HandheldCompanion.Devices.AYANEOFlipDS",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin2",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_7640U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_8840U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMini_HX370",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin3",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023_7640U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2023",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_8640U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin4_2024_HX370",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWin5",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2Intel",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+            "joined-diagnostic:HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Intel",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1AMD",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Mini",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerX1Pro",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1Intel",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerG1AMD",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFly",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniAMD",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniIntel",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayerMiniPro",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2",
+            "joined-diagnostic:HandheldCompanion.Devices.OneXPlayer2Pro",
+            "joined-diagnostic:HandheldCompanion.Devices.ROGAlly",
+            "joined-diagnostic:HandheldCompanion.Devices.ROGAllyX",
+            "joined-diagnostic:HandheldCompanion.Devices.XboxROGAlly",
+            "joined-diagnostic:HandheldCompanion.Devices.XboxROGAllyX",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.ASUS.ASUS",
+            "joined-diagnostic:HandheldCompanion.Devices.SteamDeck",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+            "joined-diagnostic:HandheldCompanion.Devices.ClawA1M",
+            "joined-diagnostic:HandheldCompanion.Devices.ClawA2VM",
+            "joined-diagnostic:HandheldCompanion.Devices.ClawBZ2EM",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.MSI.ClawCG3EM",
+            "joined-diagnostic-refused:HandheldCompanion.Devices.Zotac.GamingZone",
+            "joined-diagnostic:HandheldCompanion.Devices.DefaultDevice",
+            "joined-native:missing",
+            "joined-native:invalid",
+            "joined-native:long-valid",
+            "joined-native:long-missing",
+            "joined-native:long-invalid",
+            "joined-platform-unsupported-sensors",
+            "joined-retry:validation.acl",
+            "joined-retry:validation.payload",
+            "joined-retry:runtime.temp-root",
+            "joined-retry:board:baseboard:Manufacturer",
+            "joined-retry:device.sensors",
+            "joined-reentrant-handshake",
+            "joined-dispose-during-original-stage",
+            "joined-owner-replacement:device",
+            "joined-owner-replacement:assembly",
+            "joined-disposed-factory-stays-refused"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "15e96375f6e0f0691700ce42d8afa83d4796067b7179427b016718735f137116",
+          "hcSHA256": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/dispatch/METADATA-PROCESS.json",
+              "sha256": "e66ae7419c525b37525e9c1bc31dd2b23677a6503ed130639d33add8c821f9cb"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/dispatch/PRELOAD-PROCESS.json",
+              "sha256": "977fb9d30dc2414a6f80021615b1001bb0dc8af6c64d64803f5cbfc8380de07e"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/dispatch/PUBLIC123-PROCESS.json",
+              "sha256": "e086ee6324a494fcea20571150e4457eaf3990975b84000adfa712817daa3172"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\public64-88-dispatch-r1\\Build\\public-sta-five\\dispatch\\case\\result.json",
+            "sha256": "68e62fcfa24a1cc58780780d2967ccb494a1be6c8417aa27ca8612c01f140adc"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r64-public-factory-exact88-seven-actual-r1/dispatch/LOADED-GRAPH.json",
+            "sha256": "976a8f511c16cc9e422b5207c5f05eb398b25a0ca9412d17d9bf86448b22062f"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-exact88-seven-actual-r1\\dispatch\\tool-launch-000.json",
+            "sha256": "074304e5bb3b606e5a28a4d1f84e888d9f6983e88ced389cdf48657c2e7849e5"
+          }
+        }
+      },
+      "joint": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-seven-independent-joint\\SUMMARY.json",
+        "sha256": "4cbae2b046003459fdcc8af78c3381891db958ed7bd5f241f36e7af26277b031"
+      },
+      "frameworkQualifications": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-sta-five-parent-qualification.json",
+          "sha256": "fd7150ba8ea17f20e17c90f8d6f2504deb2b0ad3ced4777364526d058dbcd229"
+        }
+      ],
+      "reviewedSources": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-parent-source-r2\\prepare-public-factory.mjs",
+          "sha256": "dc35655915157cf4078d245ec4c609a59c384c810fccfde7d3f752e0e82b044a"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-parent-source-r2\\public-factory-basis.json",
+          "sha256": "90e192f7fd973a925ba0bf25e8920de874e17261b54d23b4f199d85698c19482"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-factory-parent-source-r2\\joined-original123-contract.mjs",
+          "sha256": "c6e7920634d78b13990477381a127f99babd5822ba4cf99330945e10a53a497e"
+        }
+      ],
+      "extensionSourceFiles": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-sta-five-extension-source\\extend-public-sta-five.mjs",
+          "sha256": "77234aad08b754e63a85b81c292ce423a3e5eaeb533a79e85511d4ed1296e6a7"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-sta-five-extension-source\\extend-public-sta-five.test.mjs",
+          "sha256": "87157a286b771f6349921c94a1bad121235b2eab77c4f0d564167e18e06013ae"
+        }
+      ],
+      "historicalDeliverySeal": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\outputs\\YMCC全局模拟器升级-20261018\\第六十四轮-公开工厂123七角色与OneX继续-20261022\\SEAL.json",
+        "sha256": "b61f3311858120316d28818eecefc95254cbb9f43e764993c5c07b4a372aa875"
+      },
+      "historicalDeliveryState": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\outputs\\YMCC全局模拟器升级-20261018\\第六十四轮-公开工厂123七角色与OneX继续-20261022\\STATE.json",
+        "sha256": "bee507e3c2122b6a8b6a12b7f65808e95cb5a02910c6977c45cd3fd881d54418"
+      }
+    },
+    "onex": {
+      "caseCount": 29,
+      "managedCount": 92,
+      "frameworkCount": 64,
+      "ids": [
+        "onex-mini-original-constructed-narrow-open",
+        "onex-mini-original-public-open-skips-led-hid",
+        "onex-original-public-cycle:OneXPlayerX1AMD",
+        "onex-original-public-reopen:OneXPlayerX1AMD",
+        "onex-original-public-cycle:OneXPlayerX1Intel",
+        "onex-original-public-reopen:OneXPlayerX1Intel",
+        "onex-original-public-cycle:OneXPlayerX1Pro",
+        "onex-original-public-reopen:OneXPlayerX1Pro",
+        "onex-original-public-cycle:OneXPlayerApex",
+        "onex-original-public-reopen:OneXPlayerApex",
+        "onex-original-public-cycle:OneXPlayerX1Mini",
+        "onex-original-public-reopen:OneXPlayerX1Mini",
+        "onex-original-unauthorized-open",
+        "onex-original-init-false-retry",
+        "onex-original-init-throw-retry",
+        "onex-original-public-open-cleans-first-dispose-failure",
+        "onex-original-init-cleanup-debt",
+        "onex-original-false-ec-result:duty",
+        "onex-original-false-ec-result:control",
+        "onex-original-release-rejection-retry",
+        "onex-original-dispose-failure-no-repeat-release",
+        "onex-original-foreign-transport",
+        "onex-original-metadata-drift",
+        "onex-original-write-superseded",
+        "onex-original-init-superseded",
+        "onex-original-invalid-duty",
+        "onex-original-foreign-open-marker",
+        "onex-original-manager-busy-close-pending",
+        "onex-original-duty-golden-rounding"
+      ],
+      "failureMasks": {
+        "family": [
+          "onex-mini-original-constructed-narrow-open",
+          "onex-mini-original-public-open-skips-led-hid",
+          "onex-original-public-cycle:OneXPlayerX1Mini",
+          "onex-original-public-reopen:OneXPlayerX1Mini",
+          "onex-original-init-false-retry",
+          "onex-original-init-throw-retry",
+          "onex-original-public-open-cleans-first-dispose-failure",
+          "onex-original-init-cleanup-debt",
+          "onex-original-false-ec-result:duty",
+          "onex-original-false-ec-result:control",
+          "onex-original-release-rejection-retry",
+          "onex-original-dispose-failure-no-repeat-release",
+          "onex-original-foreign-transport",
+          "onex-original-metadata-drift",
+          "onex-original-write-superseded",
+          "onex-original-init-superseded",
+          "onex-original-invalid-duty",
+          "onex-original-foreign-open-marker",
+          "onex-original-manager-busy-close-pending",
+          "onex-original-duty-golden-rounding"
+        ],
+        "readiness": [
+          "onex-mini-original-public-open-skips-led-hid",
+          "onex-original-public-cycle:OneXPlayerX1Mini",
+          "onex-original-public-reopen:OneXPlayerX1Mini",
+          "onex-original-init-false-retry",
+          "onex-original-init-throw-retry",
+          "onex-original-public-open-cleans-first-dispose-failure",
+          "onex-original-init-cleanup-debt",
+          "onex-original-false-ec-result:duty",
+          "onex-original-false-ec-result:control",
+          "onex-original-release-rejection-retry",
+          "onex-original-dispose-failure-no-repeat-release",
+          "onex-original-foreign-transport",
+          "onex-original-metadata-drift",
+          "onex-original-write-superseded",
+          "onex-original-init-superseded",
+          "onex-original-invalid-duty",
+          "onex-original-foreign-open-marker",
+          "onex-original-manager-busy-close-pending",
+          "onex-original-duty-golden-rounding"
+        ],
+        "write-result": [
+          "onex-original-false-ec-result:control",
+          "onex-original-false-ec-result:duty"
+        ],
+        "release-result": [
+          "onex-original-release-rejection-retry"
+        ],
+        "repeat-release": [
+          "onex-original-dispose-failure-no-repeat-release"
+        ],
+        "events": [
+          "onex-original-public-cycle:OneXPlayerX1AMD",
+          "onex-original-public-reopen:OneXPlayerX1AMD",
+          "onex-original-public-cycle:OneXPlayerX1Intel",
+          "onex-original-public-reopen:OneXPlayerX1Intel",
+          "onex-original-public-cycle:OneXPlayerX1Pro",
+          "onex-original-public-reopen:OneXPlayerX1Pro",
+          "onex-original-public-cycle:OneXPlayerApex",
+          "onex-original-public-reopen:OneXPlayerApex",
+          "onex-original-public-cycle:OneXPlayerX1Mini",
+          "onex-original-public-reopen:OneXPlayerX1Mini",
+          "onex-original-manager-busy-close-pending"
+        ]
+      },
+      "budgets": {
+        "business": 60000,
+        "parent": 360000,
+        "generation": 30000,
+        "compile": 120000
+      },
+      "roles": {
+        "positive": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\positive\\SUMMARY.json",
+            "sha256": "bc53dc914731a6ae380a2da7c8949aaa3cac698455afe65c9309864372a26c7f"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "e7fea6722ce27167b57333817265cd42a98a5aad5326f04cbd3a36249cc82260"
+          },
+          "expectedFailureMask": [],
+          "expectedExitCode": 0,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/METADATA-PROCESS.json",
+              "sha256": "566ad02e74bdffe734586b2b82cc67fea03abc16a213f56b878242e6ca478c81"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/PRELOAD-PROCESS.json",
+              "sha256": "1d2838d77fbc9428967f295f82f30ebb0cbd92f788f640b42092f040152f32e6"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/ONEX29-PROCESS.json",
+              "sha256": "eb4bc2fa4ca03152f35c7eb0051e28e00b2d9fe94630112e14c7169335606622"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\Build\\lifecycle-framework-four\\positive\\case\\result.json",
+            "sha256": "e5da8ab199192b6543340e6567d74c6a716a6789b8116646bb729b214c165d1e"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/LOADED-GRAPH.json",
+            "sha256": "a7377291a21860b089ce8bd27136c20267c7707536aa44c49e7ec6713ec3bae9"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\positive\\tool-launch-000.json",
+            "sha256": "26f008834bb9b853f7ff140aafa77ffae193c1299372c101cce907caf610182a"
+          }
+        },
+        "family": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\family\\SUMMARY.json",
+            "sha256": "fc4625ade282ba9ae049a883a9e18ea739b7c4732f945a4ad22db5f2f61c87f5"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-family-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "5a8449ee147ffffa25b208aa2ab5d9f4995c84c259eff95a36981772ec8a4129"
+          },
+          "expectedFailureMask": [
+            "onex-mini-original-constructed-narrow-open",
+            "onex-mini-original-public-open-skips-led-hid",
+            "onex-original-public-cycle:OneXPlayerX1Mini",
+            "onex-original-public-reopen:OneXPlayerX1Mini",
+            "onex-original-init-false-retry",
+            "onex-original-init-throw-retry",
+            "onex-original-public-open-cleans-first-dispose-failure",
+            "onex-original-init-cleanup-debt",
+            "onex-original-false-ec-result:duty",
+            "onex-original-false-ec-result:control",
+            "onex-original-release-rejection-retry",
+            "onex-original-dispose-failure-no-repeat-release",
+            "onex-original-foreign-transport",
+            "onex-original-metadata-drift",
+            "onex-original-write-superseded",
+            "onex-original-init-superseded",
+            "onex-original-invalid-duty",
+            "onex-original-foreign-open-marker",
+            "onex-original-manager-busy-close-pending",
+            "onex-original-duty-golden-rounding"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "3308727b88c089e44f90aacd374ca9bcf5126aab11f535f3a581aa2aecec7bd6",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/family/METADATA-PROCESS.json",
+              "sha256": "e10a5ede63d32c01728532cdc249b2a402ffe879a89615b683cf1e43cad2eb3b"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/family/PRELOAD-PROCESS.json",
+              "sha256": "1cb43640fbfdbf89766c328cc51c3cde90adbaa0f532a2bd2f3b219301cf99ae"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/family/ONEX29-PROCESS.json",
+              "sha256": "1bb17e00a4cc921d45a1526f0e5974bb37d2fd39e8a2267e3d42d529fdc06a02"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-family-r1\\Build\\lifecycle-framework-four\\family\\case\\result.json",
+            "sha256": "0151ff091f88c7b943181bab8aa19266eed857d12790f17bbaa4652afab1bc81"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/family/LOADED-GRAPH.json",
+            "sha256": "785a58b89cad520abd6c7cb452d57bea5d7a1a61252f00ee3545ce9c672659be"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\family\\tool-launch-000.json",
+            "sha256": "b1e9ea4438ea767fc227c3348a6b4c3180c2ec34e5a2d4020a731a5a0cd73dfc"
+          }
+        },
+        "readiness": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\readiness\\SUMMARY.json",
+            "sha256": "372bcf9db88c485a30e010ba309f9b41d2bd6886a74cb9e7fcdc6fea0bdcc58f"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-readiness-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "d42e1622b3e1599c9fb05a607728f7d96a6bdf0d6adddac6d0b442131d4f32d9"
+          },
+          "expectedFailureMask": [
+            "onex-mini-original-public-open-skips-led-hid",
+            "onex-original-public-cycle:OneXPlayerX1Mini",
+            "onex-original-public-reopen:OneXPlayerX1Mini",
+            "onex-original-init-false-retry",
+            "onex-original-init-throw-retry",
+            "onex-original-public-open-cleans-first-dispose-failure",
+            "onex-original-init-cleanup-debt",
+            "onex-original-false-ec-result:duty",
+            "onex-original-false-ec-result:control",
+            "onex-original-release-rejection-retry",
+            "onex-original-dispose-failure-no-repeat-release",
+            "onex-original-foreign-transport",
+            "onex-original-metadata-drift",
+            "onex-original-write-superseded",
+            "onex-original-init-superseded",
+            "onex-original-invalid-duty",
+            "onex-original-foreign-open-marker",
+            "onex-original-manager-busy-close-pending",
+            "onex-original-duty-golden-rounding"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "555cb2ad8be085788898e47d2b66525687af69996da3ac5e92c449aa2a61d25b",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/readiness/METADATA-PROCESS.json",
+              "sha256": "9f1ec396f074746d9919944074b42ea8848642a3395e8eaedc883571ed989f72"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/readiness/PRELOAD-PROCESS.json",
+              "sha256": "c2ba06099acb99fa238cb30e16f7d2df52e697e12f44aaa6c0a4283e97b7c2cf"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/readiness/ONEX29-PROCESS.json",
+              "sha256": "e47559e3a1585990c071fab9afd57d42824221d8e653bd689d4a8a5e3ab9ae35"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-readiness-r1\\Build\\lifecycle-framework-four\\readiness\\case\\result.json",
+            "sha256": "f3b1fdae588bd94b6c6e25dfba1faeccb7a4ccc76e1c9461235ab3711db3f888"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/readiness/LOADED-GRAPH.json",
+            "sha256": "59b6782dacb9312e78ace1d4537d1f41fdbfc582507fd6c0a48e4fd05612151d"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\readiness\\tool-launch-000.json",
+            "sha256": "6a3a651f2e32941571ac16011d5260c09d503673e60346e3af974ccb9ac8b3e6"
+          }
+        },
+        "write-result": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\write-result\\SUMMARY.json",
+            "sha256": "27f463d76b5a9a731222c01b80e5e55b7a34adda6b78faeb60b2cd07903747ed"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-write-result-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "4fbd37ca948b7fdec7b534a5b63977c5326efc6ccbf2aee52482f1ae91f00130"
+          },
+          "expectedFailureMask": [
+            "onex-original-false-ec-result:control",
+            "onex-original-false-ec-result:duty"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "ec767fbc02abf0202fb13cef1edf1b417b6895fb1ba6f05f04d1fb4443387b8d",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/write-result/METADATA-PROCESS.json",
+              "sha256": "253a3c0449388dabbc5524eba791954be3c9414830eebd3a8fb88581d0139405"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/write-result/PRELOAD-PROCESS.json",
+              "sha256": "26bb02e380b8262ce51f50b790dc43df70ec01765a1e16216169b2a12a9f475d"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/write-result/ONEX29-PROCESS.json",
+              "sha256": "00518066bcd535cc7f22601486868141107c3cc324959f65560999e721e4e213"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-write-result-r1\\Build\\lifecycle-framework-four\\write-result\\case\\result.json",
+            "sha256": "bd02d75896954fe08c6477c2ea7b54b7f61a595cc4d42dc636002d75301e4e2d"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/write-result/LOADED-GRAPH.json",
+            "sha256": "67a511d07869eaa1a242ce3bf3087ff1dc136e8dc96dca31da7f0f665529fa4b"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\write-result\\tool-launch-000.json",
+            "sha256": "66a74e7d8ef6cb9baa45c0ff61581a4be0004e9e153090b6fc5eea870e14cd8b"
+          }
+        },
+        "release-result": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\release-result\\SUMMARY.json",
+            "sha256": "a096a4a5ad59e39d55b4ecabfeddfbe97c2ba6806ab79adce77448ee39f29a31"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-release-result-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "f34c6e17404369a8f01d3e3afe708e0a059b6e811669790e86fec24546ec0564"
+          },
+          "expectedFailureMask": [
+            "onex-original-release-rejection-retry"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "184e597bb9e802604038fe7dfd1995c11f01f43c404f69d0597ece847b45ff5e",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/release-result/METADATA-PROCESS.json",
+              "sha256": "f51ae40ed2fc91b64c803205bd7eb6446aa7770b42b7e16f0ed9586012ada415"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/release-result/PRELOAD-PROCESS.json",
+              "sha256": "c923ca81520726d907e26cb74e6ca44563297315cfb7df7200c0a0c00ce62223"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/release-result/ONEX29-PROCESS.json",
+              "sha256": "6abee89cc4d3b6f970e8c6e35f41a508457b50daed5409c2ec37917c6ab7da26"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-release-result-r1\\Build\\lifecycle-framework-four\\release-result\\case\\result.json",
+            "sha256": "cf58bccd09969c64e39e03c698000c3cb08a606f81a53f9d7140cfc6b7785269"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/release-result/LOADED-GRAPH.json",
+            "sha256": "2fab0a073ed6ba983d3ed4f977e69d04148e543d2beb294904c07cad2dd62496"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\release-result\\tool-launch-000.json",
+            "sha256": "7435f440335bc44df946b7ac3e972f6784f02d984c183197e4179d2e95359ef7"
+          }
+        },
+        "repeat-release": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\repeat-release\\SUMMARY.json",
+            "sha256": "4c8ebef1d9d4c913d76fd57e51aa6fc2516320842cd63a4f014aab604d2fa9c5"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-repeat-release-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "8049e59ef4611d01314d010bfd94f9e6a82085fada8a9ae0b9726a17ac7ba988"
+          },
+          "expectedFailureMask": [
+            "onex-original-dispose-failure-no-repeat-release"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "82514d4a5a8fa14b10e9fd9a4b31918aead369fa3e393ffd25e379e4eae2da9f",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/repeat-release/METADATA-PROCESS.json",
+              "sha256": "3f1bddca1ff7fca558ddeaecc117044e011f7f4c75fe8145dc27eedfe6305272"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/repeat-release/PRELOAD-PROCESS.json",
+              "sha256": "2be88257be1b0b343ea7ecebdfac666d0ffa6f7c9d96d314c3036c9c46cea0b9"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/repeat-release/ONEX29-PROCESS.json",
+              "sha256": "3444d00412710b4c97ce7888088c4a14adef42a57170c550700a1586110a875e"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-repeat-release-r1\\Build\\lifecycle-framework-four\\repeat-release\\case\\result.json",
+            "sha256": "8f987c28caa4e03131f49f9a420cd708c29b89f28fe2c6c70969e10232b43f85"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/repeat-release/LOADED-GRAPH.json",
+            "sha256": "c52b64b9139240cfa67d9ec4a08f5b5ec88579d03e94ded78ad7dddf58c2e4f4"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\repeat-release\\tool-launch-000.json",
+            "sha256": "b69d8ad3bd70d24424632a3499e543e06f23cf5a5764ef122c6e56de7ecdf747"
+          }
+        },
+        "events": {
+          "summary": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\events\\SUMMARY.json",
+            "sha256": "1350d59c50dfc048d337cf13d37385066f8208342386167a6f9003493e9179fb"
+          },
+          "prepared": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-events-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+            "sha256": "a9919fcff305e5ff0795da7fa9a815db2803e0b6f699e9e84bc5fbf2d6fde0aa"
+          },
+          "expectedFailureMask": [
+            "onex-original-public-cycle:OneXPlayerX1AMD",
+            "onex-original-public-reopen:OneXPlayerX1AMD",
+            "onex-original-public-cycle:OneXPlayerX1Intel",
+            "onex-original-public-reopen:OneXPlayerX1Intel",
+            "onex-original-public-cycle:OneXPlayerX1Pro",
+            "onex-original-public-reopen:OneXPlayerX1Pro",
+            "onex-original-public-cycle:OneXPlayerApex",
+            "onex-original-public-reopen:OneXPlayerApex",
+            "onex-original-public-cycle:OneXPlayerX1Mini",
+            "onex-original-public-reopen:OneXPlayerX1Mini",
+            "onex-original-manager-busy-close-pending"
+          ],
+          "expectedExitCode": 2,
+          "artifacts": {
+            "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+            "deps": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+            "runtimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+            "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+            "launcher": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+            "launcherRuntimeconfig": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+            "producerAuthority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7"
+          },
+          "hostSHA256": "bd4d22c09348e7c1241bcdc1876349886990967b3b5b9e2884490d5cb9c2e579",
+          "hcSHA256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+          "processPins": [
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/events/METADATA-PROCESS.json",
+              "sha256": "4925a8bfc11272c3d350e8ef8955e8b09c7e0bf0bb4943a3c5683660e60787c0"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/events/PRELOAD-PROCESS.json",
+              "sha256": "c7ccf1c0f52558a9f170b49a565ff81655e80db6ee093ef13d26496de1af27f3"
+            },
+            {
+              "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/events/ONEX29-PROCESS.json",
+              "sha256": "70beeb21c8b1ac710609b79bab5c1004c82e119c2f54d11446f564b232a2e729"
+            }
+          ],
+          "businessResult": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-events-r1\\Build\\lifecycle-framework-four\\events\\case\\result.json",
+            "sha256": "661b9f3b264b44b7fd7d5bdc81e2294aa2ce9fcfbe0309bf9db41adfd1bf7274"
+          },
+          "graph": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/events/LOADED-GRAPH.json",
+            "sha256": "accb22b804e34b6cc7a4c67f9c369d0524cf2921c850142b2e2f9e0537f59e32"
+          },
+          "launch": {
+            "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-exact92-seven-actual-r1\\events\\tool-launch-000.json",
+            "sha256": "85a5c1e2fffcead345e224541d3c04c8e2a2c700c5bd6156ee5003562fc1afc4"
+          }
+        }
+      },
+      "joint": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-seven-independent-joint\\SUMMARY.json",
+        "sha256": "db5fc82bebb2a3c2314c77220dd39f024b43d53e7126b1b994294a2824b813fb"
+      },
+      "frameworkQualifications": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-sta-five-parent-qualification.json",
+          "sha256": "fd7150ba8ea17f20e17c90f8d6f2504deb2b0ad3ced4777364526d058dbcd229"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-four-parent-qualification.json",
+          "sha256": "c052d6074b619884fca613c770696c87889bf29de55cfd89fdb2c5f1d2414b93"
+        }
+      ],
+      "reviewedSources": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-source-captured-r1\\prepare-onex-lifecycle.mjs",
+          "sha256": "6cf7fc5b448c3892a22337082ba4368a99a9b596ac3bf6b8c63fc1b0f6349759"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-source-captured-r1\\onex-lifecycle-basis.json",
+          "sha256": "ba5747682831dea6e142561eac9e7017f49d60b7dbed7f39740cd02f995f2305"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-source-captured-r1\\prepare-onex-lifecycle.test.mjs",
+          "sha256": "4131576d55b9575db8632d2f460a765ddb0d778d484cba1f6700c9144aecd6ba"
+        }
+      ],
+      "extensionSourceFiles": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-four-parent-source-r1\\extend-onex-framework-four.mjs",
+          "sha256": "d70f7edeba60b92ab6260548222111562a18811441a8b81813dd5af7b60b2fd6"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-onex-four-parent-source-r1\\onex-framework-four-basis.json",
+          "sha256": "8ac54ad8c766fceeb1fddbe864f9429d44066b32623e4752ba6bf6f88869d34d"
+        }
+      ],
+      "historicalDeliverySeal": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\outputs\\YMCC全局模拟器升级-20261018\\第六十五轮-OneX生命周期29七角色与MSI接续-20261022\\SEAL.json",
+        "sha256": "18afa79fa561ad3aceedff79411a7f08c7c9eb9aa97b3cca69ebc5c4f601ed68"
+      },
+      "historicalDeliveryState": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\outputs\\YMCC全局模拟器升级-20261018\\第六十五轮-OneX生命周期29七角色与MSI接续-20261022\\STATE.json",
+        "sha256": "cbb82018dd7481caa4fe9a4233b7795a9b424c2813948e1f250981a53e0b0ead"
+      }
+    }
+  },
+  "currentBuilds": {
+    "tools": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r70-current-fan-five-tool-build\\SUMMARY.json",
+      "sha256": "1aac84f71b48349cdc4b75ad002ad269a941fcad3c80779f0832125144b6c7e5"
+    },
+    "host": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r70-current-host-build\\SOURCE-CANDIDATE.json",
+      "sha256": "9d20bbc476fb8e9312304edc6b7d8f3efbb7c4b2dda19a4ba852ead0a131678b"
+    },
+    "ports": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r70-current-fan-five-tool-build\\build\\bin\\ConstructorIoPorts\\release\\ConstructorIoPorts.dll",
+      "sha256": "d89ff9929bf3a5742e9a5a40afb60794e6ae89226abf1e29f48ddaa7f72f7583"
+    },
+    "hostManagedComparison": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r70-current-host-managed-compilation-comparison.json",
+      "sha256": "8d4bfc52c4a2aeb27b5dca55fbe0e5fe05ecc75d259719a26e89dcea4e7e71e3"
+    }
+  },
+  "canonicalCleanHost": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-current-source-candidate-build-20261021-r1/actual-build-r3/candidate/PowerControl/fan-host/YeManFanHost.dll",
+    "sha256": "2b59965fce6909b1a85058e1cf670477090ed858d64eda5484a2fda38eec484a"
+  },
+  "canonicalGeneration": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-host-five-leaf-generation\\SUMMARY.json",
+    "sha256": "a767bd3d8e3cd36fdae3d3440fb7c0f01aaf685a8517ab7b103c795f504ed716"
+  },
+  "comparisonHelper": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r70-compare-managed-compile-images.mjs",
+    "sha256": "76ef2c296065769e26e2d2f26a7ae3f6345bfa062b692bd9354f1f2fdde8b27c"
+  }
+}

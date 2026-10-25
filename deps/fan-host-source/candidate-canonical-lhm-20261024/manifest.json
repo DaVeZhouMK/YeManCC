@@ -1,0 +1,1872 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-host-component-source-bundle",
+  "componentId": "candidate-canonical-lhm-20261024",
+  "selectionStatus": "prepared-not-promoted",
+  "runtimeDeployment": false,
+  "sourceInputs": [
+    {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "archivePath": "source/capabilities/AsusFanCapabilitySession.cs",
+      "sha256": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/FanCapabilityCatalog.cs",
+      "sha256": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.cs",
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "archivePath": "source/capabilities/HcLightingCapabilityCatalog.cs",
+      "sha256": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "archivePath": "source/capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/DeviceCoreSharedDependencies.cs",
+      "archivePath": "source/FanLab/DeviceCoreSharedDependencies.cs",
+      "sha256": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "archivePath": "source/FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+      "archivePath": "source/FanLab/fan-backend/YeManFanBackend.csproj",
+      "sha256": "ef89f0f1059d68f35e15f717bf24eb60a9942b22fc46ebb555a972fa417fae58",
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+      "archivePath": "source/FanLab/real-host/DeferredHostSuccessor.cs",
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+      "archivePath": "source/FanLab/real-host/FanCapabilityPolicy.cs",
+      "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/G1FanContractAdapter.cs",
+      "archivePath": "source/FanLab/real-host/G1FanContractAdapter.cs",
+      "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/HostProcessLifetime.cs",
+      "archivePath": "source/FanLab/real-host/HostProcessLifetime.cs",
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+      "archivePath": "source/FanLab/real-host/MsiFamilyFanCurve.cs",
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "archivePath": "source/FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+      "archivePath": "source/FanLab/real-host/MsiWmiClassRegistration.cs",
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+      "archivePath": "source/FanLab/real-host/MsiWmiPayloadResource.cs",
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "sha256": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "archivePath": "source/FanLab/real-host/Program.cs",
+      "sha256": "fcd7da7b778f0ecad24666c540fd1addab4a8a67d0f8d7d2f93a40c93cf29a4d",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateFakes.cs",
+      "archivePath": "source/FanLab/real-host/Section18CandidateFakes.cs",
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section18CandidateLifecycle.cs",
+      "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section19CandidateLifecycle.cs",
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section20CandidateLifecycle.cs",
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section21CandidateLifecycle.cs",
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section22CandidateLifecycle.cs",
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+      "archivePath": "source/FanLab/real-host/Section23CandidateLifecycle.cs",
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.csproj",
+      "archivePath": "source/FanLab/real-host/YeManFanHost.csproj",
+      "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0",
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/RuntimeDependencyContract.cs",
+      "archivePath": "source/FanLab/RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/ProcessEfficiency.cs",
+      "archivePath": "source/native/ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.json",
+      "archivePath": "source/FanLab/real-host/YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "roles": [
+        "Content"
+      ]
+    }
+  ],
+  "modules": [
+    {
+      "name": "YeManFanHost",
+      "dllPath": "artifacts/YeManFanHost.dll",
+      "dllSha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df",
+      "pdbPath": "artifacts/YeManFanHost.pdb",
+      "pdbSha256": "ac96b7a5fc29c819acb992ea2f30d18169bc2c8a782bfd7117e09851204bf0dc",
+      "codeViewGuid": "1ae9bc8b-8459-453c-b70f-f780fe1606e4",
+      "stamp": 3722659091,
+      "mvid": "dd84627e-8173-413b-b7b2-7f8698073da4",
+      "compilationOptions": {
+        "version": "2",
+        "compiler-version": "5.9.0-1.26379.115+14fbf8d5271c98133561eb55185fdb05b286f578",
+        "language": "C#",
+        "source-file-count": "24",
+        "output-kind": "ConsoleApplication",
+        "optimization": "release",
+        "platform": "X64",
+        "runtime-version": "10.0.11-servicing.26373.116+e2f47b0110ed922f21a1522da67279133ce28f32",
+        "language-version": "14.0",
+        "nullable": "Enable",
+        "define": "TRACE,RELEASE,NET,NET10_0,NETCOREAPP,WINDOWS,WINDOWS10_0_19041_0,NET5_0_OR_GREATER,NET6_0_OR_GREATER,NET7_0_OR_GREATER,NET8_0_OR_GREATER,NET9_0_OR_GREATER,NET10_0_OR_GREATER,NETCOREAPP1_0_OR_GREATER,NETCOREAPP1_1_OR_GREATER,NETCOREAPP2_0_OR_GREATER,NETCOREAPP2_1_OR_GREATER,NETCOREAPP2_2_OR_GREATER,NETCOREAPP3_0_OR_GREATER,NETCOREAPP3_1_OR_GREATER,WINDOWS10_0_19041_0_OR_GREATER,WINDOWS10_0_18362_0_OR_GREATER,WINDOWS10_0_17763_0_OR_GREATER,WINDOWS8_0_OR_GREATER,WINDOWS7_0_OR_GREATER"
+      },
+      "documents": [
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\DeferredHostSuccessor.cs",
+          "archivePath": "source/FanLab/real-host/DeferredHostSuccessor.cs",
+          "sourceRelative": "FanLab/real-host/DeferredHostSuccessor.cs",
+          "generated": false,
+          "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\FanCapabilityPolicy.cs",
+          "archivePath": "source/FanLab/real-host/FanCapabilityPolicy.cs",
+          "sourceRelative": "FanLab/real-host/FanCapabilityPolicy.cs",
+          "generated": false,
+          "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\G1FanContractAdapter.cs",
+          "archivePath": "source/FanLab/real-host/G1FanContractAdapter.cs",
+          "sourceRelative": "FanLab/real-host/G1FanContractAdapter.cs",
+          "generated": false,
+          "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\HostProcessLifetime.cs",
+          "archivePath": "source/FanLab/real-host/HostProcessLifetime.cs",
+          "sourceRelative": "FanLab/real-host/HostProcessLifetime.cs",
+          "generated": false,
+          "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\MsiFamilyFanCurve.cs",
+          "archivePath": "source/FanLab/real-host/MsiFamilyFanCurve.cs",
+          "sourceRelative": "FanLab/real-host/MsiFamilyFanCurve.cs",
+          "generated": false,
+          "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\MsiFamilyFanCurveSelfTest.cs",
+          "archivePath": "source/FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+          "sourceRelative": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+          "generated": false,
+          "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\MsiFanDeviceLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/MsiFanDeviceLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+          "generated": false,
+          "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\MsiWmiClassRegistration.cs",
+          "archivePath": "source/FanLab/real-host/MsiWmiClassRegistration.cs",
+          "sourceRelative": "FanLab/real-host/MsiWmiClassRegistration.cs",
+          "generated": false,
+          "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\MsiWmiPayloadResource.cs",
+          "archivePath": "source/FanLab/real-host/MsiWmiPayloadResource.cs",
+          "sourceRelative": "FanLab/real-host/MsiWmiPayloadResource.cs",
+          "generated": false,
+          "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\OneXFanDeviceLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/OneXFanDeviceLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+          "generated": false,
+          "sha256": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Program.cs",
+          "archivePath": "source/FanLab/real-host/Program.cs",
+          "sourceRelative": "FanLab/real-host/Program.cs",
+          "generated": false,
+          "sha256": "fcd7da7b778f0ecad24666c540fd1addab4a8a67d0f8d7d2f93a40c93cf29a4d",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "fcd7da7b778f0ecad24666c540fd1addab4a8a67d0f8d7d2f93a40c93cf29a4d"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section18CandidateFakes.cs",
+          "archivePath": "source/FanLab/real-host/Section18CandidateFakes.cs",
+          "sourceRelative": "FanLab/real-host/Section18CandidateFakes.cs",
+          "generated": false,
+          "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section18CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section18CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section18CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section19CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section19CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section19CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section20CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section20CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section20CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section21CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section21CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section21CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section22CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section22CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section22CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\real-host\\Section23CandidateLifecycle.cs",
+          "archivePath": "source/FanLab/real-host/Section23CandidateLifecycle.cs",
+          "sourceRelative": "FanLab/real-host/Section23CandidateLifecycle.cs",
+          "generated": false,
+          "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\native\\ProcessEfficiency.cs",
+          "archivePath": "source/native/ProcessEfficiency.cs",
+          "sourceRelative": "native/ProcessEfficiency.cs",
+          "generated": false,
+          "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\DeviceCoreSharedDependencies.cs",
+          "archivePath": "source/FanLab/DeviceCoreSharedDependencies.cs",
+          "sourceRelative": "FanLab/DeviceCoreSharedDependencies.cs",
+          "generated": false,
+          "sha256": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\RuntimeDependencyContract.cs",
+          "archivePath": "source/FanLab/RuntimeDependencyContract.cs",
+          "sourceRelative": "FanLab/RuntimeDependencyContract.cs",
+          "generated": false,
+          "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\obj\\YeManFanHost\\release_win-x64\\YeManFanHost.GlobalUsings.g.cs",
+          "archivePath": "generated/YeManFanHost/YeManFanHost.GlobalUsings.g.cs",
+          "sourceRelative": null,
+          "generated": true,
+          "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\obj\\YeManFanHost\\release_win-x64\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "archivePath": "generated/YeManFanHost/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "sourceRelative": null,
+          "generated": true,
+          "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\obj\\YeManFanHost\\release_win-x64\\YeManFanHost.AssemblyInfo.cs",
+          "archivePath": "generated/YeManFanHost/YeManFanHost.AssemblyInfo.cs",
+          "sourceRelative": null,
+          "generated": true,
+          "sha256": "dd38ccec034081316bb508ba946ddb0557ede693b10d1cdf2cf1104a7ba989ce",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "dd38ccec034081316bb508ba946ddb0557ede693b10d1cdf2cf1104a7ba989ce"
+        }
+      ],
+      "customDebugRecords": [
+        {
+          "parentToken": 1,
+          "kind": "b5feec05-8cd0-4a83-96da-466284bb4bd8",
+          "valueBase64": "dmVyc2lvbgAyAGNvbXBpbGVyLXZlcnNpb24ANS45LjAtMS4yNjM3OS4xMTUrMTRmYmY4ZDUyNzFjOTgxMzM1NjFlYjU1MTg1ZmRiMDViMjg2ZjU3OABsYW5ndWFnZQBDIwBzb3VyY2UtZmlsZS1jb3VudAAyNABvdXRwdXQta2luZABDb25zb2xlQXBwbGljYXRpb24Ab3B0aW1pemF0aW9uAHJlbGVhc2UAcGxhdGZvcm0AWDY0AHJ1bnRpbWUtdmVyc2lvbgAxMC4wLjExLXNlcnZpY2luZy4yNjM3My4xMTYrZTJmNDdiMDExMGVkOTIyZjIxYTE1MjJkYTY3Mjc5MTMzY2UyOGYzMgBsYW5ndWFnZS12ZXJzaW9uADE0LjAAbnVsbGFibGUARW5hYmxlAGRlZmluZQBUUkFDRSxSRUxFQVNFLE5FVCxORVQxMF8wLE5FVENPUkVBUFAsV0lORE9XUyxXSU5ET1dTMTBfMF8xOTA0MV8wLE5FVDVfMF9PUl9HUkVBVEVSLE5FVDZfMF9PUl9HUkVBVEVSLE5FVDdfMF9PUl9HUkVBVEVSLE5FVDhfMF9PUl9HUkVBVEVSLE5FVDlfMF9PUl9HUkVBVEVSLE5FVDEwXzBfT1JfR1JFQVRFUixORVRDT1JFQVBQMV8wX09SX0dSRUFURVIsTkVUQ09SRUFQUDFfMV9PUl9HUkVBVEVSLE5FVENPUkVBUFAyXzBfT1JfR1JFQVRFUixORVRDT1JFQVBQMl8xX09SX0dSRUFURVIsTkVUQ09SRUFQUDJfMl9PUl9HUkVBVEVSLE5FVENPUkVBUFAzXzBfT1JfR1JFQVRFUixORVRDT1JFQVBQM18xX09SX0dSRUFURVIsV0lORE9XUzEwXzBfMTkwNDFfMF9PUl9HUkVBVEVSLFdJTkRPV1MxMF8wXzE4MzYyXzBfT1JfR1JFQVRFUixXSU5ET1dTMTBfMF8xNzc2M18wX09SX0dSRUFURVIsV0lORE9XUzhfMF9PUl9HUkVBVEVSLFdJTkRPV1M3XzBfT1JfR1JFQVRFUgA="
+        },
+        {
+          "parentToken": 1,
+          "kind": "7e4d4708-096e-4c5c-aeda-cb10ba6a740d",
+          "valueBase64": "QWNjZXNzaWJpbGl0eS5kbGwAAAFbkmNqAIAAADTxMPe5xzJPiXRhQRwrQoFNaWNyb3NvZnQuQ1NoYXJwLmRsbAAAAUcl8/oAgAAAIhbIk2NWAkKvp+ZKu97DYE1pY3Jvc29mdC5WaXN1YWxCYXNpYy5Db3JlLmRsbAAAAfT7nrEAIAEAJi6SCeaaz0uXH9Ly4rZV9E1pY3Jvc29mdC5WaXN1YWxCYXNpYy5kbGwAAAHDMQSTAIAAANHmK2tEqeNDkA021EnhlBdNaWNyb3NvZnQuV2luMzIuUHJpbWl0aXZlcy5kbGwAAAF/sHu6AIAAAL6BGaCzwchDjEJGFW20oaBNaWNyb3NvZnQuV2luMzIuUmVnaXN0cnkuQWNjZXNzQ29udHJvbC5kbGwAAAGhGaPjAIAAAOk9e8JIJcVGv2CpBvgHb1tNaWNyb3NvZnQuV2luMzIuUmVnaXN0cnkuZGxsAAABuOFQ/wCgAADwKpnUaoLITbgzkTeckVVbTWljcm9zb2Z0LldpbjMyLlN5c3RlbUV2ZW50cy5kbGwAAAHRW52pAIAAAMz46bbWPv1LrZqyLcCg6k1NaWNyb3NvZnQuV2luZG93cy5TREsuTkVULmRsbAAAAVKymbAA4HsBf75Udnfq10KiOj2jDKIwB21zY29ybGliLmRsbAAAAUOu6OYAIAEA4f6c658XI0K66s+Bgy/Lwm5ldHN0YW5kYXJkLmRsbAAAAYKcQ4kAwAEAaysVm+khuEmBfqUduRthMlByZXNlbnRhdGlvbkNvcmUuZGxsAAAB6QPsuwCgCABh3fy9Z4VVS52NkqXpr250UHJlc2VudGF0aW9uRnJhbWV3b3JrLkFlcm8uZGxsAAABPVqjzgDAAADSSne7BSakTbU3JltTQrE0UHJlc2VudGF0aW9uRnJhbWV3b3JrLkFlcm8yLmRsbAAAAQ9kNKAAwAAAnwfpUZiOL06Fv08BTe0/dVByZXNlbnRhdGlvbkZyYW1ld29yay5BZXJvTGl0ZS5kbGwAAAFQfav8AMAAACsy9Vi6dnFBumnLbZfK0pZQcmVzZW50YXRpb25GcmFtZXdvcmsuQ2xhc3NpYy5kbGwAAAGrucvfAMAAAABd9kOXtq9Kpeu/LpQmsMxQcmVzZW50YXRpb25GcmFtZXdvcmsuZGxsAAABjRRuygBgCACDQkAe6RsZQqJh5QuDSWWFUHJlc2VudGF0aW9uRnJhbWV3b3JrLkx1bmEuZGxsAAABO5IF/ADAAACeS7UC2fmgQqwHtJczDwMoUHJlc2VudGF0aW9uRnJhbWV3b3JrLlJveWFsZS5kbGwAAAGJavvyAMAAAJOxf+muoplDiYZZZ3WaTMhQcmVzZW50YXRpb25VSS5kbGwAAAH+7fqVAMAAAN0psDWNfbZOqluXoQ2u9+lSZWFjaEZyYW1ld29yay5kbGwAAAFsVNfBAAABANLpH6YqGv9GkR/rHTaObrpTeXN0ZW0uQXBwQ29udGV4dC5kbGwAAAF7lsDOAIAAAC0er2cdxExHuqs0j4N67ftTeXN0ZW0uQnVmZmVycy5kbGwAAAHNvl6wAIAAANBmjCqF2GVKtmtyAJBiakZTeXN0ZW0uQ29kZURvbS5kbGwAAAGONyK4AEABAJPh2dbn0eVKmVZk0b9eRfVTeXN0ZW0uQ29sbGVjdGlvbnMuQ29uY3VycmVudC5kbGwAAAG336yZAKAAAEhwiMmplhVHpZaUwOGl1atTeXN0ZW0uQ29sbGVjdGlvbnMuZGxsAAABlD184wAgAQDFfPbma+x6QK5U5GhekjOUU3lzdGVtLkNvbGxlY3Rpb25zLkltbXV0YWJsZS5kbGwAAAFvTpaJAGABANPN+OHDcMxMp3q2BjyB7/pTeXN0ZW0uQ29sbGVjdGlvbnMuTm9uR2VuZXJpYy5kbGwAAAHu3ob4AKAAAIWDyN4Xz8NLiHP+UylpnlJTeXN0ZW0uQ29sbGVjdGlvbnMuU3BlY2lhbGl6ZWQuZGxsAAABsepV5gCgAADII/FRWfK/Q4iRMATvMwThU3lzdGVtLkNvbXBvbmVudE1vZGVsLkFubm90YXRpb25zLmRsbAAAAWcYTusAwAAABNeQ3IZdh0i7U+l/rPw+D1N5c3RlbS5Db21wb25lbnRNb2RlbC5EYXRhQW5ub3RhdGlvbnMuZGxsAAABs5FmowCAAAAJeCRn1lX7SbFWVuOb/kw9U3lzdGVtLkNvbXBvbmVudE1vZGVsLmRsbAAAAb/IkvMAgAAAD1IJhGLYGUC2fhnIhKXOk1N5c3RlbS5Db21wb25lbnRNb2RlbC5FdmVudEJhc2VkQXN5bmMuZGxsAAABg2v0pgCAAACOBxYrhMH5QooAjSpc7jT5U3lzdGVtLkNvbXBvbmVudE1vZGVsLlByaW1pdGl2ZXMuZGxsAAABG/Kz+QCgAAAhdI/spbRBSYOL73lnQgbEU3lzdGVtLkNvbXBvbmVudE1vZGVsLlR5cGVDb252ZXJ0ZXIuZGxsAAABASrH0wDgAQBUJMS1hYZ1TK1f+pK+LiySU3lzdGVtLkNvbmZpZ3VyYXRpb24uQ29uZmlndXJhdGlvbk1hbmFnZXIuZGxsAAABP5ZI9wCgAQDTdqA8T5ZVSKi9IcKcDHN9U3lzdGVtLkNvbmZpZ3VyYXRpb24uZGxsAAABSREI4QCAAAAcKHZ4e+daSZ8cGk+18uf5U3lzdGVtLkNvbnNvbGUuZGxsAAABgnhbzwCgAACra90j+ZXETZ38yHk1BOBSU3lzdGVtLkNvcmUuZGxsAAABlnE+hACgAADpiv53Udx8RbYwjdUSaWxjU3lzdGVtLkRhdGEuQ29tbW9uLmRsbAAAAYODVoQAoAIAAMWrzHovPkqdkbLaz0mvH1N5c3RlbS5EYXRhLkRhdGFTZXRFeHRlbnNpb25zLmRsbAAAAbcfiLYAgAAAwJy/88Jvx0WD53573f7WIVN5c3RlbS5EYXRhLmRsbAAAAeotc+sAoAAARob41xGT40S5cTSr140gvVN5c3RlbS5EaWFnbm9zdGljcy5Db250cmFjdHMuZGxsAAABNvVUxQCAAAAG/4JxGLEdR6W1Ta7sMvykU3lzdGVtLkRpYWdub3N0aWNzLkRlYnVnLmRsbAAAAaxpBeIAgAAA/j53v8GSsEiDkgNgY648clN5c3RlbS5EaWFnbm9zdGljcy5EaWFnbm9zdGljU291cmNlLmRsbAAAARGMfbEA4AAA5lPjQ0CxX0CnSbeNn+hlE1N5c3RlbS5EaWFnbm9zdGljcy5FdmVudExvZy5kbGwAAAFEwpe2AMAAAHvp3pplfrVIhYBHtqW/4dxTeXN0ZW0uRGlhZ25vc3RpY3MuRmlsZVZlcnNpb25JbmZvLmRsbAAAAd3RNf8AgAAAIOenzXfnvESzGV4INFkIMVN5c3RlbS5EaWFnbm9zdGljcy5QZXJmb3JtYW5jZUNvdW50ZXIuZGxsAAABYAqWtQCgAACpxyzVnVb6Q6nnCeVrkFPhU3lzdGVtLkRpYWdub3N0aWNzLlByb2Nlc3MuZGxsAAABoZyv+ADAAAAA8RkL24zHQJatBrse0ujzU3lzdGVtLkRpYWdub3N0aWNzLlN0YWNrVHJhY2UuZGxsAAABorh06ACgAACo1SXoFn5DRKBWgwW/uhuOU3lzdGVtLkRpYWdub3N0aWNzLlRleHRXcml0ZXJUcmFjZUxpc3RlbmVyLmRsbAAAARjl4NEAgAAANiQeSWkpO0So+qXl6y+Y/1N5c3RlbS5EaWFnbm9zdGljcy5Ub29scy5kbGwAAAH9BkK1AIAAAO2yzeeW/ZRAo1gRF9jiY/xTeXN0ZW0uRGlhZ25vc3RpY3MuVHJhY2VTb3VyY2UuZGxsAAABMl0swACgAACJvFpAuYg0Q7vuhwevhEFqU3lzdGVtLkRpYWdub3N0aWNzLlRyYWNpbmcuZGxsAAABSMLvlQCgAADz0DzrfeaMQ7/wF7H/Kn41U3lzdGVtLkRpcmVjdG9yeVNlcnZpY2VzLmRsbAAAAcGni9sAgAEAPRvbgNAKX0GBVYaoq7gcJ1N5c3RlbS5kbGwAAAH0S5DKAAABADTb7v9UfdJKpajy6/ZtsgdTeXN0ZW0uRHJhd2luZy5Db21tb24uZGxsAAABFwTR5gAgAwD/SxlEN/IfRoBeCojm0qP9U3lzdGVtLkRyYXdpbmcuZGxsAAABZsmelACAAAB8w0r4GZ1wRKEhouNpMp/JU3lzdGVtLkRyYXdpbmcuUHJpbWl0aXZlcy5kbGwAAAF/QOWSAMAAAAL4miM/6kJJqEJHICt893RTeXN0ZW0uRHluYW1pYy5SdW50aW1lLmRsbAAAAQ6vFYEAgAAA4NnfW5NNZ0Ku0HbsnkVhS1N5c3RlbS5Gb3JtYXRzLkFzbjEuZGxsAAABZ3/VoACgAAA4vyEge9/MRYY/l0z/e2t+U3lzdGVtLkZvcm1hdHMuTnJiZi5kbGwAAAGEtf3dAIAAAG6pVRbiYjhOoNCaphSq5gNTeXN0ZW0uRm9ybWF0cy5UYXIuZGxsAAABj0ZTxACAAACNfgA+sBL8T6tzgZEcLjHPU3lzdGVtLkdsb2JhbGl6YXRpb24uQ2FsZW5kYXJzLmRsbAAAAenHRNIAgAAAlj3CT+RmWUSJEHsttGbIOFN5c3RlbS5HbG9iYWxpemF0aW9uLmRsbAAAAUbo2aUAgAAAvWQsRafIokOYflzyySo9T1N5c3RlbS5HbG9iYWxpemF0aW9uLkV4dGVuc2lvbnMuZGxsAAABwxrn/wCAAAAuw+oY0ccESYKi//PrYR+vU3lzdGVtLklPLkNvbXByZXNzaW9uLkJyb3RsaS5kbGwAAAHI0lXZAIAAAJB1lZPuXD9JljoFx0Ch75tTeXN0ZW0uSU8uQ29tcHJlc3Npb24uZGxsAAABpwXzvgCgAABUBjgjGIxySp7i34JB/ZzfU3lzdGVtLklPLkNvbXByZXNzaW9uLkZpbGVTeXN0ZW0uZGxsAAABoU0A9wCAAAAi0vYej18/SL05d+FKXvDNU3lzdGVtLklPLkNvbXByZXNzaW9uLlppcEZpbGUuZGxsAAABzoWb2wCAAAAyF0ThV59+R7p0ZdIT17arU3lzdGVtLklPLmRsbAAAAYxfeeoAgAAA/ivZHAjUuky3Q3S1d26PllN5c3RlbS5JTy5GaWxlU3lzdGVtLkFjY2Vzc0NvbnRyb2wuZGxsAAABUNl44QCAAADpyGp+Sr/eTLSCJrQryu8MU3lzdGVtLklPLkZpbGVTeXN0ZW0uZGxsAAAB+siWlwCAAADNT9OXPiCKS6z/C4zF3mEAU3lzdGVtLklPLkZpbGVTeXN0ZW0uRHJpdmVJbmZvLmRsbAAAAV03/tUAgAAAnhntlX30lEajmweC7NaJflN5c3RlbS5JTy5GaWxlU3lzdGVtLlByaW1pdGl2ZXMuZGxsAAABiT/n2ACAAABnjod4ntJQTZVptIOW79LfU3lzdGVtLklPLkZpbGVTeXN0ZW0uV2F0Y2hlci5kbGwAAAHxR23JAIAAAN4Rb6yiMghJnK2qO85WPUxTeXN0ZW0uSU8uSXNvbGF0ZWRTdG9yYWdlLmRsbAAAAdL0wYwAoAAAOmOPJZWbokSExvBkg1KRpVN5c3RlbS5JTy5NZW1vcnlNYXBwZWRGaWxlcy5kbGwAAAEG/rvTAIAAAI4NI1M3MKFGm41M04QjvPNTeXN0ZW0uSU8uUGFja2FnaW5nLmRsbAAAAQ1nrd4AoAAAruvZgIUwO0Ku2dWBivX9JlN5c3RlbS5JTy5QaXBlbGluZXMuZGxsAAABeqvT1QCAAADc2rQd+kX2Roq8v3jypmaHU3lzdGVtLklPLlBpcGVzLkFjY2Vzc0NvbnRyb2wuZGxsAAABqeQ7kwCAAADBmExGI/1JQ73rDg941Rt7U3lzdGVtLklPLlBpcGVzLmRsbAAAAbxvU+IAoAAAsWAj5RWgp0e49nYdfY/szVN5c3RlbS5JTy5Vbm1hbmFnZWRNZW1vcnlTdHJlYW0uZGxsAAAByv95/QCAAADPp1aJW9m3SLPZVrVdNoqyU3lzdGVtLkxpbnEuQXN5bmNFbnVtZXJhYmxlLmRsbAAAAXR4+ZcAwAAAvJslPx0bmkWaQWPUKgBhllN5c3RlbS5MaW5xLmRsbAAAATR5JOEAwAAA8avMDnnL2E+D9snuOLumzlN5c3RlbS5MaW5xLkV4cHJlc3Npb25zLmRsbAAAAT/ZYrYAQAEAZW75kPRwA0CK2LYWAV0ihFN5c3RlbS5MaW5xLlBhcmFsbGVsLmRsbAAAAUQp49cAwAAAgMFtqQCeFkKYqRGHjp80KVN5c3RlbS5MaW5xLlF1ZXJ5YWJsZS5kbGwAAAH5PeX8AMAAADywdqsOwGBAhK+uJGZ+blJTeXN0ZW0uTWVtb3J5LmRsbAAAAYpAXLsAIAEAce0HTDl8vU6Lca6+vgQhUFN5c3RlbS5OZXQuZGxsAAABFJmd7wCAAADYrD+sPOyBSoMUY5DLXhC5U3lzdGVtLk5ldC5IdHRwLmRsbAAAAa9Wdu8AIAEAoyOlVrNoOES7kJgU4S0am1N5c3RlbS5OZXQuSHR0cC5Kc29uLmRsbAAAAf2N+egAoAAAJfDV0YzXt0mQVXwnI78LB1N5c3RlbS5OZXQuSHR0cExpc3RlbmVyLmRsbAAAAQ4OadcAoAAALjBBPhmRMkudmi38MUr/pVN5c3RlbS5OZXQuTWFpbC5kbGwAAAHMB7uEAMAAAL/1V7dUuxpFuYfRuW56VHFTeXN0ZW0uTmV0Lk5hbWVSZXNvbHV0aW9uLmRsbAAAAf//7fQAgAAAbFtpz1bwZEKpkOY+FXa61FN5c3RlbS5OZXQuTmV0d29ya0luZm9ybWF0aW9uLmRsbAAAAX6eAO8AwAAAGYGg/cU0vEWJ/H5qDDZ0clN5c3RlbS5OZXQuUGluZy5kbGwAAAEB1MfUAIAAAHAMMnrax0hFl73yRUx9EdVTeXN0ZW0uTmV0LlByaW1pdGl2ZXMuZGxsAAABGACF0ADAAAAxlgyFmtnrR494gKuxoELRU3lzdGVtLk5ldC5RdWljLmRsbAAAAauc9MEAoAAA8fVvmRkxk0Ggxq5iqrwRdFN5c3RlbS5OZXQuUmVxdWVzdHMuZGxsAAABQqfn/gDgAAAYz8M2IBxJR4EUu66l4J7nU3lzdGVtLk5ldC5TZWN1cml0eS5kbGwAAAG0JefoAAABAHD1Fvis0aBNkVwxWXj3b0pTeXN0ZW0uTmV0LlNlcnZlclNlbnRFdmVudHMuZGxsAAABbDkTtgCAAACr6WWpE4GOSIDgDMT9v6teU3lzdGVtLk5ldC5TZXJ2aWNlUG9pbnQuZGxsAAABCGCn8QCAAACCGHXVB4rhT73aRTRnu2o/U3lzdGVtLk5ldC5Tb2NrZXRzLmRsbAAAAU9mxPgAAAEA+pwY4c3hI0ed+SM1K/1HpFN5c3RlbS5OZXQuV2ViQ2xpZW50LmRsbAAAAQIt3cMAoAAAx6UdaTA3CkKlmujgckV/e1N5c3RlbS5OZXQuV2ViSGVhZGVyQ29sbGVjdGlvbi5kbGwAAAFicLLTAIAAAP8/tsohCnlIlxgp1+/fcltTeXN0ZW0uTmV0LldlYlByb3h5LmRsbAAAAUpHfbMAgAAAW1ftjrkaWU22qPD8JiNOwFN5c3RlbS5OZXQuV2ViU29ja2V0cy5DbGllbnQuZGxsAAABmnfZjwCAAAByKr53UjKnSYMSh7azjcmgU3lzdGVtLk5ldC5XZWJTb2NrZXRzLmRsbAAAAfnAyagAoAAAAQnlqeBQuk+TYlqii29zkFN5c3RlbS5OdW1lcmljcy5kbGwAAAGlgxXoAIAAALsD7u95ECRJmUIBSAkdjilTeXN0ZW0uTnVtZXJpY3MuVmVjdG9ycy5kbGwAAAECDpWpACABAD4A/UzZHf5Lj9IneraK2zJTeXN0ZW0uT2JqZWN0TW9kZWwuZGxsAAABRUOazACgAACDDG2nyv3fS4e1uf0bdT0EU3lzdGVtLlByaW50aW5nLmRsbAAAAbwHbeYAIAEA7CYBIzUqw0W8IGaDQi+L0FN5c3RlbS5Qcml2YXRlLldpbmRvd3MuQ29yZS5kbGwAAAEPIkvPAOAOABYAu1atFldFiOG/tsUgvWxTeXN0ZW0uUHJpdmF0ZS5XaW5kb3dzLkdkaVBsdXMuZGxsAAABTb5U3QCAAgDx/4/qJMVcTZ+FFfXvC44cU3lzdGVtLlJlZmxlY3Rpb24uRGlzcGF0Y2hQcm94eS5kbGwAAAG4g1OWAIAAAMkBAooTZIFClzSAN4/SxgpTeXN0ZW0uUmVmbGVjdGlvbi5kbGwAAAHcmxH1AIAAAGjiAHfhzr5Oqob90M1xcrpTeXN0ZW0uUmVmbGVjdGlvbi5FbWl0LmRsbAAAAcDScPYA4AAAtxhQ8eA8XEGi30hrFUYURFN5c3RlbS5SZWZsZWN0aW9uLkVtaXQuSUxHZW5lcmF0aW9uLmRsbAAAAVnRXbMAgAAAH0dI8zpTPUWmwveFBzrfeFN5c3RlbS5SZWZsZWN0aW9uLkVtaXQuTGlnaHR3ZWlnaHQuZGxsAAABDY+u1gCAAAA9SIlUU+J4QabOWwBHAeQKU3lzdGVtLlJlZmxlY3Rpb24uRXh0ZW5zaW9ucy5kbGwAAAEs806sAIAAALg5nJTl/UJFgE0QkFNBTZpTeXN0ZW0uUmVmbGVjdGlvbi5NZXRhZGF0YS5kbGwAAAFqayy7ACACAOKadbxByyNBhMaS3BNcDRRTeXN0ZW0uUmVmbGVjdGlvbi5QcmltaXRpdmVzLmRsbAAAAaPPxI4AoAAAnmXrvGNL8kCGq3Spdg5ClFN5c3RlbS5SZWZsZWN0aW9uLlR5cGVFeHRlbnNpb25zLmRsbAAAAS9TbrgAgAAAwyQwo4/vHEafpNz4zPukdVN5c3RlbS5SZXNvdXJjZXMuRXh0ZW5zaW9ucy5kbGwAAAH/Hk+AAIAAABiZGJJi8X9PrUmm0uXs4G9TeXN0ZW0uUmVzb3VyY2VzLlJlYWRlci5kbGwAAAFdq6nOAIAAAM8ICwUvCi9NjKER25LLIS9TeXN0ZW0uUmVzb3VyY2VzLlJlc291cmNlTWFuYWdlci5kbGwAAAGiEZHRAIAAAMgwMvHGv0dNu1gbLPBCtWhTeXN0ZW0uUmVzb3VyY2VzLldyaXRlci5kbGwAAAGof5ijAIAAALduTui6sXRDg1JudIg5sAlTeXN0ZW0uUnVudGltZS5Db21waWxlclNlcnZpY2VzLlVuc2FmZS5kbGwAAAHfLwvYAIAAABmp6x/pzqFPm1eBXR2ulL1TeXN0ZW0uUnVudGltZS5Db21waWxlclNlcnZpY2VzLlZpc3VhbEMuZGxsAAABUCAhgACAAADgaZvk5buBSawds/VkeoK1U3lzdGVtLlJ1bnRpbWUuZGxsAAABeGrmngBgDQAVwH4yTalrQbbG2OQJAqhUU3lzdGVtLlJ1bnRpbWUuRXh0ZW5zaW9ucy5kbGwAAAG9FYj6AIAAAF1B21ybeZROpF+Srw6nnVJTeXN0ZW0uUnVudGltZS5IYW5kbGVzLmRsbAAAATd14r4AgAAAWnRpM0PS20OB8ty6JUL0oFN5c3RlbS5SdW50aW1lLkludGVyb3BTZXJ2aWNlcy5kbGwAAAEGuc7EAMABAOFLdI3N8ndHh+ewM3Y+zrZTeXN0ZW0uUnVudGltZS5JbnRlcm9wU2VydmljZXMuSmF2YVNjcmlwdC5kbGwAAAGLho3uAKAAADTFYanqKNtImm8oSnaDSJZTeXN0ZW0uUnVudGltZS5JbnRlcm9wU2VydmljZXMuUnVudGltZUluZm9ybWF0aW9uLmRsbAAAAek93dcAgAAAWVVFxLncV0GHh7F79TYO7VN5c3RlbS5SdW50aW1lLkludHJpbnNpY3MuZGxsAAABOCtTsgBgBwB5ZPDamitNRY32zLISQVpxU3lzdGVtLlJ1bnRpbWUuTG9hZGVyLmRsbAAAAQy017YAgAAAb7qJa4+nV0yDjW2WLEKyxFN5c3RlbS5SdW50aW1lLk51bWVyaWNzLmRsbAAAAZtj4MMAwAAAVK+szflpZEqMMmVxBH3FOVN5c3RlbS5SdW50aW1lLlNlcmlhbGl6YXRpb24uZGxsAAABypxbrACAAAAq2MvOKSnJQ4wF/qijxIxwU3lzdGVtLlJ1bnRpbWUuU2VyaWFsaXphdGlvbi5Gb3JtYXR0ZXJzLmRsbAAAAWEoL8YAoAAAZoNa9RmhlEK+DUedZ0OU0FN5c3RlbS5SdW50aW1lLlNlcmlhbGl6YXRpb24uSnNvbi5kbGwAAAFm6r2PAIAAAA+noegB/p1DqFxk53IVG3NTeXN0ZW0uUnVudGltZS5TZXJpYWxpemF0aW9uLlByaW1pdGl2ZXMuZGxsAAAB1D87rACAAABF34gmpT+2SqCs24MgbBalU3lzdGVtLlJ1bnRpbWUuU2VyaWFsaXphdGlvbi5YbWwuZGxsAAABkOfvmwDgAADKYquqNMaXQKdyMiLcalzoU3lzdGVtLlNlY3VyaXR5LkFjY2Vzc0NvbnRyb2wuZGxsAAABjv6jsQDAAAAPW6R+bAX+SYSV4Jk9uOnzU3lzdGVtLlNlY3VyaXR5LkNsYWltcy5kbGwAAAH0SI7zAMAAACedCteBlLZBkECN6cZ+IkVTeXN0ZW0uU2VjdXJpdHkuQ3J5cHRvZ3JhcGh5LkFsZ29yaXRobXMuZGxsAAABQLe1pQCAAADGwHtxuT62SrbAydwvb+ICU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5DbmcuZGxsAAABd72Y3ACAAAB3xUIRtQxUT7R/JYFgIgZpU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5Dc3AuZGxsAAABKdnRggCAAAAiOQnhG2riQImPSEoBAzjFU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5kbGwAAAHAKuSbAMACAFHF+d30FLdIg9ApbZC6RgVTeXN0ZW0uU2VjdXJpdHkuQ3J5cHRvZ3JhcGh5LkVuY29kaW5nLmRsbAAAASu+KeUAgAAAZWY7WjysU0me9xue7tEmNFN5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuT3BlblNzbC5kbGwAAAGLC7C8AIAAAM5Je+V2bh5Lo6Z8153/1ahTeXN0ZW0uU2VjdXJpdHkuQ3J5cHRvZ3JhcGh5LlBrY3MuZGxsAAABbsGdsgDAAABdib97o3pjQaHDGP0EG9uDU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5QcmltaXRpdmVzLmRsbAAAAUnBqKgAgAAAKqdRViNlMUa9TV2ik04JM1N5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuUHJvdGVjdGVkRGF0YS5kbGwAAAEh2gXqAIAAACWhB9ysGIRJjbTbehoLnBxTeXN0ZW0uU2VjdXJpdHkuQ3J5cHRvZ3JhcGh5Llg1MDlDZXJ0aWZpY2F0ZXMuZGxsAAAB/6YgiACAAABM0hCcGBzyQqwps55VDUt9U3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5YbWwuZGxsAAABnp4gmQDgAABz8uATWXA0R7DRmA0p0saYU3lzdGVtLlNlY3VyaXR5LmRsbAAAAf/nxroAgAAAWW6PU3kK9kO11MxAkGlE1lN5c3RlbS5TZWN1cml0eS5QZXJtaXNzaW9ucy5kbGwAAAFbcdb+AGABAN5Fu3FAm4BPm0woJoXbjoZTeXN0ZW0uU2VjdXJpdHkuUHJpbmNpcGFsLmRsbAAAARm8hL4AgAAAx6nJD8oYZ0SyfG2sOnRwZlN5c3RlbS5TZWN1cml0eS5QcmluY2lwYWwuV2luZG93cy5kbGwAAAGZXHyFAKAAALnHAaCMTMxOjGtBHM2AoCJTeXN0ZW0uU2VjdXJpdHkuU2VjdXJlU3RyaW5nLmRsbAAAARYt0tAAgAAA92LrLKH1ZUKyuIWGy+Wh1lN5c3RlbS5TZXJ2aWNlTW9kZWwuV2ViLmRsbAAAAbt1GsMAgAAAUpkrLhuQ+kmudfZhpHr2rFN5c3RlbS5TZXJ2aWNlUHJvY2Vzcy5kbGwAAAFIx/fnAIAAAKTiKUCeVzdEoKIU4gU1pYFTeXN0ZW0uVGV4dC5FbmNvZGluZy5Db2RlUGFnZXMuZGxsAAABDzDU3ACAAACNp4h4c82zTLHicya189e4U3lzdGVtLlRleHQuRW5jb2RpbmcuZGxsAAABJWzy0ACAAACdhb9gMlgsTJq5z14kBk62U3lzdGVtLlRleHQuRW5jb2RpbmcuRXh0ZW5zaW9ucy5kbGwAAAFYUsTjAIAAAOGF4Sr8I39Nhb5xjb1HZNlTeXN0ZW0uVGV4dC5FbmNvZGluZ3MuV2ViLmRsbAAAAQNtYuoAoAAAiCsRwFCqZEiedjxQjJJB9lN5c3RlbS5UZXh0Lkpzb24uZGxsAAABNF8JpwCAAQC8ola8WjC/QqqYPbxJSNguU3lzdGVtLlRleHQuUmVndWxhckV4cHJlc3Npb25zLmRsbAAAAQ2oFbMAwAAAvziGKzfEhE6chsyuA5zbfVN5c3RlbS5UaHJlYWRpbmcuQWNjZXNzQ29udHJvbC5kbGwAAAFvf1XgAIAAAAN+IUBBUzlOs/UxwUIpmhpTeXN0ZW0uVGhyZWFkaW5nLkNoYW5uZWxzLmRsbAAAAcW1k9wAgAAAngDiHAyxZEaqneenHZUMM1N5c3RlbS5UaHJlYWRpbmcuZGxsAAABhtCtowDAAABHOZ+Ey3G9T4Dc8mOvFT2AU3lzdGVtLlRocmVhZGluZy5PdmVybGFwcGVkLmRsbAAAAZHlkMEAgAAAXS7wbCPrsUq5RfNNnN18kVN5c3RlbS5UaHJlYWRpbmcuVGFza3MuRGF0YWZsb3cuZGxsAAABcA5qmQDAAAATwMJgkRo7RL0bQwkmjq2KU3lzdGVtLlRocmVhZGluZy5UYXNrcy5kbGwAAAGPF66lAIAAALk3g7DjUQRLsis3CywmiC9TeXN0ZW0uVGhyZWFkaW5nLlRhc2tzLkV4dGVuc2lvbnMuZGxsAAABPM2yswCAAAADAFfcuvTGRqREtHgmDXhNU3lzdGVtLlRocmVhZGluZy5UYXNrcy5QYXJhbGxlbC5kbGwAAAEU8YT0AIAAAGPvrnnUNztCov4cEGqiLQJTeXN0ZW0uVGhyZWFkaW5nLlRocmVhZC5kbGwAAAFNUan/AKAAAIf6qOOjqmBIo1hnv7reDUBTeXN0ZW0uVGhyZWFkaW5nLlRocmVhZFBvb2wuZGxsAAABZjJokACAAAAcyXqpKIXAQrZgTt3gOOu5U3lzdGVtLlRocmVhZGluZy5UaW1lci5kbGwAAAHnfBTsAIAAABxKP+3doW1Ih36aBOzOLbVTeXN0ZW0uVHJhbnNhY3Rpb25zLmRsbAAAAbO6Nb0AgAAAHQlxKlVWUkS92tVp7+L/cVN5c3RlbS5UcmFuc2FjdGlvbnMuTG9jYWwuZGxsAAABarV3nACgAAAWf9uUJ3kqRbNZVWm+3U47U3lzdGVtLlZhbHVlVHVwbGUuZGxsAAABlBG+4ACAAAAB+6TdChLPRKSUYhV1gG5/U3lzdGVtLldlYi5kbGwAAAGWL5aiAIAAALeKs4edPpVIpK4CAXr8v6FTeXN0ZW0uV2ViLkh0dHBVdGlsaXR5LmRsbAAAAVStu5sAgAAAaMNxCsQ2HU+oX4Aqbfixu1N5c3RlbS5XaW5kb3dzLkNvbnRyb2xzLlJpYmJvbi5kbGwAAAE/lS33AAACABz37dGfWKdDsD0zk1ISZntTeXN0ZW0uV2luZG93cy5kbGwAAAHhIRKoAIAAAEZyIc8C6D5KmRNvdAGC8cNTeXN0ZW0uV2luZG93cy5FeHRlbnNpb25zLmRsbAAAAXn/H48AgAAADH+ZW0pmPUGoA+8STT+XsVN5c3RlbS5XaW5kb3dzLklucHV0Lk1hbmlwdWxhdGlvbnMuZGxsAAABp+6Y/wCgAACOVtt6vNMcS5whJWCKKklxU3lzdGVtLldpbmRvd3MuUHJlc2VudGF0aW9uLmRsbAAAAUeRDOsAwAAAKU5TDwzbm0S18UkXA4Bb81N5c3RlbS5XaW5kb3dzLlByaW1pdGl2ZXMuZGxsAAABDAelygDAAAClkFfrh92VR7j1Kf/PlM6sU3lzdGVtLlhhbWwuZGxsAAABCadisQBAAQASboHheOO6TZJc9ckOu1UmU3lzdGVtLlhtbC5kbGwAAAHOurbiAKAAAMOWQGigTqRMrwfQOF7qtJpTeXN0ZW0uWG1sLkxpbnEuZGxsAAAB8n/u8QCAAAAZo8WS40FoTqnTdP/uFdV8U3lzdGVtLlhtbC5SZWFkZXJXcml0ZXIuZGxsAAABzRBUtAAAAgBoQD4sZaRiTb9xWKCKcxHFU3lzdGVtLlhtbC5TZXJpYWxpemF0aW9uLmRsbAAAAbrVQ5YAgAAAJp8u6D1/NEyd3yLsL4pXDVN5c3RlbS5YbWwuWERvY3VtZW50LmRsbAAAAaFiPP8AwAAA/6Iu+OHFfUOdfrgBIIy5PVN5c3RlbS5YbWwuWG1sRG9jdW1lbnQuZGxsAAABHQqT8QCAAAC4Ok/OI44GQr8JEwbSpzgJU3lzdGVtLlhtbC5YbWxTZXJpYWxpemVyLmRsbAAAATpP3K8AAAEAD1DQv133g0KXmANDKUV1aFN5c3RlbS5YbWwuWFBhdGguZGxsAAAB9g60sACAAAC7JS3VR8fUTrUYQJjdm5gUU3lzdGVtLlhtbC5YUGF0aC5YRG9jdW1lbnQuZGxsAAAB2wGo3wCAAAC4FYS5lc/XR5dvf+9WP+vHVUlBdXRvbWF0aW9uQ2xpZW50LmRsbAAAASKmu9kAwAAAg5lim3BBxk6+YgEtZcLcHFVJQXV0b21hdGlvbkNsaWVudFNpZGVQcm92aWRlcnMuZGxsAAABu2te0QCAAAAKx6iMSDvqQKL4z7sH2zR4VUlBdXRvbWF0aW9uUHJvdmlkZXIuZGxsAAABk47DyACgAAAVdcBgu7dyTYubipzbxf/2VUlBdXRvbWF0aW9uVHlwZXMuZGxsAAABlmPwngDAAAAjhbdiFzQwSqlrdICHGC+fV2luZG93c0Jhc2UuZGxsAAABBgG+gwDgAQABSDsEpyixR6rOOnq6xsmaV2luUlQuUnVudGltZS5kbGwAAAG7mFm9AEAIADdiA+fMEI5AqsDyxv6woAxZZU1hbkZhbkJhY2tlbmQuZGxsAAABSct/jgDgAADtY8O5wIBeQp7OIKifwbH7"
+        },
+        {
+          "parentToken": 855638022,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "TmFtZQBTaGEyNTYA"
+        },
+        {
+          "parentToken": 855638024,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "TmFtZQBTaGEyNTYA"
+        },
+        {
+          "parentToken": 855638121,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QmxvY2sAU291cmNlAEF4aXMAVGFibGUA"
+        },
+        {
+          "parentToken": 855638128,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QmxvY2sAU291cmNlAEF4aXMAVGFibGUA"
+        },
+        {
+          "parentToken": 855638137,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "dHlwZQBuYW1lAGNvdW50AA=="
+        },
+        {
+          "parentToken": 855638141,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "AG5hbWUA"
+        },
+        {
+          "parentToken": 33554759,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "BQ=="
+        },
+        {
+          "parentToken": 33554772,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554773,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 855638365,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "VGlja01zAFN0YXRlAA=="
+        },
+        {
+          "parentToken": 33554794,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554795,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554796,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554797,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554799,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Cw=="
+        },
+        {
+          "parentToken": 33554810,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "DA=="
+        },
+        {
+          "parentToken": 33554811,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "DA=="
+        },
+        {
+          "parentToken": 855638525,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RmluZ2VycHJpbnQAQ291bnQARmlyc3RTZWVuAA=="
+        },
+        {
+          "parentToken": 855638550,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "dHlwZQBuYW1lAA=="
+        },
+        {
+          "parentToken": 855638723,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "T2sARGF0YQBFcnJvcgA="
+        },
+        {
+          "parentToken": 855638729,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QXR0ZW1wdGVkAE9rAERldGFpbAA="
+        },
+        {
+          "parentToken": 855638933,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "bG9hZGVkQXNzZW1ibHkAZnVsbE5hbWUA"
+        },
+        {
+          "parentToken": 855638938,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "AG5hbWUATGVuZ3RoAA=="
+        },
+        {
+          "parentToken": 855638941,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "dHlwZQBuYW1lAA=="
+        },
+        {
+          "parentToken": 855638950,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "dHlwZQBuYW1lAA=="
+        },
+        {
+          "parentToken": 855638958,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "AG5hbWUA"
+        },
+        {
+          "parentToken": 855639055,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RXZlbnQARGV0YWlscwA="
+        },
+        {
+          "parentToken": 855639058,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RXZlbnQARGV0YWlscwA="
+        },
+        {
+          "parentToken": 855639826,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "TGFiZWwAVmFsdWUA"
+        },
+        {
+          "parentToken": 855640117,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "T3duZXIAQWNjZXB0YW5jZQA="
+        },
+        {
+          "parentToken": 855640145,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "VGlja01zAFN1cHByZXNzZWQA"
+        },
+        {
+          "parentToken": 855640194,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q2FzZQBSZWNlaXB0cwBLaW5kAEFjdGlvbgBTYWZlAA=="
+        },
+        {
+          "parentToken": 855640195,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640211,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640212,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640213,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640214,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640217,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640218,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640220,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640223,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640277,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640278,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640279,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640282,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640289,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640293,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640297,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640303,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640306,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640310,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q29kZQBTdGF0dXMATWVzc2FnZQA="
+        },
+        {
+          "parentToken": 855640333,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABEZXRhaWwARXhwbGljaXRGYWlsdXJlAFVua25vd24ATm9uZVRyYW5zcG9ydGVkAFJlY2VpcHRzAEV4cGVjdGVkQWN0aW9uAEV4cGVjdGVkRXZpZGVuY2UARXhwZWN0ZWRTYWZlAAAA"
+        },
+        {
+          "parentToken": 855640344,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Q2FzZQBLaW5kAFdyaXRlSGlzdG9yeQBFeHBlY3RlZFNhZmUA"
+        },
+        {
+          "parentToken": 855640351,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640352,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "S2luZABBY3Rpb24AU2FmZQBEZXRhaWwA"
+        },
+        {
+          "parentToken": 855640374,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "TmFtZQBQYXlsb2FkAA=="
+        },
+        {
+          "parentToken": 855640619,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RGV2aWNlAENvbXBsZXRlAA=="
+        },
+        {
+          "parentToken": 855640620,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RGV2aWNlAENvbXBsZXRlAA=="
+        },
+        {
+          "parentToken": 855640628,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RGV2aWNlAENvbXBsZXRlAA=="
+        },
+        {
+          "parentToken": 855640630,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RGV2aWNlAENvbXBsZXRlAA=="
+        },
+        {
+          "parentToken": 855640765,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "U3RhcnRlZEF0AFN0YXRlAA=="
+        },
+        {
+          "parentToken": 855640766,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "U3RhcnRlZEF0AFN0YXRlAA=="
+        },
+        {
+          "parentToken": 855640767,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "U3RhcnRlZEF0AFN0YXRlAA=="
+        },
+        {
+          "parentToken": 855640824,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RWMAQ29udHJvbGxlckZpcm13YXJlAA=="
+        },
+        {
+          "parentToken": 855640825,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RWMAQ29udHJvbGxlckZpcm13YXJlAA=="
+        },
+        {
+          "parentToken": 855640826,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RWMAQ29udHJvbGxlckZpcm13YXJlAA=="
+        },
+        {
+          "parentToken": 855640840,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Rm91bmQAQ3ljbGVJZABBdHRlbXB0cwBSZXBsYWNlbWVudHMAUmVtYWluaW5nTXMA"
+        },
+        {
+          "parentToken": 855640841,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Rm91bmQAQ3ljbGVJZABBdHRlbXB0cwBSZXBsYWNlbWVudHMAUmVtYWluaW5nTXMA"
+        },
+        {
+          "parentToken": 855640846,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Rm91bmQAQ3ljbGVJZABBdHRlbXB0cwBSZXBsYWNlbWVudHMAUmVtYWluaW5nTXMA"
+        },
+        {
+          "parentToken": 855640848,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Rm91bmQAQ3ljbGVJZABBdHRlbXB0cwBSZXBsYWNlbWVudHMAUmVtYWluaW5nTXMA"
+        },
+        {
+          "parentToken": 855640849,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "Rm91bmQAQ3ljbGVJZABBdHRlbXB0cwBSZXBsYWNlbWVudHMAUmVtYWluaW5nTXMA"
+        },
+        {
+          "parentToken": 855640943,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "RXZlbnQARGV0YWlscwA="
+        },
+        {
+          "parentToken": 855640950,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 855640951,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 855640954,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 855640955,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 855640957,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 855640959,
+          "kind": "ed9fdf71-8879-4747-8ed3-fe5ede3ce710",
+          "valueBase64": "QWNrAEhvc3QAQ3ljbGUAUXVldWVkAFBoYXNlAFNjb3BlAEFjY2VwdGVkQXQA"
+        },
+        {
+          "parentToken": 100666332,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666352,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666417,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666488,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666546,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666585,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666709,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666823,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100666996,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100667012,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100667032,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100667064,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100667094,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668045,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668344,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668371,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668393,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668427,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668588,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "bAcAAA8FAAAqBQAAlKx/BgAAmgYAAJSs"
+        },
+        {
+          "parentToken": 100668588,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAKcHAAA="
+        },
+        {
+          "parentToken": 100668592,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAXAAAASgAAAA=="
+        },
+        {
+          "parentToken": 100668629,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668663,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668713,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668716,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668732,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668748,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668766,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668782,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668838,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668843,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668877,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668960,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100668986,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669474,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAXAAAASgAAAA=="
+        },
+        {
+          "parentToken": 100669529,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669553,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669585,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669607,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669630,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669690,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAXAAAASgAAAA=="
+        },
+        {
+          "parentToken": 100669696,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAL0BAADVAQAAmQA="
+        },
+        {
+          "parentToken": 100669696,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAALAIAAA=="
+        },
+        {
+          "parentToken": 100669717,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100669740,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAADAAAABHAAAAmSw="
+        },
+        {
+          "parentToken": 100669764,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAANcAAADvAAAAmUQ="
+        },
+        {
+          "parentToken": 100669766,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAK8CAADKAgAAmUaHBQAAogUAAJlG8wUAAA4GAACZRpYGAACxBgAAmUYCBwAAHQcAAJlGcQcAAIwHAACZRqcLAADCCwAAmUYKDgAAJQ4AAJlG4A4AAPsOAACZRtgPAADwDwAAmUY="
+        },
+        {
+          "parentToken": 100669766,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "wQAAAAQMAAATAAAAHRAAABMAAAAdEAAAEwAAAB0QAAA="
+        },
+        {
+          "parentToken": 100669768,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAADcBAABPAQAAmUg="
+        },
+        {
+          "parentToken": 100669770,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAHsAAACSAAAAmUo="
+        },
+        {
+          "parentToken": 100669772,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAOsAAAADAQAAmUw="
+        },
+        {
+          "parentToken": 100669772,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAAawEAAAAAAABrAQAA"
+        },
+        {
+          "parentToken": 100669774,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAEgAAABfAAAAmU4="
+        },
+        {
+          "parentToken": 100669776,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAGMAAAB6AAAAmVA="
+        },
+        {
+          "parentToken": 100669778,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAOACAAD7AgAAmVJrAwAAhgMAAJlS"
+        },
+        {
+          "parentToken": 100669780,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAKsAAADCAAAAmVQ="
+        },
+        {
+          "parentToken": 100669780,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAAPwEAAA=="
+        },
+        {
+          "parentToken": 100669782,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAL8AAADaAAAAmVY="
+        },
+        {
+          "parentToken": 100669782,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAKUCAAA="
+        },
+        {
+          "parentToken": 100669784,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAMkAAADhAAAAmVg="
+        },
+        {
+          "parentToken": 100669786,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAE8BAABqAQAAmVoNAwAAKAMAAJlafQMAAJUDAACZWg=="
+        },
+        {
+          "parentToken": 100669786,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "7QAAADEBAAAAAAAAAAAAAEkAAAB5AwAA7QAAADEBAAA="
+        },
+        {
+          "parentToken": 100669790,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAXAAAASgAAAA=="
+        },
+        {
+          "parentToken": 100669796,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAANgAAADzAAAAmWR0AQAAjwEAAJlkOwIAAFYCAACZZNgCAADwAgAAmWQ="
+        },
+        {
+          "parentToken": 100669796,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAkAAAA8gIAAA=="
+        },
+        {
+          "parentToken": 100669798,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAKgAAADDAAAAmWY="
+        },
+        {
+          "parentToken": 100669798,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAAjAEAAA=="
+        },
+        {
+          "parentToken": 100669903,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAEYAAABdAAAAmc8="
+        },
+        {
+          "parentToken": 100669903,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAA1AAAAA=="
+        },
+        {
+          "parentToken": 100669907,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAAAAAAAG0AAACuAAAA"
+        },
+        {
+          "parentToken": 100669973,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAK8BAADKAQAAmhWCAgAAnQIAAJoVFhgAADEYAACaFZ8YAAC6GAAAmhUoGQAAQxkAAJoVsRkAAMwZAACaFcodAADlHQAAmhVzHgAAjh4AAJoV"
+        },
+        {
+          "parentToken": 100669973,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAJgvAAAAAAAAmC8AADgBAAB8AgAAOAEAAHwCAAA4AQAAfAIAADgBAAB8AgAAWwEAALoAAAA="
+        },
+        {
+          "parentToken": 100669975,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAOoAAAAEAQAAmheDAgAAnQIAAJoX"
+        },
+        {
+          "parentToken": 100669975,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAA/wMAAAAAAAD/AwAAAAAAAP8DAAAAAAAA/wMAAIcAAADyAgAAhwAAAPICAAA="
+        },
+        {
+          "parentToken": 100669977,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAACkXAABEFwAAmhm+FwAA2RcAAJoZnBgAALcYAACaGWoZAACFGQAAmhmdGgAAuBoAAJoZMhsAAE0bAACaGTQeAABPHgAAmhk="
+        },
+        {
+          "parentToken": 100669977,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAALAAAA/CYAAAsAAAD8JgAAcQAAAGImAABNFQAAfQkAAHgVAAAxCQAA"
+        },
+        {
+          "parentToken": 100669979,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAGwCAACHAgAAmhuEBgAAnwYAAJobugkAANUJAACaG3AMAACLDAAAmhvjDgAA/g4AAJob"
+        },
+        {
+          "parentToken": 100669979,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAcUAAAAAAAABxQAACAJAADkAgAASQ4AAMYCAADdAwAAvAMAAN0DAAC8AwAAUAkAAJYCAABQCQAAlgIAAA=="
+        },
+        {
+          "parentToken": 100669981,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAKoBAADFAQAAmh0dAgAAOAIAAJodoAIAALsCAACaHTMDAABOAwAAmh2lAwAAwAMAAJodGAQAADMEAACaHdIEAADtBAAAmh2hBQAAvAUAAJodxQYAAOAGAACaHbgIAADTCAAAmh3LCQAA5gkAAJodCgsAACULAACaHeALAAD7CwAAmh0="
+        },
+        {
+          "parentToken": 100669981,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "DwAAAPoMAAAPAAAA+gwAAA8AAAD6DAAADwAAAPoMAAAPAAAA+gwAAA8AAAD6DAAADwAAAPoMAAAAAAAAAAAAAAAAAAAAAAAAdwEAAAIFAAB3AQAAAgUAANIHAAB1AgAAAQgAACUCAAABCAAAJQIAAJ4KAAAVAgAA"
+        },
+        {
+          "parentToken": 100669983,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAABwBAAA3AQAAmh+XAQAAsgEAAJoffAMAAJcDAACaHwkEAAAkBAAAmh/MBAAA5wQAAJofAgYAAB0GAACaH3UGAACQBgAAmh+oCAAAwwgAAJofQwkAAF4JAACaH94JAAD5CQAAmh9aCgAAdQoAAJof"
+        },
+        {
+          "parentToken": 100669983,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAA3wsAAAAAAADfCwAAAAAAAN8LAAAAAAAA3wsAAAAAAADfCwAAAAAAAN8LAAAAAAAA3wsAAAAAAADfCwAAAAAAAN8LAABaAAAAYAIAAHAAAAApAgAAcAAAACkCAADTAAAApgEAAA=="
+        },
+        {
+          "parentToken": 100669985,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAB4BAAA5AQAAmiHhAgAA/AIAAJoh"
+        },
+        {
+          "parentToken": 100669985,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAGEFAAAAAAAAYQUAAAAAAABhBQAAAAAAAGEFAACFAAAAYQQAAA=="
+        },
+        {
+          "parentToken": 100669987,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAGgAAACCAAAAmiM="
+        },
+        {
+          "parentToken": 100669987,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAABgEAAA=="
+        },
+        {
+          "parentToken": 100669989,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAFkAAABwAAAAmiU="
+        },
+        {
+          "parentToken": 100669989,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAAAAAA2QAAAA=="
+        },
+        {
+          "parentToken": 100669991,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAF8AAAB5AAAAmic="
+        },
+        {
+          "parentToken": 100669991,
+          "kind": "6da9a61e-f8c7-4874-be62-68bc5630df71",
+          "valueBase64": "AAAAAAAAAAAKAAAAsgAAAA=="
+        },
+        {
+          "parentToken": 100670044,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100670069,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAADwAAABWAAAAmnU="
+        },
+        {
+          "parentToken": 100670081,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "dwIAANkAAAD0AAAAmoE1AQAAUAEAAJqB"
+        },
+        {
+          "parentToken": 100670083,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAI4AAACmAAAAmoM="
+        },
+        {
+          "parentToken": 100670085,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAF0AAAB0AAAAmoU="
+        },
+        {
+          "parentToken": 100670087,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAD0AAABXAAAAmoc="
+        },
+        {
+          "parentToken": 100670089,
+          "kind": "54fd2ac5-e925-401a-9c2a-f94f171072f8",
+          "valueBase64": "AAAAAGYAAAB+AAAAmok="
+        }
+      ]
+    },
+    {
+      "name": "YeManFanBackend",
+      "dllPath": "artifacts/YeManFanBackend.dll",
+      "dllSha256": "fb2f9396d81594bf573d158c5c9e216a1abc5e3820ba088297262da84d845d60",
+      "pdbPath": "artifacts/YeManFanBackend.pdb",
+      "pdbSha256": "b1845b0bdbd68feb8128f080c63c28c335aa9229178255ca21e302f5f3f08dc0",
+      "codeViewGuid": "82ee385c-2b46-41fe-b8f6-c93c83961ee6",
+      "stamp": 2272533585,
+      "mvid": "17302697-afe5-4d49-88eb-c7549c20bd1b",
+      "compilationOptions": {
+        "version": "2",
+        "compiler-version": "5.9.0-1.26379.115+14fbf8d5271c98133561eb55185fdb05b286f578",
+        "language": "C#",
+        "source-file-count": "12",
+        "output-kind": "DynamicallyLinkedLibrary",
+        "optimization": "release",
+        "platform": "AnyCpu",
+        "runtime-version": "10.0.11-servicing.26373.116+e2f47b0110ed922f21a1522da67279133ce28f32",
+        "language-version": "14.0",
+        "nullable": "Enable",
+        "define": "TRACE,RELEASE,NET,NET10_0,NETCOREAPP,NET5_0_OR_GREATER,NET6_0_OR_GREATER,NET7_0_OR_GREATER,NET8_0_OR_GREATER,NET9_0_OR_GREATER,NET10_0_OR_GREATER,NETCOREAPP1_0_OR_GREATER,NETCOREAPP1_1_OR_GREATER,NETCOREAPP2_0_OR_GREATER,NETCOREAPP2_1_OR_GREATER,NETCOREAPP2_2_OR_GREATER,NETCOREAPP3_0_OR_GREATER,NETCOREAPP3_1_OR_GREATER"
+      },
+      "documents": [
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\fan-backend\\Asus\\AsusFanBackendController.cs",
+          "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+          "sourceRelative": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+          "generated": false,
+          "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\fan-backend\\Asus\\AsusFanBackendReceipts.cs",
+          "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+          "sourceRelative": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+          "generated": false,
+          "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\fan-backend\\Asus\\AsusFanBackendTransport.cs",
+          "archivePath": "source/FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+          "sourceRelative": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+          "generated": false,
+          "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\FanLab\\fan-backend\\Asus\\AsusFanCurveWriter.cs",
+          "archivePath": "source/FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+          "sourceRelative": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+          "generated": false,
+          "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.cs",
+          "sourceRelative": "capabilities/HcDeviceCapabilityCatalog.cs",
+          "generated": false,
+          "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "archivePath": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs",
+          "sourceRelative": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+          "generated": false,
+          "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\FanCapabilityCatalog.cs",
+          "archivePath": "source/capabilities/FanCapabilityCatalog.cs",
+          "sourceRelative": "capabilities/FanCapabilityCatalog.cs",
+          "generated": false,
+          "sha256": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\AsusFanCapabilitySession.cs",
+          "archivePath": "source/capabilities/AsusFanCapabilitySession.cs",
+          "sourceRelative": "capabilities/AsusFanCapabilitySession.cs",
+          "generated": false,
+          "sha256": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\HcLightingCapabilityCatalog.cs",
+          "archivePath": "source/capabilities/HcLightingCapabilityCatalog.cs",
+          "sourceRelative": "capabilities/HcLightingCapabilityCatalog.cs",
+          "generated": false,
+          "sha256": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\Source\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+          "archivePath": "source/capabilities/HcLightingCapabilityCatalog.generated.cs",
+          "sourceRelative": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+          "generated": false,
+          "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\obj\\YeManFanBackend\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "archivePath": "generated/YeManFanBackend/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "sourceRelative": null,
+          "generated": true,
+          "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "originalPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\CanonicalLayoutRebase\\HostBuild\\artifacts\\obj\\YeManFanBackend\\release\\YeManFanBackend.AssemblyInfo.cs",
+          "archivePath": "generated/YeManFanBackend/YeManFanBackend.AssemblyInfo.cs",
+          "sourceRelative": null,
+          "generated": true,
+          "sha256": "cb535e9f99b477888b7ae877c223a651d00ad813fac91d1a968b086aceed2064",
+          "pdbHashAlgorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "pdbChecksum": "cb535e9f99b477888b7ae877c223a651d00ad813fac91d1a968b086aceed2064"
+        }
+      ],
+      "customDebugRecords": [
+        {
+          "parentToken": 100663297,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 1,
+          "kind": "b5feec05-8cd0-4a83-96da-466284bb4bd8",
+          "valueBase64": "dmVyc2lvbgAyAGNvbXBpbGVyLXZlcnNpb24ANS45LjAtMS4yNjM3OS4xMTUrMTRmYmY4ZDUyNzFjOTgxMzM1NjFlYjU1MTg1ZmRiMDViMjg2ZjU3OABsYW5ndWFnZQBDIwBzb3VyY2UtZmlsZS1jb3VudAAxMgBvdXRwdXQta2luZABEeW5hbWljYWxseUxpbmtlZExpYnJhcnkAb3B0aW1pemF0aW9uAHJlbGVhc2UAcGxhdGZvcm0AQW55Q3B1AHJ1bnRpbWUtdmVyc2lvbgAxMC4wLjExLXNlcnZpY2luZy4yNjM3My4xMTYrZTJmNDdiMDExMGVkOTIyZjIxYTE1MjJkYTY3Mjc5MTMzY2UyOGYzMgBsYW5ndWFnZS12ZXJzaW9uADE0LjAAbnVsbGFibGUARW5hYmxlAGRlZmluZQBUUkFDRSxSRUxFQVNFLE5FVCxORVQxMF8wLE5FVENPUkVBUFAsTkVUNV8wX09SX0dSRUFURVIsTkVUNl8wX09SX0dSRUFURVIsTkVUN18wX09SX0dSRUFURVIsTkVUOF8wX09SX0dSRUFURVIsTkVUOV8wX09SX0dSRUFURVIsTkVUMTBfMF9PUl9HUkVBVEVSLE5FVENPUkVBUFAxXzBfT1JfR1JFQVRFUixORVRDT1JFQVBQMV8xX09SX0dSRUFURVIsTkVUQ09SRUFQUDJfMF9PUl9HUkVBVEVSLE5FVENPUkVBUFAyXzFfT1JfR1JFQVRFUixORVRDT1JFQVBQMl8yX09SX0dSRUFURVIsTkVUQ09SRUFQUDNfMF9PUl9HUkVBVEVSLE5FVENPUkVBUFAzXzFfT1JfR1JFQVRFUgA="
+        },
+        {
+          "parentToken": 1,
+          "kind": "7e4d4708-096e-4c5c-aeda-cb10ba6a740d",
+          "valueBase64": "TWljcm9zb2Z0LkNTaGFycC5kbGwAAAFHJfP6AIAAACIWyJNjVgJCr6fmSrvew2BNaWNyb3NvZnQuVmlzdWFsQmFzaWMuQ29yZS5kbGwAAAH0+56xACABACYukgnmms9Llx/S8uK2VfRNaWNyb3NvZnQuVmlzdWFsQmFzaWMuZGxsAAABwzEEkwCAAADR5itrRKnjQ5ANNtRJ4ZQXTWljcm9zb2Z0LldpbjMyLlByaW1pdGl2ZXMuZGxsAAABf7B7ugCAAAC+gRmgs8HIQ4xCRhVttKGgTWljcm9zb2Z0LldpbjMyLlJlZ2lzdHJ5LmRsbAAAAbjhUP8AoAAA8CqZ1GqCyE24M5E3nJFVW21zY29ybGliLmRsbAAAAUOu6OYAIAEA4f6c658XI0K66s+Bgy/Lwm5ldHN0YW5kYXJkLmRsbAAAAYKcQ4kAwAEAaysVm+khuEmBfqUduRthMlN5c3RlbS5BcHBDb250ZXh0LmRsbAAAAXuWwM4AgAAALR6vZx3ETEe6qzSPg3rt+1N5c3RlbS5CdWZmZXJzLmRsbAAAAc2+XrAAgAAA0GaMKoXYZUq2a3IAkGJqRlN5c3RlbS5Db2xsZWN0aW9ucy5Db25jdXJyZW50LmRsbAAAAbffrJkAoAAASHCIyamWFUellpTA4aXVq1N5c3RlbS5Db2xsZWN0aW9ucy5kbGwAAAGUPXzjACABAMV89uZr7HpArlTkaF6SM5RTeXN0ZW0uQ29sbGVjdGlvbnMuSW1tdXRhYmxlLmRsbAAAAW9OlokAYAEA08344cNwzEynerYGPIHv+lN5c3RlbS5Db2xsZWN0aW9ucy5Ob25HZW5lcmljLmRsbAAAAe7ehvgAoAAAhYPI3hfPw0uIc/5TKWmeUlN5c3RlbS5Db2xsZWN0aW9ucy5TcGVjaWFsaXplZC5kbGwAAAGx6lXmAKAAAMgj8VFZ8r9DiJEwBO8zBOFTeXN0ZW0uQ29tcG9uZW50TW9kZWwuQW5ub3RhdGlvbnMuZGxsAAABZxhO6wDAAAAE15Dchl2HSLtT6X+s/D4PU3lzdGVtLkNvbXBvbmVudE1vZGVsLkRhdGFBbm5vdGF0aW9ucy5kbGwAAAGzkWajAIAAAAl4JGfWVftJsVZW45v+TD1TeXN0ZW0uQ29tcG9uZW50TW9kZWwuZGxsAAABv8iS8wCAAAAPUgmEYtgZQLZ+GciEpc6TU3lzdGVtLkNvbXBvbmVudE1vZGVsLkV2ZW50QmFzZWRBc3luYy5kbGwAAAGDa/SmAIAAAI4HFiuEwflCigCNKlzuNPlTeXN0ZW0uQ29tcG9uZW50TW9kZWwuUHJpbWl0aXZlcy5kbGwAAAEb8rP5AKAAACF0j+yltEFJg4vveWdCBsRTeXN0ZW0uQ29tcG9uZW50TW9kZWwuVHlwZUNvbnZlcnRlci5kbGwAAAEBKsfTAOABAFQkxLWFhnVMrV/6kr4uLJJTeXN0ZW0uQ29uZmlndXJhdGlvbi5kbGwAAAFJEQjhAIAAABwodnh751pJnxwaT7Xy5/lTeXN0ZW0uQ29uc29sZS5kbGwAAAGCeFvPAKAAAKtr3SP5lcRNnfzIeTUE4FJTeXN0ZW0uQ29yZS5kbGwAAAGWcT6EAKAAAOmK/ndR3HxFtjCN1RJpbGNTeXN0ZW0uRGF0YS5Db21tb24uZGxsAAABg4NWhACgAgAAxavMei8+Sp2RstrPSa8fU3lzdGVtLkRhdGEuRGF0YVNldEV4dGVuc2lvbnMuZGxsAAABtx+ItgCAAADAnL/zwm/HRYPnfnvd/tYhU3lzdGVtLkRhdGEuZGxsAAAB6i1z6wCgAABGhvjXEZPjRLlxNKvXjSC9U3lzdGVtLkRpYWdub3N0aWNzLkNvbnRyYWN0cy5kbGwAAAE29VTFAIAAAAb/gnEYsR1HpbVNruwy/KRTeXN0ZW0uRGlhZ25vc3RpY3MuRGVidWcuZGxsAAABrGkF4gCAAAD+Pne/wZKwSIOSA2BjrjxyU3lzdGVtLkRpYWdub3N0aWNzLkRpYWdub3N0aWNTb3VyY2UuZGxsAAABEYx9sQDgAADmU+NDQLFfQKdJt42f6GUTU3lzdGVtLkRpYWdub3N0aWNzLkZpbGVWZXJzaW9uSW5mby5kbGwAAAHd0TX/AIAAACDnp81357xEsxleCDRZCDFTeXN0ZW0uRGlhZ25vc3RpY3MuUHJvY2Vzcy5kbGwAAAGhnK/4AMAAAADxGQvbjMdAlq0Gux7S6PNTeXN0ZW0uRGlhZ25vc3RpY3MuU3RhY2tUcmFjZS5kbGwAAAGiuHToAKAAAKjVJegWfkNEoFaDBb+6G45TeXN0ZW0uRGlhZ25vc3RpY3MuVGV4dFdyaXRlclRyYWNlTGlzdGVuZXIuZGxsAAABGOXg0QCAAAA2JB5JaSk7RKj6peXrL5j/U3lzdGVtLkRpYWdub3N0aWNzLlRvb2xzLmRsbAAAAf0GQrUAgAAA7bLN55b9lECjWBEX2OJj/FN5c3RlbS5EaWFnbm9zdGljcy5UcmFjZVNvdXJjZS5kbGwAAAEyXSzAAKAAAIm8WkC5iDRDu+6HB6+EQWpTeXN0ZW0uRGlhZ25vc3RpY3MuVHJhY2luZy5kbGwAAAFIwu+VAKAAAPPQPOt95oxDv/AXsf8qfjVTeXN0ZW0uZGxsAAAB9EuQygAAAQA02+7/VH3SSqWo8uv2bbIHU3lzdGVtLkRyYXdpbmcuZGxsAAABZsmelACAAAB8w0r4GZ1wRKEhouNpMp/JU3lzdGVtLkRyYXdpbmcuUHJpbWl0aXZlcy5kbGwAAAF/QOWSAMAAAAL4miM/6kJJqEJHICt893RTeXN0ZW0uRHluYW1pYy5SdW50aW1lLmRsbAAAAQ6vFYEAgAAA4NnfW5NNZ0Ku0HbsnkVhS1N5c3RlbS5Gb3JtYXRzLkFzbjEuZGxsAAABZ3/VoACgAAA4vyEge9/MRYY/l0z/e2t+U3lzdGVtLkZvcm1hdHMuVGFyLmRsbAAAAY9GU8QAgAAAjX4APrAS/E+rc4GRHC4xz1N5c3RlbS5HbG9iYWxpemF0aW9uLkNhbGVuZGFycy5kbGwAAAHpx0TSAIAAAJY9wk/kZllEiRB7LbRmyDhTeXN0ZW0uR2xvYmFsaXphdGlvbi5kbGwAAAFG6NmlAIAAAL1kLEWnyKJDmH5c8skqPU9TeXN0ZW0uR2xvYmFsaXphdGlvbi5FeHRlbnNpb25zLmRsbAAAAcMa5/8AgAAALsPqGNHHBEmCov/z62Efr1N5c3RlbS5JTy5Db21wcmVzc2lvbi5Ccm90bGkuZGxsAAAByNJV2QCAAACQdZWT7lw/SZY6BcdAoe+bU3lzdGVtLklPLkNvbXByZXNzaW9uLmRsbAAAAacF874AoAAAVAY4IxiMckqe4t+CQf2c31N5c3RlbS5JTy5Db21wcmVzc2lvbi5GaWxlU3lzdGVtLmRsbAAAAaFNAPcAgAAAItL2Ho9fP0i9OXfhSl7wzVN5c3RlbS5JTy5Db21wcmVzc2lvbi5aaXBGaWxlLmRsbAAAAc6Fm9sAgAAAMhdE4Veffke6dGXSE9e2q1N5c3RlbS5JTy5kbGwAAAGMX3nqAIAAAP4r2RwI1LpMt0N0tXduj5ZTeXN0ZW0uSU8uRmlsZVN5c3RlbS5BY2Nlc3NDb250cm9sLmRsbAAAAVDZeOEAgAAA6chqfkq/3ky0gia0K8rvDFN5c3RlbS5JTy5GaWxlU3lzdGVtLmRsbAAAAfrIlpcAgAAAzU/Tlz4gikus/wuMxd5hAFN5c3RlbS5JTy5GaWxlU3lzdGVtLkRyaXZlSW5mby5kbGwAAAFdN/7VAIAAAJ4Z7ZV99JRGo5sHguzWiX5TeXN0ZW0uSU8uRmlsZVN5c3RlbS5QcmltaXRpdmVzLmRsbAAAAYk/59gAgAAAZ46HeJ7SUE2VabSDlu/S31N5c3RlbS5JTy5GaWxlU3lzdGVtLldhdGNoZXIuZGxsAAAB8UdtyQCAAADeEW+sojIISZytqjvOVj1MU3lzdGVtLklPLklzb2xhdGVkU3RvcmFnZS5kbGwAAAHS9MGMAKAAADpjjyWVm6JEhMbwZINSkaVTeXN0ZW0uSU8uTWVtb3J5TWFwcGVkRmlsZXMuZGxsAAABBv670wCAAACODSNTNzChRpuNTNOEI7zzU3lzdGVtLklPLlBpcGVsaW5lcy5kbGwAAAF6q9PVAIAAANzatB36RfZGiry/ePKmZodTeXN0ZW0uSU8uUGlwZXMuQWNjZXNzQ29udHJvbC5kbGwAAAGp5DuTAIAAAMGYTEYj/UlDvesOD3jVG3tTeXN0ZW0uSU8uUGlwZXMuZGxsAAABvG9T4gCgAACxYCPlFaCnR7j2dh19j+zNU3lzdGVtLklPLlVubWFuYWdlZE1lbW9yeVN0cmVhbS5kbGwAAAHK/3n9AIAAAM+nVolb2bdIs9lWtV02irJTeXN0ZW0uTGlucS5Bc3luY0VudW1lcmFibGUuZGxsAAABdHj5lwDAAAC8myU/HRuaRZpBY9QqAGGWU3lzdGVtLkxpbnEuZGxsAAABNHkk4QDAAADxq8wOecvYT4P2ye44u6bOU3lzdGVtLkxpbnEuRXhwcmVzc2lvbnMuZGxsAAABP9litgBAAQBlbvmQ9HADQIrYthYBXSKEU3lzdGVtLkxpbnEuUGFyYWxsZWwuZGxsAAABRCnj1wDAAACAwW2pAJ4WQpipEYeOnzQpU3lzdGVtLkxpbnEuUXVlcnlhYmxlLmRsbAAAAfk95fwAwAAAPLB2qw7AYECEr64kZn5uUlN5c3RlbS5NZW1vcnkuZGxsAAABikBcuwAgAQBx7QdMOXy9Totxrr6+BCFQU3lzdGVtLk5ldC5kbGwAAAEUmZ3vAIAAANisP6w87IFKgxRjkMteELlTeXN0ZW0uTmV0Lkh0dHAuZGxsAAABr1Z27wAgAQCjI6VWs2g4RLuQmBThLRqbU3lzdGVtLk5ldC5IdHRwLkpzb24uZGxsAAAB/Y356ACgAAAl8NXRjNe3SZBVfCcjvwsHU3lzdGVtLk5ldC5IdHRwTGlzdGVuZXIuZGxsAAABDg5p1wCgAAAuMEE+GZEyS52aLfwxSv+lU3lzdGVtLk5ldC5NYWlsLmRsbAAAAcwHu4QAwAAAv/VXt1S7GkW5h9G5bnpUcVN5c3RlbS5OZXQuTmFtZVJlc29sdXRpb24uZGxsAAAB///t9ACAAABsW2nPVvBkQqmQ5j4VdrrUU3lzdGVtLk5ldC5OZXR3b3JrSW5mb3JtYXRpb24uZGxsAAABfp4A7wDAAAAZgaD9xTS8RYn8fmoMNnRyU3lzdGVtLk5ldC5QaW5nLmRsbAAAAQHUx9QAgAAAcAwyetrHSEWXvfJFTH0R1VN5c3RlbS5OZXQuUHJpbWl0aXZlcy5kbGwAAAEYAIXQAMAAADGWDIWa2etHj3iAq7GgQtFTeXN0ZW0uTmV0LlF1aWMuZGxsAAABq5z0wQCgAADx9W+ZGTGTQaDGrmKqvBF0U3lzdGVtLk5ldC5SZXF1ZXN0cy5kbGwAAAFCp+f+AOAAABjPwzYgHElHgRS7rqXgnudTeXN0ZW0uTmV0LlNlY3VyaXR5LmRsbAAAAbQl5+gAAAEAcPUW+KzRoE2RXDFZePdvSlN5c3RlbS5OZXQuU2VydmVyU2VudEV2ZW50cy5kbGwAAAFsORO2AIAAAKvpZakTgY5IgOAMxP2/q15TeXN0ZW0uTmV0LlNlcnZpY2VQb2ludC5kbGwAAAEIYKfxAIAAAIIYddUHiuFPvdpFNGe7aj9TeXN0ZW0uTmV0LlNvY2tldHMuZGxsAAABT2bE+AAAAQD6nBjhzeEjR535IzUr/UekU3lzdGVtLk5ldC5XZWJDbGllbnQuZGxsAAABAi3dwwCgAADHpR1pMDcKQqWa6OByRX97U3lzdGVtLk5ldC5XZWJIZWFkZXJDb2xsZWN0aW9uLmRsbAAAAWJwstMAgAAA/z+2yiEKeUiXGCnX799yW1N5c3RlbS5OZXQuV2ViUHJveHkuZGxsAAABSkd9swCAAABbV+2OuRpZTbao8PwmI07AU3lzdGVtLk5ldC5XZWJTb2NrZXRzLkNsaWVudC5kbGwAAAGad9mPAIAAAHIqvndSMqdJgxKHtrONyaBTeXN0ZW0uTmV0LldlYlNvY2tldHMuZGxsAAAB+cDJqACgAAABCeWp4FC6T5NiWqKLb3OQU3lzdGVtLk51bWVyaWNzLmRsbAAAAaWDFegAgAAAuwPu73kQJEmZQgFICR2OKVN5c3RlbS5OdW1lcmljcy5WZWN0b3JzLmRsbAAAAQIOlakAIAEAPgD9TNkd/kuP0id6torbMlN5c3RlbS5PYmplY3RNb2RlbC5kbGwAAAFFQ5rMAKAAAIMMbafK/d9Lh7W5/Rt1PQRTeXN0ZW0uUmVmbGVjdGlvbi5EaXNwYXRjaFByb3h5LmRsbAAAAbiDU5YAgAAAyQECihNkgUKXNIA3j9LGClN5c3RlbS5SZWZsZWN0aW9uLmRsbAAAAdybEfUAgAAAaOIAd+HOvk6qhv3QzXFyulN5c3RlbS5SZWZsZWN0aW9uLkVtaXQuZGxsAAABwNJw9gDgAAC3GFDx4DxcQaLfSGsVRhREU3lzdGVtLlJlZmxlY3Rpb24uRW1pdC5JTEdlbmVyYXRpb24uZGxsAAABWdFdswCAAAAfR0jzOlM9RabC94UHOt94U3lzdGVtLlJlZmxlY3Rpb24uRW1pdC5MaWdodHdlaWdodC5kbGwAAAENj67WAIAAAD1IiVRT4nhBps5bAEcB5ApTeXN0ZW0uUmVmbGVjdGlvbi5FeHRlbnNpb25zLmRsbAAAASzzTqwAgAAAuDmclOX9QkWATRCQU0FNmlN5c3RlbS5SZWZsZWN0aW9uLk1ldGFkYXRhLmRsbAAAAWprLLsAIAIA4pp1vEHLI0GExpLcE1wNFFN5c3RlbS5SZWZsZWN0aW9uLlByaW1pdGl2ZXMuZGxsAAABo8/EjgCgAACeZeu8Y0vyQIardKl2DkKUU3lzdGVtLlJlZmxlY3Rpb24uVHlwZUV4dGVuc2lvbnMuZGxsAAABL1NuuACAAADDJDCjj+8cRp+k3PjM+6R1U3lzdGVtLlJlc291cmNlcy5SZWFkZXIuZGxsAAABXaupzgCAAADPCAsFLwovTYyhEduSyyEvU3lzdGVtLlJlc291cmNlcy5SZXNvdXJjZU1hbmFnZXIuZGxsAAABohGR0QCAAADIMDLxxr9HTbtYGyzwQrVoU3lzdGVtLlJlc291cmNlcy5Xcml0ZXIuZGxsAAABqH+YowCAAAC3bk7ourF0Q4NSbnSIObAJU3lzdGVtLlJ1bnRpbWUuQ29tcGlsZXJTZXJ2aWNlcy5VbnNhZmUuZGxsAAAB3y8L2ACAAAAZqesf6c6hT5tXgV0drpS9U3lzdGVtLlJ1bnRpbWUuQ29tcGlsZXJTZXJ2aWNlcy5WaXN1YWxDLmRsbAAAAVAgIYAAgAAA4Gmb5OW7gUmsHbP1ZHqCtVN5c3RlbS5SdW50aW1lLmRsbAAAAXhq5p4AYA0AFcB+Mk2pa0G2xtjkCQKoVFN5c3RlbS5SdW50aW1lLkV4dGVuc2lvbnMuZGxsAAABvRWI+gCAAABdQdtcm3mUTqRfkq8Op51SU3lzdGVtLlJ1bnRpbWUuSGFuZGxlcy5kbGwAAAE3deK+AIAAAFp0aTND0ttDgfLcuiVC9KBTeXN0ZW0uUnVudGltZS5JbnRlcm9wU2VydmljZXMuZGxsAAABBrnOxADAAQDhS3SNzfJ3R4fnsDN2Ps62U3lzdGVtLlJ1bnRpbWUuSW50ZXJvcFNlcnZpY2VzLkphdmFTY3JpcHQuZGxsAAABi4aN7gCgAAA0xWGp6ijbSJpvKEp2g0iWU3lzdGVtLlJ1bnRpbWUuSW50ZXJvcFNlcnZpY2VzLlJ1bnRpbWVJbmZvcm1hdGlvbi5kbGwAAAHpPd3XAIAAAFlVRcS53FdBh4exe/U2Du1TeXN0ZW0uUnVudGltZS5JbnRyaW5zaWNzLmRsbAAAATgrU7IAYAcAeWTw2porTUWN9syyEkFacVN5c3RlbS5SdW50aW1lLkxvYWRlci5kbGwAAAEMtNe2AIAAAG+6iWuPp1dMg41tlixCssRTeXN0ZW0uUnVudGltZS5OdW1lcmljcy5kbGwAAAGbY+DDAMAAAFSvrM35aWRKjDJlcQR9xTlTeXN0ZW0uUnVudGltZS5TZXJpYWxpemF0aW9uLmRsbAAAAcqcW6wAgAAAKtjLzikpyUOMBf6oo8SMcFN5c3RlbS5SdW50aW1lLlNlcmlhbGl6YXRpb24uRm9ybWF0dGVycy5kbGwAAAFhKC/GAKAAAGaDWvUZoZRCvg1HnWdDlNBTeXN0ZW0uUnVudGltZS5TZXJpYWxpemF0aW9uLkpzb24uZGxsAAABZuq9jwCAAAAPp6HoAf6dQ6hcZOdyFRtzU3lzdGVtLlJ1bnRpbWUuU2VyaWFsaXphdGlvbi5QcmltaXRpdmVzLmRsbAAAAdQ/O6wAgAAARd+IJqU/tkqgrNuDIGwWpVN5c3RlbS5SdW50aW1lLlNlcmlhbGl6YXRpb24uWG1sLmRsbAAAAZDn75sA4AAAymKrqjTGl0CncjIi3Gpc6FN5c3RlbS5TZWN1cml0eS5BY2Nlc3NDb250cm9sLmRsbAAAAY7+o7EAwAAAD1ukfmwF/kmEleCZPbjp81N5c3RlbS5TZWN1cml0eS5DbGFpbXMuZGxsAAAB9EiO8wDAAAAnnQrXgZS2QZBAjenGfiJFU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5BbGdvcml0aG1zLmRsbAAAAUC3taUAgAAAxsB7cbk+tkq2wMncL2/iAlN5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuQ25nLmRsbAAAAXe9mNwAgAAAd8VCEbUMVE+0fyWBYCIGaVN5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuQ3NwLmRsbAAAASnZ0YIAgAAAIjkJ4Rtq4kCJj0hKAQM4xVN5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuZGxsAAABwCrkmwDAAgBRxfnd9BS3SIPQKW2QukYFU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5FbmNvZGluZy5kbGwAAAErvinlAIAAAGVmO1o8rFNJnvcbnu7RJjRTeXN0ZW0uU2VjdXJpdHkuQ3J5cHRvZ3JhcGh5Lk9wZW5Tc2wuZGxsAAABiwuwvACAAADOSXvldm4eS6OmfNed/9WoU3lzdGVtLlNlY3VyaXR5LkNyeXB0b2dyYXBoeS5QcmltaXRpdmVzLmRsbAAAAUnBqKgAgAAAKqdRViNlMUa9TV2ik04JM1N5c3RlbS5TZWN1cml0eS5DcnlwdG9ncmFwaHkuWDUwOUNlcnRpZmljYXRlcy5kbGwAAAH/piCIAIAAAEzSEJwYHPJCrCmznlUNS31TeXN0ZW0uU2VjdXJpdHkuZGxsAAAB/+fGugCAAABZbo9TeQr2Q7XUzECQaUTWU3lzdGVtLlNlY3VyaXR5LlByaW5jaXBhbC5kbGwAAAEZvIS+AIAAAMepyQ/KGGdEsnxtrDp0cGZTeXN0ZW0uU2VjdXJpdHkuUHJpbmNpcGFsLldpbmRvd3MuZGxsAAABmVx8hQCgAAC5xwGgjEzMToxrQRzNgKAiU3lzdGVtLlNlY3VyaXR5LlNlY3VyZVN0cmluZy5kbGwAAAEWLdLQAIAAAPdi6yyh9WVCsriFhsvlodZTeXN0ZW0uU2VydmljZU1vZGVsLldlYi5kbGwAAAG7dRrDAIAAAFKZKy4bkPpJrnX2YaR69qxTeXN0ZW0uU2VydmljZVByb2Nlc3MuZGxsAAABSMf35wCAAACk4ilAnlc3RKCiFOIFNaWBU3lzdGVtLlRleHQuRW5jb2RpbmcuQ29kZVBhZ2VzLmRsbAAAAQ8w1NwAgAAAjaeIeHPNs0yx4nMmtfPXuFN5c3RlbS5UZXh0LkVuY29kaW5nLmRsbAAAASVs8tAAgAAAnYW/YDJYLEyauc9eJAZOtlN5c3RlbS5UZXh0LkVuY29kaW5nLkV4dGVuc2lvbnMuZGxsAAABWFLE4wCAAADhheEq/CN/TYW+cY29R2TZU3lzdGVtLlRleHQuRW5jb2RpbmdzLldlYi5kbGwAAAEDbWLqAKAAAIgrEcBQqmRInnY8UIySQfZTeXN0ZW0uVGV4dC5Kc29uLmRsbAAAATRfCacAgAEAvKJWvFowv0KqmD28SUjYLlN5c3RlbS5UZXh0LlJlZ3VsYXJFeHByZXNzaW9ucy5kbGwAAAENqBWzAMAAAL84his3xIROnIbMrgOc231TeXN0ZW0uVGhyZWFkaW5nLkFjY2Vzc0NvbnRyb2wuZGxsAAABb39V4ACAAAADfiFAQVM5TrP1McFCKZoaU3lzdGVtLlRocmVhZGluZy5DaGFubmVscy5kbGwAAAHFtZPcAIAAAJ4A4hwMsWRGqp3npx2VDDNTeXN0ZW0uVGhyZWFkaW5nLmRsbAAAAYbQraMAwAAARzmfhMtxvU+A3PJjrxU9gFN5c3RlbS5UaHJlYWRpbmcuT3ZlcmxhcHBlZC5kbGwAAAGR5ZDBAIAAAF0u8Gwj67FKuUXzTZzdfJFTeXN0ZW0uVGhyZWFkaW5nLlRhc2tzLkRhdGFmbG93LmRsbAAAAXAOapkAwAAAE8DCYJEaO0S9G0MJJo6tilN5c3RlbS5UaHJlYWRpbmcuVGFza3MuZGxsAAABjxeupQCAAAC5N4Ow41EES7IrNwssJogvU3lzdGVtLlRocmVhZGluZy5UYXNrcy5FeHRlbnNpb25zLmRsbAAAATzNsrMAgAAAAwBX3Lr0xkakRLR4Jg14TVN5c3RlbS5UaHJlYWRpbmcuVGFza3MuUGFyYWxsZWwuZGxsAAABFPGE9ACAAABj76551Dc7QqL+HBBqoi0CU3lzdGVtLlRocmVhZGluZy5UaHJlYWQuZGxsAAABTVGp/wCgAACH+qjjo6pgSKNYZ7+63g1AU3lzdGVtLlRocmVhZGluZy5UaHJlYWRQb29sLmRsbAAAAWYyaJAAgAAAHMl6qSiFwEK2YE7d4DjruVN5c3RlbS5UaHJlYWRpbmcuVGltZXIuZGxsAAAB53wU7ACAAAAcSj/t3aFtSId+mgTszi21U3lzdGVtLlRyYW5zYWN0aW9ucy5kbGwAAAGzujW9AIAAAB0JcSpVVlJEvdrVae/i/3FTeXN0ZW0uVHJhbnNhY3Rpb25zLkxvY2FsLmRsbAAAAWq1d5wAoAAAFn/blCd5KkWzWVVpvt1OO1N5c3RlbS5WYWx1ZVR1cGxlLmRsbAAAAZQRvuAAgAAAAfuk3QoSz0SklGIVdYBuf1N5c3RlbS5XZWIuZGxsAAABli+WogCAAAC3irOHnT6VSKSuAgF6/L+hU3lzdGVtLldlYi5IdHRwVXRpbGl0eS5kbGwAAAFUrbubAIAAAGjDcQrENh1PqF+AKm34sbtTeXN0ZW0uV2luZG93cy5kbGwAAAHhIRKoAIAAAEZyIc8C6D5KmRNvdAGC8cNTeXN0ZW0uWG1sLmRsbAAAAc66tuIAoAAAw5ZAaKBOpEyvB9A4Xuq0mlN5c3RlbS5YbWwuTGlucS5kbGwAAAHyf+7xAIAAABmjxZLjQWhOqdN0/+4V1XxTeXN0ZW0uWG1sLlJlYWRlcldyaXRlci5kbGwAAAHNEFS0AAACAGhAPixlpGJNv3FYoIpzEcVTeXN0ZW0uWG1sLlNlcmlhbGl6YXRpb24uZGxsAAAButVDlgCAAAAmny7oPX80TJ3fIuwvilcNU3lzdGVtLlhtbC5YRG9jdW1lbnQuZGxsAAABoWI8/wDAAAD/oi744cV9Q51+uAEgjLk9U3lzdGVtLlhtbC5YbWxEb2N1bWVudC5kbGwAAAEdCpPxAIAAALg6T84jjgZCvwkTBtKnOAlTeXN0ZW0uWG1sLlhtbFNlcmlhbGl6ZXIuZGxsAAABOk/crwAAAQAPUNC/XfeDQpeYA0MpRXVoU3lzdGVtLlhtbC5YUGF0aC5kbGwAAAH2DrSwAIAAALslLdVHx9ROtRhAmN2bmBRTeXN0ZW0uWG1sLlhQYXRoLlhEb2N1bWVudC5kbGwAAAHbAajfAIAAALgVhLmVz9dHl29/71Y/68dXaW5kb3dzQmFzZS5kbGwAAAG/lyKDAIAAADjPLikA+RFDvxTM0jHHoUM="
+        },
+        {
+          "parentToken": 33554439,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Bg=="
+        },
+        {
+          "parentToken": 33554440,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Bg=="
+        },
+        {
+          "parentToken": 33554443,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "CA=="
+        },
+        {
+          "parentToken": 33554450,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Ag=="
+        },
+        {
+          "parentToken": 33554451,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Ag=="
+        },
+        {
+          "parentToken": 33554455,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Aw=="
+        },
+        {
+          "parentToken": 33554456,
+          "kind": "932e74bc-dba9-4478-8d46-0f32a7bab3d3",
+          "valueBase64": "Aw=="
+        },
+        {
+          "parentToken": 100663331,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100663363,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100663389,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100663436,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100663466,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        },
+        {
+          "parentToken": 100663591,
+          "kind": "9d40ace1-c703-4d0e-bf41-7243060a8fb5",
+          "valueBase64": ""
+        }
+      ]
+    }
+  ],
+  "files": [
+    {
+      "path": "artifacts/YeManFanBackend.dll",
+      "bytes": 97792,
+      "sha256": "fb2f9396d81594bf573d158c5c9e216a1abc5e3820ba088297262da84d845d60"
+    },
+    {
+      "path": "artifacts/YeManFanBackend.pdb",
+      "bytes": 21628,
+      "sha256": "b1845b0bdbd68feb8128f080c63c28c335aa9229178255ca21e302f5f3f08dc0"
+    },
+    {
+      "path": "artifacts/YeManFanHost.dll",
+      "bytes": 1693184,
+      "sha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df"
+    },
+    {
+      "path": "artifacts/YeManFanHost.pdb",
+      "bytes": 260524,
+      "sha256": "ac96b7a5fc29c819acb992ea2f30d18169bc2c8a782bfd7117e09851204bf0dc"
+    },
+    {
+      "path": "evidence/build-provenance.json",
+      "bytes": 692,
+      "sha256": "9bb4b4414e3e24d8b9c289d1d8c156943ea3cf7b46f23369feb7f373b247f4f2"
+    },
+    {
+      "path": "evidence/isolated-build.targets",
+      "bytes": 287,
+      "sha256": "14a709d1fc8dfa9bfb45043a860cc76bda2d5d111668c862bc024d96d0e1feb5"
+    },
+    {
+      "path": "evidence/pe-pdb-current-source.json",
+      "bytes": 89241,
+      "sha256": "1406976d491da3d58de0eb1f627125e29dea9665b3b37e6feb5d670e69f3f0b5"
+    },
+    {
+      "path": "generated/YeManFanBackend/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "bytes": 200,
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+    },
+    {
+      "path": "generated/YeManFanBackend/YeManFanBackend.AssemblyInfo.cs",
+      "bytes": 980,
+      "sha256": "cb535e9f99b477888b7ae877c223a651d00ad813fac91d1a968b086aceed2064"
+    },
+    {
+      "path": "generated/YeManFanHost/.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+      "bytes": 200,
+      "sha256": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+    },
+    {
+      "path": "generated/YeManFanHost/YeManFanHost.AssemblyInfo.cs",
+      "bytes": 1148,
+      "sha256": "dd38ccec034081316bb508ba946ddb0557ede693b10d1cdf2cf1104a7ba989ce"
+    },
+    {
+      "path": "generated/YeManFanHost/YeManFanHost.GlobalUsings.g.cs",
+      "bytes": 183,
+      "sha256": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+    },
+    {
+      "path": "payload-sources/install-fan-host-payload.ps1",
+      "bytes": 12787,
+      "sha256": "7aedc1ab24e3291b1a1a320406e674aaca658bf189394a6d816bbde89c05f94f"
+    },
+    {
+      "path": "source/capabilities/AsusFanCapabilitySession.cs",
+      "bytes": 4038,
+      "sha256": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee"
+    },
+    {
+      "path": "source/capabilities/FanCapabilityCatalog.cs",
+      "bytes": 5705,
+      "sha256": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78"
+    },
+    {
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.cs",
+      "bytes": 6191,
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8"
+    },
+    {
+      "path": "source/capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "bytes": 66867,
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+    },
+    {
+      "path": "source/capabilities/HcLightingCapabilityCatalog.cs",
+      "bytes": 4277,
+      "sha256": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e"
+    },
+    {
+      "path": "source/capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "bytes": 8580,
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+    },
+    {
+      "path": "source/FanLab/DeviceCoreSharedDependencies.cs",
+      "bytes": 6645,
+      "sha256": "6bc3ea2958aad1238caa399a82249404717987f50fd6bfcbf91a56954df62c66"
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "bytes": 11769,
+      "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "bytes": 13424,
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "bytes": 1083,
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+    },
+    {
+      "path": "source/FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "bytes": 4318,
+      "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+    },
+    {
+      "path": "source/FanLab/fan-backend/YeManFanBackend.csproj",
+      "bytes": 1764,
+      "sha256": "ef89f0f1059d68f35e15f717bf24eb60a9942b22fc46ebb555a972fa417fae58"
+    },
+    {
+      "path": "source/FanLab/real-host/DeferredHostSuccessor.cs",
+      "bytes": 5962,
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+    },
+    {
+      "path": "source/FanLab/real-host/FanCapabilityPolicy.cs",
+      "bytes": 8013,
+      "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+    },
+    {
+      "path": "source/FanLab/real-host/G1FanContractAdapter.cs",
+      "bytes": 9643,
+      "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+    },
+    {
+      "path": "source/FanLab/real-host/HostProcessLifetime.cs",
+      "bytes": 5304,
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFamilyFanCurve.cs",
+      "bytes": 11724,
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "bytes": 13878,
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392"
+    },
+    {
+      "path": "source/FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "bytes": 10420,
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+    },
+    {
+      "path": "source/FanLab/real-host/MsiWmiClassRegistration.cs",
+      "bytes": 7944,
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+    },
+    {
+      "path": "source/FanLab/real-host/MsiWmiPayloadResource.cs",
+      "bytes": 5277,
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+    },
+    {
+      "path": "source/FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "bytes": 13623,
+      "sha256": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549"
+    },
+    {
+      "path": "source/FanLab/real-host/Program.cs",
+      "bytes": 1483943,
+      "sha256": "fcd7da7b778f0ecad24666c540fd1addab4a8a67d0f8d7d2f93a40c93cf29a4d"
+    },
+    {
+      "path": "source/FanLab/real-host/Section18CandidateFakes.cs",
+      "bytes": 78823,
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+    },
+    {
+      "path": "source/FanLab/real-host/Section18CandidateLifecycle.cs",
+      "bytes": 86939,
+      "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+    },
+    {
+      "path": "source/FanLab/real-host/Section19CandidateLifecycle.cs",
+      "bytes": 76494,
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+    },
+    {
+      "path": "source/FanLab/real-host/Section20CandidateLifecycle.cs",
+      "bytes": 37363,
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+    },
+    {
+      "path": "source/FanLab/real-host/Section21CandidateLifecycle.cs",
+      "bytes": 27778,
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+    },
+    {
+      "path": "source/FanLab/real-host/Section22CandidateLifecycle.cs",
+      "bytes": 12831,
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+    },
+    {
+      "path": "source/FanLab/real-host/Section23CandidateLifecycle.cs",
+      "bytes": 33707,
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+    },
+    {
+      "path": "source/FanLab/real-host/YeManFanHost.csproj",
+      "bytes": 2023,
+      "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0"
+    },
+    {
+      "path": "source/FanLab/real-host/YeManFanHost.json",
+      "bytes": 343,
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "path": "source/FanLab/RuntimeDependencyContract.cs",
+      "bytes": 8570,
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+    },
+    {
+      "path": "source/native/ProcessEfficiency.cs",
+      "bytes": 2747,
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+    }
+  ],
+  "historicalSourceDocumentPathsRequired": false,
+  "rebuildReproducibilityProven": false,
+  "purpose": "Current fan initialization repair candidate; not installed or published",
+  "payloadSourceInputs": [
+    {
+      "path": "payload-sources/install-fan-host-payload.ps1",
+      "sha256": "7aedc1ab24e3291b1a1a320406e674aaca658bf189394a6d816bbde89c05f94f"
+    }
+  ]
+}

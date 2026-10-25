@@ -1,0 +1,93 @@
+{
+  "schemaVersion": 1,
+  "kind": "simulation-to-ordinary-log-node-map",
+  "source": "src/bridge/fanHost.ts",
+  "sourceSha256": "8aac422c52007cd04369f6fa3c79b5bb090878487775374e27c62b5f12b083ca",
+  "ordinaryLogsOnly": true,
+  "physicalVerification": false,
+  "noTokensOrLeaseCredentialsRequired": true,
+  "nodes": [
+    {
+      "node": "lifecycle.power-snapshot-synchronized",
+      "meaning": "Current native power observation adopted; generation/phase/write flags are admission evidence, not a hardware write",
+      "simulation": [
+        "native-power-probe/results[*]/timeline event native-read/native-read-delivered",
+        "Original HTTP client timeline native-observation"
+      ],
+      "ordinaryLogFields": [
+        "generation",
+        "phase",
+        "hardwareWritesAllowed",
+        "resumeReady",
+        "inputReady"
+      ],
+      "limitations": "Client observation/delivery sequence only; not server arrival or EC effect"
+    },
+    {
+      "node": "lifecycle.manual-wake-recovery-failed",
+      "meaning": "Current manual wake did not grant native write admission",
+      "simulation": [
+        "refused-native-sleep-Ready",
+        "refused-native-sleep-AwaitingControl",
+        "stale-native-generation",
+        "resuming-without-write-permission",
+        "unavailable-native-fact"
+      ],
+      "ordinaryLogFields": [
+        "reason",
+        "generation",
+        "expectedGeneration",
+        "phase",
+        "state"
+      ],
+      "limitations": "Expected bridge node mapped from exact source; native fixture records its own refusal, not a real OS recovery"
+    },
+    {
+      "node": "lifecycle.rearm-after-wake-noop",
+      "meaning": "Host Ready status must still pass shared native admission; no additional control may be issued after refusal",
+      "simulation": [
+        "Six original authenticated HTTP request timelines",
+        "ready-current-native",
+        "acknowledged-manual-promotion"
+      ],
+      "ordinaryLogFields": [
+        "reason",
+        "generation",
+        "state"
+      ],
+      "limitations": "Ready/noop is not permission by itself; compare subsequent open/acquire/enable client sends"
+    },
+    {
+      "node": "lifecycle.control-intent-superseded",
+      "meaning": "OFF, newer power or newer explicit intent retires the pending continuation",
+      "simulation": [
+        "native-ready-admission-await-off",
+        "native-ready-admission-await-sleep",
+        "native-ready-admission-await-wake",
+        "state-response-issued-before-sleep",
+        "acquireControl-issued-before-sleep",
+        "enable-issued-before-sleep",
+        "Original manual continuation newest curve/preset cases"
+      ],
+      "ordinaryLogFields": [
+        "action",
+        "reason",
+        "intentRevision",
+        "generation",
+        "sessionGeneration"
+      ],
+      "limitations": "A pre-boundary request may finish late; distinguish it from a new request issued after the rejection. Same-generation newer wake may admit only the fresh valid intent."
+    }
+  ],
+  "correlation": [
+    "Use one log member ordered lines and explicit generation/intent/request identity where available",
+    "Record user ON/OFF/sleep/wake action and build/source identity; do not infer missing events or cross-file causality",
+    "Match failure and stop/return feedback separately; simulated ACK/restore is not firmware/physical proof"
+  ],
+  "coverageLayers": {
+    "originalHttp": "Mock engine realBackend=null with authenticated own loopback HTTP",
+    "controlledSta": "Real current backend object, real WPF dispatcher and Windows thread observation, inert device route",
+    "hcInitializationAbi": "Not executed by this leaf; existing runtime-connectivity contract remains required for changed runtime/profile inputs",
+    "installationPhysical": "Not accepted; only ordinary user-exported logs may correct real-device behavior"
+  }
+}

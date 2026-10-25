@@ -1,9 +1,13 @@
+import { migrateControllerPersona } from './controllerPersona';
 import { fs, settingsStore } from './api';
 import { snapshotSettingsData } from './settingsSnapshot';
+import { SETTINGS_BASELINE, assertSupportedSettingsBaseline, hasCompletedSettingsBaseline, stampSettingsBaseline, equalSettingsDocuments, type ConfigurationBaseline } from './settingsBaseline';
 import { createDefaultQuickApps } from './quickAppDefaults';
 import { normalizeInputStartupPreferences } from './inputStartupPolicy';
 import { computeInputConfigHash } from './inputConfigHash';
 import { HC_MIN_GYRO_THRESHOLD_DPS } from './hcInputUtils';
+import type { VirtualStartProtectionState } from './virtualOutputStatus';
+import type { AxisCalibrationConfig } from './controllerCalibrationContract';
 
 /**
  * One durable user-settings document for the whole application.
@@ -104,11 +108,12 @@ export interface InputSettingsSnapshot extends JsonObject {
   gyroMotion: JsonObject;
   ownership: JsonObject;
   diagnostics: JsonObject;
+  axisCalibration?: AxisCalibrationConfig & { deviceKey?: string };
 }
 
 export type SettingsCasResult =
   | { ok: true; revision: number; value: InputSettingsSnapshot }
-  | { ok: false; reason: 'revision-conflict' | 'write-failed' | 'game-override-active' | 'cancelled'; currentRevision: number; value: InputSettingsSnapshot };
+  | { ok: false; reason: 'revision-conflict' | 'write-failed' | 'game-override-active' | 'cancelled' | 'virtual-start-protection-active'; currentRevision: number; value: InputSettingsSnapshot; startProtection?: VirtualStartProtectionState };
 
 /** Pure CAS decision used by the durable writer and S-15 fixtures. */
 export function evaluateInputCas(
@@ -159,6 +164,7 @@ export function evaluateInputCasWrite(
 }
 
 export interface UnifiedSettings extends JsonObject {
+  configurationBaseline?: ConfigurationBaseline;
   schemaVersion: number;
   baselineId: string;
   appVersionWritten?: string;
@@ -190,9 +196,12 @@ const DEFAULTS: UnifiedSettings = {
     dynamicBackgroundEnabled: true,
     backgroundOpacity: 0.7,
     backgroundBlur: 0,
+    backgroundPositionX: 50,
+    backgroundPositionY: 50,
     videoBatteryPause: true,
     scheduleMonitor: true,
     steamChartAutoRefresh: 'none',
+    gestureSummonEnabled: false,
   },
   background: { asset: {}, dynamic: {} },
   music: { folder: '', mode: 'random', volume: 0.11 },
@@ -215,6 +224,7 @@ const DEFAULTS: UnifiedSettings = {
         enabled: false,
         off: false,
         mode: 'solid',
+        presetId: '',
         color: '#2ea6ff',
         color2: '#9d7cff',
         speed: 55,
@@ -231,6 +241,7 @@ const DEFAULTS: UnifiedSettings = {
   },
   gameCustom: { version: 1, entries: {} },
   rtss: {
+    templateDefaults: true,
     frameRates: {
       ac: { fps: 120, ceiling: 120, lastFps: 120 },
       dc: { fps: 60, ceiling: 60, lastFps: 60 },
@@ -260,7 +271,8 @@ const DEFAULTS: UnifiedSettings = {
     factMonitorEnabled: false,
     sleepPowerPlanOptimizationEnabled: true,
     wakePasswordEnabled: false,
-    steamOverlayOffFix: false,
+    steamOverlayOffFix: false, // deprecated/abandoned; normalized off, no UI
+    autoWakeRecovery: true,
   },
   quickApps: createDefaultQuickApps(),
   startupDesired: {
@@ -326,7 +338,7 @@ const DEFAULTS: UnifiedSettings = {
       // 用户裁决（2026-09-29）：虚拟手柄联动默认开启。
       virtualPadLink: true,
     },
-    ownership: { schemaVersion: 1, mode: 'ymcc-semantic', frontendSummonVirtualControl: false },
+    ownership: { schemaVersion: 1, mode: 'ymcc-semantic', frontendSummonVirtualControl: false, externalControllerPriority: false },
     diagnostics: { inputLoggingEnabled: false },
   },
   extensions: {},
@@ -377,7 +389,25 @@ function hasLegacyFrameRates(source: JsonObject): boolean {
 
 export function normalizeSettings(raw: unknown): UnifiedSettings {
   const source = isObject(raw) ? raw : {};
+  assertSupportedSettingsBaseline(source);
   const merged = mergeSettings(DEFAULTS, source) as UnifiedSettings;
+  function repairShape(value: JsonObject, template: JsonObject): void {
+    for (const [key, expected] of Object.entries(template)) {
+      if (isObject(expected)) {
+        if (!isObject(value[key])) value[key] = structuredClone(expected);
+        else repairShape(value[key], expected);
+      } else if (Array.isArray(expected) && !Array.isArray(value[key])) {
+        value[key] = structuredClone(expected);
+      }
+    }
+  }
+  repairShape(merged as unknown as JsonObject, DEFAULTS as unknown as JsonObject);
+  if (!isObject(merged.sleep)) merged.sleep = structuredClone(DEFAULTS.sleep);
+  // This abandoned key can survive older imports, but can never become active.
+  merged.sleep.steamOverlayOffFix = false;
+  if (typeof merged.sleep.autoWakeRecovery !== 'boolean') merged.sleep.autoWakeRecovery = false;
+  // An explicit saved frame pair predates the fresh-template marker unless stated otherwise.
+  if (isObject(source.rtss) && isObject(source.rtss.frameRates) && source.rtss.templateDefaults === undefined) merged.rtss.templateDefaults = false;
   const savedFrames = isObject(source.rtss) && isObject(source.rtss.frameRates) ? source.rtss.frameRates : null;
   if (!savedFrames && hasLegacyFrameRates(source)) {
     // Do not let new AC/DC defaults hide a user's older scalar/profile FPS.
@@ -404,11 +434,32 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   if (legacyApplyStatus === 'pending') input.applyStatus = 'saved-pending';
   else if (legacyApplyStatus === 'applied') input.applyStatus = 'active';
   else if (!['unknown', 'saved-pending', 'host-acknowledged', 'active', 'rejected', 'safe-stop'].includes(legacyApplyStatus)) input.applyStatus = 'unknown';
+  const ownership = isObject(input.ownership) ? input.ownership : structuredClone(DEFAULTS.input.ownership);
+  ownership.externalControllerPriority = ownership.externalControllerPriority === true;
+  input.ownership = ownership;
   const target = isObject(input.outputTarget) ? input.outputTarget : {};
   target.schemaVersion = Number.isSafeInteger(Number(target.schemaVersion)) ? Math.max(1, Math.floor(Number(target.schemaVersion))) : 1;
   target.revision = Number.isSafeInteger(Number(target.revision)) ? Math.max(0, Math.floor(Number(target.revision))) : 0;
   if (!['CLOSED', 'UNENCLOSED', 'NOT-APPLICABLE'].includes(String(target.closure))) target.closure = 'UNENCLOSED';
-  if (!['disabled', 'dualshock4', 'xbox360', 'steamdeck', 'dualsense', 'elite', 'dualsense-edge'].includes(String(target.persona))) target.persona = 'disabled';
+  const previousPersona = target.persona;
+  target.persona = migrateControllerPersona(previousPersona);
+  if (previousPersona !== target.persona) {
+    target.descriptorHash = null; target.closure = 'UNENCLOSED';
+    input.appliedRevision = null; input.appliedConfigHash = null; input.pendingConfigHash = null;
+    input.hostAcknowledgedRevision = null; input.hostAcknowledgedConfigHash = null; input.applyStatus = 'saved-pending';
+  }
+  if (isObject(input.gameOverride)) {
+    const override = input.gameOverride;
+    const savedTargets = [override.outputTarget, isObject(override.baseline) ? override.baseline.outputTarget : undefined];
+    for (const savedTarget of savedTargets) {
+      if (!isObject(savedTarget) || !('persona' in savedTarget)) continue;
+      const nextPersona = migrateControllerPersona(savedTarget.persona);
+      if (nextPersona === savedTarget.persona) continue;
+      savedTarget.persona = nextPersona; savedTarget.descriptorHash = null; savedTarget.closure = 'UNENCLOSED';
+      input.appliedRevision = null; input.appliedConfigHash = null; input.pendingConfigHash = null;
+      input.hostAcknowledgedRevision = null; input.hostAcknowledgedConfigHash = null; input.applyStatus = 'saved-pending';
+    }
+  }
   if (!['hidden', 'project-only', 'unavailable'].includes(String(target.visibilityPolicy))) target.visibilityPolicy = 'hidden';
   target.buttonMappingEnabled = target.buttonMappingEnabled === true;
   target.gyroEnabled = target.gyroEnabled === true;
@@ -448,7 +499,7 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   motion.provider = typeof motion.provider === 'string' && motion.provider.trim() ? motion.provider : null;
   motion.unit = typeof motion.unit === 'string' && motion.unit.trim() ? motion.unit : null;
   motion.calibrationId = typeof motion.calibrationId === 'string' && motion.calibrationId.trim() ? motion.calibrationId : null;
-  if (!['virtual-stick', 'ds4-imu', 'disabled'].includes(String(motion.outputMode))) motion.outputMode = 'disabled';
+  if (!['virtual-stick', 'disabled'].includes(String(motion.outputMode))) motion.outputMode = 'disabled';
   if (!['local-space', 'player-space', 'world-space', 'joystick-steering'].includes(String(motion.motionInput))) motion.motionInput = 'local-space';
   // HC Profile.SteeringAxis: Roll=0, Yaw=1, Auto=2 (default Roll).
   if (!['roll', 'yaw', 'auto'].includes(String(motion.steeringAxis))) motion.steeringAxis = 'roll';
@@ -559,6 +610,7 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   if ('axisOrder' in motion) delete (motion as Record<string, unknown>).axisOrder;
   if ('axisMatrix' in motion) delete (motion as Record<string, unknown>).axisMatrix;
   input.gyroMotion = motion;
+  stampSettingsBaseline(merged);
   return merged;
 }
 
@@ -657,7 +709,7 @@ async function migrateLegacySettings(dir = settingsDir): Promise<UnifiedSettings
   });
   set('cpu', {
     profiles: cpuProfiles?.profiles || {},
-    active: cpuProfiles?.active,
+    ...(cpuProfiles?.active === undefined ? {} : { active: cpuProfiles.active }),
     ...(cpuAutostart ? { autostart: cpuAutostart } : {}),
     ...(cpuAutoEnable ? { autoEnable: cpuAutoEnable } : {}),
     ...(cpuLock ? { lock: cpuLock } : {}),
@@ -684,7 +736,9 @@ async function archiveCorruptMain(path: string): Promise<void> {
 }
 
 function assertCompatibleSchema(document: JsonObject): void {
-  const schema = Number(document.schemaVersion ?? 0);
+  assertSupportedSettingsBaseline(document);
+  const rawSchema = Object.prototype.hasOwnProperty.call(document, 'schemaVersion') ? document.schemaVersion : 0;
+  const schema = typeof rawSchema === 'number' ? rawSchema : NaN;
   // Missing/schema 0 documents are legacy. Do not reinterpret an unknown or
   // future version as schema 1, including a recoverable backup document.
   if (!Number.isInteger(schema) || schema < 0 || schema > 1) {
@@ -697,6 +751,7 @@ function assertCompatibleSchema(document: JsonObject): void {
 export async function loadSettings(): Promise<UnifiedSettings> {
   if (!loadPromise) {
     const generation = settingsGeneration;
+    const cacheAtReadStart = cache;
     const task = (async () => {
       if (!settingsLocationResolved) await resolveSettingsLocation();
       assertSettingsGeneration(generation);
@@ -722,20 +777,23 @@ export async function loadSettings(): Promise<UnifiedSettings> {
         mainExists = main !== null || await fs.exists(path);
       }
       assertSettingsGeneration(generation);
+      // A newer commit may publish while this earlier read is awaiting IO.
+      if (cache && cache !== cacheAtReadStart) return cache;
       let next: UnifiedSettings;
       if (main) {
         assertCompatibleSchema(main);
-        const requiredSections: SettingsSection[] = [
-          'ui', 'background', 'music', 'gamepad', 'performanceSchedule',
-          'gameCustom', 'tdp', 'cpu', 'sleep', 'quickApps', 'startupDesired',
-          'power', 'tray', 'autoclose', 'fan', 'input',
-        ];
-        const needsMigration = requiredSections.some(section => !Object.prototype.hasOwnProperty.call(main, section));
-        const legacy = needsMigration ? await migrateLegacySettings() : DEFAULTS;
+        // A durable baseline receipt closes legacy imports forever. Missing/new
+        // sections after that point use this build's defaults, never stale mirrors.
+        const missingSection = SETTINGS_BASELINE.sections.some(({ name }) =>
+          !Object.prototype.hasOwnProperty.call(main, name));
+        const importLegacy = !hasCompletedSettingsBaseline(main) && missingSection;
+        const legacy = importLegacy ? await migrateLegacySettings() : DEFAULTS;
         assertSettingsGeneration(generation);
-        next = normalize(mergeSettings(legacy, main));
-        if (Number(main.schemaVersion) !== next.schemaVersion || needsMigration) {
-          next = await writeSettings(next, main, generation, path, true);
+        next = normalize(importLegacy ? mergeSettings(legacy, main) : main);
+        if (!equalSettingsDocuments(main, next)) {
+          // Apply only this migration's delta under the native lock. initialize
+          // only fills absent keys and cannot persist repairs to malformed shapes.
+          next = await writeSettings(next, main, generation, path);
           stamp = null;
         }
       } else {
@@ -753,10 +811,14 @@ export async function loadSettings(): Promise<UnifiedSettings> {
         assertSettingsGeneration(generation);
         next = backup ? normalize(backup) : await migrateLegacySettings();
         assertSettingsGeneration(generation);
-        next = await writeSettings(next, {}, generation, path, true);
+        // A recovered backup can need shape repair too: persist its delta.
+        // Only genuine first initialization uses fill-missing semantics.
+        next = await writeSettings(next, backup || {}, generation, path, backup === null);
         stamp = null;
       }
       assertSettingsGeneration(generation);
+      // A newer commit may publish while this earlier read is awaiting IO.
+      if (cache && cache !== cacheAtReadStart) return cache;
       cache = next;
       cacheStamp = stamp;
       return next;
@@ -768,11 +830,33 @@ export async function loadSettings(): Promise<UnifiedSettings> {
   finally { if (loadPromise === task) loadPromise = null; }
 }
 
+export class VirtualStartProtectionActive extends Error {
+  readonly reason = 'virtual-start-protection-active';
+  constructor(readonly document: UnifiedSettings, readonly startProtection?: VirtualStartProtectionState) {
+    super('手柄切换处理中，请稍候；可切回本机手柄。');
+  }
+}
+
 class InputSettingsCommitConflict extends Error {
   constructor(readonly document: UnifiedSettings) { super('输入配置在提交前已变更'); }
 }
 
 const inputSettingsListeners=new Set<() => void>();
+/** Observe the existing native CAS receipt without issuing a second durable write. */
+export function acceptNativeInputSettingsCommit(value: unknown, revision: number, hash: string): boolean {
+  if (!isObject(value) || !Number.isSafeInteger(revision) || revision < 0 || value.revision !== revision ||
+      typeof hash !== 'string' || computeInputConfigHash(value) !== hash) return false;
+  if (cache && cache.input.revision > revision) return false;
+  if (cache) {
+    const next = normalize({ ...cache, input: snapshotSettingsData(value) });
+    if (computeInputConfigHash(next.input) !== hash) return false;
+    cache = next;
+  }
+  cacheStamp = null;
+  for (const listener of inputSettingsListeners) { try { listener(); } catch {} }
+  return true;
+}
+
 export function onInputSettingsChanged(listener:()=>void):()=>void {inputSettingsListeners.add(listener);return()=>{inputSettingsListeners.delete(listener);};}
 async function writeSettings(
   next: UnifiedSettings,
@@ -790,6 +874,9 @@ async function writeSettings(
   assertSettingsGeneration(generation);
   if (typeof result === 'object' && !result.ok && result.reason === 'revision-conflict') {
     throw new InputSettingsCommitConflict(normalize(JSON.parse(result.content)));
+  }
+  if (typeof result === 'object' && !result.ok && result.reason === 'virtual-start-protection-active') {
+    throw new VirtualStartProtectionActive(normalize(JSON.parse(result.content)), result.startProtection);
   }
   if (!result || (typeof result === 'object' && !result.ok)) throw new Error(`统一配置写入失败: ${path}`);
   // Cache the document actually committed under the native lock, never the
@@ -852,7 +939,8 @@ export async function compareAndSwapInputSettings(
     // 才退回缓存。
     const onDisk = await readJson(SETTINGS_FILE).catch(() => null);
     if (onDisk) assertCompatibleSchema(onDisk);
-    const current = onDisk ? normalize(onDisk) : await loadSettings();
+    // A first CAS must complete legacy import before it can publish the receipt.
+    const current = onDisk && hasCompletedSettingsBaseline(onDisk) ? normalize(onDisk) : await loadSettings();
     const snapshot = current.input;
     // Recheck at the queued commit boundary, after disk I/O, not only in the caller.
     if (isCurrent && !isCurrent()) {
@@ -879,10 +967,11 @@ export async function compareAndSwapInputSettings(
       }
       Object.assign(next, committed);
     } catch (error) {
-      if (error instanceof InputSettingsCommitConflict) {
+      if (error instanceof InputSettingsCommitConflict || error instanceof VirtualStartProtectionActive) {
         cache = error.document; cacheStamp = null;
-        result = { ok: false, reason: 'revision-conflict', currentRevision: error.document.input.revision,
-          value: snapshotSettingsData(error.document.input) };
+        result = { ok: false, reason: error instanceof VirtualStartProtectionActive ? error.reason : 'revision-conflict',
+          currentRevision: error.document.input.revision, value: snapshotSettingsData(error.document.input),
+          ...(error instanceof VirtualStartProtectionActive ? { startProtection: error.startProtection } : {}) };
       } else result = evaluateInputCasWrite(snapshot, expectedRevision, patch, false);
       return;
     }

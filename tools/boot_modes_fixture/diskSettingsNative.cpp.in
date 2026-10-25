@@ -1,0 +1,39 @@
+// The runner extracts the production file IO, delta, baseline and startup consumers.
+// The cross-process app mutex and device admission are isolated, never the live app's.
+#define NOMINMAX
+#include <windows.h>
+#include "settings_baseline.h"
+#include "controller_persona_settings.h"
+#include "input_startup_policy.h"
+#include <filesystem>
+#include <fstream>
+#include <iostream>
+#include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <limits>
+#include <cwctype>
+using json=nlohmann::json;
+static std::wstring YM_SETTINGS_FILE,YM_SETTINGS_BACKUP_FILE;
+struct SettingsFileGuard {};
+struct InputHostTargetWriteGuard{bool admit(const json&,const json&){return true;}void commit(){}};
+namespace fspath{static bool exists(const std::wstring& path){return std::filesystem::exists(std::filesystem::path(path));}}
+// FILE_SETTINGS_PRODUCTION_BODIES
+static json handle(const json& request){
+ auto file=std::filesystem::weakly_canonical(std::filesystem::u8path(request.at("file").get<std::string>()));
+ auto root=std::filesystem::weakly_canonical(std::filesystem::u8path(request.at("root").get<std::string>()));
+ const auto relative=std::filesystem::relative(file,root);if(relative.empty()||relative.is_absolute()||*relative.begin()==L"..")throw std::runtime_error("outside isolated evidence root");
+ YM_SETTINGS_FILE=file.wstring();YM_SETTINGS_BACKUP_FILE=YM_SETTINGS_FILE+L".bak";
+ const auto operation=request.at("operation").get<std::string>();
+ if(operation=="read")return ymSettingsReadSnapshot(request.value("stamp",std::string{}));
+ json committed;bool conflict=false,blocked=false,ok=false;
+ if(operation=="write"){
+  const auto baseline=request.value("baseline",json(nullptr));
+  ok=ymSettingsWriteDocumentUnlocked(request.at("content").get<std::string>(),nullptr,baseline.is_object()?&baseline:nullptr,&committed,request.value("initialize",false),request.value("expectedInputRevision",-1LL),&conflict,&blocked);
+ }else if(operation=="startup"){
+  auto before=ymSettingsReadUnlocked();auto next=ymcc::initializeBootModeInputStartup(before,request.at("session").get<std::string>(),request.at("boot").get<std::string>());
+  ok=ymSettingsWriteDocumentUnlocked(next.dump(),nullptr,&before,&committed);
+ }else throw std::runtime_error("forbidden operation");
+ return json({{"ok",ok},{"content",committed.dump()},{"reason",conflict?"revision-conflict":blocked?"virtual-start-protection-active":ok?"":"write-failed"}});
+}
+int main(){std::string line;while(std::getline(std::cin,line)){try{std::cout<<handle(json::parse(line)).dump()<<"\n"<<std::flush;}catch(const std::exception& e){std::cout<<json({{"error",e.what()}}).dump()<<"\n"<<std::flush;}}return 0;}

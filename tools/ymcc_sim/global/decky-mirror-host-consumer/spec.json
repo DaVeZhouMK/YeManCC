@@ -1,0 +1,393 @@
+{
+  "schemaVersion": 1,
+  "id": "plugins.decky-mirror-host-consumer",
+  "suites": [
+    {
+      "name": "host",
+      "script": "tools/decky_sidebar_host_selftest.mjs",
+      "cases": [
+        {
+          "name": "ready lifecycle has no eager reads or saves",
+          "line": 11
+        },
+        {
+          "name": "snapshot exposes continuous performance owner and no old six-tier/core mirror fields",
+          "line": 12
+        },
+        {
+          "name": "old game mode/core commands are rejected without a save",
+          "line": 13
+        },
+        {
+          "name": "performance patch crosses host relay and saves one shared owner bank",
+          "line": 14
+        },
+        {
+          "name": "input edit preserves full continuous controls",
+          "line": 15
+        },
+        {
+          "name": "performance source and power generation reject stale writes",
+          "line": 16
+        },
+        {
+          "name": "global performance owner is exposed when no game is confirmed",
+          "line": 17
+        },
+        {
+          "name": "stop removes observers and late requests cannot save",
+          "line": 18
+        }
+      ],
+      "report": "stdout.log"
+    },
+    {
+      "name": "readonly",
+      "script": "tools/decky_sidebar_readonly_selftest.mjs",
+      "cases": [
+        {
+          "name": "relay waits for authenticated demand",
+          "line": 8
+        },
+        {
+          "name": "relay coalesces source invalidations and does not poll",
+          "line": 9
+        },
+        {
+          "name": "relay rejects unknown and mutation commands in read-only provider",
+          "line": 10
+        },
+        {
+          "name": "host read is side-effect free and exposes only continuous performance controls",
+          "line": 12
+        },
+        {
+          "name": "host rejects old Decky game mode/core commands",
+          "line": 13
+        },
+        {
+          "name": "host stop removes subscriptions and late source changes are inert",
+          "line": 14
+        }
+      ],
+      "report": "stdout.log"
+    },
+    {
+      "name": "client",
+      "script": "tools/decky_sidebar_client_selftest.mjs",
+      "cases": [
+        {
+          "name": "missing bootstrap starts no discovery/network/timer",
+          "line": 39
+        },
+        {
+          "name": "non-loopback bootstrap rejected",
+          "line": 40
+        },
+        {
+          "name": "one visible socket requests one snapshot, no idle polling",
+          "line": 41
+        },
+        {
+          "name": "hidden/unloaded releases socket and timers",
+          "line": 42
+        },
+        {
+          "name": "old view packets ignored after hide",
+          "line": 43
+        },
+        {
+          "name": "older revisions do not overwrite fresh state",
+          "line": 44
+        },
+        {
+          "name": "malformed snapshot rejects instead of crashing React",
+          "line": 45
+        },
+        {
+          "name": "restart run ID disconnects and no mutation replay",
+          "line": 46
+        },
+        {
+          "name": "request freezes identity/generation/revision and args",
+          "line": 47
+        },
+        {
+          "name": "second mutation cannot overlap first",
+          "line": 48
+        },
+        {
+          "name": "timeout never resends a possibly applied action",
+          "line": 49
+        },
+        {
+          "name": "close rejects inflight mutation and reconnect does not replay it",
+          "line": 50
+        },
+        {
+          "name": "silent first connection has finite deadline and reconnect",
+          "line": 51
+        },
+        {
+          "name": "visible sidebar recovers beyond three failures with capped outage backoff",
+          "line": 52
+        },
+        {
+          "name": "hide cancels queued reconnect",
+          "line": 53
+        },
+        {
+          "name": "power not ready rejects changes without send",
+          "line": 54
+        },
+        {
+          "name": "fan requests do not include game identity",
+          "line": 55
+        },
+        {
+          "name": "late native bootstrap starts cold plugin by event, no polling",
+          "line": 56
+        },
+        {
+          "name": "same native binding event cannot duplicate live connection",
+          "line": 57
+        },
+        {
+          "name": "new native run cancels old mutation, never replays into new host",
+          "line": 58
+        },
+        {
+          "name": "hidden bootstrap event starts zero sockets",
+          "line": 59
+        },
+        {
+          "name": "late message from closed socket cannot restore connected state",
+          "line": 60
+        },
+        {
+          "name": "connection owns immutable bootstrap identity, not mutable global object",
+          "line": 61
+        },
+        {
+          "name": "port zero and out-of-range bootstrap are rejected",
+          "line": 62
+        },
+        {
+          "name": "Steam runtime ID getter runs once per demand, not per render or timer",
+          "line": 63
+        },
+        {
+          "name": "Steam runtime getter failure cannot prevent Fan snapshot connection",
+          "line": 64
+        },
+        {
+          "name": "slider accepts only the exact rendered snapshot",
+          "line": 65
+        },
+        {
+          "name": "slider rendered revision change rejects before sending any mutation",
+          "line": 66
+        },
+        {
+          "name": "slider game identity cannot migrate to a different foreground game",
+          "line": 67
+        },
+        {
+          "name": "failed action notice survives confirmed unchanged-state snapshot without retrying",
+          "line": 68
+        },
+        {
+          "name": "failed action notice cannot leak into another game or hidden/reopened session",
+          "line": 69
+        },
+        {
+          "name": "monitor accepts one boolean intent without requiring a game or fan permission",
+          "line": 70
+        },
+        {
+          "name": "monitor never sends without state/permission or with invented parameters",
+          "line": 71
+        },
+        {
+          "name": "malformed monitor state/permission terminates the session safely",
+          "line": 72
+        },
+        {
+          "name": "monitor timeout requests fresh state and never replays the intent",
+          "line": 73
+        },
+        {
+          "name": "connection test needs its own fresh native reply and never emits a mutation",
+          "line": 74
+        },
+        {
+          "name": "connection test cannot mistake unconfirmed or not-ready replies for success",
+          "line": 75
+        },
+        {
+          "name": "connection test timeout does not replay or block business controls",
+          "line": 76
+        },
+        {
+          "name": "hiding disposes the connection test and consumes late responses",
+          "line": 77
+        },
+        {
+          "name": "connection test reconnects existing binding without replaying writes",
+          "line": 78
+        },
+        {
+          "name": "trainer open requires a confirmed ready entry, not a missing or pending snapshot",
+          "line": 79
+        },
+        {
+          "name": "trainer request sends only open intent and exact current-game admission identity",
+          "line": 82
+        },
+        {
+          "name": "trainer-only pending state keeps existing game controls available and refuses a second launch",
+          "line": 85
+        },
+        {
+          "name": "malformed trainer states and private paths are rejected before UI sees them",
+          "line": 88
+        },
+        {
+          "name": "available trainer without a current game is an invalid snapshot",
+          "line": 91
+        },
+        {
+          "name": "trainer open rejects alternate actions and supplied file paths without sending",
+          "line": 92
+        },
+        {
+          "name": "trainer intent timeout refreshes state and never repeats the launch",
+          "line": 93
+        },
+        {
+          "name": "wallpaper passive demand does not own HUD traffic or business snapshots",
+          "line": 94
+        },
+        {
+          "name": "HUD and wallpaper independently release one shared connection",
+          "line": 95
+        }
+      ],
+      "report": "artifacts/validation/MIRROR-CLIENT-SELFTEST.json"
+    },
+    {
+      "name": "connection_probe",
+      "script": "tools/decky_sidebar_connection_probe_selftest.mjs",
+      "cases": [
+        {
+          "name": "ordinary snapshot may reuse a cache, fresh probe forces a native read and correlated reply",
+          "line": 14
+        },
+        {
+          "name": "a second test has a distinct correlation and does not acknowledge an older request",
+          "line": 15
+        },
+        {
+          "name": "invalid probe identifiers never read state or send a fabricated confirmation",
+          "line": 16
+        },
+        {
+          "name": "pause is not a test and ends demand",
+          "line": 17
+        },
+        {
+          "name": "existing Steam restoration is confined to enabled Decky and validates identity/mode",
+          "line": 21
+        },
+        {
+          "name": "watch recovery wakes the owning worker without joining itself or granting Steam startup",
+          "line": 22
+        },
+        {
+          "name": "startup attachment returns initialization without opening business writes and ready reattaches the same peer",
+          "line": 23
+        }
+      ],
+      "report": "artifacts/validation/CONNECTION-PROBE-SELFTEST.json"
+    }
+  ],
+  "fixtures": [
+    "tools/fixtures/decky_game_memory_store.mjs",
+    "tools/fixtures/decky_mirror_host_fixture.mjs",
+    "tools/fixtures/decky_task_paths.mjs"
+  ],
+  "productSources": [
+    "PowerControl/GameTitlePolicy.json",
+    "decky-plugin/src/mirrorClient.ts",
+    "decky-plugin/src/performanceModel.ts",
+    "decky-plugin/src/steamRunningContext.ts",
+    "native/decky_sidebar_runtime.h",
+    "native/main.cpp",
+    "src/App.vue",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/deckyFanActions.ts",
+    "src/bridge/deckyFrameActions.ts",
+    "src/bridge/deckyGameActions.ts",
+    "src/bridge/deckyGlobalActions.ts",
+    "src/bridge/deckyInputOptions.ts",
+    "src/bridge/deckyLosslessState.ts",
+    "src/bridge/deckyMirrorExtensions.ts",
+    "src/bridge/deckyMirrorHost.ts",
+    "src/bridge/deckyMirrorRelay.ts",
+    "src/bridge/deckyMonitorActions.ts",
+    "src/bridge/deckyPerformanceActions.ts",
+    "src/bridge/deckyProfileActions.ts",
+    "src/bridge/deckySpeedActions.ts",
+    "src/bridge/deckyTouchpadActions.ts",
+    "src/bridge/deckyTrainerActions.ts",
+    "src/bridge/frameRateModel.ts",
+    "src/bridge/gamePolicyHysteresis.ts",
+    "src/bridge/gamedetect.ts",
+    "src/bridge/gyroPresetModel.ts",
+    "src/bridge/monitorCoreTiles.ts",
+    "src/bridge/monitorFrameTime.ts",
+    "src/bridge/monitorHudFpsVisibility.ts",
+    "src/bridge/monitorHudFreshness.ts",
+    "src/bridge/monitorHudModel.ts",
+    "src/bridge/monitorNativeDemand.ts",
+    "src/bridge/monitorSnapshotSignals.ts",
+    "src/bridge/performanceControls.ts",
+    "src/bridge/performanceSchedule.ts",
+    "src/bridge/quickActionLock.ts",
+    "src/bridge/screenTouchpads.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/bridge/virtualTargetPolicy.ts",
+    "src/bridge/yeman.ts"
+  ],
+  "metadata": [
+    "package.json"
+  ],
+  "staticOnly": [
+    "src/App.vue",
+    "native/main.cpp",
+    "native/decky_sidebar_runtime.h"
+  ],
+  "faults": [
+    {
+      "id": "host-ready-never-commits",
+      "suite": "host",
+      "source": "src/bridge/deckyMirrorHost.ts",
+      "function": "startDeckyMirrorHost.return.ready",
+      "from": "ready() {hostReady = true; updaterHost.ready(); relay.invalidate();attach();}",
+      "to": "ready() {hostReady = false; updaterHost.ready(); relay.invalidate();attach();}",
+      "expectedName": "snapshot exposes continuous performance owner and no old six-tier/core mirror fields",
+      "expectedLine": 12
+    },
+    {
+      "id": "host-stop-does-not-dispose-relay",
+      "suite": "host",
+      "source": "src/bridge/deckyMirrorHost.ts",
+      "function": "startDeckyMirrorHost.return.stop",
+      "from": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); relay.dispose(); }",
+      "to": "stop() { ended = true; updaterHost.stop(); trainerActions.stop(); losslessObservation.dispose(); fanActions.stop(); stopRequests(); stopPeers(); }",
+      "expectedName": "stop removes observers and late requests cannot save",
+      "expectedLine": 18
+    }
+  ]
+}

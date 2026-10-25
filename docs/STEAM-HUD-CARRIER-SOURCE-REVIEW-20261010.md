@@ -1,5 +1,7 @@
 # YMCC Steam HUD 显示载体源码复核 — 2026-10-10
 
+> 后续状态（2026-10-10 17:18）：候选A修订2已在2077设置页获得真实显示/透明度/短时菜单收起持显证据及用户目视确认；输入、长时稳定和各显示模式仍未验收。以下源码复核与初始ready结论保留当时范围，不能据其旧表述误认为后续未测试。实测详见文末。
+
 ## 本轮范围与结论
 
 用户要求暂停本机直接验证、继续看别人源码。自该要求起，**没有连接现场 CDP、没有切换应用/发键/截图、没有向 Steam 注入或安装插件**。仅下载固定版本源码、读取本机 Steam JS 字节、在 Node 的隔离 VM 中执行两个原函数的惰性 mock 测试。
@@ -121,3 +123,17 @@
 6. 当前全屏与之后单独无边框验证；无法测得DXGI独占时明确记录，而不是自动升级成“所有全屏支持”。
 
 **用户未恢复授权前不做上述现场步骤。** 本轮没有正式接数据、没有新增EXE/DLL或第二插件，也没有部署子载体实现。
+
+## 实现补充：原生子窗口探针已备好（尚未实机跑这一版）
+
+后续已将候选A接成opt-in探针：直接复用原native generic popup hook和Portal、当前game owner绑定、creation pin/none独立变量；当前只支持用户选的角落信息块。45项carrier、8项精确TSX惰性渲染、35项状态与131项既有回归通过。原JS字节/签名离线匹配，未触碰现场Steam或桌面。
+
+详情：`G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\docs\STEAM-HUD-NATIVE-CHILD-READY-20261010.md`。已准备2077脚本与runtime；默认build排除，安装版未替换。仍待用户明确桌面可用后实机验收，不把ready当成功。
+
+## 后续实机证据：候选A显示成功，非完整验收
+
+用户再次明确桌面可用后已恢复现场验证。修订1额外覆盖owner_window导致window未创建；修订2保持原popup默认SharedJSContext opener、仍用target_browser指向当前游戏，实际游戏owner仅用于校验/生命周期。修订2实拍显示H5 HUD及四档底板，Steam交互菜单关闭/根overlay hidden仍短时可见，停止后清理成功；用户确认“目视到成功了”。旧root-DOM失败与修订1失败均保留，不回写为成功。
+
+全部七张截图已人工核验，机器原报告不变，后验记录在 `G:\YeManCC-Work\Build\Tasks\YMCC-Steam-HUD-Probe\2077-native-opener-20261010-171827\2077-NATIVE-PIXEL-REVIEW.json`。输入透传、长时稳定、无边框、DXGI独占、真实YMCC快照接入仍未验证，候选B未实测。本页原“当前全部待验收”只指源码复核时的状态。
+
+完整失败/成功过程与边界见 `G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\docs\STEAM-HUD-NATIVE-CHILD-READY-20261010.md`。

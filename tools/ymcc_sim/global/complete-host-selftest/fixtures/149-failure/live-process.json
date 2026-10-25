@@ -1,0 +1,9 @@
+{
+  "pid": 43192,
+  "startedUtc": "2026-10-19T04:53:31.617987+00:00",
+  "executable": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-candidate-20261019\\candidate-payload-minimal-apphost\\YeManFanHost.exe",
+  "arguments": [
+    "--self-test"
+  ],
+  "evidenceRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\full-host-selftest\\bd9c032b69fd4da586fc3bde45739422"
+}

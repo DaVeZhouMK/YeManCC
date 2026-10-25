@@ -1,0 +1,5 @@
+{
+  "schemaVersion": 1,
+  "sharedManifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+  "additional": []
+}

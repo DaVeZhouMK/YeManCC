@@ -26,7 +26,7 @@ const server=createServer((q,r)=>{r.setHeader('Content-Type',q.url==='/fixture.j
 await new Promise(r=>server.listen(0,'127.0.0.1',r));
 const url='http://127.0.0.1:'+server.address().port;
 const key=p=>String(p).replaceAll('/','\\').toLowerCase();
-const owned=['ui','background','music','performanceSchedule','gameCustom','tdp','cpu','sleep','quickApps','power','tray','autoclose'];
+const owned=['ui','background','music','performanceSchedule','gameCustom','tdp','rtss','cpu','sleep','quickApps','power','tray','autoclose'];
 const cases=[],pages=[],pageErrors=[];let browser;
 const check=async(name,run)=>{await run();cases.push({name,ok:true});console.log('PASS '+name)};
 async function fixture(seed={schemaVersion:99,ui:{theme:'kept'},input:{revision:48,marker:'protected'},fan:{marker:'protected'},future:{marker:'protected'}}){
@@ -45,7 +45,7 @@ async function fixture(seed={schemaVersion:99,ui:{theme:'kept'},input:{revision:
  // Storage mock only; native reset implementation is independently tested by
  // global_cache_config_native_selftest extracting the real C++ helper/IPC.
  let current={};for(const p of [fx.file,fx.file+'.bak']){try{const d=JSON.parse(fx.files.get(key(p)));if(d&&typeof d==='object'&&!Array.isArray(d)){current=d;break}}catch{}}
- const next=structuredClone(current);for(const name of owned)next[name]=structuredClone(args.defaults[name]);next.schemaVersion=1;next.tdp.autoApply={boot:false,wake:false};next.tdp.float={target:120,profile:'none',tdpStrategy:'none'};next.cpu.autoEnable={mode:'off'};next.cpu.autostart={ccd:{enabled:false},uv:{enabled:false}};next.performanceSchedule.enabled=false;
+ const next=structuredClone(current);for(const name of owned)next[name]=structuredClone(args.defaults[name]);next.schemaVersion=1;next.configurationBaseline=structuredClone(args.defaults.configurationBaseline);next.tdp.autoApply={boot:false,wake:false};next.tdp.float={target:120,profile:'none',tdpStrategy:'none'};next.cpu.autoEnable={mode:'off'};next.cpu.autostart={ccd:{enabled:false},uv:{enabled:false}};next.performanceSchedule.enabled=false;
  const backups=[];for(const p of [fx.file,fx.file+'.bak'])if(fx.files.has(key(p))){const saved=p+'.before-user-reset-fixture-'+fx.resets;fx.files.set(key(saved),fx.files.get(key(p)));backups.push(saved);fx.archives.push(saved)}
  fx.files.set(key(fx.file),JSON.stringify(next));return {ok:true,backups,protectedDataRecovered:Object.keys(current).length>0};
  });
@@ -65,6 +65,14 @@ try{
  await check('corrupt main without backup stays byte-identical and presents recovery',async()=>{const g=await fixture('{broken-main');assert.equal((await g.page.evaluate(()=>window.__boot)).ready,false);assert.match(await g.page.locator('#yemancc-route-fallback').textContent(),/共享配置损坏/);assert.equal(g.fx.files.get(key(g.fx.file)),'{broken-main');assert.equal(g.fx.writes.length,0);assert.equal(await recover(g.page).isEnabled(),true)});
  await check('reload button really navigates even when app is inert and does not reset',async()=>{const g=await fixture('{broken-main');const reload=g.page.waitForEvent('load');await g.page.getByRole('button',{name:'重新加载',exact:true}).click();await reload;assert.equal((await g.page.evaluate(()=>window.__boot)).ready,false);assert.equal(g.fx.resets,0);assert.equal(g.fx.files.get(key(g.fx.file)),'{broken-main')});
  await check('legacy schema remains compatible and preserves unrelated/protected branches',async()=>{const g=await fixture({schemaVersion:0,tdp:{tdpMax:37},input:{revision:48},future:{kept:true}});assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);const saved=JSON.parse(g.fx.files.get(key(g.fx.file)));assert.equal(saved.schemaVersion,1);assert.equal(saved.tdp.tdpMax,37);assert.equal(saved.input.revision,48);assert.equal(saved.future.kept,true);assert.equal(g.fx.resets,0)});
+ await check('future baseline is inspectable and explicit archived reset establishes the current receipt',async()=>{
+  const g=await fixture({schemaVersion:1,configurationBaseline:{id:'ymcc-settings',revision:2,legacyImported:true},input:{revision:48,marker:'protected'},fan:{marker:'protected'},future:{marker:'protected'}});
+  assert.equal((await g.page.evaluate(()=>window.__boot)).ready,false);assert.match(await g.page.locator('#yemancc-route-fallback').textContent(),/配置基准/);
+  const original=g.fx.files.get(key(g.fx.file));g.fx.confirm=true;const loaded=g.page.waitForEvent('load');await recover(g.page).click();await loaded;
+  assert.equal((await g.page.evaluate(()=>window.__boot)).ready,true);const saved=JSON.parse(g.fx.files.get(key(g.fx.file)));
+  assert.equal(saved.configurationBaseline.revision,1);assert.equal(saved.input.revision,48);assert.equal(saved.fan.marker,'protected');assert.equal(saved.future.marker,'protected');
+  assert(g.fx.archives.some(file=>g.fx.files.get(key(file))===original));assert.equal(g.fx.resets,1);
+ });
  await check('error text is safe and transient fallback restores previous inert state',async()=>{const g=await fixture(null);await g.page.evaluate(()=>window.__show('<img src=x onerror="window.__pwn=true">','schedule',false,'<script>evil</script>'));assert.equal(await g.page.locator('#yemancc-route-fallback img, #yemancc-route-fallback script').count(),0);await g.page.evaluate(()=>window.__clear());assert.equal(await g.page.locator('#app').evaluate(e=>e.inert),false);assert.equal(await g.page.locator('#yemancc-route-fallback').count(),0)});
  assert.deepEqual(pageErrors,[]);
  const report={passed:cases.length,failed:0,cases,pageErrors,actualApiAndIpc:true,actualRepositoryAndFallback:true,nativeServicesMemoryOnly:true,realSettingsWritten:false,actualProductLaunched:false,hardwareOperations:false};console.log(JSON.stringify(report,null,2));

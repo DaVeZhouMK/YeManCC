@@ -1598,6 +1598,7 @@ def _rapl_power_unit_w(backend):
             return None, None
         exponent = int(raw) & 0xF
         unit_w = 1.0 / (1 << exponent)
+        _tdp_observe_update(unitRaw="0x%016X" % int(raw), unitExponent=exponent, unitW=unit_w)
         log("  [Intel] MSR 0x606 power unit exponent=%d (1/%.0f W)" %
             (exponent, (1 << exponent)))
         return unit_w, exponent
@@ -1638,13 +1639,66 @@ def _intel_power_limit_value(backend, pl1_w, pl2_w, old_msr=None):
     return value, o, f, unit_w
 
 
+# Static snapshots of the existing transaction; no new address/read/write.
+_TDP_OBSERVATION_CURRENT = None
+_TDP_OBSERVATION_LAST = None
+_TDP_OBSERVATION_CONTEXT = {}
+_TDP_OBSERVATION_FAILURES = 0
+
+def _tdp_observe_update(**values):
+    global _TDP_OBSERVATION_FAILURES
+    try:
+        if _TDP_OBSERVATION_CURRENT is not None:
+            _TDP_OBSERVATION_CURRENT.update(values)
+    except Exception:
+        _TDP_OBSERVATION_FAILURES += 1
+
+def _tdp_observe_raw(name, value, unit_w=None):
+    if value is None:
+        return
+    fields = {name + "Raw": "0x%016X" % (int(value) & 0xFFFFFFFFFFFFFFFF),
+              name + "EnablePL1": bool(int(value) & (1 << 15)),
+              name + "EnablePL2": bool(int(value) & (1 << 47)),
+              name + "Lock": bool(int(value) & (1 << 63))}
+    if unit_w is not None:
+        fields[name + "PL1W"] = (int(value) & 0x7FFF) * unit_w
+        fields[name + "PL2W"] = ((int(value) >> 32) & 0x7FFF) * unit_w
+    _tdp_observe_update(**fields)
+
 def intel_set_pawn(backend, pl1_w, pl2_w, dry=False):
+    global _TDP_OBSERVATION_CURRENT, _TDP_OBSERVATION_LAST, _TDP_OBSERVATION_FAILURES
+    prior = _TDP_OBSERVATION_CURRENT
+    started = time.monotonic()
+    observation = {"schemaVersion": 1, "requestId": _TDP_OBSERVATION_CONTEXT.get("requestId", "cli:%s:%s" % (os.getpid(), time.monotonic_ns())),
+                   "route": _TDP_OBSERVATION_CONTEXT.get("route", "cli"), "helperPid": os.getpid(),
+                   "requestedPL1W": pl1_w, "requestedPL2W": pl2_w, "dryRun": dry,
+                   "verificationScope": "MSR_0x610_target_fields_only", "stage": "parameters",
+                   "hardwareCommandReturned": False, "readbackMatched": "not-observed",
+                   "beforeRaw": "not-observed", "intendedRaw": "not-observed", "afterRaw": "not-observed",
+                   "oemMode": "not-observed", "physicalPowerVerified": False}
+    _TDP_OBSERVATION_CURRENT = observation
+    try:
+        rc = _intel_set_pawn_observed_core(backend, pl1_w, pl2_w, dry)
+        observation["rc"] = rc
+        return rc
+    finally:
+        try:
+            observation["durationMs"] = round((time.monotonic() - started) * 1000, 3)
+            observation["logFailureCount"] = _TDP_OBSERVATION_FAILURES
+            _TDP_OBSERVATION_LAST = dict(observation)
+            log("YMCC_TDP_OBSERVATION", json.dumps(observation, ensure_ascii=True, separators=(",", ":")))
+        except Exception:
+            _TDP_OBSERVATION_FAILURES += 1
+        _TDP_OBSERVATION_CURRENT = prior
+
+def _intel_set_pawn_observed_core(backend, pl1_w, pl2_w, dry=False):
     """Intel TDP: capability → read 0x606 → 0x610 RMW → lock → write → readback。"""
     requested_pl1, requested_pl2 = _clamp_w(pl1_w), _clamp_w(pl2_w)
     if requested_pl1 is None or requested_pl2 is None:
         log("  Intel TDP 参数无效")
         return 2
     cap = detect_intel_capability()
+    _tdp_observe_update(cpuName=cap.get("name", "not-observed"), staticRaplCapability=cap.get("rapl_supported"), cpuIdentitySource="existing-capability-probe", stage="backend")
     if dry:
         # dry-run 允许跨机预演，不接触硬件；未知平台只警告，不伪装为已支持。
         o, f = requested_pl1, requested_pl2
@@ -1657,12 +1711,15 @@ def intel_set_pawn(backend, pl1_w, pl2_w, dry=False):
         log("  Intel TDP: backend 无效")
         return 3
     # 事务级锁: 整个 RMW 持有 Global\Access_MSR
+    _tdp_observe_update(stage="mutex")
     if not backend._enter_tx():
         log("  [Intel TDP] 无法获取 MSR 事务锁")
         return 6
     try:
         # 1) 读当前 MSR 0x610
+        _tdp_observe_update(stage="read-before")
         old = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        _tdp_observe_raw("before", old)
         if old is None:
             log("  [Intel TDP] 无法读取 MSR 0x610")
             return 6
@@ -1670,34 +1727,45 @@ def intel_set_pawn(backend, pl1_w, pl2_w, dry=False):
         cap["rapl_supported"] = True
         log("  [Intel TDP] MSR 0x610 可读，按运行时 RAPL 能力继续")
         # 2) 检查 bit63 Lock
+        _tdp_observe_update(runtimeMsrAccessible=True, stage="lock")
         if int(old) & MSR_PKG_POWER_LOCK:
             log("  [Intel TDP] MSR 0x610 bit63 Lock 已置位, 拒绝写入 (需 reboot 解锁)")
             return 6
         # 3) 计算目标值 (RMW 保留 OEM 位)
+        _tdp_observe_update(stage="unit")
         packed = _intel_power_limit_value(backend, requested_pl1, requested_pl2, old)
         if packed[0] is None:
             log("  [Intel TDP] MSR 0x606 power unit 不可用 → 拒绝写入")
             return 6
         value, o, f, unit_w = packed
+        _tdp_observe_raw("before", old, unit_w)
+        _tdp_observe_raw("intended", value, unit_w)
+        _tdp_observe_update(targetPL1W=o, targetPL2W=f, targetMask="0x0000FFFF0000FFFF", stage="write")
         log("  Intel (PawnIO) PL1=%dW PL2=%dW raw_PL1=0x%04X raw_PL2=0x%04X unit=%.3fW" %
             (o, f, (value & 0x7FFF), ((value >> 32) & 0x7FFF), unit_w))
         log("  [Intel TDP] MSR 0x610 old=0x%016X → new=0x%016X (RMW preserved OEM fields)" %
             (old, value))
         # 4) 写入
-        if not backend.write_msr_raw(MSR_PKG_POWER_LIMIT, value):
+        written = backend.write_msr_raw(MSR_PKG_POWER_LIMIT, value)
+        _tdp_observe_update(hardwareCommandReturned=True, transportReportedOk=bool(written))
+        if not written:
             log("  [Intel TDP] MSR 0x610 写入未成功")
             return 6
         # 5) 读回校验 (按目标 mask)
+        _tdp_observe_update(hardwareCommandReturned=True, stage="readback")
         actual = backend.read_msr_raw(MSR_PKG_POWER_LIMIT)
+        _tdp_observe_raw("after", actual, unit_w)
         if actual is None:
             log("  [Intel TDP] MSR 0x610 写后读回失败")
             return 6
         rmw_mask = 0xFFFF | (0xFFFF << 32)
+        _tdp_observe_update(readbackMatched=(int(actual) & rmw_mask) == (value & rmw_mask))
         if (int(actual) & rmw_mask) != (value & rmw_mask):
             log("  [Intel TDP] MSR 0x610 功耗字段读回不一致: expected=0x%016X actual=0x%016X" %
                 (value & rmw_mask, int(actual) & rmw_mask))
             return 6
         log("  [Intel TDP] MSR 0x610 RMW/读回 OK: 0x%016X (OEM fields preserved)" % actual)
+        _tdp_observe_update(stage="completed")
         return 0
     except Exception as e:
         log("  [Intel TDP] RMW 失败: %s" % e)
@@ -1854,15 +1922,21 @@ def intel_get(dry=False):
         backend.close()
 
 # ---------- 统一写入入口 (无早退 / 无调度 / 无重试循环) ----------
+def _intel_single_target_limits(watts, intel_delta=1):
+    """Intel 单值目标表示 PL1；默认 PL2=PL1+1，显式 delta 仍表示额外余量。
+    CLI 与 daemon 共用；不改变双值/raw 接口、编码边界或硬件准入。
+    """
+    pl1 = max(0, int(round(watts)))
+    return pl1, pl1 + max(1, int(intel_delta))
+
+
 def apply_tdp(vendor, watts, intel_delta=1, dry=False):
     if vendor == "amd":
         mw = int(round(watts * 1000))
         return amd_set(mw, mw, mw, dry)
     if vendor == "intel":
-        # UXTU 同款: PL1 = W-1 (保证 PL1<PL2, 规避 PL1==PL2 边界),
-        # PL2 = PL1 + intel_delta (默认 1 => PL2=W)。intel_delta 仅作为 PL2 额外余量。
-        pl1 = max(0, int(round(watts)) - 1)
-        pl2 = pl1 + max(0, int(intel_delta))
+        # YMCC 单值语义：PL1=W，默认 PL2=W+1；不再从持续目标扣除 1W。
+        pl1, pl2 = _intel_single_target_limits(watts, intel_delta)
         return intel_set(pl1, pl2, dry)
     return 5
 
@@ -2625,11 +2699,12 @@ def _optiscaler_analyze(game_dir, cfg):
     if game_runtime and runtime_missing:
         missing = [item for item in missing if item not in runtime_missing]
     return {
-        "ok": os.path.isdir(game_dir) and bool(cfg.get("src_opti")) and not features["anti_cheat"] and features["scan_complete"],
+        "ok": os.path.isdir(game_dir) and bool(cfg.get("src_opti")) and features["scan_complete"],
         "scan_complete": features["scan_complete"],
         "game_dir": game_dir,
         "api": features["api"],
         "anti_cheat": features["anti_cheat"],
+        "requires_anti_cheat_confirmation": features["anti_cheat"],
         "native_fg_input": features["native_fg_input"],
         "warnings": list(cfg.get("warnings") or []),
         "engine": features["engine"],
@@ -3033,11 +3108,11 @@ def _opti_atomic_restore(source, destination, expected):
             os.remove(temp)
 
 
-def _optiscaler_install(game_dir, cfg, dry, backend="auto"):
-    return _opti_mutation(game_dir, cfg, dry, _optiscaler_install_locked, backend)
+def _optiscaler_install(game_dir, cfg, dry, backend="auto", acknowledge_anticheat=False):
+    return _opti_mutation(game_dir, cfg, dry, _optiscaler_install_locked, backend, acknowledge_anticheat)
 
 
-def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto"):
+def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto", acknowledge_anticheat=False):
     hard_missing = [item for item in (cfg.get("missing") or [])
                     if str(item).startswith("OptiScaler.dll")]
     if hard_missing:
@@ -3047,8 +3122,11 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto"):
     analysis = _optiscaler_analyze(game_dir, cfg)
     if not analysis.get("scan_complete", True):
         return {"ok": False, "msgs": analysis.get("missing") or ["游戏扫描不完整，拒绝注入"]}
-    if analysis.get("anti_cheat"):
-        return {"ok": False, "msgs": ["检测到反作弊，已拒绝自动注入；游戏文件未修改"]}
+    # This acknowledgement permits file deployment only. It never changes
+    # anti-cheat, Steam launch options, services, or the game executable.
+    if analysis.get("anti_cheat") and acknowledge_anticheat is not True:
+        return {"ok": False, "anti_cheat": True, "requires_anti_cheat_confirmation": True,
+                "msgs": ["检测到反作弊，请明确确认离线使用风险后再导入；游戏文件未修改"]}
     selected_backend = _optiscaler_normalize_backend(
         backend, {"available_backends": analysis.get("available_backends") or []})
     if not selected_backend:
@@ -3098,6 +3176,7 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto"):
         manifest = {"schema_version": 2, "game_dir": game_dir,
                     "installed_at": time.strftime("%Y-%m-%d %H:%M:%S"),
                     "backend": selected_backend,
+                    "anti_cheat_risk_acknowledged": bool(analysis.get("anti_cheat")) and acknowledge_anticheat is True,
                     "analysis": analysis,
                     "source_version": "%s/%s" % (cfg.get("opti_version") or "", cfg.get("extra_version") or ""),
                     "source_root": cfg.get("source_root"),
@@ -3226,7 +3305,10 @@ def _optiscaler_install_locked(game_dir, cfg, dry, backend="auto"):
                 pass
             msg += "；回滚异常（原件备份已保留于 " + pending + "）: " + "、".join(rollback_errors)
         return {"ok": False, "msgs": [msg], "written": written}
-    return {"ok": True, "written": written, "warnings": list(cfg.get("warnings") or []) + configured.get("warnings", []), "backup": bdir,
+    warnings = list(cfg.get("warnings") or []) + configured.get("warnings", [])
+    if analysis.get("anti_cheat"):
+        warnings.append("检测到反作弊：已按本次风险确认部署 OPT，未执行绕过；不保证加载/插帧或联机安全，请自行使用已确认的离线方式启动。")
+    return {"ok": True, "written": written, "anti_cheat": bool(analysis.get("anti_cheat")), "warnings": warnings, "backup": bdir,
             "backend": selected_backend, "analysis": analysis,
             "source": cfg.get("source_root"),
             "version": manifest["source_version"]}
@@ -3492,8 +3574,9 @@ def _optiscaler_uninstall_locked(game_dir, cfg, dry):
 def optiscaler_cmd(argv, dry=False):
     try:
         if len(argv) < 2:
-            raise ValueError("usage: optiscaler <analyze|status|install|uninstall> <game_dir> [--backend fsr|xess] [--dry-run]")
+            raise ValueError("usage: optiscaler <analyze|status|install|uninstall> <game_dir> [--backend fsr|xess] [--acknowledge-anticheat-risk] [--dry-run]")
         sub, game_dir, backend = str(argv[0]).lower(), argv[1], "auto"
+        acknowledge_anticheat = False
         if sub not in ("analyze", "status", "install", "uninstall"):
             raise ValueError("unknown optiscaler subcommand: " + sub)
         i = 2
@@ -3501,6 +3584,8 @@ def optiscaler_cmd(argv, dry=False):
             arg = argv[i]
             if arg == "--dry-run":
                 dry = True
+            elif arg == "--acknowledge-anticheat-risk" and sub == "install":
+                acknowledge_anticheat = True
             elif arg == "--backend" and i + 1 < len(argv):
                 i += 1
                 backend = argv[i]
@@ -3521,7 +3606,7 @@ def optiscaler_cmd(argv, dry=False):
             payload = dict(st, ok=not bool(st.get("msgs")), available_backends=cfg.get("available_backends") or [], source=cfg.get("source_root"))
             payload.setdefault("version", "%s/%s" % (cfg.get("opti_version") or "", cfg.get("extra_version") or ""))
         elif sub == "install":
-            payload = _optiscaler_install(game_dir, cfg, dry, backend)
+            payload = _optiscaler_install(game_dir, cfg, dry, backend, acknowledge_anticheat)
         else:
             payload = _optiscaler_uninstall(game_dir, cfg, dry)
     except Exception as e:
@@ -3827,6 +3912,22 @@ def _daemon_resume_hardware(v, state):
 
 
 def _daemon_dispatch_request(v, state, req):
+    global _TDP_OBSERVATION_CONTEXT, _TDP_OBSERVATION_LAST
+    prior = _TDP_OBSERVATION_CONTEXT
+    _TDP_OBSERVATION_CONTEXT = {"requestId": req.get("requestId"), "route": "daemon"}
+    _TDP_OBSERVATION_LAST = None
+    try:
+        response, stop = _daemon_dispatch_request_observed_core(v, state, req)
+        if _TDP_OBSERVATION_LAST is not None:
+            try:
+                response.setdefault("result", {})["msrObservation"] = _TDP_OBSERVATION_LAST
+            except Exception:
+                pass
+        return response, stop
+    finally:
+        _TDP_OBSERVATION_CONTEXT = prior
+
+def _daemon_dispatch_request_observed_core(v, state, req):
     """窄命令集 typed RPC；不接受原始命令行，不暴露 restore-raw/UV/PBO。"""
     request_id = req.get("requestId")
     resp = {"version": 1, "requestId": request_id, "ok": False, "rc": 2, "error": "bad_request"}
@@ -3861,7 +3962,8 @@ def _daemon_dispatch_request(v, state, req):
         mw = int(round(w * 1000))
         rc = _daemon_amd_gate_call(lambda: amd_set_with(state.get("p"), state.get("cfg"), mw, mw, mw))
     elif v == "intel":
-        rc = intel_set_pawn(state.get("intel"), w - 1, w, False)
+        pl1, pl2 = _intel_single_target_limits(w)
+        rc = intel_set_pawn(state.get("intel"), pl1, pl2, False)
     else:
         rc = 5
     resp.update({"ok": rc == 0, "rc": int(rc),

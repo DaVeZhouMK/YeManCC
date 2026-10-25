@@ -1,0 +1,352 @@
+// Complete production case/loop/predicates; only OS/UI/module ports below are
+// substituted. All real private kernel resources are observed and closed before
+// reporting. Closing the fixture process is never a cleanup observation.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <json.hpp>
+#include <atomic>
+#include <cstdint>
+#include <algorithm>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+using json=nlohmann::json;
+@GLOBALS@
+
+// Explicit memory ports for the Host-local predicate's transitive state. No
+// product Host mutex, process, primary thread or transport is opened or retired.
+using InputHostMutex=std::mutex;
+static InputHostMutex g_inputHostMx;
+static HANDLE g_inputHostProcess=nullptr,g_inputHostPrimaryThread=nullptr;
+static HANDLE g_inputHostServerPipe=nullptr,g_inputHostUnadoptedPipe=nullptr;
+namespace ymcc::inputHost::pipeTransport {
+struct Snapshot {bool available=true,stopped=true;};
+struct MemoryRuntime {
+ Snapshot state{};bool throws=false;
+ Snapshot snapshot(){if(throws)throw std::runtime_error("memory transport snapshot unavailable");return state;}
+};
+static MemoryRuntime memoryRuntime;
+static bool runtimeExists=false;
+static MemoryRuntime* existingProcessRuntime(){return runtimeExists?&memoryRuntime:nullptr;}
+}
+@HOST_PREDICATE@
+@CAPTURE_PREDICATE@
+
+static unsigned checks=0,failures=0;
+static std::vector<std::string> failedChecks;
+static void check(bool ok,const std::string& name){++checks;if(!ok){++failures;failedChecks.push_back(name);std::cerr<<"CHECK_FAILED "<<name<<'\n';}}
+static unsigned privateThreadsStarted=0,privateThreadsObserved=0;
+static std::atomic<unsigned> privateThreadsRunning{0};
+static unsigned fixtureForcedRealCleanupCount=0;
+static std::map<HANDLE,std::string> privateHandles;
+static HANDLE cleanupIdentity=nullptr,releaseEvent=nullptr;
+static bool cleanupObserved=false;
+static bool recoveryStopped=true;
+static unsigned closeFailRemaining=0,cleanupCloseAttempts=0,cleanupCloseSuccesses=0;
+static unsigned waitFailRemaining=0,outerWaits=0,messageOnlyWaits=0,loopPortCalls=0;
+static unsigned teardownCalls=0,windowDestroyed=0,transportReadChecks=0,portErrors=0;
+static DWORD lastMemoryError=ERROR_SUCCESS,lastObservedWait=WAIT_FAILED;
+static std::vector<std::string> trace;
+static json memoryLog=json::array(),closeObservations=json::array(),firstTeardownObservation=nullptr;
+static HWND g_hwnd=nullptr;
+static bool memoryWindowExists=true;
+static HANDLE g_acdcNotify=nullptr,g_monitorNotify=nullptr,g_idleDisplayNotify=nullptr;
+static HANDLE g_schemeNotify=nullptr,g_suspendResumeNotify=nullptr,g_tdpDaemonJob=nullptr;
+static HICON g_memTrayIcon=nullptr;
+static bool g_monitorEntryFailureTimerArmed=true;
+static unsigned long long g_monitorEntryFailureGeneration=7;
+static std::string g_exitSessionId="private-completion-gates-only";
+static constexpr UINT WM_APP_EXIT_READY=WM_APP+171;
+enum : UINT_PTR { EXIT_CLEANUP_WATCHDOG_TIMER_ID=1,TIMER_ID_ACDC,SUMMON_FOCUS_TIMER_ID,
+ RETURN_GAME_FOCUS_TIMER_ID,RESUME_GAME_FOCUS_TIMER_ID,WAKE_FOCUS_NUDGE_TIMER_ID,
+ FOCUS_DISPLAY_TIMER_ID,MEM_TRAY_TIMER_ID,SG_RETRY_TIMER_ID,SG_MONITOR_ENTRY_FAILURE_TIMER_ID,
+ GP_HOLD_TIMER_ID,GP_STATE_FALLBACK_TIMER_ID,WEBVIEW_RECOVERY_TIMER_ID,WEBVIEW_RECOVERY_ACTION_TIMER_ID };
+static LRESULT executeReadyCase(HWND,UINT,WPARAM,LPARAM);
+static HANDLE token(std::uintptr_t value){return reinterpret_cast<HANDLE>(value);}
+static bool steamOriginalRecoveryStopped(){return recoveryStopped;}
+static void appendNativeLifecycleLog(const char* event,json value){value["event"]=event;memoryLog.push_back(std::move(value));}
+static void touch(const char* name){
+ if(teardownCalls==0)firstTeardownObservation={{"completed",g_exitCleanupCompleted},{"cleanupOwnerNull",g_exitCleanupThread==nullptr},{"actualCleanupCloseSuccesses",cleanupCloseSuccesses}};
+ ++teardownCalls;trace.push_back(name);
+}
+static DWORD WINAPI privateCleanup(void* parameter){
+ const auto event=static_cast<HANDLE>(parameter);
+ privateThreadsRunning.fetch_add(1);
+ const auto waited=::WaitForSingleObject(event,5000);
+ privateThreadsRunning.fetch_sub(1);
+ return waited==WAIT_OBJECT_0?0:1;
+}
+static void realClose(HANDLE handle){
+ if(!privateHandles.count(handle))throw std::runtime_error("private close without exact owner");
+ if(!::CloseHandle(handle))throw std::runtime_error("actual private CloseHandle failed");
+ privateHandles.erase(handle);
+}
+static void releaseAndObserve(){
+ if(cleanupObserved)return;
+ if(!releaseEvent||!privateHandles.count(cleanupIdentity))throw std::runtime_error("private thread owner lost before observation");
+ if(!::SetEvent(releaseEvent))throw std::runtime_error("private SetEvent failed");
+ if(::WaitForSingleObject(cleanupIdentity,2000)!=WAIT_OBJECT_0)throw std::runtime_error("private cleanup thread did not signal within budget");
+ DWORD code=99;
+ if(!::GetExitCodeThread(cleanupIdentity,&code)||code!=0)throw std::runtime_error("private cleanup thread did not return normally");
+ cleanupObserved=true;++privateThreadsObserved;
+ realClose(releaseEvent);releaseEvent=nullptr;
+}
+static void preparePrivateThread(bool complete){
+ releaseEvent=::CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ if(!releaseEvent)throw std::runtime_error("private CreateEvent failed");
+ privateHandles.emplace(releaseEvent,"cleanup-release-event");
+ cleanupIdentity=::CreateThread(nullptr,0,privateCleanup,releaseEvent,0,nullptr);
+ if(!cleanupIdentity)throw std::runtime_error("private CreateThread failed");
+ privateHandles.emplace(cleanupIdentity,"cleanup-thread-owner");++privateThreadsStarted;
+ g_exitCleanupThread=cleanupIdentity;cleanupObserved=false;
+ if(complete)releaseAndObserve();
+}
+static DWORD portWait(HANDLE h,DWORD ms){
+ if(h!=cleanupIdentity||!privateHandles.count(h)){++portErrors;return WAIT_FAILED;}
+ if(waitFailRemaining){--waitFailRemaining;lastMemoryError=ERROR_INVALID_HANDLE;lastObservedWait=WAIT_FAILED;trace.push_back("injected-wait-failed");return WAIT_FAILED;}
+ lastObservedWait=::WaitForSingleObject(h,ms);trace.push_back("real-kernel-wait-"+std::to_string(lastObservedWait));return lastObservedWait;
+}
+static BOOL portClose(HANDLE h){
+ if(h==g_tdpDaemonJob&&h!=nullptr){touch("memory-job-close");return TRUE;}
+ if(h!=cleanupIdentity||!privateHandles.count(h)){++portErrors;return FALSE;}
+ ++cleanupCloseAttempts;trace.push_back("checked-cleanup-close-attempt");
+ closeObservations.push_back({{"completedBeforeAttempt",g_exitCleanupCompleted},{"captureReturned",inputCaptureExitOwnershipReleased()},
+  {"hostLocalOwnersReturned",inputHostExitLocalOwnershipReleased()},{"recoveryStopped",recoveryStopped},
+  {"actualKernelWaitBeforeClose",::WaitForSingleObject(h,0)}});
+ if(closeFailRemaining){--closeFailRemaining;lastMemoryError=ERROR_ACCESS_DENIED;trace.push_back("injected-cleanup-close-failed");return FALSE;}
+ const BOOL closed=::CloseHandle(h);
+ if(closed){privateHandles.erase(h);++cleanupCloseSuccesses;trace.push_back("actual-cleanup-handle-closed");}
+ return closed;
+}
+struct EndOneLoopObservation{};
+static DWORD fixtureMsgWaitForMultipleObjectsEx(DWORD count,const HANDLE* handles,DWORD timeout,DWORD mask,DWORD flags){
+ ++loopPortCalls;
+ if(loopPortCalls>6){++portErrors;return WAIT_OBJECT_0+count;}
+ if(mask!=QS_ALLINPUT||flags!=MWMO_INPUTAVAILABLE)++portErrors;
+ if(count==1){
+  if(timeout!=INFINITE||!handles||*handles!=cleanupIdentity)++portErrors;
+  if(outerWaits++){trace.push_back("memory-queued-message-wake");return WAIT_OBJECT_0+count;}
+  return portWait(*handles,0);
+ }
+ if(count!=0||handles!=nullptr||timeout!=200)++portErrors;
+ ++messageOnlyWaits;trace.push_back("memory-message-only-wait");return WAIT_OBJECT_0;
+}
+// The production wait helper itself is compiled; its Windows message/UI call is
+// the explicit scripted memory leaf above. Cleanup HANDLE waits inside that
+// leaf use the actual kernel object, except designated WAIT_FAILED injection.
+#define MsgWaitForMultipleObjectsEx fixtureMsgWaitForMultipleObjectsEx
+#include "exit_cleanup_wait.h"
+#undef MsgWaitForMultipleObjectsEx
+static DWORD portLastError(){return lastMemoryError;}
+static BOOL portKillTimer(HWND,UINT_PTR){touch("memory-kill-timer");return TRUE;}
+static BOOL portUnregisterPower(HANDLE){touch("memory-unregister-power");return TRUE;}
+static DWORD portUnregisterSuspend(HANDLE){touch("memory-unregister-suspend");return ERROR_SUCCESS;}
+static BOOL portDestroyIcon(HICON){touch("memory-destroy-icon");return TRUE;}
+static BOOL portDestroyWindow(HWND){touch("memory-destroy-window");memoryWindowExists=false;++windowDestroyed;return TRUE;}
+static BOOL portIsWindow(HWND){return memoryWindowExists?TRUE:FALSE;}
+static void sgStopKernelPowerSubscription(){touch("memory-stop-kernel-power-subscription");}
+static void focusLosslessReturnCancel(){touch("memory-focus-return-cancel");}
+static void cancelTaskbarLayoutRecheck(){touch("memory-taskbar-layout-cancel");}
+static void stopPowerResumeWatchdog(){touch("memory-stop-resume-watchdog");}
+static void gamepadSerialStop(DWORD){touch("memory-gamepad-serial-stop");}
+static void closeWebViewsForExit(){touch("memory-close-webviews");}
+static void stopRecoveryService(){touch("memory-stop-recovery-service");}
+static bool tryStartExitCleanupWorker(HWND){trace.push_back("memory-reuse-existing-cleanup-owner");return g_exitCleanupThread!=nullptr;}
+static void beginAsyncExit(HWND,WPARAM,const char*){trace.push_back("memory-begin-async-exit");}
+static BOOL portPeekMessage(MSG*,HWND,UINT,UINT,UINT){throw EndOneLoopObservation{};}
+static BOOL portGetMessage(MSG*,HWND,UINT,UINT){return FALSE;}
+static BOOL portTranslateMessage(const MSG*){return TRUE;}
+static LRESULT portDispatchMessage(const MSG*){return 0;}
+static LRESULT portSendMessage(HWND h,UINT m,WPARAM w,LPARAM l){return executeReadyCase(h,m,w,l);}
+
+// Substitution applies to the exact original bodies only. Ports never enforce
+// the child/Host gates; tests observe violations, including old-code teardown.
+#define WaitForSingleObject portWait
+#define CloseHandle portClose
+#define GetLastError portLastError
+#define KillTimer portKillTimer
+#define UnregisterPowerSettingNotification portUnregisterPower
+#define PowerUnregisterSuspendResumeNotification portUnregisterSuspend
+#define DestroyIcon portDestroyIcon
+#define DestroyWindow portDestroyWindow
+#define IsWindow portIsWindow
+#define PeekMessageW portPeekMessage
+#define GetMessageW portGetMessage
+#define TranslateMessage portTranslateMessage
+#define DispatchMessageW portDispatchMessage
+#define SendMessageW portSendMessage
+static LRESULT executeReadyCase(HWND h,UINT message,WPARAM w,LPARAM l){
+ (void)w;(void)l;
+ switch(message){
+@READY_CASE@
+ default:return -1;
+ }
+}
+// Only the entire real MSG declaration + message loop are inserted here. The
+// surrounding entry signature is a fixture wrapper, not the real app startup.
+static WPARAM fixtureWWinMainLoop(){
+@MESSAGE_LOOP@
+ return msg.wParam;
+}
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef GetLastError
+#undef KillTimer
+#undef UnregisterPowerSettingNotification
+#undef PowerUnregisterSuspendResumeNotification
+#undef DestroyIcon
+#undef DestroyWindow
+#undef IsWindow
+#undef PeekMessageW
+#undef GetMessageW
+#undef TranslateMessage
+#undef DispatchMessageW
+#undef SendMessageW
+
+static void restoreFacts(){
+ g_exitRequested=true;g_captureExitReleased=true;g_inputHostExitLocalReturned=true;
+ recoveryStopped=true;waitFailRemaining=0;closeFailRemaining=0;
+ g_inputHostProcess=g_inputHostPrimaryThread=g_inputHostServerPipe=g_inputHostUnadoptedPipe=nullptr;
+ using namespace ymcc::inputHost::pipeTransport;
+ runtimeExists=false;memoryRuntime.state={true,true};memoryRuntime.throws=false;
+}
+static void fresh(){
+ if(!privateHandles.empty()||privateThreadsRunning.load()!=0)throw std::runtime_error("previous case did not release private resources");
+ restoreFacts();g_exitReadyPosted=true;g_exitCleanupThread=nullptr;g_exitCleanupCompleted=false;
+ g_exitCleanupStage="private-cleanup-returned";g_exitLastWaitingStage=nullptr;g_exitBeginTick=::GetTickCount64();g_exitCode=42;
+ g_hwnd=nullptr;memoryWindowExists=true;
+ g_acdcNotify=token(0x101);g_monitorNotify=token(0x102);g_idleDisplayNotify=token(0x103);
+ g_schemeNotify=token(0x104);g_suspendResumeNotify=token(0x105);g_tdpDaemonJob=token(0x106);
+ g_memTrayIcon=reinterpret_cast<HICON>(token(0x107));g_monitorEntryFailureTimerArmed=true;g_monitorEntryFailureGeneration=7;
+ cleanupIdentity=releaseEvent=nullptr;cleanupObserved=false;
+ cleanupCloseAttempts=cleanupCloseSuccesses=teardownCalls=windowDestroyed=0;
+ outerWaits=messageOnlyWaits=loopPortCalls=portErrors=0;
+ lastObservedWait=WAIT_FAILED;lastMemoryError=ERROR_SUCCESS;trace.clear();memoryLog=json::array();closeObservations=json::array();firstTeardownObservation=nullptr;
+}
+static json snapshot(){
+ DWORD handleFlags=0;
+ const bool actualOwnerValid=privateHandles.count(cleanupIdentity)&&::GetHandleInformation(cleanupIdentity,&handleFlags);
+ return {{"cleanupOwnerEqualsOriginal",g_exitCleanupThread==cleanupIdentity},
+  {"originalCleanupHandleStillOpen",privateHandles.count(cleanupIdentity)!=0},{"actualKernelOwnerValid",actualOwnerValid},
+  {"completed",g_exitCleanupCompleted},{"closeAttempts",cleanupCloseAttempts},{"closeSuccesses",cleanupCloseSuccesses},
+  {"teardownCalls",teardownCalls},{"windowDestroyed",windowDestroyed},{"windowStillExists",memoryWindowExists},
+  {"hostLocalReturnedFlag",g_inputHostExitLocalReturned.load()},{"captureReturnedFlag",g_captureExitReleased.load()},
+  {"recoveryStopped",recoveryStopped},{"kernelThreadExitObserved",cleanupObserved},
+  {"privateHandles",privateHandles.size()},{"privateThreadsRunning",privateThreadsRunning.load()},
+  {"lastWait",lastObservedWait},{"messageOnlyWaits",messageOnlyWaits},{"trace",trace},{"memoryLog",memoryLog},
+  {"closeAttemptObservations",closeObservations},{"firstTeardownObservation",firstTeardownObservation}};
+}
+static bool invoke(const std::string& route){
+ outerWaits=messageOnlyWaits=loopPortCalls=0;
+ if(route=="ready"){
+  const auto result=executeReadyCase(reinterpret_cast<HWND>(token(0x200)),WM_APP_EXIT_READY,42,0);
+  if(result!=0)++portErrors;
+  return false;
+ }
+ try{const auto result=fixtureWWinMainLoop();if(g_exitCleanupCompleted&&result!=42)++portErrors;return true;}
+ catch(const EndOneLoopObservation&){return false;}
+}
+static json oneCase(const std::string& route,const std::string& fault){
+ fresh();const auto before=failures;const std::string prefix=route+":"+fault+":";
+ const bool pending=fault!="all-returned";
+ preparePrivateThread(fault!="cleanup-thread-running");
+ if(fault=="host-local-not-returned")g_inputHostExitLocalReturned=false;
+ else if(fault=="capture-not-returned")g_captureExitReleased=false;
+ else if(fault=="recovery-not-returned")recoveryStopped=false;
+ else if(fault=="wait-failed")waitFailRemaining=1;
+ else if(fault=="close-failed")closeFailRemaining=1;
+ else if(fault=="host-process-retained")g_inputHostProcess=token(0x301);
+ else if(fault=="host-primary-retained")g_inputHostPrimaryThread=token(0x302);
+ else if(fault=="host-server-pipe-retained")g_inputHostServerPipe=token(0x303);
+ else if(fault=="host-unadopted-pipe-retained")g_inputHostUnadoptedPipe=token(0x304);
+ else if(fault=="host-transport-pending"||fault=="host-transport-unavailable"||fault=="host-transport-throws"){
+  using namespace ymcc::inputHost::pipeTransport;
+  runtimeExists=true;memoryRuntime.state={fault!="host-transport-unavailable",fault!="host-transport-pending"};
+  memoryRuntime.throws=fault=="host-transport-throws";
+ }else if(fault!="all-returned"&&fault!="cleanup-thread-running")throw std::runtime_error("unreviewed case");
+ const bool hostBlocked=fault.rfind("host-",0)==0;
+ check(inputHostExitLocalOwnershipReleased()==!hostBlocked,prefix+"actual-host-local-predicate-result");
+ const bool loopReturned=invoke(route);const auto initial=snapshot();
+ if(pending){
+  check(g_exitCleanupThread==cleanupIdentity&&privateHandles.count(cleanupIdentity)&&initial["actualKernelOwnerValid"]==true,prefix+"retain-cleanup-owner");
+  check(!g_exitCleanupCompleted,prefix+"do-not-mark-completed");
+  check(teardownCalls==0&&windowDestroyed==0&&memoryWindowExists,prefix+"no-window-or-module-teardown");
+  check(cleanupCloseAttempts==(fault=="close-failed"?1u:0u),prefix+"checked-close-only-after-all-gates");
+  if(route=="ready")check(!g_exitReadyPosted,prefix+"pending-ready-wake-is-rearmed");
+  else check(!loopReturned,prefix+"pending-loop-must-not-return-to-final-cleanup");
+  if(fault=="wait-failed"){
+   check(lastObservedWait==WAIT_FAILED,prefix+"designated-wait-failure-executed");
+   if(route=="no-window-loop")check(messageOnlyWaits==1&&memoryLog.size()==1&&
+      memoryLog[0]["event"]=="exit-kernel-wait-failed",prefix+"actual-wait-failure-message-fallback-executed");
+  }
+  if(fault=="close-failed")check(cleanupCloseSuccesses==0&&privateHandles.count(cleanupIdentity),prefix+"failed-close-keeps-exact-kernel-owner");
+  if(fault=="cleanup-thread-running")check(lastObservedWait==WAIT_TIMEOUT&&!cleanupObserved,prefix+"unsignalled-thread-is-not-completion");
+ }
+ // Explicit fixture actor supplies later child-return facts; this is not a
+ // product self-healing claim. The unchanged actual consumer then retries.
+ restoreFacts();releaseAndObserve();
+ invoke(route);
+ check(g_exitCleanupThread==nullptr&&g_exitCleanupCompleted,prefix+"completed-only-after-return-and-successful-close");
+ check(cleanupCloseSuccesses==1&&!privateHandles.count(cleanupIdentity),prefix+"exact-private-thread-owner-closed-once");
+ check(privateHandles.empty()&&privateThreadsRunning.load()==0,prefix+"all-real-private-resources-zero-before-case-return");
+ check(portErrors==0,prefix+"memory-port-contract-valid");
+ bool orderProven=!closeObservations.empty();
+ for(const auto& close:closeObservations)orderProven=orderProven&&close["completedBeforeAttempt"]==false&&
+  close["captureReturned"]==true&&close["hostLocalOwnersReturned"]==true&&close["recoveryStopped"]==true&&close["actualKernelWaitBeforeClose"]==WAIT_OBJECT_0;
+ check(orderProven,prefix+"every-close-follows-real-thread-signal-and-three-return-gates-before-completed");
+ if(route=="ready"){
+  check(windowDestroyed==1&&!memoryWindowExists&&teardownCalls>0,prefix+"complete-real-ready-case-reaches-memory-teardown");
+  check(firstTeardownObservation["completed"]==true&&firstTeardownObservation["cleanupOwnerNull"]==true&&
+    firstTeardownObservation["actualCleanupCloseSuccesses"]==1,prefix+"window-teardown-follows-actual-checked-close-and-completed");
+  check(!g_acdcNotify&&!g_monitorNotify&&!g_idleDisplayNotify&&!g_schemeNotify&&!g_suspendResumeNotify&&
+    !g_tdpDaemonJob&&!g_memTrayIcon&&!g_monitorEntryFailureTimerArmed&&g_monitorEntryFailureGeneration==0,
+    prefix+"all-ready-memory-module-fields-retired");
+ }else check(windowDestroyed==0&&teardownCalls==0,prefix+"no-window-loop-completes-without-fabricated-ui-teardown");
+ const auto final=snapshot();const auto closed=cleanupCloseSuccesses,destroyed=windowDestroyed,touched=teardownCalls;
+ invoke(route);
+ check(cleanupCloseSuccesses==closed&&windowDestroyed==destroyed&&teardownCalls==touched,prefix+"repeat-dispatch-cannot-double-close-or-teardown");
+ // Final module fields here are memory leaves, not kernel resources or a claim
+ // that the omitted wWinMain final cleanup executed.
+ g_acdcNotify=g_monitorNotify=g_idleDisplayNotify=g_schemeNotify=g_suspendResumeNotify=g_tdpDaemonJob=nullptr;
+ g_memTrayIcon=nullptr;
+ return {{"name",route+":"+fault},{"pass",failures==before},{"initialObservation",initial},
+  {"afterExplicitFactsAndActualConsumerRetry",final},{"processExitUsedAsCleanup",false},
+  {"realPrivateResourcesZeroBeforeReturn",privateHandles.empty()&&privateThreadsRunning.load()==0}};
+}
+static void emergencyFixtureRelease(){
+ if(privateHandles.empty())return;
+ ++fixtureForcedRealCleanupCount;
+ if(releaseEvent&&privateHandles.count(releaseEvent))::SetEvent(releaseEvent);
+ if(cleanupIdentity&&privateHandles.count(cleanupIdentity)){
+  if(::WaitForSingleObject(cleanupIdentity,2000)==WAIT_OBJECT_0){
+   if(!cleanupObserved){cleanupObserved=true;++privateThreadsObserved;}
+   realClose(cleanupIdentity);
+  }
+ }
+ if(releaseEvent&&privateHandles.count(releaseEvent))realClose(releaseEvent);
+}
+int main(){
+ json cases=json::array();
+ try{
+  for(const char* route:{"ready","no-window-loop"})
+   for(const char* fault:{"host-local-not-returned","capture-not-returned","recovery-not-returned","wait-failed",
+     "cleanup-thread-running","close-failed","all-returned","host-process-retained","host-primary-retained",
+     "host-server-pipe-retained","host-unadopted-pipe-retained","host-transport-pending","host-transport-unavailable","host-transport-throws"})
+    cases.push_back(oneCase(route,fault));
+ }catch(const std::exception& error){std::cerr<<error.what()<<'\n';check(false,"fixture-exception");emergencyFixtureRelease();}
+ const bool zero=privateHandles.empty()&&privateThreadsRunning.load()==0&&privateThreadsStarted==privateThreadsObserved;
+ check(zero,"all-private-kernel-resources-returned-before-output");
+ check(fixtureForcedRealCleanupCount==0,"private-cleanup-return-witness-precedes-any-emergency-fixture-teardown");
+ std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"failedChecks",failedChecks},{"cases",cases},
+  {"privateThreadsStarted",privateThreadsStarted},{"privateThreadsSignalledAndObserved",privateThreadsObserved},
+  {"privateThreadsStillRunning",privateThreadsRunning.load()},{"privateHandlesRemaining",privateHandles.size()},
+  {"fixtureForcedRealCleanupCount",fixtureForcedRealCleanupCount},{"allPrivateResourcesZeroBeforeExit",zero},
+  {"completeReadyCaseExecuted",true},{"completeWWinMainMessageLoopExecuted",true},{"actualHostLocalPredicateExecuted",true},
+  {"processExitUsedAsCleanup",false},{"realProductHostOrCaptureExecuted",false},{"realWindowsOrModuleCleanupExecuted",false},
+  {"wholeMainAcceptance",false},{"wholeLifecycleAcceptance",false}}).dump()<<'\n';
+ return failures?1:0;
+}

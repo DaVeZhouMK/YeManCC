@@ -1,0 +1,9 @@
+html,body{margin:0!important;padding:0!important;background:transparent!important;overflow:hidden!important;width:100%;height:100%;pointer-events:none;}
+#hud{width:100%;min-width:0;pointer-events:none;}
+
+/* Bounded feedback only while dragging; no idle animation or raster loop. */
+html[data-hud-dragging="true"] [data-monitor-hud] {box-shadow:inset 0 0 0 2px var(--hud-accent,#8bd5e8),inset 0 0 14px color-mix(in srgb,var(--hud-accent,#8bd5e8) 55%,transparent)!important;}
+.hud-drag-toast {position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);padding:9px 16px;border-radius:10px;background:rgb(18 24 34 / var(--hud-drag-opacity,.8));color:#edf6ff;border:1px solid var(--accent,#8bd5e8);font:600 15px/1.35 'Segoe UI','Microsoft YaHei UI',sans-serif;white-space:nowrap;pointer-events:none;opacity:0;z-index:99;}
+.hud-drag-toast--show {animation:hud-drag-toast 1.8s ease both;}
+@keyframes hud-drag-toast {0%{opacity:0;translate:0 7px}12%,76%{opacity:1;translate:0 0}100%{opacity:0;translate:0 -4px}}
+@media(prefers-reduced-motion:reduce){.hud-drag-toast--show{animation-timing-function:step-end;}@keyframes hud-drag-toast{0%,80%{opacity:1}100%{opacity:0}}}

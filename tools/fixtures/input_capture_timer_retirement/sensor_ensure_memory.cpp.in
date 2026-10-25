@@ -1,0 +1,121 @@
+// Shared executable scenarios; memory OS leaves below are explicit substitutions.
+// Kernel mode inserts sensor_ensure_kernel.cpp.in without replacing Ensure logic.
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+#include "sensor_thread_mailbox.h"
+#include "json.hpp"
+using json=nlohmann::json;
+using SensorThreadRequest=ymcc::sensors::ThreadRequest;
+static HANDLE g_sensorThread=nullptr,g_sensorThreadWake=nullptr;
+static std::mutex g_sensorThreadMx;
+static ymcc::sensors::ThreadMailbox g_sensorThreadMailbox;
+static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept;
+static std::vector<json> lifecycle;
+static void appendNativeLifecycleLog(const char* event,const json& payload){auto row=payload;row["event"]=event;lifecycle.push_back(row);}
+static void writeLog(const char*,const std::string&){} // memory-only diagnostic sink
+static unsigned checks=0,failures=0;
+static const char* scenario="warmup";
+static void check(bool ok,const char* label){++checks;if(!ok)++failures;std::cout<<(ok?"PASS ":"FAIL ")<<scenario<<" "<<label<<"\n";}
+#if YMCC_ENSURE_KERNEL
+@KERNEL_PORT@
+#else
+namespace port {
+struct Record {bool thread=false,owned=true,terminal=false,joined=false;};
+static std::vector<std::unique_ptr<Record>> records;
+static unsigned eventAttempts=0,threadAttempts=0,eventsCreated=0,eventsClosed=0,threadsCreated=0,threadsClosed=0,joins=0,auxCreated=0,auxClosed=0;
+static unsigned stopCommands=0,startCommands=0,shutdownCommands=0,orphanOwners=0;
+static std::atomic<unsigned> workerTimeouts{0};
+static bool failEvent=false,failThread=false,failClose=false,overrideWait=false;
+static DWORD waitValue=WAIT_FAILED;
+static Record* find(HANDLE h){for(auto& r:records)if(reinterpret_cast<HANDLE>(r.get())==h&&r->owned)return r.get();return nullptr;}
+static HANDLE make(bool thread){auto r=std::make_unique<Record>();r->thread=thread;auto h=reinterpret_cast<HANDLE>(r.get());records.push_back(std::move(r));return h;}
+static HANDLE event(LPSECURITY_ATTRIBUTES,BOOL,BOOL,LPCWSTR){++eventAttempts;if(failEvent){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return nullptr;}++eventsCreated;return make(false);}
+static HANDLE thread(LPSECURITY_ATTRIBUTES,SIZE_T,LPTHREAD_START_ROUTINE,LPVOID,DWORD,LPDWORD){++threadAttempts;if(failThread){SetLastError(ERROR_NOT_ENOUGH_MEMORY);return nullptr;}++threadsCreated;return make(true);}
+static DWORD wait(HANDLE h,DWORD){auto r=find(h);if(!r){SetLastError(ERROR_INVALID_HANDLE);return WAIT_FAILED;}if(r->thread&&overrideWait){SetLastError(ERROR_INVALID_HANDLE);return waitValue;}if(r->terminal){if(!r->joined){r->joined=true;++joins;}return WAIT_OBJECT_0;}return WAIT_TIMEOUT;}
+static BOOL close(HANDLE h){auto r=find(h);if(!r)return FALSE;if(r->thread&&failClose){SetLastError(ERROR_ACCESS_DENIED);return FALSE;}if(r->thread){check(r->terminal&&r->joined,"thread close follows independent terminal join");++threadsClosed;}else ++eventsClosed;r->owned=false;return TRUE;}
+static BOOL signal(HANDLE h){if(!find(h))return FALSE;while(auto ticket=g_sensorThreadMailbox.take()){const auto req=ticket->request;if(req==SensorThreadRequest::Stop)++stopCommands;if(req==SensorThreadRequest::Start)++startCommands;if(req==SensorThreadRequest::Shutdown)++shutdownCommands;g_sensorThreadMailbox.complete(ticket);if(req==SensorThreadRequest::Shutdown){if(auto r=find(g_sensorThread))r->terminal=true;g_sensorThreadMailbox.close();break;}}return TRUE;}
+static void finish(HANDLE h){if(auto r=find(h)){r->terminal=true;g_sensorThreadMailbox.close();check(wait(h,0)==WAIT_OBJECT_0,"memory worker terminal observed");}}
+static void cleanupOrphans(){for(auto& r:records)if(r->owned&&r->thread){++orphanOwners;auto h=reinterpret_cast<HANDLE>(r.get());finish(h);close(h);}}
+static unsigned owned(){unsigned n=0;for(auto& r:records)n+=r->owned;return n;}
+}
+static DWORD WINAPI inputCaptureSensorThreadProc(LPVOID) noexcept{return 0;} // never invoked by memory CreateThread
+#endif
+#define WaitForSingleObject port::wait
+#define CloseHandle port::close
+#define CreateEventW port::event
+#define CreateThread port::thread
+#define SetEvent port::signal
+@ACTUAL@
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef CreateEventW
+#undef CreateThread
+#undef SetEvent
+static void faultsOff(){port::failEvent=port::failThread=port::failClose=port::overrideWait=false;}
+static void retire(){faultsOff();if(g_sensorThread)port::finish(g_sensorThread);check(inputCaptureSensorThreadReap(2000),"actual Reap retires globals");port::cleanupOrphans();g_sensorThreadMailbox.close();}
+static void begin(const char* name){scenario=name;faultsOff();lifecycle.clear();check(!g_sensorThread&&!g_sensorThreadWake&&port::owned()==0,"starts with zero owned resources");g_sensorThreadMailbox.close();}
+static void rejected(const char* phase,DWORD state,DWORD error,bool threadOwned,bool wakeOwned){
+    bool found=false;for(const auto& row:lifecycle)if(row.value("event","")=="input-capture-sensor-owner-rejected"&&row.value("phase","")==phase){
+        found=row.value("waitResult",DWORD(0))==state&&row.value("win32",DWORD(0))==error&&row.value("threadOwned",false)==threadOwned&&row.value("wakeOwned",false)==wakeOwned&&row.value("ownerRetained",false)==(threadOwned||wakeOwned);
+    }check(found,"rejected log preserves exact phase waitResult win32 and ownership fields");
+}
+int main(){
+    // Warm the CRT/kernel thread path before the independent process HANDLE baseline.
+    check(inputCaptureSensorThreadEnsure(),"warmup Ensure");retire();
+    DWORD before=0,after=0;check(GetProcessHandleCount(GetCurrentProcess(),&before)!=FALSE,"process HANDLE baseline captured");
+    begin("live-open");check(inputCaptureSensorThreadEnsure(),"empty owner creates worker");auto t=g_sensorThread,w=g_sensorThreadWake;auto creates=port::threadAttempts;
+    check(inputCaptureSensorThreadEnsure(),"live open mailbox usable");check(g_sensorThread==t&&g_sensorThreadWake==w&&port::threadAttempts==creates,"live owner never replaced");
+    check(inputCaptureSensorThreadPost(SensorThreadRequest::Start),"actual Post acknowledged by leaf worker");retire();
+
+    begin("live-closed");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;w=g_sensorThreadWake;g_sensorThreadMailbox.close();creates=port::threadAttempts;
+    check(!inputCaptureSensorThreadEnsure(),"closed live mailbox rejected");check(g_sensorThread==t&&g_sensorThreadWake==w&&port::threadAttempts==creates&&!g_sensorThreadMailbox.acceptsWork(),"closed owner and mailbox retained");retire();
+
+    begin("signalled-close-failure-retry");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;w=g_sensorThreadWake;port::finish(t);g_sensorThreadMailbox.open();auto ticket=g_sensorThreadMailbox.submit(SensorThreadRequest::Start);creates=port::threadAttempts;port::failClose=true;
+    check(!inputCaptureSensorThreadEnsure(),"failed close rejects availability");check(g_sensorThread==t&&g_sensorThreadWake==w&&port::threadAttempts==creates,"failed close retains exact old owners without create");
+    check(ticket&&ticket->result==ymcc::sensors::ThreadMailbox::Result::Pending&&g_sensorThreadMailbox.hasQueuedWork(),"failed close never resets mailbox");rejected("thread-close",WAIT_OBJECT_0,ERROR_ACCESS_DENIED,true,true);
+    faultsOff();check(inputCaptureSensorThreadEnsure(),"fault clearance permits checked close and retry");check(g_sensorThread&&g_sensorThreadWake==w&&port::threadAttempts==creates+1,"retry creates one successor and reuses owned wake");retire();
+
+    for(const auto state:{DWORD(WAIT_FAILED),DWORD(WAIT_ABANDONED_0),DWORD(0x1234)}){
+        begin(state==WAIT_FAILED?"wait-failed":state==WAIT_ABANDONED_0?"wait-abandoned":"wait-unexpected");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;w=g_sensorThreadWake;ticket=g_sensorThreadMailbox.submit(SensorThreadRequest::Start);creates=port::threadAttempts;port::overrideWait=true;port::waitValue=state;
+        check(!inputCaptureSensorThreadEnsure(),"unknown wait never promises worker availability");check(g_sensorThread==t&&g_sensorThreadWake==w&&port::threadAttempts==creates,"unknown wait retains exact owners");check(ticket&&ticket->result==ymcc::sensors::ThreadMailbox::Result::Pending&&g_sensorThreadMailbox.hasQueuedWork(),"unknown wait never resets mailbox");rejected("thread-wait",state,state==WAIT_FAILED?ERROR_INVALID_HANDLE:ERROR_SUCCESS,true,true);retire();
+    }
+    begin("event-create-failure");port::failEvent=true;creates=port::threadAttempts;
+    check(!inputCaptureSensorThreadEnsure(),"CreateEvent failure returns false");check(!g_sensorThread&&!g_sensorThreadWake&&port::threadAttempts==creates&&!g_sensorThreadMailbox.acceptsWork(),"event failure leaves no owner and never creates worker");rejected("wake-create",0,ERROR_NOT_ENOUGH_MEMORY,false,false);faultsOff();check(inputCaptureSensorThreadEnsure(),"event failure retry succeeds");retire();
+
+    begin("thread-create-failure-owned-wake");port::failThread=true;check(!inputCaptureSensorThreadEnsure(),"CreateThread failure returns false");w=g_sensorThreadWake;auto events=port::eventAttempts;
+    check(!g_sensorThread&&w&&!g_sensorThreadMailbox.acceptsWork(),"failed worker keeps owned wake and closes admission");rejected("thread-create",0,ERROR_NOT_ENOUGH_MEMORY,false,true);
+    check(!inputCaptureSensorThreadEnsure()&&g_sensorThreadWake==w&&port::eventAttempts==events,"repeated failed retry retains same wake");faultsOff();check(inputCaptureSensorThreadEnsure()&&g_sensorThreadWake==w&&port::eventAttempts==events,"successful retry never overwrites wake owner");retire();
+
+    begin("failed-create-reap-shutdown");port::failThread=true;check(!inputCaptureSensorThreadEnsure(),"create failure owns event");faultsOff();check(inputCaptureSensorThreadShutdown(),"actual Shutdown retires event without thread");check(!g_sensorThread&&!g_sensorThreadWake&&port::owned()==0,"event actually closed before exit");
+
+    begin("signalled-close-create-success");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;w=g_sensorThreadWake;port::finish(t);creates=port::threadAttempts;
+    check(inputCaptureSensorThreadEnsure(),"signalled owner checked close and create succeeds");check(g_sensorThread&&g_sensorThreadWake==w&&port::threadAttempts==creates+1,"replacement reuses wake");retire();
+
+    begin("signalled-close-create-failure");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;w=g_sensorThreadWake;port::finish(t);port::failThread=true;
+    check(!inputCaptureSensorThreadEnsure()&&!g_sensorThread&&g_sensorThreadWake==w&&!g_sensorThreadMailbox.acceptsWork(),"successful close followed by failed create retains only wake");rejected("thread-create",0,ERROR_NOT_ENOUGH_MEMORY,false,true);faultsOff();check(inputCaptureSensorThreadEnsure()&&g_sensorThreadWake==w,"later retry reuses retained wake");retire();
+
+    begin("stop-terminal-fence");check(inputCaptureSensorThreadEnsure(),"create worker");t=g_sensorThread;creates=port::threadAttempts;auto stop=g_sensorThreadMailbox.submit(SensorThreadRequest::Stop);
+    check(stop&&g_sensorThreadMailbox.stopRequested(),"actual mailbox observes queued Stop");check(inputCaptureSensorThreadEnsure()&&g_sensorThread==t&&port::threadAttempts==creates,"queued Stop preserves native live-mailbox contract without capability gate");
+    auto terminal=g_sensorThreadMailbox.submit(SensorThreadRequest::Shutdown);check(terminal&&!g_sensorThreadMailbox.acceptsWork(),"terminal queue closes admission");check(!inputCaptureSensorThreadEnsure()&&g_sensorThread==t&&port::threadAttempts==creates,"Ensure cannot reopen terminal live mailbox");check(!g_sensorThreadMailbox.submit(SensorThreadRequest::Start),"late Start rejected by actual mailbox");retire();
+
+    begin("actual-shutdown-loop");auto starts=port::startCommands,stops=port::stopCommands,shutdowns=port::shutdownCommands;
+    check(inputCaptureSensorThreadEnsure(),"create worker");check(inputCaptureSensorThreadPost(SensorThreadRequest::Start),"actual Post Start completes");check(inputCaptureSensorThreadShutdown(),"actual Post Stop Shutdown Reap close loop");check(port::startCommands==starts+1&&port::stopCommands==stops+1&&port::shutdownCommands==shutdowns+1,"private worker consumed each production command");
+    check(!g_sensorThread&&!g_sensorThreadWake&&port::owned()==0,"actual Shutdown zero owners before process exit");check(inputCaptureSensorThreadShutdown(),"repeated actual Shutdown is idempotent");
+    check(port::orphanOwners==0,"no abandoned owner required controller salvage");
+    check(port::threadsCreated==port::threadsClosed&&port::threadsCreated==port::joins,"independent created joined closed thread counts balance");
+    check(port::eventsCreated==port::eventsClosed&&port::auxCreated==port::auxClosed,"independent production and auxiliary event close counts balance");
+    check(port::workerTimeouts.load()==0,"no helper worker timed out");
+    check(GetProcessHandleCount(GetCurrentProcess(),&after)!=FALSE&&before==after,"process HANDLE count returns to warmed baseline before exit");
+    std::cout<<"SUMMARY "<<json({{"checks",checks},{"failures",failures},{"threadsCreated",port::threadsCreated},{"threadsJoined",port::joins},{"threadsClosed",port::threadsClosed},{"eventsCreated",port::eventsCreated},{"eventsClosed",port::eventsClosed},{"auxCreated",port::auxCreated},{"auxClosed",port::auxClosed},{"orphanOwners",port::orphanOwners},{"ownedBeforeExit",port::owned()},{"handlesBefore",before},{"handlesAfter",after},{"workerTimeouts",port::workerTimeouts.load()}}).dump()<<"\n";
+    return failures?1:0;
+}
+

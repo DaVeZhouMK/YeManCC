@@ -11,7 +11,7 @@ import {
 const baseInput = {
   schemaVersion: 1,
   revision: 41,
-  outputTarget: { schemaVersion: 1, revision: 41, closure: 'UNENCLOSED', persona: 'dualshock4', descriptorHash: null, buttonMappingEnabled: true, gyroEnabled: true, visibilityPolicy: 'project-only' },
+  outputTarget: { schemaVersion: 1, revision: 41, closure: 'UNENCLOSED', persona: 'dualsense-edge', descriptorHash: null, buttonMappingEnabled: true, gyroEnabled: true, visibilityPolicy: 'project-only' },
   buttonMapping: { schemaVersion: 1, revision: 41, closure: 'UNENCLOSED', profileId: 'default', rules: {} },
   gyroMotion: { schemaVersion: 1, revision: 41, closure: 'UNENCLOSED', enabled: true, provider: 'windows-imu', unit: 'deg/s', calibrationId: 'cal-41', outputMode: 'virtual-stick', motionInput: 'local-space', motionMode: 'on', gyroMultiplier: 1, accelerometerMultiplier: 1, gyroThreshold: 2000, motionSensitivityX: 1, motionSensitivityY: 1, gyroWeight: 1.2, innerDeadzone: 0, outerDeadzone: 0, antiDeadzone: 15, invertHorizontal: false, invertVertical: false },
   ownership: { schemaVersion: 1, mode: 'ymcc-semantic' },
@@ -52,7 +52,7 @@ for (const mutation of [
 const request: GyroConfigActivationRequestV1 = {
   schemaVersion: 1,
   runId: 't10-run', requestId: 't10-request-41', epoch: 12, powerGeneration: 7,
-  owner: 'game-consumer', targetId: 'target-ds4-1', persona: 'dualshock4',
+  owner: 'game-consumer', targetId: 'mock-target-edge-1', persona: 'dualsense-edge',
   configRevision: 41, configHash: stableHash, providerId: 'windows-imu', physicalIdentity: 'imu:fixture',
   calibrationId: 'cal-41', visibilityTransactionId: null, sampleSequence: null,
   timestampUtc: '2026-09-04T12:00:00.000Z', neutralProofId: null,
@@ -71,6 +71,7 @@ if (activation.snapshot().phase === 'active') throw new Error('T10 marked active
 const firstFrame: GyroConfigFirstFrameV1 = {
   ...request,
   schemaVersion: 1, sampleSequence: 9001,
+  // Opaque mock report proof for ACK/frame binding, not an Edge SDK layout claim.
   mapped: { x: 0.125, y: -0.25 }, report: { id: 1, length: 64, hash: 'report-41-9001' },
 };
 if (activation.publishFirstFrame(firstFrame).result !== 'active' || activation.snapshot().lastActiveSampleSequence !== 9001) {
@@ -109,7 +110,7 @@ const evidence = {
   },
   trace: activation.trace(),
 };
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/GyroVirtual/T10-E01-gyro-config-activation-mock-20260904.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/GyroVirtual'), 'T10-E01-gyro-config-activation-mock-20260904.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
 console.log(`gyro config activation selftest: PASS (${evidencePath})`);

@@ -14,6 +14,12 @@
   --dc-accent: var(--accent-2); /* DC 专用语义色 */
   --danger: #e5484d; /* 红 (复位/退出) */
   --ok: #3fb950; /* 绿 (已开启状态点) */
+  --bg-card: var(--bg-panel);
+  --border: color-mix(in srgb, var(--text) 13%, transparent);
+  --accent-surface: color-mix(in srgb, var(--accent) 14%, var(--bg-input));
+  --accent-border: color-mix(in srgb, var(--accent) 45%, transparent);
+  --text-on-accent: #07131d;
+  --radius-card: 12px;
   --radius: 12px; /* 卡片 */
   --radius-ctrl: 8px; /* 控件 */
   /* 普通单行按钮基准：与 CPU 页“快速调节 CPU”按钮保持同一高度比例。 */
@@ -29,54 +35,36 @@
 }
 
 :root[data-theme='red-black'] {
-  --theme-gradient: linear-gradient(135deg, #1b070d 0%, #0d090c 54%, #4b1023 100%);
-  --bg-solid: #160b10;
-  --bg-panel: rgba(25, 12, 18, 0.94);
-  --bg-input: #24131b;
-  --bg-nav: rgba(24, 10, 16, 0.97);
-  --text: #fff0f1;
-  --text-dim: #c0959d;
-  --accent: #ff3b5c;
-  --accent-2: #ff9d3d;
+  --theme-gradient: linear-gradient(140deg, #160e16, #100d13 58%, #2c1420);
+  --bg-solid: #120e13;
+  --bg-panel: rgba(24, 18, 25, .97);
+  --bg-input: #281c25;
+  --bg-nav: rgba(18, 14, 20, .98);
+  --text: #f6edf1;
+  --text-dim: #bba8b2;
+  --accent: #f16b82;
+  --accent-2: #e8ad67;
   --dc-accent: var(--accent-2);
-  --danger: #ff5265;
-  --focus-ring: 0 0 0 2px var(--accent), 0 0 14px rgba(255, 59, 92, 0.55);
+  --danger: #ff8a81;
+  --text-on-accent: #280d17;
+  --focus-ring: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 32%, transparent);
 }
 
+/* Keep the saved cyberpunk id; its yellow theme now uses restrained gold. */
 :root[data-theme='cyberpunk'] {
-  --theme-gradient: linear-gradient(135deg, #050505 0%, #08140b 58%, #0c2a16 100%);
-  --bg-solid: #050505;
-  --bg-panel: rgba(10, 18, 12, 0.98);
-  --bg-input: #102017;
-  --bg-nav: rgba(5, 9, 6, 0.99);
-  --text: #f5d90a;
-  --text-dim: #c7ad18;
-  --accent: #ffe600;
-  --accent-2: #ffef66;
-  --dc-accent: #39ff68;
-  --danger: #ff5c4d;
-  --focus-ring: 0 0 0 2px var(--accent), 0 0 14px rgba(255, 230, 0, 0.6);
-}
-
-:root[data-theme='cyberpunk'] .nav-item,
-:root[data-theme='cyberpunk'] .nav-item.active {
-  color: var(--accent);
-}
-
-:root[data-theme='cyberpunk'] .app-main,
-:root[data-theme='cyberpunk'] .app-main .muted {
-  color: var(--text);
-}
-
-:root[data-theme='cyberpunk'] body,
-:root[data-theme='cyberpunk'] .app-main {
-  color: var(--text);
-}
-
-:root[data-theme='cyberpunk'] .card,
-:root[data-theme='cyberpunk'] .row-label,
-:root[data-theme='cyberpunk'] .card-title {
-  color: var(--text);
+  --theme-gradient: linear-gradient(140deg, #17140c, #100f0c 58%, #2b2313);
+  --bg-solid: #11100c;
+  --bg-panel: rgba(23, 21, 16, .97);
+  --bg-input: #282419;
+  --bg-nav: rgba(17, 16, 12, .98);
+  --text: #f4f0e4;
+  --text-dim: #beb39a;
+  --accent: #efc65b;
+  --accent-2: #dea36c;
+  --dc-accent: var(--accent-2);
+  --danger: #f08477;
+  --text-on-accent: #251d0b;
+  --focus-ring: 0 0 0 2px var(--accent), 0 0 12px color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 

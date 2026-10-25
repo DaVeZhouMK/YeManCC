@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-20T02:56:27.466Z",
+  "caseId": "fan.explicit-off-host-chain-consumer",
+  "previousGlobalFailure": {
+    "root": "D:/C31/2026-10-20T02-42-41-840Z-cb6bdbf1/result.json",
+    "sha256": "9202599a8d91e3301a35d371b1a8972f4d92e7ebccd28ed8809d5857c041f268",
+    "cause": "EXPLICIT_CHAIN_REVIEWED_SOURCE_DRIFT:FanLab/real-host/Program.cs",
+    "preserved": true
+  },
+  "sourceReview": [
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "before": "fb42c5a9dd85ca30fc2167abf1504f81af2498e71a864dfcff61475a18031b11",
+      "after": "6643edb07d80cf723d0be8835c6405c01c0d2ec24ad59689c8d97ce342c9f7cc",
+      "diffFile": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\diffs\\FanLab\\real-host\\Program.cs.diff",
+      "diffSha256": "f2c2acf92e6f48265437894fd1e7931a031106c0758423c52d469b5d4c9571dd"
+    },
+    {
+      "path": "src/bridge/controllerShortcutRules.ts",
+      "before": "eb7ed8c8328ab771666ff9441f6974e51044d349699faf506ef10e57f46e39fb",
+      "after": "6eb5c2126217babceb686dfcecf9175a51d1606c2f12d317c327d2dbec7abcf5",
+      "diffFile": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\diffs\\src\\bridge\\controllerShortcutRules.ts.diff",
+      "diffSha256": "d252023ebd2dbce3d9ec94ee51d3fdcc0ff3c22f20faa80ec8e417d8b62873d8"
+    },
+    {
+      "path": "src/bridge/fanHost.ts",
+      "before": "a77d85d93f15e63d34f744279603474b290bf6db64af6b7ecbd2ac628c912c45",
+      "after": "e2aee041f41cf5b2c0ac1b27ae560b3f4c5b97bf22bf98ce16eceb65836a6a23",
+      "diffFile": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\diffs\\src\\bridge\\fanHost.ts.diff",
+      "diffSha256": "9aa3d5b9debed29f394e4968b70081925be5d699ad323acb5aca95c59ecf9109"
+    },
+    {
+      "path": "src/bridge/performanceControls.ts",
+      "before": "87ac5918e2ca81c657e67bb08d8ae6b73639b7f89bcf4e5a49eeea6015674862",
+      "after": "6e576f791dc903402ca11dd19f96a3d622672f87f8d04eaa86ec7bf00b5cddc9",
+      "diffFile": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\diffs\\src\\bridge\\performanceControls.ts.diff",
+      "diffSha256": "48a35624e17f8752ef64e5c4f72ec73af8d340bc19a74ae112083b4a01b4ccd9"
+    },
+    {
+      "path": "src/bridge/performanceSchedule.ts",
+      "before": "1a2b0c9d85310411e9528b412eb4957e5e38895c79630ea785fed7abfcb5cd54",
+      "after": "2b5422dca7095c678ab3f115089f605a2c1820341d07901141f1a17939501883",
+      "diffFile": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\diffs\\src\\bridge\\performanceSchedule.ts.diff",
+      "diffSha256": "3ce493852fb3d8dbdeecf6cbe98191d0d68c8109f56bf32ef3e0ba4f21576338"
+    }
+  ],
+  "programDifference": {
+    "oldSha256": "fb42c5a9dd85ca30fc2167abf1504f81af2498e71a864dfcff61475a18031b11",
+    "newSha256": "6643edb07d80cf723d0be8835c6405c01c0d2ec24ad59689c8d97ce342c9f7cc",
+    "outsideBackendAndRecoveryPrefixUnchanged": true,
+    "serverIdenticalAfterLineEndingNormalization": true,
+    "oldRecoveryPrefix": "    private void RecoverAfterHardwareFailure(Exception error)\n    {\n        if (error is FanApiException { Code: \"FAN_WRITE_SUPERSEDED\" })\n        {\n",
+    "newRecoveryPrefix": "    private void RecoverAfterHardwareFailure(Exception error)\n    {\n        if (error is FanApiException { Code: \"FAN_WRITE_SUPERSEDED\" or \"HC_OPEN_EVENTS_POWER_SUPERSEDED\" })\n        {\n            // Event subscription rollback is local. The already-announced power\n            // boundary retains device Close/return ownership, exactly as for a\n            // superseded fan write; retain the cause without a second restore.\n            if (error is FanApiException { Code: \"HC_OPEN_EVENTS_POWER_SUPERSEDED\" })\n                state.LastError = ExceptionText(error);\n",
+    "backendScope": "Compiled in full, but original engine explicit mock makes realBackend null. No real HC/init/EC verification claimed."
+  },
+  "tsClosure": {
+    "before": 96,
+    "after": 97,
+    "added": [
+      "src/radial/availability.ts"
+    ],
+    "removed": [],
+    "changed": [
+      "src/bridge/fanHost.ts",
+      "src/bridge/controllerShortcutRules.ts",
+      "src/bridge/performanceSchedule.ts",
+      "src/bridge/performanceControls.ts"
+    ]
+  },
+  "originalExpectationsUnchanged": {
+    "modes": 5,
+    "positiveChecks": 412,
+    "managedFault": "actual-bridge-control-contract-allowed",
+    "otherFaultChecksPassed": 81,
+    "nodeFaultError": "Error: Fan Host 当前不可控制: suspended",
+    "originalTsSha256": "cca250364b46462d4908487584034303fbbe75f4567242ae5e11fcf826dd4c0e",
+    "originalManagedSha256": "1de26c1493a8406b43d32b795104c89f5c83bc829bba3f9e194196c0d7ec4752"
+  },
+  "localValidation": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\local-validation.json",
+    "sha256": "6aa841aa8462d667f280a7e64eef51c47feb8c8dc77803ff6e0aeff11face9b2",
+    "workerResult": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\r2\\worker-result.json",
+    "workerSha256": "8d8a90f09829b5ac741eb810a14912f3f2ccb47df5b04533562aca5ff390714d",
+    "rootExecution": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-repair-20261020\\r2\\local-root-execution.json",
+    "rootNaturalExit": 0,
+    "compilerProjects": 3,
+    "compiledOriginalManagedProgram": true,
+    "originalTsCompilerInputs": 97
+  },
+  "scope": {
+    "globalRun": false,
+    "auditRun": false,
+    "productChanges": 0,
+    "B31Changed": false,
+    "realHostMainInvoked": false,
+    "realHC": false,
+    "hardwareWrites": false,
+    "osSleep": false,
+    "physicalAcceptance": false
+  },
+  "note": "Reviewed identities advanced only after the isolated original positive and exact semantic-fault executions. Original failed global run and first local compiler-closure failure retained. This metadata is not a global PASS."
+}

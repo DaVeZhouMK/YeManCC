@@ -1,9 +1,8 @@
 // Windows full-screen startup is user intent, not the presence of a YeMan task.
-// These defaults were verified by the user on a ROG / 26300.9457. Never apply on read.
+// Explicit user requests may apply these defaults on any machine. Never apply on read.
 export const GAMING_HOME_DEFAULTS = Object.freeze({ deviceForm: 46, startup: 1 });
 export const GAMING_OEM_KEY = 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\OEM';
 export const GAMING_CONFIG_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\GamingConfiguration';
-const BIOS_KEY = 'HARDWARE\\DESCRIPTION\\System\\BIOS';
 export type GamingRegistryRoot = 'HKLM' | 'HKCU';
 
 export interface GamingHomeState {
@@ -42,13 +41,6 @@ export async function readGamingHomeState(port: GamingHomeRegistryPort): Promise
   };
 }
 
-// Missing OEM identity may only be repaired on a recognized physical ROG Ally.
-// Other handhelds with their OEM DeviceForm=46 already set are also accepted.
-export function isRogGamingHandheld(manufacturer: unknown, product: unknown): boolean {
-  return typeof manufacturer === 'string' && typeof product === 'string' &&
-    /ASUS/i.test(manufacturer) && /ROG.*Ally|\bRC7[123][A-Z0-9_]*\b/i.test(product);
-}
-
 interface Change {
   root: GamingRegistryRoot;
   key: string;
@@ -58,20 +50,11 @@ interface Change {
 }
 
 export async function setGamingHomeStartup(
-  port: GamingHomeRegistryPort, enabled: boolean,
+  port: GamingHomeRegistryPort, enabled: boolean, repairHandheld = enabled,
 ): Promise<GamingHomeState> {
   const before = await readGamingHomeState(port);
-  if (enabled && before.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm) {
-    const [manufacturer, product] = await Promise.all([
-      port.read('HKLM', BIOS_KEY, 'SystemManufacturer'),
-      port.read('HKLM', BIOS_KEY, 'SystemProductName'),
-    ]);
-    if (!isRogGamingHandheld(manufacturer, product)) {
-      throw new Error('未确认是 ROG 掌机，拒绝把普通电脑标记为掌机；请先检查设备识别。');
-    }
-  }
   const changes: Change[] = [];
-  if (enabled && before.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm) {
+  if (repairHandheld && before.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm) {
     changes.push({ root: 'HKLM', key: GAMING_OEM_KEY, name: 'DeviceForm',
       before: before.deviceForm, after: GAMING_HOME_DEFAULTS.deviceForm });
   }
@@ -95,7 +78,7 @@ export async function setGamingHomeStartup(
     }
     const result = await readGamingHomeState(port);
     if (result.startupValue !== startup ||
-        (enabled && result.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm)) {
+        (repairHandheld && result.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm)) {
       throw new Error('全屏启动配置被其他程序覆盖，请检查开机联动。');
     }
     return result;

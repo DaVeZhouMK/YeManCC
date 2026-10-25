@@ -1,0 +1,23 @@
+{
+  "status": "PROMOTED_BY_PARENT",
+  "reportedCombinedTotalBytes": 11849647,
+  "note": "Parent promotion is explicitly authorized and expected. Frozen before snapshots and earlier validation results remain historical evidence. No further experiment or live baseline guard was run after this notification.",
+  "productionPromotionPerformedByParent": true,
+  "authorizationSource": "User message in this session, 2026-10-18",
+  "sdkAfterSha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+  "reportedParentValidation": [
+    "UI+SDK combined seven pure constructors",
+    "SDL positive and negative paths",
+    "22 callbacks",
+    "complete cross-library contracts",
+    "13 runtime checks"
+  ],
+  "freshProductionRetestByThisSubtask": false,
+  "sdkBeforeBytes": 1568256,
+  "sdkNetSavedBytes": 493568,
+  "productionChangedByThisSubtask": false,
+  "sdkAfterBytes": 1074688,
+  "baselineDriftFailure": false,
+  "sdkBeforeSha256": "0da19d45d98c20b46b08ec282bd8a818e5600d482912e2289ba0da591e19b7e0",
+  "reportedProfileSha256Prefix": "c3c35e"
+}

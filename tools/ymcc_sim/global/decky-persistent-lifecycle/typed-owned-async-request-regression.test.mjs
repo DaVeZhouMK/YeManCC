@@ -1,0 +1,46 @@
+// Every control is copied from one exact actual receipt. These mutations only
+// test rejection; no synthetic product execution or PASS is inferred.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import test from 'node:test';
+import {validateOwnedAsyncNative} from './typed-owned-async-native.mjs';
+const resultFile=process.env.YMCC_OWNED_ASYNC_RESULT,resultSha=process.env.YMCC_OWNED_ASYNC_RESULT_SHA256;
+assert(resultFile&&/^[a-f0-9]{64}$/.test(resultSha??''),'ACTUAL_OWNED_RECEIPT_IDENTITY_REQUIRED');
+const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'),read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
+assert.equal(sha(resultFile),resultSha);const envelope=read(resultFile);assert.equal(envelope.passed,true);
+assert.equal(sha(envelope.raw.path),envelope.raw.sha256);const raw=read(envelope.raw.path);
+const observations=new Map();for(const row of envelope.controls){assert.equal(sha(row.raw.path),row.raw.sha256);assert(!observations.has(row.nonce));observations.set(row.nonce,read(row.raw.path));}
+const options=()=>({executablePath:envelope.nativeImage.path,observations:structuredClone(observations)});
+const reject=(name,mutate)=>test(name,()=>{const value=structuredClone(raw),context=options();mutate(value,context);assert.throws(()=>validateOwnedAsyncNative(value,context));});
+test('actual source-bound owned result preserves6+2+4 and10 exact finite children',()=>{const summary=validateOwnedAsyncNative(raw,options());assert.equal(summary.typedRows,6);assert.equal(summary.typedFailed,0);assert.equal(summary.directActualAsyncConsumers,2);assert.equal(summary.negativeControls,4);assert.equal(summary.ownedDirectChildren,10);assert.equal(summary.strictParentHandlesEqual,true);assert.equal(summary.strictParentThreadsEqual,true);assert.equal(summary.ownedCalibrationPassed,true);});
+reject('v1 cannot masquerade as ownership-v2',r=>r.schema='ymcc.typed-legacy-async-request.v1');
+reject('same-process natural library-zero claim cannot be invented',r=>r.sameProcessLibraryNaturalZeroClaim='PASS');
+reject('missing original condition is rejected',r=>r.originalTypedRows[0].originalAssertions.pop());
+reject('changed original condition order is rejected',r=>r.originalTypedRows[0].originalAssertions.reverse());
+reject('child death without callback release is rejected',r=>r.originalTypedRows[0].afterStopAsync.callbackOwnersReleasedObserved=false);
+reject('owned Client residue is rejected',r=>r.originalTypedRows[0].atExit.handles=1);
+reject('late callback revival is rejected',r=>r.originalTypedRows[0].lateCreatesAfter++);
+reject('fatal reason cannot disappear',r=>r.originalTypedRows[2].faultBeforeLate='');
+reject('native20s remains strict',r=>r.elapsedMs=20000);
+reject('child source identity mismatch is rejected',r=>r.directAsyncRequestConsumers[0].ownership.child.path='C:/foreign.exe');
+reject('child process identity cannot be parent',r=>r.directAsyncRequestConsumers[0].ownership.child.pid=r.directAsyncRequestConsumers[0].ownership.parent.pid);
+reject('callback must be observed while child alive',r=>r.directAsyncRequestConsumers[0].ownership.aliveWhileCallbackProofRead=false);
+reject('unreleased strong callback owner is rejected',r=>{r.directAsyncRequestConsumers[0].callbackOwnersReleased=false;r.directAsyncRequestConsumers[0].ownership.callbackReleaseObserved=false;r.directAsyncRequestConsumers[0].ownership.callbackReleasedAt=0;});
+reject('exit1 cannot become a positive control',r=>r.directAsyncRequestConsumers[0].ownership.exitCode=1);
+reject('forced Job retirement cannot replace natural exit',r=>r.directAsyncRequestConsumers[0].ownership.afterOwnerClose.jobTerminationAttempted=true);
+reject('Job active process cannot be hidden',r=>r.directAsyncRequestConsumers[0].ownership.afterOwnerClose.jobActiveProcesses=1);
+reject('retained parent observation handle is rejected',r=>r.directAsyncRequestConsumers[0].ownership.parentHandlesAfter++);
+reject('per-control parent thread mismatch is rejected',r=>r.directAsyncRequestConsumers[0].ownership.parentThreadsAfter++);
+reject('original1500ms resource budget cannot expand',r=>r.directAsyncRequestConsumers[0].ownership.resourceDeadlineMs=1600);
+reject('cleanup at the deadline cannot be promoted',r=>r.directAsyncRequestConsumers[0].ownership.cleanupFinishedAt=r.directAsyncRequestConsumers[0].ownership.offAt+1500);
+reject('old nonce cannot be reused by a new child',r=>r.directAsyncRequestConsumers[0].ownership.nonce=r.ownedCalibration[0].probes[0].ownership.nonce);
+reject('missing independently copied child raw is rejected',(r,c)=>c.observations.delete(r.directAsyncRequestConsumers[0].ownership.nonce));
+reject('changed child raw body is rejected',(r,c)=>c.observations.get(r.directAsyncRequestConsumers[0].ownership.nonce).row.reason='fake');
+reject('changed child raw clock is rejected',(r,c)=>c.observations.get(r.directAsyncRequestConsumers[0].ownership.nonce).offAt++);
+reject('unknown peer initialization resource delta is rejected',r=>r.parentPeerCalibration[0].afterHandles++);
+reject('peer calibration cannot hide a lost baseline handle',r=>r.parentPeerCalibration[0].after.shift());
+reject('non-KsecDD File cannot use crypto calibration',r=>{const before=new Set(r.parentPeerCalibration[0].before.map(h=>[h.handle,h.type,h.access].join(':')));const file=r.parentPeerCalibration[0].after.find(h=>h.type==='File'&&!before.has([h.handle,h.type,h.access].join(':')));assert(file);file.objectName='foreign';});
+reject('unstable second peer calibration is rejected',r=>r.parentPeerCalibration[1].afterHandles++);
+reject('owned calibration drift cannot be marked stable',r=>r.ownedCalibration[1].afterHandles++);
+reject('total parent handle equality cannot be waived',r=>r.parentHandlesAfter++);
+reject('total parent thread equality cannot be waived',r=>r.parentThreadsAfter++);
+reject('extra lifecycle row is rejected',r=>r.originalTypedRows.push(structuredClone(r.originalTypedRows[0])));
+reject('missing renewal negative is rejected',r=>r.negativeControls.shift());

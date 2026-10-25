@@ -1,0 +1,559 @@
+{
+  "schemaVersion": 1,
+  "role": "Reuse existing native tool inventory; enumerate the fixed managed manifest sources/snapshots/generated/runtime/evaluated/tool allowlist as individual artifactInputs. No directory scan.",
+  "node": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "msvcVersion": "14.44.35207",
+  "windowsSdkVersion": "10.0.26100.0",
+  "nativeArtifactBindings": [
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b",
+      "bytes": 83344536
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat",
+      "sha256": "6b516d8fcf543c14b2d861e1f45661e0029230fe0dc48e86ce78522801822209",
+      "bytes": 39
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\Microsoft.VCToolsVersion.default.txt",
+      "sha256": "030613df718548a88970e4c1844a8605d17aba9aa36bfea0b4359d8f28fd62bf",
+      "bytes": 13
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\atlprov.dll",
+      "sha256": "de51e1081c30be9b5b34315ae5c8a923e2c052404deb8126897790a359ff4cd6",
+      "bytes": 212320
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\bscmake.exe",
+      "sha256": "de08279282ae87f667ccb76d9e390db4838c8036cfb39e062a79966f59cb4bae",
+      "bytes": 117136
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1.dll",
+      "sha256": "48bb561939cfd8fbf194bb73b111b2083912da4fb81af2c181cbe8f4b89e5ad1",
+      "bytes": 3430200
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c1xx.dll",
+      "sha256": "688fe28f3065283edf668868e76aeab28f03f80e2171c14c7d4e37f64513f623",
+      "bytes": 12332384
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2.dll",
+      "sha256": "98050f97d60f7e95fcaf3525a7103e4818fba498a43563922476819ce88ed162",
+      "bytes": 10462008
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\c2dd.dll",
+      "sha256": "66f48262db00a15cffed9bc852e9e377f90c2e42da54b38d9569c3ab615aea54",
+      "bytes": 10462048
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cfgpersist.dll",
+      "sha256": "12b0ba2977b3df21b3399e34af95b9bc151490d9ddec6f42bb23a5fdd9818214",
+      "bytes": 1605176
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cl.exe",
+      "sha256": "88c8344236a27a6e727e0a8edc49aaa2690bdc7a9464b9d18cc7abe70a9f1c0d",
+      "bytes": 677736
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dbg_dynamic-x86_64.dll",
+      "sha256": "6ebc5e4c7b5906a3fa8234937dab49aa5b31be1f329bb6cc92141cdc80472ad4",
+      "bytes": 1267784
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\clang_rt.asan_dynamic-x86_64.dll",
+      "sha256": "3aa742521e8cbd23252f0545aa51d5a15624a3e4430fbe2f81567afaeb3fc59b",
+      "bytes": 1193496
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ConcurrencyCheck.dll",
+      "sha256": "6d42cd490c56d11e640d7524d8ca701a129bb5a4de2c97150862fc7f5e0fa303",
+      "bytes": 820792
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\CppBuildInsights.dll",
+      "sha256": "c83504679e7fca14a6f60480d0f75eb94dec9994ed900dba0ff94125d468fc07",
+      "bytes": 292904
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\CppCoreCheck.dll",
+      "sha256": "68af7ec79d86d2d69d86b83b2a317f1d5ec2b64120c2f55ed11ac45260fed187",
+      "bytes": 1174568
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\cvtres.exe",
+      "sha256": "8e4b47f34c08c2118b1a6913ee923abc0c94881dc4e003d0daf059c1230c7687",
+      "bytes": 48544
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\d3dcompiler_47.dll",
+      "sha256": "8c88c162010a8d6b80f2c0433d4ce973ce626afcbc8da5be68bfa2ba68341eba",
+      "bytes": 4467904
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\dpcmi.dll",
+      "sha256": "74aabc92d318480d0f9bd3a65ecc0b15a144eb723f1f3379758913c4fbfd9b81",
+      "bytes": 1398584
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\dumpbin.exe",
+      "sha256": "12a1cd87238bd66dfdb788b4fcdcb91ce4b3f81236aab12a7a29e5ae1d85af50",
+      "bytes": 23416
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\editbin.exe",
+      "sha256": "82fc1e076713c90959d2c5856fd219d88ea8112af74164769a737dff5a418928",
+      "bytes": 23376
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\EnumIndex.dll",
+      "sha256": "75e2511ab5d6b035f8a40878609774f4b228ec523d25dd38e189896a508044ea",
+      "bytes": 624672
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\EspXEngine.dll",
+      "sha256": "18a6ac873124a291ae22be9f0d1729fdb6a784478efb428c8df7d66184b1bbb2",
+      "bytes": 2934840
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\HResultCheck.dll",
+      "sha256": "c5bf47ad49cef86638bc24d979ccc1a5249725d0a8872a29f7ff89cf0c939980",
+      "bytes": 557640
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ifc.exe",
+      "sha256": "afceb636b7b8d4e8f0478bc32b77d96c5c69ff0f5f3681fe7751cac18e0e1967",
+      "bytes": 211808
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\KernelTraceControl.dll",
+      "sha256": "e462f4c4fff915c6fa742e218a254e5a3d5d051eadf5292b649904f602ce7f8e",
+      "bytes": 253472
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\lib.exe",
+      "sha256": "3d694c782f93e998fec5db0c2df78153565da23a028ee4618561fa0c33408489",
+      "bytes": 23376
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\link.exe",
+      "sha256": "ca11e6c45debd34bf652dfe984c5360a531a005ed78bf72852330c9c2590cf0d",
+      "bytes": 3252576
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\llvm-symbolizer.exe",
+      "sha256": "1a591000e57e894662427fee1f24dfbf5b5f0345260f84c5c2102207a31918ab",
+      "bytes": 12831776
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Microsoft.Diagnostics.Tracing.EventSource.dll",
+      "sha256": "a20f6d6c0dae7ac9c7c295b819d085bdfc7cfab123e8fc4ca4ddfd0a88701d04",
+      "bytes": 170288
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Microsoft.VisualStudio.RemoteControl.dll",
+      "sha256": "cc52e19735d6152702672feb5911c8ba77f60fdc73df5ed0d601b37415f3a7ed",
+      "bytes": 47536
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Microsoft.VisualStudio.Telemetry.dll",
+      "sha256": "c6b09bdb01fb84406fb95f77befd68b4f8f0b5d715bb00df817b5e691501c50d",
+      "bytes": 1026088
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Microsoft.VisualStudio.Utilities.Internal.dll",
+      "sha256": "4d1d5efd28d72c332ba87e1993cb35e46404753543c5563700b98a97aa3c42a6",
+      "bytes": 62480
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\ml64.exe",
+      "sha256": "a776cf32777d2df2e201a769bb5bd6502bb72bac98f60c6f53a4bfcecd0db8ed",
+      "bytes": 646504
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msobj140.dll",
+      "sha256": "0a18f9fe0a6d7afd9fbcf921c15eee51e3c982d7297429eabf4122a19e56d4bc",
+      "bytes": 149344
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdb140.dll",
+      "sha256": "8cd754a0fe8a91d853e04c48bf56b5de502897c77c3aa89a2dc82d6b80b9351a",
+      "bytes": 345912
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcmf.exe",
+      "sha256": "79f50bad07e6f9bb9651cfadaf79201e627533b08fd13358494aee189d976f08",
+      "bytes": 2021752
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbcore.dll",
+      "sha256": "ff7482bf01d1dcad8d5e368333e4495ed3572713edeec7044623e5f5fff999b9",
+      "bytes": 1321824
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbsrv.exe",
+      "sha256": "9221dbe740f39a1059dfe6e917984effad6f97312636f001c9191a6bccb34f93",
+      "bytes": 186248
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspdbst.dll",
+      "sha256": "80de4791af04fcdd093fb9f9163122a07d9e08321c8a1512b15cdce08acf729e",
+      "bytes": 1288544
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\mspft140.dll",
+      "sha256": "f1800a2620d018886440cf1cc1a5ad22d403387409e5b9ff128eaf8eb71a906a",
+      "bytes": 2525496
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcdis140.dll",
+      "sha256": "a5baa6487efccc4285b1aadd6620b94bbbcd649a77b4068170a5c575b0087e88",
+      "bytes": 1824608
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140.dll",
+      "sha256": "20076bc0e3fcb1842cab77dfe8ef816bc099b887c25329847a83e71c98765639",
+      "bytes": 557496
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_1.dll",
+      "sha256": "a65e4abcf1df1ee5b4c363a2dfd27c471f78f1520372e38456c4379064d75aa2",
+      "bytes": 35696
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_2.dll",
+      "sha256": "b0798ec98cb0bade3df33ab66b553282425c6a2b512ff24b2d3f9040c848fe73",
+      "bytes": 280000
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_atomic_wait.dll",
+      "sha256": "4b77104b31157c094493667f2919ef857e39f23163df632dbe302c4e6d7e8180",
+      "bytes": 50032
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\msvcp140_codecvt_ids.dll",
+      "sha256": "21ce1d7d4685efff88bae1034215529a5a991d3a1dbb9daf5126963818a935a4",
+      "bytes": 31600
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\Newtonsoft.Json.dll",
+      "sha256": "a4096c8ab7c4dc5c21485b43f81b8f87699b748d39c4c24dc5dab6df61111219",
+      "bytes": 709944
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\nmake.exe",
+      "sha256": "b05f089f67dba8df1d7cc38798b71e62a6ce8881b234dcfc80a657264597626c",
+      "bytes": 134560
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\pgocvt.exe",
+      "sha256": "401d6c25a06df63fbc4e729e6275909e77f67a84ce46e7f1be7116ac8eef2c52",
+      "bytes": 59048
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\pgodb140.dll",
+      "sha256": "2dcb8bd692b6731fe41881666f8987126f1da87aad2145a54af6d5277e65bf91",
+      "bytes": 88096
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\pgomgr.exe",
+      "sha256": "7dd64ea79dae13e63be99133b52e88a8ebd869f08b70994c9a6a587181a66a20",
+      "bytes": 93816
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\pgort140.dll",
+      "sha256": "3a620df77fc0eb13003ee0da1728ed22e424b12997a95678de2ab8c9c742fc3c",
+      "bytes": 50728
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\pgosweep.exe",
+      "sha256": "5682d59c3864fb6566eb9a92add78b071c1d6a335f0be6734b6668f65d19f2e7",
+      "bytes": 64656
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\SecurityChecks.dll",
+      "sha256": "2452cb217044522553fda785f2ce5aba786964bfdecab7a8adb1f33c5007b386",
+      "bytes": 611896
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\System.Memory.dll",
+      "sha256": "06ea95f8388a6b031acb2449fd5663d9d26d720ae13df80c800805f896734430",
+      "bytes": 138144
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\System.Runtime.CompilerServices.Unsafe.dll",
+      "sha256": "3cadcb6b8a7335141c7c357a1d77af1ff49b59b872df494f5025580191d1c0d5",
+      "bytes": 16768
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\tbbmalloc.dll",
+      "sha256": "1e142c6c1d16f5454dbe30167e0164123c8542a85ef0db6a41ce474d93aef8ed",
+      "bytes": 115000
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\undname.exe",
+      "sha256": "e805364f61cecb3f7730731a77111a258a7198e33cc89e652392651340f00984",
+      "bytes": 26472
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\VariantClear.dll",
+      "sha256": "7dd21e35b22c2165f73e8a9f99ecc48a6a0b28406ac02b2dc4e5c446246b78cb",
+      "bytes": 655904
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcmeta.dll",
+      "sha256": "2ac473af2de8d862f0b2ee5df02693b7ebbc639b9b0139ae063015aa71dbb7f7",
+      "bytes": 113976
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcperf.exe",
+      "sha256": "2cfba4e704e19c8eda9514b4f7eca42fd35326f8fa730a2a17dff5144ffec50a",
+      "bytes": 265568
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140.dll",
+      "sha256": "b23a5c9ee132fbb72d970165de052f332209992eb4568616b7802052edc4f398",
+      "bytes": 124272
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_1.dll",
+      "sha256": "c3feb5700b1cbe6ace93e64e286b6394970e52d36b3b643d8243a1771077d210",
+      "bytes": 49592
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vcruntime140_threads.dll",
+      "sha256": "077dac1a197b8fbb9bffff1109489fdfba21140a25960b7e94d20bb69687dd84",
+      "bytes": 38328
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\vctip.exe",
+      "sha256": "e175c981ca866689bf8f8d9bd5ba1e71e2eb1c9d389de555744b0cb439250996",
+      "bytes": 335328
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\bin\\Hostx64\\x64\\xdcmake.exe",
+      "sha256": "8bfe7d0842bbf727c154b0229e0e91b11b6850a8d1ae300839a91e478a917d42",
+      "bytes": 42368
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcmt.lib",
+      "sha256": "8fe40dd342b90b35d62b8f5d55b4e92df7785c122976618365cfe3b014cc857a",
+      "bytes": 6534094
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libcpmt.lib",
+      "sha256": "da86944db1497552c378e6252a7177fbefbdaeba4e69a6457de4db7fb2d235de",
+      "bytes": 21684758
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\libvcruntime.lib",
+      "sha256": "e4f8daf356d63592ff6d6f7ad90c8c9da4c1230273ad113a9a2b56afd6bfcb04",
+      "bytes": 2087406
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\lib\\x64\\oldnames.lib",
+      "sha256": "35bd82cfb02a0146ff9c0ca6bf7dbde61d49c6d4f3493befe584218c370ff41d",
+      "bytes": 157422
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\WindowsApp.lib",
+      "sha256": "00443855b2c9c731326fe58882ddb2cd42454496f64a5b622df29a966bea740f",
+      "bytes": 1490672
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\kernel32.lib",
+      "sha256": "341c7d56125a03b458e4d5093e4c79b33123ccfdfd610fe236937b8e6f3134bb",
+      "bytes": 311908
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\user32.lib",
+      "sha256": "f45759349ad08b848bdd4eee39cd9b428b2a7ae63a09889c09a197fe7b01421d",
+      "bytes": 167864
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\gdi32.lib",
+      "sha256": "f530829c5e91cacd906c9e7363ca873bb8eaeb50114cc6a74a8a04c49bb4ec40",
+      "bytes": 138622
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\shell32.lib",
+      "sha256": "2a22142874964268432783a85cef5e3f5c18ed050ab77e637bb6bab30bb73ab6",
+      "bytes": 271918
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\shlwapi.lib",
+      "sha256": "d2c39baa1c2658e022a82410f283e89b8ef94b8ac0bf64f3532a954b0d8598d3",
+      "bytes": 74178
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\ole32.lib",
+      "sha256": "f7b6d1e4a2f2a16c6a78ed821c8aa7f0b488112bb4da778285086e4588ca197a",
+      "bytes": 118864
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\oleaut32.lib",
+      "sha256": "ccb86049288e4816e34b572f0d63a6b2c40d91777b092bb77ae639aa8e887ae5",
+      "bytes": 82126
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\uuid.lib",
+      "sha256": "d077ffb106503e057428dc7bb4c5daac019c269ffc714edb18ca028723cc840a",
+      "bytes": 8936424
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\dwmapi.lib",
+      "sha256": "a51990637560d22b3b28ea748064cf88d56381ef5f4e65d8014d31a6660ff3a8",
+      "bytes": 8850
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\winhttp.lib",
+      "sha256": "6873f0b8893e8e7bd86cb7a8310631b3fcde99a85486196fe61ce9f1a352906a",
+      "bytes": 21576
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\advapi32.lib",
+      "sha256": "a0ea53377e6de11c5fdc07e72af11d22d8fa613cecc6ccb1b6de43490392eadc",
+      "bytes": 178306
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\shcore.lib",
+      "sha256": "ac184006754749e3c709c1d8d42d61877d7192a5cf492d0a09ded201f62bfaca",
+      "bytes": 16772
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\version.lib",
+      "sha256": "391b955d560dd6b07b8fb16a536550ac6156fa5ffd537584a2d24ea6723a6c93",
+      "bytes": 4100
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\psapi.lib",
+      "sha256": "45ef99080ea8b49ec3ab396442d7b9ec39c1289445bf0197135f8922b1b4d973",
+      "bytes": 7406
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\PowrProf.lib",
+      "sha256": "9c05216b4cf2e80a3763d56b49d4a12bed0078c417b3633a03faa7405676378d",
+      "bytes": 29894
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\ws2_32.lib",
+      "sha256": "a8a552a37d8935e272ff470e2620f55e05433b989707bd05e9911d2482f44134",
+      "bytes": 260560
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\ucrt\\x64\\libucrt.lib",
+      "sha256": "2b247d6a27c22c520c34134b8acf2da3366175a4690886927a51929f37725fdd",
+      "bytes": 43336396
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\webview2\\build\\native\\x64\\WebView2LoaderStatic.lib",
+      "sha256": "89c6b872783b8f6c3cedbff618adb42082d455c615453ae10cfc753f1e8f25d8",
+      "bytes": 10500472
+    },
+    {
+      "path": "C:\\Windows\\System32\\cmd.exe",
+      "sha256": "65ec268add3973b6dca64222985da47caeaee44a340b0ec1466782914fd743d9",
+      "bytes": 344064
+    },
+    {
+      "path": "C:\\Windows\\System32\\chcp.com",
+      "sha256": "8d75e783f327f899a42927fc2927f0e3d1ec62c4ca1dc88de04dd67de9ae555d",
+      "bytes": 36864
+    }
+  ],
+  "managedDll": "G:/YeManCC-Work/Build/Validation/VirtualController-Lifecycle-20261019/integration/managed/env-return200-r4/bin/Release/net10.0/Fixture.dll",
+  "managedManifestSha256": "a2731cc0d3f990e862e946e4b422b48f17456d847480aab6564a830b552a3405",
+  "expectedPositive": {
+    "cases": 14,
+    "checks": 545,
+    "managedChildren": 12
+  },
+  "expectedNegative": {
+    "cases": 14,
+    "checks": 86,
+    "failedAssertions": 14,
+    "minimumSentinelFailures": 3,
+    "managedChildren": 0,
+    "failures": [
+      {
+        "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+        "case": "COLD-ARCHIVE/MSI/saved-ON-steamdeck"
+      },
+      {
+        "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+        "case": "COLD-ARCHIVE/MSI/saved-ON-elite"
+      },
+      {
+        "assertion": "MSI opaque OS ID permits durable two-duty cleanup before saved ON creation",
+        "case": "COLD-ARCHIVE/MSI/saved-ON-dualsense-edge"
+      },
+      {
+        "assertion": "MSI OFF completes both historical duties through the real cold owner",
+        "case": "COLD-ARCHIVE/MSI/OFF-two-hidden-paths"
+      },
+      {
+        "assertion": "MSI reserved but already-visible paths settle without inventing a hide write",
+        "case": "COLD-ARCHIVE/MSI/reserved-paths-already-visible"
+      },
+      {
+        "assertion": "lost unhide ACK may settle only after exact readback proves both keys absent",
+        "case": "COLD-ARCHIVE/MSI/ack-loss-readback-proves-return"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-target-present"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-census-unknown"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-writer-unknown"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-ancestry-unknown"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-visibility-unknown"
+      },
+      {
+        "assertion": "MSI transient proof recovery creates the requested Host within the original period",
+        "case": "COLD-ARCHIVE/MSI/transient-old-path-still-present"
+      },
+      {
+        "assertion": "MSI missing old devnodes require complete absence before removing historical hide keys",
+        "case": "COLD-ARCHIVE/MSI/reboot-missing-old-devnodes"
+      },
+      {
+        "assertion": "MSI later OFF settles now-provable old responsibilities",
+        "case": "COLD-ARCHIVE/MSI/original-budget-then-explicit-OFF"
+      }
+    ]
+  },
+  "caseNames": [
+    "COLD-ARCHIVE/MSI/saved-ON-steamdeck",
+    "COLD-ARCHIVE/MSI/saved-ON-elite",
+    "COLD-ARCHIVE/MSI/saved-ON-dualsense-edge",
+    "COLD-ARCHIVE/MSI/OFF-two-hidden-paths",
+    "COLD-ARCHIVE/MSI/reserved-paths-already-visible",
+    "COLD-ARCHIVE/MSI/ack-loss-readback-proves-return",
+    "COLD-ARCHIVE/MSI/transient-target-present",
+    "COLD-ARCHIVE/MSI/transient-census-unknown",
+    "COLD-ARCHIVE/MSI/transient-writer-unknown",
+    "COLD-ARCHIVE/MSI/transient-ancestry-unknown",
+    "COLD-ARCHIVE/MSI/transient-visibility-unknown",
+    "COLD-ARCHIVE/MSI/transient-old-path-still-present",
+    "COLD-ARCHIVE/MSI/reboot-missing-old-devnodes",
+    "COLD-ARCHIVE/MSI/original-budget-then-explicit-OFF"
+  ],
+  "sourcePinPolicy": "Collect all sourceInputs for this run, verify before each variant and after both variants. Reject every drift, including unrelated shared native changes. No persisted production-source admission baseline.",
+  "originalRepositoryRoot": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC"
+}

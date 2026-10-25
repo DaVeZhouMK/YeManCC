@@ -45,7 +45,10 @@ const mocks = {
     import {ref} from 'vue';export const folder=ref(''),baseUrl=ref(''),tracks=ref([]),index=ref(0),playing=ref(false),mode=ref('order'),error=ref(''),currentName=ref(''),hasFolder=ref(false),volume=ref(1),muted=ref(false);
     export const chooseFolder=async()=>{},scanFolder=async()=>{},togglePlay=()=>{},playNext=()=>{},playPrev=()=>{},setMode=v=>mode.value=v,setVolume=v=>volume.value=v,persistVolume=()=>{},toggleMute=()=>muted.value=!muted.value;
   `,
-  '@/gamepad/focus': `export const focusGamepadElement=n=>n?.focus();export function getGamepadPopupPlacement(rect,width,height){return {style:{position:'fixed',left:Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px',top:Math.max(8,Math.min(rect.bottom+8,window.innerHeight-height-8))+'px'},above:false}}`,
+  '@/bridge/performanceSchedule': 'export async function loadPerformanceSchedule(){return {quickMode:false}};',
+  '@/bridge/yeman': 'export async function summonGet(){return {enabled:true}};',
+  '@/robust/frontendDiagnostics': 'export function reportFrontendTrace(){};',
+  '@/router': "export const ROUTES=[{path:'/quickapp'}];",
 };
 const bundle = await build({
   stdin: { resolveDir: root, loader: 'ts', contents: `
@@ -54,6 +57,9 @@ const bundle = await build({
     window.__fixture={apps:Array.from({length:6},(_,i)=>({name:'测试应用 '+(i+1),path:'C:/fixture/app'+(i+1)+'.exe',futureField:{keep:i}})),writes:[],executions:[],picked:null,iconResults:JSON.parse(sessionStorage.getItem('quick-app-test-icons')||'{}')};
     const savedDisk=sessionStorage.getItem('quick-app-test-disk');window.__fixture.files=savedDisk?JSON.parse(savedDisk):{[repository.SETTINGS_FILE]:JSON.stringify(repository.normalizeSettings({quickApps:{apps:window.__fixture.apps}}))};
     let app;window.__mountPage=()=>{app=createApp({render:()=>h(KeepAlive,null,{default:()=>h(Page)})});app.mount('#app')};window.__remountPage=()=>{app.unmount();window.__mountPage()};window.__mountPage();
+    import {startGamepad} from './src/gamepad/engine';
+    startGamepad({router:{currentRoute:{value:{path:'/quickapp'}},push:async()=>{}},onAction(){}});
+    let inputSequence=0;window.__gamepadAction=action=>window.dispatchEvent(new CustomEvent('ipc:gamepad.ui-input',{detail:{action,uiSeq:++inputSequence,provenance:{session:'quick-app-fixture'}}}));
   ` },
   bundle: true, write: false, format: 'iife', platform: 'browser',
   alias: { '@': path.join(root, 'src') }, define: { 'process.env.NODE_ENV': '"production"' },
@@ -349,10 +355,41 @@ try {
   await page.screenshot({ path: expandedScreenshot, fullPage: true }); screenshots.push(expandedScreenshot);
   cases.push('Adding a sixth and seventh app automatically creates more row space and remains visible');
 
-  await restoreButton.click();
+  const beforeReset=await page.evaluate(()=>({disk:window.__fixture.files[window.__settingsFile],writes:window.__fixture.writes.length}));
+  const resetDialog=page.getByRole('alertdialog',{name:'确认恢复默认应用'});
+  await restoreButton.click();await resetDialog.waitFor();
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='取消');
+  assert.equal(await page.locator('.launch-card').count(),7);
+  assert.deepEqual(await page.evaluate(()=>({disk:window.__fixture.files[window.__settingsFile],writes:window.__fixture.writes.length})),beforeReset);
+  await page.waitForFunction(()=>getComputedStyle(document.querySelector('.fsr-confirm')).opacity==='1');
+  const resetShot=path.join(out,'quick-app-restore-default-confirm.png');await page.screenshot({path:resetShot});screenshots.push(resetShot);
+  const resetActions=await resetDialog.locator('button').evaluateAll(nodes=>nodes.map(n=>{const r=n.getBoundingClientRect();return {text:n.textContent.trim(),left:r.left,top:r.top}}));
+  assert.deepEqual(resetActions.map(b=>b.text),['取消','确认恢复']);assert(resetActions[1].left>resetActions[0].left&&Math.abs(resetActions[1].top-resetActions[0].top)<.5);
+  await page.evaluate(()=>window.__gamepadAction('confirm'));await resetDialog.waitFor({state:'hidden'});
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='恢复默认');
+  assert.deepEqual(await page.evaluate(()=>({disk:window.__fixture.files[window.__settingsFile],writes:window.__fixture.writes.length})),beforeReset);
+  cases.push('Restore opens unified cancel-first dialog; immediate gamepad A cancels with no write and restores trigger focus');
+  for(const exit of ['back','escape','outside']) {
+    await restoreButton.click();await resetDialog.waitFor();
+    if(exit==='back')await page.evaluate(()=>window.__gamepadAction('back'));
+    else if(exit==='escape')await resetDialog.press('Escape');
+    else await page.locator('.sub-title').filter({hasText:'添加自定义应用'}).click();
+    await resetDialog.waitFor({state:'hidden'});
+    assert.deepEqual(await page.evaluate(()=>({disk:window.__fixture.files[window.__settingsFile],writes:window.__fixture.writes.length})),beforeReset);
+  }
+  cases.push('B, Escape and outside dismissal preserve the existing custom application list');
+  await restoreButton.click();await resetDialog.waitFor();
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='取消');
+  await page.evaluate(()=>window.__gamepadAction('nav-right'));
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='确认恢复');
+  assert.deepEqual(await page.evaluate(()=>({disk:window.__fixture.files[window.__settingsFile],writes:window.__fixture.writes.length})),beforeReset);
+  await page.evaluate(()=>window.__gamepadAction('confirm'));
   await page.waitForFunction(() => document.querySelectorAll('.launch-card').length === 5);
+  await resetDialog.waitFor({state:'hidden'});
   assert.deepEqual(await page.evaluate(() => JSON.parse(window.__fixture.files[window.__settingsFile]).quickApps.apps), expectedUserPresets);
-  cases.push('Restore default removes added apps and restores exactly the five-app baseline');
+  assert.equal(await page.evaluate(()=>window.__fixture.writes.length),beforeReset.writes+1);
+  await page.waitForFunction(()=>document.activeElement?.textContent?.trim()==='恢复默认');
+  cases.push('Gamepad moves from Cancel to Confirm Restore then A writes exactly once and restores the five defaults');
   await page.reload();
   await page.waitForFunction(() => document.querySelectorAll('.launch-card').length === 5 && !document.querySelector('.launch-apps-card .add-app-btn:last-child')?.disabled);
   assert.deepEqual(await page.evaluate(async () => (await window.__repository.readSettingsSection('quickApps')).apps), expectedUserPresets);

@@ -1,3 +1,5 @@
+// Historical in-process callback regression; not the owned binding production acceptance.
+#define YMCC_DECKY_RUNTIME_LEGACY_FIXTURE 1
 // Source-built Windows process fixture only. No Steam, third-party loader, settings,
 // network, or hardware IO. Production Runtime owns this inert child's Job.
 #include "../native/decky_sidebar_runtime.h"
@@ -21,7 +23,7 @@ int main(){
         if(!length||length>=32768)throw std::runtime_error("fixture executable path");
         const std::wstring executable(module,length);
         const std::filesystem::path build=std::filesystem::path(executable).parent_path();
-        if(build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Launch25\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Bootstrap26\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Input27\Build)")throw std::runtime_error("fixture outside explicit task Build roots");
+        if(build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-SharedSteamSignal-20261014\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-StartupRecovery-20261014\Build)" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Launch25\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Bootstrap26\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Input27\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-OpenBlocked-20261013\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-SelfHeal-20261013\Build)")throw std::runtime_error("fixture outside explicit task Build roots");
         if(std::filesystem::path(executable).parent_path()!=build)throw std::runtime_error("fixture must run within explicit task Build");
         const auto home=(build/L"YMCC-Decky-Lifecycle-Fixture-Home").wstring();
         std::filesystem::create_directories(home); // Task-local inert home; no settings files.

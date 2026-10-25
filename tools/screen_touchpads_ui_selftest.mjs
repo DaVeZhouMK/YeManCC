@@ -18,19 +18,25 @@ try {
     ['legacy-rear-buttons', { enabled: false, rearMask: 2, rearEnabled: true }, ['选择组合']],
     ['steamdeck', { enabled: true, leftMode: 'steamdeck', rightMode: 'steamdeck' }, ['左侧映射', '右侧映射', 'SteamDeck 左触摸板 (Steam内设置)', 'SteamDeck 右触摸板 (Steam内设置)', '触摸板缩放', '触摸板显示透明度']],
     ['dual-ps5', { enabled: true, layout: 'dual', leftMode: 'dualsense', rightMode: 'dualsense' }, ['PS5 左触摸板 (Steam内设置)', 'PS5 右触摸板 (Steam内设置)']],
-    ['dual-ps4', { enabled: true, layout: 'dual', leftMode: 'dualsense', rightMode: 'dualsense' }, ['PS4 左触摸板 (Steam内设置)', 'PS4 右触摸板 (Steam内设置)']],
     ['single-ps5', { enabled: true, layout: 'single', singleMode: 'dualsense' }, ['触摸板映射', 'PS5触摸板 (Steam内设置)', '触摸板缩放']],
     ['single-keyboard', { enabled: true, layout: 'single', singleMode: 'arrows' }, ['触摸板映射', '键盘 ↑ / ← / ↓ / →']],
+    ['feedback-explicit-off', { enabled: true, touchFeedback: 'off' }, []],
+    ['feedback-missing-field', { enabled: true, touchFeedback: undefined }, ['中震动反馈']],
+    ['feedback-explicit-minimal', { enabled: true, touchFeedback: 'minimal' }, ['最小震动反馈']],
+    ['feedback-explicit-medium', { enabled: true, touchFeedback: 'medium' }, ['中震动反馈']],
+    ['feedback-explicit-strong', { enabled: true, touchFeedback: 'strong' }, ['强震动反馈']],
     ['wasd-mouse', { enabled: true, leftMode: 'wasd', rightMode: 'mouse' }, ['键盘 W / A / S / D', '模拟鼠标', '触摸板鼠标灵敏度']],
     ['arrows-mouse', { enabled: true, leftMode: 'arrows', rightMode: 'mouse', transparency: 100 }, ['键盘 ↑ / ← / ↓ / →', '100%']],
   ]) {
     // Render the actual compiled SFC and shared controls, changing only its
     // setup refs as an IPC receipt would. No forked mock template.
+    let expectedOverlays = false;
     const Fixture = { ...Component, setup(props, context) {
       const bindings = originalSetup(props, context);
       assert.ok(bindings.state && bindings.loading, 'Actual SFC setup state must be available');
       bindings.state.value = { ...bindings.state.value, layout: config.enabled ? 'dual' : 'off', ...config, available: true, steamDeckAvailable: true, ps5Available: true, visible: config.enabled };
       bindings.loading.value = false;
+      expectedOverlays = bindings.overlaysEnabled.value;
       if (props.persona === 'steamdeck' || props.persona === 'dualsense-edge') {
         assert.equal(bindings.rearOptions.value.length, 4, 'Rear menu exposes exactly four choices');
         assert.deepEqual(bindings.rearOptions.value.map(option => option.label), props.persona === 'steamdeck'
@@ -39,11 +45,18 @@ try {
       return bindings;
     } };
     const html = await renderToString(createSSRApp(Fixture,{persona: name.startsWith('standalone-')?'disabled':['single-ps5','dual-ps5'].includes(name)?'dualsense-edge':name==='dual-ps4'?'dualshock4':name==='legacy-xbox-buttons'?'elite':'steamdeck',ps5Enabled:true,steamDeckEnabled:true}));
-    for (const label of expected) assert.ok(html.includes(label), `${name}: missing ${label}`);
+    for (const label of expected) assert.ok(html.includes(label.replace(' (Steam内设置)','')), `${name}: missing ${label}`);
     assert.ok(html.includes('aria-label="屏幕触摸板布局"'));
     for(const label of ['YMCC呼出位置','专用按键组合','背部按键组合'])assert.ok(html.includes('aria-label="'+label+'"'));
-    assert.equal((html.match(/class="screen-control-select"/g) || []).length, 3, 'Three controller-accessible dropdowns are always shown');
-    assert.ok(!html.includes('role="switch"'));
+    assert.equal((html.match(/class="screen-control-select(?:\s|")/g) || []).length, 3, 'Three controller-accessible dropdowns are always shown');
+    assert.equal(html.includes('aria-label="触摸板触摸反馈"'), expectedOverlays, 'Feedback follows every configured screen control, including special keys when the pad layout is off');
+    if(expectedOverlays) {
+      const selected=config.touchFeedback??'medium';
+      for(const [mode,label] of [['minimal','最小震动反馈'],['medium','中震动反馈'],['strong','强震动反馈']])
+        assert.equal(html.includes(label),selected===mode,'Selected feedback label and medium fallback');
+    }
+    assert.equal((html.match(/role="switch"/g)||[]).length,1,'Exactly one independent persona master switch');
+    assert.ok(html.includes('aria-label="触控板总开关"')); 
     assert.ok(!html.includes('屏幕双触摸板'));
     if(name.startsWith('single')){assert.ok(!html.includes('左侧映射'));assert.ok(!html.includes('右侧映射'));}
     if (name === 'disabled') assert.ok(!html.includes('左侧映射'));

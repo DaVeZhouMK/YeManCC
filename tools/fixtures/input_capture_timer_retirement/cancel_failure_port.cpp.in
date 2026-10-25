@@ -1,0 +1,229 @@
+// Replacement sections for actual_worker_fixture.cpp.in only. The production
+// scope, callback, WorkerFault and worker are always inserted verbatim.
+// timeKillEvent documents success and event-not-found MMSYSERR_INVALPARAM (11).
+// Error 97 is a noncontract/unknown-error adversary. For BOTH errors the pending
+// private callback is a conservative assumption, not a documented WinMM state.
+// These runs cannot establish a real OS reproduction or a product root cause.
+// BEGIN CANCEL_LEAF
+constexpr MMRESULT kDocumentShapedInvalidParameter=11;
+static_assert(TIMERR_NOCANDO==97); // Retained adversarial input, NOT a documented timeKillEvent error.
+static json cancellationSemantics(MMRESULT result){
+    return {{"result",result},
+        {"classification",result==TIMERR_NOERROR?"MEMORY_SUCCESS_CONTROL":
+            result==kDocumentShapedInvalidParameter?"DOCUMENTED_ERROR_CODE_WITH_UNPROVEN_PENDING_CALLBACK":
+            "NONCONTRACT_UNKNOWN_ERROR_ADVERSARY"},
+        {"errorCodeMatchesDocumentedTimeKillEventReturn",result==TIMERR_NOERROR||result==kDocumentShapedInvalidParameter},
+        {"pendingCallbackConservativeAssumption",result!=TIMERR_NOERROR},
+        {"pendingCallbackDocumentedForThisError",false},{"fixtureModelsWinmmRegistrationState",false},
+        {"realOsReproduction",false},{"productDefectRootCauseConfirmed",false}};
+}
+struct CancelFailurePort {
+    MMRESULT injectedResult=TIMERR_NOERROR;
+    std::atomic<unsigned> timerId{0}, result{0}, activeAtReturn{0};
+    std::atomic<bool> joinedByCancel{false};
+};
+static CancelFailurePort* cancellationPort=nullptr;
+static MMRESULT timeKillEvent(UINT timerId){
+    ++current->killCalls;
+    current->stopAtCancel=g_inputCaptureStop.load(std::memory_order_acquire);
+    cancellationPort->timerId=timerId;
+    {std::lock_guard<std::mutex> lock(current->mutex);current->killEntered=true;current->cv.notify_all();}
+    // Sole failure injection: return the selected fake result without joining.
+    // In the 11 case the return CODE matches the document's event-not-found
+    // error. That document does not establish this pending-callback state.
+    // No WinMM registration state is modeled; the private callback thread is
+    // conservatively kept pending and is later released/joined by the controller.
+    const MMRESULT result=cancellationPort->injectedResult;
+    if(result==TIMERR_NOERROR && (current->flags.load()&TIME_KILL_SYNCHRONOUS) && current->callback.joinable()){
+        current->callback.join();cancellationPort->joinedByCancel=true;
+    }
+    cancellationPort->result=result;
+    cancellationPort->activeAtReturn=current->active.load();
+    current->cancelReturnOrder=current->next();
+    return result;
+}
+// END CANCEL_LEAF
+
+// BEGIN DRIVER
+static unsigned checks=0,failures=0;
+static void check(bool condition,const char* name){
+    ++checks;
+    if(!condition){++failures;std::cerr<<"EVIDENCE_FAILED "<<name<<'\n';}
+}
+// This guard covers assertion/JSON/thread-construction failures too. A timeout
+// never substitutes for joining, and event marker storage outlives both threads.
+struct OwnedFixtureThreads {
+    Scenario& scenario;
+    std::unique_lock<std::mutex>& busLock;
+    std::thread& worker;
+    bool workerJoined=false,callbackJoined=false,finished=false;
+    void finish(){
+        if(finished)return;
+        g_inputCaptureStop.store(true,std::memory_order_release);
+        if(busLock.owns_lock())busLock.unlock();
+        scenario.releaseAll();
+        if(worker.joinable()){worker.join();workerJoined=true;}
+        if(scenario.callback.joinable()){scenario.callback.join();callbackJoined=true;}
+        finished=true;
+    }
+    ~OwnedFixtureThreads(){finish();}
+};
+static json ownerReceipt(const ymcc::inputTimerEvidence::Snapshot& snapshot,unsigned long long owner){
+    for(unsigned i=0;i<snapshot.summary.ownerCount;++i){
+        const auto& entry=snapshot.owners[i];
+        if(entry.owner==owner)return {{"owner",entry.owner},{"creates",entry.creates},{"kills",entry.kills},
+            {"timerId",entry.timerId},{"killTimerId",entry.killTimerId},{"killResult",entry.killResult},
+            {"createEventHandle",entry.createEventHandle},{"killEventHandle",entry.killEventHandle}};
+    }
+    return nullptr;
+}
+static json run(bool tail,unsigned fault,MMRESULT injectedResult){
+    const bool injectFailure=injectedResult!=TIMERR_NOERROR;
+    Scenario scenario;scenario.tail=tail;scenario.fault=fault;
+    CancelFailurePort port;port.injectedResult=injectedResult;
+    current=&scenario;cancellationPort=&port;
+    g_inputCaptureStop.store(false);g_domainLogEnabled[1].store(true);
+    const auto before=g_inputTimerEvidence.snapshot();
+    const auto owner=g_inputTimerEvidenceNextOwner.load()+1;
+    std::unique_lock<std::mutex> busLock(g_inputCaptureBusTickMx,std::defer_lock);
+    std::thread worker;
+    OwnedFixtureThreads owned{scenario,busLock,worker};
+    if(tail)busLock.lock();
+    worker=std::thread([&]{
+        inputCaptureThreadProc(nullptr);
+        {std::lock_guard<std::mutex> lock(scenario.mutex);scenario.workerDone=true;scenario.cv.notify_all();}
+    });
+    const bool gateSeen=scenario.wait([&]{return scenario.atGate;});
+    check(gateSeen,"actual callback reached owned gate");
+    if(busLock.owns_lock())busLock.unlock();
+    if(!fault)g_inputCaptureStop.store(true,std::memory_order_release);
+    {std::lock_guard<std::mutex> lock(scenario.mutex);scenario.initContinue=true;scenario.cv.notify_all();}
+    const bool killSeen=scenario.wait([&]{return scenario.killEntered;});
+    check(killSeen,"actual worker reached selected timeKillEvent leaf");
+    // Failure requires positive worker completion, not an elapsed wait. Success
+    // uses a short early observation, then requires the final joined ordering.
+    const bool completedBeforeRelease=scenario.wait([&]{return scenario.workerDone;},injectFailure?800u:30u);
+    const bool closedBeforeRelease=scenario.event.closed.load();
+    const unsigned shutdownBeforeRelease=scenario.shutdownOrder.load();
+    const unsigned activeBeforeRelease=scenario.active.load();
+    const auto held=g_inputTimerEvidence.snapshot();
+    const auto releaseOrder=scenario.next();
+    scenario.releaseAll();
+    const bool workerDone=scenario.wait([&]{return scenario.workerDone;});
+    check(workerDone,"owned worker completed following unconditional controller release");
+    owned.finish();
+    const auto after=g_inputTimerEvidence.snapshot();
+    const auto receipt=ownerReceipt(after,owner);
+    check(owned.workerJoined && (owned.callbackJoined || port.joinedByCancel.load()),"both owned threads explicitly joined");
+    check(!scenario.gateTimedOut,"callback gate explicitly released without timeout");
+    check(scenario.active.load()==0,"no owned callback remains active");
+    check(scenario.killCalls.load()==1 && port.timerId.load()==22,"one cancellation and no final retry for timer ID 22");
+    check(scenario.shutdowns.load()==1,"one actual worker capture-shutdown leaf");
+    check(scenario.eventCreates.load()==1 && scenario.eventCloses.load()==1,"one memory event created and closed");
+    check(scenario.periodBalance.load()==0 && scenario.comBalance.load()==0,"period and COM memory leaves balanced");
+    check(scenario.faultLogs.load()==(fault?1u:0u),"actual WorkerFault matches selected exception class");
+    check(scenario.flags.load()==(TIME_PERIODIC|TIME_KILL_SYNCHRONOUS),"actual creation retains periodic and synchronous flags");
+    check(scenario.stopAtCancel.load(),"actual terminal-stop guard reached cancellation");
+    check(scenario.bus.load()==0 && scenario.lateBus.load()==0,"actual stop/busy branch admits no BUS after retirement");
+    check(activeBeforeRelease==1,"one owned callback positively held before release");
+    check(before.summary.known && held.summary.known && after.summary.known,"actual Recorder snapshots known");
+    check(after.summary.accountingComplete && after.summary.inFlightKnown && after.summary.inFlight==0,"actual Recorder conserved callback accounting after joins");
+    check(after.summary.entered-before.summary.entered==1 && after.summary.exited-before.summary.exited==1 &&
+          after.summary.matchedLeaves-before.summary.matchedLeaves==1,"actual callback scope entered and left once");
+    check(after.summary.busySkip-before.summary.busySkip==(tail?1u:0u) &&
+          after.summary.stopReturn-before.summary.stopReturn==(tail?0u:1u),"actual callback executed busy-tail or terminal beforeBUS branch");
+    const unsigned expectedResult=injectedResult;
+    check(port.result.load()==expectedResult,"fake OS returned the selected cancellation result");
+    check(!receipt.is_null() && receipt.at("kills")==1 && receipt.at("killTimerId")==22 &&
+          receipt.at("killResult")==expectedResult,"actual production Recorder retained exact failed/successful API receipt");
+    check(!receipt.is_null() && receipt.at("createEventHandle")==receipt.at("killEventHandle"),"actual Recorder retains the same memory event identity");
+    if(injectFailure){
+        check(completedBeforeRelease && closedBeforeRelease && shutdownBeforeRelease>0,"positive worker shutdown and close while callback remained held");
+        check(!port.joinedByCancel.load() && port.activeAtReturn.load()==1,"nonzero fake leaf preserved the conservatively assumed pending private callback");
+        check(held.summary.inFlight==1,"actual Recorder still accounted one held callback at worker exit");
+        check(scenario.cancelReturnOrder.load()<scenario.shutdownOrder.load() &&
+              scenario.shutdownOrder.load()<scenario.eventCloseOrder.load() &&
+              scenario.eventCloseOrder.load()<releaseOrder && releaseOrder<scenario.callbackDoneOrder.load(),"failed cancellation then shutdown then close then release then callback completion");
+        check(scenario.closedEventSignals.load()==1,"actual callback later signalled the safely retained retired event marker");
+    }else{
+        check(!completedBeforeRelease && !closedBeforeRelease && !shutdownBeforeRelease,"successful cancellation held resources through callback gate");
+        check(port.joinedByCancel.load() && port.activeAtReturn.load()==0,"successful synchronous leaf joined the callback");
+        check(releaseOrder<scenario.callbackDoneOrder.load() &&
+              scenario.callbackDoneOrder.load()<scenario.cancelReturnOrder.load() &&
+              scenario.cancelReturnOrder.load()<scenario.shutdownOrder.load() &&
+              scenario.shutdownOrder.load()<scenario.eventCloseOrder.load(),"positive success order is release callback cancel shutdown close");
+        check(scenario.closedEventSignals.load()==0,"success control has no retired event signal");
+    }
+    // Local captureTimerId is not instrumented. Its zeroing is a source-bound
+    // inference: the frozen unconditional assignment plus one kill invocation
+    // and the positively completed worker (the final if(id) did not retry).
+    const bool idClearedWhileAssumedPending=injectFailure && completedBeforeRelease && activeBeforeRelease==1 && scenario.killCalls.load()==1;
+    // These are failures of the conservative conditional memory contract, not
+    // confirmed real-WinMM/product-defect findings.
+    json conditionalFailures=json::array();
+    const auto conditionalCheck=[&](bool ok,const char* point){
+        if(!ok){conditionalFailures.push_back(point);std::cerr<<"CONDITIONAL_CONTRACT_FAILED "<<(tail?"busy-tail":"beforeBUS")
+            <<'/'<<fault<<' '<<point<<'\n';}
+    };
+    conditionalCheck(!idClearedWhileAssumedPending,"CONDITIONAL_RETAIN_ID_UNTIL_ASSUMED_CALLBACK_DRAIN");
+    conditionalCheck(!(shutdownBeforeRelease && activeBeforeRelease),"CONDITIONAL_NO_SHUTDOWN_WITH_ASSUMED_PENDING_CALLBACK");
+    conditionalCheck(!(closedBeforeRelease && activeBeforeRelease),"CONDITIONAL_NO_CLOSE_WITH_ASSUMED_PENDING_CALLBACK");
+    conditionalCheck(scenario.closedEventSignals.load()==0,"CONDITIONAL_NO_RETIRED_EVENT_MARKER_SIGNAL");
+    return {{"exit",fault==0?"normal":fault==1?"std":"nonstandard"},{"fault",fault},
+        {"interleaving",tail?"busy-tail":"beforeBUS"},{"injectedResult",expectedResult},
+        {"cancellationScenario",cancellationSemantics(injectedResult)},
+        {"sourceFlags",scenario.flags.load()},{"stopAtCancel",scenario.stopAtCancel.load()},
+        {"completedBeforeCallbackRelease",completedBeforeRelease},{"activeBeforeRelease",activeBeforeRelease},
+        {"closedBeforeRelease",closedBeforeRelease},{"shutdownBeforeRelease",shutdownBeforeRelease},
+        {"timerIdClearEvidence",{{"localDirectlyInstrumented",false},{"sourceBoundUnconditionalClear",true},
+            {"noFinalRetry",scenario.killCalls.load()==1},{"clearedWhileAssumedPendingCallback",idClearedWhileAssumedPending}}},
+        {"actualFunctionsExecuted",{"inputCaptureThreadProc","inputCaptureTimerEventProc","InputTimerCallbackEvidenceScope"}},
+        {"actualWorkerFaultExecuted",fault!=0},{"callbackJoinedByCancel",port.joinedByCancel.load()},
+        {"ownedWorkerJoined",owned.workerJoined},{"ownedCallbackJoined",owned.callbackJoined||port.joinedByCancel.load()},
+        {"ownedThreadsJoined",owned.workerJoined&&(owned.callbackJoined||port.joinedByCancel.load())},
+        {"ownedActiveCallbacksAfter",scenario.active.load()},{"remainingFixtureEvents",scenario.eventCreates.load()-scenario.eventCloses.load()},
+        {"gateTimedOut",scenario.gateTimedOut},{"killCalls",scenario.killCalls.load()},{"shutdownCalls",scenario.shutdowns.load()},
+        {"eventCloseCalls",scenario.eventCloses.load()},{"busCalls",scenario.bus.load()},{"lateBus",scenario.lateBus.load()},
+        {"closedEventSignals",scenario.closedEventSignals.load()},
+        {"order",{{"cancelReturn",scenario.cancelReturnOrder.load()},{"shutdown",scenario.shutdownOrder.load()},
+            {"eventClose",scenario.eventCloseOrder.load()},{"controllerRelease",releaseOrder},{"callbackDone",scenario.callbackDoneOrder.load()}}},
+        {"ownerReceiptWhileHeld",ownerReceipt(held,owner)},{"ownerReceiptAfterJoin",receipt},
+        {"actualRecorderAfterJoin",ymcc::inputTimerEvidence::snapshotJson(after)},
+        {"conditionalUnsafeOrderingObserved",!conditionalFailures.empty()},{"productionAccepted",false},
+        {"realOsReproduction",false},{"productDefectRootCauseConfirmed",false},
+        {"conditionalRetirementContractSatisfiedForThisSchedule",conditionalFailures.empty()},
+        {"specifiedFailurePoints",conditionalFailures}};
+}
+int main(int argc,char** argv){
+    if(argc!=2)return 1;
+    const std::string mode=argv[1];
+    if(mode!="success" && mode!="adversarial-97" && mode!="document-shaped-11")return 1;
+    const MMRESULT injectedResult=mode=="success"?TIMERR_NOERROR:
+        mode=="adversarial-97"?TIMERR_NOCANDO:kDocumentShapedInvalidParameter;
+    const bool injectFailure=injectedResult!=TIMERR_NOERROR;
+    try{
+        json cases=json::array();unsigned conditionalFailures=0;
+        for(bool tail:{false,true})for(unsigned fault:{0u,1u,2u}){
+            auto value=run(tail,fault,injectedResult);
+            conditionalFailures+=static_cast<unsigned>(value.at("specifiedFailurePoints").size());
+            cases.push_back(std::move(value));
+        }
+        const bool complete=failures==0;
+        const bool contractSatisfied=complete && conditionalFailures==0;
+        // A successful control is scoped to its schedule; it cannot sign the product.
+        std::cout<<json({{"pass",false},{"productionAccepted",false},{"evidenceComplete",complete},
+            {"successControlPassed",!injectFailure&&contractSatisfied},
+            {"conditionalRetirementContractSatisfiedForThisMatrix",contractSatisfied},
+            {"forensicChecks",checks},{"forensicFailures",failures},{"conditionalContractFailures",conditionalFailures},
+            {"confirmedProductDefectFailures",0},{"realOsReproduction",false},{"productDefectRootCauseConfirmed",false},
+            {"cancellationScenario",cancellationSemantics(injectedResult)},
+            {"cases",cases},{"realWinmmOrDeviceCalls",false},{"productionCaptureShutdownBodyExecuted",false},
+            {"eventStorage", "Scenario::Event is an atomic closed marker; remains allocated until both fixture threads join"},
+            {"memoryBounds",{{"casesPerProcess",6},{"maxConcurrentOwnedThreads",2},{"callbacksPerCase",1},
+                {"eventsPerCase",1},{"checkpointTimeoutMs",2000},{"workerObservationTimeoutMs",800},
+                {"threadsReleasedAndJoinedOnException",true},{"timeoutIsNeverPassing",true}}}}).dump()<<'\n';
+        return !complete?1:contractSatisfied?0:2;
+    }catch(const std::exception& error){std::cerr<<"EVIDENCE_EXCEPTION "<<error.what()<<'\n';return 1;}
+    catch(...){std::cerr<<"EVIDENCE_EXCEPTION nonstandard\n";return 1;}
+}
+// END DRIVER

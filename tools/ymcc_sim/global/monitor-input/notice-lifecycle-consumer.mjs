@@ -1,0 +1,34 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {pathToFileURL} from 'node:url';import {createServer} from 'node:http';
+export async function runNoticeLifecycle({root,out,browser,baseline=''}){
+ fs.mkdirSync(out,{recursive:true});const sourceHashes={},req=createRequire(path.join(root,'package.json')),{build}=req('esbuild');
+ const {monitorHudVuePlugin}=await import(pathToFileURL(path.join(root,'tools/monitor_hud_vue_build.mjs')));
+ const read=file=>{const relative=path.relative(root,file).replaceAll('\\','/'),actual=baseline&&fs.existsSync(path.join(baseline,relative))?path.join(baseline,relative):file;sourceHashes[relative]=crypto.createHash('sha256').update(fs.readFileSync(actual)).digest('hex');return fs.readFileSync(actual,'utf8');};
+ const ipc="export const isNativeRuntime=true;const handlers=new Map();window.__nativeCalls=[];export const on=(name,fn)=>{if(!handlers.has(name))handlers.set(name,new Set());handlers.get(name).add(fn);return()=>handlers.get(name)?.delete(fn)};window.__emit=(name,data)=>{for(const fn of handlers.get(name)??[])fn(data)};export async function invoke(name,args){window.__nativeCalls.push({name,args});if(name==='desktopHud.ready')return{id:7,width:1280,height:800};if(name==='desktopHud.layout'||name==='desktopHud.close')return true;throw Error('Unexpected notice command '+name)}";
+ const built=await build({stdin:{contents:"import './src/monitorNoticeOutputEntry';",resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'browser',format:'iife',metafile:true,outdir:out,plugins:[{name:'notice-ipc-boundary',setup(b){b.onLoad({filter:/[\\/]src[\\/]bridge[\\/]ipc\.ts$/},()=>({contents:ipc,loader:'ts'}));b.onLoad({filter:/[\\/]src[\\/].*\.ts$/},a=>({contents:read(a.path),loader:'ts',resolveDir:path.dirname(a.path)}));}},monitorHudVuePlugin(root)]});
+ const css=read(path.join(root,'src/components/MonitorShortcutNotice.vue')).match(/<style[^>]*>([\s\S]*?)<\/style>/)[1];
+ const html='<!doctype html><html><meta charset="utf-8"><style>'+css+'\n'+built.outputFiles.filter(f=>f.path.endsWith('.css')).map(f=>f.text).join('\n')+'</style><div id="notice"></div><script>'+built.outputFiles.find(f=>f.path.endsWith('.js')).text.replaceAll('</script','<\\/script')+'</script></html>';fs.writeFileSync(path.join(out,'notice.html'),html);
+ const server=createServer((_,res)=>{res.setHeader('Content-Type','text/html;charset=utf-8');res.end(html)});await new Promise(r=>server.listen(0,'127.0.0.1',r));const page=await browser.newPage({viewport:{width:1280,height:800}}),errors=[],checks=[];page.on('pageerror',e=>errors.push(String(e)));
+ const test=async(name,fn)=>{try{await fn();checks.push({name,ok:true})}catch(e){checks.push({name,ok:false,error:String(e)})}};
+ try{
+  await page.goto('http://127.0.0.1:'+server.address().port+'/?hudId=7&nonce=notice-lifecycle-owned-0001');await page.waitForFunction(()=>window.__emit&&window.__nativeCalls.some(c=>c.name==='desktopHud.ready'));
+  const emit=(seq,reuse=false)=>page.evaluate(({seq,reuse})=>{const now=Date.now(),feedback=reuse?window.__feedback:{schemaVersion:1,id:'notice-'+seq,origin:'monitor',actionId:'monitor.template',state:'applied',title:'已切换到监控模板 B',message:'已切换到监控模板 B',occurredAtUnixMs:now,expiresAtUnixMs:now+8000,powerGeneration:1,presentation:{fullscreen:true,leftMonitor:true}};window.__feedback=feedback;window.__emit('monitorNotice.frame',{type:'monitor-notice',protocol:1,hudId:7,nonce:'notice-lifecycle-owned-0001',seq,expiresAt:feedback.expiresAtUnixMs,feedback,appearance:{opacity:.8},occupied:[]})},{seq,reuse});
+  const layouts=()=>page.evaluate(()=>window.__nativeCalls.filter(c=>c.name==='desktopHud.layout').map(c=>c.args));
+  await test('idle notice has no layout and no visible content',async()=>{assert.equal((await layouts()).length,0);assert.equal(await page.locator('.shortcut-notice').count(),0)});
+  await emit(1);await page.waitForFunction(()=>window.__nativeCalls.some(c=>c.name==='desktopHud.layout'&&c.args.seq===1));const first=(await layouts()).at(-1);
+  await test('first actual notice entry confirms its bounded layout',async()=>{assert(first.width>0&&first.height>0&&first.width<1280&&first.height<800);assert.equal(await page.locator('#notice').evaluate(n=>n.style.pointerEvents),'none')});
+  await page.evaluate(()=>window.__emit('monitorNotice.hide',{}));await page.waitForFunction(()=>!document.querySelector('.shortcut-notice'));
+  await emit(2);await page.waitForTimeout(100);
+  await test('same-size notice after hide resubmits current sequence layout',async()=>{const next=(await layouts()).find(x=>x.seq===2);assert(next,'New native frame must not reuse a hidden older layout');assert.equal(next.width,first.width);assert.equal(next.height,first.height)});
+  await emit(3,true);await page.waitForTimeout(100);
+  await test('same feedback appearance refresh also confirms its new layout sequence',async()=>assert((await layouts()).some(x=>x.seq===3),'Repeated feedback still needs current sequence layout'));
+  const before=(await layouts()).length;await emit(2,true);await page.waitForTimeout(50);
+  await test('old notice sequence cannot revive or re-layout current content',async()=>assert.equal((await layouts()).length,before));
+  await test('notice renderer only calls its display whitelist',async()=>assert((await page.evaluate(()=>window.__nativeCalls)).every(c=>['desktopHud.ready','desktopHud.layout'].includes(c.name))));
+ }finally{await page.close();await new Promise(r=>server.close(r));}
+ const report={ok:errors.length===0&&checks.every(c=>c.ok),checks,errors,sourceHashes,scope:'Actual notice-output entry, Vue renderer and production layout lane; IPC terminal held in memory, no OS input or physical WebView2 acceptance'};fs.writeFileSync(path.join(out,'verification.json'),JSON.stringify(report,null,2));return report;
+}
+if(process.argv[1]&&path.resolve(process.argv[1])===path.resolve(import.meta.filename)){
+ const root=path.resolve(import.meta.dirname,'../../../..'),args=process.argv.slice(2),value=k=>args[args.indexOf(k)+1],out=path.resolve(value('--evidence-dir')),baseline=args.includes('--baseline-root')?path.resolve(value('--baseline-root')):'';
+ const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_ymcc_ui.cjs')('playwright'),browser=await chromium.launch({channel:'msedge',headless:true});
+ try{const r=await runNoticeLifecycle({root,out,browser,baseline});if(args.includes('--expect-baseline-failure')){assert.equal(r.ok,false);assert(r.checks.some(c=>!c.ok&&c.name.startsWith('same-size notice')))}else assert.equal(r.ok,true,JSON.stringify(r));console.log(JSON.stringify({ok:true,baselineExpected:!!baseline,checks:r.checks.length,failures:r.checks.filter(c=>!c.ok).map(c=>c.name)}))}finally{await browser.close()}
+}

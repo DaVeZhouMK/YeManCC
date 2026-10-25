@@ -1,0 +1,523 @@
+// Private, standalone Windows-kernel leaf fixture. The parent injects the whole
+// production Stop and base-event classifier, then builds against the Windows
+// SDK, json.hpp and the STL. No application, device, service, driver or WinMM
+// entry point is linked. All kernel objects below belong to this fixture.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#include <Windows.h>
+#include <json.hpp>
+#include <type_traits>
+#include "input_capture_completion.h"
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <iterator>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
+
+using json = nlohmann::json;
+using Clock = std::chrono::steady_clock;
+static constexpr DWORD kProductionWaitMs = 2000;
+static constexpr DWORD kReadyWaitMs = 5000;
+static constexpr DWORD kWorkerGateWaitMs = 30000;
+static constexpr DWORD kControllerJoinWaitMs = 5000;
+static unsigned checks = 0, failures = 0;
+
+static void check(bool value, const char* name) {
+    ++checks;
+    if (!value) {
+        ++failures;
+        std::cerr << "CHECK_FAILED " << name << '\n';
+    }
+}
+static double elapsedMs(Clock::time_point start) {
+    return std::chrono::duration<double, std::milli>(Clock::now() - start).count();
+}
+static const char* waitName(DWORD value) {
+    switch (value) {
+    case WAIT_OBJECT_0: return "WAIT_OBJECT_0";
+    case WAIT_TIMEOUT: return "WAIT_TIMEOUT";
+    case WAIT_FAILED: return "WAIT_FAILED";
+    case WAIT_ABANDONED: return "WAIT_ABANDONED";
+    default: return "UNEXPECTED_WAIT_RESULT";
+    }
+}
+struct WaitReceipt {
+    bool called = false;
+    DWORD budget = 0, result = WAIT_FAILED, error = ERROR_SUCCESS;
+    double elapsed = 0;
+};
+static WaitReceipt realWait(HANDLE handle, DWORD budget) noexcept {
+    WaitReceipt receipt;
+    receipt.called = true;
+    receipt.budget = budget;
+    const auto start = Clock::now();
+    receipt.result = ::WaitForSingleObject(handle, budget);
+    const DWORD lastError = ::GetLastError();
+    receipt.error = receipt.result == WAIT_FAILED ? lastError : ERROR_SUCCESS;
+    receipt.elapsed = elapsedMs(start);
+    // Observation must not change the immediate Win32 error seen by Stop.
+    ::SetLastError(lastError);
+    return receipt;
+}
+static json describe(const WaitReceipt& receipt) {
+    return {{"called", receipt.called}, {"budgetMs", receipt.budget},
+        {"waitResult", receipt.called ? json(receipt.result) : json(nullptr)},
+        {"WAIT_RESULT", receipt.called ? json(waitName(receipt.result)) : json(nullptr)},
+        {"waitWin32", receipt.error}, {"elapsedMs", receipt.elapsed}};
+}
+struct OwnedHandle {
+    HANDLE value = nullptr;
+    DWORD closeError = ERROR_SUCCESS;
+    unsigned closeAttempts = 0;
+    void close() noexcept {
+        if (!value) return;
+        ++closeAttempts;
+        if (::CloseHandle(value) != FALSE) {
+            value = nullptr;
+            closeError = ERROR_SUCCESS;
+        } else {
+            closeError = ::GetLastError();
+        }
+    }
+};
+struct CloseReceipt {
+    bool success = false;
+    DWORD error = ERROR_SUCCESS;
+    WaitReceipt controllerProbe;
+    unsigned stopCall = 0;
+};
+struct KernelCase {
+    OwnedHandle ready, release, completed, product, controller;
+    HANDLE originalProduct = nullptr; // Identity only; never used after closure.
+    bool workerCreated = false, controllerDuplicatedBeforeStop = false;
+    bool joined = false, releaseAttempted = false, releaseSucceeded = false;
+    bool cleanupFinished = false, controllerReclaimedProduct = false;
+    DWORD releaseError = ERROR_SUCCESS, creationError = ERROR_SUCCESS;
+    std::atomic<bool> workerDone{false};
+    std::atomic<DWORD> readyError{ERROR_SUCCESS}, completedError{ERROR_SUCCESS};
+    std::atomic<DWORD> workerGateResult{WAIT_FAILED}, workerGateError{ERROR_SUCCESS};
+    WaitReceipt readyWait, beforeStopProbe, beforeStopCompletedWait;
+    WaitReceipt precompletedJoin, afterStopProbe, afterStopCompletedWait;
+    WaitReceipt cleanupJoin;
+    std::array<WaitReceipt, 4> productWaits{};
+    std::array<unsigned, 4> waitStopCalls{};
+    std::array<CloseReceipt, 4> productCloses{};
+    std::array<double, 2> stopElapsed{};
+    std::array<bool, 2> stopThrew{};
+    unsigned waitCount = 0, closeCount = 0, stopCalls = 0;
+    unsigned revokes = 0, dsu = 0, host = 0, hostWhileWorkerLive = 0;
+    unsigned blockedInvalidApiAttempts = 0;
+    std::vector<json> logs;
+
+    unsigned eventsRemaining() const noexcept {
+        return unsigned(ready.value != nullptr) + unsigned(release.value != nullptr)
+            + unsigned(completed.value != nullptr);
+    }
+    unsigned handlesRemaining() const noexcept {
+        return eventsRemaining() + unsigned(product.value != nullptr)
+            + unsigned(controller.value != nullptr);
+    }
+    void releaseAndJoin() noexcept {
+        // Also run on setup/Stop/check failure. Never close a worker-used event
+        // until the real thread object has signaled through a still-owned handle.
+        if (release.value) {
+            releaseAttempted = true;
+            if (::SetEvent(release.value) != FALSE) {
+                releaseSucceeded = true;
+                releaseError = ERROR_SUCCESS;
+            } else {
+                releaseError = ::GetLastError();
+            }
+        }
+        if (!workerCreated || joined) return;
+        // The original is a rollback-only fallback if duplication failed before
+        // Stop. Once Stop has run, only the controller duplicate may prove join.
+        HANDLE joinHandle = controller.value;
+        if (!joinHandle && stopCalls == 0) joinHandle = product.value;
+        if (joinHandle) {
+            cleanupJoin = realWait(joinHandle, kControllerJoinWaitMs);
+            joined = cleanupJoin.result == WAIT_OBJECT_0;
+        }
+    }
+    void closeAfterJoin() noexcept {
+        if (cleanupFinished) return;
+        cleanupFinished = true;
+        if (workerCreated && !joined) return;
+        if (product.value) {
+            controllerReclaimedProduct = true;
+            product.close();
+        }
+        controller.close();
+        completed.close();
+        ready.close();
+        release.close();
+    }
+};
+static KernelCase* current = nullptr;
+
+// Explicit fake production leaves: these objects/counters cannot reach YMCC.
+enum class YmccFamily { Generic, LenovoLegionGo };
+static struct { YmccFamily family = YmccFamily::Generic; } g_machineIdentity;
+static std::atomic<bool> g_inputCaptureStop{false};
+// Explicit atomic-only fake stop-request leaf. No StartupWait mutex, CV
+// or notification runs here; this fixture does not prove startup synchronization.
+static void inputCaptureRequestStop() noexcept {
+    g_inputCaptureStop.store(true, std::memory_order_release);
+}
+static HANDLE g_inputCaptureThread = nullptr;
+@CAPTURE_SUPPORT@
+static void legionMotionRevoke() { ++current->revokes; }
+static void dsu_stop() { ++current->dsu; }
+static void inputHostStop() {
+    ++current->host;
+    if (!current->workerDone.load(std::memory_order_acquire)) ++current->hostWhileWorkerLive;
+}
+
+static void gamebarTraceRequestStop(){}
+static void inputCaptureShutdown(){g_captureShutdownAttempted.store(true);}
+static std::uint64_t inputCaptureRetireResources(bool){dsu_stop();inputHostStop();return 0;}
+@BASE_CLASSIFIER@
+
+static void appendNativeLifecycleLog(const char* event, json detail) {
+    detail["event"] = event;
+    detail["baseLane"] = nativeLifecycleEventIsBase(event);
+    current->logs.push_back(std::move(detail));
+}
+
+// Transparent observers around REAL Windows APIs, scoped only to the injected
+// function. No synthetic WAIT_RESULT, fake close, invalid-handle API probe, or
+// last-error substitution is used. An unexpected/stale argument fails before
+// entering Windows; ordinary scenarios always call the SDK function itself.
+static DWORD observedProductWait(HANDLE handle, DWORD budget) {
+    if (!current || !handle || handle != current->product.value ||
+        !current->controller.value || budget != kProductionWaitMs ||
+        current->waitCount >= current->productWaits.size()) {
+        if (current) ++current->blockedInvalidApiAttempts;
+        throw std::logic_error("unsafe or unbounded production wait argument");
+    }
+    const unsigned index = current->waitCount++;
+    current->waitStopCalls[index] = current->stopCalls;
+    current->productWaits[index] = realWait(handle, budget);
+    return current->productWaits[index].result;
+}
+static BOOL observedProductClose(HANDLE handle) {
+    if (!current || !handle || handle != current->product.value ||
+        !current->controller.value || current->closeCount >= current->productCloses.size()) {
+        if (current) ++current->blockedInvalidApiAttempts;
+        throw std::logic_error("unsafe production close argument");
+    }
+    auto& receipt = current->productCloses[current->closeCount++];
+    receipt.stopCall = current->stopCalls;
+    receipt.controllerProbe = realWait(current->controller.value, 0);
+    const BOOL result = ::CloseHandle(handle);
+    const DWORD lastError = ::GetLastError();
+    receipt.success = result != FALSE;
+    receipt.error = receipt.success ? ERROR_SUCCESS : lastError;
+    if (receipt.success) current->product.value = nullptr;
+    ::SetLastError(lastError);
+    return result;
+}
+#define WaitForSingleObject observedProductWait
+#define CloseHandle observedProductClose
+@STOP_FUNCTION@
+#undef CloseHandle
+#undef WaitForSingleObject
+
+static DWORD WINAPI ownedWorker(void* argument) noexcept {
+    auto& state = *static_cast<KernelCase*>(argument);
+    if (::SetEvent(state.ready.value) == FALSE) state.readyError = ::GetLastError();
+    const DWORD result = ::WaitForSingleObject(state.release.value, kWorkerGateWaitMs);
+    const DWORD error = result == WAIT_FAILED ? ::GetLastError() : ERROR_SUCCESS;
+    state.workerGateError.store(error, std::memory_order_relaxed);
+    state.workerGateResult.store(result, std::memory_order_release);
+    state.workerDone.store(true, std::memory_order_release);
+    if (::SetEvent(state.completed.value) == FALSE) state.completedError = ::GetLastError();
+    return result == WAIT_OBJECT_0 ? ERROR_SUCCESS : 1;
+}
+static void invokeStop(KernelCase& state) {
+    const unsigned index = state.stopCalls++;
+    const auto start = Clock::now();
+    try {
+        const auto receipt=observeCaptureStop([]{return inputCaptureStop();});
+        if constexpr(!std::is_void_v<decltype(inputCaptureStop())>){
+            check(receipt.settled()==(g_inputCaptureThread==nullptr),"typed receipt tracks retained real worker owner");
+            check(current->hostWhileWorkerLive==0,"actual Stop held worker forbids Host cleanup");
+        }
+    } catch (...) {
+        state.stopThrew[index] = true;
+    }
+    state.stopElapsed[index] = elapsedMs(start);
+    check(!state.stopThrew[index], "production Stop returned without exception");
+    check(g_inputCaptureStop.load(std::memory_order_acquire), "Stop published capture stop");
+    check(state.host==state.dsu && (std::is_void_v<decltype(inputCaptureStop())> ? state.host==state.stopCalls : state.host<=state.stopCalls),
+        "resource retirement leaves respect typed Stop producer barrier");
+    check(state.revokes == (g_machineIdentity.family == YmccFamily::LenovoLegionGo ? (std::is_void_v<decltype(inputCaptureStop())> ? state.stopCalls : 1u) : 0u),
+        "production family branch used the explicit fake revoke leaf");
+}
+static void requireSetup(bool value, const char* message) {
+    if (!value) throw std::runtime_error(message);
+}
+struct CleanupGuard {
+    KernelCase& state;
+    std::unique_ptr<KernelCase>& owner;
+    ~CleanupGuard() {
+        state.releaseAndJoin();
+        state.closeAfterJoin();
+        if ((state.workerCreated && !state.joined) || state.handlesRemaining() != 0) {
+            // A bounded cleanup failure must preserve worker-used storage even
+            // if later JSON construction throws. It remains an explicit failure
+            // with nonzero ownership counts; process exit is not disposal proof.
+            owner.release();
+        }
+    }
+};
+static void verifyLog(const KernelCase& state, unsigned index, DWORD wait, bool retained) {
+    check(state.logs.size() > index, "checked Stop emitted its lifecycle receipt");
+    if (state.logs.size() <= index) return;
+    const auto& receipt = state.logs[index];
+    check(receipt.value("event", "") == "input-capture-worker-stop" && receipt.value("baseLane", false),
+        "production classifier admits ordinary worker-stop evidence");
+    check(receipt.value("threadWaitBudgetMs", 0u) == kProductionWaitMs &&
+        receipt.value("waitResult", DWORD(WAIT_FAILED)) == wait,
+        "production receipt matches real kernel wait and its per-wait budget");
+    check(receipt.value("threadExitVerified", false) == (wait == WAIT_OBJECT_0) &&
+        receipt.value("ownerRetained", !retained) == retained &&
+        receipt.value("handleClosed", false) == (wait == WAIT_OBJECT_0),
+        "production receipt distinguishes exit proof, closure and retained ownership");
+    check(receipt.value("waitWin32", DWORD(WAIT_FAILED)) == ERROR_SUCCESS &&
+        receipt.value("closeWin32", DWORD(WAIT_FAILED)) == ERROR_SUCCESS,
+        "ordinary real-kernel cases have no injected Win32 failures");
+}
+
+static json runCase(bool blocked, bool expectLegacy, bool& canContinue) {
+    auto owner = std::make_unique<KernelCase>();
+    KernelCase& state = *owner;
+    current = &state;
+    resetCaptureFixture();
+    g_inputCaptureStop.store(false, std::memory_order_release);
+    g_inputCaptureThread = nullptr;
+    // Exercise both existing family paths without adding more timed scenarios.
+    g_machineIdentity.family = blocked ? YmccFamily::LenovoLegionGo : YmccFamily::Generic;
+    const unsigned checksBefore = checks;
+    const unsigned failuresBefore = failures;
+    bool retainedAtFirstReturn = false, workerIncompleteAtFirstReturn = false;
+    bool productClosedAtFirstReturn = false, lostUnverifiedOwner = false;
+    bool lateReclaimedAfterSignal = false, secondStopAfterJoin = false;
+    std::string setupOrObservationError;
+    {
+        CleanupGuard cleanup{state, owner};
+        try {
+            state.logs.reserve(2);
+            for (OwnedHandle* event : {&state.ready, &state.release, &state.completed}) {
+                event->value = ::CreateEventW(nullptr, TRUE, FALSE, nullptr);
+                if (!event->value) state.creationError = ::GetLastError();
+                requireSetup(event->value != nullptr, "owned unnamed event creation failed");
+            }
+            state.product.value = ::CreateThread(nullptr, 0, ownedWorker, &state, 0, nullptr);
+            if (!state.product.value) state.creationError = ::GetLastError();
+            requireSetup(state.product.value != nullptr, "owned worker creation failed");
+            state.workerCreated = true;
+            state.originalProduct = state.product.value;
+            g_inputCaptureThread = state.product.value;
+            const BOOL duplicated = ::DuplicateHandle(::GetCurrentProcess(), state.product.value,
+                ::GetCurrentProcess(), &state.controller.value, 0, FALSE, DUPLICATE_SAME_ACCESS);
+            if (duplicated == FALSE) state.creationError = ::GetLastError();
+            requireSetup(duplicated != FALSE, "controller join-handle duplication failed");
+            state.controllerDuplicatedBeforeStop = true;
+            check(state.controller.value != state.product.value, "controller owns a distinct duplicate thread handle");
+
+            state.readyWait = realWait(state.ready.value, kReadyWaitMs);
+            requireSetup(state.readyWait.result == WAIT_OBJECT_0, "worker ready gate did not signal within its bound");
+            check(state.readyError.load() == ERROR_SUCCESS, "worker successfully signaled its ready event");
+            if (!blocked) {
+                state.releaseAndJoin();
+                state.precompletedJoin = state.cleanupJoin;
+                requireSetup(state.joined, "precompleted worker did not join before Stop");
+                check(state.workerDone.load(std::memory_order_acquire), "completed scenario has finished worker work");
+            }
+            state.beforeStopProbe = realWait(state.controller.value, 0);
+            state.beforeStopCompletedWait = realWait(state.completed.value, 0);
+            requireSetup(state.beforeStopProbe.result == (blocked ? WAIT_TIMEOUT : WAIT_OBJECT_0),
+                "worker did not have the required thread state before Stop");
+            check(state.beforeStopCompletedWait.result == (blocked ? WAIT_TIMEOUT : WAIT_OBJECT_0),
+                "owned completion event agrees with the scenario before Stop");
+            invokeStop(state);
+            if constexpr(!std::is_void_v<decltype(inputCaptureStop())>)check(state.host==(blocked?0u:1u),"retirement cannot run before worker release and successful close");
+            retainedAtFirstReturn = g_inputCaptureThread == state.originalProduct && state.product.value != nullptr;
+            productClosedAtFirstReturn = state.product.value == nullptr;
+            check(state.waitCount == 1 && state.productWaits[0].budget == kProductionWaitMs,
+                "first production Stop executed one real 2000ms wait");
+            const DWORD expectedWait = blocked ? WAIT_TIMEOUT : WAIT_OBJECT_0;
+            check(state.waitCount == 1 && state.productWaits[0].result == expectedWait,
+                "first production Stop observed the required real WAIT_RESULT");
+            // The independent duplicate is valid even after legacy closes the
+            // product handle. Never probe originalProduct after that closure.
+            state.afterStopProbe = realWait(state.controller.value, 0);
+            state.afterStopCompletedWait = realWait(state.completed.value, 0);
+            workerIncompleteAtFirstReturn = state.afterStopProbe.result == WAIT_TIMEOUT &&
+                state.afterStopCompletedWait.result == WAIT_TIMEOUT &&
+                !state.workerDone.load(std::memory_order_acquire);
+            lostUnverifiedOwner = blocked && workerIncompleteAtFirstReturn && g_inputCaptureThread == nullptr;
+            check(blocked ? workerIncompleteAtFirstReturn : state.afterStopProbe.result == WAIT_OBJECT_0,
+                "controller independently proves worker state immediately after Stop");
+            if (expectLegacy) {
+                check(g_inputCaptureThread == nullptr && productClosedAtFirstReturn && state.closeCount == 1 &&
+                    state.productCloses[0].success, "legacy discarded and actually closed its product handle");
+                check(!blocked || lostUnverifiedOwner, "legacy timeout reproduced lost live-worker ownership");
+            } else {
+                check(blocked ? retainedAtFirstReturn : g_inputCaptureThread == nullptr,
+                    "candidate retains timeout ownership and retires only a completed worker");
+                check(blocked ? state.closeCount == 0 : state.closeCount == 1 && state.productCloses[0].success,
+                    "candidate never closes its product handle on timeout");
+                check(!lostUnverifiedOwner, "candidate did not lose unverified worker ownership");
+                verifyLog(state, 0, expectedWait, blocked);
+            }
+
+            // Release is unconditional, including failed expectations. Join must
+            // precede the second Stop and every controller/event close below.
+            state.releaseAndJoin();
+            if (!expectLegacy && blocked && retainedAtFirstReturn && state.joined) {
+                secondStopAfterJoin = true;
+                invokeStop(state);
+                lateReclaimedAfterSignal = g_inputCaptureThread == nullptr && state.product.value == nullptr &&
+                    state.waitCount == 2 && state.productWaits[1].result == WAIT_OBJECT_0 &&
+                    state.closeCount == 1 && state.productCloses[0].success;
+                check(lateReclaimedAfterSignal, "second production Stop reclaimed retained owner after actual join");
+                verifyLog(state, 1, WAIT_OBJECT_0, false);
+            }
+            if (!expectLegacy && blocked) {
+                check(secondStopAfterJoin && lateReclaimedAfterSignal, "candidate completed the timeout-to-signaled retirement path");
+            }
+        } catch (const std::exception& error) {
+            setupOrObservationError = error.what();
+            check(false, "kernel fixture setup or observation failed; guarded cleanup still runs");
+        } catch (...) {
+            setupOrObservationError = "unknown fixture exception";
+            check(false, "kernel fixture threw; guarded cleanup still runs");
+        }
+    }
+    check(state.controllerDuplicatedBeforeStop, "controller duplicate existed before any production Stop");
+    check(state.releaseAttempted && state.releaseSucceeded, "controller unconditionally released the worker gate");
+    check(state.workerCreated && state.joined, "owned worker positively joined through a valid owned handle");
+    check(state.workerDone.load(std::memory_order_acquire), "owned worker completion was observed");
+    check(state.workerGateResult.load(std::memory_order_acquire) == WAIT_OBJECT_0 &&
+        state.workerGateError.load() == ERROR_SUCCESS, "worker cooperatively completed through the released gate");
+    check(state.completedError.load() == ERROR_SUCCESS, "worker completion event was signaled successfully");
+    check(state.eventsRemaining() == 0 && state.handlesRemaining() == 0, "all owned events and handles actually closed after join");
+    check(!state.controllerReclaimedProduct, "normal retirement came from production Stop rather than controller salvage");
+    check(state.blockedInvalidApiAttempts == 0, "no invalid or closed handle reached a kernel API");
+    check(state.stopCalls == (!expectLegacy && blocked ? 2u : 1u), "required production Stop invocations completed");
+    if (!expectLegacy) {
+        check(state.logs.size() == state.stopCalls, "one production lifecycle receipt per Stop");
+        for (unsigned index = 0; index < state.closeCount; ++index)
+            check(state.productCloses[index].controllerProbe.result == WAIT_OBJECT_0,
+                "candidate product close followed actual kernel thread completion");
+    }
+
+    json waits = json::array(), closes = json::array(), stopTimings = json::array();
+    for (unsigned index = 0; index < state.waitCount; ++index) {
+        json receipt = describe(state.productWaits[index]);
+        receipt["stopCall"] = state.waitStopCalls[index];
+        waits.push_back(std::move(receipt));
+    }
+    unsigned liveHandleCloses = 0;
+    for (unsigned index = 0; index < state.closeCount; ++index) {
+        const auto& receipt = state.productCloses[index];
+        liveHandleCloses += unsigned(receipt.controllerProbe.result == WAIT_TIMEOUT && receipt.success);
+        closes.push_back({{"stopCall", receipt.stopCall}, {"success", receipt.success},
+            {"closeWin32", receipt.error}, {"controllerProbeBeforeClose", describe(receipt.controllerProbe)}});
+    }
+    for (unsigned index = 0; index < state.stopCalls; ++index)
+        stopTimings.push_back({{"stopCall", index + 1}, {"elapsedMs", state.stopElapsed[index]}, {"threw", state.stopThrew[index]}});
+    if (expectLegacy && blocked)
+        check(liveHandleCloses == 1, "legacy actually closed a handle to a kernel-proven live worker");
+    const bool productionExecuted = state.stopCalls != 0;
+    json result = {{"case", blocked ? "worker-held-until-controller-release" : "worker-completed-before-stop"},
+        {"pass", failures == failuresBefore}, {"checks", checks - checksBefore},
+        {"failures", failures - failuresBefore}, {"expectedLegacy", expectLegacy},
+        {"productionStopFunctionExecuted", productionExecuted}, {"actualStopFunctionExecuted", productionExecuted},
+        {"realKernelWaitAndClose", true}, {"realThreadWaitOrCloseApi", true},
+        {"controllerJoinHandleDuplicatedBeforeStop", state.controllerDuplicatedBeforeStop},
+        {"firstStopWait", describe(state.productWaits[0])}, {"productionWaits", waits}, {"productionCloses", closes},
+        {"stopCalls", state.stopCalls}, {"stopTimings", stopTimings},
+        {"threadWaitBudgetMs", kProductionWaitMs}, {"stopTotalBudgetClaimed", false},
+        {"readyWait", describe(state.readyWait)}, {"beforeStopControllerProbe", describe(state.beforeStopProbe)},
+        {"precompletedJoin", describe(state.precompletedJoin)}, {"afterStopControllerProbe", describe(state.afterStopProbe)},
+        {"afterStopCompletedEventProbe", describe(state.afterStopCompletedWait)},
+        {"workerStillIncompleteAtFirstReturn", workerIncompleteAtFirstReturn},
+        {"retainedAtFirstReturn", retainedAtFirstReturn}, {"productClosedAtFirstReturn", productClosedAtFirstReturn},
+        {"lostUnverifiedOwner", lostUnverifiedOwner}, {"liveHandleCloses", liveHandleCloses},
+        {"secondStopAfterControllerJoin", secondStopAfterJoin}, {"lateReclaimedAfterSignal", lateReclaimedAfterSignal},
+        {"releaseAttempted", state.releaseAttempted}, {"releaseSucceeded", state.releaseSucceeded}, {"releaseWin32", state.releaseError},
+        {"controllerJoin", describe(state.cleanupJoin)}, {"ownedThreadCreated", state.workerCreated},
+        {"ownedThreadJoined", state.joined}, {"ownedFixtureThreadJoined", state.joined},
+        {"workerCooperativeCompletion", state.workerGateResult.load() == WAIT_OBJECT_0},
+        {"workerGateWaitBudgetMs", kWorkerGateWaitMs}, {"workerGateWaitResult", state.workerGateResult.load()},
+        {"workerGateWin32", state.workerGateError.load()}, {"creationWin32", state.creationError},
+        {"ownedEventsRemaining", state.eventsRemaining()}, {"ownedHandlesRemaining", state.handlesRemaining()},
+        {"ownedThreadsRemaining", unsigned(state.workerCreated && !state.joined)},
+        {"cleanupStatus", state.workerCreated && !state.joined ? "FAILED_JOIN_UNPROVEN" :
+            state.handlesRemaining() != 0 ? "FAILED_HANDLES_REMAIN" :
+            !state.workerCreated ? "NO_WORKER_CREATED" : "JOINED_AND_HANDLES_CLOSED"},
+        {"contextRetainedAfterCleanupFailure", owner == nullptr},
+        {"productHandleRemaining", state.product.value != nullptr}, {"controllerJoinHandleRemaining", state.controller.value != nullptr},
+        {"controllerReclaimedProduct", state.controllerReclaimedProduct},
+        {"cleanupCloseWin32", {{"ready", state.ready.closeError}, {"release", state.release.closeError},
+            {"completed", state.completed.closeError}, {"product", state.product.closeError}, {"controller", state.controller.closeError}}},
+        {"blockedInvalidApiAttempts", state.blockedInvalidApiAttempts},
+        {"fakeLeaves", {{"family", blocked ? "LenovoLegionGo" : "Generic"}, {"revokeCalls", state.revokes},
+            {"dsuCalls", state.dsu}, {"hostCalls", state.host}, {"hostCleanupWhileWorkerLive", state.hostWhileWorkerLive}}},
+        {"logs", state.logs}, {"error", setupOrObservationError},
+        {"independentHostCleanupProven", false}, {"boundedStalledProductionDestructionProven", false},
+        {"wholeLifecycleAcceptance", false}};
+    canContinue = (!state.workerCreated || state.joined) && state.handlesRemaining() == 0;
+    if (state.product.value == nullptr) g_inputCaptureThread = nullptr;
+    current = nullptr;
+    return result;
+}
+
+int main(int argc, char** argv) {
+    const bool validMode = argc == 2 && (std::string_view(argv[1]) == "legacy" || std::string_view(argv[1]) == "safe");
+    const bool legacy = validMode && std::string_view(argv[1]) == "legacy";
+    json cases = json::array();
+    check(validMode, "usage: fixture.exe legacy|safe");
+    if (validMode) {
+        bool canContinue = true;
+        cases.push_back(runCase(false, legacy, canContinue));
+        if (canContinue) cases.push_back(runCase(true, legacy, canContinue));
+        check(cases.size() == 2, "both real-kernel scenarios completed");
+    }
+    unsigned eventsRemaining = 0, handlesRemaining = 0, threadsRemaining = 0;
+    bool allJoined = validMode && cases.size() == 2;
+    bool allExecuted = allJoined, cooperative = allJoined;
+    for (const auto& scenario : cases) {
+        eventsRemaining += scenario.value("ownedEventsRemaining", 0u);
+        handlesRemaining += scenario.value("ownedHandlesRemaining", 0u);
+        threadsRemaining += scenario.value("ownedThreadsRemaining", 0u);
+        allJoined = allJoined && scenario.value("ownedThreadJoined", false);
+        allExecuted = allExecuted && scenario.value("productionStopFunctionExecuted", false);
+        cooperative = cooperative && scenario.value("workerCooperativeCompletion", false);
+    }
+    std::cout << json({{"pass", failures == 0}, {"checks", checks}, {"failures", failures},
+        {"cases", cases}, {"expectedLegacy", legacy}, {"realKernelWaitAndClose", true},
+        {"productionStopFunctionExecuted", allExecuted}, {"productionStopExecuted", allExecuted},
+        {"ownedThreadJoined", allJoined}, {"ownedEventsRemaining", eventsRemaining}, {"ownedHandlesRemaining", handlesRemaining},
+        {"ownedThreadsRemaining", threadsRemaining}, {"cooperativeCompletion", cooperative}, {"processExitUsedAsCleanup", false},
+        {"threadWaitBudgetMs", kProductionWaitMs}, {"stopTotalBudgetClaimed", false},
+        {"noRealWinmmDeviceHostOrService", true}, {"independentHostCleanupProven", false},
+        {"boundedStalledProductionDestructionProven", false}, {"wholeLifecycleAcceptance", false}}).dump() << '\n';
+    return failures ? 1 : 0;
+}

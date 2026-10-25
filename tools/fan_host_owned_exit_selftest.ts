@@ -28,6 +28,7 @@ async function invoke(cmd: string, args: any): Promise<any> {
   if (cmd === 'fs.exists') return String(args.path).toLowerCase().endsWith('yemanfanhost.exe');
   if (cmd === 'fs.mkdir') return true;
   if (cmd === 'fs.readTextFile') return TOKEN;
+  if (cmd === 'fs.readTextRange') return { content: TOKEN, offset: 0, size: Buffer.byteLength(TOKEN) };
   if (cmd === 'shell.run') return { exitCode: 0, stdout: ' TCP 127.0.0.1:8765 0.0.0.0:0 LISTENING ' + PID, stderr: '' };
   if (cmd === 'proc.findExact') return { found: true, pid: PID };
   if (cmd === 'http.request') return { status: 200, body: JSON.stringify({ ok: true, state: { state: 'Ready' } }), headers: '' };
@@ -44,6 +45,8 @@ win.chrome = { webview: {
   ); },
 } };
 (globalThis as any).window = win;
+// The real shared UI lifecycle expects document when a native window fixture exists.
+(globalThis as any).document = Object.assign(new EventTarget(), { visibilityState: 'visible', hidden: false, createElement: () => ({ content: {}, style: {} }) });
 const { NativeFanHostLauncher, resolveFanHostConfig } = await import('../src/bridge/fanHost');
 const owned = { pid: PID, executable: EXE, processCreated: CREATED };
 const reset = () => { calls = []; current = { valid: false, pid: PID }; exact = { ok: false, matched: true, exited: false, reason: 'still-running' }; };

@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "timeoutMs": 30000,
+  "artifactInputBudget": 3072,
+  "producerSha256": "3eaf6d2cbea922ca9f8a397838e6806cb7c459c7987873696b606a85af56ff41",
+  "sourceInputs": [
+    "tools/custom_steam_library_ui_datachain_selftest.mjs",
+    "CustomSteamLibrary/workspace-ui/app.js",
+    "CustomSteamLibrary/workspace-ui/index.html"
+  ],
+  "caseNames": [
+    "reject-non-object-snapshot-0",
+    "reject-non-object-snapshot-1",
+    "reject-non-object-snapshot-2",
+    "reject-non-object-snapshot-3",
+    "reject-non-object-snapshot-4",
+    "reject-non-object-snapshot-5",
+    "null-library-preserves-current-games",
+    "malformed-games-array-preserves-current-games",
+    "all-malformed-rows-are-not-authoritative-empty",
+    "intentional-empty-library-remains-empty",
+    "mixed-valid-and-malformed-games-preserve-previous-complete-set",
+    "non-string-primary-is-not-rendered-or-imported",
+    "invalid-plan-fields-cannot-be-import-ready",
+    "invalid-root-field-keeps-user-settings",
+    "invalid-overrides-and-accounts-are-safe",
+    "different-steam-roots-same-account-are-retained",
+    "snapshot-normalization-does-not-mutate-prior-or-input",
+    "raw-download-result-is-not-treated-as-snapshot",
+    "state-response-without-snapshot-is-rejected",
+    "steam-write-error-refreshes-durable-state",
+    "steam-open-does-not-relabel-join-button",
+    "malformed-bridge-message-does-not-access-array-shape",
+    "deterministic-snapshot-field-fuzz-1000-combinations",
+    "no-steamid-igdb-and-baidu-artwork-is-visible",
+    "manual-file-cover-wins-grid-and-editor",
+    "manual-cover-does-not-hide-automatic-background",
+    "manual-wallpaper-does-not-hide-automatic-cover",
+    "manual-deletion-wins-over-stale-manual-and-auto-assets",
+    "missing-manual-file-falls-back-to-automatic-preview",
+    "automatic-preview-wins-over-initials",
+    "no-image-uses-initials-without-throwing",
+    "portable-local-copy-wins-over-dead-download-url",
+    "legacy-manual-artwork-uses-the-same-priority",
+    "artwork-source-priority-1000-slot-combinations",
+    "duplicate-exe-old-snapshot-is-one-card",
+    "duplicate-exe-keeps-owned-plan-not-pending-plan",
+    "same-filename-distinct-exes-remain-separate-cards",
+    "builtin-steam-tool-all-snapshot-boundaries",
+    "builtin-steam-tool-non-authoritative-fallback-still-filters",
+    "builtin-steam-tool-strict-id-and-exact-name"
+  ],
+  "fuzzCombinationCount": 1000,
+  "artworkPriorityCombinationCount": 1000,
+  "faults": [
+    {
+      "id": "malformed-row-fallback-lost",
+      "vm": "snapshot",
+      "before": "return valid.length !== input.length && Array.isArray(fallback) ? fallback.map(row => ({ ...row })) : valid;",
+      "after": "return valid;",
+      "expectedFailedNames": [
+        "all-malformed-rows-are-not-authoritative-empty",
+        "mixed-valid-and-malformed-games-preserve-previous-complete-set"
+      ]
+    },
+    {
+      "id": "portable-artwork-url-preempts-local-copy",
+      "vm": "artwork",
+      "before": "const raw = String(entry.portableFile || entry.path || entry.file || '').trim();",
+      "after": "const raw = String(entry.url || entry.portableFile || entry.path || entry.file || '').trim();",
+      "expectedFailedNames": [
+        "portable-local-copy-wins-over-dead-download-url"
+      ]
+    }
+  ]
+}

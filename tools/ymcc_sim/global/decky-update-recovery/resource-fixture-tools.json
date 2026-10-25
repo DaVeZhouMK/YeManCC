@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "scope": "Additional exact resource-fixture link input; original tool declarations remain unchanged; unknown inputs always refuse",
+  "files": [
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Lib\\10.0.26100.0\\um\\x64\\iphlpapi.lib",
+      "sha256": "99dd1b9d3c44a20c9b62277f4140fc9fc11c6dd779c34be7d514020be1d13e41"
+    }
+  ]
+}

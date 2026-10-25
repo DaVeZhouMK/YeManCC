@@ -1,0 +1,672 @@
+{
+  "InputSha256": "0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49",
+  "Purpose": "YMCC devicecore conditional profile v2: preserve all device/native/LED/neutral strings and method IL; exclude HC ordinary App/UI and Hook/profile-output workflow",
+  "Removals": [
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "app.baml",
+      "Sha256": "25011c764e89288b9035ad6901e6c7264728241001242d718eadb0d1092615cd",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "presets/default/dark.baml",
+      "Sha256": "272d51ac1b5c52f5078ed5a97e6fe418f4212688e9b78dcf8ddff16976e75610",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "presets/default/light.baml",
+      "Sha256": "7064ce48235bef45b514053f31ee5bce18bcd06e7d42cebcdd732afe5a57067e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_0_big.png",
+      "Sha256": "e15d069d29652ebec834c3c707d4528f6608b252ca7ca2c32265ceddf7a7e055",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_1_big.png",
+      "Sha256": "552e3bdbd695aa7c4f6bb06590f0695b6ab7f1ed013f19139fb92ffef43f60ac",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_2_big.png",
+      "Sha256": "35deea5f11a2f88e848b43d3a948c8046d413ded398e46f6dcbbf33c328762c7",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_3_big.png",
+      "Sha256": "4e3e3ef75c6c72fb31b63265756d52c26fee3f541bb96b2f13a156ea4944cee8",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_4_big.png",
+      "Sha256": "4e4c5b88bd32358ab9768e3ec63172569c5322c0c5441ca83a5a73f1aa68aaf7",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/controllers/controller_6_big.png",
+      "Sha256": "cfc9d61a69f76e1afc9081b4da044706eeffcf06db64d017a79850d95c6ddd23",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aokzoe_a1.png",
+      "Sha256": "ab40713906e70bf7b97ee269d538191934d51bc760caac91edfdd0abeeeded8e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_2.png",
+      "Sha256": "3a923114a418217045ddfd293d2a7e0e3360683947ec2047a27d3c663ca3ec70",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_2021.png",
+      "Sha256": "18f155c3834f57d3cd8c28eac239e22778d39361b746b231b319fe9c5fc6c250",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_air.png",
+      "Sha256": "c4c401af67738d35d6292992b4fb173756898260c40572cf46e5e4c64491ef8d",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_flip_ds.png",
+      "Sha256": "2eadd186d4c2f1039eeb6185eb17715b4bdfe5a13fc360fe4e0875bfac1739ab",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_flip_kb.png",
+      "Sha256": "5aa84c8999f3e464af96ad02241dcb5b6c1cbe6e7eeba9c7644ee96907ba3a9e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_kun.png",
+      "Sha256": "66e3d30af34c822fe6350386a954afe451510f9b7eb6f6afc95ca4e248fada09",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_next.png",
+      "Sha256": "9c80924d1c273cf6d77079b739282a322cc4b1c314a4d71d5930978f81aa1858",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_aya_slide.png",
+      "Sha256": "37f6f62ed52aa421aa5f2cd8c41ae780097f8bb486c793ecf2d5250df154b0eb",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_ayn_loki.png",
+      "Sha256": "d29e41952c0b81d6083a8501527ff6bcf9b5b4c57bbc95b1b430d1cb2d9fcaa0",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_generic.png",
+      "Sha256": "97210d5217fb13c7f5f40da3903ea7b9a6a272ac6b1a37dec2dc8f1bd2fff08c",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd_win2.png",
+      "Sha256": "19a99fc172c6ae3a5817d3cd59dba8d06bc1a0060cbedc4d1ba83a772566d963",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd_winmax2.png",
+      "Sha256": "3a18bfacdefa5512e8415c4b44543bfa2392e8c32f1d81618e9bc2b0d13e4312",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd_winmini.png",
+      "Sha256": "4b9326678a56569f348e6b8ea24bdb2703ca9d9f25af0fa351cf50114def083b",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd3.png",
+      "Sha256": "159ff0f054ab74e529ef7eda19a1ac58803850dd3600de3bed33390dac72c28b",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd4.png",
+      "Sha256": "e19366aa296fb9ff4f355edcb4b0e6099fe2ebf575a2c77578839dd763a2519c",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_gpd5.png",
+      "Sha256": "9d4dbc650762801efa1fbbb289f58c063f643954ab3ed27be5ff5834d5638818",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_legion_go_s.png",
+      "Sha256": "28151cf7a16fb1a36806a8eee3d3646b5c508fb013fc1a21ede80060e0136528",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_legion_go.png",
+      "Sha256": "ca1915e634ef8ea90f1a8c8b6a48372f23a3065d3eb8c0fc8b7bcb76a96b3495",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_legion_go2.png",
+      "Sha256": "a78cf3f259470c8097e01dcc640339e98da5fdca8f542c466804579bb0e8a755",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_minisforum_v3.png",
+      "Sha256": "c8d99d98cb26ff6fafe8a702dab529b1097f3ef8db413b4239c4140b562dada1",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_msi_claw.png",
+      "Sha256": "01337c49093f79c7e4d169646de786918811c3a61cbfbeb05a81d6151c64e388",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_msi_claw8.png",
+      "Sha256": "3b2a4b6312a32a6585186b19d9398624f9a041bb7feb6fe6820dfd305a629781",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_msi_claw8ex.png",
+      "Sha256": "ccdef51438a160cd15c6e31adc1a536e50aaf54d5572a459427c3af30f7d935e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_2.png",
+      "Sha256": "063bff8842ab79c67f67d3b9cf2e5d9eee682e9405d38e6bee1ef2f553057e19",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_apex.png",
+      "Sha256": "ccc9f1bc5ebd2c3fa07ec57bb83ccc5773d07b53a690bce0da1569ac405588fd",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_g1.png",
+      "Sha256": "1aff2da9c1602010a35be9dbe7a7fd5fc4625a16e8d5336289e5d50057613e95",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_mini.png",
+      "Sha256": "5ca86d64798ebe6988b52d0eb7b595cab0905cfddb01b09fd93b5e18a821c897",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_onexfly.png",
+      "Sha256": "599fe7813609facb8a6d60094360e12cb869531733d548f2f28cf2a491c15194",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_onexplayer_x1.png",
+      "Sha256": "9228dd5e2021aab58f0444b49cd9acd3d9e410e4fad4e37738ecf9119edd11bf",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_rog_ally_x.png",
+      "Sha256": "31a69433e88e14806ada7d55c944de93fbd938fa581c4938cbb587a0c6619ddd",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_rog_ally.png",
+      "Sha256": "365b89570570dd6ad45069c4a9388cd4dcd98a5f549e6eefe36e058c1293bad0",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_suiplay_0x1.png",
+      "Sha256": "c8fa579dde95f05c5c0dbee0b25149b20184e138f42929d49442ead10d047860",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_valve_jupiter.png",
+      "Sha256": "587f85a431efc92731a681f4a76146117f303fd8c1eb48855d7f8822d5cbf5fb",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_xbox_rog_ally_x.png",
+      "Sha256": "20aed116270f4ee96cb3cf0395fa316a679c7845bf9b015708c690e612a193c4",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_xbox_rog_ally.png",
+      "Sha256": "5f614e69012e80e400b352a4719a6a0afb04e4b53cfaac59761daa294b0fb4e2",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/deviceimages/device_zotac_zone.png",
+      "Sha256": "1de148498d592b817e1da5ac604b8520fd7a747de4d3fd13c630dbefbc28e9d4",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/missingartwork.png",
+      "Sha256": "5299d7ef10cc4e6e010dd28112329ac969e7cbf66505aad274d98a379f619771",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "resources/missingcover.png",
+      "Sha256": "2ac8c6cb5efa552e804d5e5af9f421c3f8a06f8a288e6d870854673e1ac4f3a9",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "styles/navigationview.baml",
+      "Sha256": "8d8e4ae374d6cc4cb62ca26e61d237a43344bfa87148d197b8888cdb19ca3ed0",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "styles/toggleswitch.baml",
+      "Sha256": "9dbffb8f201512c4845dbc758f395b0f96ec68ed92faa96aaad357020c9e021b",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/aboutpage.baml",
+      "Sha256": "684d3cf2b59efe462d2f6febd492b9a1886b2666c8a8d2aca4a9b8b447e92e08",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/actionsettingspage.baml",
+      "Sha256": "a5a1faf7ec1b2131f6b788d7b1f45ee15576a36e26be033669bb55506bf3d812",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/controllerpage.baml",
+      "Sha256": "96ba894f4b59a2be8ae603ba7044883a132c7326b6bb682c76cf4c5a28272008",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/devicepage.baml",
+      "Sha256": "90237e53d26b55ea53d6c3e30ae8b6e91f25d8acb5bbb5a50085caab2be91e68",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/hotkeysettingspage.baml",
+      "Sha256": "33865cc762f5a089ec5b4418203a86fe01f5ffc813213087a84e8006cc960c84",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/hotkeyspage.baml",
+      "Sha256": "1cd0a464193b30fa52fd899de03eee736e782a2738c61e606fec2f881c5a0221",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/buttonspage.baml",
+      "Sha256": "cbee817670835904ec81a98eb9f6309659908be4e31d07ced3890d3fdb8023e8",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/dpadpage.baml",
+      "Sha256": "4173c4f3f762180b55efffe759e867c3361b3c4665db3cede48198f696682021",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/gyropage.baml",
+      "Sha256": "9b5e62671919c97526c3b3c948ab7ff8e8a23c06923584ee0584eabaee4652c8",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/joystickspage.baml",
+      "Sha256": "176f7bc4ec4b669b63e1640a9904442f4a7115a8c9e86f4cd94f20f05b520c5e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/trackpadspage.baml",
+      "Sha256": "34489ca71f55573df26eaeb4cd321555d226a46be5277de5305ac9021f9a7db0",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layout/triggerspage.baml",
+      "Sha256": "a44cde5ce3a7f447c9a14b58662555d5648941a2908d54fbb23ec2ca06a27d1e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layoutitempage.baml",
+      "Sha256": "2491e4150c06eb4f4f28544eda5767b0ad3aa3a99a99333099c7272b27749a72",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/layoutpage.baml",
+      "Sha256": "91b60db7336d955b8816e1b3b85f9cb82e118be88c58a493f6cfae6082790223",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryallgamespage.baml",
+      "Sha256": "e251b4f8196672642be1c718e0818a9ce8613d4dda5363427dabfd5ba3d63046",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarybattlenetpage.baml",
+      "Sha256": "61aab3163c8cc52cabdc4b31a20cb12c4a33a30a217986ad7868d42d7e97fe5e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarycollectionpage.baml",
+      "Sha256": "027c2d0d85ab2ee925cc9fee75e6039d26892bcfe7eb168c234c1459f7175d0a",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarycollectionscontent.baml",
+      "Sha256": "75c4f012f4d14b9b52254c4fe10a4eaf6ae6c2d2ffdc2ecb9ba63b9720784703",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarycollectionsoverviewpage.baml",
+      "Sha256": "fec9c0ebf9726879f325cb66aeff599ee944679e20851191e7a53887afc0af1b",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryeadesktoppage.baml",
+      "Sha256": "373245e4f95f235f1afab905b68e37e5438cc8db509b70272c9b7e224c1c1d9f",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryepicpage.baml",
+      "Sha256": "16c4e3ea0d4e65aa297948de8343c658192d8b4425df38addfb99b464360afaa",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryfavoritespage.baml",
+      "Sha256": "fa0e91c45885e3dae5c8be3d2e69a1dec93ceca31e33fe31825a1579ae30f632",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarygogpage.baml",
+      "Sha256": "e781ff985c16e812df17c6ee859b9e58763be7f598395ade76ba888b105cb7be",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarymicrosoftstorepage.baml",
+      "Sha256": "dd989995703a918498b4286848953088aa7a0db5d3c69919cb65935d30655920",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryoriginpage.baml",
+      "Sha256": "1806d78ae8d6d7fc9b35e0f77e1a2800036291230da2e028d522433fdb6f2329",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryprofilescontent.baml",
+      "Sha256": "1393296b51ca384c48a0131db5e51b5f1dc484c21952c64bd5c481b0d193280f",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryriotpage.baml",
+      "Sha256": "64b8d3b4d6589fad12ee7e424d42896c653cfd069be590fd6155d691ff9ee9d0",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryrockstarpage.baml",
+      "Sha256": "d1a785e45f5a166b1f2bb447bbbf67487f88b78f016938e25c8948288904bbb4",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/librarysteampage.baml",
+      "Sha256": "534d90a88524c3701cd002ad05171dbf9779b78630ce123b9ba0b787b99eaceb",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/library/libraryubisoftpage.baml",
+      "Sha256": "5223f43a5489989b40b72daa366eeb76f01f4a4146cd940e9c09ce76312f8f15",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/librarypage.baml",
+      "Sha256": "e2f4d515a09e30905a4a1fbc51320c18646c3ff03df94d8d0be653700529ac65",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/notificationspage.baml",
+      "Sha256": "cf2918a7100eea367fcd7ef864059f908b3a3515bb2b5e416396638e14da66d2",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/overlaypage.baml",
+      "Sha256": "28c9a1dea2b2dc7ecd573184fe09bf8a840d40323964ba017d04e98a2541d57e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/performancepage.baml",
+      "Sha256": "025b865dad38478bbc0c9f10f5236850b2dd611836c2ac4dc225519324815979",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/profiles/settingsmode0.baml",
+      "Sha256": "6571572b5532ec5e2701bedccbe6422430648d791da3cc953711e87cc37e655d",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/profiles/settingsmode1.baml",
+      "Sha256": "09d5205c475160f51e6d831d6f42aaf8bcc30a87702ea39e44f31b69d53cebf6",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/profilespage.baml",
+      "Sha256": "606473d92c84ce39cd35d2830626c2f047ed346dcca26e01ddebb61b49632f60",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/settingspage.baml",
+      "Sha256": "0261f565adb16d00851d561fe558ee83316db1f3791b2fea9fbda4775f08e45e",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/welcome/welcomedevicepage.baml",
+      "Sha256": "c08898c6bededa098735bcf4784c73dea28efd939a87d528158ef110a6ee8a29",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/welcome/welcomefinishpage.baml",
+      "Sha256": "adfd1e4e29e8380541b33106da6c751a76da61086e901eaaee41fa466eda94de",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/welcome/welcomeoempage.baml",
+      "Sha256": "8e4477fd8efe474e8fce26a336010832cdaf5e6401c1234af1ad54baa8a835f2",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/welcome/welcomesettingspage.baml",
+      "Sha256": "06b72d15dce4fe008672911c016d3502c7ecfd23489dc12ff7d51db9ace24b20",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/pages/welcome/welcomestartpage.baml",
+      "Sha256": "325180f4ee29eaec38c6af03da35f8ebd14ca4aacba8ae111a62d452e055eaa1",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickapplicationspage.baml",
+      "Sha256": "ab20b98158a228d7b0f350ccdbfcfb356dfbc8de0be2748b1a27f312b6812814",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickdevicepage.baml",
+      "Sha256": "0ae781db24a3182f8d8ab9fc7953762d860179b6017bf49a38b372abe0519610",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickhomepage.baml",
+      "Sha256": "b68d2ea7d5ce4ba66495b51102090f8704e99538d9279edd32c486a71c31ffd1",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickkeyboardpage.baml",
+      "Sha256": "1770e667d6dc5813af8efc22aa6594a86f8057136270939ea83cbc3c6acbfba2",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickoverlaypage.baml",
+      "Sha256": "620397e501dd236a51c728398391f0a05da86a43bd48d67880d85820fd0ec432",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickperformancepage.baml",
+      "Sha256": "3dbb742939a984faaeefdbe9180a4df85c1c0b8f86fd9ccd7b6d3a44a20ef2dc",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/quickpages/quickprofilespage.baml",
+      "Sha256": "c0af7da6aefd2288fa90b8d6329c30630c89e87351316359f807aa8fae28668d",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/splashscreen.baml",
+      "Sha256": "b5263e58e33616f16915255967068142f1e6e57b9e997abf2e2341b0f012faa7",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/templatesdictionary.baml",
+      "Sha256": "6a2f60f4e5d3d12d8e688c20a9349d8f4b6462e03b125076af846d31aac6e6b6",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/windows/mainwindow.baml",
+      "Sha256": "2e78408aa5d355c1960bae1447a0e31d449e0bc64944bf74c1396e2552e47539",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/windows/overlaymodel.baml",
+      "Sha256": "f29802ce69d98279f08b316cd2930f84cc681c7c7bdf0c70c20637198b194fa3",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/windows/overlayquicktools.baml",
+      "Sha256": "f3a743f823dc910ed720cf6cace156f7c7447c7f39cf9278e423c55b7bc457cc",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/windows/overlaytrackpad.baml",
+      "Sha256": "d887c7cf77591b7bc2c4f3f113adba27f7f3c8f9b1d9ae3331794268c8ed3c2f",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.g.resources",
+      "Name": "views/windows/welcomewindow.baml",
+      "Sha256": "e52b8f47afb2f065a4be7725ab3fa4540fffd38f74d6462cdc1004fc8c01d11a",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.Properties.Resources.resources",
+      "Name": "xinput1_x64",
+      "Sha256": "d7e572cc9dae13c8e494d62f481c61cb14f52b8b3c53485158000b0f37fe6d79",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.Properties.Resources.resources",
+      "Name": "xinput1_x86",
+      "Sha256": "064eeb24d74a56fc7d76d4ac9c8a9318840912378b66a10a8f7cd82a47995886",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.Properties.Resources.resources",
+      "Name": "XInputPlusInjector",
+      "Sha256": "27216ce2ea6b910c93f098a9da3b9f0c8888380117c3e8531b3056ec611bab57",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    },
+    {
+      "Container": "HandheldCompanion.Properties.Resources.resources",
+      "Name": "XInputPlusInjector64",
+      "Sha256": "2935384f5bee7a47539bec33b7558b7da315bcc06974f1e26b1996da52ddb743",
+      "Evidence": "HC-static-devicecore-profile-v2: per-resource EvidenceRules validation and all-device/ManagerFactory constructor IL consumption report; standalone HC UI/ProfileManager.Start/Hook workflows excluded by explicit profile contract."
+    }
+  ]
+}

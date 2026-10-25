@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "packageId": "yemancc-update",
+  "packageVersion": "0.0.35",
+  "requiredRoots": [
+    "PowerControl",
+    "YeManCC"
+  ],
+  "roots": [
+    {
+      "source": "YeManCC",
+      "target": "YeManCC",
+      "mode": "program"
+    },
+    {
+      "source": "PowerControl",
+      "target": "PowerControl",
+      "mode": "power-control"
+    }
+  ],
+  "rules": {
+    "unknownRoots": "reject-unless-declared",
+    "unknownFiles": "preserve-when-targeted",
+    "rollback": "per-root",
+    "fanHost": "preserve-existing",
+    "fanHostV2": "replace",
+    "gyroVirtualAssets": "include",
+    "fanHostPayload": {
+      "directory": "fan-host-v2",
+      "schemaVersion": 2,
+      "manifestSha256": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae",
+      "fileCount": 9,
+      "runtimeDirectory": "handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1",
+      "runtimeManifestSha256": "6389F7A22B1E294EBAF6C75B05B28BB9839ABC7459BE0D8898985DE27DFE47B8"
+    }
+  }
+}

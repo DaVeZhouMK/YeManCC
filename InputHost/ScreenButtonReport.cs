@@ -8,15 +8,15 @@ internal static partial class Program
     {
         bits=0;
         if(value.ValueKind!=JsonValueKind.Number || !value.TryGetInt32(out var n) || n<0)return false;
-        var allowed=persona switch {"steamdeck" or "dualsense-edge"=>63,"dualsense"=>3,"elite" or "xbox360" or "dualshock4"=>1,_=>-1};
+        var allowed=persona switch {"steamdeck" or "dualsense-edge"=>63,"elite"=>1,_=>-1};
         if(allowed<0 || (n&~allowed)!=0)return false;
         bits=n;return true;
     }
     private static bool ScreenButtonTestFailure(string name){Console.Error.WriteLine("screen-buttons failed: "+name);return false;}
     private static bool RunScreenButtonsSelfTest()
     {
-        using var context=new HMContext();context.LoadDefaultProfiles();int cases=0;
-        var deck=context.GetProfile("steam-deck-composite");var ps=context.GetProfile("dualsense-edge");var xbox=context.GetProfile("xbox-360-wired");
+        using var context=new SdkDataOnlyProfiles();context.LoadDefaultProfiles();int cases=0;
+        var deck=context.GetProfile("steam-deck-composite");var ps=context.GetProfile("dualsense-edge");var xbox=context.GetProfile("xbox-elite-v2");
         if(deck is null || ps is null || xbox is null)return ScreenButtonTestFailure("check-line-19");
         CommandEnvelope E(string persona,int bits)=>new("SUBMIT_FRAME","buttons",1,"buttons",1,1,"target","owner",persona,persona,"nonce",1,new string('a',64)) {ScreenButtons=bits};
         var positions=new[]{13,50,41,15,42,16};var dsBits=new[]{1,4,16,64,32,128};
@@ -42,10 +42,10 @@ internal static partial class Program
             if(ReadDualSenseContact(p,32)!=ReadDualSenseContact(BuildDualSenseDataOnlyReport(ps,pe with {ScreenButtons=0},7),32))return ScreenButtonTestFailure("check-line-41");
             cases+=3;
         }
-        if((BuildXbox360State(xbox,E("xbox360",1)).Buttons&HMButton.Guide)==0 || (BuildXbox360State(xbox,E("xbox360",0)).Buttons&HMButton.Guide)!=0)return ScreenButtonTestFailure("check-line-44");
+        if((BuildEliteState(xbox,E("elite",1)).Buttons&HMButton.Guide)==0 || (BuildEliteState(xbox,E("elite",0)).Buttons&HMButton.Guide)!=0)return ScreenButtonTestFailure("check-line-44");
         foreach(var persona in new[]{"steamdeck","dualsense-edge","dualsense","xbox360","elite","dualshock4"})foreach(var raw in new[]{"0","1","2","3","4","63","64","-1","1.5","true","\"1\""}) {
             using var doc=JsonDocument.Parse(raw);var valid=TryReadScreenButtons(doc.RootElement,persona,out _);
-            var integer=int.TryParse(raw,out var n);var allowed=persona switch {"steamdeck" or "dualsense-edge"=>63,"dualsense"=>3,"xbox360" or "elite" or "dualshock4"=>1,_=>-1};
+            var integer=int.TryParse(raw,out var n);var allowed=persona switch {"steamdeck" or "dualsense-edge"=>63,"elite"=>1,_=>-1};
             if(valid!=(integer && allowed>=0 && n>=0 && (n&~allowed)==0))return ScreenButtonTestFailure("check-line-48");cases++;
         }
         Console.WriteLine($"screen-buttons: OK {cases+2} report/parser checks; Deck Steam/QAM/L4/L5/R4/R5, PS/Mute/Fn/Back, Xbox Guide, release and touch coexistence; no hardware touched");

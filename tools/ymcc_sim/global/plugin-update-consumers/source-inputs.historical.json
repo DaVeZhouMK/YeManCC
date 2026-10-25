@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "plugins.updater-service-consumer": {
+      "script": "tools/decky_updater_service_selftest.mjs",
+      "report": "UPDATER-SERVICE.json",
+      "entries": [
+        "src/bridge/deckyUpdaterService.ts",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts"
+      ],
+      "sources": [
+        "decky-plugin/src/deckyStoreClient.ts",
+        "decky-plugin/src/deckyUpdaterClient.ts",
+        "decky-plugin/src/deckyUpdaterProtocol.ts",
+        "package.json",
+        "src/bridge/deckyUpdaterService.ts",
+        "tools/decky_updater_service_selftest.mjs"
+      ],
+      "expectedNames": [
+        "status is read-only and does not implicitly check or install",
+        "check -> download -> confirmed install reaches the original owner with the exact target",
+        "unverified package cannot enable installation",
+        "current or older manifest versions never enable a downgrade",
+        "duplicate install packet is acknowledged without a second install",
+        "conflicting packet IDs cannot replace the accepted package",
+        "old trimmed packet IDs remain rejected",
+        "wrong run and wrong peer never reach the update owner",
+        "install is blocked while a game runs or power is not ready",
+        "power/game is checked again immediately before installation",
+        "package replacement during install admission requires a fresh confirmation",
+        "synchronous validation failure is handled before an IPC acknowledgement finishes",
+        "disconnect after acceptance stops an unstarted install",
+        "an already connected mirror sends its status after enabling the updater consumer",
+        "old native protocol is explicitly unavailable and never sends update commands",
+        "unsupported or stale views cannot enable install",
+        "client duplicate activation cannot send two mutations",
+        "a different client cannot acknowledge this request",
+        "timeout requests fresh status but never replays installation",
+        "stale confirmation binds both package version and hash",
+        "missing host response finishes waiting without an idle poll",
+        "disconnect rejects the outstanding request and requires a fresh status",
+        "restored YMCC renderer requests status again without replaying the interrupted operation",
+        "twenty settings remounts reuse one bounded client identity with increasing receipts",
+        "a receipt from the prior page cannot acknowledge a new page operation",
+        "replacement page owns demand and old teardown cannot disable it"
+      ],
+      "target": "es2022",
+      "fault": {
+        "path": "src/bridge/deckyUpdaterService.ts",
+        "before": "state.sha256?.toLowerCase()===t.sha256",
+        "after": "true",
+        "expectedFailedCase": "unverified package cannot enable installation"
+      }
+    },
+    "plugins.dual-update-consumer": {
+      "script": "tools/decky_dual_update_selftest.mjs",
+      "report": "DUAL-UPDATE.json",
+      "entries": [
+        "decky-plugin/src/deckyNativeUpdate.ts"
+      ],
+      "sources": [
+        "decky-plugin/src/deckyNativeUpdate.ts",
+        "decky-plugin/src/deckyStoreClient.ts",
+        "package.json",
+        "tools/decky_dual_update_selftest.mjs"
+      ],
+      "expectedNames": [
+        "Windows explicitly uses compatible YMCC channel and never submits upstream install",
+        "unknown platform is fallback-only",
+        "Linux supported native backend exposes actual target without installation",
+        "native explicit confirmation rechecks target then calls real native updater route",
+        "normal native return is not success until updated service version is observed",
+        "service/renderer recreation only reads result, never replays installation",
+        "native check error enables YMCC fallback",
+        "definite native installation error enables fallback without success claim",
+        "ambiguous native disconnect blocks competing installs and never auto-replays",
+        "stale confirmation cannot install changed target",
+        "unsupported native build falls back",
+        "foreign upstream repository falls back",
+        "missing native asset falls back",
+        "foreign binary URL falls back",
+        "duplicate native confirmations submit at most one mutation",
+        "current native version still keeps independent YMCC fallback available",
+        "progress is bounded, cleanup releases the exact listener",
+        "a hanging native check ends and exposes the fallback",
+        "native install timeout stays uncertain and blocks competing installation",
+        "ARM Linux requires its actual platform asset"
+      ],
+      "fault": {
+        "path": "decky-plugin/src/deckyNativeUpdate.ts",
+        "before": "fallbackAllowed:!uncertain",
+        "after": "fallbackAllowed:true",
+        "expectedFailedCase": "ambiguous native disconnect blocks competing installs and never auto-replays"
+      }
+    }
+  }
+}

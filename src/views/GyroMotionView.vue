@@ -1,25 +1,91 @@
 <script setup lang="ts">
+// [AI:USER:GYRO] 开启→按当前预设使用体感；关闭→停止体感效果；预设修改保持当前公用/游戏专属范围。
+// 体感开关与“虚拟手柄联动”是不同选择；未识别来源不能当作已开启，校准未确认不能当作已保存。
+// 切页不代表关闭，用户关闭后旧请求不能重新开启；输入来源/输出支持查总库与现有实现，不按设备名称猜测。
+import { migrateControllerPersona, type ControllerPersona } from '@/bridge/controllerPersona';
+import GyroInputOutputPreview from '@/components/GyroInputOutputPreview.vue';
+import GameProfileRemoveDialog from '@/components/GameProfileRemoveDialog.vue';
+import { loadGameCustomConfig, removeGameCustomProfile, restorePerformanceScheduleIfConfigured, type GameCustomProfileTarget } from '@/bridge/performanceSchedule';
+import { tryAcquireQuickAction } from '@/bridge/quickActionLock';
+import GyroSimulationWindow from '@/components/GyroSimulationWindow.vue';
+import { focusGamepadElement } from '@/gamepad/focus';
+import GyroStatusPreview from '@/components/GyroStatusPreview.vue';
+import GameProfileModeBanner from '@/components/GameProfileModeBanner.vue';
+import IntegratedPage from '@/components/IntegratedPage.vue';
+import UsbipUpgradeStatus from '@/components/UsbipUpgradeStatus.vue';
 import { nextTick, computed, onActivated, onDeactivated, onBeforeUnmount, onMounted, ref, toRaw, watch } from 'vue';
 import SegButton from '@/components/SegButton.vue';
 import Slider from '@/components/Slider.vue';
 import Toggle from '@/components/Toggle.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import InlineIcon from '@/components/InlineIcon.vue';
-import { compareAndSwapInputSettings, loadSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
-import { normalizeGyroTelemetry, type GyroMotionConfigV1 } from '@/bridge/inputContracts';
-import { mapGyroSample } from '@/bridge/gyroMotionMapperMock';
-import { assembleCanonicalFrame } from '@/bridge/virtualReportAssembler';
+import { type InputSettingsSnapshot } from '@/bridge/settingsRepository';
+import { normalizeGyroTelemetry } from '@/bridge/inputContracts';
 import { invoke, on } from '@/bridge/ipc';
-import { subscribeGameInputOverrideState, getGameInputOverrideState } from '@/bridge/gameInputOverride';
-import { shell } from '@/bridge/api';
+import { readGameInputEditor, onGameInputEditorChanged, type GameInputEditor } from '@/bridge/gameInputEditor';
+import {saveGyroEditorPatch} from '@/bridge/gyroPresetSave';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { createGyroPresentationGate } from '@/bridge/gyroPresentation';
+import { formatGyroAxis } from '@/bridge/gyroAxisFormat';
 
+const simulationOpen = ref(false);
+const simulationSettings = ref<HTMLElement | null>(null);
+const simulationMotion = ref({x:0,y:0});
+const simulationAdmitted = ref(false);
+function closeSimulation() {
+  simulationSettings.value=null;simulationOpen.value=false;
+  void nextTick(()=>focusGamepadElement(document.querySelector<HTMLElement>('.gyro-simulation-open')));
+}
 const snapshot = ref<InputSettingsSnapshot | null>(null);
 const busy = ref(false);
-const gameLocked = ref(getGameInputOverrideState().locked);
-const controlsLocked = computed(() => busy.value || gameLocked.value);
+const gyroSettingsRoot = ref<HTMLElement|null>(null);
+const removalBusy = ref(false), removalError = ref('');
+const removal = ref<{target:GameCustomProfileTarget;gameName:string;revision:string}|null>(null);
+const inputEditor = ref<GameInputEditor | null>(null);
+const editingGame = computed(() => inputEditor.value?.gameName || '');
+const gameLocked = computed(() => !inputEditor.value);
+const controlsLocked = computed(() => busy.value || removalBusy.value || gameLocked.value);
+async function requestProfileRemoval(): Promise<void> {
+  const editor=inputEditor.value;
+  if(!editor?.profile || controlsLocked.value)return;
+  const target={...editor.target},gameName=editingGame.value;
+  removalBusy.value=true;
+  try {
+    const config=await loadGameCustomConfig(),current=inputEditor.value;
+    const entry=config.entries[target.exe];
+    if(!current?.profile || (current.target.exe!==target.exe || current.target.pid!==target.pid || current.target.processCreated!==target.processCreated || current.target.generation!==target.generation) || !entry)
+      throw new Error('当前游戏已变化，请重新确认退出专属');
+    removalError.value='';
+    removal.value={target,gameName,revision:JSON.stringify([entry,config.rtss[target.exe]])};
+  } catch(error) {status.value=`退出专属失败：${(error as Error).message}`;}
+  finally {removalBusy.value=false;}
+}
+function cancelProfileRemoval(): void {
+  if(removalBusy.value)return;
+  removal.value=null;
+  void nextTick(()=>focusGamepadElement(gyroSettingsRoot.value?.querySelector<HTMLElement>('[data-gyro-profile-exit],.gyro-power-row button:not(:disabled)') || null));
+}
+async function confirmProfileRemoval(): Promise<void> {
+  const request=removal.value;
+  if(!request || removalBusy.value)return;
+  const release=tryAcquireQuickAction('gyro-profile-remove');
+  if(!release){removalError.value='已有其它快捷操作正在执行，请稍候';return;}
+  removalBusy.value=true;removalError.value='';let deleted=false;
+  try {
+    await removeGameCustomProfile(request.target,request.revision);
+    deleted=true;removal.value=null;
+    await restorePerformanceScheduleIfConfigured();
+    status.value=`已退出 ${request.gameName} 专属，恢复公用设置`;
+  } catch(error) {
+    if(deleted)status.value=`专属已删除，恢复公用调度未完成：${(error as Error).message}`;
+    else removalError.value=(error as Error).message;
+  } finally {
+    removalBusy.value=false;release();
+    if(deleted){await load().catch(()=>undefined);await nextTick();focusGamepadElement(gyroSettingsRoot.value?.querySelector<HTMLElement>('.gyro-power-row button:not(:disabled)') || null);}
+  }
+}
 let stopOverride: (() => void) | null = null;
+let editorRefreshPending = false;
 const status = ref('读取配置中');
 const enabled = ref(false);
 const provider = ref('unselected');
@@ -55,7 +121,7 @@ const outputShape = ref<'default' | 'circle' | 'cross' | 'square'>('circle');
 const invertHorizontal = ref(false);
 const invertVertical = ref(false);
 type GyroPresetKind = 'fps' | 'racing' | 'custom' | 'steam';
-type VirtualPadPersona = 'disabled' | 'dualshock4' | 'xbox360' | 'steamdeck' | 'dualsense' | 'elite' | 'dualsense-edge';
+type VirtualPadPersona = ControllerPersona;
 const preset = ref<GyroPresetKind>('fps');
 // 用户裁决（2026-09-15）：开启/关闭与预设拆开。preset 只记当前选中的四档，
 // 不再用 'off' 当关闭。enabled 才是总开关。
@@ -100,10 +166,7 @@ function applyVirtualPadLink(): void {
 }
 function applyVirtualPad(target: { persona?: unknown; buttonMappingEnabled?: unknown } | null | undefined): void {
   const persona = String(target?.persona || 'disabled');
-  virtualPersona.value = persona === 'dualshock4' || persona === 'xbox360' || persona === 'steamdeck' || persona === 'dualsense' ||
-    persona === 'elite' || persona === 'dualsense-edge'   // 批112
-    ? (persona as VirtualPadPersona)
-    : 'disabled';
+  virtualPersona.value = migrateControllerPersona(persona);
   virtualPadEnabled.value = target?.buttonMappingEnabled === true && virtualPersona.value !== 'disabled';
 }
 const presetStore = ref<Record<string, Record<string, unknown> | null>>({
@@ -120,31 +183,12 @@ const aimingSightsTrigger = ref('');
 const autoCalibrate = ref(true);
 const advancedOpen = ref(false);
 const loaded = ref(false);
-const USBIP_RELEASES_URL = 'https://github.com/vadimgrn/usbip-win2/releases';
-const usbipPrompt = ref<null | 'missing' | 'failed'>(null);
-const usbipPromptDismissed = ref(0);
-const usbipPromptText = computed(() => usbipPrompt.value === 'missing'
-  ? '启用 Steam Deck 需要 USBip 后端，但本地未找到 USBip 安装器。是否前往官网下载？下载后请放入 C:\\SOFT\\YeMan\\PowerControl\\redist 目录再重试。'
-  : 'USBip 后端自动安装没有成功。是否前往官网下载最新版手动安装？');
-function dismissUsbipPrompt(): void {
-  usbipPromptDismissed.value = usbipPrompt.value === 'missing' ? 1 : 2;
-  usbipPrompt.value = null;
-}
-async function openUsbipSite(): Promise<void> {
-  usbipPrompt.value = null;
-  try { await shell.open(USBIP_RELEASES_URL); } catch { /* 打开失败不打断页面 */ }
-}
 const sampleSequence = ref<number | null>(null);
 const sampleTimestamp = ref<string | null>(null);
 const gyroAxes = ref({ x: 0, y: 0, z: 0 });
+const gyroOrientation = ref<{w:number;x:number;y:number;z:number} | null>(null);
 // Y-2 v3（2026-09-12，用户第三次裁决）：陀螺仪点 = 2D 坐标系点位移（与摇杆点
 // 同域），不做角度/3D/四元数——直接显示陀螺仪在摇杆 2D 空间的贡献。
-const gyroDot2D = ref<{ x: number; y: number }>({ x: 0, y: 0 });
-const hostOutputAxes = ref({ x: 0, y: 0 });
-const hostFrameState = ref<'not-running' | 'not-admitted-or-failed' | 'publication-suppressed' | 'frame-accepted' | 'unavailable'>('unavailable');
-const hostLifecycle = ref('none');
-const hostActive = ref(false);
-const outputAxes = ref({ x: 0, y: 0 });
 // 传感器连接状态：收到 gyro.telemetry 即为已连接；连续 ~1s 无事件回退为未连接。
 const gyroConnected = ref(false);
 let gyroConnectedTimer: ReturnType<typeof window.setTimeout> | null = null;
@@ -178,10 +222,10 @@ function noteGyroConnected(receivedAt: number): void {
 
 // HC 静态校准：native IPC gyro.calibrate 触发 capture tick 内非阻塞状态机，
 // 完成回发 gyro.calibrate.result（confidence/weight/offset，HC
-// SensorsManager.Calibrate 语义：静止 5s 采样、置信度 >=1 才可用于锁定）。
-// 用户指令 UX 合同（2026-09-12，C1-reinstate）：invoke 成功后启动 10s 计时器，
-// 到点未收到 gyro.calibrate.result → calibrating=false + "校准超时，请重试"；
-// 收到 result 即清计时器。纯前端 UX 兜底，不改 native、不带 HC 语义。
+// SensorsManager.Calibrate: reset, sample, then accept only confidence >99%).
+// The UI follows the native sample window and allows 5s for the result event.
+// Older hosts use the original 10s watchdog; MSI's 15s window uses 20s.
+// A result clears the watchdog; the UI never changes calibration acceptance.
 const calibrating = ref(false);
 const calibResult = ref<{ confidence: number; weight: number; offsetX: number; offsetY: number; offsetZ: number } | null>(null);
 const calibError = ref('');
@@ -201,34 +245,129 @@ function applyCalibStatus(status: string | undefined): void {
 }
 let offCalibResult: (() => void) | null = null;
 let offCalibStatus: (() => void) | null = null;
-let offGamepadState: (() => void) | null = null;
 let calibTimeout: ReturnType<typeof window.setTimeout> | null = null;
 function clearCalibTimeout(): void {
   if (calibTimeout) { window.clearTimeout(calibTimeout); calibTimeout = null; }
+}
+
+type CalibResultDetail = { ok?: boolean; saved?: boolean; source?: string; provider?: string; requestId?: number | string; confidence?: number; weight?: number; offset?: { x?: number; y?: number; z?: number } };
+type CalibStatusDetail = { status?: string; trusted?: boolean; provider?: string; requestId?: number | string };
+// Correlate Controller events after ACK; early events cannot identify this invocation.
+let controllerCalibRequest: {
+  requestId: string | null; awaitingAck: boolean; completed: boolean; receivedResult: boolean; earlyEvents: Array<() => void>;
+} | null = null;
+function controllerCalibRequestId(value: unknown): string | null {
+  if (typeof value === 'number') return Number.isSafeInteger(value) && value > 0 ? String(value) : null;
+  if (typeof value === 'string' && /^[1-9]\d{0,19}$/.test(value) && BigInt(value) <= 18446744073709551615n) return value;
+  return null;
+}
+function handleCalibStatus(detail: CalibStatusDetail): boolean {
+  if (detail?.provider === 'controller') {
+    const request = controllerCalibRequest;
+    const id = controllerCalibRequestId(detail.requestId);
+    if (detail.requestId !== undefined && !id) return false;
+    if (request?.awaitingAck) {
+      if (id) request.earlyEvents.push(() => { handleCalibStatus(detail); });
+      return false;
+    }
+    if (request) {
+      if (!request.completed && (!id || id !== request.requestId)) return false;
+      if (id && id !== request.requestId) return false;
+      if (request.completed && detail.status === 'calibrating') return false;
+      if (id && (detail.status === 'already-calibrated' || detail.status === 'uncalibrated' || detail.status === 'waiting-still')) {
+        request.completed = true;
+        clearCalibTimeout();
+      }
+    }
+  }
+  applyCalibStatus(detail?.status);
+  return true;
+}
+function handleCalibResult(detail: CalibResultDetail): void {
+  if (detail?.provider === 'controller') {
+    const request = controllerCalibRequest;
+    const id = controllerCalibRequestId(detail.requestId);
+    if (!request || !id) return;
+    if (request.awaitingAck) {
+      request.earlyEvents.push(() => { handleCalibResult(detail); });
+      return;
+    }
+    if (id !== request.requestId || request.receivedResult) return;
+    request.completed = request.receivedResult = true;
+  }
+
+  // Y-1 诊断埋点（LegB）：result 事件到达时刻。
+  console.log('[gyro.calibrate] result', detail, new Date().toISOString());
+  void invoke('diagnostics.frontendError', { where: 'gyro-motion', message: 'calibration-result-received-ok:' + String(detail?.ok === true) }).catch(() => {});
+  clearCalibTimeout();
+  calibrating.value = false;
+  const saved = detail?.saved === true || (detail?.ok === true && detail?.saved !== false && (detail.confidence ?? 0) > 0.99);
+  if (saved) {
+    calibError.value = '';
+    calibUiStatus.value = 'already-calibrated';
+    calibResult.value = {
+      confidence: detail.confidence ?? 0,
+      weight: detail.weight ?? 0,
+      offsetX: detail.offset?.x ?? 0,
+      offsetY: detail.offset?.y ?? 0,
+      offsetZ: detail.offset?.z ?? 0,
+    };
+  } else if (detail?.source === 'auto') {
+    calibError.value = '';
+  } else {
+    calibResult.value = null;
+    calibError.value = '未达到确认可信，未保存';
+  }
 }
 async function startCalibration(): Promise<void> {
   if (gameLocked.value) return;
   calibError.value = '';
   calibResult.value = null;
+  const request = { requestId: null as string | null, awaitingAck: true, completed: false, receivedResult: false, earlyEvents: [] as Array<() => void> };
+  controllerCalibRequest = request;
   try {
-    const resp = await invoke<{ ok: boolean; reason?: string }>('gyro.calibrate', {});
+    const resp = await invoke<{ ok: boolean; reason?: string; pollWindowMs?: number; provider?: string; requestId?: number | string }>('gyro.calibrate', {});
     // Y-1 诊断埋点（LegB 取证）：native ack/拒绝、UI 超时、result 到达三处
     // 都写 console + diagnostics.frontendError（进 native 导出日志），下次
     // 录制一次即可定位 result 事件断点位置。
     console.log('[gyro.calibrate] native-ack', resp, new Date().toISOString());
     void invoke('diagnostics.frontendError', { where: 'gyro-motion', message: resp?.ok ? 'calibration-request-ack-ok' : 'calibration-request-ack-nack:' + (resp?.reason ?? '') }).catch(() => {});
+    if (resp?.provider === 'controller') {
+      if (controllerCalibRequest !== request) return;
+      request.awaitingAck = false;
+      request.requestId = controllerCalibRequestId(resp.requestId);
+      if (!request.requestId) {
+        controllerCalibRequest = null;
+        clearCalibTimeout();
+        calibrating.value = false;
+        calibError.value = '校准请求标识无效，请重试';
+        return;
+      }
+      clearCalibTimeout();
+      if (resp.ok) {
+        for (const replay of request.earlyEvents.splice(0)) replay();
+        if (request.completed) return;
+      }
+    } else if (controllerCalibRequest === request) {
+      controllerCalibRequest = null;
+    }
     if (!resp?.ok) { calibError.value = resp?.reason ?? '校准请求被拒绝'; return; }
     calibrating.value = true;
-    // 用户指令 UX 合同（2026-09-12）：10s 超时兜底，收到 result 即清。
+    // 保留旧主机 10s 兜底；MSI 的 15s 采样窗口另留 5s 回包余量。
+    const pollWindowMs = Number.isFinite(resp.pollWindowMs) ? Math.max(5000, Math.min(15000, resp.pollWindowMs!)) : 5000;
     clearCalibTimeout();
     calibTimeout = window.setTimeout(() => {
+      if (resp.provider === 'controller' && controllerCalibRequest !== request) return;
+      if (resp.provider === 'controller') request.completed = true;
       calibrating.value = false;
       calibTimeout = null;
       calibError.value = '校准超时，请重试';
       console.warn('[gyro.calibrate] ui-timeout', new Date().toISOString());
       void invoke('diagnostics.frontendError', { where: 'gyro-motion', message: 'calibration-timeout-observed' }).catch(() => {});
-    }, 10_000);
+    }, pollWindowMs + 5000);
   } catch (e) {
+    if (controllerCalibRequest !== request && controllerCalibRequest?.requestId) return;
+    if (controllerCalibRequest === request) controllerCalibRequest = null;
     calibError.value = String(e);
     console.error('[gyro.calibrate] invoke-failed', e, new Date().toISOString());
     void invoke('diagnostics.frontendError', { where: 'gyro-motion', message: 'calibration-invoke-failed:' + String(e) }).catch(() => {});
@@ -569,88 +708,26 @@ function applyTelemetry(detail: NonNullable<ReturnType<typeof normalizeGyroTelem
   // time, not the time of this replay, controls connection expiry.
   if (Number.isFinite(lastSensorEvidenceAt)) noteGyroConnected(lastSensorEvidenceAt);
   if (sampleSequence.value === detail.sequence && sampleTimestamp.value === detail.timestampUtc) return;
-  if (!previewPointerDown) gyroAxes.value = detail.gyro; // 拖拽中冻结页面级 XYZ 刷新
-  // Y-2 v3（2026-09-12，用户第三次裁决）：陀螺仪点数据 = telemetry 的
-  // motionContribution（MotionManager 陀螺仪贡献，摇杆 2D 域、归一化 [-1,1]）。
-  // 无贡献或字段缺失时归零（同 HC：motion 未映射/未触发即无贡献）。
-  const contrib = detail.motionContribution;
-  if (contrib && [contrib.x, contrib.y].every((v) => Number.isFinite(v))) {
-    gyroDot2D.value = {
-      x: Math.max(-1, Math.min(1, contrib.x)),
-      y: Math.max(-1, Math.min(1, contrib.y)),
-    };
-  } else {
-    gyroDot2D.value = { x: 0, y: 0 };
-  }
-  const actualTarget = detail.targetStick ?? detail.hostFrame?.targetStick ?? outputStick.value;
-  const actualHostStick = actualTarget === 'left'
-    ? (detail.leftStick ?? detail.hostFrame?.leftStick)
-    : (detail.rightStick ?? detail.hostFrame?.rightStick);
-  hostOutputAxes.value = actualHostStick ?? { x: 0, y: 0 };
-  hostFrameState.value = detail.hostFrame?.hostSubmission ?? 'unavailable';
-  hostLifecycle.value = detail.hostFrame?.lifecycle ?? 'none';
-  hostActive.value = detail.hostFrame?.hostActive === true;
-  // A standalone real-stick lane has a canonical Host-local receipt. Show it
-  // directly so the operator can see the actual target axis before looking at
-  // the fixture preview below; this is still not HID/Steam/game readback.
-  const actualLane = detail.motionAdmission === 'hc-motion-admitted' &&
-    detail.hostFrame?.firstFrame === true && detail.hostFrame.hostActive === true && !!actualHostStick;
-  const persistedMotion = snapshot.value?.gyroMotion as GyroMotionConfigV1 | undefined;
-  if (actualLane) {
-    outputAxes.value = actualHostStick;
-  } else {
-    // Preview must consume the real durable gyro section, not a page-local
-    // CLOSED/windows-imu/ui-preview substitute. A saved-pending or unbound
-    // config is intentionally still unclosed here, so the fixture stays zero.
-    let stick = { x: 0, y: 0 };
-    const gateOpen = persistedMotion?.enabled === true &&
-      persistedMotion.outputStick === 'right' &&
-      persistedMotion.motionMode !== 'toggle' && !persistedMotion.motionTrigger &&
-      !(!!persistedMotion.aimingSightsTrigger && detail.aimingSightsTriggerResolved === false && (persistedMotion.aimingSightsMultiplier ?? 1) !== 1);
-    if (gateOpen) {
-      const preview = mapGyroSample(
-        { runId: 'ui-preview', epoch: 0, powerGeneration: 0, targetId: 'preview', configRevision: persistedMotion.revision },
-        persistedMotion,
-        { gamepadMotionPlane: detail.gamepadMotionPlane, sequence: detail.sequence, timestamp: Date.parse(detail.timestampUtc) },
-      );
-      if (preview.ok) {
-        const assembled = assembleCanonicalFrame({
-          runId: 'ui-preview', epoch: 0, powerGeneration: 0, targetId: 'preview', persona: 'dualshock4', configRevision: persistedMotion.revision,
-          inputSequence: detail.sequence, timestamp: 0, buttons: 0, axes: {}, triggers: {}, rightStick: { x: 0, y: 0 },
-        }, preview.frame, {
-          gyroWeight: persistedMotion.gyroWeight, innerDeadzone: persistedMotion.innerDeadzone, outerDeadzone: persistedMotion.outerDeadzone,
-          antiDeadzone: persistedMotion.antiDeadzone, outputShape: persistedMotion.outputShape,
-          responseCurvePoints: persistedMotion.responseCurvePoints ?? null,
-        });
-        if (assembled.ok) stick = assembled.frame.rightStick;
-      }
-    }
-    outputAxes.value = persistedMotion?.outputAxis === 'x' ? { x: stick.x, y: 0 } : stick;
-  }
+  if (!previewPointerDown) { gyroAxes.value = detail.gyro; gyroOrientation.value = detail.orientation ?? detail.gamepadMotionPlane?.orientation ?? null; } // 拖拽中冻结页面级 XYZ 刷新
+  // Consume the native admitted gyro contribution. Do not reimplement the gyro
+  // mapping or use combined output (which can contain ordinary stick input).
+  simulationAdmitted.value = detail.motionAdmission === 'hc-motion-admitted' && !!detail.motionContribution;
+  simulationMotion.value = simulationAdmitted.value ? {...detail.motionContribution!} : {x:0,y:0};
   sampleSequence.value = detail.sequence;
   sampleTimestamp.value = detail.timestampUtc;
 }
-const hostLiveDot = computed(() => ({
-  left: `${50 + hostOutputAxes.value.x * 38}%`,
-  top: `${50 - hostOutputAxes.value.y * 38}%`,
-}));
-const previewLiveDot = computed(() => ({
-  // Y-2 v3（用户第三次裁决）：陀螺仪点 = 摇杆同域 2D 位移（motionContribution），
-  // 不做角度映射。±1 → ±38% 舞台半径，与摇杆点公式一致。
-  left: `${50 + gyroDot2D.value.x * 38}%`,
-  top: `${50 - gyroDot2D.value.y * 38}%`,
-}));
 let loadGeneration = 0;
 // Keep preset tuning, but never use this session's power/preset as next boot intent.
 // Native initializes power and selected preset from startupDesired once per process.
 async function load(): Promise<void> {
   const generation = ++loadGeneration;
   loaded.value = false;
-  const settings = await loadSettings();
+  const editor = await readGameInputEditor();
   if (generation !== loadGeneration) return;
+  inputEditor.value = editor;
+  const settings = { input: editor.input };
   const motion = settings.input.gyroMotion || {};
   snapshot.value = settings.input;
-  gameLocked.value = getGameInputOverrideState().locked || !!settings.input.gameOverride;
   enabled.value = motion.enabled === true;
   provider.value = String(motion.provider || 'unselected');
   calibrationId.value = String(motion.calibrationId || '');
@@ -758,6 +835,7 @@ async function load(): Promise<void> {
 }
 let saveTimer: ReturnType<typeof window.setTimeout> | null = null;
 let saveRequested = false;
+let saveImmediate = false;
 // 用户裁决（2026-09-14）：重置此预设——把当前激活预设重置为该预设自身默认
 // （fps/赛车/steam/custom 各不同，与 applyPreset 无记忆分支同口径），随后走
 // 正常保存链。off 时 activePreset 仍是上次激活预设，同样重置它。
@@ -836,7 +914,7 @@ function queueSave(immediate = false): void {
   saveTimer = window.setTimeout(() => {
     saveTimer = null;
     void saveNow();
-  }, immediate ? 0 : 3000);
+  }, saveImmediate ? 0 : 3000);
 }
 async function saveNow(): Promise<void> {
   if (gameLocked.value || !snapshot.value || busy.value) return;
@@ -862,7 +940,9 @@ async function saveNow(): Promise<void> {
       presetsOut[key] = cloned;
     }
     const outputTarget = { gyroEnabled: enabled.value };
-    const result = await compareAndSwapInputSettings(snapshot.value.revision, {
+    const saveOwner = inputEditor.value!;
+    const saveGeneration = loadGeneration;
+    const saved = await saveGyroEditorPatch(saveOwner, {
       outputTarget,
       gyroMotion: {
         enabled: enabled.value,
@@ -913,21 +993,34 @@ async function saveNow(): Promise<void> {
         activePreset: activePreset.value,
         presets: presetsOut,
       },
-    });
+    }, () => saveGeneration === loadGeneration && inputEditor.value === saveOwner);
+    const {result} = saved;
+    inputEditor.value = saved.editor;
     // 抖动根因 B（2026-09-14）：保存失败不再整页 load() 回填（拖动中的
     // 滑块会被快照回跳造成"页面刷新"观感）；仅提示，保留当前编辑值。
     if (!result.ok) { status.value = '配置版本已变化，请稍后重试保存。'; return; }
     // Only an explicit page save ends the temporary shortcut; hydration never saves.
-    await invoke('input.shortcutRuntime.clear', {}).catch(() => undefined);
+    await invoke('input.shortcutRuntime.clear', {}, {timeoutMs:1500}).catch(() => undefined);
     shortcutGyroEnabled.value = null;
+    // The save helper already returns the exact confirmed editor/revision.
+    // Another game-detect/read here could block the next queued preset.
     snapshot.value = result.value;
-    applyVirtualPad(result.value.outputTarget);
-    status.value = `已记录（修订 ${result.revision}），等待 InputHost 确认。`;
+    if (!saveRequested) applyVirtualPad(result.value.outputTarget);
+    status.value = editingGame.value ? `已保存 ${editingGame.value} 专属陀螺仪设置` : `已记录（修订 ${result.revision}），等待 InputHost 确认。`;
   } catch (error) {
     status.value = `保存失败：${(error as Error).message}`;
   } finally {
     busy.value = false;
-    if (saveRequested) queueSave();
+    if (editorRefreshPending) {
+      editorRefreshPending = false;
+      const next = await readGameInputEditor().catch(() => null);
+      const current = inputEditor.value;
+      if (!next || !current || next.target.exe !== current.target.exe || next.target.pid !== current.target.pid || next.target.processCreated !== current.target.processCreated || !!next.profile !== !!current.profile) {
+        saveRequested = false; inputEditor.value = null;
+        await load().catch(() => undefined);
+      }
+    }
+    if (saveRequested) queueSave(true);
   }
 }
 watch([
@@ -947,8 +1040,9 @@ onMounted(() => {
     if (!visible) previewPointerDown = false;
     gyroPresentation.setVisible(visible);
   });
-  stopOverride = subscribeGameInputOverrideState((state) => {
-    gameLocked.value = state.locked;
+  stopOverride = onGameInputEditorChanged(() => {
+    if (busy.value) { editorRefreshPending = true; return; }
+    inputEditor.value = null;
     if (saveTimer) window.clearTimeout(saveTimer);
     saveTimer = null; saveRequested = false;
     void load().catch(() => undefined);
@@ -957,41 +1051,10 @@ onMounted(() => {
   // 抖动根因 A 配套：拖拽检测（冻结页面级 XYZ 刷新；气泡照常）
   window.addEventListener('pointerdown', onGyroPreviewPointerDown, { capture: true });
   window.addEventListener('pointerup', onGyroPreviewPointerUp, { capture: true });
-  offCalibResult = on('gyro.calibrate.result', (detail: { ok?: boolean; saved?: boolean; source?: string; confidence?: number; weight?: number; offset?: { x?: number; y?: number; z?: number } }) => {
-    // Y-1 诊断埋点（LegB）：result 事件到达时刻。
-    console.log('[gyro.calibrate] result', detail, new Date().toISOString());
-    void invoke('diagnostics.frontendError', { where: 'gyro-motion', message: 'calibration-result-received-ok:' + String(detail?.ok === true) }).catch(() => {});
-    clearCalibTimeout();
-    calibrating.value = false;
-    const saved = detail?.saved === true || (detail?.ok === true && detail?.saved !== false && (detail.confidence ?? 0) > 0.99);
-    if (saved) {
-      calibError.value = '';
-      calibUiStatus.value = 'already-calibrated';
-      calibResult.value = {
-        confidence: detail.confidence ?? 0,
-        weight: detail.weight ?? 0,
-        offsetX: detail.offset?.x ?? 0,
-        offsetY: detail.offset?.y ?? 0,
-        offsetZ: detail.offset?.z ?? 0,
-      };
-    } else if (detail?.source === 'auto') {
-      calibError.value = '';
-    } else {
-      calibResult.value = null;
-      calibError.value = '未达到确认可信，未保存';
-    }
-  });
-  offGamepadState = on<{ backendInstallPrompt?: number }>('gamepad.state', (state) => {
-    const prompt = state.backendInstallPrompt;
-    if (prompt && usbipPromptDismissed.value !== prompt && !usbipPrompt.value) {
-      usbipPrompt.value = prompt === 1 ? 'missing' : 'failed';
-    }
-  });
-  offCalibStatus = on('gyro.calibrate.status', (detail: { status?: string }) => {
-    applyCalibStatus(detail?.status);
-  });
-  void invoke<{ status?: string; trusted?: boolean }>('gyro.calibrate.status', {}).then((s) => {
-    applyCalibStatus(s?.status);
+  offCalibResult = on('gyro.calibrate.result', handleCalibResult);
+  offCalibStatus = on('gyro.calibrate.status', handleCalibStatus);
+  void invoke<CalibStatusDetail>('gyro.calibrate.status', {}).then((s) => {
+    if (!handleCalibStatus(s)) return;
     if (s?.trusted) calibUiStatus.value = 'already-calibrated';
   }).catch(() => {});
   void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
@@ -1002,10 +1065,14 @@ onActivated(() => {
   void load().catch(() => undefined);
 });
 onDeactivated(() => {
+  simulationSettings.value=null;simulationOpen.value=false;
+  ++sourceProbePollToken;
+  sourceProbeRunning.value = false;
   previewPointerDown = false;
   gyroPresentation.setActive(false);
 });
 onBeforeUnmount(() => {
+  ++sourceProbePollToken;
   gyroPresentation.dispose();
   stopGyroVisibility?.();
   stopGyroVisibility = null;
@@ -1013,55 +1080,114 @@ onBeforeUnmount(() => {
   if (saveTimer) window.clearTimeout(saveTimer);
   if (gyroConnectedTimer) window.clearTimeout(gyroConnectedTimer);
   clearCalibTimeout();
+  controllerCalibRequest = null;
   if (offCalibResult) offCalibResult();
   if (offCalibStatus) offCalibStatus();
-  if (offGamepadState) offGamepadState();
   offShortcutRuntime?.();
   window.removeEventListener('input:motion-telemetry', telemetry);
   window.removeEventListener('pointerdown', onGyroPreviewPointerDown, { capture: true } as EventListenerOptions);
   window.removeEventListener('pointerup', onGyroPreviewPointerUp, { capture: true } as EventListenerOptions);
 });
+const sourceProbeRunning = ref(false);
+const sourceProbeMessage = ref('');
+let sourceProbePollToken = 0;
+async function detectMotionSources(): Promise<void> {
+  if (sourceProbeRunning.value || controlsLocked.value || calibrating.value) return;
+  const token = ++sourceProbePollToken;
+  sourceProbeRunning.value = true;
+  sourceProbeMessage.value = '正在检测，请轻轻转动设备';
+  const messages: Record<string, string> = {
+    'inventory-not-current': '请先开启陀螺仪，等待片刻后再检测',
+    'source-not-active': '请先开启陀螺仪，再检测来源',
+    'no-observable-winrt-source': 'Windows 未列出可检测的来源；当前体感仍按原路线判断',
+    'source-changed': '来源已变化，请稍后重新检测',
+    'sensor-thread-unavailable': '当前无法检测，请开启陀螺仪后重试',
+    'sensor-thread-wake-failed': '检测未开始，请重试',
+    busy: '已有检测正在进行，稍后可导出日志',
+  };
+  try {
+    const request = await invoke<{ ok: boolean; reason?: string; requestId?: number; truncated?: boolean }>('gyro.windowsSourceProbe.start', {});
+    if (token !== sourceProbePollToken) return;
+    if (!request?.ok || !Number.isSafeInteger(request.requestId)) {
+      sourceProbeMessage.value = messages[request?.reason || ''] || '暂时无法检测，请导出日志';
+      return;
+    }
+    for (let i = 0; i < 24 && token === sourceProbePollToken; i++) {
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 250));
+      if (token !== sourceProbePollToken) return;
+      const result = await invoke<{ busy?: boolean; contextCurrent?: boolean; observationState?: string;
+        lastObservation?: { requestId?: number }; currentPairEvidence?: { parts?: { kind?: string; rawSourceCurrent?: boolean }[] }[] }>('gyro.windowsSourceProbe.get', {});
+      if (token !== sourceProbePollToken) return;
+      if (result.lastObservation?.requestId !== request.requestId) continue;
+      if (result.busy) continue;
+      const sources = (result.currentPairEvidence || []).flatMap((entry) => entry.parts || []).filter((part) => part.rawSourceCurrent === true);
+      const gyros = sources.filter((part) => part.kind === 'gyro').length;
+      const accels = sources.filter((part) => part.kind === 'accel').length;
+      sourceProbeMessage.value = result.observationState === 'cancelled' || result.observationState === 'source-retired'
+        ? '检测因来源变化而中断，可导出日志后重试'
+        : sources.length > 0 ? `已检测到 ${gyros} 路角速度、${accels} 路加速度，可导出日志${request.truncated ? '（本次仅检测部分来源）' : ''}`
+        : '尚未确认持续六轴数据，请导出日志';
+      return;
+    }
+    if (token === sourceProbePollToken) sourceProbeMessage.value = '检测仍在进行，稍后可导出日志';
+  } catch {
+    if (token === sourceProbePollToken) sourceProbeMessage.value = '检测暂未完成，请导出日志';
+  } finally {
+    if (token === sourceProbePollToken) sourceProbeRunning.value = false;
+  }
+}
 </script>
 <template>
-  <div class="page">
-    <p v-if="gameLocked" class="game-override-notice" role="status">游戏专属配置生效中</p>
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="rotate" /> 开启陀螺仪</h3>
+  <IntegratedPage title="陀螺仪" hide-heading>
+  <Teleport :to="simulationSettings || 'body'" :disabled="!simulationSettings">
+  <div ref="gyroSettingsRoot" class="page gyro-integrated-page" :data-gp-scope="simulationOpen ? undefined : 'gyro-page'" :data-gp-spatial="simulationOpen ? undefined : 'nearest'">
+    <header v-if="!simulationOpen" class="gyro-page-heading"><h1>陀螺仪</h1><button type="button" class="gyro-simulation-open" data-gp-row="-2" data-gp-col="1" @click="simulationOpen=true"><InlineIcon name="play"/>模拟陀螺仪</button></header>
+    <GameProfileModeBanner v-if="editingGame" :game-name="editingGame"><template #actions><button class="gyro-profile-exit" data-gyro-profile-exit data-gp-row="-1" data-gp-col="2" :disabled="controlsLocked" @click="requestProfileRemoval">退出专属</button></template></GameProfileModeBanner>
+    <section class="card gyro-overview-card" aria-label="陀螺仪状态与预设">
       <div class="field-stack">
-        <div class="gyro-power-row">
+        <GyroStatusPreview :orientation="gyroOrientation" :axes="gyroAxes" :connected="gyroConnected" :power="gyroPowerState" :calibration="calibUiStatus" :calibration-text="calibStatusText" :calibration-error="calibError"><template #rates><span v-for="axis in (['x', 'y', 'z'] as const)" :key="axis" class="gyro-xyz-axis">{{ axis.toUpperCase() }} <b>{{ formatGyroAxis(gyroAxes[axis]) }}</b></span></template><template #power><div class="gyro-power-row">
           <button
             type="button"
             class="gyro-power-btn"
+            :aria-label="gyroPowerText"
+            :aria-pressed="gyroPowerState === 'on'"
             :class="gyroPowerClass"
             :disabled="controlsLocked || gyroPowerState === 'unknown'"
             data-gp-row="0"
             data-gp-col="0"
             @click="toggleGyroPower"
           >
-            {{ gyroPowerText }}
+            <span>陀螺仪</span><small>{{gyroPowerState==='on'?'已开启':gyroPowerState==='off'?'已关闭':'未识别'}}</small>
           </button>
           <button
             type="button"
             class="gyro-power-btn link"
+            :aria-label="virtualPadLink ? '虚拟手柄联动已开启' : '虚拟手柄联动已关闭'"
+            :aria-pressed="virtualPadLink"
             :disabled="controlsLocked"
             :class="{ on: virtualPadLink }"
             data-gp-row="0"
             data-gp-col="1"
             @click="toggleVirtualPadLink"
           >
-            {{ virtualPadLink ? '虚拟手柄联动已开启' : '虚拟手柄联动已关闭' }}
+            <span>虚拟手柄联动</span><small>{{virtualPadLink?'已开启':'已关闭'}}</small>
           </button>
-        </div>
-        <div class="field">
-          <span>预设</span>
-          <SegButton :model-value="preset" :options="presetOptions" full :disabled="controlsLocked" :gp-row="1" @update:model-value="applyPreset" />
+        </div></template></GyroStatusPreview><p v-if="busy || status.includes('失败')" class="hint live-status">{{busy?'正在记录…':status}}</p>
+        <UsbipUpgradeStatus errors-only />
+        <div class="field gyro-preset-field">
+          <span>使用预设</span>
+          <SegButton :model-value="preset" :options="presetOptions" full :disabled="removalBusy || gameLocked" :gp-row="1" @update:model-value="applyPreset" />
         </div>
       </div>
     </section>
 
-    <section v-if="preset !== 'steam'" class="card">
-      <h3 class="card-title"><InlineIcon name="target" /> 触发模式</h3>
-      <div class="field-stack">
+    <section class="card gyro-workflow-card" aria-label="陀螺仪预览、输入和输出">
+      <h3 class="card-title"><InlineIcon name="gamepad" /> 预览 · 输入 · 输出</h3>
+      <GyroInputOutputPreview :persona="virtualPersona" :trigger="motionTrigger" :mode="motionMode" :aiming-trigger="aimingSightsTrigger" :input-label="motionInputOptions.find(option=>option.value===motionInput)?.label || motionInput" :output-stick="outputStick" :output-axis="outputAxis" :steam="preset==='steam'" :motion="simulationMotion" :receiving="gyroConnected && enabled && simulationAdmitted" />
+      <div class="gyro-workflow-section gyro-input-section">
+        <h4>输入</h4>
+        <div v-if="preset !== 'steam'" class="gyro-trigger-fields">
+<div class="field-stack">
         <div
           class="field-grid"
           :class="{ 'three-col': motionMode !== 'on' }"
@@ -1081,57 +1207,38 @@ onBeforeUnmount(() => {
         </div>
         <Slider v-model="aimingSightsMultiplier" label="变速触发键倍率" :min="0" :max="2" :step="0.1" :value-text="aimingSightsMultiplierText" :disabled="controlsLocked || !aimingSightsTrigger" :gp-row="4" :gp-col="0" @update:model-value="markCustom" />
       </div>
-    </section>
-
-    <!-- 2026-09-30 用户裁决：Steam 预设的说明小字，位置在「输入模式」上方。 -->
-    <p v-if="preset === 'steam'" class="steam-preset-hint">请在 Steam 内设置，支持 SteamDeck 和 PS5 虚拟手柄</p>
-
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="speed" /> 输入模式</h3>
-      <div class="field-stack">
-        <div v-if="preset !== 'steam'" class="field">
-          <span>输出到</span>
-          <SegButton v-model="outputStick" :options="stickOptions" full :disabled="controlsLocked" :gp-row="5" @update:model-value="markCustom" />
         </div>
+        <p v-else class="steam-preset-hint">请在 Steam 内设置触发方式，支持 SteamDeck 和 PS5 虚拟手柄</p>
+        <div class="field-stack">
         <div class="field-grid" :class="{ 'one-col': preset === 'steam' }">
           <label class="field">
             <span>输入方式</span>
-            <Dropdown v-model="motionInput" :options="motionInputOptions" :disabled="controlsLocked" show-selected-sub :gp-row="6" :gp-col="0" @change="markCustom" />
+            <Dropdown v-model="motionInput" :options="motionInputOptions" :disabled="controlsLocked" show-selected-sub :gp-row="5" :gp-col="0" @change="markCustom" />
           </label>
           <div v-if="preset !== 'steam'" class="field">
             <span>速度模式</span>
-            <SegButton v-model="velocityMode" :options="velocityModeOptions" full :disabled="controlsLocked" :gp-row="6" :gp-col-start="1" @update:model-value="markCustom" />
+            <SegButton v-model="velocityMode" :options="velocityModeOptions" full :disabled="controlsLocked" :gp-row="5" :gp-col-start="1" @update:model-value="markCustom" />
           </div>
         </div>
-        <Slider v-if="preset !== 'steam' && velocityMode === 'velocity'" v-model="velocityScale" label="变速倍率" :min="0.1" :max="5" :step="0.1" :value-text="velocityScale.toFixed(1)" :disabled="controlsLocked" :gp-row="7" :gp-col="0" @update:model-value="markCustom" />
-        <Slider v-model="gyroWeight" label="陀螺仪权重【倍率】" :min="1" :max="3" :step="0.1" :value-text="gyroWeight.toFixed(1)" :disabled="controlsLocked" :gp-row="8" :gp-col="0" @update:model-value="markCustom" />
+        <Slider v-if="preset !== 'steam' && velocityMode === 'velocity'" v-model="velocityScale" label="变速倍率" :min="0.1" :max="5" :step="0.1" :value-text="velocityScale.toFixed(1)" :disabled="controlsLocked" :gp-row="6" :gp-col="0" @update:model-value="markCustom" />
+
         <template v-if="motionInput === 'joystick-steering'">
           <div class="modifier-title">赛车倾斜</div>
           <Slider v-model="steeringMaxAngle" label="最大倾角" unit="°" :min="10" :max="80" :step="1" :disabled="controlsLocked" :gp-row="9" :gp-col="0" @update:model-value="markCustom" />
           <Slider v-model="steeringPower" label="转向曲线" :min="0.2" :max="5" :step="0.1" :value-text="steeringPower.toFixed(1)" :disabled="controlsLocked" :gp-row="10" :gp-col="0" @update:model-value="markCustom" />
           <Slider v-model="steeringDeadzone" label="倾斜死区" unit="°" :min="0" :max="5" :step="0.1" :disabled="controlsLocked" :gp-row="11" :gp-col="0" @update:model-value="markCustom" />
         </template>
-      </div>
-    </section>
 
-    <section class="card">
-      <div class="inner preview">
-        <div class="stage" aria-label="陀螺仪数据面">
-          <i class="mid-x"></i>
-          <i class="mid-y"></i>
-          <span class="axis-tag tag-x">X</span>
-          <span class="axis-tag tag-y">Y</span>
-          <span class="axis-tag tag-z">Z</span>
-          <b class="dot host-dot" :class="{ inactive: hostFrameState !== 'frame-accepted' || !hostActive }" :style="hostLiveDot" aria-label="native InputHost canonical frame receipt"></b>
-          <b class="dot preview-dot" :style="previewLiveDot" aria-label="本地模拟预览"></b>
-        </div>
-        <div class="axis-chips">
-          <div class="chip"><span>X</span><b>{{ gyroAxes.x.toFixed(1) }}</b></div>
-          <div class="chip"><span>Y</span><b>{{ gyroAxes.y.toFixed(1) }}</b></div>
-          <div class="chip"><span>Z</span><b>{{ gyroAxes.z.toFixed(1) }}</b></div>
         </div>
       </div>
-      <p v-if="busy || status.includes('失败')" class="hint live-status">{{ busy ? '正在记录…' : status }}</p>
+      <div class="gyro-workflow-section gyro-output-section">
+        <h4>输出</h4>
+        <div class="field-stack">
+          <div v-if="preset !== 'steam'" class="field"><span>输出到</span><SegButton v-model="outputStick" :options="stickOptions" full :disabled="controlsLocked" :gp-row="12" @update:model-value="markCustom" /></div>
+          <p v-else class="gyro-steam-output">Steam 体感输出</p>
+        <Slider v-model="gyroWeight" label="陀螺仪权重【倍率】" :min="1" :max="3" :step="0.1" :value-text="gyroWeight.toFixed(1)" :disabled="controlsLocked" :gp-row="8" :gp-col="0" @update:model-value="markCustom" />
+        </div>
+      </div>
     </section>
 
     <section class="card">
@@ -1143,7 +1250,7 @@ onBeforeUnmount(() => {
       </div>
 
       <div v-if="advancedOpen" class="advanced-content">
-        <div class="inner calib-row">
+        <div class="inner gyro-advanced-calibration"><div class="modifier-title">校准</div><div class="calib-row integrated-calib-row">
           <div class="calib-static">
             <span class="row-label">静态校准</span>
             <button type="button" class="calib-btn" :disabled="calibrating || busy" data-gp-row="16" data-gp-col="0" @click="startCalibration">
@@ -1152,12 +1259,18 @@ onBeforeUnmount(() => {
           </div>
           <div class="calib-auto">
             <Toggle :model-value="autoCalibrate" label="自动校准" :disabled="controlsLocked" :gp-row="16" :gp-col="1" @update:model-value="onAutoCalibrate" />
-            <p class="calib-result" :class="'calib-' + calibUiStatus">{{ calibStatusText }}</p>
             <span v-if="calibResult && calibUiStatus === 'already-calibrated'" class="calib-result">
               可信度 {{ (calibResult.confidence * 100).toFixed(0) }}%
             </span>
             <span v-else-if="calibError" class="calib-error">{{ calibError }}</span>
           </div>
+        </div></div>
+
+        <div class="inner">
+          <button type="button" class="calib-btn" :disabled="sourceProbeRunning || controlsLocked || calibrating" data-gp-row="17" data-gp-col="0" @click="detectMotionSources">
+            {{ sourceProbeRunning ? '检测中' : '检测体感来源' }}
+          </button>
+          <p v-if="sourceProbeMessage" class="calib-result" role="status" aria-live="polite">{{ sourceProbeMessage }}</p>
         </div>
         <div class="inner">
           <Slider :model-value="motionSensitivityX" label="灵敏度" :min="0.5" :max="2" :step="0.1" :value-text="motionSensitivityX.toFixed(1)" :disabled="controlsLocked" :gp-row="18" :gp-col="0" @update:model-value="onSensitivityLevel" />
@@ -1208,31 +1321,38 @@ onBeforeUnmount(() => {
       </div>
     </section>
 
-    <div v-if="usbipPrompt" class="usbip-prompt-backdrop" @click.self="dismissUsbipPrompt">
-      <div class="usbip-prompt-card">
-        <h3 class="card-title"><InlineIcon name="download" /> 需要 USBip 后端</h3>
-        <p>{{ usbipPromptText }}</p>
-        <div class="usbip-prompt-actions">
-          <button type="button" class="usbip-btn" data-gp-row="31" data-gp-col="0" @click="dismissUsbipPrompt">稍后再说</button>
-          <button type="button" class="usbip-btn primary" data-gp-row="31" data-gp-col="1" @click="openUsbipSite">是，去官网下载</button>
-        </div>
-      </div>
-    </div>
   </div>
+
+  </Teleport>
+  <GyroSimulationWindow v-if="simulationOpen" :motion="simulationMotion" :connected="gyroConnected" :enabled="enabled" :admitted="simulationAdmitted" @settings-host="element=>simulationSettings=element" @close="closeSimulation" />
+  <GameProfileRemoveDialog v-if="removal" :game-name="removal.gameName" :busy="removalBusy" :error="removalError" @cancel="cancelProfileRemoval" @confirm="confirmProfileRemoval" />
+  </IntegratedPage>
 </template>
 
 <style scoped>
 .game-override-notice{margin:0 0 12px;color:var(--accent);font-size:12px;font-weight:700}
 .gyro-power-btn:disabled{opacity:.5;cursor:default}
 .page { padding-bottom: 20px; }
+/* Nine mono cells also fit signed six-digit rates and finite scientific notation.
+   Reserving them up front keeps axis labels and the decimal point stationary. */
+.gyro-xyz-axis { display: inline-flex; align-items: baseline; gap: 0.5ch; }
+.gyro-xyz-axis b {
+  display: inline-block;
+  flex: 0 0 9ch;
+  width: 9ch;
+  font-family: Consolas, 'Liberation Mono', monospace;
+  font-weight: 550;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+  text-align: right;
+}
 /* 2026-09-30 用户裁决：Steam 预设说明小字（位于「输入模式」上方，跟随卡片 10px 节奏）。
    2026-10-04 用户裁决：改为居中显示并放大字体。 */
 .steam-preset-hint { margin: 0 0 10px; color: var(--text-dim); font-size: 13px; line-height: 1.5; text-align: center; }
 .calib-btn { min-height: var(--btn-min-h); padding: 0 12px; border: 1px solid #2a3342; border-radius: var(--radius-ctrl); background: var(--bg-input); color: var(--text); cursor: pointer; font-weight: 700; }
 .calib-btn:disabled { opacity: .5; cursor: default; }
 .calib-result { color: #8b96a8; font-size: 12px; line-height: 1.5; }
-.calib-result.calib-waiting-still, .calib-result.calib-calibrating { color: #2ea6ff; }
-.calib-result.calib-already-calibrated { color: #7fe08a; }
 .calib-result small { display: block; color: #9fd0a9; }
 .calib-error { color: #ff8080; font-size: 12px; }
 .inner {
@@ -1341,66 +1461,6 @@ onBeforeUnmount(() => {
 }
 .field-grid.one-col { grid-template-columns: minmax(0, 1fr); }
 .field-grid.three-col { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.preview {
-  display: grid;
-  /* 用户裁决（2026-09-29）：永远左右结构——首列随视口收紧而等比缩小，
-     不再在窄宽度下折成上下两行。 */
-  grid-template-columns: clamp(84px, 26vw, 132px) minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-}
-.stage {
-  position: relative;
-  width: 100%;
-  aspect-ratio: 1 / 1;
-  border-radius: 50%;
-  background: color-mix(in srgb, var(--bg-panel) 80%, #000);
-}
-.mid-x, .mid-y { position: absolute; background: color-mix(in srgb, var(--text) 28%, transparent); }
-.mid-x { left: 10%; right: 10%; top: 50%; height: 1px; }
-.mid-y { top: 10%; bottom: 10%; left: 50%; width: 1px; }
-.axis-tag {
-  position: absolute;
-  font-size: 10px;
-  font-weight: 700;
-  color: var(--accent);
-}
-.tag-x { right: 8px; top: calc(50% + 4px); }
-.tag-y { top: 8px; left: calc(50% + 6px); }
-.tag-z { left: 8px; bottom: 8px; }
-.dot {
-  position: absolute;
-  width: 10px;
-  height: 10px;
-  margin: -5px;
-  border-radius: 50%;
-  background: var(--accent);
-}
-.host-dot {
-  z-index: 2;
-  background: #65d6ff;
-  box-shadow: 0 0 0 2px color-mix(in srgb, #65d6ff 24%, transparent);
-}
-.host-dot.inactive { opacity: 0.32; }
-.preview-dot {
-  z-index: 3;
-  box-sizing: border-box;
-  background: transparent;
-  border: 2px solid var(--accent);
-  box-shadow: 0 0 0 1px color-mix(in srgb, #000 55%, transparent);
-}
-.axis-chips { display: grid; gap: 6px; }
-.chip {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 10px;
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-panel) 78%, #000);
-}
-.chip span { font-size: 12px; font-weight: 700; color: var(--accent); }
-.chip b { font-size: 13px; font-variant-numeric: tabular-nums; }
 .live-status { padding: 2px 2px 0; }
 .advanced-head {
   display: flex;
@@ -1454,50 +1514,26 @@ onBeforeUnmount(() => {
 .reset-preset-btn:disabled { opacity: .5; cursor: default; }
 .reset-preset-btn:focus-visible { box-shadow: var(--focus-ring); }
 
-.usbip-prompt-backdrop {
-  position: fixed;
-  inset: 0;
-  z-index: 900;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  background: rgba(0, 0, 0, 0.55);
-}
-.usbip-prompt-card {
-  width: min(420px, calc(100vw - 32px));
-  padding: 16px;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: var(--radius-ctrl);
-  background: var(--bg-panel);
-}
-.usbip-prompt-card h3 {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin: 0 0 8px;
-  font-size: 13px;
-}
-.usbip-prompt-card p {
-  margin: 0 0 14px;
-  color: var(--text-dim);
-  font-size: 11px;
-  line-height: 1.5;
-}
-.usbip-prompt-actions { display: flex; justify-content: flex-end; gap: 8px; }
-.usbip-btn {
-  min-height: 30px;
-  padding: 0 12px;
-  border: 1px solid rgba(255, 255, 255, 0.14);
-  border-radius: var(--radius-ctrl);
-  background: color-mix(in srgb, var(--bg-input) 88%, transparent);
-  color: var(--text);
-  font-size: 11px;
-  font-weight: 700;
-  cursor: pointer;
-}
-.usbip-btn.primary {
-  border-color: color-mix(in srgb, var(--accent) 55%, transparent);
-  background: color-mix(in srgb, var(--accent) 14%, transparent);
-  color: var(--accent);
-}
+.gyro-simulation-open{border-color:var(--accent-border);color:var(--accent);background:var(--accent-surface)}
+.gyro-integrated-page .gyro-power-btn{white-space:nowrap;font-size:13px}.gyro-integrated-page .gyro-power-btn.link{flex:1.25 1 0}.gyro-integrated-page .gyro-simulation-open{flex:.85 1 0}
+
+.gyro-profile-exit{min-height:34px;padding:5px 12px;border:1px solid color-mix(in srgb,var(--danger) 50%,transparent);border-radius:7px;background:color-mix(in srgb,var(--danger) 12%,var(--bg-input));color:var(--danger);font:inherit;font-size:13px;font-weight:650;white-space:nowrap;cursor:pointer}.gyro-profile-exit:disabled{opacity:.5}
+.gyro-workflow-section{border-top:1px solid var(--console-line);padding-top:12px;margin-top:12px;min-width:0}.gyro-workflow-section h4{font-size:14px;line-height:1.4;margin:0 0 10px;font-weight:650;color:var(--text)}.gyro-trigger-fields{margin-bottom:12px}.gyro-steam-output{font-size:14px;margin:0;color:var(--accent)}.gyro-advanced-calibration .modifier-title{margin-top:0}.gyro-advanced-calibration .calib-row{margin-top:8px}
+</style>
+
+<style>
+.gyro-integrated-page .integrated-calib-row{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px;margin:0;padding:0;border:0;background:transparent}.gyro-integrated-page .integrated-calib-row .calib-static{display:flex;flex-direction:column;align-items:stretch;gap:6px}.gyro-integrated-page .integrated-calib-row .calib-auto{min-width:0}.gyro-integrated-page .integrated-calib-row .row-label{font-size:12px;color:var(--text-dim)}.gyro-integrated-page .integrated-calib-row .calib-btn{min-height:36px;font-size:13px}.gyro-integrated-page .integrated-calib-row .calib-auto .toggle-row{min-height:36px!important;padding:0!important;gap:5px}.gyro-integrated-page .integrated-calib-row .calib-auto .toggle-label{font-size:13px}.gyro-integrated-page .gyro-power-row{gap:8px}.gyro-integrated-page .gyro-power-btn{font-size:13px;padding:8px 6px;line-height:1.4;min-height:42px}.gyro-integrated-page .gyro-status-preview{margin-bottom:12px}
+
+/* The overview has one heading, two equal actions and one aligned preset row. */
+.gyro-page-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;min-width:0;padding:3px 1px 2px}
+.gyro-page-heading h1{font-size:20px;line-height:1.3;margin:0;font-weight:650}
+.gyro-page-heading .gyro-simulation-open{display:flex;align-items:center;justify-content:center;gap:6px;min-height:36px;padding:6px 12px;border:1px solid var(--accent-border);border-radius:8px;font:inherit;font-size:14px;color:var(--accent);background:var(--accent-surface);white-space:nowrap;cursor:pointer}
+.gyro-overview-card>.field-stack{gap:12px}
+.gyro-integrated-page .gyro-power-row{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+.gyro-integrated-page .gyro-power-row .gyro-power-btn{display:flex;align-items:center;justify-content:space-between;gap:6px;min-height:42px;padding:8px 10px;font-size:14px;line-height:1.35;flex:initial}
+.gyro-power-btn>span{font-weight:650;white-space:nowrap}.gyro-power-btn>small{font-size:12px;font-weight:500;white-space:nowrap;opacity:.85}
+.gyro-preset-field{gap:7px}.gyro-preset-field>span{font-size:12px;color:var(--text-dim)}
+.gyro-preset-field :deep(.seg){display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+.gyro-preset-field :deep(.seg-btn){min-width:0;min-height:36px;padding:6px 5px;white-space:nowrap}
+.gyro-integrated-page .gyro-page-heading .gyro-simulation-open{flex:0 0 auto}
 </style>

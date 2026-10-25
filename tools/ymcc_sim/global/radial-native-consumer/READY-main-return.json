@@ -1,0 +1,346 @@
+{
+  "schemaVersion": 1,
+  "scopeVersion": 2,
+  "atUtc": "2026-10-19T23:58:49.287Z",
+  "status": "V2_MANDATORY_MAIN_RETURN_PORT_STATIC_READY_FOR_PARENT_FORMAL",
+  "root": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\radial-native-consumer",
+  "id": "controller.radial-native-consumer",
+  "uniqueExistingId": true,
+  "registrationAdded": false,
+  "kind": "powershell",
+  "ownedJob": "existing shared host-process.ps1 gated child kill-on-close tree",
+  "writeScope": {
+    "productCode": "none",
+    "sharedRegistryOrRunner": "none",
+    "publicLeaf": "tools/ymcc_sim/global/radial-native-consumer/",
+    "maintenancePreimage": "D:/Codex/2026-10-18/kai-s/work/radial-main-public03"
+  },
+  "newMainPositiveSource": "current patched G snapshots; no D selected/runs dependency",
+  "approvedProductSources": [
+    {
+      "path": "native/main.cpp",
+      "sha256": "8aa08fb62c24652744dadeb6314ff1d1c4ffb149465a0078c719dfe2de17a757"
+    },
+    {
+      "path": "native/radial_overlay.h",
+      "sha256": "bfa59c1d03bf5b3dff21e917d61ec739030ee599519915a340921cc8251129b9"
+    },
+    {
+      "path": "native/radial_input_region.h",
+      "sha256": "5361fca72bff3b73ff802c8c4cd2c26ab80e978c99af7df2f709fcee66f0f093"
+    },
+    {
+      "path": "deps/json/json.hpp",
+      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    }
+  ],
+  "scope": {
+    "postCreateDefinitions": 13,
+    "postCreateOriginalCases": 12,
+    "postCreateFaults": 2,
+    "mainReturnDefinitions": 30,
+    "mainReturnExactDeclarations": 54,
+    "mainReturnOriginalCases": 12,
+    "mainReturnFaults": 2,
+    "mainTranslationUnitCompiled": false,
+    "realCreate": false,
+    "actualHostIntentOrTdp": false
+  },
+  "mandatoryResults": [
+    "radial-native/result.json",
+    "radial-native/post-create-result.json",
+    "radial-native/main-return/result.json",
+    "radial-native/wrapper-terminal.json"
+  ],
+  "mandatoryCompletion": "RADIAL_NATIVE_CONSUMER_V2_COMPLETED postCreate=12+2 mainReturn=12+2",
+  "finalResultSchemaVersion": 2,
+  "finalResultScopeVersion": 2,
+  "oldThreeGroupsCannotPassV2": true,
+  "sameRunSameStageOriginal12RequiredForFaults": true,
+  "compileFailureCountsAsSemanticFault": false,
+  "tools": {
+    "files": 1191,
+    "completeDirectories": 4,
+    "oldManifestByteUnchanged": true,
+    "droppedMembers": 0,
+    "osLoadedModuleClosureClaimed": false
+  },
+  "sourceDeclaration": {
+    "inner": 22,
+    "expectedOuterWithExistingRunnerAndCompletion": 24,
+    "actualProductSources": 4,
+    "hostContextIncluded": false
+  },
+  "preservedOriginal13RuntimeFiles": [
+    {
+      "path": "plan.json",
+      "sha256": "c813ffa711250a9892d36900d94b8afdb7a21831b20623e1f893d190622437b8"
+    },
+    {
+      "path": "extraction-contract.json",
+      "sha256": "83045abbff11f13860f7d88bda54e8b6c6557e827ef9def0fd1b37569a4a45a1"
+    },
+    {
+      "path": "prepare.mjs",
+      "sha256": "ad2e3341282084642831a04facc536c636ab7f3860afee70369c79d440b5a318"
+    },
+    {
+      "path": "helper.mjs",
+      "sha256": "e51c7fb675a2de68c10ac3c10f19bbdd2cd878d36c3d3cb7c0bb42795d524520"
+    },
+    {
+      "path": "MemoryPorts.hpp",
+      "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+    },
+    {
+      "path": "ConsumerCases.hpp",
+      "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02"
+    },
+    {
+      "path": "toolchain-inputs.json",
+      "sha256": "e0da09b62151fdb926f2967840a1ec8668b8044c8c0a25bafcabc39ba50e3b39"
+    }
+  ],
+  "mainTemplates": [
+    {
+      "name": "MainPlatform.hpp",
+      "sha256": "fb8d4cfb92d03e624f88c923167cdb8b203b8a37e68728ecf47a2ebfea4b5a23",
+      "sameAsFrozenD": true
+    },
+    {
+      "name": "MainEndpoints.hpp",
+      "sha256": "acbd14b20c1af5ca16d2766f00cc86869a38b26d43cdc8102caa62399a86eb01",
+      "sameAsFrozenD": true
+    },
+    {
+      "name": "MainCases.hpp",
+      "sha256": "27ac19893d285c9b35f98c8f5c9483b96f5b5c5aaada26f116856a125d3e7aa7",
+      "sameAsFrozenD": true
+    }
+  ],
+  "oldPublicPreimage": {
+    "indexSha256": "ffa653e2c6981806b9d78da7b055ff8d6ad1c0f9fac91ab6fae6c82aad10a93d",
+    "preimage": "D:/Codex/2026-10-18/kai-s/work/radial-main-public03/public-preimage",
+    "indexedMembers": 84,
+    "rawFilesIncludingIndex": 85,
+    "allBytesExact": true,
+    "oldLiveIndexUnchanged": true
+  },
+  "frozenMainD": {
+    "root": "D:/Codex/2026-10-18/kai-s/work/radial-main-return02",
+    "indexSha256": "db54e0e9e3568c0717328b7d687e9446234a7604a65617ebe5798a16733f3d73",
+    "indexedFiles": 180,
+    "allBytesExact": true,
+    "reexecuted": false
+  },
+  "modifiedExistingFiles": [
+    {
+      "path": "adapter.mjs",
+      "beforeSha256": "31c5ae7a4e6fae4542e92ecbeda0a8d57fa68ea62f3b1da40ed3f1933202e39e",
+      "afterSha256": "d62f5eff176a00efcdc23e4fb98b271d7715ece24804ba3119ae14bbfddaccab",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\adapter.mjs"
+    },
+    {
+      "path": "check.mjs",
+      "beforeSha256": "5442160929b51b356a180af817dc88a4ddbed89bd958410922fa5103c71e0078",
+      "afterSha256": "47f9360a10cda5a4657ae3621c0c06b2aff675a1b61c2b3b9830ba9cede1ca12",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\check.mjs"
+    },
+    {
+      "path": "contract.test.mjs",
+      "beforeSha256": "bbfa217dca0c638160e9c6e3522a144ff375de6510a81c3d36025f49a3793d79",
+      "afterSha256": "8a56afabc4a09e78edc9c2bca0c7d58689c0f8147ea638f2e8c3836d0cee9850",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\contract.test.mjs"
+    },
+    {
+      "path": "README.md",
+      "beforeSha256": "c6462e143778238ed739f997ce6319156e219d9209802c33837a2c108355a934",
+      "afterSha256": "02833d96cbe00791edba07990f1a89e1a908537529f697648a63ffdab5f7c1d9",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\README.md"
+    },
+    {
+      "path": "Run-Radial.ps1",
+      "beforeSha256": "c010dff45d49a24e2ec45edbe37d2ddd2a791041ac1b87953adc90b0d9d888f5",
+      "afterSha256": "24639472cef5fd9b8575232908750938fcc13fc34a265bb5a14e4b5612af5a14",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\Run-Radial.ps1"
+    },
+    {
+      "path": "run.mjs",
+      "beforeSha256": "2286b04ac04320e7d63e4a744a4d6f03febaaf2052a8c2b7c9f4d80b825b4c28",
+      "afterSha256": "82b2b62eb0cf43083baf046f755ad56ce6cd11619a9b7ed6f768460a11170753",
+      "exactInversePreimage": "D:\\Codex\\2026-10-18\\kai-s\\work\\radial-main-public03\\public-preimage\\run.mjs"
+    }
+  ],
+  "newMainFiles": [
+    {
+      "path": "main-return/MainCases.hpp",
+      "sha256": "27ac19893d285c9b35f98c8f5c9483b96f5b5c5aaada26f116856a125d3e7aa7"
+    },
+    {
+      "path": "main-return/MainEndpoints.hpp",
+      "sha256": "acbd14b20c1af5ca16d2766f00cc86869a38b26d43cdc8102caa62399a86eb01"
+    },
+    {
+      "path": "main-return/MainPlatform.hpp",
+      "sha256": "fb8d4cfb92d03e624f88c923167cdb8b203b8a37e68728ecf47a2ebfea4b5a23"
+    },
+    {
+      "path": "main-return/contract.json",
+      "sha256": "1e49d4af98d0de256459f7835e101c19ab3388d3dc2047d5727ba2cde14bc55c"
+    },
+    {
+      "path": "main-return/contract.test.mjs",
+      "sha256": "160f0a2e95a327a3c06605f285f8d6a42aa2019d9c0e3829531bf65f5e17440a"
+    },
+    {
+      "path": "main-return/plan.json",
+      "sha256": "837a756be0ac321b2b4bb804ccbe8f180169bc1f3b4f38c5db6f05451db5fe12"
+    },
+    {
+      "path": "main-return/prepare.mjs",
+      "sha256": "5eeb6ac5d0533ab84f1b05124c875d94129a3836d8fb00fe8abdbfdebfb1d121"
+    },
+    {
+      "path": "main-return/run.mjs",
+      "sha256": "67ade511e891f5e72cd26fdd2d9b7615b5808c8eddf14e9d47af7ef9fd743c02"
+    }
+  ],
+  "checks": {
+    "contractTests": 25,
+    "nodeSyntaxFiles": 9,
+    "powershellParserScripts": 1,
+    "all11ProcessesNaturalExit": 0,
+    "report": {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\radial-native-consumer/maintenance-evidence/main-return-checks-03/report.json",
+      "sha256": "c9ef8a04ec200c136a3006906e8f1b258ccd0dea4a293e52b89e421786df37be"
+    },
+    "nativeCompiled": false,
+    "nativeExecuted": false,
+    "globalProducerOrAuditExecuted": false
+  },
+  "newRuntimeSourceIdentities": [
+    {
+      "path": "ConsumerCases.hpp",
+      "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02"
+    },
+    {
+      "path": "MemoryPorts.hpp",
+      "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+    },
+    {
+      "path": "Run-Radial.ps1",
+      "sha256": "24639472cef5fd9b8575232908750938fcc13fc34a265bb5a14e4b5612af5a14"
+    },
+    {
+      "path": "adapter.mjs",
+      "sha256": "d62f5eff176a00efcdc23e4fb98b271d7715ece24804ba3119ae14bbfddaccab"
+    },
+    {
+      "path": "check.mjs",
+      "sha256": "47f9360a10cda5a4657ae3621c0c06b2aff675a1b61c2b3b9830ba9cede1ca12"
+    },
+    {
+      "path": "contract.test.mjs",
+      "sha256": "8a56afabc4a09e78edc9c2bca0c7d58689c0f8147ea638f2e8c3836d0cee9850"
+    },
+    {
+      "path": "extraction-contract.json",
+      "sha256": "83045abbff11f13860f7d88bda54e8b6c6557e827ef9def0fd1b37569a4a45a1"
+    },
+    {
+      "path": "helper.mjs",
+      "sha256": "e51c7fb675a2de68c10ac3c10f19bbdd2cd878d36c3d3cb7c0bb42795d524520"
+    },
+    {
+      "path": "main-return/MainCases.hpp",
+      "sha256": "27ac19893d285c9b35f98c8f5c9483b96f5b5c5aaada26f116856a125d3e7aa7"
+    },
+    {
+      "path": "main-return/MainEndpoints.hpp",
+      "sha256": "acbd14b20c1af5ca16d2766f00cc86869a38b26d43cdc8102caa62399a86eb01"
+    },
+    {
+      "path": "main-return/MainPlatform.hpp",
+      "sha256": "fb8d4cfb92d03e624f88c923167cdb8b203b8a37e68728ecf47a2ebfea4b5a23"
+    },
+    {
+      "path": "main-return/contract.json",
+      "sha256": "1e49d4af98d0de256459f7835e101c19ab3388d3dc2047d5727ba2cde14bc55c"
+    },
+    {
+      "path": "main-return/contract.test.mjs",
+      "sha256": "160f0a2e95a327a3c06605f285f8d6a42aa2019d9c0e3829531bf65f5e17440a"
+    },
+    {
+      "path": "main-return/plan.json",
+      "sha256": "837a756be0ac321b2b4bb804ccbe8f180169bc1f3b4f38c5db6f05451db5fe12"
+    },
+    {
+      "path": "main-return/prepare.mjs",
+      "sha256": "5eeb6ac5d0533ab84f1b05124c875d94129a3836d8fb00fe8abdbfdebfb1d121"
+    },
+    {
+      "path": "main-return/run.mjs",
+      "sha256": "67ade511e891f5e72cd26fdd2d9b7615b5808c8eddf14e9d47af7ef9fd743c02"
+    },
+    {
+      "path": "plan.json",
+      "sha256": "c813ffa711250a9892d36900d94b8afdb7a21831b20623e1f893d190622437b8"
+    },
+    {
+      "path": "prepare.mjs",
+      "sha256": "ad2e3341282084642831a04facc536c636ab7f3860afee70369c79d440b5a318"
+    },
+    {
+      "path": "run.mjs",
+      "sha256": "82b2b62eb0cf43083baf046f755ad56ce6cd11619a9b7ed6f768460a11170753"
+    },
+    {
+      "path": "toolchain-inputs.json",
+      "sha256": "e0da09b62151fdb926f2967840a1ec8668b8044c8c0a25bafcabc39ba50e3b39"
+    }
+  ],
+  "proof": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/radial-main-public03/port-proof.json",
+    "sha256": "2324c00224384231299006092b4b9f084d40cc62ce95bccf2ff50b8697cd62bc"
+  },
+  "readme": {
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\radial-native-consumer/README.md",
+    "sha256": "02833d96cbe00791edba07990f1a89e1a908537529f697648a63ffdab5f7c1d9"
+  },
+  "explicitParentWorkBeforeFormal": [
+    {
+      "path": "tools/ymcc_sim/global/extra-adapters.test.mjs",
+      "anchor": "controller.radial-native-consumer resultFiles assertion",
+      "oldMandatoryResults": 2,
+      "newMandatoryResults": 4,
+      "sharedFileNotWritten": true
+    },
+    {
+      "task": "Review input declaration updates from22 inner to24 outer and new completion scope without adding ID"
+    },
+    {
+      "task": "Run next unique full V2 case and current-source audit; all native stages mandatory"
+    },
+    {
+      "task": "Complete current whole-main build in parent scope"
+    }
+  ],
+  "remainingCoverage": [
+    "Actual create/acquisition and OS/device IO",
+    "Full parent navigation consumer/OEM rule engine and real sampling",
+    "Actual queue concurrency and jobs delayed beyond a whole radial lifecycle",
+    "Unselected held controls including thumb buttons",
+    "TypeScript host intent/checkpoint and actual actions/TDP"
+  ],
+  "hostCheckpoint": {
+    "status": "GAP_RECORDED_ONLY_NO_EXECUTION_OR_CANDIDATE",
+    "path": "src/radial/host.ts",
+    "anchor": "checkpoint(s:Session),await loadRadialSettings",
+    "observedSha256": "cf71c1a9aa3f512c9538ac93d2a89abbc1e8cf670f68930ece704b8c5fb7f3fc",
+    "futureScopeRequiresUserAndParentSteering": true
+  },
+  "finitePortAssignmentComplete": true,
+  "wholeGoalComplete": false,
+  "stopAfterThisReady": true
+}

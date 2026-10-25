@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 1,
+  "id": "B39-EXACT-SOURCE-REBIND-OF-REVIEWED-CANCELLATION-FAULT",
+  "scope": "Source-bound rebind by the fixture owner under parent authorization. Independent adjudication remains the unmodified CUT47 Ni original; no new independent review is claimed.",
+  "mainSha256": "ba86ea1e1acd8fe3fa0c7ed57ea8735cabdf0436c7fd7a7568052c4a6fdf640f",
+  "sourceManifest": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-cancellation/source-manifest.json",
+    "sha256": "c737e8920756463726c9ff7b18de233887f9eb744fda88502cf906bc39a6583b"
+  },
+  "rawOriginal": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-cancellation/full-pipe/fixture-result.json",
+    "sha256": "b62449efc4ee8e41398e5b0d3675aadc74a1ddc4de08bcab5c7c1d361f0bc725",
+    "status": "FAIL",
+    "checks": 2330,
+    "groups": 25
+  },
+  "actualCore": [
+    {
+      "symbol": "inputHostPerformPsWakeRearm",
+      "sha256": "749fcb04de2f95b510ba47233e10fc5f441e2b67941d9d11db3c2ad99543053b",
+      "executedSha256": "50aca86c2b1a0ed1b046a0495f6f5081c4ea76705db5edb0ffe88d4f5af5fbcd",
+      "unchanged": false,
+      "fixtureEndpointAdapter": false,
+      "expectedSemanticNegative": true
+    },
+    {
+      "symbol": "inputHostRecreatePreparedTarget",
+      "sha256": "9e1a78f4ec824939d5ecb9f115f57ede9257f3000591400033d74bd6bf176ffd",
+      "executedSha256": "c0f0fc3e5d39e527fb510006fe27bf8b47a8f01ecc23f0fa4268a6d04882f5d0",
+      "unchanged": false,
+      "fixtureEndpointAdapter": false,
+      "expectedSemanticNegative": true
+    },
+    {
+      "symbol": "inputHostSubmitPad",
+      "sha256": "5f98789dce909d69030fd4a7349ed05d1218b3bad6f41f3240d77bfb0884f815",
+      "executedSha256": "bd2b172400c1e24030cd9af8be0ce39f73dc0aad4d791a5c37f7506c116caaa9",
+      "unchanged": false,
+      "fixtureEndpointAdapter": false,
+      "expectedSemanticNegative": true
+    },
+    {
+      "symbol": "inputHostFrameSubmissionCurrent",
+      "sha256": "8bc2855a4f473aa731013fe32ded58feefb375eb092c8b3bbc822660f62713d3",
+      "executedSha256": "76cfcc3e7b35e93920733346054416d17e7b3e82e078eab4a3c5925ecaf636ce",
+      "unchanged": false,
+      "fixtureEndpointAdapter": false,
+      "expectedSemanticNegative": true
+    }
+  ],
+  "originalRecipeLfSha256": "59cab536a03038b7f037d3ef47bf15fe5b9918a84a4c62f5dd1521478dc02350",
+  "recipeSourceSha256": "a5a1df2883e33614a4911607eaa6e90a1d3429bcee9539ff0503adfdcab7dcca",
+  "originalIndependentNiReview": {
+    "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-fixture-upgrade-20261020-R3/NI-CANCELLATION-READONLY-ADJUDICATION.original.json",
+    "sha256": "ccdcd25920b3efaf4449fb4c7ea5a920fa806da29389afc22e8c20519665399e"
+  },
+  "sameFailureIdentityMultisetAsReviewedCut47": true,
+  "exactFailedInstances": [
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+      "checkIndex": 1168
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+      "checkIndex": 1169
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "checkIndex": 1170
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1176
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "checkIndex": 1195
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "checkIndex": 1235
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1238
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "checkIndex": 1280
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "checkIndex": 1329
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1332
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "checkIndex": 1374
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+      "checkIndex": 1531
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+      "checkIndex": 1532
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+      "checkIndex": 1533
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1536
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "old Edge Host closes naturally without stale-query recreation before requested persona replacement starts",
+      "checkIndex": 1541
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+      "checkIndex": 1842
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "assertion": "new target requires its own fresh ownership query and no second recreate",
+      "checkIndex": 1844
+    }
+  ],
+  "originalInstancesNowRequiredPass": [
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "checkIndex": 1177
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "checkIndex": 1239
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "checkIndex": 1333
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1424
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "older endpoint query cannot clear or rebuild a newer pending PS request",
+      "checkIndex": 1425
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "newer PS request requires its own fresh query before reusing existing target",
+      "checkIndex": 1427
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "checkIndex": 1468
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "checkIndex": 1537
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+      "checkIndex": 1674
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+      "checkIndex": 1675
+    },
+    {
+      "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+      "checkIndex": 1718
+    }
+  ],
+  "allFourIndependentlyReviewedGuardFragmentsByteIdentical": true,
+  "B39AlreadyPresentQueueGuardsKept": true,
+  "signatureChanged": false,
+  "producerOrGuardMutationExpanded": false
+}

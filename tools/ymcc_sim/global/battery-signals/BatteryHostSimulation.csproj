@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <AssemblyName>BatteryHostTests</AssemblyName><TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <UseSharedCompilation>false</UseSharedCompilation>
+    <StartupObject Condition="'$(BatteryBridge)' != 'true'">Program</StartupObject>
+    <StartupObject Condition="'$(BatteryBridge)' == 'true'">BatteryControllerBridge</StartupObject>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Remove="ControllerBridge.cs" Condition="'$(BatteryBridge)' != 'true'" />
+    <Compile Include="$(BatteryDispatchSource)" Link="ProductionDispatch.g.cs" Condition="'$(BatteryBridge)' == 'true'" />
+    <ProjectReference Include="../../../../native/BatteryHost/YeManBatteryHost.csproj" />
+    <Compile Include="../../../../native/BatteryHostTests/Program.cs" Link="OriginalTests.cs" />
+    <Compile Include="../../../../native/BatteryHostTests/MsiFixture.cs" Link="OriginalMsiFixtures.cs" />
+  </ItemGroup>
+</Project>

@@ -1,0 +1,83 @@
+{
+  "schemaVersion": 1,
+  "scope": "Exact locked xbox-elite-v2 virtual target, XInput source2/report0, classical two-motor raw4 or flagged5 only",
+  "capabilityId": "controller.feedback.game.xbox-elite-v2-xinput-classic",
+  "profileIdentity": "xbox-elite-v2",
+  "protocol": "xbox-elite-v2-xinput-classic-v1",
+  "protocolToken": 3,
+  "compatibilityToken": 4,
+  "lockedSdk": {
+    "file": "deps/hidmaestro/HIDMaestro.Core.dll",
+    "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+    "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+    "commit": "30b8faf0f7de746f249edc5f1520eaa0440965cf"
+  },
+  "lockedProfile": {
+    "resource": "HIDMaestro.Profiles.microsoft\\xbox-elite-v2.json",
+    "sha256": "42815183da56cb78336219563971b9c7d687de3d94ec1f9c3ed8e20615c4a3d2"
+  },
+  "wire": {
+    "reportSource": 2,
+    "reportId": 0,
+    "acceptedBodyBytes": [
+      4,
+      5
+    ],
+    "raw4": {
+      "meaning": "XINPUT_VIBRATION little-endian WORD pair",
+      "leftWordOffset": 0,
+      "rightWordOffset": 2,
+      "normalization": "upper byte of each unsigned16; same classical8 adapter"
+    },
+    "flagged5": {
+      "meaning": "packed InSetState_t; companion publishes IOCTL input unchanged",
+      "virtualIndexOffset": 0,
+      "ledOffset": 1,
+      "leftByteOffset": 2,
+      "rightByteOffset": 3,
+      "flagsOffset": 4,
+      "vibrationMask": 2,
+      "ledMask": 1,
+      "allowedFlagsMask": 3,
+      "withoutVibration": "NoMotorUpdate; do not replace pending motor or zero",
+      "physicalSourceChosenByVirtualIndex": false
+    },
+    "zeroPairMeansStop": true
+  },
+  "primaryProtocolEvidence": {
+    "sdkCommit": "30b8faf0f7de746f249edc5f1520eaa0440965cf",
+    "sdkFiles": [
+      "driver/companion.c",
+      "sdk/HIDMaestro.Core/HMOutputPacket.cs"
+    ],
+    "openXinputCommit": "ce152dc310eb5dbfa2ccafaf0f0cedcdecb8d9cf",
+    "openXinputFile": "src/OpenXinput.cpp",
+    "reviewedSymbols": [
+      "InSetState_t",
+      "SendLEDState",
+      "SendDeviceVibration"
+    ],
+    "rawVibrationReference": "Microsoft Win32 XINPUT_VIBRATION",
+    "implementationCopied": false,
+    "probesExecuted": false
+  },
+  "supportedPhysicalSources": [
+    "controller.feedback.xinput.physical",
+    "controller.feedback.msi-dinput.physical"
+  ],
+  "sourceRule": "Same admitted frame original physical SourceToken; virtual XUSB index never selects or grants physical target authority.",
+  "softwareAcceptanceEvidenceRecordedSeparately": true,
+  "physicalAcceptance": false,
+  "wholeProcessCpuReduction": null,
+  "remaining": [
+    "Xbox HID/BT classical and impulse-trigger output",
+    "WGI/GameInput additional layouts not matching exact raw4/flagged5",
+    "independent runtime frontend proof",
+    "current-source formal combined consumer acceptance",
+    "actual motor/firmware acceptance"
+  ],
+  "frozenTarget": {
+    "file": "Targets/Xbox360Target.cs",
+    "sha256": "91b80d929d5dd354d0f74cbcd6b85d8af7ee78f61f580eebae6fdee1e3f99043"
+  }
+}

@@ -1,0 +1,277 @@
+{
+  "schemaVersion": 1,
+  "kind": "immutable-lightsetter-source-snapshot",
+  "capturedUtc": "2026-10-19T05:53:40.848449+00:00",
+  "sourceRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+  "snapshotRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source",
+  "sourceInputs": [
+    {
+      "path": "FanLab/LightSetter/YeManLightSetter.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\YeManLightSetter.csproj",
+      "sha256": "d0e700bdad086e6984943a48fefd69809ae447d7b0541a9da176ce92250e64b0",
+      "bytes": 3101,
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/DeviceCoreConsumer.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\DeviceCoreConsumer.cs",
+      "sha256": "0e9578c6846c6556cfb224ada2593936f64a652fcc50eb12213a481e7a3c3885",
+      "bytes": 7015,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/LightingAssemblyPins.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\LightingAssemblyPins.cs",
+      "sha256": "4b85c2e75ab8b00653edd10c8797ea7a76ec2a30a2b1ab6006b2d53775cd9c56",
+      "bytes": 224,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/OneXLightingSession.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXLightingSession.cs",
+      "sha256": "939425f3e2c07888653b8b5e873806d0e269d8267f132491f907a049b2849605",
+      "bytes": 8125,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/OneXQueuedLighting.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\OneXQueuedLighting.cs",
+      "sha256": "ca7d31eb42ef23c5bc83a2577e7204d7ff93502f0f9f7b122d0c5db1fcea8c0c",
+      "bytes": 7469,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/Program.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\Program.cs",
+      "sha256": "bb38faf6f4a5c71eb6113e9c986fcb04d6cd5bca9196d6fae2bf4c40348d7994",
+      "bytes": 38702,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/ProcessEfficiency.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bytes": 2747,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/DeviceCoreSharedDependencies.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bytes": 6751,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/RuntimeDependencyContract.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bytes": 8570,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa",
+      "bytes": 5404,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2",
+      "bytes": 3934,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4",
+      "bytes": 8580,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/LightSetter/YeManLightSetter.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\LightSetter\\YeManLightSetter.json",
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7",
+      "bytes": 350,
+      "roles": [
+        "Content"
+      ]
+    },
+    {
+      "path": "tools/LightSetterSelfTest/Program.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\Program.cs",
+      "sha256": "4e9ca7de60c3c880bd65a962be380041f075352ca183af2198d67dac38a76aa6",
+      "bytes": 11031,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/LightSetterSelfTest/ArtifactProbe.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\ArtifactProbe.cs",
+      "sha256": "ab8c68f18b13bc307f9c6e3f8adf335e3d9be99e9b501c04a2fad7a42dfb53b6",
+      "bytes": 35092,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/LightSetterSelfTest/FakeOneXDevice.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\FakeOneXDevice.cs",
+      "sha256": "6adf0537de28e25aa31140fb1fd9833ed9216a1f2cda48c52611ac888eaa841b",
+      "bytes": 5763,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/LightSetterSelfTest/LightSetterSelfTest.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\LightSetterSelfTest\\LightSetterSelfTest.csproj",
+      "sha256": "900f0da5253c02d39572d8f26b3c865acf7012114635e73513e3f14bf77b8d36",
+      "bytes": 2025,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/HcLightingCapabilitySelfTest/Program.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+      "sha256": "1e57df06a6243746fdfcacd546ad3f76a2e36bbd70d44b43ebca77f4d50dd3ee",
+      "bytes": 12157,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/HcLightingCapabilitySelfTest/HcLightingCapabilitySelfTest.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\HcLightingCapabilitySelfTest\\HcLightingCapabilitySelfTest.csproj",
+      "sha256": "08dfc939012f82fea839e23e338297124d27c1ed176452f6bd50142712d2cd50",
+      "bytes": 1899,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "deps/handheldcompanion-runtime/source/Misc/SerialQueueTasks.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\handheldcompanion-runtime\\source\\Misc\\SerialQueueTasks.cs",
+      "sha256": "53dd7fee5ec52945e3ff8048306fec57a43d7b1c8f3d5fac891d3c945e071ca8",
+      "bytes": 5700,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "capabilities/hc-device-catalog.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\hc-device-catalog.json",
+      "sha256": "2517bdb4144b2e6db8a9104950d326c34994c19d0f4a3e623e084511086ca5f6",
+      "bytes": 715690,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "capabilities/hc-lighting-policy.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\hc-lighting-policy.json",
+      "sha256": "f092fbba40bd617c8a6e80309c4fc1d708ba822042e3e8a38a80d99006a192f1",
+      "bytes": 2753,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\INTEGRATION-STATUS.json",
+      "sha256": "93a67c24ec8f3d43a58c4601a91e5ea43f1ed5ce3c13488b428a56d94deb20af",
+      "bytes": 9499,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\EXECUTION-CHAINS.json",
+      "sha256": "7713afbdca153954b4ded5a95450f0d3835b6df6387df4f51b98ba075c2e0ecb",
+      "bytes": 19256,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/hc_capability_catalog_generate.mjs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\hc_capability_catalog_generate.mjs",
+      "sha256": "cfde07f69d2a974d5d33385ca8ecf67ef2c4f43ed9ef8c0fa3e5019910e61865",
+      "bytes": 10612,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    },
+    {
+      "path": "tools/lib/hc_lighting_catalog.mjs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\lib\\hc_lighting_catalog.mjs",
+      "sha256": "e91b7337e65046557c5c20bc8388d4a354395ea06901a01367b381e5421f0dab",
+      "bytes": 13561,
+      "roles": [
+        "existing-fixture-or-provenance"
+      ]
+    }
+  ],
+  "productSourceCount": 14,
+  "productCompileCount": 12,
+  "testAndProvenanceInputs": 13,
+  "toolchain": {
+    "dotnet": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "dotnetSha256": "ab1b71fd3dd71062e074c9fab8312081a81b7f2b3e0327c48c4d249c8d1a3135",
+    "sdkVersion": "10.0.400"
+  },
+  "evaluationProperties": {
+    "DirectoryBuildPropsPath": "",
+    "DirectoryBuildTargetsPath": "",
+    "TargetFramework": "net10.0-windows",
+    "UseWPF": "true",
+    "NETCoreSdkVersion": "10.0.400",
+    "LangVersion": "14.0"
+  },
+  "lightingSourceBatchOwnerEvidence": {
+    "path": "D:\\Codex\\2026-10-19\\ni-s\\outputs\\YMCC-总库本轮接入与收益证据-20261019.json",
+    "sha256": "099799ecaebae70ea79675e78a0836317d1ca44cbe5631be8a0511f10bc32945",
+    "scope": "Owner-completed lighting domain; unrelated later controller/motion goals remain incomplete"
+  },
+  "sourceChangedDuringCapture": false,
+  "candidateInstalled": false,
+  "actualCWritten": false,
+  "otherDomainCompletenessClaimed": false
+}

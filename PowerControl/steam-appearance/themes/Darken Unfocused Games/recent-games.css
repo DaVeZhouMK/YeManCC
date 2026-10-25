@@ -1,0 +1,12 @@
+/* YMCC: dim cover artwork only. Keep Steam tile filters, shine, focus outlines and reflections on their native layers. */
+.gamepadhome_RecentSection_39tNv
+.basicgamecarousel_BasicGameCarousel_3MdH5
+.appportrait_LibraryItemBox_WYgDg:not(:where(.gpfocus, .gpfocuswithin, .gpfocus-within, .appportrait_ShowAsHovered_2YsY_, :focus-within, :hover, :active))
+.libraryassetimage_Container_1R9r2:not(.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf) > .libraryassetimage_Image_24_Au {
+    filter: brightness(var(--ren-game-tile-brightness)) saturate(var(--ren-game-tile-saturate));
+}
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-adc53db086931902: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-edb441b15360774d: 1; }

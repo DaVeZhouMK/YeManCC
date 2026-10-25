@@ -8,7 +8,7 @@ import { NoIoHost } from './fixtures/fan_no_io_host';
 import type { PowerLifecycleState } from '../src/bridge/api';
 let assertions = 0;
 function check(value: unknown, message: string): asserts value { ++assertions; if (!value) throw new Error(message); }
-const curve: FanNode[] = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 25 }, { tempC: 100, dutyPercent: 90 }];
+const curve: FanNode[] = [{ tempC: 0, dutyPercent: 0 }, { tempC: 40, dutyPercent: 25 }, { tempC: 70, dutyPercent: 65 }, { tempC: 100, dutyPercent: 90 }];
 const launcher: FanHostLauncher = { start: async () => ({ pid: 943, executable: 'no-io.exe' }), stop: async () => {} };
 const native = (generation: number): PowerLifecycleState => ({ generation, phase: 'ready', resumeReady: generation > 1,
   hardwareWritesAllowed: true, inputReady: true, hibernateAvailable: true });
@@ -131,9 +131,8 @@ async function main() {
     const oldResult = old.then(() => 'resolved', () => 'cancelled');
     for (let spins = 0; spins < 30 && !(life as any).resumeWaitTask; ++spins) await Promise.resolve();
     check(!!(life as any).resumeWaitTask, 'old same-generation rearm waiter actually exists');
-    // Mirror apply's synchronous supersession before any microtask can clear the old owner.
-    (life as any).controlIntentRevision += 1;
-    (life as any).cancelResumeWait('new-curve-intent');
+    // Use the production staging entry to retire the earlier rearm waiter.
+    life.stagePendingControlCurve(curve);
     const latestRearm = (life as any).rearmAfterWakeForControlAdmission('new-intent', true);
     host.stateName = 'Ready'; host.opened = host.events = true;
     await latestRearm;

@@ -1,0 +1,234 @@
+{
+  "schemaVersion": 1,
+  "originalScript": {
+    "path": "tools/sleep_non_user_wake_selftest.py",
+    "sha256": "c2bcd193a515586874930b48a9b5d9d829d0df8019ab585369e48dc893e88396",
+    "originalBeforeCompatibilitySha256": "0b81a0e5cdb4106e53e3a076e603e9a9104c1d4dee651e899fdd5b95ef632ddc",
+    "reviewedMaintenance": true,
+    "priorReviewedSha256": "33f47f921132cbd461ab06597c6a5b411a0503eeeda2ad961fdb5614b3601930"
+  },
+  "originalFixtures": [
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/amd_usb4_failure.json",
+      "sha256": "d95de25af40d68dca43d91832b3d2fef3c855a8b91b0e295018fc496f3bf85c5",
+      "events": 50
+    },
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/intel_usb4_failure.json",
+      "sha256": "dadb83444a004c8761a1017d739c4d83ef38551e32002cc4775e00fa21b862ff",
+      "events": 21
+    },
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/amd_power_button_wake.json",
+      "sha256": "d2341f98712800ea5bd2d53dbeda6b025d34052f6c01ccda3e4e112f20c4ce5c",
+      "events": 24
+    }
+  ],
+  "productSources": [
+    "tools/sleep_non_user_wake_selftest.py",
+    "tools/fixtures/sleep_non_user_wake/amd_usb4_failure.json",
+    "tools/fixtures/sleep_non_user_wake/intel_usb4_failure.json",
+    "tools/fixtures/sleep_non_user_wake/amd_power_button_wake.json",
+    "native/main.cpp",
+    "native/sleep_retry_budget.h",
+    "native/fan_physical_wake.h",
+    "deps/json/json.hpp",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary-probe.cpp",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/sleep_game_pause_selftest.py",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+  ],
+  "privateFault": {
+    "path": "native/sleep_retry_budget.h",
+    "before": "return requests_ < limit_;",
+    "after": "return true;",
+    "expectedAssertion": "requestCount==3&&!timerDue",
+    "scope": "Private production budget wrongly never exhausts; original S3 refusal/budget assertions must fail only after successful compile and program start."
+  },
+  "ioReview": {
+    "actualFunctions": 31,
+    "sourceOnlySystemSleepFunction": "sgRequestSystemSleep",
+    "realSystemSleepFunctionActuallyExecuted": false,
+    "systemSleepPort": "original counter requestCount with requestAccepted, never SetSuspendState",
+    "clockAndTimers": "original fakeGetTickCount64/fakeSetTimer/fakeKillTimer",
+    "capabilityDiscovery": "original sgPlatformIsAlwaysOnAlwaysConnected memory flags and platformQueries counter",
+    "pidResume": "original frozen/resumeCount memory lease",
+    "pureDateConversion": "SystemTimeToFileTime normal pure OS conversion allowed",
+    "knownOriginalCompatibilityRisk": "case_body506 spans neighbor fan kernel case; actual new retryBoundary needs pure state header",
+    "realSleep": false,
+    "physicalUsb4Acceptance": false,
+    "currentSourceReview": "Existing original assertions and actual function extraction are retained; current manual-wake original timestamp witnesses use atomic memory, no real power terminal"
+  },
+  "compatibilityMaintenance": {
+    "uniqueCompleteFunctionsAndCases": true,
+    "neighborHardwareCaseRemovedFromAccidentalSlice": true,
+    "actualFanPhysicalWakeMemoryHeader": true,
+    "allOriginalNativeAssertionsPreservedInOrder": true,
+    "extraPureFanBoundaryCheck": true,
+    "productGuardChanges": false,
+    "originalBudgetAnd120SecondGateUnchanged": true
+  },
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+      "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+      "sha256": "c773aeedde73fc4c2cc81cd2cfd91ab1314d1afcfa20e1e38510acab27000c9a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary-probe.cpp",
+      "sha256": "ddbb2c36be9ef412f8c91dfcf1457b18e89356502a7715ffe89cb38841bab40f"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    }
+  ],
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 2,
+    "kind": "exact-current-source-reverse-deltas",
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "compilerAndEnvironmentTextUnchanged": true,
+    "oldIdentities": "priorReviewedSharedLeafIdentities",
+    "sourceApproval": false
+  },
+  "sourceCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "oldIdentitiesRetained": true,
+    "fullReverseDeltaRequired": true,
+    "sourceApproval": false
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+      "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+      "sha256": "c773aeedde73fc4c2cc81cd2cfd91ab1314d1afcfa20e1e38510acab27000c9a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary-probe.cpp",
+      "sha256": "ddbb2c36be9ef412f8c91dfcf1457b18e89356502a7715ffe89cb38841bab40f"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    }
+  ],
+  "priorReviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  },
+  "currentSourceMaintenance": {
+    "retainedGroups": 32,
+    "addedGroups": 5,
+    "totalMainGroups": 37,
+    "retainedCppAssertions": 69,
+    "totalCppAssertions": 78,
+    "addedPureHeader": "native/sleep_request_fallback.h",
+    "controlledMetadataCommand": "exact original Node calibration expression; existing fan-global/runtime-guard; no permission expansion",
+    "originalPolicyBudgetsUnchanged": true
+  },
+  "additionalArchivedFixtures": [
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json",
+      "sha256": "fd3a8d53f67fec4457ec9738dfd48ec539087e5e55eddfc2882d03e04654e194",
+      "events": 7,
+      "scope": "Archived G3E callback-versus-GUI timestamp ordering; raw originals retained; extends same consumer, not a new formal test ID"
+    }
+  ],
+  "additionalFixtures": [
+    {
+      "path": "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json",
+      "sha256": "fd3a8d53f67fec4457ec9738dfd48ec539087e5e55eddfc2882d03e04654e194",
+      "events": 7
+    }
+  ],
+  "expectedProfiles": {
+    "s3": 4,
+    "capsUnknown": 4,
+    "main": 76
+  }
+}

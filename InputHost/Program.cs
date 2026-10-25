@@ -1,3 +1,5 @@
+// [AI:ENTRY:INPUTHOST] 控制器用户行为见 src/views/ButtonMappingView.vue [AI:USER:CONTROLLER]；总地图见 src/router.ts [AI:MAP]。
+// 用户动作说明用于守住功能含义；Host职责、协议和内部执行读实现，具体机型能力统一查询 capabilities/ 总库。
 using System.Diagnostics;
 using System.IO.Pipes;
 using System.Runtime.InteropServices;
@@ -5,6 +7,7 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using HIDMaestro;
+using YeManInputHost.Diagnostics;
 using Nefarius.Drivers.HidHide;
 using Nefarius.Utilities.DeviceManagement.Extensions;
 using Nefarius.Utilities.DeviceManagement.PnP;
@@ -18,19 +21,15 @@ using Nefarius.Utilities.DeviceManagement.PnP;
 internal static partial class Program
 {
     private const int ProtocolVersion = 1;
-    // DS4 wire 7 bits2-7 的 6-bit 每帧计数器（真实 DS4 语义；ds4drv 作为 timestamp
-    // 读取）。DualSense/SteamDeck/X360 各有自己的帧序列字段，不使用本计数器。
-    // long（非 byte）：同一个帧序号还要驱动 wire 9-10 的 16-bit timestamp 累加，
-    // byte 会在 256 帧处回绕；wire7 侧仍按 (counter & 0x3F) 取 6 bit。
-    private static long _ds4FrameCounter;
-    // DualSense wire 7 的 seq_number 是整字节（与 DS4 的 6-bit 计数器不同位置），
-    // 独立计数避免两种 persona 互相污染。
+    // Populated only by the explicit MSI engineering launch flag.
+    private static MsiHostStageEvidence? _msiHostStageEvidence;
+    // Edge wire 7 carries the full-byte report sequence.
     private static long _dualSenseFrameCounter;
     private const int MaxMessageBytes = 16 * 1024;
     // F3-B（第八十一批 B-变体，2026-09-12 用户授权"因为 HID"）：删 InputHost
     // 自杀门（lease 自杀分支/LeaseExpired/CommandLeaseTimeoutMs/KEEPALIVE 全线）。
-    // 宿主存活 = 进程存活（while(IsParentAlive)），父死=pipe 断=毫秒级退出，
-    // 无僵尸窗口；无 KEEPALIVE 命令、无租约超时自杀。
+    // 原父进程句柄退出时取消连接/读/写，随后由串行路径归还本地资源；
+    // 不依赖 pipe 同时断开，无 KEEPALIVE 命令、无租约超时自杀。
     // HIDMaestro's SetupController performs its own PnP waits, but the SDK
     // does not propagate those wait results through HMController.  Keep the
     // Host-side receipt bounded within the native PREPARE_TARGET budget and
@@ -45,38 +44,15 @@ internal static partial class Program
     // 其中还要容纳建塔后的到达等待 3.5 s ⇒ 2×2500 + 3500 = 8.5 s，留 1.5 s 余量。
     // 释放路径（ReleaseLocal）继续用 VirtualEndpointRemovalTimeoutMs，口径不变。
     private const int SwitchReconcileFamilyWaitMs = 2500;
-    // HC's DS4Touch disabled state is finger id + TOUCH_DISABLE (0x80),
-    // not an all-zero contact. HIDMaestro encodes these IDs into the DS4 v2
-    // report's touch contacts; zero would be interpreted by DS4 consumers as
-    // an active contact at coordinate (0, 0).
+    // Released Sony contacts retain their finger IDs with the inactive bit set.
     private const byte TouchpadFinger0DisabledId = 0x81;
     private const byte TouchpadFinger1DisabledId = 0x82;
-    // DS4 wire 9-10 的 16-bit timestamp 每帧递增量：真机实测单位速率 187,500/s
-    // （DS4 v1 直读 ~750 @250Hz），折算本产品 8ms 节拍 = 187,500 × 0.008 = 1500。
-    // 该字段与 wire7 的 6-bit 计数器同源（同一帧序号），16-bit 回绕。
-    private const long Ds4WireTimestampUnitsPerFrame = 1500;
-    // DS4 v2 battery lives in the common status[0] nibble: Linux
-    // hid-playstation and InputMapper both read the full USB report byte 30
-    // (0-based, report id at 0) = status[0]: low nibble = capacity 0..10,
-    // bit 4 = cable. In this Host's 63-byte data-only layout (driver prepends
-    // report id 0x01) that is data index 29. The dualshock-4-v2.json
-    // extendedReport "byte 14 = batteryLevel" is NOT the wire position (same
-    // metadata is off for touch: labels 38/42 vs wire 35/39). A zero nibble
-    // makes Steam show "电量不足 5%"; writing 0x0A (10/10 full, no cable bit)
-    // is a USER-APPROVED product delta (P103; HC wire has no battery byte).
-    private const byte Ds4WireBatteryLevelIndex = 29; // wire byte 30 -> data index 29
-    private const byte Ds4WireBatteryFull = 0x0A; // low nibble 10/10 满电, cable bit clear
-    // HC XInputController: L2Soft/R2Soft require LeftTrigger/RightTrigger >
-    // XINPUT_GAMEPAD_TRIGGER_THRESHOLD (30/255). Kept for reference; the DS4
-    // and Xbox360 wires now consume the raw pre-canonicalized trigger (G8), so
-    // the report builders no longer threshold against this constant.
-    private const float TriggerButtonThreshold = 30f / 255f;
-    // E3 回滚（2026-09-13 用户裁决）：回归 stock 40MB HIDMaestro.Core.dll
-    // （40,755,712B / BD42A99B... / MVID c61e2715-...）。TryVerifyLockedAsset
-    // 依此三常量校验所引 DLL。
-    private const long LockedCoreBytes = 40_755_712;
-    private const string LockedCoreSha256 = "bd42a99bcb260435ce25796c54a4b792f8a2ced6ab78659c0cf926011663938e";
-    private const string LockedCoreMvid = "c61e2715-47ae-4cf3-87f7-244c330ef80e";
+    // Edge status[0]: capacity 10/10, cable bit clear; preserve the current wire byte.
+    private const byte SonyWireBatteryFull = 0x0A;
+    // Approved upstream HIDMaestro 2.0.0. Keep native, setup and export pins in sync.
+    private const long LockedCoreBytes = 63_076_352;
+    private const string LockedCoreSha256 = "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c";
+    private const string LockedCoreMvid = "86aed9a3-c024-4596-b02c-650082ffb852";
     // The virtual-gamepad feature directory is the canonical home of this Host
     // (PowerControl\feature-assets\virtual-gamepad) in both the formal deploy
     // and isolated test packages.  Older installs kept the Host beside
@@ -140,25 +116,34 @@ internal static partial class Program
 
     private static async Task<int> Main(string[] args)
     {
+        YeManCC.ProcessEfficiency.ApplyCurrentProcessOnce();
+        if (args.Length == 1 && args[0] == "--selftest-external-controller-priority-cycle")
+            return ExternalControllerPortCycle.SelfTest() ? 0 : 3;
+        if (args.Length > 0 && args[0] == ExternalControllerPortCycle.Command)
+            return ExternalControllerPortCycle.Run(args);
+        if (args.Length == 1 && args[0] == "--selftest-msi-native-cycle")
+            return MsiNativePortCycle.SelfTest() ? 0 : 3;
+        if (args.Length > 0 && args[0] == MsiNativePortCycle.Command)
+            return MsiNativePortCycle.Run(args);
         if (args.Length == 1 && args[0] == "--selftest-shared-runtime")
             return RuntimeSharedDependencies.RunSelfTest();
         if (args.Length == 1 && args[0] == "--selftest-protocol")
             return RunProtocolSelfTest() ? 0 : 3;
-        if (args.Length == 1 && args[0] == "--selftest-xbox360-state")
-            return RunXbox360StateSelfTest() ? 0 : 3;
+        if (args.Length == 1 && args[0] == "--selftest-virtual-output-admission")
+            return RunVirtualOutputAdmissionSelfTest() ? 0 : 3;
+        if (args.Length == 1 && args[0] == "--selftest-elite-state")
+            return RunEliteStateSelfTest() ? 0 : 3;
         if (args.Length == 2 && args[0] == "--selftest-native-touchpad-fixture")
             return RunNativeScreenPadFixtureTest(args[1]) ? 0 : 3;
-        if (args.Length == 1 && args[0] == "--selftest-ds4-touchpad")
-            return RunDs4ScreenPadSelfTest() ? 0 : 3;
-        if (args.Length == 1 && args[0] == "--selftest-dualsense-touchpad")
-            return RunDualSenseScreenPadSelfTest() ? 0 : 3;
+        if (args.Length == 1 && args[0] == "--selftest-edge-touchpad")
+            return RunEdgeScreenPadSelfTest() ? 0 : 3;
         if(args.Length==1 && args[0]=="--selftest-screen-buttons")return RunScreenButtonsSelfTest()?0:3;
         if (args.Length == 1 && args[0] == "--selftest-steamdeck-touchpads")
             return RunSteamDeckScreenPadSelfTest() ? 0 : 3;
         if (args.Length == 1 && args[0] == "--selftest-steamdeck-state")
             return RunSteamDeckStateSelfTest() ? 0 : 3;
-        if (args.Length == 1 && args[0] == "--selftest-ds-wire")
-            return RunDsWireSelfTest() ? 0 : 3;
+        if (args.Length == 1 && args[0] == "--selftest-edge-wire")
+            return RunEdgeWireSelfTest() ? 0 : 3;
         if (args.Length == 1 && args[0].StartsWith("--selftest-alloc-probe", StringComparison.Ordinal))
             return RunAllocProbeAsync().GetAwaiter().GetResult();
         if (args.Length == 1 && args[0] == "--selftest-endpoint-fence")
@@ -166,7 +151,7 @@ internal static partial class Program
         if (args.Length == 1 && args[0] == "--selftest-backend-advisory")
             return RunBackendAdvisorySelfTest() ? 0 : 3;
 
-        if (!TryParseArguments(args, out var pipeName, out var startupNonce, out var parentPid, out var argumentError))
+        if (!TryParseArguments(args, out var pipeName, out var startupNonce, out var parentPid, out var msiStageRequested, out var argumentError))
         {
             // T0 (2026-09-10): never surface a console/usage popup.  A Host
             // double-clicked from Explorer (or a stale shortcut) previously
@@ -177,20 +162,30 @@ internal static partial class Program
             return 2;
         }
 
-        var session = new HostSession(startupNonce!);
+        var session = new HostSession(startupNonce!, parentPid, msiStageRequested);
+        IDisposable? msiCostLifetime = null;
+        MsiHostStageEvidence? msiStage = null;
         try
         {
-            return await RunPipeClientAsync(pipeName!, parentPid, session).ConfigureAwait(false);
-        }
-        catch (Exception ex)
-        {
-            // X1：宿主死因落盘（CREATE_NO_WINDOW 丢弃 stderr，见 LogFatalExit 头注释）。
-            LogFatalExit("fatal-exception", ex.GetType().Name + ": " + ex.Message);
-            return 4;
+            return await HostTerminalCleanup.RunAsync(
+                async () =>
+                {
+                    // Once session is owned, initialization failures must settle it too.
+                    msiCostLifetime = session.CostDiagnosticLifetime;
+                    msiStage = msiStageRequested
+                        ? MsiHostStageEvidence.TryCreate(parentPid, _fatalContextHostInstance) : null;
+                    _msiHostStageEvidence = msiStage;
+                    return await RunPipeClientAsync(pipeName!, parentPid, session).ConfigureAwait(false);
+                },
+                (out string detail) => session.ReleaseLocal(out detail),
+                LogFatalExit).ConfigureAwait(false);
         }
         finally
         {
-            session.ReleaseLocal(out _);
+            _msiHostStageEvidence = null;
+            // Keep diagnostics alive through settlement; both owned scopes must retire.
+            try { msiStage?.Dispose(); }
+            finally { msiCostLifetime?.Dispose(); }
         }
     }
 
@@ -244,32 +239,24 @@ internal static partial class Program
         return true;
     }
 
-    // 批 104（2026-09-24）：L-1/L-2/L-3 把端点栅栏回归老线（09-17）"本族判定"口径后，
-    // 本自测同步对齐——旧断言编码的是被回退掉的语义（"他族残留必须计入 IsAbsent /
-    // 必须拒绝本族建塔"），在新语义下必然为假（=假红）。本条只改断言，不改产品行为。
-    //   · L-3：IsAbsent 只看 HIDMAESTRO 三计数（老线 Program.cs:781 逐字同形）
-    //   · L-2：SD root 计数含"复合根 + 其 MI_00 接口"两份 ⇒ 老线 :792 为 `>= 1`
-    //   · L-1：xbox360 / dualshock4 / dualsense 分支只引用本族计数（老线 :782-787 同形）
-    // 保留项：**同族**重复端点仍拒绝（本族严格性不放松）。
-    // 批107 / T2 追加：IsFullyAbsent（全族判空）只服务 persona 切换清场；
-    // IsAbsent 保持 L-3 口径（只看 HIDMAESTRO 三计数），建塔门不受影响。
+    // Preserve the current endpoint counts and reject every retired virtual persona.
     private static bool RunEndpointFenceSelfTest()
     {
         static VirtualEndpointObservation O(int primary, int companion, int hid, int steam, int steamHid) =>
             new(true, primary, companion, hid, steam, steamHid, true, "selftest");
 
         var absent = O(0, 0, 0, 0, 0);
-        var ds4 = O(1, 0, 1, 0, 0);
+        var edge = O(1, 0, 1, 0, 0);
         var steamDeck = O(0, 0, 0, 1, 1);
         // L-2 回归位：复合根 + MI_00 接口 = root 计数 2（老 `== 1` 永不可满足的死锁形状）。
         var steamDeckTwoRoots = O(0, 0, 0, 2, 1);
         // L-1 回归位：HIDMAESTRO 本族唯一 + usbip 残留（旧语义下必须被拒绝）。
         var mixed = O(1, 0, 1, 1, 1);
-        var xbox360 = O(1, 1, 1, 0, 0);
-        var xbox360WithStaleUsbip = O(1, 1, 1, 1, 1);
+        var elite = O(1, 1, 1, 0, 0);
+        var eliteWithStaleUsbip = O(1, 1, 1, 1, 1);
         // 本族严格性回归位：同族重复端点。
-        var duplicateDs4 = O(2, 0, 2, 0, 0);
-        var duplicateXbox360 = O(2, 1, 2, 0, 0);
+        var duplicateEdge = O(2, 0, 2, 0, 0);
+        var duplicateElite = O(2, 1, 2, 0, 0);
         var compositeRootId = IsSteamDeckCompositeHardwareId("USB\\VID_28DE&PID_1205");
         var compositeRevisionId = IsSteamDeckCompositeHardwareId("USB\\VID_28DE&PID_1205&REV_0300");
         var interfaceId = IsSteamDeckCompositeHardwareId("USB\\VID_28DE&PID_1205&MI_00");
@@ -277,22 +264,22 @@ internal static partial class Program
         {
             absent.IsAbsent,                                            // 全空 = absent
             steamDeck.IsAbsent,                                         // L-3：仅 usbip 在场 = HIDMAESTRO 平面已清空（旧语义 false）
-            ds4.IsUniqueStartedTarget("dualshock4"),
-            !steamDeck.IsUniqueStartedTarget("dualshock4"),             // 无本族端点 ⇒ 不通过
+            edge.IsUniqueStartedTarget("dualsense-edge"),
+            !steamDeck.IsUniqueStartedTarget("dualsense-edge"),             // 无本族端点 ⇒ 不通过
             steamDeck.IsUniqueStartedTarget("steamdeck"),
             steamDeckTwoRoots.IsUniqueStartedTarget("steamdeck"),       // L-2：root 计数 2 也通过（老 `== 1` 会假）
-            mixed.IsUniqueStartedTarget("dualshock4"),                  // L-1：他族残留不阻塞本族建塔（旧语义 false）
-            xbox360.IsUniqueStartedTarget("xbox360"),
-            xbox360WithStaleUsbip.IsUniqueStartedTarget("xbox360"),     // L-1：360 同样不再被他族残留阻塞
-            !duplicateDs4.IsUniqueStartedTarget("dualshock4"),          // 同族重复仍拒绝
-            !duplicateXbox360.IsUniqueStartedTarget("xbox360"),         // 同族重复仍拒绝
+            mixed.IsUniqueStartedTarget("dualsense-edge"),                  // L-1：他族残留不阻塞本族建塔（旧语义 false）
+            elite.IsUniqueStartedTarget("elite"),
+            eliteWithStaleUsbip.IsUniqueStartedTarget("elite"),     // L-1：360 同样不再被他族残留阻塞
+            !duplicateEdge.IsUniqueStartedTarget("dualsense-edge"),          // 同族重复仍拒绝
+            !duplicateElite.IsUniqueStartedTarget("elite"),         // 同族重复仍拒绝
             compositeRootId,
             compositeRevisionId,
             !interfaceId,
             // 批107 / T2：全族判空（切换清场专用）——与 IsAbsent（L-3）的口径差异
             // 显式成对断言：仅 usbip 在场时 IsAbsent 真而 IsFullyAbsent 假。
             absent.IsFullyAbsent,                                       // 全族空 = fully absent
-            !ds4.IsFullyAbsent,                                         // HIDMAESTRO 在场 ⇒ 非全族空
+            !edge.IsFullyAbsent,                                         // HIDMAESTRO 在场 ⇒ 非全族空
             !steamDeck.IsFullyAbsent,                                   // 仅 usbip 在场：IsAbsent 真 / IsFullyAbsent 假
             !mixed.IsFullyAbsent,                                       // 两族都在场
         };
@@ -303,16 +290,20 @@ internal static partial class Program
         {
             if (!passed) return false;
         }
+        foreach (var retired in new[] { "xbox360", "dualshock4", "dualsense", "disabled", "unknown" })
+            if (edge.IsUniqueStartedTarget(retired) || elite.IsUniqueStartedTarget(retired) || steamDeck.IsUniqueStartedTarget(retired)) return false;
         return true;
     }
 
-    private static bool TryParseArguments(string[] args, out string? pipeName, out string? startupNonce, out int parentPid, out string error)
+    private static bool TryParseArguments(string[] args, out string? pipeName, out string? startupNonce, out int parentPid, out bool msiStageRequested, out string error)
     {
         pipeName = null;
         startupNonce = null;
         parentPid = 0;
+        msiStageRequested = false;
         error = "usage: YeManInputHost.exe --pipe <name> --nonce <nonce> --parent-pid <pid>";
-        if (args.Length != 6 || args[0] != "--pipe" || args[2] != "--nonce" || args[4] != "--parent-pid") return false;
+        if (!(args.Length == 6 || (args.Length == 7 && args[6] == "--msi-host-stage-evidence-v1")) ||
+            args[0] != "--pipe" || args[2] != "--nonce" || args[4] != "--parent-pid") return false;
         if (string.IsNullOrWhiteSpace(args[1]) || args[1].Length > 180 || args[1].Any(char.IsControl))
         {
             error = "invalid-pipe-name";
@@ -330,10 +321,11 @@ internal static partial class Program
         }
         pipeName = args[1];
         startupNonce = args[3];
+        msiStageRequested = args.Length == 7;
         return true;
     }
 
-    private static async Task<int> RunPipeClientAsync(string pipeName, int parentPid, HostSession session)
+    private static async Task<HostTerminalCleanup.LoopResult> RunPipeClientAsync(string pipeName, int parentPid, HostSession session)
     {
         // Native Coordinator owns the server; this process is a bounded client
         // that can never originate a target command. Keep one message-mode
@@ -341,6 +333,11 @@ internal static partial class Program
         // adds a named-pipe handshake to the HID->virtual-output path.
         // Bind the original parent once; a recycled PID cannot revive this Host.
         using var parentLifetime = ParentProcessLifetime.TryOpen(parentPid);
+        if (parentLifetime is null || !parentLifetime.IsAlive)
+        {
+            LogFatalExit("parent-exited", "parent-process-gone");
+            return new(0, "parent-exited");
+        }
         var codec = new MessageCodec();   // GP-CPU2 P2/P3：会话级缓冲（每 Host 会话一份）
         await using var pipe = new NamedPipeClientStream(
             ".",
@@ -349,47 +346,64 @@ internal static partial class Program
             PipeOptions.Asynchronous);
         try
         {
-            await pipe.ConnectAsync(3000, CancellationToken.None).ConfigureAwait(false);
+            await pipe.ConnectAsync(3000, parentLifetime.ExitToken).ConfigureAwait(false);
             pipe.ReadMode = PipeTransmissionMode.Message;
+        }
+        catch (OperationCanceledException) when (!parentLifetime.IsAlive)
+        {
+            LogFatalExit("parent-exited", "parent-process-gone");
+            return new(0, "parent-exited");
         }
         catch (Exception ex) when (ex is TimeoutException or IOException)
         {
             LogFatalExit("connect-failed", ex.GetType().Name);
-            session.ReleaseLocal(out _);
-            return 4;
+            return new(4, "connect-failed");
         }
 
-        while (parentLifetime?.IsAlive == true)
+        while (parentLifetime.IsAlive)
         {
-            // F3-B（第八十一批 B-变体）：无 lease 自杀门——宿主退出只由
-            // 父进程死亡（pipe 断 → read 失败/EOF）驱动，毫秒级、无僵尸。
+            // The bound parent exit cancels even a pipe held open by another
+            // process. Release remains serialized after the pending IO ends.
             string? request;
             // R3 补充：管道读侧计时（门控内；含等待，见 RecordCostPipeRead 注释）。
             var costReadStarted = session.CostEnabledForRead ? Stopwatch.GetTimestamp() : 0L;
             try
             {
-                request = await codec.ReadAsync(pipe, CancellationToken.None).ConfigureAwait(false);
+                _msiHostStageEvidence?.BeginRead();
+                request = await codec.ReadAsync(pipe, parentLifetime.ExitToken).ConfigureAwait(false);
+                _msiHostStageEvidence?.EndRead(request?.Length ?? 0);
             }
+            catch (OperationCanceledException) when (!parentLifetime.IsAlive) { break; }
             catch (Exception ex)
             {
                 LogFatalExit("read-failed", ex.GetType().Name);
-                session.ReleaseLocal(out _);
-                return 5;
+                return new(5, "read-failed");
             }
 
+            if (!parentLifetime.IsAlive) break;
             if (request is null)
             {
-                session.ReleaseLocal(out _);
                 LogFatalExit("read-failed", "null-message");
-                return 5;
+                return new(5, "read-failed");
             }
             if (costReadStarted != 0)
                 session.RecordCostPipeRead((long)(Stopwatch.GetElapsedTime(costReadStarted).TotalMilliseconds * 1000.0));
 
+            _msiHostStageEvidence?.BeginHandle();
             var response = session.Handle(request, out var shutdown);
+            var shutdownResult = shutdown || HostTerminalCleanup.IsFailedShutdownResponse(response)
+                ? HostTerminalCleanup.ShutdownResult(response) : (HostTerminalCleanup.LoopResult?)null;
+            _msiHostStageEvidence?.EndHandle();
             try
             {
-                await codec.WriteAsync(pipe, response, CancellationToken.None).ConfigureAwait(false);
+                _msiHostStageEvidence?.BeginWrite();
+                await codec.WriteAsync(pipe, response, parentLifetime.ExitToken).ConfigureAwait(false);
+                _msiHostStageEvidence?.EndWrite();
+            }
+            catch (OperationCanceledException) when (!parentLifetime.IsAlive)
+            {
+                LogFatalExit("parent-exited", "parent-process-gone");
+                return new(0, "parent-exited", shutdownResult?.ShutdownRelease);
             }
             catch (Exception ex)
             {
@@ -397,17 +411,15 @@ internal static partial class Program
                 // Release locally and exit; never keep a background writer.
                 // X1：宿主死因落盘（CREATE_NO_WINDOW 丢弃 stderr，见 LogFatalExit 头注释）。
                 LogFatalExit("write-failed", ex.GetType().Name + ": " + ex.Message);
-                session.ReleaseLocal(out _);
-                return 6;
+                return new(6, "write-failed", shutdownResult?.ShutdownRelease);
             }
 
-            if (shutdown) { LogFatalExit("shutdown-ordered", "shutdown-command"); return 0; }   // 2026-09-23 W3 批 100（跨线共报 #2）：有序 SHUTDOWN 与"父进程消失"必须可区分；旧文案让 5 次正常收尾看起来像 5 次父进程死亡（实测 20:19/20:21/20:22 三次 App 并未退出）。
+            if (shutdownResult is { } terminal) { LogFatalExit("shutdown-ordered", "shutdown-command"); return terminal; }   // 2026-09-23 W3 批 100（跨线共报 #2）：有序 SHUTDOWN 与"父进程消失"必须可区分；旧文案让 5 次正常收尾看起来像 5 次父进程死亡（实测 20:19/20:21/20:22 三次 App 并未退出）。
         }
 
         // Parent crash/exit is terminal, never an automatic rearm condition.
-        session.ReleaseLocal(out _);
         LogFatalExit("parent-exited", "parent-process-gone");
-        return 0;
+        return new(0, "parent-exited");
     }
 
 
@@ -463,9 +475,9 @@ internal static partial class Program
         Console.WriteLine("PROBE-START n=" + N);
         var frameHash = CanonicalFrameHash(0, 0, 0, 0, 0, 0, 0);
         string Hello() =>
-            $$"""{"protocolVersion":1,"command":"HELLO","requestId":"r0","sequence":1,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}"}""";
+            $$"""{"protocolVersion":1,"command":"HELLO","requestId":"r0","sequence":1,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualsense-edge","profileIdentity":"dualsense-edge","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}"}""";
         string Frame(int i) =>
-            $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"f{{i}}","sequence":{{i + 2}},"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":{{i + 1}},"monotonicTick":{{i + 1}},"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
+            $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"f{{i}}","sequence":{{i + 2}},"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualsense-edge","profileIdentity":"dualsense-edge","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":{{i + 1}},"monotonicTick":{{i + 1}},"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
 
         // A) 解析 + 处理（合法帧路径）
         var session = new HostSession(nonce);
@@ -559,14 +571,55 @@ internal static partial class Program
         return 0;
     }
 
+    private static bool RunVirtualOutputAdmissionSelfTest()
+    {
+        var current = new[] { ("steamdeck", "steam-deck-composite"), ("dualsense-edge", "dualsense-edge"), ("elite", "xbox-elite-v2") };
+        var retired = new[] { ("xbox360", "xbox-360-wired"), ("dualshock4", "dualshock-4-v2"), ("dualsense", "dualsense"), ("unknown", "dualsense-edge"), ("disabled", "disabled") };
+        var commands = new[] { "HELLO", "PREPARE_TARGET", "RECREATE_TARGET", "SUBMIT_NEUTRAL", "SUBMIT_FRAME" };
+        int checks = 0;
+        bool Check(string persona, string profile, string command, bool expected)
+        {
+            var values = new Dictionary<string, object>
+            {
+                ["protocolVersion"] = 1, ["command"] = command, ["requestId"] = "admission", ["sequence"] = 1,
+                ["runId"] = "admission", ["epoch"] = 1, ["powerGeneration"] = 1, ["targetId"] = "target",
+                ["ownerIdentity"] = "owner", ["persona"] = persona, ["profileIdentity"] = profile,
+                ["startupNonce"] = "admission-nonce", ["configRevision"] = 1, ["configHash"] = new string('a', 64)
+            };
+            if (command == "SUBMIT_FRAME")
+            {
+                foreach (var key in new[] { "buttons", "lx", "ly", "rx", "ry", "lt", "rt" }) values[key] = 0;
+                values["sampleSequence"] = 1; values["monotonicTick"] = 1;
+                values["normalizedInputHash"] = CanonicalFrameHash(0, 0, 0, 0, 0, 0, 0);
+                values["motionPairProofId"] = "pair-unproven-safe-zero";
+            }
+            var accepted = TryParseEnvelope(JsonSerializer.Serialize(values), out var envelope, out var error);
+            checks++;
+            return accepted == expected && (expected ? envelope is not null : envelope is null && error == "persona-not-admitted");
+        }
+        foreach (var command in commands)
+        {
+            foreach (var (persona, profile) in current)
+            {
+                if (!Check(persona, profile, command, true)) return false;
+                foreach (var (_, otherProfile) in current)
+                    if (otherProfile != profile && !Check(persona, otherProfile, command, false)) return false;
+            }
+            foreach (var (persona, profile) in retired)
+                if (!Check(persona, profile, command, false)) return false;
+        }
+        Console.WriteLine($"virtual-output-admission: OK {checks} strict current profile-pair and retired/unknown wire checks; no Host or hardware constructed");
+        return checks == 70;
+    }
+
     private static bool RunProtocolSelfTest()
     {
         const string hash = "a3d10d49211a38883c647eea27268b7639b414bb377d63f9419f2e54ce42e281";
         const string nonce = "t10-selftest-startup-nonce-0123456789";
-        var hello = $$"""{"protocolVersion":1,"command":"HELLO","requestId":"r1","sequence":1,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}"}""";
+        var hello = $$"""{"protocolVersion":1,"command":"HELLO","requestId":"r1","sequence":1,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualsense-edge","profileIdentity":"dualsense-edge","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}"}""";
         var frameHash = CanonicalFrameHash(0, 0, 0, 0, 0, 0, 0);
         // F3-B：keepAliveBeforePrepare 定义已删除（KEEPALIVE 全线移除）。
-        var frameBeforePrepare = $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"r2","sequence":2,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualshock4","profileIdentity":"dualshock-4-v2","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":1,"monotonicTick":1,"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
+        var frameBeforePrepare = $$"""{"protocolVersion":1,"command":"SUBMIT_FRAME","requestId":"r2","sequence":2,"runId":"run-1","epoch":1,"powerGeneration":1,"targetId":"target-1","ownerIdentity":"coordinator","persona":"dualsense-edge","profileIdentity":"dualsense-edge","startupNonce":"{{nonce}}","configRevision":1,"configHash":"{{hash}}","buttons":0,"lx":0,"ly":0,"rx":0,"ry":0,"lt":0,"rt":0,"sampleSequence":1,"monotonicTick":1,"normalizedInputHash":"{{frameHash}}","motionPairProofId":"pair-unproven-safe-zero"}""";
         var unknownField = hello[..^1] + ",\"unknown\":1}";
         var nonceMismatch = hello.Replace(nonce, nonce + "-mismatch", StringComparison.Ordinal);
         var negativeZero = frameBeforePrepare.Replace("\"lx\":0", "\"lx\":-0", StringComparison.Ordinal);
@@ -729,48 +782,17 @@ internal static partial class Program
                recreateDoc.RootElement.GetProperty("detail").GetString() == "hello-required";
     }
 
-    // ── DS4 / DualSense 线缆自测（2026-09-16）───────────────────────────────
-    // 锁定 2026-09-16 修复的 DS4 IMU 错位。基准 = 两个独立消费者实现：
-    //   SDL3 SDL_hidapi_ps4.c 的 PS4StatePacket_t 与 ds4drv device.py parse_report
-    //   （gyro wire 13/15/17、accel wire 19/21/23、battery wire 30、touch id wire
-    //   35/39、wire 7 = PS + TPAD + 6-bit 计数器）。DualSense 侧基准 = Linux
-    //   hid-playstation struct dualsense_input_report（gyro 16/18/20、accel
-    //   22/24/26、seq 7、touch 33/37、status 53）。任何再次偏移/缩放漂移都会
-    //   在此断言失败；旧错位位置（data[24..25]）必须保持为 0。
-    // S0'''（2026-09-16 用户批准"开工"）：Sony persona 的"声明序置换"。
-    // 只把描述符里的轴 usage 标签对调（Rz <-> Rx），数据字节一个都不改：
-    //   平台"手柄导航"的四个输出各只认一个 usage —— 横向←Z、纵向←Rx、RT←Rz、LT←Ry；
-    //   它们要求的中性值分别是 0x80 / 0x80 / 0 / 0，恰好对上我们 Sony 静止态
-    //   （两根摇杆字节=0x80、两根扳机字节=0）。置换后导航层看到"全静止"⇒ 幻影消失。
-    // 描述符仍是完整 GD/GamePad（6 轴 + hat + 15 按钮）⇒ Steam/WGI/DirectInput/SDL/
-    // 独立 Sony 消费端全部照常（字节不变）。本机 A/B 实测（tools\virtual_axis_decl_ab）：
-    //   STAYED-OPEN 6s+ 零注入 + 平台口径 Z=0x80 Rx=0x80 Rz=0x00 Ry=0x00
-    //   + Steam `Controller 1 connected` 下发 controller_ps4_gamepad_fps.vdf + 线缆逐帧零差异。
-    // fail-closed：描述符形态不认识就原样返回（绝不猜改）。
+    // Preserve Edge's axis-usage swap without changing report bytes.
+    // Unrecognized descriptor bytes retain the existing fail-closed behavior.
     private static HMProfile? ApplySonyAxisDeclarationSwap(HMProfile? profile)
     {
         if (profile is null) return null;
         var hex = profile.DescriptorHex;
         if (string.IsNullOrEmpty(hex)) return profile;
-        string fromA, toA, fromB = "", toB = "";
-        // 批126（operator 2026-09-24）：PS5 Pro（dualsense-edge）此前落在下面的 else
-        // 分支 ⇒ **完全没有轴 usage 置换**（DS4/DualSense 有、Edge 没有），现场表现为
-        // "Windows 开始菜单又开始乱弹"。Edge 与 DualSense 同族、同映射；仍保持
-        // fail-closed（描述符字节不认识就原样返回，绝不猜改）。
-        if (profile.Id == "dualsense" || profile.Id == "dualsense-edge")
-        {
-            fromA = "0932093509330934"; toA = "0932093309350934"; // Z,Rz,Rx,Ry -> Z,Rx,Rz,Ry
-        }
-        else if (profile.Id == "dualshock-4-v2")
-        {
-            fromA = "0930093109320935"; toA = "0930093109320933"; // X,Y,Z,Rz -> X,Y,Z,Rx
-            fromB = "050109330934"; toB = "050109350934";         // 扳机项 Rx,Ry -> Rz,Ry
-        }
-        else return profile; // xbox360 / steamdeck 等一律不动
+        if (profile.Id != "dualsense-edge") return profile;
+        const string fromA = "0932093509330934", toA = "0932093309350934";
         if (!hex.Contains(fromA, StringComparison.Ordinal)) return profile;
-        if (fromB.Length > 0 && !hex.Contains(fromB, StringComparison.Ordinal)) return profile;
         var swapped = hex.Replace(fromA, toA);
-        if (fromB.Length > 0) swapped = swapped.Replace(fromB, toB);
         var map = new Dictionary<string, string>(StringComparer.Ordinal)
         {
             ["0x32"] = "rightStickX",
@@ -778,21 +800,23 @@ internal static partial class Program
             ["0x35"] = "leftTrigger",
             ["0x34"] = "rightTrigger",
         };
-        return new HMProfileBuilder().FromProfile(profile).DescriptorHex(swapped).AxisMap(map).Build();
+        // SDK 2.0 resets the inferred report size when DescriptorHex changes.
+        // Keep this existing declaration-only patch on its original 64-byte wire.
+        return new HMProfileBuilder().FromProfile(profile).DescriptorHex(swapped)
+            .InputReportSize(profile.InputReportSize).AxisMap(map).Build();
     }
 
-    private static bool RunDsWireSelfTest()
+    private static bool RunEdgeWireSelfTest()
     {
-        using var context = new HMContext();
+        using var context = new SdkDataOnlyProfiles();
         context.LoadDefaultProfiles();
-        var ds4Profile = ApplySonyAxisDeclarationSwap(context.GetProfile("dualshock-4-v2"));
-        if (ds4Profile is null || ds4Profile.InputReportSize != 64) return false;
-        var dsProfile = ApplySonyAxisDeclarationSwap(context.GetProfile("dualsense"));
-        if (dsProfile is null || dsProfile.InputReportSize != 64) return false;
+        var dsProfile = ApplySonyAxisDeclarationSwap(context.GetProfile("dualsense-edge"));
+        Console.WriteLine("edge-profile: present="+(dsProfile is not null)+" size="+dsProfile?.InputReportSize);
+        if (dsProfile is null || dsProfile.InputReportSize != 64) { Console.Error.WriteLine("edge-wire-check-1-failed"); return false; }
 
         var env = new CommandEnvelope(
             "SUBMIT_FRAME", "selftest", 1, "selftest", 1, 1, "target", "owner",
-            "dualshock4", "dualshock-4-v2", "selftest-nonce", 1, LockedCoreSha256)
+            "dualsense-edge", "dualsense-edge", "selftest-nonce", 1, LockedCoreSha256)
         {
             Buttons = 0x0400 | 0x0100,   // Guide + L1
             LtRaw = 0.5f,
@@ -802,47 +826,26 @@ internal static partial class Program
             ImuAccelX = 1.0, ImuAccelY = 2.0, ImuAccelZ = 3.0,
         };
 
-        var ds4 = BuildDs4V2DataOnlyReport(ds4Profile, env, 5);
-        // IMU：gyro data[12/14/16] = dps × 16；accel data[18/20/22] = g × 8192
-        if ((short)(ds4[12] | (ds4[13] << 8)) != 1600) return false;
-        if ((short)(ds4[14] | (ds4[15] << 8)) != 3200) return false;
-        if ((short)(ds4[16] | (ds4[17] << 8)) != 4800) return false;
-        if ((short)(ds4[18] | (ds4[19] << 8)) != 8192) return false;
-        if ((short)(ds4[20] | (ds4[21] << 8)) != 16384) return false;
-        if ((short)(ds4[22] | (ds4[23] << 8)) != 24576) return false;
-        if (ds4[24] != 0 || ds4[25] != 0) return false;              // 旧错位位置必须空
-        if (ds4[6] != (byte)(0x01 | (5 << 2))) return false;         // PS + 6-bit 计数器
-        if (ds4[4] != 8) return false;                               // 无 dpad/face → hat=8
-        if (ds4[5] != 0x0D) return false;                            // L1 + L2 + R2 数字位
-        if (ds4[7] != 128 || ds4[8] != 255) return false;            // LtRaw 0.5 / RtRaw 1.0
-        if (ds4[29] != Ds4WireBatteryFull) return false;             // wire 30 电量
-        // wire 9-10 = 16-bit timestamp：counter=5 → 5 × 1500 = 7500 = 0x1D4C（真机实测
-        // 单位速率 187,500/s 折算 8ms 节拍；见 Ds4WireTimestampUnitsPerFrame）
-        if ((ushort)(ds4[9] | (ds4[10] << 8)) != 7500) return false;
-        if (ds4[34] != TouchpadFinger0DisabledId || ds4[38] != TouchpadFinger1DisabledId) return false;
-
-        var ds = BuildDualSenseDataOnlyReport(dsProfile, env with { Persona = "dualsense", ProfileIdentity = "dualsense" }, 5);
-        if ((short)(ds[15] | (ds[16] << 8)) != 1600) return false;   // gyro wire 16
-        if ((short)(ds[17] | (ds[18] << 8)) != 3200) return false;   // gyro wire 18
-        if ((short)(ds[19] | (ds[20] << 8)) != 4800) return false;   // gyro wire 20
-        if ((short)(ds[21] | (ds[22] << 8)) != 8192) return false;   // accel wire 22
-        if ((short)(ds[23] | (ds[24] << 8)) != 16384) return false;  // accel wire 24
-        if ((short)(ds[25] | (ds[26] << 8)) != 24576) return false;  // accel wire 26
-        if (ds[6] != 5) return false;                                // seq_number wire 7
-        if (ds[4] != 128 || ds[5] != 255) return false;              // z / rz
-        if (ds[7] != 8) return false;                                // hat 8
-        if (ds[8] != 0x0D) return false;                             // L1 + L2 + R2
-        if (ds[9] != 0x01) return false;                             // PS（buttons[2] bit0）
+        var ds = BuildDualSenseDataOnlyReport(dsProfile, env, 5);
+        if ((short)(ds[15] | (ds[16] << 8)) != 1600) { Console.Error.WriteLine("edge-wire-check-2-failed"); return false; }   // gyro wire 16
+        if ((short)(ds[17] | (ds[18] << 8)) != 3200) { Console.Error.WriteLine("edge-wire-check-3-failed"); return false; }   // gyro wire 18
+        if ((short)(ds[19] | (ds[20] << 8)) != 4800) { Console.Error.WriteLine("edge-wire-check-4-failed"); return false; }   // gyro wire 20
+        if ((short)(ds[21] | (ds[22] << 8)) != 8192) { Console.Error.WriteLine("edge-wire-check-5-failed"); return false; }   // accel wire 22
+        if ((short)(ds[23] | (ds[24] << 8)) != 16384) { Console.Error.WriteLine("edge-wire-check-6-failed"); return false; }  // accel wire 24
+        if ((short)(ds[25] | (ds[26] << 8)) != 24576) { Console.Error.WriteLine("edge-wire-check-7-failed"); return false; }  // accel wire 26
+        if (ds[6] != 5) { Console.Error.WriteLine("edge-wire-check-8-failed"); return false; }                                // seq_number wire 7
+        if (ds[4] != 128 || ds[5] != 255) { Console.Error.WriteLine("edge-wire-check-9-failed"); return false; }              // z / rz
+        if (ds[7] != 8) { Console.Error.WriteLine("edge-wire-check-10-failed"); return false; }                                // hat 8
+        if (ds[8] != 0x0D) { Console.Error.WriteLine("edge-wire-check-11-failed"); return false; }                             // L1 + L2 + R2
+        if (ds[9] != 0x01) { Console.Error.WriteLine("edge-wire-check-12-failed"); return false; }                             // PS（buttons[2] bit0）
         var ts = (uint)(ds[27] | (ds[28] << 8) | (ds[29] << 16) | (ds[30] << 24));
-        if (ts != 5u * 24024u) return false;                         // sensor_timestamp（8ms 节拍折算）
-        if (ds[32] != TouchpadFinger0DisabledId || ds[36] != TouchpadFinger1DisabledId) return false;
-        if (ds[52] != Ds4WireBatteryFull) return false;               // status[0] wire 53
+        if (ts != 5u * 24024u) { Console.Error.WriteLine("edge-wire-check-13-failed"); return false; }                         // sensor_timestamp（8ms 节拍折算）
+        if (ds[32] != TouchpadFinger0DisabledId || ds[36] != TouchpadFinger1DisabledId) { Console.Error.WriteLine("edge-wire-check-14-failed"); return false; }
+        if (ds[52] != SonyWireBatteryFull) { Console.Error.WriteLine("edge-wire-check-15-failed"); return false; }               // status[0] wire 53
 
-        // GP-MSIG3E-6-LC-R3（§四 C1 规则4）：既有 Edge 生产映射**只核对不改**。
-        // 进入帧 BackButtons → MapDsEdgePaddles → BuildDualSenseDataOnlyReport 的
-        // data[9](wire 10) bit6=L(M1) / bit7=R(M2)；plain dualsense 无背键映射（persona 门）。
+        // Preserve Edge back-button bits and their independent wire positions.
         var dsEdgeProfile = ApplySonyAxisDeclarationSwap(context.GetProfile("dualsense-edge"));
-        if (dsEdgeProfile is null || dsEdgeProfile.InputReportSize != 64) return false;
+        if (dsEdgeProfile is null || dsEdgeProfile.InputReportSize != 64) { Console.Error.WriteLine("edge-wire-check-16-failed"); return false; }
         var edgeEnv = env with { Persona = "dualsense-edge", ProfileIdentity = "dualsense-edge" };
         var e0 = BuildDualSenseDataOnlyReport(dsEdgeProfile, edgeEnv with { BackButtons = 0x0 }, 5, MapDsEdgePaddles(0x0));
         var e1 = BuildDualSenseDataOnlyReport(dsEdgeProfile, edgeEnv with { BackButtons = 0x1 }, 5, MapDsEdgePaddles(0x1));
@@ -852,56 +855,13 @@ internal static partial class Program
             (e1[9] & 0x40) == 0 || (e1[9] & 0x80) != 0 ||
             (e2[9] & 0x80) == 0 || (e2[9] & 0x40) != 0 ||
             (e3[9] & 0xC0) != 0xC0) return false;
-        // persona 门：plain dualsense 即使进入帧带 BackButtons，也不进 Edge paddle 映射
-        //（提交分派仅 dualsense-edge 调 MapDsEdgePaddles；默认 edgePaddles=0 复现该形状）。
-        var plainWithBack = BuildDualSenseDataOnlyReport(dsProfile,
-            env with { Persona = "dualsense", ProfileIdentity = "dualsense", BackButtons = 0x3 }, 5);
-        if ((plainWithBack[9] & 0xF0) != 0) return false;
         return true;
     }
 
-    private static bool RunXbox360StateSelfTest()
+    private static bool RunEliteStateSelfTest()
     {
-        using var context = new HMContext();
+        using var context = new SdkDataOnlyProfiles();
         context.LoadDefaultProfiles();
-        var profile = context.GetProfile("xbox-360-wired");
-        if (profile is null || profile.InputReportSize != 18) return false;
-
-        var neutral = new CommandEnvelope(
-            "SUBMIT_FRAME", "selftest", 1, "selftest", 1, 1, "target", "owner",
-            "xbox360", "xbox-360-wired", "selftest-nonce", 1, LockedCoreSha256);
-        var state = BuildXbox360State(profile, neutral);
-        var axes = state.Axes;
-        var centered =
-            Math.Abs(axes[HMAxis.X] - 0.5f) < 0.0001f &&
-            Math.Abs(axes[HMAxis.Y] - 0.5f) < 0.0001f &&
-            Math.Abs(axes[HMAxis.Rx] - 0.5f) < 0.0001f &&
-            Math.Abs(axes[HMAxis.Ry] - 0.5f) < 0.0001f &&
-            axes[HMAxis.Vx] == 0f && axes[HMAxis.Vy] == 0f;
-        if (!centered) return false;
-
-        var guide = neutral with { Buttons = 0x0400 };
-        var guideState = BuildXbox360State(profile, guide);
-        if ((guideState.Buttons & HMButton.Guide) == 0) return false;
-
-        var full = neutral with { Lx = -1f, Ly = 1f, Rx = 1f, Ry = -1f, Lt = 1f, Rt = 1f, LtRaw = 1f, RtRaw = 1f };
-        var fullState = BuildXbox360State(profile, full);
-        if (!(fullState.Axes[HMAxis.X] == 0f &&
-              fullState.Axes[HMAxis.Y] == 0f &&
-              fullState.Axes[HMAxis.Rx] == 1f &&
-              fullState.Axes[HMAxis.Ry] == 1f &&
-              fullState.Axes[HMAxis.Vx] == 1f &&
-              fullState.Axes[HMAxis.Vy] == 1f)) return false;
-
-        // 批115（2026-09-24 实机 RCA，19:05 包 + Host 拒绝日志）：同一个 builder 也服务
-        // elite persona（帧/中性分支 `case "elite": BuildXbox360State(...)`）。现场
-        // `input-host-rejects.log` 三条 `SUBMIT_NEUTRAL / neutral-exception:
-        // InvalidOperationException`（18:57:30.5 开塔、18:57:52.6 停止、19:01:05.3）
-        // 就出在这条路上：elite 的 USB profile（xbox-elite-v2）**未声明**
-        // inputReportSize（null），而本 builder 原先硬要求 18 ⇒ 每次提交都抛 ⇒ 塔永不
-        // neutralize（发布门挡掉全部输入帧）且停止进不了有序拆除（release-unproven →
-        // 5 s 超时 → 隔离 ⇒ 现场"切换要关再开"）。本段让该形状**离线可复现**：
-        // 修复前此测试必须失败并打印异常原文。
         var eliteProfile = context.GetProfile("xbox-elite-v2");
         if (eliteProfile is null)
         {
@@ -915,7 +875,7 @@ internal static partial class Program
         HMGamepadState eliteState;
         try
         {
-            eliteState = BuildXbox360State(eliteProfile, eliteNeutral);
+            eliteState = BuildEliteState(eliteProfile, eliteNeutral);
         }
         catch (Exception ex)
         {
@@ -933,8 +893,8 @@ internal static partial class Program
             eliteAxes.TryGetValue(HMAxis.Z, out var eliteLt) && Math.Abs(eliteLt) < 0.0001f &&
             eliteAxes.TryGetValue(HMAxis.Rz, out var eliteRt) && Math.Abs(eliteRt) < 0.0001f &&
             !eliteAxes.ContainsKey(HMAxis.Vx) && !eliteAxes.ContainsKey(HMAxis.Vy);
-        var eliteGuide = BuildXbox360State(eliteProfile, eliteNeutral with { Buttons = 0x0400 });
-        var eliteFull = BuildXbox360State(eliteProfile,
+        var eliteGuide = BuildEliteState(eliteProfile, eliteNeutral with { Buttons = 0x0400 });
+        var eliteFull = BuildEliteState(eliteProfile,
             eliteNeutral with { Lx = -1f, Ly = 1f, Rx = 1f, Ry = -1f, LtRaw = 1f, RtRaw = 1f });
         var eliteFullOk =
             eliteFull.Axes[HMAxis.X] == 0f && eliteFull.Axes[HMAxis.Y] == 0f &&
@@ -946,12 +906,9 @@ internal static partial class Program
                 " guide=" + ((eliteGuide.Buttons & HMButton.Guide) != 0) + " full=" + eliteFullOk);
             return false;
         }
-        // GP-MSIG3E-6-LC-R3（§四 C1 规则4）：xbox360 与 elite persona **不消费** BackButtons
-        // （BuildXbox360State 无背键映射，隔离零污染）。进入帧带 M1/M2 也不得落入 paddle 位。
-        var x360Back = BuildXbox360State(profile, neutral with { BackButtons = 0x3 });
-        var eliteBack = BuildXbox360State(eliteProfile, eliteNeutral with { BackButtons = 0x3 });
-        if ((x360Back.Buttons & (HMButton.LeftPaddle | HMButton.RightPaddle)) != 0 ||
-            (eliteBack.Buttons & (HMButton.LeftPaddle | HMButton.RightPaddle)) != 0)
+        // Elite does not consume OEM BackButtons as SDK paddle buttons.
+        var eliteBack = BuildEliteState(eliteProfile, eliteNeutral with { BackButtons = 0x3 });
+        if ((eliteBack.Buttons & (HMButton.LeftPaddle | HMButton.RightPaddle)) != 0)
         {
             Console.WriteLine("elite-state: FAIL backbuttons-consumed-by-xbox-builder");
             return false;
@@ -965,7 +922,7 @@ internal static partial class Program
     // SteamDeckTarget 系数（accel 16384/g、gyro 16/dps、轴序 X,-Z,Y）。
     private static bool RunSteamDeckStateSelfTest()
     {
-        using var context = new HMContext();
+        using var context = new SdkDataOnlyProfiles();
         context.LoadDefaultProfiles();
         var profile = context.GetProfile("steam-deck-composite");
         if (profile is null || profile.InputReportSize != 64) return false;
@@ -1015,7 +972,7 @@ internal static partial class Program
 
         // IMU 编码：gyro.X=1 dps -> GyroPitch=16；accel.X=1g -> AccelX=16384；
         // accelY = -accelZ*16384、accelZ = accelY*16384（HC accel 轴序 X,-Z,Y）。
-        // short 截断：-3*16384=-49152 -> +16384；2*16384=32768 -> -32768。
+        // Signed-16 saturation: -3g -> -32768; +2g -> +32767, without sign wrap.
         var imu = neutral with
         {
             ImuAdmitted = true,
@@ -1024,7 +981,7 @@ internal static partial class Program
         };
         var imuState = BuildSteamDeckState(profile, imu);
         var imuOk = imuState.GyroPitch == 16 && imuState.GyroYaw == -48 && imuState.GyroRoll == 32 &&
-                    imuState.AccelX == 16384 && imuState.AccelY == 16384 && imuState.AccelZ == -32768;
+                    imuState.AccelX == 16384 && imuState.AccelY == short.MinValue && imuState.AccelZ == short.MaxValue;
 
         // GP-MSIG3E-6-LC-R3（§四 C1 规则4）：既有 Deck 生产 builder 的背键位序**只核对不改**。
         // 进入帧的 BackButtons(bit0=M1 / bit1=M2) 必须被 BuildSteamDeckState 消费为
@@ -1034,10 +991,10 @@ internal static partial class Program
         var m12 = BuildSteamDeckState(profile, neutral with { BackButtons = 0x3 }).Buttons;
         var m0 = BuildSteamDeckState(profile, neutral with { BackButtons = 0x0 }).Buttons;
         var backOk =
-            (m1 & HMButton.LeftPaddle) != 0 && (m1 & HMButton.RightPaddle) == 0 &&
-            (m2 & HMButton.RightPaddle) != 0 && (m2 & HMButton.LeftPaddle) == 0 &&
-            (m12 & (HMButton.LeftPaddle | HMButton.RightPaddle)) == (HMButton.LeftPaddle | HMButton.RightPaddle) &&
-            (m0 & (HMButton.LeftPaddle | HMButton.RightPaddle)) == 0;
+            (m1 & HMButton.LeftPaddle2) != 0 && (m1 & HMButton.RightPaddle2) == 0 &&
+            (m2 & HMButton.RightPaddle2) != 0 && (m2 & HMButton.LeftPaddle2) == 0 &&
+            (m12 & (HMButton.LeftPaddle2 | HMButton.RightPaddle2)) == (HMButton.LeftPaddle2 | HMButton.RightPaddle2) &&
+            (m0 & (HMButton.LeftPaddle2 | HMButton.RightPaddle2)) == 0;
         return imuOk && backOk;
     }
 
@@ -1065,13 +1022,13 @@ internal static partial class Program
     // 等待旧端点消失。与释放路径的 WaitForVirtualEndpointRemoval 刻意分开：后者的
     // IsAbsent 口径（批 104 / L-3，只看 HIDMAESTRO 三计数）是"本族建塔门"，不得改动
     // （否则 SteamDeck 死锁回归）。探针失败 ⇒ IsFullyAbsent=false ⇒ 走有界等待。
-    private static VirtualEndpointObservation WaitForEndpointFamilyRemoval(int timeoutMs)
+    private static VirtualEndpointObservation WaitForEndpointFamilyRemoval(int timeoutMs, bool requireInstanceIds = false)
     {
         var deadline = Environment.TickCount64 + timeoutMs;
         VirtualEndpointObservation observation;
         do
         {
-            observation = ObserveVirtualEndpoint();
+            observation = ObserveVirtualEndpoint(requireInstanceIds: requireInstanceIds);
             if (observation.IsFullyAbsent) return observation;
             Thread.Sleep(VirtualEndpointPollIntervalMs);
         }
@@ -1079,26 +1036,29 @@ internal static partial class Program
         return observation;
     }
 
-    private static VirtualEndpointObservation WaitForVirtualEndpointArrival(string persona)
+    private static VirtualEndpointObservation WaitForVirtualEndpointArrival(string persona, bool requireInstanceIds = false)
     {
         var deadline = Environment.TickCount64 + VirtualEndpointArrivalTimeoutMs;
         VirtualEndpointObservation observation;
         do
         {
-            observation = ObserveVirtualEndpoint(persona);
-            if (observation.IsUniqueStartedTarget(persona)) return observation;
+            observation = ObserveVirtualEndpoint(persona, requireInstanceIds);
+            if (observation.IsUniqueStartedTarget(persona) && (!requireInstanceIds || observation.SteamDeckRootCount == 1)) return observation;
             Thread.Sleep(VirtualEndpointPollIntervalMs);
         }
         while (Environment.TickCount64 < deadline);
         return observation;
     }
 
-    private static VirtualEndpointObservation ObserveVirtualEndpoint(string? persona = null)
+    private static VirtualEndpointObservation ObserveVirtualEndpoint(string? persona = null, bool requireInstanceIds = false)
     {
+        using var diagnosticScope = new MsiPnpCensusDiagnostic.ObservationScope(
+            MsiPnpCensusDiagnostic.Requested ? Environment.TickCount64 : 0);
+        var diagnostic = diagnosticScope.Capture;
         try
         {
-            var nodes = EnumeratePresentPnpNodes();
-            // The removal/rebuild fence must be persona-agnostic.  A DS4/X360
+            var nodes = EnumeratePresentPnpNodes(requireInstanceIds);
+            // The removal/rebuild fence must be persona-agnostic. An Edge/Elite
             // probe used to ignore a stale SteamDeck USBIP root (and vice versa),
             // so the next persona could be published while the old endpoint was
             // still present.  Count every supported virtual family on every poll;
@@ -1130,7 +1090,14 @@ internal static partial class Program
                 SteamDeckHidChildCount: steamDeckHidChildren.Length,
                 AllStarted: allStarted,
                 Detail: DescribeVirtualEndpoint(hidMaestroRoots, xboxCompanionRoots, hidChildren,
-                    steamDeckRoots, steamDeckHidChildren, allStarted));
+                    steamDeckRoots, steamDeckHidChildren, allStarted))
+            {
+                SteamDeckRootInstanceIds = requireInstanceIds ? Array.AsReadOnly(steamDeckRoots.Select(node => node.InstanceId).ToArray()) : null,
+                SteamDeckHidChildInstanceIds = requireInstanceIds ? Array.AsReadOnly(steamDeckHidChildren.Select(node => node.InstanceId).ToArray()) : null,
+                PresentInstanceIds = requireInstanceIds ? Array.AsReadOnly(nodes.Select(node => node.InstanceId).ToArray()) : null,
+                MsiPnpCensus = CaptureExistingMsiPnpCensus(diagnostic, hidMaestroRoots, xboxCompanionRoots,
+                    hidChildren, steamDeckRoots, steamDeckHidChildren),
+            };
         }
         catch (Exception ex)
         {
@@ -1142,11 +1109,26 @@ internal static partial class Program
                 SteamDeckRootCount: 0,
                 SteamDeckHidChildCount: 0,
                 AllStarted: false,
-                Detail: "pnp-probe-exception:" + ex.GetType().Name);
+                Detail: "pnp-probe-exception:" + ex.GetType().Name)
+                { MsiPnpCensus = diagnostic?.TryComplete(false, Environment.TickCount64) };
         }
     }
 
-    private static IReadOnlyList<PnpNode> EnumeratePresentPnpNodes()
+    private static MsiPnpCensusDiagnostic.Receipt? CaptureExistingMsiPnpCensus(MsiPnpCensusDiagnostic? diagnostic,
+        PnpNode[] primary, PnpNode[] companion, PnpNode[] hid, PnpNode[] steamDeck, PnpNode[] steamDeckHid)
+    {
+        if(diagnostic is null) return null;
+        try {
+            diagnostic.TryCandidates("primary-root", primary.Select(node => node.InstanceId));
+            diagnostic.TryCandidates("xbox-companion-root", companion.Select(node => node.InstanceId));
+            diagnostic.TryCandidates("hid-descendant", hid.Select(node => node.InstanceId));
+            diagnostic.TryCandidates("steamdeck-root", steamDeck.Select(node => node.InstanceId));
+            diagnostic.TryCandidates("steamdeck-hid-descendant", steamDeckHid.Select(node => node.InstanceId));
+            return diagnostic.TryComplete(true, Environment.TickCount64);
+        } catch { return null; }
+    }
+
+    private static IReadOnlyList<PnpNode> EnumeratePresentPnpNodes(bool requireInstanceIds = false)
     {
         const uint digcfPresent = 0x00000002;
         const uint digcfAllClasses = 0x00000004;
@@ -1162,11 +1144,18 @@ internal static partial class Program
                 if (!SetupDiEnumDeviceInfo(deviceSet, index, ref data))
                 {
                     var error = Marshal.GetLastWin32Error();
-                    if (error == 259) break; // ERROR_NO_MORE_ITEMS
+                    if (error == 259) { MsiPnpCensusDiagnostic.Current?.TryEnumerationEnd(); break; } // ERROR_NO_MORE_ITEMS
                     throw new InvalidOperationException("setupdi-enumerate:" + error);
                 }
+                MsiPnpCensusDiagnostic.Current?.TryNodeEnumerated();
                 var instanceId = GetPnpInstanceId(deviceSet, ref data);
-                if (string.IsNullOrWhiteSpace(instanceId)) continue;
+                if (string.IsNullOrWhiteSpace(instanceId))
+                {
+                    MsiPnpCensusDiagnostic.Current?.TryMissingInstanceId();
+                    if (requireInstanceIds) throw new InvalidOperationException("setupdi-instance-id-unavailable");
+                    continue;
+                }
+                MsiPnpCensusDiagnostic.Current?.TryNamedNode();
                 nodes.Add(new PnpNode(instanceId, data.DevInst, IsPnpNodeStarted(data.DevInst), GetPnpHardwareIds(deviceSet, ref data)));
             }
             return nodes;
@@ -1191,10 +1180,23 @@ internal static partial class Program
     {
         const uint spdrpHardwareId = 0x00000001;
         SetupDiGetDeviceRegistryPropertyW(deviceSet, ref data, spdrpHardwareId, out _, null, 0, out var required);
-        if (required == 0) return Array.Empty<string>();
-        var buffer = new byte[required];
-        if (!SetupDiGetDeviceRegistryPropertyW(deviceSet, ref data, spdrpHardwareId, out _, buffer, (uint)buffer.Length, out _))
+        if (required == 0) {
+            MsiPnpCensusDiagnostic.Current?.TryHardwareIdsUnavailable(Marshal.GetLastWin32Error(), required);
             return Array.Empty<string>();
+        }
+        var buffer = new byte[required];
+        if (!SetupDiGetDeviceRegistryPropertyW(deviceSet, ref data, spdrpHardwareId, out var returnedPropertyType, buffer, (uint)buffer.Length, out var returnedSize)) {
+            MsiPnpCensusDiagnostic.Current?.TryHardwareIdsReadFailed(Marshal.GetLastWin32Error(), required);
+            return Array.Empty<string>();
+        }
+        if(MsiPnpCensusDiagnostic.Current is { } census) {
+            try {
+                var length = (int)Math.Min(returnedSize, (uint)buffer.Length);
+                var terminated = returnedSize >= 4 && returnedSize <= buffer.Length &&
+                    buffer[length - 1] == 0 && buffer[length - 2] == 0 && buffer[length - 3] == 0 && buffer[length - 4] == 0;
+                census.TryHardwareIdsReadShape(required, returnedSize, returnedPropertyType, terminated);
+            } catch { /* optional read-shape diagnostic only */ }
+        }
         return Encoding.Unicode.GetString(buffer)
             .Split('\0', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
     }
@@ -1224,12 +1226,19 @@ internal static partial class Program
         var current = devInst;
         for (var depth = 0; depth < 16; depth++)
         {
-            if (CM_Get_Parent(out var parent, current, 0) != ConfigurationManagerSuccess) yield break;
+            var parentResult = CM_Get_Parent(out var parent, current, 0);
+            if (parentResult != ConfigurationManagerSuccess) {
+                MsiPnpCensusDiagnostic.Current?.TryAncestorParentNonSuccess(parentResult); yield break;
+            }
             var buffer = new StringBuilder(512);
-            if (CM_Get_Device_IDW(parent, buffer, buffer.Capacity, 0) != ConfigurationManagerSuccess) yield break;
+            var ancestorIdResult = CM_Get_Device_IDW(parent, buffer, buffer.Capacity, 0);
+            if (ancestorIdResult != ConfigurationManagerSuccess) {
+                MsiPnpCensusDiagnostic.Current?.TryAncestorIdNonSuccess(ancestorIdResult); yield break;
+            }
             yield return buffer.ToString();
             current = parent;
         }
+        MsiPnpCensusDiagnostic.Current?.TryAncestorDepthLimit();
     }
 
     private static bool IsPnpNodeStarted(uint devInst) =>
@@ -1307,6 +1316,30 @@ internal static partial class Program
     [DllImport("cfgmgr32.dll")]
     private static extern int CM_Get_DevNode_Status(out uint status, out uint problemNumber, uint devInst, uint flags);
 
+    // Read-only CM leaf boundary. The helper owns all graph traversal and checks.
+    private sealed class PsOwnershipCmReader : PsEndpointOwnership.ICmReader
+    {
+        internal static readonly PsOwnershipCmReader Instance = new();
+        public int Locate(string id, out uint node) => CM_Locate_DevNodeW(out node, id, 0);
+        public int GetChild(uint node, out uint child) => CM_Get_Child(out child, node, 0);
+        public int GetSibling(uint node, out uint sibling) => CM_Get_Sibling(out sibling, node, 0);
+        public int GetDeviceId(uint node, out string id)
+        {
+            var buffer = new StringBuilder(PsEndpointOwnership.MaximumIdLength + 1);
+            var result = CM_Get_Device_IDW(node, buffer, buffer.Capacity, 0);
+            id = result == PsEndpointOwnership.Success ? buffer.ToString() : "";
+            return result;
+        }
+        public int GetStatus(uint node, out uint status, out uint problem) => CM_Get_DevNode_Status(out status, out problem, node, 0);
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CM_Locate_DevNodeW(out uint node, string instanceId, uint flags);
+    [DllImport("cfgmgr32.dll")]
+    private static extern int CM_Get_Child(out uint child, uint node, uint flags);
+    [DllImport("cfgmgr32.dll")]
+    private static extern int CM_Get_Sibling(out uint sibling, uint node, uint flags);
+
     private readonly record struct PnpNode(string InstanceId, uint DevInst, bool Started, IReadOnlyList<string> HardwareIds);
 
     private readonly record struct VirtualEndpointObservation(
@@ -1319,6 +1352,12 @@ internal static partial class Program
         bool AllStarted,
         string Detail)
     {
+        // Optional identity snapshots preserve existing count-only callers.
+        public IReadOnlyList<string>? SteamDeckRootInstanceIds { get; init; }
+        public IReadOnlyList<string>? SteamDeckHidChildInstanceIds { get; init; }
+        public IReadOnlyList<string>? PresentInstanceIds { get; init; }
+        public MsiPnpCensusDiagnostic.Receipt? MsiPnpCensus { get; init; }
+
         // 批 104 / L-3（回归老线口径，2026-09-24）：IsAbsent 只看 HIDMAESTRO 三计数；
         // usbip（SteamDeck）族不再参与"必须清空"的阻塞判定（老线 main.cpp L781 同形）。
         public bool IsAbsent => ProbeSucceeded &&
@@ -1333,13 +1372,9 @@ internal static partial class Program
         public bool IsUniqueStartedTarget(string persona) =>
             ProbeSucceeded && AllStarted &&
             (persona == "steamdeck" ? IsUniqueSteamDeck() :
-             // 批 104 / L-1（回归老线"本族判定"口径，2026-09-24）：只引用本族计数；
-             // 他族（usbip/SteamDeck）端点不再阻塞建塔（否则切换被上一代/他族残留永久拒绝，见 §58/§61）。
-             persona == "xbox360" ? PrimaryRootCount == 1 && HidChildCount == 1 && XboxCompanionRootCount == 1 :
-             // 批112：Elite（Xbox 族新增档）——USB Elite 是否派生 xusb 伴生离线未知，
-             // 本族唯一性只要求 1 root + 1 HID 子设备且伴生 ≤1（**只对新档**，老 360 判据未动）。
+             // Each current persona retains its existing endpoint-count contract.
              persona == "elite" ? PrimaryRootCount == 1 && HidChildCount == 1 && XboxCompanionRootCount <= 1 :
-             (persona == "dualshock4" || persona == "dualsense" || persona == "dualsense-edge") ? PrimaryRootCount == 1 && HidChildCount == 1 &&
+             persona == "dualsense-edge" ? PrimaryRootCount == 1 && HidChildCount == 1 &&
                                       XboxCompanionRootCount == 0 :
              false);
 
@@ -1382,7 +1417,8 @@ internal static partial class Program
                 // kind：orderly = 收到 SHUTDOWN 的有序收尾；parent-lost = 父进程消失
                 // （App 关闭与 App 崩溃在此不可区分，note 已标注）；fatal = 异常/读写失败。
                 var kind = reason == "shutdown-ordered" ? "orderly"
-                    : (reason == "parent-exited" ? "parent-lost" : "fatal");
+                    : (reason == "parent-exited" ? "parent-lost"
+                    : reason is "terminal-cleanup-complete" or "terminal-cleanup-failed" ? "resource-settlement" : "fatal");
                 var line = JsonSerializer.Serialize(new
                 {
                     t = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
@@ -1395,6 +1431,18 @@ internal static partial class Program
                     hostInstanceId = _fatalContextHostInstance,
                     lastCommand = _fatalContextLastCommand
                 });
+                if (_msiHostStageEvidence is { } stage)
+                {
+                    // Enrich this existing fatal event only. Ordinary launches
+                    // retain the original line and have no stage channel.
+                    try
+                    {
+                        var node = System.Text.Json.Nodes.JsonNode.Parse(line)!;
+                        node["msiHostStage"] = JsonSerializer.SerializeToNode(stage.FatalSnapshot());
+                        line = node.ToJsonString();
+                    }
+                    catch { }
+                }
                 var dir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YeManCC");
                 try { Directory.CreateDirectory(dir); } catch { }
                 File.AppendAllText(Path.Combine(dir, "input-host-fatal.log"), line + Environment.NewLine, System.Text.Encoding.UTF8);
@@ -1410,6 +1458,23 @@ internal static partial class Program
         private readonly object _lifecycleGate = new();
         private HMContext? _context;
         private HMController? _controller;
+        private readonly PsEndpointOwnership _psEndpointOwnership = new();
+        private readonly HostGameOutputObservation _gameOutputObservation = new();
+        private HMController? _gameOutputController;
+        private Action<HMController, HMOutputPacket>? _gameOutputCallback;
+        private CommandEnvelope? _gameOutputTuple;
+        // A failed SD writer barrier retains the target for a later release retry.
+        private bool _steamDeckReleasePending;
+        private bool _outputReleasePending;
+        private bool _idleCtsReleasePending;
+        private HostControllerIdleCtsRelease.Captured? _idleCtsRelease;
+        // Pinned SDK Dispose sets its flag before the final context callback.
+        // After an exception a second no-op Dispose is not completion evidence.
+        private string _sdkDisposeFailure = "";
+        private bool LocalReleasePending => _steamDeckReleasePending || _outputReleasePending || _idleCtsReleasePending ||
+            _sdkDisposeFailure.Length != 0;
+        // R39: host-local SDK object lifetime diagnostics; no OS or frame reads.
+        private readonly TargetCreationLifetimeEvidence? _targetCreationLifetime = TargetCreationLifetimeEvidence.TryCreate();
         private long _lastSubmitElapsedUs;
         // GP-926R17 §4：后端实际 submit 的最小聚合回执——只绑当前 tuple/会话（HELLO 与每次
         // PREPARE/RECREATE 重置）；native 在唤醒与借用结算各取一次。不改判定/幂等/后端架构。
@@ -1420,7 +1485,13 @@ internal static partial class Program
         private string _lastBackendDetail = "";
         private ulong _lastBackendSequence;
         private CommandEnvelope? _tuple;
+        private HostReleaseTimingEvidence? _releaseTimingEvidence;
+        private CommandEnvelope? _releaseTimingBinding;
         private readonly string _startupNonce;
+        private readonly int _reportChainParentPid1410;
+        private MsiReportChainRuntime1410? _reportChain1410;
+        private HostVirtualSignalEvidence? _virtualSignalEvidence;
+        private bool _reportChainCapabilityAdvertised1410;
         private readonly Dictionary<string, IdempotentReply> _idempotentReplies = new(StringComparer.Ordinal);
         private Phase _phase = Phase.AwaitHello;
         private ulong _lastSequence;
@@ -1430,6 +1501,15 @@ internal static partial class Program
         private bool _virtualEndpointReconciled;
         private VirtualEndpointObservation _virtualEndpoint = new(false, 0, 0, 0, 0, 0, false, "pnp-not-observed");
         private bool _targetPnpAdmitted;
+        private MsiSteamDeckReleaseFence1726? _msiSteamDeckReleaseFence1726;
+        private readonly bool _msiNonSdReleaseDiagnosticRequested;
+        // R13: existing known-MSI detailed-log launch authority only. Failure to
+        // start diagnostics must not fall back to synchronous work in SUBMIT_FRAME.
+        private readonly bool _msiCostDeferredRequested;
+        private readonly MsiCostWindowDiagnostics? _msiCostDiagnostics;
+        internal IDisposable? CostDiagnosticLifetime => _msiCostDiagnostics;
+        private MsiNonSdReleaseDiagnostic? _msiNonSdReleaseDiagnostic;
+        private CommandEnvelope? _msiNonSdReleaseDiagnosticBinding;
         private readonly long _startedAt = Environment.TickCount64;
         // R3（2026-09-17 tick 成本需求单）：宿主侧成本聚合（默认关门控；
         // 门控 = native 写的 input-host-cost-enabled.flag，窗口级刷新）。
@@ -1451,8 +1531,7 @@ internal static partial class Program
         // R3b″（2026-09-18 用户授权）：分配量与线程角色归因。规则与既有成本字段一致：
         // 门 = input-host-cost-enabled.flag；关时零累加零写入（各调用点先查门）。
         private long _costLastAllocBytes = GC.GetTotalAllocatedBytes(precise: false);
-        private double _costLastProcCpuMs;   // GP-CPU2 P5：进程累计 CPU 上一窗口值
-        private readonly Dictionary<int, double> _costLastThreadCpuMs = new();
+        private HostCpuCostWindow? _costCpuWindow; // Allocated only inside the enabled diagnostic window.
         // 角色自报：在既有热路径埋点处记录"当前线程 OS tid → 角色"（kernel32
         // GetCurrentThreadId 为 TEB 读取，ns 级；池线程无法用 Thread.Name 命名）。
         private readonly Dictionary<string, int> _costRoleOsTid = new(StringComparer.Ordinal);
@@ -1472,6 +1551,8 @@ internal static partial class Program
         private bool _costFlagEnabled = CostLoggingRequestedByFlag();
         private long _lastActivityAt = Environment.TickCount64;
         private readonly string _hostInstanceId = Guid.NewGuid().ToString("N");
+        private HostRuntimeBinaryIdentity.Snapshot? _runtimeBinaryIdentity;
+        private UsbipTransportObservation? _usbipTransportObservation;
         // ── GP-GBRETURN-1：关闭归还刷新的"短受理—后台执行—有界查询"支持（**只服务 T1 关闭归还**）──
         // 既有同步 HIDHIDE_CYCLE 在消息循环里执行 CyclePort（可达数秒）⇒ 帧命令堵在循环后面
         // （R17-4 因此撤回关闭侧对称 cycle）。本组命令只为此新增：BEGIN 立即受理（一个在途），
@@ -1488,9 +1569,17 @@ internal static partial class Program
         private ulong _closeRefreshEpoch;
         private ulong _closeRefreshPowerGeneration;
 
-        public HostSession(string startupNonce)
+        public HostSession(string startupNonce, int parentPid = 0, bool msiReleaseDiagnosticRequested = false)
         {
             _startupNonce = startupNonce;
+            _reportChainParentPid1410 = parentPid;
+            _msiNonSdReleaseDiagnosticRequested = msiReleaseDiagnosticRequested;
+            _msiCostDeferredRequested = msiReleaseDiagnosticRequested;
+            if (_msiCostDeferredRequested)
+            {
+                try { _msiCostDiagnostics = new(_costFlagEnabled, CostStateDir); }
+                catch { /* optional diagnostics unavailable; never block frame receipts */ }
+            }
             // 批129：宿主身份进死因上下文（可与 native 侧回执的 hostInstanceId 对齐）。
             Program.NoteHostInstance(_hostInstanceId);
         }
@@ -1511,6 +1600,10 @@ internal static partial class Program
             var costParseStarted = _costFlagEnabled ? Stopwatch.GetTimestamp() : 0L;
             if (!TryParseEnvelope(message, out var envelope, out var parseError))
                 return Error(null, "protocol-error", parseError);
+            // Parsed metadata is diagnostic evidence, never tuple/admission proof.
+            var stageEnvelope = envelope!;
+            _msiHostStageEvidence?.Decode(stageEnvelope.RequestId, stageEnvelope.Sequence,
+                stageEnvelope.RunId, stageEnvelope.Epoch, stageEnvelope.PowerGeneration, stageEnvelope.Command);
             if (_costFlagEnabled)
             {
                 _costJsonParseUsSum += (long)(Stopwatch.GetElapsedTime(costParseStarted).TotalMilliseconds * 1000.0);
@@ -1537,6 +1630,20 @@ internal static partial class Program
                 if (envelope.Command != "HELLO") return Error(envelope, "protocol-error", "hello-required");
                 if (!TryVerifyLockedAsset(out var assetDetail)) return Error(envelope, "asset-mismatch", assetDetail);
                 _assetVerified = true;
+                // R4: own Host identity, observed only after the existing SDK check.
+                // A diagnostic failure never changes HELLO or controller behavior.
+                try
+                {
+                    var businessAssembly = typeof(Program).Assembly;
+                    var coreAssembly = typeof(HMContext).Assembly;
+                    _runtimeBinaryIdentity = HostRuntimeBinaryIdentity.Capture(
+                        Environment.ProcessPath ?? "", businessAssembly.Location,
+                        businessAssembly.ManifestModule.ModuleVersionId.ToString("D"),
+                        coreAssembly.Location, coreAssembly.ManifestModule.ModuleVersionId.ToString("D"),
+                        LockedCoreBytes, LockedCoreSha256, DateTimeOffset.UtcNow.ToString("O"));
+                }
+                catch { _runtimeBinaryIdentity = null; }
+                ResetVirtualSignalEvidenceSafely();
                 _tuple = envelope;
                 _lastSequence = envelope.Sequence;
                 _lastActivityAt = Environment.TickCount64;
@@ -1545,7 +1652,9 @@ internal static partial class Program
                 // 批次A（评审10 §3）：能力协商——HELLO 回执 detail 广告本宿主支持
                 // 精简状态查询。旧 native 不解析 detail（无行为差）；新 native 据此
                 // 决定周期核对用 HIDHIDE_QUERY_STATE，否则回退完整 HIDHIDE_QUERY。
-                return Ack(envelope, "host-hello", "{\"hidhideStateQuery\":true}");
+                return Ack(envelope, "host-hello", _msiCostDeferredRequested
+                    ? "{\"hidhideStateQuery\":true,\"msiCostWindowDeferred\":true,\"msiCostWindowDeferredAvailable\":" + (_msiCostDiagnostics is not null ? "true" : "false") + "}"
+                    : "{\"hidhideStateQuery\":true}");
             }
 
             if (envelope!.Command == "HELLO") return Error(envelope, "protocol-error", "hello-already-received");
@@ -1566,6 +1675,7 @@ internal static partial class Program
                     }
                     ResetBackendSubmitStats();   // GP-926R17：目标代次重置（只绑当前 tuple）
                     _phase = Phase.Prepared;
+                    ArmReportChain1410Safely(envelope);
                     {
                         var response = Ack(envelope, "target-prepared", prepareDetail);
                         RememberIdempotent(envelope, response);
@@ -1584,7 +1694,7 @@ internal static partial class Program
                     {
                         if (!ReleaseLocalLocked(out var recreateReleaseDetail))
                         {
-                            _phase = Phase.Hello;
+                            _phase = LocalReleasePending ? Phase.Quiesced : Phase.Hello;
                             var response = Error(envelope, "recreate-release-failed", recreateReleaseDetail,
                                 "local-dispose-failed");
                             RememberIdempotent(envelope, response);
@@ -1594,7 +1704,7 @@ internal static partial class Program
                     }
                     if (!TryPrepare(envelope, out var recreateDetail))
                     {
-                        _phase = Phase.Hello;
+                        _phase = LocalReleasePending ? Phase.Quiesced : Phase.Hello;
                         var response = Error(envelope, "recreate-rejected", recreateDetail);
                         RememberIdempotent(envelope, response);
                         return response;
@@ -1607,10 +1717,25 @@ internal static partial class Program
                         return response;
                     }
 
+                case "QUERY_TARGET_OWNERSHIP":
+                    if (envelope.Persona != PsEndpointOwnership.Persona)
+                        return Error(envelope, "state-rejected", "ownership-persona-unavailable");
+                    if (_psEndpointOwnership.BindingGeneration == 0)
+                        return Error(envelope, "state-rejected", "ownership-target-not-created");
+                    CapturePsEndpointOwnership();
+                    {
+                        // Incomplete is an observation, not a transport failure.
+                        var response = Ack(envelope, "target-ownership");
+                        RememberIdempotent(envelope, response);
+                        return response;
+                    }
+
                 case "SUBMIT_NEUTRAL":
                     if (_phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active or Phase.Quiesced))
                         return Error(envelope, "state-rejected", "neutral-requires-prepared-target");
-                    if (!TrySubmitNeutral(out var neutralDetail)) return Error(envelope, "neutral-rejected", neutralDetail);
+                    if (_phase == Phase.Quiesced && !TryStopSteamDeckIdleForRelease(out var idleStopDetail))
+                        return Error(envelope, "neutral-rejected", idleStopDetail);
+                    if (!TrySubmitNeutral(out var neutralDetail, envelope, "submit-neutral-command")) return Error(envelope, "neutral-rejected", neutralDetail);
                     if (_phase != Phase.Quiesced) _phase = Phase.Neutralized;
                     return Ack(envelope, "neutral-accepted");
 
@@ -1624,7 +1749,7 @@ internal static partial class Program
                         // available for a later frame. This is still only a
                         // local dispose result, never device-gone proof.
                         var frameReleaseOk = ReleaseLocalLocked(out var frameReleaseDetail);
-                        _phase = Phase.Released;
+                        _phase = LocalReleasePending ? Phase.Quiesced : Phase.Released;
                         var response = Error(
                             envelope,
                             "frame-rejected",
@@ -1644,14 +1769,15 @@ internal static partial class Program
                 case "QUIESCE":
                     if (_phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active or Phase.Quiesced))
                         return Error(envelope, "state-rejected", "quiesce-requires-prepared-target");
+                    var quiesceOutputDetail = DetachGameOutputObservation();
                     _phase = Phase.Quiesced;
-                    return Ack(envelope, "quiesced");
+                    return Ack(envelope, "quiesced", quiesceOutputDetail);
 
                 case "RELEASE_TARGET":
                     if (_phase is Phase.AwaitHello or Phase.Hello or Phase.Released)
                         return Error(envelope, "state-rejected", "release-requires-prepared-target");
-                    var releaseOk = ReleaseLocal(out var releaseDetail);
-                    _phase = Phase.Released;
+                    var releaseOk = ReleaseLocal(out var releaseDetail, envelope);
+                    _phase = LocalReleasePending ? Phase.Quiesced : Phase.Released;
                     {
                         var response = releaseOk
                         ? Ack(envelope, "release-local-dispose-complete", releaseDisposition: "local-dispose-complete")
@@ -1661,9 +1787,9 @@ internal static partial class Program
                     }
 
                 case "SHUTDOWN":
-                    var shutdownReleaseOk = ReleaseLocal(out var shutdownDetail);
-                    _phase = Phase.Released;
-                    shutdown = true;
+                    var shutdownReleaseOk = ReleaseLocal(out var shutdownDetail, envelope);
+                    _phase = LocalReleasePending ? Phase.Quiesced : Phase.Released;
+                    shutdown = !LocalReleasePending;
                     return shutdownReleaseOk
                         ? Ack(envelope, "shutdown", releaseDisposition: "local-dispose-complete")
                         : Error(envelope, "shutdown-local-dispose-failed", shutdownDetail, releaseDisposition: "local-dispose-failed");
@@ -2027,22 +2153,168 @@ internal static partial class Program
             }
         }
 
-        public bool ReleaseLocal(out string detail)
+        public bool ReleaseLocal(out string detail, CommandEnvelope? releaseRequest = null)
         {
+            // R101: bounded release-only evidence. Internal cleanup and frame
+            // paths do not allocate a collector or inherit a previous receipt.
+            var timing = releaseRequest?.Command is ("RELEASE_TARGET" or "SHUTDOWN")
+                ? HostReleaseTimingEvidence.TryCreate() : null;
+            timing?.Begin(HostReleaseTimingEvidence.Stage.LifecycleGate);
             lock (_lifecycleGate)
-                return ReleaseLocalLocked(out detail);
+            {
+                timing?.End(HostReleaseTimingEvidence.Stage.LifecycleGate);
+                _releaseTimingEvidence = timing;
+                _releaseTimingBinding = timing is null ? null : releaseRequest;
+                try
+                {
+                    var ok = ReleaseLocalLocked(out detail, timing);
+                    timing?.Complete(ok);
+                    return ok;
+                }
+                finally { timing?.Finish(); }
+            }
         }
 
-        private bool ReleaseLocalLocked(out string detail)
+        private static MsiNonSdReleaseDiagnostic.Snapshot MsiNonSdSnapshot(VirtualEndpointObservation observation) =>
+            new(observation.ProbeSucceeded, observation.PrimaryRootCount, observation.XboxCompanionRootCount,
+                observation.HidChildCount, observation.SteamDeckRootCount, observation.SteamDeckHidChildCount,
+                observation.AllStarted, observation.Detail) { ExistingPnpCensus = observation.MsiPnpCensus };
+
+        private void CaptureMsiSdkDeclaredIdentityDiagnostic()
         {
+            if (_msiNonSdReleaseDiagnostic is null) return;
+            try { _msiNonSdReleaseDiagnostic.TrySetSdkDeclaredIdentity(
+                MsiSdkDeclaredIdentityDiagnostic.TryCapture(_controller, _assetVerified, LockedCoreMvid, Environment.TickCount64)); }
+            catch { /* optional identity diagnostic never changes target lifetime */ }
+        }
+
+        private void BeginMsiNonSdReleaseDiagnostic()
+        {
+            if (_msiNonSdReleaseDiagnostic is null) return;
+            try { _msiNonSdReleaseDiagnostic.TryBegin(MsiNonSdSnapshot(_virtualEndpoint), Environment.TickCount64,
+                _controller is not null, _context is not null); } catch { /* optional diagnostic loss */ }
+        }
+        private void ObserveMsiNonSdReleaseDiagnostic(VirtualEndpointObservation observation, long beginTick)
+        {
+            if (_msiNonSdReleaseDiagnostic is null) return;
+            try { _msiNonSdReleaseDiagnostic.TryObserveExistingPoll(MsiNonSdSnapshot(observation), beginTick, Environment.TickCount64); }
+            catch { /* no effect on the existing removal/admission decision */ }
+        }
+        private void CompleteMsiNonSdReleaseDiagnostic(bool localDisposalReportedOk)
+        {
+            if (_msiNonSdReleaseDiagnostic is null) return;
+            try { _msiNonSdReleaseDiagnostic.TryComplete(localDisposalReportedOk, Environment.TickCount64); } catch { }
+        }
+
+        private bool TryStopSteamDeckIdleForRelease(out string detail, HostReleaseTimingEvidence? releaseTiming = null)
+        {
+            detail = "";
+            if (_tuple?.Persona != "steamdeck" || _controller is null) return true;
+            releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.SteamDeckIdleStop);
+            try
+            {
+                StopSteamDeckIdleForRelease(_controller);
+                _steamDeckReleasePending = false;
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // Keep the objects and phase retryable. Never let SDK Dispose's
+                // unchecked Join or context-wide cleanup race this live writer.
+                _steamDeckReleasePending = true;
+                _phase = Phase.Quiesced;
+                detail = "steamdeck-idle-stop-failed:" + ex.GetType().Name + ":" + ex.Message;
+                return false;
+            }
+            finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.SteamDeckIdleStop); }
+        }
+
+        private bool TryStopControllerOutputForRelease(out string detail, HostReleaseTimingEvidence? releaseTiming = null)
+        {
+            detail = "";
+            if (_controller is null) { _outputReleasePending = false; return true; }
+            releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.OutputReaderStop);
+            try
+            {
+                var stopped = HostControllerOutputStop.TryStop(_controller, out detail);
+                _outputReleasePending = !stopped;
+                if (!stopped) _phase = Phase.Quiesced;
+                return stopped;
+            }
+            finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.OutputReaderStop); }
+        }
+
+        private bool TryCompleteIdleCtsRelease(out string detail)
+        {
+            detail = "";
+            if (_idleCtsRelease is null) return true;
+            var completed = _idleCtsRelease.TryRelease(out detail);
+            _idleCtsReleasePending = !completed;
+            if (completed) _idleCtsRelease = null;
+            else _phase = Phase.Quiesced;
+            return completed;
+        }
+
+        private bool ReleaseLocalLocked(out string detail, HostReleaseTimingEvidence? releaseTiming = null)
+        {
+            _psEndpointOwnership.Invalidate("release-started");
+            var gameOutputDetachDetail = DetachGameOutputObservation();
+            if (_sdkDisposeFailure.Length != 0)
+            {
+                _phase = Phase.Quiesced;
+                // Keep the original failure detail and read-only MSI observation
+                // semantics on SHUTDOWN; an absent endpoint cannot prove SDK disposal.
+                if (_msiSteamDeckReleaseFence1726?.HasReleaseReceipt == true)
+                    _msiSteamDeckReleaseFence1726.ConfirmUnresolvedRelease(MsiSteamDeckReleaseFence1726.Read(
+                        () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true)));
+                detail = _sdkDisposeFailure;
+                return false;
+            }
+            _targetCreationLifetime?.ReleaseAttempt();
+            // A successful SDK Dispose can leave only our captured idle CTS
+            // pending. Finish that exact resource before any context cleanup.
+            if (!TryCompleteIdleCtsRelease(out detail)) return false;
+            if (!TryStopSteamDeckIdleForRelease(out detail, releaseTiming)) return false;
+            _msiCostDiagnostics?.InvalidateController();
+            using var pnpDiagnosticScope = new MsiPnpCensusDiagnostic.Scope(_msiNonSdReleaseDiagnostic is not null);
+            BeginMsiNonSdReleaseDiagnostic();
+            var msiFence = _msiSteamDeckReleaseFence1726;
+            // SHUTDOWN after RELEASE must retain both success and unresolved
+            // errors; null SDK objects are not fresh proof of endpoint removal.
+            if (_controller is null && _context is null && msiFence?.HasReleaseReceipt == true)
+            {
+                releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.FinalObservation);
+                try
+                {
+                    if (!msiFence.ReleaseSucceeded)
+                    {
+                        _virtualEndpoint = MsiSteamDeckReleaseFence1726.Read(
+                            () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true));
+                        msiFence.ConfirmUnresolvedRelease(_virtualEndpoint);
+                    }
+                    detail = msiFence.ReleaseDetail;
+                    return msiFence.ReleaseSucceeded;
+                }
+                finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.FinalObservation); }
+            }
+            VirtualEndpointObservation? ownedBefore = msiFence is null ? null : MsiSteamDeckReleaseFence1726.Read(
+                () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true));
+            VirtualEndpointObservation? ownedAfter = null;
             using var xboxDiagnostics = _context is not null ? XboxSdkDiagnostics.TryBegin(
                 _tuple?.Persona ?? "", _hostInstanceId, _tuple?.RunId ?? "", _tuple?.Epoch ?? 0UL,
                 "RELEASE_LOCAL", LockedCoreSha256, LockedCoreMvid) : null;
             xboxDiagnostics?.SetEndpoint(_virtualEndpoint.Detail);
+            using var usbipDiagnostics = _context is not null ? UsbipSetupEvidence.TryBegin(
+                _tuple?.Persona ?? "", _hostInstanceId, _tuple?.RunId ?? "", _tuple?.Epoch ?? 0UL,
+                "RELEASE_LOCAL", LockedCoreSha256, LockedCoreMvid) : null;
+            usbipDiagnostics?.Stage("release-begin", _virtualEndpoint.Detail);
             _targetPnpAdmitted = false;
             var errors = new List<string>();
+            if (gameOutputDetachDetail.Length != 0) errors.Add(gameOutputDetachDetail);
+            LogUsbipTransportLifecycleSafely("release-before-neutral");
             if (_controller is not null)
             {
+                releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.Neutral);
                 try
                 {
                     // A neutral call can fail without throwing because
@@ -2055,10 +2327,66 @@ internal static partial class Program
                         errors.Add("neutral:" + (string.IsNullOrWhiteSpace(neutralDetail) ? "failed" : neutralDetail));
                 }
                 catch (Exception ex) { errors.Add("neutral:" + ex.GetType().Name); }
-                try { _controller.Dispose(); }
-                catch (Exception ex) { errors.Add("controller-dispose:" + ex.GetType().Name); }
+                finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.Neutral); }
+                // SDK Dispose ignores a failed output-reader Join. Retain all
+                // SDK resources until that reader has actually terminated.
+                if (!TryStopControllerOutputForRelease(out var outputStopDetail, releaseTiming))
+                {
+                    errors.Add("controller-output-stop:" + outputStopDetail);
+                    detail = string.Join(";", errors);
+                    CompleteMsiNonSdReleaseDiagnostic(false);
+                    return false;
+                }
+                // Capture the pinned readonly idle CTS only after both worker
+                // barriers have passed. Never release it before SDK Dispose.
+                if (!HostControllerIdleCtsRelease.TryCapture(_controller, out var idleCtsRelease, out var captureDetail) ||
+                    idleCtsRelease is null)
+                {
+                    _idleCtsReleasePending = true;
+                    _phase = Phase.Quiesced;
+                    errors.Add("controller-idle-cts-capture:" + captureDetail);
+                    detail = string.Join(";", errors);
+                    CompleteMsiNonSdReleaseDiagnostic(false);
+                    return false;
+                }
+                releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.ControllerDispose);
+                try
+                {
+                    usbipDiagnostics?.Stage("controller-dispose-begin");
+                    _controller.Dispose();
+                    usbipDiagnostics?.Stage("controller-dispose-returned");
+                    idleCtsRelease.MarkControllerDisposeReturned();
+                    _idleCtsRelease = idleCtsRelease;
+                    _idleCtsReleasePending = true;
+                }
+                catch (Exception ex)
+                {
+                    // A set SDK _disposed flag is not proof that Dispose
+                    // returned. Do not release the captured CTS on this path.
+                    _idleCtsRelease = idleCtsRelease;
+                    _idleCtsReleasePending = true;
+                    _phase = Phase.Quiesced;
+                    errors.Add("controller-dispose:" + ex.GetType().Name);
+                    return RetainSdkDisposeFailure(errors, ownedBefore, out detail);
+                }
+                finally
+                {
+                    releaseTiming?.End(HostReleaseTimingEvidence.Stage.ControllerDispose);
+                    LogUsbipTransportLifecycleSafely("controller-dispose-finished");
+                }
                 _controller = null;
+                ResetVirtualSignalEvidenceSafely();
+                if (!TryCompleteIdleCtsRelease(out var idleCtsDetail))
+                {
+                    errors.Add("controller-idle-cts-release:" + idleCtsDetail);
+                    detail = string.Join(";", errors);
+                    CompleteMsiNonSdReleaseDiagnostic(false);
+                    return false;
+                }
             }
+            releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.ReportChainClose);
+            try { CloseReportChain1410Safely("release-local"); }
+            finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.ReportChainClose); }
             if (_context is not null)
             {
                 try
@@ -2072,32 +2400,93 @@ internal static partial class Program
                     // current controller has been neutralized and disposed.
                     // This is the single-public-endpoint close boundary, not
                     // a second writer or an input-source operation.
-                    // Preserve the installed HIDMaestro backend across HC-style
-                    // target teardown.  The parameterless SDK overload is a
-                    // machine-level cleanup boundary that may also remove the
-                    // installed backend; HC disconnect/dispose tears down the
-                    // vTarget, not the backend installation itself.
-                    HMContext.RemoveAllVirtualControllers(true);
+                    // Stock SDK 2.0.0 maps this bool overload to Orphaned,
+                    // preserveInstall=true. Live controllers leased by another
+                    // process are outside this sweep. Never replace it with
+                    // HMCleanupScope.Everything to force a local release.
+                    // Exact endpoint absence remains the release proof below.
+                    releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.RemoveAllAttempt1);
+                    try { HMContext.RemoveAllVirtualControllers(true); }
+                    finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.RemoveAllAttempt1); }
                     // Do not acknowledge local release while a HIDMaestro
                     // endpoint is still present in the PnP tree. Dispose
                     // can return before the backend removal notification;
                     // one bounded retry closes that race.
-                    var endpointRemoval = WaitForVirtualEndpointRemoval();
-                    if (!endpointRemoval.IsAbsent)
+                    var diagnosticPollBegin = _msiNonSdReleaseDiagnostic is null ? 0 : Environment.TickCount64;
+                    VirtualEndpointObservation endpointRemoval;
+                    releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.EndpointWaitAttempt1);
+                    try
                     {
-                        HMContext.RemoveAllVirtualControllers(true);
-                        endpointRemoval = WaitForVirtualEndpointRemoval();
+                        endpointRemoval = msiFence is null ? WaitForVirtualEndpointRemoval() : msiFence.Wait(
+                            () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true),
+                            () => Environment.TickCount64, Thread.Sleep, VirtualEndpointRemovalTimeoutMs, VirtualEndpointPollIntervalMs);
                     }
-                    if (!endpointRemoval.IsAbsent)
+                    finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.EndpointWaitAttempt1); }
+                    ObserveMsiNonSdReleaseDiagnostic(endpointRemoval, diagnosticPollBegin);
+                    if (msiFence is null ? !endpointRemoval.IsAbsent : !msiFence.IsOwnedAbsent(endpointRemoval))
+                    {
+                        releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.RemoveAllAttempt2);
+                        try { HMContext.RemoveAllVirtualControllers(true); }
+                        finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.RemoveAllAttempt2); }
+                        diagnosticPollBegin = _msiNonSdReleaseDiagnostic is null ? 0 : Environment.TickCount64;
+                        releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.EndpointWaitAttempt2);
+                        try
+                        {
+                            endpointRemoval = msiFence is null ? WaitForVirtualEndpointRemoval() : msiFence.Wait(
+                                () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true),
+                                () => Environment.TickCount64, Thread.Sleep, VirtualEndpointRemovalTimeoutMs, VirtualEndpointPollIntervalMs);
+                        }
+                        finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.EndpointWaitAttempt2); }
+                        ObserveMsiNonSdReleaseDiagnostic(endpointRemoval, diagnosticPollBegin);
+                    }
+                    if (msiFence is not null) ownedAfter = _virtualEndpoint = endpointRemoval;
+                    if (msiFence is null && !endpointRemoval.IsAbsent)
                         errors.Add("virtual-endpoint-removal-timeout:" + endpointRemoval.Detail);
                 }
                 catch (Exception ex) { errors.Add("virtual-endpoint-reconcile:" + ex.GetType().Name); }
+                releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.ContextDispose);
                 try { _context.Dispose(); }
-                catch (Exception ex) { errors.Add("context-dispose:" + ex.GetType().Name); }
+                catch (Exception ex)
+                {
+                    errors.Add("context-dispose:" + ex.GetType().Name);
+                    return RetainSdkDisposeFailure(errors, ownedBefore, out detail);
+                }
+                finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.ContextDispose); }
                 _context = null;
             }
-            detail = errors.Count == 0 ? "local-dispose-complete" : string.Join(";", errors);
-            return errors.Count == 0;
+            releaseTiming?.Begin(HostReleaseTimingEvidence.Stage.FinalObservation);
+            try
+            {
+                if (msiFence is not null)
+                {
+                    // Even exceptional cleanup/unknown ownership gets a real final
+                    // observation and an explicit failure receipt, never prepare cache.
+                    ownedAfter ??= MsiSteamDeckReleaseFence1726.Read(
+                        () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true));
+                    _virtualEndpoint = ownedAfter.Value;
+                    return msiFence.CompleteRelease(ownedBefore!.Value, ownedAfter.Value, errors, out detail);
+                }
+                detail = errors.Count == 0 ? "local-dispose-complete" : string.Join(";", errors);
+                CompleteMsiNonSdReleaseDiagnostic(errors.Count == 0);
+                return errors.Count == 0;
+            }
+            finally { releaseTiming?.End(HostReleaseTimingEvidence.Stage.FinalObservation); }
+        }
+
+        private bool RetainSdkDisposeFailure(List<string> errors, VirtualEndpointObservation? ownedBefore, out string detail)
+        {
+            _sdkDisposeFailure = detail = string.Join(";", errors);
+            _phase = Phase.Quiesced;
+            var fence = _msiSteamDeckReleaseFence1726;
+            if (fence is not null && ownedBefore.HasValue)
+            {
+                var after = MsiSteamDeckReleaseFence1726.Read(
+                    () => ObserveVirtualEndpoint("steamdeck", requireInstanceIds: true));
+                fence.CompleteRelease(ownedBefore.Value, after, errors, out detail);
+                _sdkDisposeFailure = detail;
+            }
+            CompleteMsiNonSdReleaseDiagnostic(false);
+            return false;
         }
 
         private void RememberIdempotent(CommandEnvelope envelope, string response) =>
@@ -2106,8 +2495,48 @@ internal static partial class Program
 
         private bool TryPrepare(CommandEnvelope envelope, out string detail)
         {
+            using var usbipPreparationGate = YeManInputHost.UsbipMaintenanceGate.TryEnter(envelope.Persona == "steamdeck");
+            if (usbipPreparationGate is null) {
+                detail = envelope.Persona == "steamdeck" && YeManCC.UsbipMaintenanceState.Pending
+                    ? "usbip-reboot-required" : "usbip-version-maintenance-in-progress";
+                return false;
+            }
+            if (_sdkDisposeFailure.Length != 0)
+            {
+                detail = "prior-sdk-dispose-unconfirmed:" + _sdkDisposeFailure;
+                return false;
+            }
+            if (_idleCtsReleasePending || _idleCtsRelease is not null)
+            {
+                detail = "prior-idle-cts-release-pending";
+                return false;
+            }
+            if (!TryGetVirtualOutputProfile(envelope.Persona, envelope.ProfileIdentity, out var profileName))
+            {
+                detail = "persona-not-admitted";
+                return false;
+            }
+            var targetCreationAttempt = _targetCreationLifetime?.BeginAttempt() ?? default;
+            var targetCreationPrepared = false;
+            _msiCostDiagnostics?.InvalidateController();
+            using var pnpDiagnosticScope = new MsiPnpCensusDiagnostic.Scope(
+                MsiNonSdReleaseDiagnostic.ShouldObserve(_msiNonSdReleaseDiagnosticRequested, envelope.Persona));
+            CloseReportChain1410Safely("target-prepare");
+            _msiNonSdReleaseDiagnostic = null; _msiNonSdReleaseDiagnosticBinding = null;
+            try { if (MsiNonSdReleaseDiagnostic.ShouldObserve(_msiNonSdReleaseDiagnosticRequested, envelope.Persona))
+                { _msiNonSdReleaseDiagnostic = new(envelope.Persona); _msiNonSdReleaseDiagnosticBinding = envelope; } }
+            catch { /* diagnostic initialization never rejects target prepare */ }
+            // PREPARE is per-epoch explicit opt-in. RECREATE in that same epoch
+            // retains the requirement but resets pins/receipts before SDK create.
+            _msiSteamDeckReleaseFence1726 = (envelope.Command == "PREPARE_TARGET"
+                ? envelope.MsiSteamDeckReleaseFence : _msiSteamDeckReleaseFence1726 is not null)
+                ? new MsiSteamDeckReleaseFence1726(envelope) : null;
             // GP-XBOX-7: enable stock SDK setup timing before its static/prewarm initialization.
             using var xboxDiagnostics = XboxSdkDiagnostics.TryBegin(envelope.Persona, _hostInstanceId,
+                envelope.RunId, envelope.Epoch, envelope.Command, LockedCoreSha256, LockedCoreMvid);
+            // USBIP evidence is scoped to SD lifecycle transitions. It never enables SDK
+            // packet diagnostics or changes preparation, migration, retry or timeout policy.
+            using var usbipDiagnostics = UsbipSetupEvidence.TryBegin(envelope.Persona, _hostInstanceId,
                 envelope.RunId, envelope.Epoch, envelope.Command, LockedCoreSha256, LockedCoreMvid);
             // GP-XBOX-5：PREPARE 的数秒停顿拆开记录；非 Elite 不启用，不进入帧路径。
             var xboxTimings = envelope.Persona == "elite" ? new List<string>() : null;
@@ -2122,6 +2551,7 @@ internal static partial class Program
             void XboxStage(string stage)
             {
                 lastStage = stage;
+                usbipDiagnostics?.Stage(stage);
                 if (xboxClock is null) return;
                 var elapsed = xboxClock.ElapsedMilliseconds;
                 xboxTimings!.Add(stage + "=" + (elapsed - xboxStageStart));
@@ -2131,6 +2561,7 @@ internal static partial class Program
                 ";xbox-startup-ms:" + string.Join(",", xboxTimings) + ",total=" + xboxClock!.ElapsedMilliseconds;
             try
             {
+                usbipDiagnostics?.Stage("context-create-begin");
                 _context = new HMContext();
                 _context.LoadDefaultProfiles();
                 XboxStage("context-profiles");
@@ -2151,48 +2582,33 @@ internal static partial class Program
                 //   ③ 仍有他族/幽灵残留 ⇒ **恰好一次**有界 fallback 清扫 + 再次有界等待。
                 _targetPnpAdmitted = false;
                 var reconcileStarted = Environment.TickCount64;
-                var reconcileBefore = ObserveVirtualEndpoint();
+                var reconcileBefore = ObserveVirtualEndpoint(requireInstanceIds: _msiSteamDeckReleaseFence1726 is not null);
                 var reconcilePath = "hc-parity";
                 _virtualEndpoint = reconcileBefore;
                 if (!reconcileBefore.IsFullyAbsent)
                 {
-                    _virtualEndpoint = WaitForEndpointFamilyRemoval(SwitchReconcileFamilyWaitMs);
+                    _virtualEndpoint = WaitForEndpointFamilyRemoval(SwitchReconcileFamilyWaitMs, requireInstanceIds: _msiSteamDeckReleaseFence1726 is not null);
                     if (!_virtualEndpoint.IsFullyAbsent)
                     {
                         HMContext.RemoveAllVirtualControllers(true);
                         _virtualEndpointReconciled = true;
                         reconcilePath = "fallback-sweep";
-                        _virtualEndpoint = WaitForEndpointFamilyRemoval(SwitchReconcileFamilyWaitMs);
+                        _virtualEndpoint = WaitForEndpointFamilyRemoval(SwitchReconcileFamilyWaitMs, requireInstanceIds: _msiSteamDeckReleaseFence1726 is not null);
                     }
                 }
                 var reconcileReceipt = "switch-reconcile:path=" + reconcilePath +
                     ";waitedMs=" + (Environment.TickCount64 - reconcileStarted) +
                     ";before=" + DescribeEndpointCounts(reconcileBefore) +
                     ";after=" + DescribeEndpointCounts(_virtualEndpoint);
-                if (!_virtualEndpoint.IsAbsent)
+                if (_msiSteamDeckReleaseFence1726 is null ? !_virtualEndpoint.IsAbsent : !_virtualEndpoint.IsFullyAbsent)
                 {
                     ReleaseLocal(out _);
                     detail = "stale-virtual-endpoint:" + _virtualEndpoint.Detail + ";" + reconcileReceipt;
                     return false;
                 }
+                var zeroBeforeCreate = _virtualEndpoint;
+                _msiNonSdReleaseDiagnostic?.TrySetBeforeCreateCensus(zeroBeforeCreate.MsiPnpCensus);
                 XboxStage("old-endpoint-reconcile");
-                var profileName = envelope.Persona switch
-                {
-                    "dualshock4" when envelope.ProfileIdentity == "dualshock-4-v2" => "dualshock-4-v2",
-                    "xbox360" when envelope.ProfileIdentity == "xbox-360-wired" => "xbox-360-wired",
-                    "steamdeck" when envelope.ProfileIdentity == "steam-deck-composite" => "steam-deck-composite",
-                    "dualsense" when envelope.ProfileIdentity == "dualsense" => "dualsense",
-                    // 批112：新增两档（老档一行未动）。
-                    "elite" when envelope.ProfileIdentity == "xbox-elite-v2" => "xbox-elite-v2",
-                    "dualsense-edge" when envelope.ProfileIdentity == "dualsense-edge" => "dualsense-edge",
-                    _ => ""
-                };
-                if (string.IsNullOrEmpty(profileName))
-                {
-                    ReleaseLocal(out _);
-                    detail = "persona-not-admitted";
-                    return false;
-                }
                 // S0'''（2026-09-16 用户批准）：Sony persona 走"声明序置换"profile（数据字节不变）。
                 var profile = ApplySonyAxisDeclarationSwap(_context.GetProfile(profileName));
                 if (profile is null)
@@ -2206,18 +2622,29 @@ internal static partial class Program
                 _controller = CreateTargetWithBackendWarning(() =>
                 {
                     var ready = TryEnsureDriverInstalled(_context, out var backendDetail,
-                        requireUsbip: profile.RequiresUsbipBackend);
+                        requireUsbip: profile.RequiresUsbipBackend, usbipDiagnostics: usbipDiagnostics);
                     XboxStage("profile-backend");
                     return (ready, backendDetail);
                 }, () =>
                 {
                     lastStage = "sdk-create";
+                    usbipDiagnostics?.Stage("sdk-create-begin", backendReceipt);
+                    if (envelope.Persona == PsEndpointOwnership.Persona)
+                        _psEndpointOwnership.BeginCreate(PsOwnershipBinding(envelope));
                     return _context.CreateController(profile);
                 }, out backendReceipt);
+                if (envelope.Persona == PsEndpointOwnership.Persona)
+                    _psEndpointOwnership.Created(_controller);
+                _targetCreationLifetime?.Created(targetCreationAttempt, _controller);
+                CaptureMsiSdkDeclaredIdentityDiagnostic();
+                LogUsbipTransportLifecycleSafely("target-created");
                 _screenPadOwnsReport = false;
                 _screenPadPacketCounter = 0;
+                ScreenPadSubmissionEvidence.Reset();
+                _steamDeckReleasePending = false;
+                _outputReleasePending = false;
                 XboxStage("sdk-create");
-                _virtualEndpoint = WaitForVirtualEndpointArrival(envelope.Persona);
+                _virtualEndpoint = WaitForVirtualEndpointArrival(envelope.Persona, requireInstanceIds: _msiSteamDeckReleaseFence1726 is not null);
                 XboxStage("pnp-arrival");
                 xboxDiagnostics?.SetEndpoint(_virtualEndpoint.Detail);
                 if (!_virtualEndpoint.IsUniqueStartedTarget(envelope.Persona))
@@ -2228,11 +2655,21 @@ internal static partial class Program
                         ";" + reconcileReceipt + ";" + backendReceipt;
                     return false;
                 }
+                if (_msiSteamDeckReleaseFence1726 is not null &&
+                    !_msiSteamDeckReleaseFence1726.TryPin(zeroBeforeCreate, _virtualEndpoint, out var pinDetail))
+                {
+                    ReleaseLocal(out var releaseDetail);
+                    detail = pinDetail + ";" + releaseDetail;
+                    return false;
+                }
                 detail = "target-pnp-admitted;profile=" + profileName +
                     ";descriptor-vid=" + profile.VendorId.ToString("X4") +
                     ";descriptor-pid=" + profile.ProductId.ToString("X4") +
                     ";" + _virtualEndpoint.Detail + ";" + reconcileReceipt + ";" + backendReceipt + XboxTimingDetail();
                 _targetPnpAdmitted = true;
+                CapturePsEndpointOwnership();
+                BindGameOutputObservation(envelope);
+                targetCreationPrepared = true;
                 return true;
             }
             catch (Exception ex)
@@ -2241,6 +2678,7 @@ internal static partial class Program
                 // （类型全名 / HResult / Win32 NativeErrorCode / 内层异常链 / 截断栈顶帧），最后才标记
                 // exception 阶段。仅加诊断，不改创建策略或描述符。
                 var failedStage = lastStage;
+                usbipDiagnostics?.Stage("prepare-exception", "stage=" + failedStage + DescribePrepareException(ex));
                 ReleaseLocal(out _);
                 XboxStage("exception");
                 detail = "prepare-exception:" + ex.GetType().Name
@@ -2249,6 +2687,11 @@ internal static partial class Program
                     + ";" + backendReceipt
                     + XboxTimingDetail();
                 return false;
+            }
+            finally
+            {
+                usbipDiagnostics?.Stage("prepare-result", targetCreationPrepared ? "target-pnp-admitted" : "not-prepared");
+                if (!targetCreationPrepared) _targetCreationLifetime?.Failure(targetCreationAttempt);
             }
         }
 
@@ -2296,10 +2739,11 @@ internal static partial class Program
             catch { return null; }
         }
 
-        private static bool TryEnsureDriverInstalled(HMContext context, out string detail, bool requireUsbip = false)
+        private static bool TryEnsureDriverInstalled(HMContext context, out string detail, bool requireUsbip = false,
+            UsbipSetupEvidence? usbipDiagnostics = null)
         {
             if (requireUsbip)
-                return TryEnsureUsbipBackend(out detail);
+                return TryEnsureUsbipBackend(out detail, usbipDiagnostics);
 
             if (context.IsDriverInstalled)
             {
@@ -2333,37 +2777,35 @@ internal static partial class Program
             return true;
         }
 
-        // E5（2026-09-13，stock 回归修正）：SteamDeck persona 的 usbip 后端
-        // 直接由 HIDMaestro.Core 内建安装，不再搜索外部安装包。stock 版 DLL
-        // （40MB，BD42A99B 锁定）内嵌 USBip-0.9.7.7-x64.exe 资源
-        // （HIDMaestro.Resources.USBip-0.9.7.7-x64.exe）+ 完整安装链路：
-        //   UsbipDriverInstaller.ExtractInstaller()  → 提取内嵌安装器到
-        //     %TEMP%\HIDMaestro_usbip_0.9.7.7\（SHA256 校验 51620fa5...）
-        //   UsbipDriverInstaller.RunSilentInstall()  → /VERYSILENT 静默安装
-        //   HMContext.InstallUsbipBackend()          → 上述 EnsureInstalled 的公开包装
-        // slim 版（7.5MB）无内嵌资源才需要外部安装包；E3 已回滚 stock（Program.cs
-        // 66-68 三常量锁定），此处随之去掉外部包搜索（FindUsbipInstaller）原创路径，
-        // 回归 SDK 内建。安装后轮询 VhciClient.IsAvailable()（SDK 内部 60s）。
-        private static bool TryEnsureUsbipBackend(out string detail)
+        // Stock HIDMaestro 2.0.0 owns its bundled usbip-win2 0.9.8.1 installation.
+        // No local transport fork or external-installer fallback.
+        private static bool TryEnsureUsbipBackend(out string detail, UsbipSetupEvidence? usbipDiagnostics = null)
         {
+            usbipDiagnostics?.Stage("backend-probe-begin");
             if (HMContext.IsUsbipBackendAvailable)
             {
                 detail = "usbip-backend-available";
+                usbipDiagnostics?.Stage("backend-probe-result", detail, true);
                 return true;
             }
+            usbipDiagnostics?.Stage("backend-probe-result", "usbip-backend-unavailable", false);
 
             try
             {
                 // SDK 内建安装：提权由 SDK 内部完成（RunSilentInstall + pnputil），
                 // 与 HC 侧 UsbipDriverInstaller 同构；输入 Host 自身以非管理员
                 // 模式运行时亦可经由 SDK 例外抛出，不在此造轮子拉安装器。
-                HMContext.InstallUsbipBackend(null);
+                usbipDiagnostics?.Stage("sdk-install-begin");
+                Action<string>? progress = usbipDiagnostics is null ? null : usbipDiagnostics.Report;
+                HMContext.InstallUsbipBackend(progress);
                 if (HMContext.IsUsbipBackendAvailable)
                 {
                     detail = "usbip-backend-installed-by-sdk";
+                    usbipDiagnostics?.Stage("sdk-install-returned", detail, true);
                     return true;
                 }
                 detail = "usbip-backend-install-failed";
+                usbipDiagnostics?.Stage("sdk-install-returned", detail, false);
                 return false;
             }
             catch (Exception ex)
@@ -2373,40 +2815,168 @@ internal static partial class Program
                 // installer-missing（prompt 1 下载安装包）不再出现：SDK 内建
                 // 安装不依赖外部安装包，无需用户手放 redist。
                 detail = "usbip-backend-install-failed:" + ex.GetType().Name + ":" + ex.Message;
+                usbipDiagnostics?.Stage("sdk-install-exception", detail, false);
                 return false;
             }
         }
 
+        private void ArmReportChain1410Safely(CommandEnvelope envelope)
+        {
+            try
+            {
+                CloseReportChain1410Safely("prepare-arm");
+                if (!_reportChainCapabilityAdvertised1410 || envelope.ReportChainPrepare1410 is null || !_targetPnpAdmitted || _controller is null) return;
+                var runtime = new MsiReportChainRuntime1410();
+                if (runtime.ArmSafely(envelope.ReportChainPrepare1410, _reportChainParentPid1410, Environment.ProcessId,
+                    _hostInstanceId, envelope.Persona, envelope.ProfileIdentity, envelope.RunId, envelope.Epoch,
+                    envelope.PowerGeneration, _virtualEndpoint.Detail, _targetPnpAdmitted)) _reportChain1410 = runtime;
+            }
+            catch { _reportChain1410 = null; }
+        }
+
+        private void CloseReportChain1410Safely(string reason)
+        {
+            ResetVirtualSignalEvidenceSafely();
+            var runtime = _reportChain1410; _reportChain1410 = null;
+            try { runtime?.CloseSafely(reason); } catch { }
+        }
+
+        private void PrepareReportChainInvocation1410(CommandEnvelope? cause, long? encoderIndex, string reason,
+            out MsiPersonaReportChain20261012? tracker, out MsiReportChainFrame20261012? frame)
+        {
+            tracker = null; frame = null;
+            try
+            {
+                var runtime = _reportChain1410;
+                if (runtime is null || !runtime.Armed) return;
+                var binding = cause ?? _tuple;
+                if (binding is null) return;
+                // binding.Buttons is the FINAL submitted native canonical frame, not raw
+                // physical-source bits. Optional source metadata supplies IDs only.
+                runtime.TryInvocationSafely(binding.RunId, binding.Epoch, binding.PowerGeneration, binding.Persona,
+                    binding.ProfileIdentity, cause?.Sequence ?? _lastSequence, reason, encoderIndex,
+                    cause?.ReportChainSource1410, reason == "live-frame" ? (uint)binding.Buttons : null, out tracker, out frame);
+            }
+            catch { tracker = null; frame = null; }
+        }
+
+        private void ResetVirtualSignalEvidenceSafely()
+        {
+            try { _virtualSignalEvidence?.ResetSafely(_costFlagEnabled); } catch { }
+        }
+
+        internal HostVirtualSignalEvidence.Attempt BeginVirtualSignalEvidenceSafely(HMController controller,
+            CommandEnvelope? cause, CommandEnvelope? canonical, string reason, long? encoderIndex,
+            byte[]? report, HMGamepadState? state)
+        {
+            try
+            {
+                if (!_costFlagEnabled) { ResetVirtualSignalEvidenceSafely(); return default; }
+                var binding = cause ?? _tuple;
+                // Never substitute a trigger/prepare envelope for actual internal controls.
+                if (binding is null || canonical is null) return default;
+                var evidence = _virtualSignalEvidence ??= new HostVirtualSignalEvidence(CostStateDir);
+                return evidence.BeginSafely(_hostInstanceId, controller, binding, canonical,
+                    cause?.Sequence ?? _lastSequence, cause is not null, reason, encoderIndex, report, state);
+            }
+            catch { return default; }
+        }
+
+        internal void CompleteVirtualSignalEvidenceSafely(HostVirtualSignalEvidence.Attempt attempt, Exception? exception)
+        {
+            try
+            {
+                if (_costFlagEnabled) _virtualSignalEvidence?.CompleteSafely(attempt, exception);
+                else ResetVirtualSignalEvidenceSafely();
+            }
+            catch { }
+        }
+
+        private void SubmitSonyReportChain1410(HMController controller, CommandEnvelope? cause, byte[] report,
+            long encoderIndex, string reason, CommandEnvelope? canonical = null)
+        {
+            var attempt = BeginVirtualSignalEvidenceSafely(controller, cause, canonical ?? cause, reason, encoderIndex, report, null);
+            MsiPersonaReportChain20261012? tracker = null; MsiReportChainFrame20261012? frame = null;
+            try { PrepareReportChainInvocation1410(cause, encoderIndex, reason, out tracker, out frame); }
+            catch { tracker = null; frame = null; }
+            // Keep the existing opt-in tracker. Its delegate is allocated only when armed.
+            static void Tracked(MsiPersonaReportChain20261012 tracker, MsiReportChainFrame20261012 frame,
+                HMController controller, byte[] report) => tracker.InvokeRaw(frame, report, bytes => controller.SubmitRawReport(bytes));
+            try
+            {
+                try
+                {
+                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, report);
+                    else controller.SubmitRawReport(report);
+                }
+                catch (Exception ex) { CompleteVirtualSignalEvidenceSafely(attempt, ex); throw; }
+                CompleteVirtualSignalEvidenceSafely(attempt, null);
+            }
+            finally { try { _reportChain1410?.AfterBackendSafely(); } catch { } }
+        }
+
+        private void SubmitEliteReportChain1410(HMController controller, HMGamepadState state, CommandEnvelope? cause,
+            string reason, CommandEnvelope? canonical = null)
+        {
+            var attempt = BeginVirtualSignalEvidenceSafely(controller, cause, canonical ?? cause, reason, null, null, state);
+            MsiPersonaReportChain20261012? tracker = null; MsiReportChainFrame20261012? frame = null;
+            try { PrepareReportChainInvocation1410(cause, null, reason, out tracker, out frame); }
+            catch { tracker = null; frame = null; }
+            static void Tracked(MsiPersonaReportChain20261012 tracker, MsiReportChainFrame20261012 frame,
+                HMController controller, HMGamepadState state) => tracker.InvokeUnencodedState(frame, () => controller.SubmitState(state));
+            try
+            {
+                try
+                {
+                    if (tracker is not null && frame is not null) Tracked(tracker, frame, controller, state);
+                    else controller.SubmitState(state);
+                }
+                catch (Exception ex) { CompleteVirtualSignalEvidenceSafely(attempt, ex); throw; }
+                CompleteVirtualSignalEvidenceSafely(attempt, null);
+            }
+            finally { try { _reportChain1410?.AfterBackendSafely(); } catch { } }
+        }
+
         private bool TrySubmitFrame(CommandEnvelope envelope, out string detail)
         {
+            if (!TryGetVirtualOutputProfile(envelope.Persona, envelope.ProfileIdentity, out var profileName))
+            {
+                detail = "persona-not-admitted";
+                return false;
+            }
             if (_controller is null || _context is null)
             {
                 detail = "target-not-ready";
                 return false;
             }
             var started = Stopwatch.GetTimestamp();
+            _msiHostStageEvidence?.BeginSubmit();
+
             try
             {
-                var profileName = envelope.Persona switch
-                {
-                    "xbox360" => "xbox-360-wired",
-                    "steamdeck" => "steam-deck-composite",
-                    "dualsense" => "dualsense",
-                    "elite" => "xbox-elite-v2",                 // 批112
-                    "dualsense-edge" => "dualsense-edge",       // 批112
-                    _ => "dualshock-4-v2"
-                };
                 var profile = _context.GetProfile(profileName) ?? throw new InvalidOperationException("profile-missing:" + profileName);
                 // R3（2026-09-17 需求单）：HID 提交段计时（门控缓存；关时零累加）。
                 var costHidStarted = _costFlagEnabled ? Stopwatch.GetTimestamp() : 0L;
-                switch (envelope.Persona)
+                _msiHostStageEvidence?.BeginBackend();
+                try
                 {
-                    case "xbox360": _controller.SubmitState(BuildXbox360State(profile, envelope)); break;
-                    case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, envelope); break;
-                    case "dualsense": _controller.SubmitRawReport(BuildDualSenseDataOnlyReport(profile, envelope, _dualSenseFrameCounter++)); break;
-                    case "elite": _controller.SubmitState(BuildXbox360State(profile, envelope)); break;   // 批112
-                    case "dualsense-edge": _controller.SubmitRawReport(BuildDualSenseDataOnlyReport(profile, envelope, _dualSenseFrameCounter++, MapDsEdgePaddles(envelope.BackButtons))); break;   // 批112
-                    default: _controller.SubmitRawReport(BuildDs4V2DataOnlyReport(profile, envelope, _ds4FrameCounter++)); break;
+                    switch (envelope.Persona)
+                    {
+                        case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, envelope, _costFlagEnabled, signalSession: this, signalCause: envelope); break;
+                        case "elite": SubmitEliteReportChain1410(_controller, BuildEliteState(profile, envelope), envelope, "live-frame"); break;
+                        case "dualsense-edge":
+                        {
+                            var frameIndex = _dualSenseFrameCounter++;
+                            var report = BuildDualSenseDataOnlyReport(profile, envelope, frameIndex, MapDsEdgePaddles(envelope.BackButtons));
+                            SubmitSonyReportChain1410(_controller, envelope, report, frameIndex, "live-frame");
+                            break;
+                        }
+                        default: throw new InvalidOperationException("persona-not-admitted");
+                    }
+                }
+                finally
+                {
+                    _msiHostStageEvidence?.EndBackend();
                 }
                 if (_costFlagEnabled)
                 {
@@ -2431,6 +3001,10 @@ internal static partial class Program
                 detail = "submit-exception:" + ex.GetType().Name;
                 RecordCostFrame(_lastSubmitElapsedUs, rejected: true);
                 return false;
+            }
+            finally
+            {
+                _msiHostStageEvidence?.EndSubmit();
             }
         }
 
@@ -2467,7 +3041,13 @@ internal static partial class Program
 
         private void RecordCostFrame(long submitUs, bool rejected)
         {
-            if (!_costFlagEnabled) return;
+            if (!_costFlagEnabled)
+            {
+                // MSI's background reader may notice logging re-enabled. No
+                // flag file or process query is performed by this polling call.
+                if (_msiCostDeferredRequested) MaybeEmitCostWindow();
+                return;
+            }
             _costFrames++;
             if (rejected) _costFramesRejected++;
             if (_costSubmitUsCount < _costSubmitUsSamples.Length)
@@ -2490,98 +3070,225 @@ internal static partial class Program
             var now = Environment.TickCount64;
             var windowMs = now - _costWindowStartTicks;
             if (windowMs < 1000) return;
-            _costWindowStartTicks = now;
-            _costFlagEnabled = CostLoggingRequestedByFlag();  // 窗口级刷新（≤1 次 IO/s）
-            if (!_costFlagEnabled)
-            {
-                ResetCostWindow();
-                return;
-            }
+            _msiHostStageEvidence?.BeginCost();
             try
             {
-                var count = _costSubmitUsCount;
-                var samples = new long[count];
-                Array.Copy(_costSubmitUsSamples, samples, count);
-                Array.Sort(samples);
-                long Percentile(double p) => count == 0
-                    ? 0L
-                    : samples[Math.Min(count - 1, (int)(count * p))];
-                var proc = System.Diagnostics.Process.GetCurrentProcess();
-                // R3b″（2026-09-18 授权）：分配率（窗口增量；allocPerFrame 供"每帧
-                // 分配"对拍）+ 线程级 CPU top-4（含埋点自报角色；未标注 = 池/运行时线程）。
-                // GP-CPU2 P5（裁决：纠正统计口径）：byThread 只列最忙 4 条线程、不是进程总和 ⇒
-                // 增记**进程累计 CPU 增量**（procCpuMsPerSec）；byThread 保留作热点提示。
-                double procCpuMs;
-                try { procCpuMs = proc.TotalProcessorTime.TotalMilliseconds; } catch { procCpuMs = 0; }
-                var procCpuDelta = procCpuMs - _costLastProcCpuMs;
-                if (_costLastProcCpuMs <= 0 || procCpuDelta < 0) procCpuDelta = 0;
-                _costLastProcCpuMs = procCpuMs;
-                var allocTotal = GC.GetTotalAllocatedBytes(precise: false);
-                var allocDelta = allocTotal - _costLastAllocBytes;
-                if (allocDelta < 0) allocDelta = 0;
-                _costLastAllocBytes = allocTotal;
-                var threadRows = new List<(int tid, long msPerSec, string role)>();
-                foreach (System.Diagnostics.ProcessThread th in proc.Threads)
+                _costWindowStartTicks = now;
+                if (_msiCostDeferredRequested)
                 {
-                    double cpuMs;
-                    try { cpuMs = th.TotalProcessorTime.TotalMilliseconds; } catch { continue; }
-                    _costLastThreadCpuMs.TryGetValue(th.Id, out var prevCpuMs);
-                    _costLastThreadCpuMs[th.Id] = cpuMs;
-                    var deltaMs = cpuMs - prevCpuMs;
-                    if (deltaMs <= 0) continue;
-                    threadRows.Add((th.Id, (long)Math.Round(deltaMs * 1000.0 / windowMs), RoleOfCostThread(th.Id)));
+                    QueueMsiCostWindow(now, windowMs);
+                    return;
                 }
-                threadRows.Sort((x, y) => y.msPerSec.CompareTo(x.msPerSec));
-                var byThread = new List<object>();
-                for (var ti = 0; ti < threadRows.Count && ti < 4; ti++)
-                    byThread.Add(new { tid = threadRows[ti].tid, cpuMsPerSec = threadRows[ti].msPerSec, role = threadRows[ti].role });
+                _costFlagEnabled = CostLoggingRequestedByFlag();  // 窗口级刷新（≤1 次 IO/s）
+                if (!_costFlagEnabled) ResetVirtualSignalEvidenceSafely();
+                if (!_costFlagEnabled)
+                {
+                    _costCpuWindow?.Reset();
+                    ResetCostWindow();
+                    return;
+                }
+                try
+                {
+                    var count = _costSubmitUsCount;
+                    var samples = new long[count];
+                    Array.Copy(_costSubmitUsSamples, samples, count);
+                    Array.Sort(samples);
+                    long Percentile(double p) => count == 0
+                        ? 0L
+                        : samples[Math.Min(count - 1, (int)(count * p))];
+                    using var proc = System.Diagnostics.Process.GetCurrentProcess();
+                    // R3b″（2026-09-18 授权）：分配率（窗口增量；allocPerFrame 供"每帧
+                    // 分配"对拍）+ 线程级 CPU top-4（含埋点自报角色；未标注 = 池/运行时线程）。
+                    // GP-CPU2 P5（裁决：纠正统计口径）：byThread 只列最忙 4 条线程、不是进程总和 ⇒
+                    // 增记**进程累计 CPU 增量**（procCpuMsPerSec）；byThread 保留作热点提示。
+                    var cpuWindow = _costCpuWindow ??= new();
+                    double? procCpuMs = null;
+                    try { procCpuMs = proc.TotalProcessorTime.TotalMilliseconds; } catch { }
+                    var processCpu = cpuWindow.ObserveProcess(procCpuMs, Environment.TickCount64);
+                    var allocTotal = GC.GetTotalAllocatedBytes(precise: false);
+                    var allocDelta = allocTotal - _costLastAllocBytes;
+                    if (allocDelta < 0) allocDelta = 0;
+                    _costLastAllocBytes = allocTotal;
+                    var threadRows = new List<(int tid, long msPerSec, string role)>();
+                    var observedThreads = proc.Threads;
+                    var threadRatesKnown = 0;
+                    var threadReadFailures = 0;
+                    var threadBaselines = 0;
+                    var threadOtherUnknown = 0;
+                    cpuWindow.BeginThreadObservation();
+                    try
+                    {
+                        foreach (System.Diagnostics.ProcessThread th in observedThreads)
+                        {
+                            using (th)
+                            {
+                                double? cpuMs = null;
+                                try { cpuMs = th.TotalProcessorTime.TotalMilliseconds; } catch { }
+                                var measurement = cpuWindow.ObserveThread(th.Id, cpuMs, Environment.TickCount64);
+                                if (measurement.MsPerSec is long rate)
+                                {
+                                    threadRatesKnown++;
+                                    if (rate > 0) threadRows.Add((th.Id, rate, RoleOfCostThread(th.Id)));
+                                }
+                                else if (measurement.Status == "read-unavailable") threadReadFailures++;
+                                else if (measurement.Status == "baseline") threadBaselines++;
+                                else threadOtherUnknown++;
+                            }
+                        }
+                    }
+                    finally { cpuWindow.FinishThreadObservation(); }
+                    threadRows.Sort((x, y) => y.msPerSec.CompareTo(x.msPerSec));
+                    var byThread = new List<object>();
+                    for (var ti = 0; ti < threadRows.Count && ti < 4; ti++)
+                        byThread.Add(new { tid = threadRows[ti].tid, cpuMsPerSec = threadRows[ti].msPerSec, role = threadRows[ti].role });
+                    var line = JsonSerializer.Serialize(new
+                    {
+                        t = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
+                        // Writer/session identity remains available when optional USBIP evidence is null.
+                        writerPid = Environment.ProcessId, hostInstanceId = _hostInstanceId,
+                        runId = _tuple?.RunId ?? "", epoch = _tuple?.Epoch ?? 0UL,
+                        powerGeneration = _tuple?.PowerGeneration ?? 0UL,
+                        windowMs,
+                        frames = _costFrames,
+                        submitElapsedUs = new
+                        {
+                            p50 = Percentile(0.50),
+                            p95 = Percentile(0.95),
+                            max = count == 0 ? 0L : samples[count - 1]
+                        },
+                        jsonParseUs = new
+                        {
+                            n = _costJsonParseCount,
+                            mean = _costJsonParseCount == 0 ? 0L : _costJsonParseUsSum / _costJsonParseCount
+                        },
+                        hidSubmitUs = new
+                        {
+                            n = _costHidSubmitCount,
+                            mean = _costHidSubmitCount == 0 ? 0L : _costHidSubmitUsSum / _costHidSubmitCount
+                        },
+                        pipeReadUs = new
+                        {
+                            n = _costPipeReadCount,
+                            mean = _costPipeReadCount == 0 ? 0L : _costPipeReadUsSum / _costPipeReadCount
+                        },
+                        framesRejected = _costFramesRejected,
+                        gcPauseMsPerSec = ComputeGcPauseMsPerSec(windowMs),
+                        allocBytesPerSec = windowMs > 0 ? (long)(allocDelta * 1000.0 / windowMs) : 0,
+                        // GP-CPU2 P5：进程累计 CPU（含所有线程；与 byThread 的 top-4 不同口径）。
+                        procCpuMsPerSec = processCpu.MsPerSec,
+                        cpuObservation = new
+                        {
+                            version = 1, state = processCpu.Status,
+                            observationTick = processCpu.ObservationTick,
+                            runtimeWindowMs = processCpu.WindowMs,
+                            threadRatesKnown, threadReadFailures, threadBaselines, threadOtherUnknown
+                        },
+                        allocPerFrame = _costFrames > 0 ? allocDelta / _costFrames : 0,
+                        hidhideQuery = new { full = _costHidHideQueryFull, state = _costHidHideQueryState },
+                        byThread,
+                        threads = observedThreads.Count,
+                        logRetention = HostCostLog.Snapshot(),
+                        gcHeapBytes = GC.GetTotalMemory(false),
+                        gen0 = GC.CollectionCount(0),
+                        gen1 = GC.CollectionCount(1),
+                        gen2 = GC.CollectionCount(2),
+                        phase = _phase.ToString(),
+                        steamDeckPadSubmissions = _tuple?.Persona == "steamdeck" ? ScreenPadSubmissionEvidence.Capture() : null,
+                        usbipTransport = CaptureUsbipTransportSafely("cost-window", _costFlagEnabled)
+                    });
+                    HostCostLog.Append(CostStateDir, line);
+                }
+                catch { _costCpuWindow?.Reset(); /* 诊断永不阻塞或改变控制路径 */ }
+                ResetCostWindow();
+            }
+            finally
+            {
+                _msiHostStageEvidence?.EndCost();
+            }
+        }
+
+        // Only bounded in-memory copies happen here. The worker never reads
+        // HostSession, takes its lifecycle lock or writes a target/pipe response.
+        private void QueueMsiCostWindow(long now, long windowMs)
+        {
+            try
+            {
+                var diagnostic = _msiCostDiagnostics;
+                _costFlagEnabled = diagnostic?.LoggingEnabled ?? false;
+                if (!_costFlagEnabled) ResetVirtualSignalEvidenceSafely();
+                if (diagnostic is null) return;
+                if (diagnostic.TryRejectBeforeSnapshot()) return;
+                var samples = _costSubmitUsCount == 0 ? Array.Empty<long>() : new long[_costSubmitUsCount];
+                Array.Copy(_costSubmitUsSamples, samples, samples.Length);
+                Func<object?, bool, object?>? reader = null;
+                WeakReference<object>? controller = null;
+                if (_assetVerified && _tuple?.Persona == "steamdeck" && _controller is not null)
+                {
+                    var observer = _usbipTransportObservation ??= new UsbipTransportObservation();
+                    reader = (target, verified) => observer.Capture(target, verified);
+                    controller = new WeakReference<object>(_controller);
+                }
+                diagnostic.TryRecord(new(
+                    DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(), now, windowMs,
+                    _costFrames, samples, _costJsonParseUsSum, _costJsonParseCount,
+                    _costHidSubmitUsSum, _costHidSubmitCount, _costPipeReadUsSum, _costPipeReadCount,
+                    _costFramesRejected, _costHidHideQueryFull, _costHidHideQueryState,
+                    _costRoleOsTid.ToArray(), _phase.ToString(), _hostInstanceId,
+                    _tuple?.RunId, _tuple?.Epoch ?? 0UL, _tuple?.PowerGeneration ?? 0UL,
+                    _tuple?.Persona, _tuple?.ProfileIdentity, _lastSequence,
+                    diagnostic.ControllerGeneration, controller, reader, _assetVerified)
+                {
+                    SteamDeckPadSubmissions = _costFlagEnabled && _tuple?.Persona == "steamdeck"
+                        ? ScreenPadSubmissionEvidence.Capture() : null
+                });
+            }
+            catch { /* snapshot loss is diagnostic-only; never change frame success */ }
+            finally { ResetCostWindow(); }
+        }
+
+        // R5: snapshot only at the existing cost window/lifecycle calls. Stock
+        // SDK queues are sampled without waiting or changing their contents.
+        // A snapshot is neither a wire receipt nor proof of external release.
+        private object? CaptureUsbipTransportSafely(string phase, bool loggingRequested)
+        {
+            if (!loggingRequested || !_assetVerified || _tuple?.Persona != "steamdeck") return null;
+            try
+            {
+                _usbipTransportObservation ??= new UsbipTransportObservation();
+                return new
+                {
+                    version = 1, phase, capturedAtUtc = DateTimeOffset.UtcNow.ToString("O"),
+                    hostPid = Environment.ProcessId, hostInstanceId = _hostInstanceId,
+                    runId = _tuple.RunId, epoch = _tuple.Epoch, powerGeneration = _tuple.PowerGeneration,
+                    persona = _tuple.Persona, profileIdentity = _tuple.ProfileIdentity,
+                    lastHostCommandSequence = _lastSequence,
+                    scope = "Sampled SDK managed state; no original request owner, wire, driver or Steam acceptance proof.",
+                    snapshot = _usbipTransportObservation.Capture(_controller, _assetVerified)
+                };
+            }
+            catch (Exception ex)
+            {
+                return new { version = 1, phase, state = "observation-error", error = ex.GetType().Name };
+            }
+        }
+
+        private void LogUsbipTransportLifecycleSafely(string phase)
+        {
+            try
+            {
+                // Refresh only at these sparse lifecycle boundaries. Detailed-log
+                // flag authority stays with Native; logging disabled means no reflection.
+                var evidence = CaptureUsbipTransportSafely(phase, CostLoggingRequestedByFlag());
+                if (evidence is null) return;
                 var line = JsonSerializer.Serialize(new
                 {
                     t = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds(),
-                    windowMs,
-                    frames = _costFrames,
-                    submitElapsedUs = new
-                    {
-                        p50 = Percentile(0.50),
-                        p95 = Percentile(0.95),
-                        max = count == 0 ? 0L : samples[count - 1]
-                    },
-                    jsonParseUs = new
-                    {
-                        n = _costJsonParseCount,
-                        mean = _costJsonParseCount == 0 ? 0L : _costJsonParseUsSum / _costJsonParseCount
-                    },
-                    hidSubmitUs = new
-                    {
-                        n = _costHidSubmitCount,
-                        mean = _costHidSubmitCount == 0 ? 0L : _costHidSubmitUsSum / _costHidSubmitCount
-                    },
-                    pipeReadUs = new
-                    {
-                        n = _costPipeReadCount,
-                        mean = _costPipeReadCount == 0 ? 0L : _costPipeReadUsSum / _costPipeReadCount
-                    },
-                    framesRejected = _costFramesRejected,
-                    gcPauseMsPerSec = ComputeGcPauseMsPerSec(windowMs),
-                    allocBytesPerSec = windowMs > 0 ? (long)(allocDelta * 1000.0 / windowMs) : 0,
-                    // GP-CPU2 P5：进程累计 CPU（含所有线程；与 byThread 的 top-4 不同口径）。
-                    procCpuMsPerSec = windowMs > 0 ? (long)Math.Round(procCpuDelta * 1000.0 / windowMs) : 0,
-                    allocPerFrame = _costFrames > 0 ? allocDelta / _costFrames : 0,
-                    hidhideQuery = new { full = _costHidHideQueryFull, state = _costHidHideQueryState },
-                    byThread,
-                    threads = proc.Threads.Count,
-                    gcHeapBytes = GC.GetTotalMemory(false),
-                    gen0 = GC.CollectionCount(0),
-                    gen1 = GC.CollectionCount(1),
-                    gen2 = GC.CollectionCount(2),
-                    phase = _phase.ToString()
+                    kind = "usbip-transport-lifecycle", usbipTransport = evidence
                 });
-                Directory.CreateDirectory(CostStateDir);
-                File.AppendAllText(Path.Combine(CostStateDir, "input-host-cost.log"),
-                    line + Environment.NewLine, System.Text.Encoding.UTF8);
+                if (Encoding.UTF8.GetByteCount(line) > 8192) return;
+                HostCostLog.Append(CostStateDir, line);
             }
-            catch { /* 诊断永不阻塞或改变控制路径 */ }
-            ResetCostWindow();
+            catch { /* diagnostic failure never changes target create/neutral/dispose */ }
         }
 
         private void ResetCostWindow()
@@ -2599,8 +3306,13 @@ internal static partial class Program
             _costHidHideQueryState = 0;
         }
 
-        private bool TrySubmitNeutral(out string detail)
+        private bool TrySubmitNeutral(out string detail, CommandEnvelope? diagnosticEnvelope = null, string diagnosticReason = "release-neutral")
         {
+            if (_tuple is null || !TryGetVirtualOutputProfile(_tuple.Persona, _tuple.ProfileIdentity, out var profileName))
+            {
+                detail = "persona-not-admitted";
+                return false;
+            }
             if (_controller is null || _context is null)
             {
                 detail = "target-not-ready";
@@ -2608,27 +3320,23 @@ internal static partial class Program
             }
             try
             {
-                var profileName = _tuple?.Persona switch
-                {
-                    "xbox360" => "xbox-360-wired",
-                    "steamdeck" => "steam-deck-composite",
-                    "dualsense" => "dualsense",
-                    "elite" => "xbox-elite-v2",                 // 批112
-                    "dualsense-edge" => "dualsense-edge",       // 批112
-                    _ => "dualshock-4-v2"
-                };
                 var profile = _context.GetProfile(profileName) ?? throw new InvalidOperationException("profile-missing:" + profileName);
                 var neutral = new CommandEnvelope(
                     "SUBMIT_NEUTRAL", "neutral", 1, "neutral", 1, 1, "target", "coordinator",
-                    _tuple?.Persona ?? "dualshock4", profileName, _startupNonce, 1, new string('0', 64));
+                    _tuple.Persona, profileName, _startupNonce, 1, new string('0', 64));
                 switch (neutral.Persona)
                 {
-                    case "xbox360": _controller.SubmitState(BuildXbox360State(profile, neutral)); break;
-                    case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, neutral); break;
-                    case "dualsense": _controller.SubmitRawReport(BuildDualSenseDataOnlyReport(profile, neutral, _dualSenseFrameCounter++)); break;
-                    case "elite": _controller.SubmitState(BuildXbox360State(profile, neutral)); break;   // 批112
-                    case "dualsense-edge": _controller.SubmitRawReport(BuildDualSenseDataOnlyReport(profile, neutral, _dualSenseFrameCounter++)); break;   // 批112
-                    default: _controller.SubmitRawReport(BuildDs4V2DataOnlyReport(profile, neutral, _ds4FrameCounter++)); break;
+                    case "steamdeck": SubmitSteamDeckWithScreenPads(_controller, profile, neutral, _costFlagEnabled, isNeutralCommand: true,
+                        signalSession: this, signalCause: diagnosticEnvelope, signalReason: diagnosticReason); break;
+                    case "elite": SubmitEliteReportChain1410(_controller, BuildEliteState(profile, neutral), diagnosticEnvelope, diagnosticReason, neutral); break;
+                    case "dualsense-edge":
+                    {
+                        var frameIndex = _dualSenseFrameCounter++;
+                        var report = BuildDualSenseDataOnlyReport(profile, neutral, frameIndex);
+                        SubmitSonyReportChain1410(_controller, diagnosticEnvelope, report, frameIndex, diagnosticReason, neutral);
+                        break;
+                    }
+                    default: throw new InvalidOperationException("persona-not-admitted");
                 }
                 _backendNeutralOk++;
                 _lastBackendDetail = "neutral-report-submitted";
@@ -2645,6 +3353,58 @@ internal static partial class Program
         }
 
         // GP-926R17 §4：后端 submit 聚合（HELLO 与每次 PREPARE/RECREATE 重置 ⇒ 只绑当前 tuple）。
+        // The callback takes only the observation lock; it never takes the lifecycle
+        // lock, performs pipe/device IO, decodes motors, or changes target ownership.
+        private void BindGameOutputObservation(CommandEnvelope envelope)
+        {
+            var detachDetail = DetachGameOutputObservation();
+            if (detachDetail.Length != 0) throw new InvalidOperationException(detachDetail);
+            if (_controller is null || !_targetPnpAdmitted) return;
+            var controller = _controller;
+            var observation = _gameOutputObservation;
+            var binding = observation.Bind(controller, envelope.ProfileIdentity);
+            Action<HMController, HMOutputPacket> callback = (sender, packet) =>
+                observation.Observe(binding, sender, (byte)packet.Source, packet.ReportId, packet.Data, packet.SeqNo);
+            _gameOutputController = controller;
+            _gameOutputCallback = callback;
+            _gameOutputTuple = envelope;
+            controller.OutputReceived += callback;
+        }
+
+        private string DetachGameOutputObservation()
+        {
+            // Invalidate first: an event invocation may already hold the old delegate.
+            _gameOutputObservation.Revoke();
+            var controller = _gameOutputController;
+            var callback = _gameOutputCallback;
+            _gameOutputTuple = null;
+            if (controller is not null && callback is not null)
+            {
+                try { controller.OutputReceived -= callback; }
+                catch (Exception ex)
+                {
+                    // Keep the exact delegate for retry. Observation authority is
+                    // already revoked; SDK stop/disposal must still run on release.
+                    return "game-output-detach:" + ex.GetType().Name;
+                }
+            }
+            _gameOutputController = null;
+            _gameOutputCallback = null;
+            return "";
+        }
+
+        private string AppendGameOutputObservation(string response, CommandEnvelope? envelope, bool ok)
+        {
+            var bindingReply = envelope?.Command is "PREPARE_TARGET" or "RECREATE_TARGET";
+            if ((!_gameOutputObservation.HasPending && !bindingReply) || !ok || envelope is null || _gameOutputTuple is null || _controller is null ||
+                !ReferenceEquals(_controller, _gameOutputController) || !SameTuple(_gameOutputTuple, envelope) ||
+                _phase is not (Phase.Prepared or Phase.Neutralized or Phase.Active)) return response;
+            // Reserve space for the existing bounded optional evidence appenders.
+            if (bindingReply) response = _gameOutputObservation.TryAppendBinding(response, _controller, MaxMessageBytes - 2048);
+            return _gameOutputObservation.TryAppend(response, _controller, MaxMessageBytes - 2048,
+                includeMotors: envelope.Command == "SUBMIT_FRAME");
+        }
+
         internal void ResetBackendSubmitStats()
         {
             _backendSubmitOk = 0;
@@ -2711,42 +3471,95 @@ internal static partial class Program
             }
         }
 
-        private string SerializeResponse(CommandEnvelope? envelope, bool ok, string status, string detail, bool? firstFrame, string? releaseDisposition) =>
-            JsonSerializer.Serialize(new
-            {
-                protocolVersion = ProtocolVersion,
+        private PsEndpointOwnership.Binding PsOwnershipBinding(CommandEnvelope envelope)
+        {
+            return new(_hostInstanceId, envelope.RunId, envelope.Epoch, envelope.TargetId, envelope.Persona);
+        }
+
+        private void CapturePsEndpointOwnership()
+        {
+            if (_tuple?.Persona == PsEndpointOwnership.Persona)
+                _psEndpointOwnership.Capture(_controller, _assetVerified, PsOwnershipCmReader.Instance);
+        }
+
+        private string AppendPsEndpointOwnership(string response, CommandEnvelope? envelope)
+        {
+            if (envelope?.Persona != PsEndpointOwnership.Persona || envelope.Command is not
+                ("PREPARE_TARGET" or "RECREATE_TARGET" or "QUERY_TARGET_OWNERSHIP")) return response;
+            return _psEndpointOwnership.Append(response, PsOwnershipBinding(envelope), MaxMessageBytes);
+        }
+
+        private string SerializeResponse(CommandEnvelope? envelope, bool ok, string status, string detail, bool? firstFrame, string? releaseDisposition)
+        {
+            var response = JsonSerializer.Serialize(new HostResponseFields(
+                ProtocolVersion,
                 ok,
-                command = envelope?.Command ?? "",
-                requestId = envelope?.RequestId ?? "",
-                sequence = envelope?.Sequence ?? 0UL,
-                hostInstanceId = _hostInstanceId,
-                runId = envelope?.RunId ?? "",
-                epoch = envelope?.Epoch ?? 0UL,
-                powerGeneration = envelope?.PowerGeneration ?? 0UL,
-                targetId = envelope?.TargetId ?? "",
-                ownerIdentity = envelope?.OwnerIdentity ?? "",
-                persona = envelope?.Persona ?? "",
-                profileIdentity = envelope?.ProfileIdentity ?? "",
-                startupNonce = envelope?.StartupNonce ?? "",
-                configRevision = envelope?.ConfigRevision ?? 0UL,
-                configHash = envelope?.ConfigHash ?? "",
+                envelope?.Command ?? "",
+                envelope?.RequestId ?? "",
+                envelope?.Sequence ?? 0UL,
+                _hostInstanceId,
+                envelope?.RunId ?? "",
+                envelope?.Epoch ?? 0UL,
+                envelope?.PowerGeneration ?? 0UL,
+                envelope?.TargetId ?? "",
+                envelope?.OwnerIdentity ?? "",
+                envelope?.Persona ?? "",
+                envelope?.ProfileIdentity ?? "",
+                envelope?.StartupNonce ?? "",
+                envelope?.ConfigRevision ?? 0UL,
+                envelope?.ConfigHash ?? "",
                 status,
                 detail,
-                assetVerified = _assetVerified,
-                lockedCoreSha256 = LockedCoreSha256,
-                lockedCoreMvid = LockedCoreMvid,
-                virtualEndpointReconciled = _virtualEndpointReconciled,
-                targetPnpAdmitted = _targetPnpAdmitted,
-                targetPnpRootCount = _virtualEndpoint.PrimaryRootCount + _virtualEndpoint.XboxCompanionRootCount,
-                targetPnpPrimaryRootCount = _virtualEndpoint.PrimaryRootCount,
-                targetPnpXboxCompanionRootCount = _virtualEndpoint.XboxCompanionRootCount,
-                targetPnpHidChildCount = _virtualEndpoint.HidChildCount,
-                targetPnpAllStarted = _virtualEndpoint.AllStarted,
-                targetPnpDetail = _virtualEndpoint.Detail,
+                _assetVerified,
+                LockedCoreSha256,
+                LockedCoreMvid,
+                _virtualEndpointReconciled,
+                _targetPnpAdmitted,
+                _virtualEndpoint.PrimaryRootCount + _virtualEndpoint.XboxCompanionRootCount,
+                _virtualEndpoint.PrimaryRootCount,
+                _virtualEndpoint.XboxCompanionRootCount,
+                _virtualEndpoint.HidChildCount,
+                _virtualEndpoint.AllStarted,
+                _virtualEndpoint.Detail,
                 firstFrame,
                 releaseDisposition,
-                submitElapsedUs = _lastSubmitElapsedUs,
-            });
+                _lastSubmitElapsedUs));
+            response = AppendGameOutputObservation(response, envelope, ok);
+            if (envelope is not null && envelope.Command is ("PREPARE_TARGET" or "RECREATE_TARGET" or "RELEASE_TARGET" or "SHUTDOWN") &&
+                _msiSteamDeckReleaseFence1726?.Evidence is not null && _msiSteamDeckReleaseFence1726.Matches(envelope))
+                response = response[..^1] + ",\"msiSteamDeckReleaseEvidence\":" +
+                    JsonSerializer.Serialize(_msiSteamDeckReleaseFence1726.Evidence) + "}";
+            if (envelope is not null && envelope.Command is ("RELEASE_TARGET" or "SHUTDOWN") &&
+                _msiNonSdReleaseDiagnosticBinding is { } diagnosticBinding && SameTuple(diagnosticBinding, envelope))
+                response = _msiNonSdReleaseDiagnostic?.TryAppend(response, MaxMessageBytes) ?? response;
+            if (envelope is not null)
+                response = _targetCreationLifetime?.TryAppend(response, envelope.Command, MaxMessageBytes) ?? response;
+            if (envelope?.Command is ("RELEASE_TARGET" or "SHUTDOWN") &&
+                _releaseTimingBinding is { } releaseBinding && SameTuple(releaseBinding, envelope) &&
+                releaseBinding.Command == envelope.Command && releaseBinding.RequestId == envelope.RequestId &&
+                releaseBinding.Sequence == envelope.Sequence)
+                response = _releaseTimingEvidence?.TryAppend(response, MaxMessageBytes) ?? response;
+            try
+            {
+                if (ok && envelope?.Command == "HELLO" && status == "host-hello")
+                {
+                    var capable = response[..^1] + ",\"msiReportChainDiagnosticVersion\":" + MsiReportChainProtocol1410.DiagnosticVersion + ",\"msiSteamDeckReleaseFenceVersion\":1,\"psEndpointOwnershipVersion\":1}";
+                    if (_msiNonSdReleaseDiagnosticRequested) capable = capable[..^1] + ",\"msiNonSdReleaseEvidenceVersion\":1}";
+                    capable = HostRuntimeBinaryIdentity.AppendToHello(capable, _runtimeBinaryIdentity, MaxMessageBytes);
+                    _reportChainCapabilityAdvertised1410 = true;
+                    return capable;
+                }
+                if (envelope?.Command == "PREPARE_TARGET" && envelope.ReportChainPrepareSpecified1410)
+                {
+                    var armed = ok && status == "target-prepared" && _reportChain1410?.Armed == true;
+                    var suffix = ",\"msiReportChainDiagnosticArmed\":" + (armed ? "true" : "false");
+                    if (armed) suffix += ",\"msiReportChainDiagnosticSessionId\":" + JsonSerializer.Serialize(_reportChain1410!.SessionId);
+                    return AppendPsEndpointOwnership(response[..^1] + suffix + "}", envelope);
+                }
+            }
+            catch { }
+            return AppendPsEndpointOwnership(response, envelope);
+        }
 
         private static bool TryVerifyLockedAsset(out string detail)
         {
@@ -2776,11 +3589,23 @@ internal static partial class Program
     // 单消费者调用（会话锁内），ThreadStatic 足够且不跨会话串用；判据与优先级逐字不变。
     [ThreadStatic] private static Dictionary<string, JsonElement>? t_fieldCache;
 
+    private static bool TryGetVirtualOutputProfile(string persona, string profileIdentity, out string profileName)
+    {
+        profileName = persona switch
+        {
+            "steamdeck" => "steam-deck-composite",
+            "dualsense-edge" => "dualsense-edge",
+            "elite" => "xbox-elite-v2",
+            _ => ""
+        };
+        return profileName.Length != 0 && profileIdentity == profileName;
+    }
+
     private static bool TryParseEnvelope(string message, out CommandEnvelope? envelope, out string error)
     {
         envelope = null;
         error = "invalid-json";
-        if (string.IsNullOrWhiteSpace(message) || Encoding.UTF8.GetByteCount(message) > MaxMessageBytes) return false;
+        if (string.IsNullOrWhiteSpace(message) || (message.Length > MaxMessageBytes / 3 && Encoding.UTF8.GetByteCount(message) > MaxMessageBytes)) return false;
         try
         {
             using var document = JsonDocument.Parse(message, new JsonDocumentOptions { AllowTrailingCommas = false, CommentHandling = JsonCommentHandling.Disallow });
@@ -2794,15 +3619,22 @@ internal static partial class Program
             //   （裁决方实跑确认：提前拒绝会改变反例的判定优先级）。
             var properties = t_fieldCache ??= new Dictionary<string, JsonElement>(StringComparer.Ordinal);
             properties.Clear();
+            var prepareMetadataDuplicate1410 = false;
+            var sourceMetadataDuplicate1410 = false;
             foreach (var property in root.EnumerateObject())
             {
-                if (!properties.TryAdd(property.Name, property.Value)) { error = "duplicate-field:" + property.Name; return false; }
+                if (!properties.TryAdd(property.Name, property.Value))
+                {
+                    if (property.Name == MsiReportChainProtocol1410.PrepareField) { prepareMetadataDuplicate1410 = true; continue; }
+                    if (property.Name == MsiReportChainProtocol1410.SourceField) { sourceMetadataDuplicate1410 = true; continue; }
+                    error = "duplicate-field:" + property.Name; return false;
+                }
             }
             if (!TryReadString(properties, "command", 32, out var command)) { error = "invalid-command"; return false; }
             if (command is not ("HELLO" or "PREPARE_TARGET" or "RECREATE_TARGET" or "SUBMIT_NEUTRAL" or "SUBMIT_FRAME"
                 // F3-B：KEEPALIVE 已从协议白名单移除（第八十一批 B-变体）。
                 // GP-926R17 §4：只读聚合回执命令（绑当前 tuple；native 唤醒/借用结算低频调用）。
-                or "TUPLE_SUBMIT_STATS"
+                or "TUPLE_SUBMIT_STATS" or "QUERY_TARGET_OWNERSHIP"
                 or "QUIESCE" or "RELEASE_TARGET" or "SHUTDOWN"
                 or "HIDHIDE_HIDE" or "HIDHIDE_UNHIDE" or "HIDHIDE_CLOAK" or "HIDHIDE_APP_REG" or "HIDHIDE_APP_UNREG" or "HIDHIDE_QUERY" or "HIDHIDE_QUERY_STATE" or "HIDHIDE_CYCLE"
                 // GP-GBRETURN-1：关闭归还专用（短受理/有界查询）——只在关闭刷新用，不是第二写者。
@@ -2816,7 +3648,7 @@ internal static partial class Program
             var unknownFieldSeen = false;
             foreach (var key in properties.Keys)
             {
-                if (!allowed.Contains(key)) { unknownFieldSeen = true; break; }
+                if (!allowed.Contains(key) && !MsiReportChainProtocol1410.IsMetadataField(key) && key != MsiSteamDeckReleaseFence1726.PrepareField) { unknownFieldSeen = true; break; }
             }
             if (unknownFieldSeen) { error = "unknown-field"; return false; }
             if (!TryReadUInt64(properties, "protocolVersion", out var version) || version != ProtocolVersion) { error = "protocol-version"; return false; }
@@ -2837,7 +3669,23 @@ internal static partial class Program
                 return false;
             }
 
+            if (!TryGetVirtualOutputProfile(persona, profileIdentity, out _))
+            {
+                error = "persona-not-admitted";
+                return false;
+            }
+
             var parsed = new CommandEnvelope(command, requestId, sequence, runId, epoch, powerGeneration, targetId, ownerIdentity, persona, profileIdentity, startupNonce, configRevision, configHash);
+            if (properties.TryGetValue(MsiSteamDeckReleaseFence1726.PrepareField, out var releaseFence))
+            {
+                if (command != "PREPARE_TARGET" || persona != "steamdeck" || profileIdentity != "steam-deck-composite" ||
+                    releaseFence.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+                {
+                    error = "invalid-msi-steamdeck-release-fence";
+                    return false;
+                }
+                parsed = parsed with { MsiSteamDeckReleaseFence = releaseFence.GetBoolean() };
+            }
             var physicalBaseContainerInstanceId = "";
             var physicalDeviceInstanceId = "";
             if (properties.ContainsKey("physicalBaseContainerInstanceId") &&
@@ -2852,20 +3700,26 @@ internal static partial class Program
                 error = "invalid-physical-device-instance-id";
                 return false;
             }
-            parsed = parsed with
+            // Optional physical/HidHide fields keep their validated values.
+            // With no such values the fresh base record already has these defaults.
+            if (physicalBaseContainerInstanceId.Length != 0 || physicalDeviceInstanceId.Length != 0 ||
+                command.StartsWith("HIDHIDE_", StringComparison.Ordinal))
             {
-                PhysicalBaseContainerInstanceId = properties.TryGetValue("physicalBaseContainerInstanceId", out _)
-                    ? physicalBaseContainerInstanceId : "",
-                PhysicalDeviceInstanceId = properties.TryGetValue("physicalDeviceInstanceId", out _)
-                    ? physicalDeviceInstanceId : "",
-                HidHidePath = properties.TryGetValue("path", out _)
-                    ? (properties["path"].ValueKind == JsonValueKind.String ? properties["path"].GetString() ?? "" : "")
-                    : "",
-                HidHideOn = properties.TryGetValue("on", out _)
-                    ? properties["on"].ValueKind == JsonValueKind.True : false,
-                HidHideCloak = properties.TryGetValue("cloak", out _)
-                    ? properties["cloak"].ValueKind == JsonValueKind.True : false
-            };
+                parsed = parsed with
+                {
+                    PhysicalBaseContainerInstanceId = properties.TryGetValue("physicalBaseContainerInstanceId", out _)
+                        ? physicalBaseContainerInstanceId : "",
+                    PhysicalDeviceInstanceId = properties.TryGetValue("physicalDeviceInstanceId", out _)
+                        ? physicalDeviceInstanceId : "",
+                    HidHidePath = properties.TryGetValue("path", out _)
+                        ? (properties["path"].ValueKind == JsonValueKind.String ? properties["path"].GetString() ?? "" : "")
+                        : "",
+                    HidHideOn = properties.TryGetValue("on", out _)
+                        ? properties["on"].ValueKind == JsonValueKind.True : false,
+                    HidHideCloak = properties.TryGetValue("cloak", out _)
+                        ? properties["cloak"].ValueKind == JsonValueKind.True : false
+                };
+            }
             if (command == "SUBMIT_FRAME")
             {
                 if (!TryReadInt32(properties, "buttons", out var buttons) || buttons < 0 || buttons > 0xffff ||
@@ -2889,8 +3743,12 @@ internal static partial class Program
                 // the canonical value when a legacy coordinator omits them.
                 var ltRaw = lt;
                 var rtRaw = rt;
-                TryReadTrigger(properties, "ltRaw", out ltRaw);
-                TryReadTrigger(properties, "rtRaw", out rtRaw);
+                if ((properties.ContainsKey("ltRaw") && !TryReadTrigger(properties, "ltRaw", out ltRaw)) ||
+                    (properties.ContainsKey("rtRaw") && !TryReadTrigger(properties, "rtRaw", out rtRaw)))
+                {
+                    error = "invalid-frame";
+                    return false;
+                }
                 // 7.52 P1-T1：raw 域（原生 SHORT/BYTE）可选解析；缺省
                 // HasRawDomain=false，编码链回退 canonical float 域（Q1）。
                 var hasRaw = properties.TryGetValue("raw", out var rawElement) &&
@@ -2916,16 +3774,14 @@ internal static partial class Program
                 var imuGyroX = 0.0; var imuGyroY = 0.0; var imuGyroZ = 0.0;
                 var imuAccelX = 0.0; var imuAccelY = 0.0; var imuAccelZ = 0.0;
                 var imuQuatW = 1.0; var imuQuatX = 0.0; var imuQuatY = 0.0; var imuQuatZ = 0.0;
+                var imuQuaternionPresent = false;
                 if (properties.TryGetValue("imu", out var imuElement) && imuElement.ValueKind == JsonValueKind.Object)
                 {
                     if (imuElement.TryGetProperty("admitted", out var admittedEl) && admittedEl.ValueKind == JsonValueKind.True)
                         imuAdmitted = true;
                     TryReadImuAxis(imuElement, "gyroDps", ref imuGyroX, ref imuGyroY, ref imuGyroZ);
                     TryReadImuAxis(imuElement, "accelG", ref imuAccelX, ref imuAccelY, ref imuAccelZ);
-                    TryReadImuAxis(imuElement, "quaternion", ref imuQuatW, ref imuQuatX, ref imuQuatY);
-                    if (imuElement.TryGetProperty("quaternion", out var quatEl) && quatEl.ValueKind == JsonValueKind.Object &&
-                        quatEl.TryGetProperty("z", out var quatZ) && quatZ.ValueKind == JsonValueKind.Number)
-                        imuQuatZ = quatZ.GetDouble();
+                    imuQuaternionPresent = TryReadImuQuaternion(imuElement, out imuQuatW, out imuQuatX, out imuQuatY, out imuQuatZ);
                 }
                 // 背键映射 Phase A（背键映射A任务书 2026-09-14 S4）：可选字段，
                 // 缺省 0（老 native 不发→零污染）；clamp 0..15（bit0=M1、bit1=M2）。
@@ -2939,7 +3795,7 @@ internal static partial class Program
                 {error="invalid-screen-buttons";return false;}
                 var padsPresent = properties.TryGetValue("touchpads", out var padsElement);
                 ScreenPad padLeft = default, padRight = default;
-                if (padsPresent && ((persona is not ("steamdeck" or "dualsense" or "dualsense-edge" or "dualshock4")) || !TryReadScreenPads(padsElement, out padLeft, out padRight)))
+                if (padsPresent && ((persona is not ("steamdeck" or "dualsense-edge")) || !TryReadScreenPads(padsElement, out padLeft, out padRight)))
                 { error = "invalid-touchpads"; return false; }
                 parsed = parsed with
                 {
@@ -2958,10 +3814,11 @@ internal static partial class Program
                     ImuGyroX = imuGyroX, ImuGyroY = imuGyroY, ImuGyroZ = imuGyroZ,
                     ImuAccelX = imuAccelX, ImuAccelY = imuAccelY, ImuAccelZ = imuAccelZ,
                     ImuQuatW = imuQuatW, ImuQuatX = imuQuatX, ImuQuatY = imuQuatY, ImuQuatZ = imuQuatZ,
+                    ImuQuaternionPresent = imuQuaternionPresent,
                     BackButtons = backButtons,
                 };
             }
-            envelope = parsed;
+            envelope = AttachReportChainMetadata1410Safely(parsed, properties, prepareMetadataDuplicate1410, sourceMetadataDuplicate1410);
             return true;
         }
         catch (JsonException)
@@ -2971,12 +3828,32 @@ internal static partial class Program
         }
     }
 
+    private static CommandEnvelope AttachReportChainMetadata1410Safely(CommandEnvelope parsed,
+        IReadOnlyDictionary<string, JsonElement> properties, bool prepareDuplicate, bool sourceDuplicate)
+    {
+        try
+        {
+            var prepareSpecified = parsed.Command == "PREPARE_TARGET" && properties.TryGetValue(MsiReportChainProtocol1410.PrepareField, out _);
+            MsiReportChainPrepare1410? prepare = null; MsiReportChainSource1410? source = null;
+            if (prepareSpecified && !prepareDuplicate && properties.TryGetValue(MsiReportChainProtocol1410.PrepareField, out var p))
+                prepare = MsiReportChainProtocol1410.ParsePrepareSafely(p, parsed.Command, parsed.RunId, parsed.Epoch, parsed.PowerGeneration);
+            if (!sourceDuplicate && properties.TryGetValue(MsiReportChainProtocol1410.SourceField, out var f))
+                source = MsiReportChainProtocol1410.ParseSourceSafely(f, parsed.Command);
+            if (!prepareSpecified && prepare is null && source is null) return parsed;
+            return parsed with { ReportChainPrepareSpecified1410 = prepareSpecified, ReportChainPrepare1410 = prepare, ReportChainSource1410 = source };
+        }
+        catch { return parsed; }
+    }
+
     private static bool TryReadString(IReadOnlyDictionary<string, JsonElement> properties, string name, int maxLength, out string value)
     {
         value = "";
         if (!properties.TryGetValue(name, out var element) || element.ValueKind != JsonValueKind.String) return false;
         value = element.GetString() ?? "";
-        return value.Length is > 0 and <= 160 && value.Length <= maxLength && !value.Any(char.IsControl);
+        if (value.Length is not (> 0 and <= 160) || value.Length > maxLength) return false;
+        for (var i = 0; i < value.Length; i++)
+            if (char.IsControl(value[i])) return false;
+        return true;
     }
 
     private static bool TryReadUInt64(IReadOnlyDictionary<string, JsonElement> properties, string name, out ulong value)
@@ -3043,13 +3920,39 @@ internal static partial class Program
         if (axis.TryGetProperty("z", out var ez) && ez.ValueKind == JsonValueKind.Number) z = ez.GetDouble();
     }
 
-    private static bool IsSha256(string value) => value.Length == 64 && value.All(Uri.IsHexDigit);
+    private static bool TryReadImuQuaternion(JsonElement imu, out double w, out double x, out double y, out double z)
+    {
+        w=1.0; x=y=z=0.0;
+        if (!imu.TryGetProperty("quaternion", out var q) || q.ValueKind != JsonValueKind.Object) return false;
+        static bool Component(JsonElement q, string key, out double value)
+        {
+            value=0;
+            return q.TryGetProperty(key,out var e) && e.ValueKind==JsonValueKind.Number &&
+                e.TryGetDouble(out value) && double.IsFinite(value);
+        }
+        if (!Component(q,"w",out var qw) || !Component(q,"x",out var qx) ||
+            !Component(q,"y",out var qy) || !Component(q,"z",out var qz)) return false;
+        w=qw; x=qx; y=qy; z=qz;
+        return true;
+    }
+
+    private static bool IsSha256(string value)
+    {
+        // Keep the length/null gate and the runtime hex predicate unchanged.
+        // Scan in order without allocating a LINQ string enumerator.
+        if (value.Length != 64) return false;
+        for (var i = 0; i < value.Length; i++)
+        {
+            if (!Uri.IsHexDigit(value[i])) return false;
+        }
+        return true;
+    }
 
     private static string CanonicalFrameHash(int buttons, float lx, float ly, float rx, float ry, float lt, float rt)
     {
         // Keep the existing decimal-buttons + six uppercase IEEE-754 X8 words.
         // Write the same UTF-8 bytes directly; do not normalize signed zero or
-        // quantize input. Only the returned 64-character hash is allocated.
+        // quantize input. Byte-identical frames reuse only a successful hash.
         // 256 also covers the legacy 79-char limit with a non-ASCII minus sign.
         Span<byte> canonical = stackalloc byte[256];
         if (!buttons.TryFormat(canonical, out var count))
@@ -3060,9 +3963,7 @@ internal static partial class Program
         AppendFrameHashBits(canonical, ref count, ry);
         AppendFrameHashBits(canonical, ref count, lt);
         AppendFrameHashBits(canonical, ref count, rt);
-        Span<byte> hash = stackalloc byte[32];
-        SHA256.HashData(canonical[..count], hash);
-        return Convert.ToHexStringLower(hash);
+        return CanonicalFrameFingerprintMemo.GetOrCompute(canonical[..count]);
     }
 
     private static void AppendFrameHashBits(Span<byte> destination, ref int count, float value)
@@ -3080,114 +3981,30 @@ internal static partial class Program
         left.ProfileIdentity == right.ProfileIdentity && left.StartupNonce == right.StartupNonce &&
         left.ConfigRevision == right.ConfigRevision && left.ConfigHash == right.ConfigHash;
 
-    private static byte[] BuildDs4V2DataOnlyReport(HMProfile profile, CommandEnvelope envelope, long counter)
+
+
+    // Shared signed-16 motion quantization for the current report builders.
+    // A signed-16 report saturates at its endpoints. Preserve each target's
+    // existing in-range rounding/truncation; never wrap a positive IMU value.
+    private static short QuantizeMotionAxis(double value, double scale, bool roundToNearest = false)
     {
-        // T12 fail-closed 已解除（2026-09-13 GYRO-WIRE，T1 布局取证定案）：
-        // dualshock-4-v2 profile 字段表（stock dll 内嵌资源实提）：
-        //   gyroPitch wire15 / gyroYaw wire17 / gyroRoll wire19
-        //   accelX   wire21 / accelY   wire23 / accelZ   wire25（均 int16-le）
-        // 与 HC DualShock4Target.cs:92-103 的编码契约一致
-        // （dps clamp ±2048 ×16；m/s^2 clamp ±64 ×512），fail-zero 保留。
-        if (profile.InputReportSize != 64)
-            throw new InvalidOperationException("ds4-v2-wire-size-mismatch:" + profile.InputReportSize);
-
-        // HIDMaestro's SubmitRawReport contract is data-only for this profile;
-        // the driver supplies report ID 0x01. These indexes are therefore one
-        // less than the profile's wire-byte offsets. The layout is derived
-        // from the locked dualshock-4-v2 profile, not copied from HC's 31-byte
-        // VIIPER report.
-        var data = new byte[63];
-        data[0] = AxisToByte(envelope.Lx);
-        data[1] = AxisToByte(-envelope.Ly); // HC DS4 target negates stick Y.
-        data[2] = AxisToByte(envelope.Rx);
-        data[3] = AxisToByte(-envelope.Ry);
-        data[4] = (byte)(MapHatOctant(envelope.Buttons) | MapFaceButtons(envelope.Buttons));
-        // HC DualShock4Target.cs:40-41: the DS4 L2/R2 digital bits are asserted
-        // on the raw trigger value (> 0), and data[7]/[8] carry the raw value
-        // unchanged — there is no canonical 30/255 deadzone on the DS4 wire.
-        // G8: consume LtRaw (pre-canonicalized) so a light 1..30 press asserts
-        // the bit and keeps its analog value, exactly like HC.
-        data[5] = MapDigitalButtons(envelope.Buttons, envelope.LtRaw > 0f, envelope.RtRaw > 0f);
-        // wire 7 = PS(bit0) + TPAD 键(bit1) + 6-bit 每帧计数器(bit2-7)：真实 DS4 每帧
-        // 递增该计数器（ds4drv device.py 以 buf[7] >> 2 作为 timestamp；HIDMaestro
-        // 的 dualshock-4-v2 描述符也把 data[6] bits2-7 声明为 vendor 0x20、log 0..127
-        // 的 6-bit 字段）。写死 0 会让消费者把连续帧视为同一时间戳。屏幕原生触摸贡献者在下方单独写入 bit1，不能覆盖 PS 或帧计数器。
-        data[6] = (byte)((byte)((envelope.Buttons & 0x0400) != 0 || (envelope.ScreenButtons & 1) != 0 ? 0x01 : 0x00) | (byte)((counter & 0x3F) << 2));
-        data[7] = TriggerToByte(envelope.LtRaw);
-        data[8] = TriggerToByte(envelope.RtRaw);
-        // wire 9-10 = 16-bit timestamp（SDL3 PS4StatePacket_t.rgucTimestamp；同时
-        // ds4drv 的 1-based buf[9]/[10] 位置）。**真机实测（2026-09-16，DS4 v1
-        // 054C:05C4 直读）**：该字段每帧递增 ~750 @250Hz ⇒ 单位速率 187,500/s
-        // （≈5.33µs/单位），16-bit 回绕 —— 我们按同一"单位速率"折算到本产品 8ms
-        // 节拍（HC 默认档，见 inputCaptureRefreshEffectiveTickPeriod）：
-        // 187,500 × 0.008 = 1500/帧。写死 0 会让消费者算不出时间推进（A/B 对照
-        // 曾报 `changed THERE but never here: timestamp`）。
-        var wireTimestamp = (ushort)((counter * Ds4WireTimestampUnitsPerFrame) & 0xFFFF);
-        data[9] = (byte)(wireTimestamp & 0xFF);
-        data[10] = (byte)((wireTimestamp >> 8) & 0xFF);
-
-        // DS4 IMU 六轴（2026-09-16 线缆错位修复，替换 2026-09-13 T1 结论）：
-        // 权威布局 = 两个独立消费者实现一致：
-        //   · SDL3 src/joystick/hidapi/SDL_hidapi_ps4.c: PS4StatePacket_t 字段序
-        //     sticks(4) buttonsHatCounter(3) triggers(2) timestamp(2) pad(1)
-        //     gyro[3](6) accel[3](6) pad(5) battery(1) pad(4) touch1(4) touch2(4)
-        //     → packet index = wire-1 ⇒ gyro wire 13/15/17、accel wire 19/21/23
-        //   · ds4drv ds4drv/device.py parse_report：S16LE at buf[13]/[15]/[17]（gyro）、
-        //     buf[19]/[21]/[23]（accel）、battery buf[30]&0x0F、touch id buf[35]/[39]
-        // 旧值 data[14..25]（wire 15..26）取自 dualshock-4-v2.json 扩展元数据，而
-        // 同一份元数据在 touch（标签 38/42 vs 实际 35/39）与 battery（标签 14 vs
-        // 实际 30）已被证伪（见上方常量注释）→ 不能作为线缆位置依据。旧布局下
-        // 消费者会把 accelY/Z 读成 gyroZ/accelX，且 gyroX 恒为 0。
-        // 缩放契约：gyro = dps × 16（SDL 回退 gyro_numerator/denominator=1/16；
-        // ±2048 dps 满量程 / int16）；accel = g × 8192（SDL 回退 1/8192 与 Linux
-        // hid-playstation DS4_ACC_RES_PER_G=8192；±4 g 满量程）。HC 的 ×9.81/×512
-        // 公式属 VIIPER 自描述设备的契约，在真实 DS4 线缆上差 1.63×。
-        if (envelope.ImuAdmitted)
-        {
-            WriteDs4ImuLe16(data, 12, envelope.ImuGyroX, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 14, envelope.ImuGyroY, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 16, envelope.ImuGyroZ, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 18, envelope.ImuAccelX, 8192.0, 4.0);
-            WriteDs4ImuLe16(data, 20, envelope.ImuAccelY, 8192.0, 4.0);
-            WriteDs4ImuLe16(data, 22, envelope.ImuAccelZ, 8192.0, 4.0);
-        }
-
-        // Wire byte 30 common status[0] carries the DS4 battery capacity nibble
-        // (Linux hid-playstation / InputMapper contract; data index 29 in this
-        // data-only layout, report id is prepended by the driver). Zero makes
-        // Steam show "电量不足 5%"; the HMGamepadState presentation bypasses
-        // this raw path, so it must be written here. Full is the USER-APPROVED
-        // product delta (P103).
-        data[Ds4WireBatteryLevelIndex] = Ds4WireBatteryFull;
-
-        // One DS4 USB touch packet per frame, including a disabled-contact
-        // release packet. Data-only offsets correspond to wire bytes 33/35/39.
-        WriteDs4ScreenPads(data,envelope,counter);
-        return data;
+        if (!double.IsFinite(value)) return 0;
+        var counts = value * scale;
+        if (counts >= short.MaxValue) return short.MaxValue;
+        if (counts <= short.MinValue) return short.MinValue;
+        return (short)(roundToNearest ? Math.Round(counts) : counts);
     }
 
-    // HC DualShock4Target.cs:93-97/110-114 的 clamp→scale→short 编码（纯数学，无状态）。
-    private static void WriteDs4ImuLe16(byte[] data, int index, double raw, double scale, double clampAbs)
+    private static void WriteSonyImuLe16(byte[] data, int index, double raw, double scale, double clampAbs)
     {
-        var value = (short)Math.Round(Math.Clamp(raw, -clampAbs, clampAbs) * scale);
+        var value = QuantizeMotionAxis(Math.Clamp(raw, -clampAbs, clampAbs), scale, roundToNearest: true);
         data[index] = (byte)(value & 0xFF);
         data[index + 1] = (byte)((value >> 8) & 0xFF);
     }
 
-    // DualSense persona（2026-09-16 新增）：dualsense profile 走 SubmitRawReport
-    // （data-only；驱动补 report id 0x01）。线缆布局以两个独立实现为准，且二者
-    // 对 DualSense 的标注完全一致（与 DS4 的"元数据被证伪"情形相反）：
-    //   · Linux hid-playstation struct dualsense_input_report（索引 = wire-1）：
-    //     x,y,rx,ry(0-3) z,rz(4-5) seq(6) buttons[4](7-10) reserved(11-14)
-    //     gyro[3](15-20) accel[3](21-26) sensorTimestamp(27-30) reserved(31)
-    //     touch[2](32-39，4 字节/点) reserved(40-51) status[3](52-54) reserved(55-62)
-    //   · HIDMaestro dualsense extendedReport：sticks 1-4 / triggers 5-6 / seq 7 /
-    //     gyro 16,18,20 / accel 22,24,26 / sensorTimestamp 28 / touchpad 33,37 ——一致
-    // 按钮：buttons[0] = dpad 低 4 位 + face(0x10 方块/0x20 叉/0x40 圆/0x80 三角)；
-    //   buttons[1] = L1/R1/L2/R2/Share/Options/L3/R3；buttons[2] = PS/触摸板/Mute。
-    // 缩放：gyro = dps × 16、accel = g × 8192（与 CNN 无关：Linux DS_GYRO/ACC_RES 与
-    //   SDL PS4/PS5 回退系数 1/16、1/8192 同源）；sensor_timestamp 单位 0.333µs。
-    // 批112：edgePaddles 缺省 0 ⇒ dualsense 的输出**逐字节不变**（老的不变）。
+    // Edge uses the current 63-byte Sony data-only layout; the driver prepends 0x01.
+    // Sticks 0..3, triggers 4..5, sequence 6, buttons 7..10, gyro 15..20,
+    // accel 21..26, timestamp 27..30, contacts 32..39, status 52..54.
     private static byte[] BuildDualSenseDataOnlyReport(HMProfile profile, CommandEnvelope envelope, long frameIndex,
         int edgePaddles = 0)
     {
@@ -3201,7 +4018,7 @@ internal static partial class Program
         data[4] = TriggerToByte(envelope.LtRaw);   // wire 5 = z (L2)
         data[5] = TriggerToByte(envelope.RtRaw);   // wire 6 = rz (R2)
         // seq_number（wire 7）：真实 DualSense 每帧递增；写死会让部分消费者把连续
-        // 帧视为同一包（DS4 分支的同类字段在 wire 7 bits2-7）。
+        // 帧视为同一包。
         data[6] = (byte)(frameIndex & 0xFF);
         data[7] = (byte)(MapHatOctant(envelope.Buttons) | MapFaceButtons(envelope.Buttons));
         data[8] = MapDigitalButtons(envelope.Buttons, envelope.LtRaw > 0f, envelope.RtRaw > 0f);
@@ -3217,12 +4034,12 @@ internal static partial class Program
         }
         if (envelope.ImuAdmitted)
         {
-            WriteDs4ImuLe16(data, 15, envelope.ImuGyroX, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 17, envelope.ImuGyroY, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 19, envelope.ImuGyroZ, 16.0, 2048.0);
-            WriteDs4ImuLe16(data, 21, envelope.ImuAccelX, 8192.0, 4.0);
-            WriteDs4ImuLe16(data, 23, envelope.ImuAccelY, 8192.0, 4.0);
-            WriteDs4ImuLe16(data, 25, envelope.ImuAccelZ, 8192.0, 4.0);
+            WriteSonyImuLe16(data, 15, envelope.ImuGyroX, 16.0, 2048.0);
+            WriteSonyImuLe16(data, 17, envelope.ImuGyroY, 16.0, 2048.0);
+            WriteSonyImuLe16(data, 19, envelope.ImuGyroZ, 16.0, 2048.0);
+            WriteSonyImuLe16(data, 21, envelope.ImuAccelX, 8192.0, 4.0);
+            WriteSonyImuLe16(data, 23, envelope.ImuAccelY, 8192.0, 4.0);
+            WriteSonyImuLe16(data, 25, envelope.ImuAccelZ, 8192.0, 4.0);
         }
         // sensor_timestamp（wire 28-31 = data[27..30]，uint32 LE，单位 0.333µs）：真机 250Hz
         // 下为 12012 单位/4ms；本产品节拍是 8ms（HC 默认档），要表达相同的"经过时间"
@@ -3233,42 +4050,23 @@ internal static partial class Program
         data[29] = (byte)((ts >> 16) & 0xFF);
         data[30] = (byte)((ts >> 24) & 0xFF);
         // 触摸点 0/1（wire 33-36 / 37-40 = data[32..35] / [36..39]）：contact 字节最高
-        // 位 = 无效触点（DS_TOUCH_POINT_INACTIVE），与 DS4 分支同语义；全 0 会被消费
+        // 位 = 无效触点（DS_TOUCH_POINT_INACTIVE）；全 0 会被消费
         // 者读成"在 (0,0) 的活跃触点"。
         WriteDualSenseScreenPads(data,envelope);
 
         // status[0]（wire 53 = data[52]）低半字节 = 电量 0..10、bit4 = 有线位。
-        // 与 DS4 分支同一用户批准 delta（P103）：写满电、无有线位，避免 Steam
+        // 保留已批准的满电、无有线位状态，避免 Steam
         // 显示"电量不足 5%"。
-        data[52] = Ds4WireBatteryFull;
+        data[52] = SonyWireBatteryFull;
         return data;
     }
 
-    // 批115（2026-09-24 实机 RCA，19:05 包）：本 builder 同时服务 xbox360 与 elite 两档。
-    // stock profile 逐字段实证：
-    //   · xbox-360-wired   inputReportSize=18  triggerMode=combined  扳机轴 Vx/Vy
-    //   · xbox-elite-v2    inputReportSize=0   triggerMode=separate  扳机轴 Z/Rz
-    //     （USB XboxGIP 的 262 B 描述符由 SDK 推导 ⇒ profile 未声明尺寸，声明值 0）
-    //   · xbox-elite-v2-bt inputReportSize=17  triggerMode=separate  扳机轴 Z/Rz
-    //   · xbox-series-xs   inputReportSize=0   triggerMode=separate  扳机轴 Z/Rz
-    // 旧守卫对**任何** ≠18 的 profile 一律抛 ⇒ elite 每次中性/帧提交都抛
-    // InvalidOperationException（现场 Host 拒绝日志三条 neutral-exception 即此），塔永不
-    // neutralize（发布门挡掉全部输入帧）且停止进不了有序拆除 ⇒ release-unproven + 隔离
-    // ⇒"切换要关再开"。修复：GIP 族不套 360 的尺寸断言（其尺寸由 SDK 推导），轴按 profile。
-    private static bool UsesSeparateTriggerAxes(HMProfile profile) => profile.Id switch
+    // Keep Elite's SDK State encoding, unsigned stick domain and separate Z/Rz triggers.
+    // The USB profile's report size remains SDK-derived.
+    private static HMGamepadState BuildEliteState(HMProfile profile, CommandEnvelope envelope)
     {
-        "xbox-elite-v2" => true,
-        "xbox-elite-v2-bt" => true,
-        "xbox-series-xs" => true,
-        "xbox-series-xs-bt" => true,
-        _ => false,
-    };
-
-    private static HMGamepadState BuildXbox360State(HMProfile profile, CommandEnvelope envelope)
-    {
-        var separateTriggers = UsesSeparateTriggerAxes(profile);
-        if (!separateTriggers && profile.InputReportSize != 18)
-            throw new InvalidOperationException("xbox-360-wire-size-mismatch:" + profile.InputReportSize);
+        if (profile.Id != "xbox-elite-v2")
+            throw new InvalidOperationException("elite-profile-not-admitted:" + profile.Id);
         var buttons = HMButton.None;
         if ((envelope.Buttons & 0x1000) != 0) buttons |= HMButton.A;
         if ((envelope.Buttons & 0x2000) != 0) buttons |= HMButton.B;
@@ -3287,29 +4085,26 @@ internal static partial class Program
         {
             Buttons = buttons,
             Hat = octant == 8 ? HMHat.None : (HMHat)(octant + 1),
-            Axes = new Dictionary<HMAxis, float>
+            Axes = new Dictionary<HMAxis, float>(6)
             {
-                // The locked Xbox 360 profile's report builder consumes its
+                // The current SDK State encoder consumes its
                 // standard stick values in the unsigned 0..1 report domain,
                 // even though the canonical B frame is signed -1..1. Empirical
                 // XInput readback is the contract here: 0.5 is center; passing
                 // signed zero produces (-32768,+32767) full-scale output.
                 // Preserve HC's Y direction convention before conversion.
-                [HMAxis.X] = Xbox360StickAxis(envelope.Lx),
-                [HMAxis.Y] = Xbox360StickAxis(-envelope.Ly),
-                [HMAxis.Rx] = Xbox360StickAxis(envelope.Rx),
-                [HMAxis.Ry] = Xbox360StickAxis(-envelope.Ry),
-                // HC Xbox360Target.cs:48-49 writes data[4]/[5] as the raw
-                // AxisState trigger (0..255, no canonical deadzone). G8:
-                // consume LtRaw/RtRaw so a light 1..30 press stays on the wire.
-                // 批115：扳机轴按 profile 的 layout（combined ⇒ Vx/Vy；separate ⇒ Z/Rz）。
-                [separateTriggers ? HMAxis.Z : HMAxis.Vx] = envelope.LtRaw,
-                [separateTriggers ? HMAxis.Rz : HMAxis.Vy] = envelope.RtRaw,
+                [HMAxis.X] = UnitStickAxis(envelope.Lx),
+                [HMAxis.Y] = UnitStickAxis(-envelope.Ly),
+                [HMAxis.Rx] = UnitStickAxis(envelope.Rx),
+                [HMAxis.Ry] = UnitStickAxis(-envelope.Ry),
+                // Preserve the raw trigger values without a canonical deadzone.
+                [HMAxis.Z] = envelope.LtRaw,
+                [HMAxis.Rz] = envelope.RtRaw,
             }
         };
     }
 
-    private static float Xbox360StickAxis(float value) =>
+    private static float UnitStickAxis(float value) =>
         Math.Clamp((value + 1f) * 0.5f, 0f, 1f);
 
     // SteamDeck persona（G2）：steam-deck-composite 走 SubmitState + alwaysArmed
@@ -3319,6 +4114,33 @@ internal static partial class Program
     // gyro*16/dps）。quaternion（byte36-42）HIDMaestro composite 无字段，首期
     // 缺省（G3/M6 待真机验证，不阻塞 persona+陀螺仪双闭口）。
     private static HMGamepadState BuildSteamDeckState(HMProfile profile, CommandEnvelope envelope)
+    {
+        var fields = BuildSteamDeckStateFields(profile, envelope);
+        // SubmitState keeps a fresh dictionary owned by this state; raw reports use fields directly.
+        return new HMGamepadState
+        {
+            Buttons = fields.Buttons,
+            Hat = fields.Hat,
+            Axes = new Dictionary<HMAxis, float>(6)
+            {
+                [HMAxis.X] = fields.X,
+                [HMAxis.Y] = fields.Y,
+                [HMAxis.Rx] = fields.Rx,
+                [HMAxis.Ry] = fields.Ry,
+                [HMAxis.Z] = fields.Z,
+                [HMAxis.Rz] = fields.Rz,
+            },
+            AccelX = fields.AccelX,
+            AccelY = fields.AccelY,
+            AccelZ = fields.AccelZ,
+            GyroPitch = fields.GyroPitch,
+            GyroYaw = fields.GyroYaw,
+            GyroRoll = fields.GyroRoll,
+        };
+    }
+
+    // Value-only conversion shared by the SDK state path and the raw SteamDeck encoder.
+    private static SteamDeckStateFields BuildSteamDeckStateFields(HMProfile profile, CommandEnvelope envelope)
     {
         if (profile.InputReportSize != 64) throw new InvalidOperationException("steam-deck-wire-size-mismatch:" + profile.InputReportSize);
         var buttons = HMButton.None;
@@ -3333,19 +4155,11 @@ internal static partial class Program
         if ((envelope.Buttons & 0x0040) != 0) buttons |= HMButton.LeftStick;
         if ((envelope.Buttons & 0x0080) != 0) buttons |= HMButton.RightStick;
         if ((envelope.Buttons & 0x0400) != 0) buttons |= HMButton.Guide;
-        // 背键映射 Phase A（背键映射A任务书 2026-09-14 S4）：仅 steamdeck 分支
-        // 消费 BackButtons（DS4/X360 分支不读，隔离零污染）。左右法则单表：
-        // M1(左,bit0)→LeftPaddle→Steam L5；M2(右,bit1)→RightPaddle→Steam R5。
-        // HMButton 只置 LeftPaddle/RightPaddle 两位，wire bit15=data9 0x80 (L5)、
-        // bit16=data10 0x01 (R5)（steam-deck-composite.json extendedReport 实证）。
-        if ((envelope.BackButtons & 0x1) != 0) buttons |= HMButton.LeftPaddle;   // M1→L5
-        if ((envelope.BackButtons & 0x2) != 0) buttons |= HMButton.RightPaddle;  // M2→R5
-        // G4（背键 4 键）首期不接：HIDMaestro composite 仅 LeftPaddle/RightPaddle，
-        // 真实 Deck 为 L4/R4/L5/R5。任务书 G4 扩展留第二期。
-        // DPad：HIDMaestro codec 把 HMHat 编码进 Neptune 按钮掩码的 DPAD 位
-        // （bit8-11，S54 线缆探针实证 North->bit8/East->bit9/South->bit11/West->bit10），
-        // 与 HC SteamDeckTarget data[9] DPadUp/Down/Left/Right 逐位一致。frame 的
-        // XInput dpad 低位（0x0001/0x0002/0x0004/0x0008）映射为 Hat。
+        // HIDMaestro 1.12 names wire bits 15/16 LeftPaddle2/RightPaddle2.
+        // Keep the existing M1 -> L5 and M2 -> R5 wire behavior.
+        if ((envelope.BackButtons & 0x1) != 0) buttons |= HMButton.LeftPaddle2;
+        if ((envelope.BackButtons & 0x2) != 0) buttons |= HMButton.RightPaddle2;
+        // L4/R4 screen buttons remain on their existing explicit raw-report bits.
         var hat = HMHat.None;
         var dpadUp = (envelope.Buttons & 0x0001) != 0;
         var dpadDown = (envelope.Buttons & 0x0002) != 0;
@@ -3359,47 +4173,42 @@ internal static partial class Program
         else if (dpadRight) hat = HMHat.East;
         else if (dpadDown) hat = HMHat.South;
         else if (dpadLeft) hat = HMHat.West;
-        return new HMGamepadState
+        return new SteamDeckStateFields
         {
             Buttons = buttons,
             Hat = hat,
-            Axes = new Dictionary<HMAxis, float>
-            {
-                // 与 xbox360 相同的 0..1 report 域（0.5=center），extendedReport
-                // 自动解析到 Neptune int16-axis 字段（byte48-54）。
-                [HMAxis.X] = Xbox360StickAxis(envelope.Lx),
-                [HMAxis.Y] = Xbox360StickAxis(-envelope.Ly),
-                [HMAxis.Rx] = Xbox360StickAxis(envelope.Rx),
-                [HMAxis.Ry] = Xbox360StickAxis(-envelope.Ry),
-                // HC SteamDeckTarget:127-128 写 uint16-trigger（byte44-46），
-                // 消费 0..1 域（extendedReport uint16-trigger 自动编码）。
-                // S54 线缆探针实证：steam-deck-composite 的 StandardAxes 为
-                // X/Y/Rx/Ry/Z/Rz——扳机角色是 Z/Rz，Vx/Vy 不被该 profile 编码
-                // （Vx/Vy 提交实测 triggers=0）。必须用 Z/Rz；codec 会在
-                // Z/Rz>0 时自动置 RT/LT_DIGITAL 按钮位（HC data[8] 0x02/0x01）。
-                // G8/HC parity：HC SteamDeckTarget 消费原始 AxisState（无 canonical
-                // ≤30 死区），与 DS4/X360 wire 同取 LtRaw/RtRaw；canonical Lt/Rt
-                // 仅用于 gate/merge/score。旧协调器缺 LtRaw 时由 TryConsumeFrame
-                // 回退 canonical 值。
-                [HMAxis.Z] = envelope.LtRaw,
-                [HMAxis.Rz] = envelope.RtRaw,
-            },
+            // 共享 0..1 report 域（0.5=center），extendedReport
+            // 自动解析到 Neptune int16-axis 字段（byte48-54）。
+            X = UnitStickAxis(envelope.Lx),
+            Y = UnitStickAxis(-envelope.Ly),
+            Rx = UnitStickAxis(envelope.Rx),
+            Ry = UnitStickAxis(-envelope.Ry),
+            // HC SteamDeckTarget:127-128 写 uint16-trigger（byte44-46），
+            // 消费 0..1 域（extendedReport uint16-trigger 自动编码）。
+            // S54 线缆探针实证：steam-deck-composite 的 StandardAxes 为
+            // X/Y/Rx/Ry/Z/Rz——扳机角色是 Z/Rz，Vx/Vy 不被该 profile 编码
+            // （Vx/Vy 提交实测 triggers=0）。必须用 Z/Rz；codec 会在
+            // Z/Rz>0 时自动置 RT/LT_DIGITAL 按钮位（HC data[8] 0x02/0x01）。
+            // G8/HC parity：HC SteamDeckTarget 消费原始 AxisState（无 canonical
+            // ≤30 死区），当前输出同取 LtRaw/RtRaw；canonical Lt/Rt
+            // 仅用于 gate/merge/score。旧协调器缺 LtRaw 时由 TryConsumeFrame
+            // 回退 canonical 值。
+            Z = envelope.LtRaw,
+            Rz = envelope.RtRaw,
             // G1：IMU 字段（HC SteamDeckTarget.BuildReport:104-116 编码系数）：
             //   accelX = accel.X * 16384/g；accelY = -accel.Z * 16384/g；
             //   accelZ = accel.Y * 16384/g（HC accel 轴序 X,-Z,Y）
             //   gyroPitch = gyro.X * 16/dps；gyroYaw = -gyro.Z * 16/dps；
             //   gyroRoll = gyro.Y * 16/dps（HC gyro 轴序 X,-Z,Y）
             // 仅 imuAdmitted 时写入；fail-zero（HC 无传感器时 DSU 全 0）。
-            AccelX = (short)(envelope.ImuAdmitted ? envelope.ImuAccelX * 16384.0 : 0.0),
-            AccelY = (short)(envelope.ImuAdmitted ? -envelope.ImuAccelZ * 16384.0 : 0.0),
-            AccelZ = (short)(envelope.ImuAdmitted ? envelope.ImuAccelY * 16384.0 : 0.0),
-            GyroPitch = (short)(envelope.ImuAdmitted ? envelope.ImuGyroX * 16.0 : 0.0),
-            GyroYaw = (short)(envelope.ImuAdmitted ? -envelope.ImuGyroZ * 16.0 : 0.0),
-            GyroRoll = (short)(envelope.ImuAdmitted ? envelope.ImuGyroY * 16.0 : 0.0),
-            // 7.49（HC SteamDeckTarget byte36-42 quat）：编译实证 HIDMaestro
-            // HMGamepadState 无 Imu 属性、HMImu 无 OrientationW/X/Y/Z 公共写接口
-            // （CS0117）——当前后端 composite 不暴露四元数通道，属后端能力缺口
-            // （真机 M6 / HIDMaestro 升级），InputHost 无法在现 API 下接线。
+            AccelX = QuantizeMotionAxis(envelope.ImuAdmitted ? envelope.ImuAccelX : 0.0, 16384.0),
+            AccelY = QuantizeMotionAxis(envelope.ImuAdmitted ? -envelope.ImuAccelZ : 0.0, 16384.0),
+            AccelZ = QuantizeMotionAxis(envelope.ImuAdmitted ? envelope.ImuAccelY : 0.0, 16384.0),
+            GyroPitch = QuantizeMotionAxis(envelope.ImuAdmitted ? envelope.ImuGyroX : 0.0, 16.0),
+            GyroYaw = QuantizeMotionAxis(envelope.ImuAdmitted ? -envelope.ImuGyroZ : 0.0, 16.0),
+            GyroRoll = QuantizeMotionAxis(envelope.ImuAdmitted ? envelope.ImuGyroY : 0.0, 16.0),
+            // HMGamepadState has no quaternion properties. The existing raw
+            // SteamDeck report writes admitted w/x/y/z at bytes 36..43.
         };
     }
 
@@ -3484,6 +4293,11 @@ internal static partial class Program
         ulong ConfigRevision,
         string ConfigHash)
     {
+        [System.Text.Json.Serialization.JsonIgnore] public bool ReportChainPrepareSpecified1410 { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore] public MsiReportChainPrepare1410? ReportChainPrepare1410 { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore] public MsiReportChainSource1410? ReportChainSource1410 { get; init; }
+        [System.Text.Json.Serialization.JsonPropertyName("msiSteamDeckReleaseFence")]
+        public bool MsiSteamDeckReleaseFence { get; init; }
         public int Buttons { get; init; }
         public float Lx { get; init; }
         public float Ly { get; init; }
@@ -3528,13 +4342,14 @@ internal static partial class Program
         public double ImuAccelX { get; init; }
         public double ImuAccelY { get; init; }
         public double ImuAccelZ { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore] public bool ImuQuaternionPresent { get; init; }
         public double ImuQuatW { get; init; } = 1.0;
         public double ImuQuatX { get; init; }
         public double ImuQuatY { get; init; }
         public double ImuQuatZ { get; init; }
         // 背键映射 Phase A（背键映射A任务书 2026-09-14 S4）：bit0=M1(左)、
-        // bit1=M2(右)。缺省 0（老 native 不发该字段零污染）；仅 steamdeck
-        // 分支消费（DS4/X360 不读）。不进 normalizedInputHash。
+        // bit1=M2(右)。缺省 0（老 native 不发该字段零污染）；由 steamdeck 与 dualsense-edge
+        // 分支消费；Elite 不读。不进 normalizedInputHash。
         public int BackButtons { get; init; }
         public int ScreenButtons { get; init; }
         public bool ScreenPadsPresent { get; init; }

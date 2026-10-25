@@ -1,0 +1,20 @@
+{
+  "kind": "actual-preserved-production-wrapper",
+  "source": "G:\\YeManCC-Work\\Build\\Validation\\VC-RETURN-20261021\\on-source-window\\main-before.cpp",
+  "sourceSha256": "24acf9570b89f5c7a293cd50fa301927f418fba97991db2fdd2517e588d5dce2",
+  "shippedR3Source": "G:/YeManCC-Work/Build/Exports/20261021-VC-HIDMAESTRO200-R3/Mainline/YeManCC-source/YeManCC/native/main.cpp",
+  "shippedR3SourceSha256": "ef86d31a0293c543110b065a199a36bba2b4c2908605dd671654c09bfee0316a",
+  "bodySha256": "bb8fb964379fb1cff504a101a114ecae955cbc6f426daabdef5a46ead4b0c73c",
+  "sameAsShippedR3Body": true,
+  "selectedBody": {
+    "symbol": "msiDinputRouteWindowDecideForWake",
+    "kind": "function",
+    "file": "preserved-before/main.cpp",
+    "startLine": 24282,
+    "endLine": 24293,
+    "startUtf8Byte": 1449409,
+    "endUtf8ByteExclusive": 1450362,
+    "sha256": "bb8fb964379fb1cff504a101a114ecae955cbc6f426daabdef5a46ead4b0c73c"
+  },
+  "scope": "Offline failure control only; no normal product or SDK startup."
+}

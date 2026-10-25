@@ -1,0 +1,612 @@
+{
+  "schemaVersion": 1,
+  "scopeVersion": 2,
+  "stage": "main-return",
+  "productSources": [
+    {
+      "path": "native/main.cpp",
+      "sha256": "8aa08fb62c24652744dadeb6314ff1d1c4ffb149465a0078c719dfe2de17a757"
+    },
+    {
+      "path": "native/radial_overlay.h",
+      "sha256": "bfa59c1d03bf5b3dff21e917d61ec739030ee599519915a340921cc8251129b9"
+    },
+    {
+      "path": "native/radial_input_region.h",
+      "sha256": "5361fca72bff3b73ff802c8c4cd2c26ab80e978c99af7df2f709fcee66f0f093"
+    },
+    {
+      "path": "deps/json/json.hpp",
+      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    }
+  ],
+  "definitions": [
+    {
+      "name": "radial::Config",
+      "source": "native/radial_overlay.h",
+      "anchor": "struct Config {",
+      "semicolon": true,
+      "sha256": "68f62b721bd7db9eb4b5be8712c32f18a03acbc249cba7b977dd2bb0995b7104"
+    },
+    {
+      "name": "radial::Overlay::State",
+      "source": "native/radial_overlay.h",
+      "anchor": " struct State {",
+      "semicolon": true,
+      "sha256": "60f2b3a8919c15fcaa55eb5006dd72446df3b1f6997343d8450801639317cfe3"
+    },
+    {
+      "name": "radial::Overlay::owns",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool owns(",
+      "semicolon": false,
+      "sha256": "a220dbe06b2bc0e1a5a48a7530789947100aa090a8e69ae938af14adcae0d621"
+    },
+    {
+      "name": "radial::Overlay::send",
+      "source": "native/radial_overlay.h",
+      "anchor": " void send(",
+      "semicolon": false,
+      "sha256": "0075a856ea113bb1d3f4948487b81a314860e3d8528b95b7628a7afdddee5098"
+    },
+    {
+      "name": "radial::Overlay::region",
+      "source": "native/radial_overlay.h",
+      "anchor": " void region(",
+      "semicolon": false,
+      "sha256": "10591a7ff167e642c92350e5f153a70236943fa2c93081ac99cfe8e86607f83d"
+    },
+    {
+      "name": "radial::Overlay::receive",
+      "source": "native/radial_overlay.h",
+      "anchor": " void receive(",
+      "semicolon": false,
+      "sha256": "c6d961f7d7ef975eaab66640c1420e9510073efc833bc325aa1a6879ba175d6d"
+    },
+    {
+      "name": "radial::Overlay::proc",
+      "source": "native/radial_overlay.h",
+      "anchor": " static LRESULT CALLBACK proc(",
+      "semicolon": false,
+      "sha256": "62224c0a98ed83b684ee4b0289f8f71a62831bb4f4e8035e040c384245a41304"
+    },
+    {
+      "name": "radial::Overlay::initialize",
+      "source": "native/radial_overlay.h",
+      "anchor": " void initialize(",
+      "semicolon": false,
+      "sha256": "3e6158ce360509d739ec39807f2463dcd8850c2936e522a3a5da1a0a72b873e7"
+    },
+    {
+      "name": "radial::Overlay::active",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool active(",
+      "semicolon": false,
+      "sha256": "12efba704c9364e5aa869065a4312ec2b95230391eeafce9e1e57c328f528613"
+    },
+    {
+      "name": "radial::Overlay::pad",
+      "source": "native/radial_overlay.h",
+      "anchor": " void pad(",
+      "semicolon": false,
+      "sha256": "2b2773fb9451a136d37a709197f919a2eba5bd52d88eb9100da4bb10f7305f57"
+    },
+    {
+      "name": "radial::Overlay::close",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool close(",
+      "semicolon": false,
+      "sha256": "1756b5e65b423058d492dfce77e969bb3e550685d824c76f4ac8060ecaaee980"
+    },
+    {
+      "name": "radial::Overlay::shutdown",
+      "source": "native/radial_overlay.h",
+      "anchor": " void shutdown(",
+      "semicolon": false,
+      "sha256": "0cee914f850b37dda791b2b17d88ed61780b08dbdcc349fccdb3eed9a4aefccb"
+    },
+    {
+      "name": "radial::Overlay::destructor",
+      "source": "native/radial_overlay.h",
+      "anchor": "~Overlay(",
+      "semicolon": false,
+      "sha256": "d0826cfc919bc07d36e6785e74fbd476c7a021b2b46e1040d2b298e1b49103e8"
+    },
+    {
+      "name": "radial::makeInputRegion",
+      "source": "native/radial_input_region.h",
+      "anchor": "inline HRGN makeInputRegion(",
+      "semicolon": false,
+      "sha256": "bc4605c2c3369356eebea4498df660c066f2e889b88603d2e644fbd4e67ba8b5"
+    },
+    {
+      "name": "CustomSteamLibraryInputPhase",
+      "source": "native/main.cpp",
+      "anchor": "enum class CustomSteamLibraryInputPhase :",
+      "semicolon": true,
+      "sha256": "a849615f414ea5689b67ab96215565508ef3b0d1c389751c2004ddb6de81fb73"
+    },
+    {
+      "name": "SerialJobKind",
+      "source": "native/main.cpp",
+      "anchor": "enum class SerialJobKind {",
+      "semicolon": true,
+      "sha256": "811e22b11bacce6b4877218c0f0e94273a6f1592029b8669103a5d1e8494957c"
+    },
+    {
+      "name": "FocusTargetSnapshot",
+      "source": "native/main.cpp",
+      "anchor": "struct FocusTargetSnapshot {",
+      "semicolon": true,
+      "sha256": "f80dfebf56a57567ec93b1047ba63fb3f1fea049184cebd119ab0a0fb14663c5"
+    },
+    {
+      "name": "OemProducerId",
+      "source": "native/main.cpp",
+      "anchor": "enum class OemProducerId",
+      "semicolon": true,
+      "sha256": "f266a1f4e55be674de168f0808c60560ec7d96aa03c3e3300c0f4b53b45fd0c6"
+    },
+    {
+      "name": "OemProducerTokens",
+      "source": "native/main.cpp",
+      "anchor": "struct OemProducerTokens {",
+      "semicolon": true,
+      "sha256": "a9981c1d42b3de694b022800f4b3057f2d928df3ea8b8fe671047fdcd65c17c9"
+    },
+    {
+      "name": "radialHasInputOwner",
+      "source": "native/main.cpp",
+      "anchor": "static bool radialHasInputOwner()",
+      "semicolon": false,
+      "sha256": "410400bc1fb45e5c38519301ca4916e00b99dbcec77dba7e40b1bf19cf0963d2"
+    },
+    {
+      "name": "gpAnyShortcutHeld",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpAnyShortcutHeld()",
+      "semicolon": false,
+      "sha256": "1eeae948f3b9f9ebac70799833299702c88acdbac7365b172f5f4f6f0c264722"
+    },
+    {
+      "name": "gpAnyButtonOrTriggerHeld",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpAnyButtonOrTriggerHeld()",
+      "semicolon": false,
+      "sha256": "5903eb9e224a5cdd96b55fde9c7b1682afc1e36b6ca331996f30c1c9406dbbaa"
+    },
+    {
+      "name": "gpAnyThumbAxisHeld",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpAnyThumbAxisHeld()",
+      "semicolon": false,
+      "sha256": "0d46e14def68b27b60bac1fd279138b7f4ba10633f93a37a72ee2a0db7e7a607"
+    },
+    {
+      "name": "gamepadUiInputEligible",
+      "source": "native/main.cpp",
+      "anchor": "static bool gamepadUiInputEligible() {",
+      "semicolon": false,
+      "sha256": "335666ff70d96d952622de699d1eccf673c3e6028423ab036635af3dcfca4aa6"
+    },
+    {
+      "name": "gamepadEmitUiAction",
+      "source": "native/main.cpp",
+      "anchor": "static void gamepadEmitUiAction(const char* action) {",
+      "semicolon": false,
+      "sha256": "6e5f0acef940e2aa406a9a33d30f899fc46a6fbfa1cd585c18a095475a76d3b9"
+    },
+    {
+      "name": "nativeYmccShortcutSubmit",
+      "source": "native/main.cpp",
+      "anchor": "static bool nativeYmccShortcutSubmit(",
+      "semicolon": false,
+      "sha256": "0933c5ec8035d6b9361692aa4096eac1cc52936b315d7793bfe4e26599d93a9a"
+    },
+    {
+      "name": "nativeYmccShortcutEmit",
+      "source": "native/main.cpp",
+      "anchor": "static bool nativeYmccShortcutEmit(",
+      "semicolon": false,
+      "sha256": "7de6ca44758024b7c0a1ed90d2d90157dcb0d060dfb50abc71a11d87931eba22"
+    },
+    {
+      "name": "radialProcessUiInput",
+      "source": "native/main.cpp",
+      "anchor": "static void radialProcessUiInput(const XINPUT_GAMEPAD& pad",
+      "semicolon": false,
+      "sha256": "33bc38f7022c95bcfbbc59720b79d2c7907d94a0124335ef32fe3d1788f58784"
+    },
+    {
+      "name": "gamepadEval",
+      "source": "native/main.cpp",
+      "anchor": "static void gamepadEval()",
+      "semicolon": false,
+      "sha256": "b8fc6c53ff8c63538cb814e24592aa26a79e1023e0acb74f484e661b5cb8d794"
+    },
+    {
+      "name": "radialInitialize-lambda-declaration",
+      "source": "native/main.cpp",
+      "anchor": "const auto radialInitialize=[]{",
+      "semicolon": true,
+      "sha256": "5fcacc419ac060c15c5a0d651a7090ea73c9a5e4466422319c25f9bd5dc93ae5"
+    }
+  ],
+  "declarations": [
+    {
+      "name": "g_radialUiOwnsInput",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_radialUiOwnsInput{false};",
+      "sha256": "dd32564178b320337f55c4fafc4454b64b428ab3f6b5de1381b25cd831cb28a1"
+    },
+    {
+      "name": "g_radialReturning",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_radialReturning{false};",
+      "sha256": "ce9ea6f01d27e5605dec05a7a039fe4b1c6e6b71d51285a68e4ea744daafd8d0"
+    },
+    {
+      "name": "g_hwnd",
+      "source": "native/main.cpp",
+      "anchor": "static HWND                              g_hwnd;",
+      "sha256": "dfb87afe42c6040027447430608532c50add240fe6a6eba7cce3c694d0e97812"
+    },
+    {
+      "name": "g_env",
+      "source": "native/main.cpp",
+      "anchor": "static ComPtr<ICoreWebView2Environment>  g_env;",
+      "sha256": "54c0fccd94f7c04e46408865705cd412918376fcc96704300c54de286367ebb0"
+    },
+    {
+      "name": "g_inputReady",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_inputReady{true};",
+      "sha256": "f67640fcb193b911c8dc4a55440085179b8b0f7ae22f23fbc53efb8a35cd178d"
+    },
+    {
+      "name": "g_inputReleaseRequired",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_inputReleaseRequired{false};",
+      "sha256": "2feaf24cc494f5486a198bd41fcccbb496ab56ec3379e69d312808444badd947"
+    },
+    {
+      "name": "g_exitRequested",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_exitRequested{false};",
+      "sha256": "81db3e1a6cbae8f8f1a070be9da7831aa6a3c8767d5e5e6086d2296c26d7f14d"
+    },
+    {
+      "name": "g_shortcutRecordingActive",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<bool> g_shortcutRecordingActive{false};",
+      "sha256": "bec02daf0022cc1de21b1da61b2e00ef2d9ce3762ecc49f0468c8746f1da1598"
+    },
+    {
+      "name": "g_shortcutRecordingMask",
+      "source": "native/main.cpp",
+      "anchor": "static uint64_t g_shortcutRecordingMask = 0;",
+      "sha256": "20aca8b05f3823e49df7926562ad0b550c256e204afcc62c74b850d00c0670b4"
+    },
+    {
+      "name": "g_customSteamLibraryInputPhase",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<int>                  g_customSteamLibraryInputPhase{static_cast<int>(CustomSteamLibraryInputPhase::disabled)};",
+      "sha256": "f276155e37a858ecbfcf32700bbbe3e79b5fab2058ad9d6bad1b3427bff04712"
+    },
+    {
+      "name": "g_customSteamLibraryInputDeadline",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<ULONGLONG>            g_customSteamLibraryInputDeadline{0};",
+      "sha256": "119641ff6615b0e79cce44289613a67850adfc9aa7a98f99424c1961b8c2bc5f"
+    },
+    {
+      "name": "g_bClosePending",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_bClosePending = false;       // 双击B后等待第二次B释放，避免按键泄漏到游戏",
+      "sha256": "994b4f2e84923b7fc0e377dc7b4a68e170e51822d8e405d9333284d9132dd400"
+    },
+    {
+      "name": "g_bClosePendingSince",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG g_bClosePendingSince = 0;",
+      "sha256": "6629783c22e1674175836e2ffc48ce88d79252cec9a0503d5b1334e0eea9983d"
+    },
+    {
+      "name": "g_bCloseReadyAt",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG g_bCloseReadyAt = 0;",
+      "sha256": "f089a6f8a472da7ff56d9eb01ab9c37ab29086913db25b4afd9d6c4d82905e5e"
+    },
+    {
+      "name": "g_bDoubleMinimize",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_bDoubleMinimize = true; // 双击 B 最小化到托盘（设置可关）",
+      "sha256": "49661567cc39e9a5446e31a50765a4199df7c1ec77a4c0e1e24d9c69909cb0e4"
+    },
+    {
+      "name": "g_summonEnabled",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_summonEnabled = true;   // 「按键呼出」开关：后台按住 LB+RB 呼出程序（设置可关，默认开）",
+      "sha256": "1885f58c9ba0d5866720957a4afc25a7577af8f5e45d73072646d68f8f4467ee"
+    },
+    {
+      "name": "g_tdpShortcut",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_tdpShortcut = true;    // Start + 上/下 快捷调节 TDP 最大值（前端处理，持久化在 native）",
+      "sha256": "5329ade3dcce15d8046d062c5594e7f8209af757a6b2ce330de11ed6458200f7"
+    },
+    {
+      "name": "g_fpsShortcut",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_fpsShortcut = true;    // Start + 左/右 快捷调节 RTSS 锁帧（前端处理，持久化在 native）",
+      "sha256": "db693af7f35ee71b76870a9a6cca38915d5333432f89f51e1e677f101846848a"
+    },
+    {
+      "name": "g_killGame",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_killGame = true;        // 选择(Back) + B 长按 0.5s → 结束当前游戏（执行 KiLL-EXE.bat）",
+      "sha256": "d36ff5c6c8f46e8a951b1c4126bb4bdcc1367701442ddc9e8a0fcb91e367b0a4"
+    },
+    {
+      "name": "g_openKeyboard",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_openKeyboard = true;    // 选择(Back) + X 长按 0.5s → 打开 Windows 触摸键盘",
+      "sha256": "9adfb2db58573da40de2d2ece779058eb1e6b7a509278f51bd69c70d0e8f41d1"
+    },
+    {
+      "name": "g_returnDesktop",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_returnDesktop = true;   // 选择(Back) + A 组合按下瞬间 → 返回桌面",
+      "sha256": "98d5791743754d6f7f3449a8e441fa5243361580dec6112aa2eb0aaf0b189bdc"
+    },
+    {
+      "name": "g_mouseToggle",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_mouseToggle = true;     // 选择(Back) + Y 长按 0.5s → 模拟鼠标开/关",
+      "sha256": "0a575b8557dc1c14bef64868512c45b6e118519b93532d120a16a376eefdc876"
+    },
+    {
+      "name": "g_mouseBackend",
+      "source": "native/main.cpp",
+      "anchor": "static std::string g_mouseBackend = \"joyxoff\"; // 模拟鼠标方案：joyxoff / gamebar",
+      "sha256": "d03d20f2ae9c5a82376feb4e5ddf14deb02c3d504d03566116235f1d66e1604b"
+    },
+    {
+      "name": "g_gamepadSettingsMx",
+      "source": "native/main.cpp",
+      "anchor": "static std::mutex g_gamepadSettingsMx;",
+      "sha256": "b5a65f012bf72a81a9d14f1eb8e79364ffb5b9e83f662771f322ccaacb9001fb"
+    },
+    {
+      "name": "g_gamepadReadMx",
+      "source": "native/main.cpp",
+      "anchor": "static std::mutex g_gamepadReadMx;",
+      "sha256": "a63c6300421d00bb360ce293bb3956998c9837cded62a8587e0157845b1ea1f1"
+    },
+    {
+      "name": "g_padConnected",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_padConnected   = false;",
+      "sha256": "ec16b84b41977abf65de7c1f7263a0d1a61ab57a2c236cf3a45cd4a4682ce225"
+    },
+    {
+      "name": "g_gamepadConnectionWasLive",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_gamepadConnectionWasLive = false;",
+      "sha256": "22e8cc8a1c5301263f0c09d5ffcee7191ee1cda7b7a7e4b4e77c48d81482ae34"
+    },
+    {
+      "name": "g_gamepadAxisNeutralAdmissionRequired",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_gamepadAxisNeutralAdmissionRequired = false;",
+      "sha256": "feab43d372287e825c07c3e3e52553ef4efe2516b83cefcb7bfb4690792f7f7d"
+    },
+    {
+      "name": "g_gamepadReleaseBarrierLogged",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_gamepadReleaseBarrierLogged = false;",
+      "sha256": "c03dcfe489d1ea80dca792dcb85362961b303293b9610e41af764bb331e74095"
+    },
+    {
+      "name": "g_xinputConnectedMask",
+      "source": "native/main.cpp",
+      "anchor": "static DWORD g_xinputConnectedMask = 0;",
+      "sha256": "b160e7de943f95c76b53ea164fd20022bac4c33037fae4008443a4e50452f70e"
+    },
+    {
+      "name": "g_xinputPrimarySlot",
+      "source": "native/main.cpp",
+      "anchor": "static DWORD g_xinputPrimarySlot = 0;",
+      "sha256": "852ce923bb6e84034574232acee16a4cdd372da6fbc407c2e307516052f4f503"
+    },
+    {
+      "name": "g_curW",
+      "source": "native/main.cpp",
+      "anchor": "static WORD  g_curW          = 0;     // 首个已连手柄的按钮位（权威态）",
+      "sha256": "18fa293527ce8d07513b23cc19f46f6e21f203dba92dc746aaa95ab14717a2b8"
+    },
+    {
+      "name": "g_prevW",
+      "source": "native/main.cpp",
+      "anchor": "static WORD  g_prevW         = 0;     // 上一帧按钮位（边沿检测）",
+      "sha256": "8bb58421e2b0812e54f3ce7e13118f76dfe188d985e44ed840b2c43b177dde18"
+    },
+    {
+      "name": "g_curPad",
+      "source": "native/main.cpp",
+      "anchor": "static XINPUT_GAMEPAD g_curPad{};     // 当前手柄完整状态，用于区分真实变化与周期性 HID 报文",
+      "sha256": "b9a81a14f4dbbc90a4563fb5042cdea8e05096c9b67c1b5001cf0b69932ecdeb"
+    },
+    {
+      "name": "g_prevPad",
+      "source": "native/main.cpp",
+      "anchor": "static XINPUT_GAMEPAD g_prevPad{};    // 上一次手柄完整状态",
+      "sha256": "1f615561102df74bb0253a44d0d7c07f4b3bba35d6a1adf0a019ad85ebf612c2"
+    },
+    {
+      "name": "g_gpHoldTimerOn",
+      "source": "native/main.cpp",
+      "anchor": "static bool g_gpHoldTimerOn = false;  // 持有计时器是否在跑",
+      "sha256": "d42e33dfdcb1bb7e51947fd0942f234178c1cf5755da8871a239dca7dd28d0b4"
+    },
+    {
+      "name": "g_uiActionSeq",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<unsigned long long> g_uiActionSeq{0};",
+      "sha256": "052134c1a43b2f1f85c2536601c743b647bc2f4cf2c4837ed26179bccb31a123"
+    },
+    {
+      "name": "g_gpSnapshotSeq",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<unsigned long long> g_gpSnapshotSeq{0};",
+      "sha256": "531ab85468f9c6f857eea533c7bc42cf684b78f991fab6427920913763a7f6fd"
+    },
+    {
+      "name": "g_gpUiConsumedSeq",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<unsigned long long> g_gpUiConsumedSeq{0};",
+      "sha256": "0dd3c8e8cb95c8e51e733cd4408915b8bd0cdffd1653544bc3e24a678efb24b4"
+    },
+    {
+      "name": "g_pendingSummonTarget",
+      "source": "native/main.cpp",
+      "anchor": "static FocusTargetSnapshot g_pendingSummonTarget; // LB/RB 首个肩键按下时抓取，防覆盖层在0.5s内抢前台",
+      "sha256": "4fc6337bef966110e55a1ba1b079c106462ec1e1b886889299ac50972fe7984d"
+    },
+    {
+      "name": "g_oemShortcutEdgeEpoch",
+      "source": "native/main.cpp",
+      "anchor": "static std::atomic<uint32_t> g_oemShortcutEdgeEpoch{1};",
+      "sha256": "75fa1e0c4707656cdd2a3c57ff8ea64673089bf428e0f7368ae4ddf0b7e2a093"
+    },
+    {
+      "name": "gpArmed",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpArmed        = true;",
+      "sha256": "942750bb01fcaef1622e2b8f34652b4f863c198ecf835a077ff08fdf878e97cf"
+    },
+    {
+      "name": "gpHoldStart",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG gpHoldStart = 0;",
+      "sha256": "a7fee13dbac3bce53ee4cd8db46225417d5c63105e593efc4ba9efd371bc7a6b"
+    },
+    {
+      "name": "gpPrevB",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpPrevB        = false;",
+      "sha256": "bcacbf439268909f7ee3992ef4809d24ce39e7fb919296a7708874cbd650fe14"
+    },
+    {
+      "name": "gpLastBPress",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG gpLastBPress = 0;",
+      "sha256": "919fd55dad3224f88a2b4ec17a75f3a8cd588e6106af10ff91bd462f0f99cbbb"
+    },
+    {
+      "name": "gpKbArmed",
+      "source": "native/main.cpp",
+      "anchor": "static bool gpKbArmed = true, gpKxArmed = true, gpKyArmed = true;",
+      "sha256": "6c929f3c3017c0c25fa38e4a96f9e5c79909fd4e4a7d1ff65ff108b7fd8b30a6"
+    },
+    {
+      "name": "gpKbHoldStart",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG gpKbHoldStart = 0, gpKxHoldStart = 0, gpKyHoldStart = 0;",
+      "sha256": "89265e91ea904dfe03e5340c58c716547bbc09f9445d3a3431b34f862365e393"
+    },
+    {
+      "name": "s_dpHeldStart",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG s_dpHeldStart = 0, s_dpLastEmit = 0;",
+      "sha256": "3feea03c51a71560e62834fdde686349e3664e356d10d225008fbbbb5fae0e3c"
+    },
+    {
+      "name": "s_brightnessHeldStart",
+      "source": "native/main.cpp",
+      "anchor": "static ULONGLONG s_brightnessHeldStart = 0, s_brightnessLastEmit = 0;",
+      "sha256": "b550ea8f9a4b6f45b3fe3809c2c983a4012d2ebe46b469e6ba6aec1bf8533503"
+    },
+    {
+      "name": "GP_UI_THUMB_THRESHOLD",
+      "source": "native/main.cpp",
+      "anchor": "static constexpr SHORT GP_UI_THUMB_THRESHOLD = 16000;",
+      "sha256": "81494c0358fe53617665eff896251d4f236f47bafb3057375aa3bde2695a30a6"
+    },
+    {
+      "name": "kOemShortcutUnboundEpoch",
+      "source": "native/main.cpp",
+      "anchor": "static constexpr uint64_t kOemShortcutUnboundEpoch = UINT64_MAX;",
+      "sha256": "5f0a552291398d08708a6bd615249c6811998119e8b6a35608cdf99dcba5da29"
+    },
+    {
+      "name": "GP_HOLD_TIMER_ID",
+      "source": "native/main.cpp",
+      "anchor": "#define GP_HOLD_TIMER_ID 0x5A33  // 手柄快捷键\"按住0.5s/连发\"复检（仅按住期间运行）",
+      "sha256": "916fcf8a95f05d81646884d9f8b29986e6a239b77244728f8b7e42781735e292"
+    },
+    {
+      "name": "kOemProducerCount",
+      "source": "native/main.cpp",
+      "anchor": "static constexpr size_t kOemProducerCount = static_cast<size_t>(OemProducerId::Count);",
+      "sha256": "8285de9a276580bbfc3dfbd4a172e752d76d48aa6e11ef349eedb14808152b20"
+    },
+    {
+      "name": "g_radialOverlay",
+      "source": "native/main.cpp",
+      "anchor": "static ymcc::radial::Overlay g_radialOverlay;",
+      "sha256": "74f51b203d1f1e930399edc336a90ed005583627216aeaccb2ebd780fdc89441"
+    }
+  ],
+  "overlayDeclarations": {
+    "aliases": {
+      "sha256": "1c57c507628cc51c8b8715a1360add312b4c40c4d292d326fd0269461d98153e"
+    },
+    "constants": {
+      "sha256": "7332012455c654fb74de296e90c3e4846c5fa1f4c07711405f07a2eea7bcf7c5"
+    },
+    "fields": {
+      "sha256": "96e88afad7eb2dc402b82e43604269b80554e65b383cf3acb02dc873f19c324c"
+    }
+  },
+  "templates": [
+    {
+      "path": "MainPlatform.hpp",
+      "sha256": "fb8d4cfb92d03e624f88c923167cdb8b203b8a37e68728ecf47a2ebfea4b5a23"
+    },
+    {
+      "path": "MainEndpoints.hpp",
+      "sha256": "acbd14b20c1af5ca16d2766f00cc86869a38b26d43cdc8102caa62399a86eb01"
+    },
+    {
+      "path": "MainCases.hpp",
+      "sha256": "27ac19893d285c9b35f98c8f5c9483b96f5b5c5aaada26f116856a125d3e7aa7"
+    }
+  ],
+  "memoryPorts": {
+    "path": "MemoryPorts.hpp",
+    "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+  },
+  "reviewedSelectedMainSha256": "2d05b2d45d49fb8e513c0a5175659033b1c67f71eb18f2d23b351c0157c19773",
+  "reviewedSelectedRadialSha256": "e0d013e0e12b8b4642d090e76525bd36928ad10d3d44b93a0f978d4e81767ea0",
+  "faults": [
+    {
+      "id": "neutral-and-to-or",
+      "before": "else if(!gpAnyButtonOrTriggerHeld()&&!gpAnyThumbAxisHeld())g_radialReturning.store(false,std::memory_order_release);",
+      "after": "else if(!gpAnyButtonOrTriggerHeld()||!gpAnyThumbAxisHeld())g_radialReturning.store(false,std::memory_order_release);"
+    },
+    {
+      "id": "queued-radial-gate-removed",
+      "before": "        // Queue consumption must still belong to the current input owner.\n        if (radialHasInputOwner() && !allowRadialOwner) {\n            appendNativeLifecycleLog(\"oem-shortcut-edge-delivery\", {{\"ok\", false}, {\"reason\", \"queued-radial-owner-or-return\"}});\n            return;\n        }\n",
+      "after": ""
+    }
+  ],
+  "assemblyScope": "Actual complete production definitions and declarations;private State with post-create seed;full gamepadEval;explicit sampling/queue/OEM/focus/action memory endpoints",
+  "openCoverage": [
+    "Actual create/acquisition and OS/device IO",
+    "Full parent navigation consumer/OEM rule engine and real sampling",
+    "Actual queue concurrency and jobs delayed beyond a whole radial lifecycle",
+    "Unselected held controls including thumb buttons",
+    "TypeScript host intent/checkpoint and actual actions/TDP"
+  ]
+}

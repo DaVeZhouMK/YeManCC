@@ -1,12 +1,21 @@
 [CmdletBinding()]
 param(
   [string]$ProjectRoot = '',
-  [string]$OutputRoot = ''
+  [string]$OutputRoot = '',
+  [ValidateSet('LegacyFull', 'PackageSource')]
+  [string]$Mode = 'LegacyFull',
+  [ValidatePattern('^[a-fA-F0-9]{64}$')]
+  [string]$ExpectedHostSha256 = '',
+  [ValidatePattern('^[a-fA-F0-9]{64}$')]
+  [string]$ExpectedBackendSha256 = '',
+  [ValidatePattern('^[a-fA-F0-9]{64}$')]
+  [string]$ExpectedManifestSha256 = '',
+  [string]$LegacyPayloadRoot = ''
 )
 
 # 920 §8.0-F: mandatory negative cases for the candidate / promotion chain.
 #
-# These drive the REAL production logic, not a rewrite of it:
+# LegacyFull (the compatible default) drives the REAL production logic:
 #   - Assert-PublishPreGate is extracted verbatim from tools/build-workspace.ps1
 #     and executed against constructed bad payload trees;
 #   - the real Host binary is started to prove the load-time identity event;
@@ -16,12 +25,428 @@ param(
 # promotion, or explicitly reports it as unverifiable. A silent PASS is a
 # failure. No real hardware or device operation is involved.
 #
+# PackageSource exits before the LegacyFull path and only executes extracted
+# production gates/copy ASTs over a fresh scratch tree. It requires explicit
+# expected hashes and an old self-consistent LegacyPayloadRoot.
+#
 # Keep this file pure ASCII: PS 5.1 misdecodes non-ASCII scripts without a BOM.
 
 $ErrorActionPreference = 'Stop'
 
 if ([string]::IsNullOrWhiteSpace($ProjectRoot)) { $ProjectRoot = Split-Path -Parent $PSScriptRoot }
 $ProjectRoot = [IO.Path]::GetFullPath($ProjectRoot).TrimEnd('\')
+# This branch must return before any LegacyFull gate, identity or Host start.
+if ($Mode -eq 'PackageSource') {
+  & {
+    foreach ($pin in @($ExpectedHostSha256, $ExpectedBackendSha256, $ExpectedManifestSha256)) {
+      if ($pin -notmatch '^[a-fA-F0-9]{64}$') { throw 'PackageSource requires explicit 64-hex ExpectedHostSha256, ExpectedBackendSha256 and ExpectedManifestSha256.' }
+    }
+    if ([string]::IsNullOrWhiteSpace($OutputRoot) -or [string]::IsNullOrWhiteSpace($LegacyPayloadRoot)) {
+      throw 'PackageSource requires explicit OutputRoot and LegacyPayloadRoot.'
+    }
+    $officialRoot = Split-Path -Parent $PSScriptRoot
+    $OutputRoot = [IO.Path]::GetFullPath($OutputRoot).TrimEnd('\')
+    $LegacyPayloadRoot = [IO.Path]::GetFullPath($LegacyPayloadRoot).TrimEnd('\')
+    foreach ($readOnlyRoot in @($officialRoot, $ProjectRoot, $LegacyPayloadRoot)) {
+      $readOnlyFull = [IO.Path]::GetFullPath($readOnlyRoot).TrimEnd('\')
+      if ($OutputRoot -ieq $readOnlyFull -or $OutputRoot.StartsWith($readOnlyFull + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        throw "PackageSource OutputRoot must be outside its input trees: $OutputRoot"
+      }
+    }
+    # A fresh child is safe only when none of its existing ancestors is a link.
+    $ancestor = $OutputRoot
+    while ($ancestor) {
+      if ((Test-Path -LiteralPath $ancestor) -and (Get-Item -LiteralPath $ancestor -Force).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {
+        throw "PackageSource output ancestor is a reparse point: $ancestor"
+      }
+      $ancestor = Split-Path -Parent $ancestor
+    }
+    $sandboxRoot = Join-Path $OutputRoot ('fan-package-source-' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N'))
+    New-Item -ItemType Directory -Path $sandboxRoot | Out-Null
+    $originalInputs = [ordered]@{}
+    $extractions = [ordered]@{}
+    $cases = New-Object 'System.Collections.Generic.List[object]'
+    $failures = New-Object 'System.Collections.Generic.List[string]'
+
+    function Assert-PackageSourceChild([string]$Path) {
+      $full = [IO.Path]::GetFullPath($Path)
+      if (-not $full.StartsWith($sandboxRoot + '\', [StringComparison]::OrdinalIgnoreCase)) { throw "PackageSource write outside fresh scratch: $full" }
+      return $full
+    }
+
+    function Get-PackageSourceAst([string]$File) {
+      $tokens = $null; $errors = $null
+      $ast = [System.Management.Automation.Language.Parser]::ParseFile($File, [ref]$tokens, [ref]$errors)
+      if ($errors.Count -ne 0) { throw ("Production script does not parse: $File : " + $errors[0].Message) }
+      return $ast
+    }
+
+    function Get-PackageSourceBlock([string]$File, [string]$Name) {
+      $ast = Get-PackageSourceAst $File
+      if ($Name -eq 'FanHostCopyBranch') {
+        $nodes = @($ast.FindAll({ param($node)
+          $node -is [System.Management.Automation.Language.IfStatementAst] -and
+          $node.Clauses.Count -eq 1 -and
+          $node.Clauses[0].Item1.Extent.Text.Trim() -ceq '$includeFanHostInFullTestPackage' -and
+          $node.Extent.Text.Contains('Copy-DirectoryContents') -and $node.Extent.Text.Contains("'fan-host-v2'")
+        }, $true))
+      } else {
+        $nodes = @($ast.FindAll({ param($node)
+          $node -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $node.Name -ceq $Name
+        }, $true))
+      }
+      if ($nodes.Count -ne 1) { throw "Expected exactly one production AST for $Name in $File; found $($nodes.Count)" }
+      $text = $nodes[0].Extent.Text
+      $tokens = $null; $errors = $null
+      # Preserve the real script filename. In source negatives this is the
+      # byte-identical scratch copy, so its verifier resolves scratch sources.
+      $parsed = [System.Management.Automation.Language.Parser]::ParseInput($text, $File, [ref]$tokens, [ref]$errors)
+      if ($errors.Count -ne 0) { throw "Extracted production AST does not parse: $File : $Name" }
+      $key = $File + '::' + $Name
+      if (-not $extractions.Contains($key)) {
+        $extractions[$key] = [ordered]@{ sourceFile = $File; name = $Name; exactText = $text }
+      }
+      return $parsed.GetScriptBlock()
+    }
+
+    # Only these definitions are evaluated, never build/package top-level code.
+    . (Get-PackageSourceBlock (Join-Path $PSScriptRoot 'build-workspace.ps1') 'Get-Sha256')
+    . (Get-PackageSourceBlock (Join-Path $PSScriptRoot 'package-release.ps1') 'Copy-DirectoryContents')
+
+    function Remember-PackageSourceInput([string]$Path) {
+      $full = [IO.Path]::GetFullPath($Path)
+      if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { throw "PackageSource input missing: $full" }
+      if ((Get-Item -LiteralPath $full -Force).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw "PackageSource input is a reparse point: $full" }
+      if (-not $full.StartsWith($sandboxRoot + '\', [StringComparison]::OrdinalIgnoreCase)) {
+        $hash = (Get-Sha256 $full).ToLowerInvariant()
+        if ($originalInputs.Contains($full) -and $originalInputs[$full] -cne $hash) { throw "PackageSource input changed during capture: $full" }
+        $originalInputs[$full] = $hash
+      }
+    }
+
+    function Copy-PackageSourceFile([string]$Source, [string]$Destination) {
+      $target = Assert-PackageSourceChild $Destination
+      Remember-PackageSourceInput $Source
+      New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force | Out-Null
+      Copy-Item -LiteralPath $Source -Destination $target
+      if ((Get-Sha256 $Source) -cne (Get-Sha256 $target)) { throw "PackageSource copy changed bytes: $Source" }
+    }
+
+    function Copy-PackageSourceTree([string]$Source, [string]$Destination) {
+      $target = Assert-PackageSourceChild $Destination
+      if (-not (Test-Path -LiteralPath $Source -PathType Container)) { throw "PackageSource input tree missing: $Source" }
+      if ((Get-Item -LiteralPath $Source -Force).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw "PackageSource input tree is a reparse point: $Source" }
+      foreach ($item in Get-ChildItem -LiteralPath $Source -Recurse -Force) {
+        if ($item.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) { throw "PackageSource input contains a reparse point: $($item.FullName)" }
+        if (-not $item.PSIsContainer) { Remember-PackageSourceInput $item.FullName }
+      }
+      Copy-DirectoryContents $Source $target
+    }
+
+    function Copy-PackageSourcePayload([string]$Source, [string]$Destination, [string]$ManifestHash) {
+      # Capture only the frozen payload, never a live session/lease directory.
+      # Inspect unexpected names without opening or recursively copying them.
+      $manifestPath = Join-Path $Source 'YeManFanHost.payload.json'
+      Remember-PackageSourceInput $manifestPath
+      if ((Get-Sha256 $manifestPath).ToLowerInvariant() -cne $ManifestHash.ToLowerInvariant()) { throw "PackageSource readiness: payload manifest identity mismatch: $Source" }
+      $manifest = Get-Content -LiteralPath $manifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      $names = @('YeManFanHost.payload.json') + @($manifest.files | ForEach-Object { [string]$_.path })
+      $items = @(Get-ChildItem -LiteralPath $Source -Force)
+      if (@($items | Where-Object { $_.PSIsContainer -or $_.Attributes.HasFlag([IO.FileAttributes]::ReparsePoint) }).Count -ne 0 -or
+          (Compare-Object @($items.Name | Sort-Object) @($names | Sort-Object))) {
+        throw "PackageSource input must contain only frozen payload members; extra paths were not read: $Source"
+      }
+      Copy-PackageSourceTree $Source $Destination
+    }
+
+    function Get-PackageSourceSnapshot([string]$Root) {
+      foreach ($file in Get-ChildItem -LiteralPath $Root -Recurse -File -Force | Sort-Object FullName) {
+        [pscustomobject]@{ path = $file.FullName.Substring($Root.Length + 1).Replace('\', '/'); sha256 = (Get-Sha256 $file.FullName).ToLowerInvariant() }
+      }
+    }
+
+    function Compare-PackageSourceSnapshot($Before, $After) {
+      $old = @{}; $new = @{}
+      foreach ($row in @($Before)) { $old[$row.path] = $row.sha256 }
+      foreach ($row in @($After)) { $new[$row.path] = $row.sha256 }
+      foreach ($path in @(@($old.Keys) + @($new.Keys) | Sort-Object -Unique)) {
+        if ($old[$path] -cne $new[$path]) {
+          [pscustomobject]@{ path = $path; before = $old[$path]; after = $new[$path] }
+        }
+      }
+    }
+
+    function Invoke-PackageSourceProduction([string]$Root, [string]$Gate, [string]$Stage, [string]$ToolsRoot) {
+      . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'build-workspace.ps1') 'Get-Sha256')
+      . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'build-workspace.ps1') 'Assert-PublishPreGate')
+      . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'Get-Sha256')
+      . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'Assert-FanHostMainlinePayload')
+      . (Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'Copy-DirectoryContents')
+      $branch = Get-PackageSourceBlock (Join-Path $ToolsRoot 'package-release.ps1') 'FanHostCopyBranch'
+      $includeFanHostInFullTestPackage = $true
+      $sourcePowerControl = Join-Path $Root 'PowerControl'
+      $StagingPowerControl = Assert-PackageSourceChild $Stage
+      $lines = New-Object 'System.Collections.Generic.List[string]'
+      $rejected = $false; $message = ''; $errorId = ''; $position = ''
+      try {
+        & {
+          switch ($Gate) {
+            'BuildPreGate' { Assert-PublishPreGate $Root }
+            'PackagePayload' { Assert-FanHostMainlinePayload (Join-Path $sourcePowerControl 'fan-host') }
+            'PackageCopyBranch' { . $branch }
+            default { throw "Unknown PackageSource production gate: $Gate" }
+          }
+        } *>&1 | ForEach-Object { $lines.Add($_.ToString()) }
+      } catch {
+        $rejected = $true; $message = $_.Exception.Message
+        $errorId = $_.FullyQualifiedErrorId; $position = $_.InvocationInfo.PositionMessage
+      }
+      return [pscustomobject]@{ gate = $Gate; rejected = $rejected; actualProductionError = $message; errorId = $errorId; position = $position; output = $lines.ToArray(); toolsRoot = $ToolsRoot }
+    }
+
+    function Set-PackageSourceNativePin([string]$Root, [string]$Hash) {
+      $path = Assert-PackageSourceChild (Join-Path $Root 'native\main.cpp')
+      $text = [IO.File]::ReadAllText($path)
+      $pattern = '(\$expectedFanHostV2ManifestSha256\s*=\s*'')[0-9a-fA-F]{64}('')'
+      if ([regex]::Matches($text, $pattern).Count -ne 1) { throw 'Expected one native default manifest hash in scratch main.cpp.' }
+      $text = [regex]::Replace($text, $pattern, { param($match) $match.Groups[1].Value + $Hash + $match.Groups[2].Value })
+      [IO.File]::WriteAllText($path, $text, (New-Object Text.UTF8Encoding($false)))
+    }
+
+    function Test-PackageSourceCase([string]$Label, [scriptblock]$Mutate, [System.Collections.IDictionary]$ExpectedErrors, [bool]$UseOfficialTools = $false) {
+      $root = Join-Path $sandboxRoot ('cases\' + $Label)
+      Copy-PackageSourceTree $baseline $root
+      $initial = @(Get-PackageSourceSnapshot $root)
+      & $Mutate $root
+      $before = @(Get-PackageSourceSnapshot $root)
+      $gateResults = New-Object 'System.Collections.Generic.List[object]'
+      $problems = New-Object 'System.Collections.Generic.List[string]'
+      $toolsRoot = if ($UseOfficialTools) { $PSScriptRoot } else { Join-Path $root 'tools' }
+      $stage = Join-Path $sandboxRoot ('staging\' + $Label)
+      foreach ($gate in $ExpectedErrors.Keys) {
+        $result = Invoke-PackageSourceProduction $root $gate $stage $toolsRoot
+        $gateResults.Add($result)
+        $pattern = [string]$ExpectedErrors[$gate]
+        if ($pattern) {
+          if (-not $result.rejected) { $problems.Add("$gate did not reject") }
+          elseif ($result.actualProductionError -notmatch $pattern) { $problems.Add("$gate rejected for an unexpected reason: $($result.actualProductionError)") }
+          if ($gate -eq 'PackageCopyBranch' -and (Test-Path -LiteralPath (Join-Path $stage 'fan-host-v2'))) { $problems.Add('Rejected production branch created its payload destination') }
+        } else {
+          if ($result.rejected) { $problems.Add("$gate rejected: $($result.actualProductionError)") }
+          $marker = if ($gate -eq 'BuildPreGate') { 'PRE_GATE_OK' } else { 'FAN_HOST_V2_OK' }
+          if (($result.output -join "`n") -notmatch $marker) { $problems.Add("$gate did not emit $marker") }
+        }
+      }
+      $staged = @()
+      if ($ExpectedErrors.Contains('PackageCopyBranch') -and -not $ExpectedErrors['PackageCopyBranch']) {
+        $destination = Join-Path $stage 'fan-host-v2'
+        if (Test-Path -LiteralPath $destination -PathType Container) {
+          $staged = @(Get-PackageSourceSnapshot $destination)
+          if (@(Compare-PackageSourceSnapshot @(Get-PackageSourceSnapshot (Join-Path $root 'PowerControl\fan-host')) $staged).Count -ne 0) { $problems.Add('Production copy file set or bytes differ from source payload') }
+          foreach ($pair in $expectedPayload.GetEnumerator()) {
+            if ((Get-Sha256 (Join-Path $destination $pair.Key)).ToLowerInvariant() -cne $pair.Value) { $problems.Add("Production copy expected identity mismatch: $($pair.Key)") }
+          }
+        } else { $problems.Add('Production copy destination is missing') }
+      }
+      $after = @(Get-PackageSourceSnapshot $root)
+      $inputChanges = @(Compare-PackageSourceSnapshot $before $after)
+      if ($inputChanges.Count -ne 0) { $problems.Add('Production gate mutated its input tree') }
+      $record = [ordered]@{ label = $Label; passed = $problems.Count -eq 0; root = $root; expectedErrors = $ExpectedErrors; inputBaseline = $initial; inputBefore = $before; inputAfter = $after; fixtureChanges = @(Compare-PackageSourceSnapshot $initial $before); inputChanges = $inputChanges; gates = $gateResults.ToArray(); stagedFiles = $staged; failures = $problems.ToArray() }
+      $cases.Add($record)
+      $record | ConvertTo-Json -Depth 9 | Set-Content -LiteralPath (Join-Path $root 'case-evidence.json') -Encoding UTF8
+      if ($problems.Count) { $failures.Add($Label + ': ' + ($problems -join '; ')) }
+      Write-Output ((@('FAIL', 'PASS')[[int]($problems.Count -eq 0)]) + ' PackageSource ' + $Label)
+    }
+
+    $expectedPayload = [ordered]@{
+      'YeManFanHost.dll' = $ExpectedHostSha256.ToLowerInvariant()
+      'YeManFanBackend.dll' = $ExpectedBackendSha256.ToLowerInvariant()
+      'YeManFanHost.payload.json' = $ExpectedManifestSha256.ToLowerInvariant()
+    }
+    try {
+      Remember-PackageSourceInput (Join-Path $PSScriptRoot 'fan_promotion_gate_selftest.ps1')
+      $baseline = Join-Path $sandboxRoot 'baseline'
+      foreach ($name in @('build-workspace.ps1', 'package-release.ps1', 'verify-r5v9-fan-host-payload.ps1')) {
+        Copy-PackageSourceFile (Join-Path $PSScriptRoot $name) (Join-Path $baseline ('tools\' + $name))
+      }
+      Copy-PackageSourceFile (Join-Path $PSScriptRoot 'hc-device-runtime\verify-host-source-bundle.ps1') (Join-Path $baseline 'tools\hc-device-runtime\verify-host-source-bundle.ps1')
+      $verifierAst = Get-PackageSourceAst (Join-Path $baseline 'tools\verify-r5v9-fan-host-payload.ps1')
+      $pinAssignments = @($verifierAst.FindAll({ param($node)
+        $node -is [System.Management.Automation.Language.AssignmentStatementAst] -and
+        $node.Left -is [System.Management.Automation.Language.VariableExpressionAst] -and $node.Left.VariablePath.UserPath -ceq 'compiledSourcePins'
+      }, $true))
+      if ($pinAssignments.Count -ne 1) { throw 'PackageSource readiness: verifier must declare one literal compiledSourcePins map.' }
+      $maps = @($pinAssignments[0].Right.FindAll({ param($node) $node -is [System.Management.Automation.Language.HashtableAst] }, $true))
+      if ($maps.Count -ne 1) { throw 'PackageSource requires a literal compiledSourcePins map.' }
+      $compiledPins = [ordered]@{}
+      foreach ($pair in $maps[0].KeyValuePairs) {
+        $key = $pair.Item1
+        $value = $pair.Item2.PipelineElements[0].Expression
+        if ($key -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or $value -isnot [System.Management.Automation.Language.StringConstantExpressionAst] -or
+            $key.Value -notmatch '^(FanLab|native|capabilities)/[^:]+\.(cs|csproj)$' -or $key.Value -match '(^|[\\/])\.\.([\\/]|$)' -or $value.Value -notmatch '^[a-fA-F0-9]{64}$' -or $compiledPins.Contains($key.Value)) {
+          throw 'PackageSource compiledSourcePins must contain unique safe literal source paths and 64-hex hashes.'
+        }
+        $compiledPins[$key.Value] = $value.Value.ToLowerInvariant()
+      }
+      if ($compiledPins.Count -lt 29) { throw "PackageSource readiness: compiled source pins are incomplete ($($compiledPins.Count), expected at least 29)." }
+      $componentBundleRelative = 'deps/fan-host-source/candidate-canonical-lhm-20261024'
+      $componentBundleManifestSha256 = '561129d604ccbfd20621737d290fad691b127d1ce99b0ffdf4110955972ac03c'
+      Copy-PackageSourceTree (Join-Path $ProjectRoot $componentBundleRelative) (Join-Path $baseline $componentBundleRelative)
+      if ((Get-Sha256 (Join-Path $baseline ($componentBundleRelative + '/manifest.json'))).ToLowerInvariant() -cne $componentBundleManifestSha256) { throw 'PackageSource readiness: approved source bundle manifest differs.' }
+      # Live-source controls are separate copies; the selected archive remains exact.
+      foreach ($relative in $compiledPins.Keys) {
+        $source = Join-Path (Join-Path $baseline ($componentBundleRelative + '/source')) $relative
+        Copy-PackageSourceFile $source (Join-Path $baseline $relative)
+        if ((Get-Sha256 (Join-Path $baseline $relative)).ToLowerInvariant() -cne $compiledPins[$relative]) { throw "PackageSource readiness: archived compiled source differs from verifier pin: $relative" }
+      }
+      $bridge = Join-Path $ProjectRoot 'src\bridge\fanHost.ts'
+      if (-not (Test-Path -LiteralPath $bridge -PathType Leaf)) { $bridge = Join-Path $officialRoot 'src\bridge\fanHost.ts' }
+      Copy-PackageSourceFile $bridge (Join-Path $baseline 'src\bridge\fanHost.ts')
+      if ([IO.File]::ReadAllText($bridge).Contains("from './fanHost/deployment'")) {
+        foreach ($leaf in @('startupConfiguration.ts','deployment.ts','capabilityAdmission.ts')) {
+          Copy-PackageSourceFile (Join-Path (Split-Path -Parent $bridge) ('fanHost\' + $leaf)) (Join-Path $baseline ('src\bridge\fanHost\' + $leaf))
+        }
+      }
+      Copy-PackageSourceFile (Join-Path $ProjectRoot 'native\main.cpp') (Join-Path $baseline 'native\main.cpp')
+      Copy-PackageSourcePayload (Join-Path $ProjectRoot 'PowerControl\fan-host') (Join-Path $baseline 'PowerControl\fan-host') $ExpectedManifestSha256
+      foreach ($name in @('handheldcompanion-runtime', 'ymcc-shared-runtime')) {
+        Copy-PackageSourceTree (Join-Path $ProjectRoot ('PowerControl\' + $name)) (Join-Path $baseline ('PowerControl\' + $name))
+      }
+      foreach ($pair in $expectedPayload.GetEnumerator()) {
+        if ((Get-Sha256 (Join-Path $baseline ('PowerControl\fan-host\' + $pair.Key))).ToLowerInvariant() -cne $pair.Value) { throw "PackageSource readiness: candidate identity mismatch: $($pair.Key)" }
+      }
+      $legacyManifest = Join-Path $LegacyPayloadRoot 'YeManFanHost.payload.json'
+      $legacyHost = Join-Path $LegacyPayloadRoot 'YeManFanHost.dll'
+      Remember-PackageSourceInput $legacyManifest
+      Remember-PackageSourceInput $legacyHost
+      if ((Get-Sha256 $legacyManifest).ToLowerInvariant() -cne '94ff83cbcc2f703cb44c1bb5ce61138faef05c78b26b3d5337a5ca407a7af6b6' -or
+          (Get-Sha256 $legacyHost).ToLowerInvariant() -cne '7f4136c87fe97b10c375b1e2e53d2074f6fc1899e34a4b2a37203ea633adcc5f') { throw 'LegacyPayloadRoot must contain the explicit old 7f/94ff payload.' }
+      $legacyJson = Get-Content -LiteralPath $legacyManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+      if (@($legacyJson.files).Count -ne 9) { throw 'LegacyPayloadRoot must contain the full old nine-file manifest.' }
+      foreach ($entry in @($legacyJson.files)) {
+        $relative = [string]$entry.path
+        if ($relative -notmatch '^[^/\\:]+$' -or $relative -in @('.', '..')) { throw 'Unsafe legacy manifest file path.' }
+        $path = Join-Path $LegacyPayloadRoot $relative
+        Remember-PackageSourceInput $path
+        if ((Get-Sha256 $path).ToLowerInvariant() -cne ([string]$entry.sha256).ToLowerInvariant()) { throw "Legacy payload is not self-consistent: $relative" }
+      }
+      Test-PackageSourceCase 'positive-official-source-and-copy' {} ([ordered]@{ BuildPreGate = ''; PackagePayload = ''; PackageCopyBranch = '' }) $true
+      Test-PackageSourceCase 'positive-isolated-source-and-copy' {} ([ordered]@{ BuildPreGate = ''; PackagePayload = ''; PackageCopyBranch = '' })
+      # Generated C# must stay outside the production compiled-source closure.
+      # This positive control pairs with both real-source additions below.
+      Test-PackageSourceCase 'positive-generated-bin-obj-excluded' {
+        param($root)
+        foreach ($lane in @('real-host', 'fan-backend')) {
+          foreach ($generated in @('bin\Release', 'obj\Release')) {
+            $path = Assert-PackageSourceChild (Join-Path $root ('FanLab\' + $lane + '\' + $generated + '\PackageSourceGenerated.cs'))
+            New-Item -ItemType Directory -Path (Split-Path -Parent $path) -Force | Out-Null
+            [IO.File]::WriteAllText($path, '// PackageSource generated file; excluded from the compiled closure')
+          }
+        }
+      } ([ordered]@{ PackagePayload = ''; PackageCopyBranch = '' })
+      Test-PackageSourceCase 'positive-live-source-drift-keeps-approved-package' {
+        param($root)
+        [IO.File]::AppendAllText((Assert-PackageSourceChild (Join-Path $root 'FanLab/real-host/Program.cs')), "`n// Incomplete live development is not the selected component source.`n")
+      } ([ordered]@{ PackagePayload = ''; PackageCopyBranch = '' })
+      Test-PackageSourceCase 'negative-source-bundle-missing' {
+        param($root)
+        Remove-Item -LiteralPath (Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/manifest.json')))
+      } ([ordered]@{ PackagePayload = '^FAN_HOST_SOURCE_BUNDLE_UNAVAILABLE$'; PackageCopyBranch = '^FAN_HOST_SOURCE_BUNDLE_UNAVAILABLE$' })
+      Test-PackageSourceCase 'negative-source-bundle-manifest-changed' {
+        param($root)
+        [IO.File]::AppendAllText((Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/manifest.json'))), "`n ")
+      } ([ordered]@{ PackagePayload = '^FAN_HOST_SOURCE_BUNDLE_MANIFEST_CHANGED$'; PackageCopyBranch = '^FAN_HOST_SOURCE_BUNDLE_MANIFEST_CHANGED$' })
+      Test-PackageSourceCase 'negative-source-bundle-artifact-pair-changed' {
+        param($root)
+        $path = Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/artifacts/YeManFanBackend.dll'))
+        $stream = [IO.File]::Open($path, [IO.FileMode]::Append, [IO.FileAccess]::Write)
+        try { $stream.WriteByte(0) } finally { $stream.Dispose() }
+      } ([ordered]@{ PackagePayload = '^FAN_HOST_SOURCE_BUNDLE_MEMBER_CHANGED: artifacts/YeManFanBackend.dll$'; PackageCopyBranch = '^FAN_HOST_SOURCE_BUNDLE_MEMBER_CHANGED: artifacts/YeManFanBackend.dll$' })
+      Test-PackageSourceCase 'negative-old-self-consistent-7f' {
+        param($root)
+        $payload = Join-Path $root 'PowerControl\fan-host'
+        foreach ($file in Get-ChildItem -LiteralPath $payload -File -Force) { Remove-Item -LiteralPath (Assert-PackageSourceChild $file.FullName) }
+        Copy-PackageSourcePayload $LegacyPayloadRoot $payload '94ff83cbcc2f703cb44c1bb5ce61138faef05c78b26b3d5337a5ca407a7af6b6'
+        Set-PackageSourceNativePin $root '94ff83cbcc2f703cb44c1bb5ce61138faef05c78b26b3d5337a5ca407a7af6b6'
+      } ([ordered]@{ BuildPreGate = ''; PackagePayload = 'manifest SHA-256 mismatch'; PackageCopyBranch = 'manifest SHA-256 mismatch' })
+      Test-PackageSourceCase 'negative-new-manifest-old-host' {
+        param($root)
+        Copy-PackageSourceFile $legacyHost (Join-Path $root 'PowerControl\fan-host\YeManFanHost.dll')
+      } ([ordered]@{ BuildPreGate = 'payload Host DLL'; PackagePayload = '(manifest file hash|pinned hash) mismatch: YeManFanHost.dll'; PackageCopyBranch = '(manifest file hash|pinned hash) mismatch: YeManFanHost.dll' })
+      Test-PackageSourceCase 'negative-old-native-default-94ff' {
+        param($root)
+        Set-PackageSourceNativePin $root '94ff83cbcc2f703cb44c1bb5ce61138faef05c78b26b3d5337a5ca407a7af6b6'
+      } ([ordered]@{ BuildPreGate = 'manifest' })
+      Test-PackageSourceCase 'negative-mixed-backend' {
+        param($root)
+        Copy-PackageSourceFile (Join-Path $LegacyPayloadRoot 'YeManFanBackend.dll') (Join-Path $root 'PowerControl\fan-host\YeManFanBackend.dll')
+      } ([ordered]@{ PackagePayload = '(manifest file hash|pinned hash) mismatch: YeManFanBackend.dll'; PackageCopyBranch = '(manifest file hash|pinned hash) mismatch: YeManFanBackend.dll' })
+      Test-PackageSourceCase 'negative-missing-host' {
+        param($root)
+        Remove-Item -LiteralPath (Assert-PackageSourceChild (Join-Path $root 'PowerControl\fan-host\YeManFanHost.dll'))
+      } ([ordered]@{ BuildPreGate = 'payload.*YeManFanHost.dll'; PackagePayload = 'manifest file missing: YeManFanHost.dll'; PackageCopyBranch = 'manifest file missing: YeManFanHost.dll' })
+      Test-PackageSourceCase 'negative-extra-mock-flags' {
+        param($root)
+        foreach ($name in @('fan-host.mock.flag', 'fan-host.mock-test.flag')) {
+          [IO.File]::WriteAllText((Assert-PackageSourceChild (Join-Path $root ('PowerControl\fan-host\' + $name))), 'scratch-only')
+        }
+      } ([ordered]@{ PackagePayload = 'files outside or missing from manifest'; PackageCopyBranch = 'files outside or missing from manifest' })
+      $sourceToBreak = @($compiledPins.Keys | Where-Object { $_ -like 'FanLab/real-host/*.cs' } | Sort-Object)[0]
+      if (-not $sourceToBreak) { throw 'Verifier compiledSourcePins has no real-host C# source for negative tests.' }
+      Test-PackageSourceCase 'negative-compiled-source-missing' {
+        param($root)
+        Remove-Item -LiteralPath (Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/source/' + $sourceToBreak)))
+      } ([ordered]@{ PackagePayload = ('^FAN_HOST_COMPILED_SOURCE_UNAVAILABLE: ' + [regex]::Escape($sourceToBreak) + '$'); PackageCopyBranch = ('^FAN_HOST_COMPILED_SOURCE_UNAVAILABLE: ' + [regex]::Escape($sourceToBreak) + '$') })
+      Test-PackageSourceCase 'negative-compiled-source-changed' {
+        param($root)
+        [IO.File]::AppendAllText((Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/source/' + $sourceToBreak))), "`n// PackageSource scratch mutation`n")
+      } ([ordered]@{ PackagePayload = ('^FAN_HOST_COMPILED_SOURCE_CHANGED: ' + [regex]::Escape($sourceToBreak) + '$'); PackageCopyBranch = ('^FAN_HOST_COMPILED_SOURCE_CHANGED: ' + [regex]::Escape($sourceToBreak) + '$') })
+      foreach ($sourceLane in @('real-host', 'fan-backend')) {
+        Test-PackageSourceCase ('negative-compiled-source-added-' + $sourceLane) {
+          param($root)
+          [IO.File]::WriteAllText((Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/source/FanLab/' + $sourceLane + '/PackageSourceUnexpected.cs'))), '// PackageSource scratch addition')
+        } ([ordered]@{ PackagePayload = '^FAN_HOST_COMPILED_SOURCE_CLOSURE_CHANGED$'; PackageCopyBranch = '^FAN_HOST_COMPILED_SOURCE_CLOSURE_CHANGED$' })
+      }
+      foreach ($linkedSource in @('capabilities/FanCapabilityCatalog.cs', 'capabilities/AsusFanCapabilitySession.cs', 'capabilities/HcLightingCapabilityCatalog.cs', 'capabilities/HcLightingCapabilityCatalog.generated.cs')) {
+        $linkedName = [IO.Path]::GetFileNameWithoutExtension($linkedSource)
+        Test-PackageSourceCase ('negative-linked-source-missing-' + $linkedName) {
+          param($root)
+          Remove-Item -LiteralPath (Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/source/' + $linkedSource)))
+        } ([ordered]@{ PackagePayload = ('^FAN_HOST_COMPILED_SOURCE_UNAVAILABLE: ' + [regex]::Escape($linkedSource) + '$'); PackageCopyBranch = ('^FAN_HOST_COMPILED_SOURCE_UNAVAILABLE: ' + [regex]::Escape($linkedSource) + '$') })
+        Test-PackageSourceCase ('negative-linked-source-changed-' + $linkedName) {
+          param($root)
+          [IO.File]::AppendAllText((Assert-PackageSourceChild (Join-Path $root ($componentBundleRelative + '/source/' + $linkedSource))), "`n// PackageSource linked source mutation`n")
+        } ([ordered]@{ PackagePayload = ('^FAN_HOST_COMPILED_SOURCE_CHANGED: ' + [regex]::Escape($linkedSource) + '$'); PackageCopyBranch = ('^FAN_HOST_COMPILED_SOURCE_CHANGED: ' + [regex]::Escape($linkedSource) + '$') })
+      }
+    } catch {
+      $failures.Add('PackageSource setup/execution: ' + $_.Exception.Message)
+    }
+    $sharedInputs = @(
+      foreach ($path in $originalInputs.Keys) {
+        $after = if (Test-Path -LiteralPath $path -PathType Leaf) { (Get-Sha256 $path).ToLowerInvariant() } else { $null }
+        if ($originalInputs[$path] -cne $after) { $failures.Add("Read-only input changed during PackageSource: $path") }
+        [pscustomobject]@{ path = $path; before = $originalInputs[$path]; after = $after }
+      }
+    )
+    $summary = [ordered]@{
+      audit = 'FAN-PROMOTION-PACKAGE-SOURCE'; mode = 'PackageSource'; executedAtLocal = (Get-Date).ToString('o'); powerShellVersion = $PSVersionTable.PSVersion.ToString()
+      projectRoot = $ProjectRoot; legacyPayloadRoot = $LegacyPayloadRoot; sandboxRoot = $sandboxRoot
+      expectedPayload = $expectedPayload; compiledSourcePins = $compiledPins
+      componentSourceSelection = [ordered]@{ archiveRelative = $componentBundleRelative; manifestSha256 = $componentBundleManifestSha256; liveSourceAcceptanceClaimed = $false }
+      hostStarted = $false; fullBuildOrPackageInvoked = $false; realSessionOrLeaseRead = $false
+      pass = @($cases | Where-Object { $_.passed }).Count; fail = $failures.Count
+      cases = $cases.ToArray(); failed = $failures.ToArray(); readOnlyInputs = $sharedInputs; extractions = @($extractions.Values)
+    }
+    $resultPath = Join-Path $sandboxRoot 'fan-promotion-package-source-result.json'
+    $summary | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath $resultPath -Encoding UTF8
+    Write-Output ("FAN promotion PackageSource: pass={0} fail={1}" -f $summary.pass, $summary.fail)
+    foreach ($failure in $failures) { Write-Output ('  FAIL ' + $failure) }
+    Write-Output ('Result: ' + $resultPath)
+    if ($failures.Count -gt 0) { throw "PackageSource failed; inspect $resultPath" }
+  }
+  return
+}
+
 if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
   $OutputRoot = Join-Path (Split-Path -Parent $ProjectRoot) 'Build\Validation'
 }
@@ -84,6 +509,13 @@ function New-Sandbox([string]$Name) {
   Get-ChildItem -LiteralPath (Join-Path $ProjectRoot 'PowerControl\fan-host') -File -Force |
     Copy-Item -Destination $fanHost
   Copy-Item -LiteralPath (Join-Path $ProjectRoot 'src\bridge\fanHost.ts') -Destination $bridgeDir
+  if ([IO.File]::ReadAllText((Join-Path $bridgeDir 'fanHost.ts')).Contains("from './fanHost/deployment'")) {
+    $startupModules = Join-Path $bridgeDir 'fanHost'
+    New-Item -ItemType Directory -Path $startupModules -Force | Out-Null
+    foreach ($leaf in @('startupConfiguration.ts','deployment.ts','capabilityAdmission.ts')) {
+      Copy-Item -LiteralPath (Join-Path $ProjectRoot ('src\bridge\fanHost\' + $leaf)) -Destination $startupModules
+    }
+  }
   Copy-Item -LiteralPath (Join-Path $ProjectRoot 'native\main.cpp') -Destination $nativeDir
   return $root
 }

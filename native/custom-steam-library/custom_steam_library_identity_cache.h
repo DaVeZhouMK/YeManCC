@@ -13,6 +13,29 @@ inline bool verifiedSteamIdentityMatch(const nlohmann::json& match) {
         const auto it=match.find(key); if(it==match.end()||!it->is_number_integer())return 0;
         try { const auto value=it->get<int64_t>(); return value>0&&value<=2147483647?value:0; } catch(...) { return 0; }
     };
+    // Historical builds labeled local INI title comments as official offline
+    // verification. Preserve their images, but require a real official lookup
+    // before these candidate IDs can promote a new Steam import.
+    if (text("source") == "local-install-metadata-offline") return false;
+    const auto source = text("source"), query = text("query");
+    if (source.starts_with("parent-") || source.starts_with("exe-")) {
+        auto asciiKey = [](const std::string& value) {
+            std::string result;
+            for (unsigned char c : value) {
+                if (c >= 128) return std::string(8, 'x');
+                if (c >= 'A' && c <= 'Z') result += static_cast<char>(c + ('a' - 'A'));
+                else if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) result += static_cast<char>(c);
+            }
+            return result;
+        };
+        const auto key = asciiKey(query);
+        auto name = text("formalName"); if (name.empty()) name = text("name");
+        if (name.empty()) name = text("displayName");
+        const bool uppercase = query.size() >= 2 && std::all_of(query.begin(), query.end(), [](unsigned char c) { return c >= 'A' && c <= 'Z'; });
+        if (!key.empty() && key.size() <= 4 && !name.empty() &&
+            (key != asciiKey(name) || (uppercase && query != name))) return false;
+        if (key == "game" || key == "launcher" || key == "start" || key == "main") return false;
+    }
     const auto appId=number("appId");
     if(appId<=0||text("primaryProvider")!="steam"||text("identityStatus")!="verified"||text("steamVerificationStatus")!="steam-verified")return false;
     const auto version=text("resolverVersion");

@@ -1,0 +1,29 @@
+.BasicUI .appportrait_PortraitMessage_3gwMk .appportrait_Message_3CRLA,
+.BasicUI .appportrait_PortraitMessage_3gwMk .appportrait_SubMessage_3DR9f {
+    width: fit-content;
+    margin: 0 auto 0 auto;
+}
+
+.basicgamecarousel_CarouselGameLabel_3CKji {
+    width: 0;
+    max-width: 0;
+    margin: 0 auto 0 auto !important;
+    overflow: visible !important;
+}
+
+.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W {
+    width: 100% !important;
+}
+
+.basicgamecarousel_CarouselGameLabel_3CKji > .appportrait_PortraitMessage_3gwMk {
+    overflow: visible !important;
+    transform: translate(-50%, 0);
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-centered-game-text: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-789518ab5ff2ac3d: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-4f48d230935f33f4: 1; }

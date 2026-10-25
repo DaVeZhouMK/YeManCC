@@ -11,6 +11,7 @@ const loading = ref(true);
 const saving = ref(false);
 const failure = ref('');
 let generation = 0;
+let refreshPending = false;
 let debounce: ReturnType<typeof window.setTimeout> | undefined;
 let queuedPercent: number | undefined;
 let disposed = false;
@@ -22,10 +23,9 @@ const hint = computed(() => {
   if (!state.value?.available) return steamDeckMouseMessage(state.value?.reason);
   if (state.value.error) return steamDeckMouseMessage(state.value.error);
   if (state.value.pending) return `已排队${state.value.desiredPercent ?? state.value.percent}% 重新启动Steam后应用`;
-  const outside = state.value.percent > 300 ? '；当前 Steam 值超出滑块范围，不会自动改写。' : '';
-  if (state.value.steamRunning && state.value.liveAvailable) return `桌面布局 · 右摇杆（${state.value.percent}%）${saving.value ? '；正在实时应用…' : state.value.appliedLive ? '；已通过 Steam 实时应用并保存。' : '；可实时调节，无需重启 Steam。'}${outside}`;
-  if (state.value.steamRunning) return `桌面布局 · 右摇杆（文件值 ${state.value.percent}%）；${steamDeckMouseMessage(state.value.liveReason)}${outside}`;
-  return `桌面布局 · 右摇杆（文件值 ${state.value.percent}%）；Steam 未运行，保存后下次启动加载。${outside}`;
+  if (state.value.percent > 300) return '当前 Steam 值超出滑块范围，不会自动改写。';
+  if (state.value.steamRunning && !state.value.liveAvailable && state.value.liveReason) return steamDeckMouseMessage(state.value.liveReason);
+  return '';
 });
 function accept(next: SteamDeckMouseState): void {
   state.value = next;
@@ -33,6 +33,8 @@ function accept(next: SteamDeckMouseState): void {
   if (queuedPercent === undefined && debounce === undefined) value.value = next.pending ? next.desiredPercent ?? next.percent : next.percent;
 }
 async function refresh(): Promise<void> {
+  if (disposed || refreshPending) return;
+  refreshPending = true;
   const ticket = ++generation;
   loading.value = true;
   try {
@@ -40,7 +42,7 @@ async function refresh(): Promise<void> {
     if (!disposed && ticket === generation && !saving.value) { accept(next); failure.value = ''; }
   } catch (error) {
     if (!disposed && ticket === generation) { state.value = null; failure.value = `无法读取 Steam 桌面布局：${error instanceof Error ? error.message : String(error)}`; }
-  } finally { if (!disposed && ticket === generation) loading.value = false; }
+  } finally { refreshPending = false; if (!disposed && ticket === generation) loading.value = false; }
 }
 async function commit(percent: number): Promise<void> {
   if (debounce !== undefined) { window.clearTimeout(debounce); debounce = undefined; }
@@ -55,6 +57,7 @@ async function commit(percent: number): Promise<void> {
     if (disposed) return;
     if (!next.ok) {
       if (next.available) state.value = next; // Preserve actual file readback even on an uncertain/live-save error.
+      queuedPercent = undefined; // An unconfirmed write never authorizes a queued replay.
       failure.value = steamDeckMouseMessage(next.reason || next.error);
       if (queuedPercent === undefined) value.value = state.value.pending ? state.value.desiredPercent ?? state.value.percent : state.value.percent;
       return;
@@ -95,7 +98,7 @@ onBeforeUnmount(() => { disposed = true; ++generation; if (debounce !== undefine
   <div class="steamdeck-mouse-bubble">
     <Slider :model-value="value" @update:model-value="draft" label="SteamDeck鼠标灵敏度" unit="%" :min="1" :max="300" :step="5" :step-base="0" :accelerate="false"
       :disabled="disabled || loading || !state?.available" @commit="commit" />
-    <p class="sensitivity-hint" role="status" aria-live="polite">{{ hint }}</p>
+    <p v-if="hint" class="sensitivity-hint" role="status" aria-live="polite">{{ hint }}</p>
   </div>
 </template>
 

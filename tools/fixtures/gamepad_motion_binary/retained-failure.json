@@ -1,0 +1,29 @@
+{
+  "schema": 1,
+  "run": "G:/YeManCC-Work/Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/AutomaticCalibration/NativeBinaryExecution/2026-10-17T09-07-16-092Z-15fa39",
+  "classification": "fixture numerical expectation error, not an ABI/load/runner failure",
+  "configuration": "Release",
+  "cases": 7,
+  "checks": 284149,
+  "failedAssertions": 6,
+  "failedCase": "manual-compensation-and-zero-samples",
+  "created": 19,
+  "deleted": 19,
+  "moduleUnloaded": true,
+  "reason": "Two all-six-axis-zero samples were incorrectly expected to produce gyro-minus-offset immediately. The actual fixed binary returns without state updates for all-zero six axes, preserving previous calibrated/gravity outputs.",
+  "staticEvidence": {
+    "file": "G:/YeManCC-Work/Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/AutomaticCalibration/NativeBinaryAudit/2026-10-17T08-48-22-182Z-d73227/dumpbin/disasm.txt",
+    "sha256": "8259f37c79d686e93f54269be608299ae95dcfea2be081224f027d6c622e639d",
+    "lines": [
+      1620,
+      1645
+    ],
+    "guardRvas": [
+      "0x2943",
+      "0x2998"
+    ],
+    "skipTargetRva": "0x2C30"
+  },
+  "correction": "Keep finite/offset/zero-input coverage; assert prior-state retention for the two all-zero samples. Check raw-minus-offset with zero gyro and nonzero gravity separately. No Auto confidence threshold or convergence deadline was added.",
+  "oldEvidenceEdited": false
+}

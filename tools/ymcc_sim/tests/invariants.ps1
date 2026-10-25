@@ -9,6 +9,8 @@ $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
 $D = Get-SimDefaults
+$testPowerShell = Join-Path $PSHOME 'pwsh.exe'
+if(-not (Test-Path -LiteralPath $testPowerShell -PathType Leaf)){throw 'This test suite requires the current PowerShell 7 runtime'}
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'invariants' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -20,7 +22,6 @@ function Inv([string]$id, [string]$name, [bool]$ok, [string]$actual) {
 $settingsPath = $D.settingsPath
 $settingsBefore = if (Test-Path -LiteralPath $settingsPath) { (Get-FileHash -LiteralPath $settingsPath -Algorithm SHA256).Hash } else { 'missing' }
 $procsBefore = @(Get-SimProcessesByRole 'App') + @(Get-SimProcessesByRole 'FanHost')
-$filesBefore = @(Get-ChildItem (Join-Path $D.localAppData 'fan-host') -Recurse -File -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName + '|' + (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash })
 
 # I1–I3：单实例 / 唯一宿主实例 / 退出零残留 —— 由沙箱宿主生命周期验证
 $port = 8896
@@ -40,7 +41,7 @@ if (-not $p2.HasExited) { try { $p2.Kill() } catch { } }
 
 # I4：未知即拒绝且 changeCallCount==0（门未建立时）
 $stubLog = Join-Path $OutDir "stub-unknown-$stamp.jsonl"
-$stub = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', '8897', '-State', 'gate-unknown', '-LogPath', $stubLog) -PassThru -WindowStyle Hidden
+$stub = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoLogo', '-NoProfile', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', '8897', '-State', 'gate-unknown', '-LogPath', $stubLog) -PassThru -WindowStyle Hidden
 Start-Sleep -Seconds 2
 $gate = Test-SimActionGate -Base 'http://127.0.0.1:8897' -Token 'x' -Kind 'external'
 $posts = 0
@@ -91,7 +92,7 @@ Inv 'I9' '代次单调：复用旧代次被拒' $i9 $d9
 Inv 'I10' '无静默成功：请求结果与状态面一致' $i10 $d10
 
 # I7 证据完备新鲜：必需摘要缺失 ⇒ exit 9（假绿防护；自 204-M 起用独立 provoke 脚本，避免内联拼接）
-$po = & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testsDir 'provoke-missing.ps1') -SimRoot $simRoot -EvidenceDir $OutDir 2>&1 | Out-String
+$po = & $testPowerShell -NoLogo -NoProfile -File (Join-Path $testsDir 'provoke-missing.ps1') -SimRoot $simRoot -EvidenceDir $OutDir 2>&1 | Out-String
 $pc = $LASTEXITCODE
 Inv 'I7' '证据完备新鲜：必需摘要缺失 ⇒ exit 9（假绿防护）' ($pc -eq 9) ("exit=" + $pc + " | " + (($po -split "`r?`n" | Where-Object { $_ -match 'verdict=' } | Select-Object -First 1)))
 
@@ -111,19 +112,18 @@ foreach ($f in $recent) {
 }
 Inv 'I12' '未证保持未证：既有睡眠证据中无"物理读回"伪装' ($badMask -eq 0) ("scanned=" + @($recent).Count + " masked=" + $badMask)
 
-# I13（2026-09-23 T0，operator：绝不允许"父进程已退出而宿主不退"的死循环）：
-# 有界收尾的源码锚点——预算常量 + 两条路径都设 deadline + 预算耗尽写成"未证实"事件。
-$t0Src = Join-Path (Split-Path -Parent (Split-Path -Parent $simRoot)) 'FanLab\real-host\Program.cs'
-$t0Ok = $false; $t0Detail = "source-missing: $t0Src"
-if (Test-Path -LiteralPath $t0Src) {
-  $t0Text = Get-Content -LiteralPath $t0Src -Raw -Encoding UTF8
-  $t0Need = @('ParentExitFinalizeBudgetMs', 'exit-budget-exhausted', 'unverified-not-success')
-  $t0Missing = @($t0Need | Where-Object { -not $t0Text.Contains($_) })
-  $t0SiteCount = ([regex]::Matches($t0Text, 'finalizeDeadline')).Count
-  $t0Ok = ($t0Missing.Count -eq 0) -and ($t0SiteCount -ge 4)
-  $t0Detail = ("anchors=" + $t0Need.Count + " finalizeDeadlineSites=" + $t0SiteCount + " missing=" + ($t0Missing -join ','))
-}
-Inv 'I13' 'T0：父进程退出/停止请求的收尾有界（预算常量 + 两条路径 deadline + 未证实事件）' $t0Ok $t0Detail
+# I13: execute actual Host contracts, including bounded gate refusal, honest
+# budget exhaustion/explicit retry, and an independent natural parent-exit run.
+$parentEvidence=Join-Path $OutDir ('parent-exit-'+[guid]::NewGuid().ToString('N'))
+$parentEngine=Join-Path $PSHOME 'pwsh.exe'
+if(-not(Test-Path -LiteralPath $parentEngine)){$parentEngine=(Get-Command pwsh.exe -ErrorAction Stop).Source}
+$parentLog=Join-Path $OutDir ('parent-exit-'+$stamp+'.log')
+& $parentEngine -NoProfile -NonInteractive -File (Join-Path $testsDir 'parent_exit_contract.ps1') -HostPayloadRoot (Split-Path -Parent $D.hostExe) -EvidenceDir $parentEvidence *> $parentLog
+$parentCode=$LASTEXITCODE
+$parentReceipt=Join-Path $parentEvidence 'verification.json'
+$parentResult=if(Test-Path -LiteralPath $parentReceipt){Get-Content -LiteralPath $parentReceipt -Raw -Encoding UTF8|ConvertFrom-Json}else{$null}
+$t0Ok=$parentCode -eq 0 -and $parentResult.status -eq 'PASS' -and $parentResult.passed -eq $true
+Inv 'I13' 'parent exit: actual bounded recovery, honest exhausted budget and natural process exit0' $t0Ok ('exit='+$parentCode+' receipt='+$parentReceipt)
 
 # I14（2026-09-23，真机 16:13 取证新增；同日 Q1 补充裁决后改为"新契约"版）：
 # ① native 侧**接受**窗口有界：退避 0/250/500 + 单次 HTTP 650 ms ⇒ ≤2700 ms（有界）；
@@ -164,7 +164,7 @@ $failed = @($script:Cases | Where-Object { -not $_.pass })
 $verdict = if ($failed.Count -eq 0) { 'PASS' } else { 'FAIL' }
 $report = [ordered]@{ at = (Get-Date).ToString('o'); tool = Get-SimFileIdentity (Join-Path $simRoot 'lib\sim_core.ps1') 'sim_core'
   cases = @($script:Cases); failed = $failed.Count; verdict = $verdict
-  note = '14 条机器可判定不变量（睡眠/风扇侧，含 I13 T0 有界退出锚点、I14 唤醒恢复窗口对齐）；realSleepPerformed=false；沙箱宿主自启自清' }
+  note = '14 条机器可判定不变量（睡眠/风扇侧，含 I13 真实Host有界退出/诚实失败回归、I14 唤醒恢复窗口对齐）；realSleepPerformed=false；沙箱宿主自启自清' }
 $jf = Join-Path $OutDir ("invariants-$stamp.json")
 [IO.File]::WriteAllText($jf, ($report | ConvertTo-Json -Depth 8), [Text.UTF8Encoding]::new($false))
 Write-Host ("invariants: cases={0} failed={1} -> {2}" -f @($script:Cases).Count, $failed.Count, $verdict) -ForegroundColor $(if ($failed.Count) { 'Red' } else { 'Green' })

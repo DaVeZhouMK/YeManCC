@@ -1,0 +1,31 @@
+{
+  "networkUsed": false,
+  "sdk": "10.0.400",
+  "dependencies": [
+    {
+      "sha256": "f218c7d4df14eca572f506e64171283465444eac14dcce4cc431b69deaf88c94",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/hc-application-dependency-trim/Program.cs"
+    },
+    {
+      "sha256": "87305caa5d6acc042a3c8fde471904503fe921a34381a3d410446b84880d2104",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/hc-application-dependency-trim/RuntimeProbe/Program.cs"
+    },
+    {
+      "sha256": "5f330542aaadcadfd021adaf6d162bf5cadd07536436945175db3aaf2bf6b8a9",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/hc-application-dependency-trim/RuntimeProbe/PinnedHcAdapter.cs"
+    },
+    {
+      "sha256": "7c36b233ff1006786f497899daa7c46736f396bac23e1b4b89a6f2a27622de48",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/hc-devicecore-trim/DevelopmentSigning.cs"
+    },
+    {
+      "sha256": "6346621d998fe428b4b97bb365e5090537be5074861d726cead5767d3b2a7cf2",
+      "path": "C:/Users/DaVe/.nuget/packages/microsoft.net.illink.tasks/10.0.11/tools/net/Mono.Cecil.dll"
+    },
+    {
+      "sha256": "573ccab989a5d3b4eb7b56cd6d6c4115e253d504dd57cc85fa6b6312c75a1023",
+      "path": "C:/Users/DaVe/.nuget/packages/microsoft.net.illink.tasks/10.0.11/tools/net/illink.dll"
+    }
+  ],
+  "runtime": "10.0.11"
+}

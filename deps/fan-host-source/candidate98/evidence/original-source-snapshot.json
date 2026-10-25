@@ -1,0 +1,582 @@
+{
+  "schemaVersion": 1,
+  "kind": "immutable-host-source-snapshot",
+  "capturedUtc": "2026-10-19T03:05:19.7650191Z",
+  "sourceRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+  "snapshotRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\source-snapshot-fan-route-selftest-fix-7669c9cdb25e4ff1a83c60e7c585bfe4\\source",
+  "status": "OWNER_FAN_BATCH_WITH_MSI_AND_FAN_ROUTE_SELFTEST_EXPECTATION_REPAIRS",
+  "batchCompletionClaimed": true,
+  "sourceInputs": [
+    {
+      "path": "FanLab/real-host/YeManFanHost.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\YeManFanHost.csproj",
+      "sha256": "791307d8d7bb132f940923b045a7f07e409531801125ad18c006aba462d2fda0",
+      "bytes": 2023,
+      "roles": [
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/DeferredHostSuccessor.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\DeferredHostSuccessor.cs",
+      "sha256": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f",
+      "bytes": 5962,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\FanCapabilityPolicy.cs",
+      "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad",
+      "bytes": 8013,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/G1FanContractAdapter.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\G1FanContractAdapter.cs",
+      "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387",
+      "bytes": 9643,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/HostProcessLifetime.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\HostProcessLifetime.cs",
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040",
+      "bytes": 5304,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurve.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFamilyFanCurve.cs",
+      "sha256": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83",
+      "bytes": 11724,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFamilyFanCurveSelfTest.cs",
+      "sha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+      "bytes": 13878,
+      "roles": [
+        "Compile",
+        "post-owner-batch-selftest-expectation-repair"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFanDeviceLifecycle.cs",
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13",
+      "bytes": 10420,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiClassRegistration.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiWmiClassRegistration.cs",
+      "sha256": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605",
+      "bytes": 7944,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/MsiWmiPayloadResource.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiWmiPayloadResource.cs",
+      "sha256": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883",
+      "bytes": 5277,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\OneXFanDeviceLifecycle.cs",
+      "sha256": "94f7be466347b24ab8099c42aa1c7ddb2d92fcce84fee1c8e655e550d55010cd",
+      "bytes": 13568,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Program.cs",
+      "sha256": "b66eb309092c1f3b9b6081b19ab55b2be93ec565bdff2d0fedf6fd68e43ddd8f",
+      "bytes": 1449115,
+      "roles": [
+        "Compile",
+        "post-owner-batch-fan-route-selftest-identity-repair"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateFakes.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section18CandidateFakes.cs",
+      "sha256": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6",
+      "bytes": 78823,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section18CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section18CandidateLifecycle.cs",
+      "sha256": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033",
+      "bytes": 86939,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section19CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section19CandidateLifecycle.cs",
+      "sha256": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272",
+      "bytes": 76494,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section20CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section20CandidateLifecycle.cs",
+      "sha256": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa",
+      "bytes": 37363,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section21CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section21CandidateLifecycle.cs",
+      "sha256": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278",
+      "bytes": 27778,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section22CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section22CandidateLifecycle.cs",
+      "sha256": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca",
+      "bytes": 12831,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Section23CandidateLifecycle.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section23CandidateLifecycle.cs",
+      "sha256": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891",
+      "bytes": 33707,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "native/ProcessEfficiency.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+      "sha256": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c",
+      "bytes": 2747,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/DeviceCoreSharedDependencies.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+      "sha256": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7",
+      "bytes": 6751,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/RuntimeDependencyContract.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs",
+      "sha256": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1",
+      "bytes": 8570,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/YeManFanHost.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+      "bytes": 343,
+      "roles": [
+        "Content"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\YeManFanBackend.csproj",
+      "sha256": "8d1c229c386d485c4317adbce12713a449608400dbd6a92765dc4c6d05c11cea",
+      "bytes": 1490,
+      "roles": [
+        "ProjectReference",
+        "project"
+      ]
+    },
+    {
+      "path": "FanLab/real-host/Directory.Build.props",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Directory.Build.props",
+      "sha256": "17638e7d1d252b85bdd00f08a3cd888f20910c16b51536eca21df0f88a5e1480",
+      "bytes": 970,
+      "roles": [
+        "DirectoryBuildPropsPath"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendController.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendController.cs",
+      "sha256": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303",
+      "bytes": 11769,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendReceipts.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendReceipts.cs",
+      "sha256": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2",
+      "bytes": 13424,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanBackendTransport.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendTransport.cs",
+      "sha256": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de",
+      "bytes": 1083,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanCurveWriter.cs",
+      "sha256": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56",
+      "bytes": 4318,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+      "sha256": "302c74563432feae0be5189295b879dccb02094cd61fbfc80f17166717c810d6",
+      "bytes": 3939,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674",
+      "bytes": 66867,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\FanCapabilityCatalog.cs",
+      "sha256": "46453519448799a09196fd376cd9a9c42b4545bde5be5951d92a51c0274af370",
+      "bytes": 5361,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\AsusFanCapabilitySession.cs",
+      "sha256": "995faafbcf97d6c1ff7d9abb5c19513fc8ea7bcb003cba2474f63f7c3f26c059",
+      "bytes": 3727,
+      "roles": [
+        "Compile"
+      ]
+    },
+    {
+      "path": "capabilities/hc-device-catalog.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\hc-device-catalog.json",
+      "sha256": "be443c3c83c46c269660a389ecfaff3b74fb076111028f476f9bc74a6994e4fc",
+      "bytes": 455074,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    },
+    {
+      "path": "tools/hc_capability_catalog_generate.mjs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\hc_capability_catalog_generate.mjs",
+      "sha256": "90a2bdcf816536829c5ab3920d850188bc41fe487c5cfa74a1bfe6843f62e825",
+      "bytes": 7912,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    },
+    {
+      "path": "tools/hc_capability_catalog_selftest.mjs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\hc_capability_catalog_selftest.mjs",
+      "sha256": "fa3a83ec59662d2f8c594f7dd2a96934bcf759053f7371726940de548fd54f6c",
+      "bytes": 2707,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    },
+    {
+      "path": "tools/PcCapabilityAudit/Program.cs",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\PcCapabilityAudit\\Program.cs",
+      "sha256": "4075b33de50bd01aef39309b55c8b7e05c67f702c1795952513c77f7a4f82a06",
+      "bytes": 11697,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    },
+    {
+      "path": "tools/PcCapabilityAudit/PcCapabilityAudit.csproj",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\PcCapabilityAudit\\PcCapabilityAudit.csproj",
+      "sha256": "43f538740623c60afb94a9dfb6020699b3425d1b59441cf5042ce48bb9e4315d",
+      "bytes": 562,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    },
+    {
+      "path": "deps/handheldcompanion-runtime/HC-BASELINE.json",
+      "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps\\handheldcompanion-runtime\\HC-BASELINE.json",
+      "sha256": "140a0bc4aa580053b8ee074499ce0d4d49d00b1b0244e3e1cc627afbf54c9914",
+      "bytes": 4134,
+      "roles": [
+        "catalog-provenance-only"
+      ]
+    }
+  ],
+  "sourceInputCount": 39,
+  "handwrittenCompileFiles": 29,
+  "externalToolchainInputs": [
+    {
+      "path": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\Sdks\\Microsoft.NET.Sdk\\analyzers\\Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll",
+      "sha256": "b944eee0710b72f0f93913312802455e6cd49dd963c1e54295b5a0a8797255e0",
+      "bytes": 210768,
+      "role": "Analyzer"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\Sdks\\Microsoft.NET.Sdk\\analyzers\\Microsoft.CodeAnalysis.NetAnalyzers.dll",
+      "sha256": "4467896c4485876e72dc43a942c2b5c7e563be474b02e9f8e3cfebdcec9480ca",
+      "bytes": 5408552,
+      "role": "Analyzer"
+    }
+  ],
+  "optionalAnalyzerConfigProbes": [
+    {
+      "path": "G:\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\.globalconfig",
+      "role": "GlobalAnalyzerConfigFiles",
+      "exists": false
+    }
+  ],
+  "toolchain": {
+    "dotnet": "C:\\Program Files\\dotnet\\dotnet.exe",
+    "dotnetExeSha256": "ab1b71fd3dd71062e074c9fab8312081a81b7f2b3e0327c48c4d249c8d1a3135",
+    "sdkVersion": "10.0.400",
+    "projects": [
+      {
+        "path": "FanLab/real-host/YeManFanHost.csproj",
+        "properties": {
+          "MSBuildAllProjects": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\YeManFanHost.csproj;;C:\\Program Files\\dotnet\\sdk\\10.0.400\\Current\\Microsoft.Common.targets\\ImportAfter\\Microsoft.TestPlatform.ImportAfter.targets",
+          "DirectoryBuildPropsPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Directory.Build.props",
+          "DirectoryBuildTargetsPath": "",
+          "DirectoryPackagesPropsPath": "",
+          "TargetFramework": "net10.0-windows10.0.19041.0",
+          "RuntimeIdentifier": "win-x64",
+          "LangVersion": "14.0",
+          "Nullable": "enable",
+          "DefineConstants": "TRACE;RELEASE",
+          "OutputType": "Exe",
+          "UseWPF": "true",
+          "NETCoreSdkVersion": "10.0.400",
+          "MSBuildToolsPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400"
+        },
+        "compileItems": [
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\DeferredHostSuccessor.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\FanCapabilityPolicy.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\G1FanContractAdapter.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\HostProcessLifetime.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFamilyFanCurve.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFamilyFanCurveSelfTest.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiFanDeviceLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiWmiClassRegistration.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\MsiWmiPayloadResource.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\OneXFanDeviceLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Program.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section18CandidateFakes.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section18CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section19CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section20CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section21CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section22CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\Section23CandidateLifecycle.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\ProcessEfficiency.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\DeviceCoreSharedDependencies.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\RuntimeDependencyContract.cs"
+        ],
+        "arguments": [
+          "msbuild",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\real-host\\YeManFanHost.csproj",
+          "-nologo",
+          "-p:Configuration=Release",
+          "-getItem:Compile,Content,EmbeddedResource,ProjectReference,AdditionalFiles,Analyzer,EditorConfigFiles,GlobalAnalyzerConfigFiles",
+          "-getProperty:MSBuildAllProjects,DirectoryBuildPropsPath,DirectoryBuildTargetsPath,DirectoryPackagesPropsPath,TargetFramework,RuntimeIdentifier,LangVersion,Nullable,DefineConstants,OutputType,UseWPF,NETCoreSdkVersion,MSBuildToolsPath"
+        ]
+      },
+      {
+        "path": "FanLab/fan-backend/YeManFanBackend.csproj",
+        "properties": {
+          "MSBuildAllProjects": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\YeManFanBackend.csproj;;C:\\Program Files\\dotnet\\sdk\\10.0.400\\Current\\Microsoft.Common.targets\\ImportAfter\\Microsoft.TestPlatform.ImportAfter.targets",
+          "DirectoryBuildPropsPath": "",
+          "DirectoryBuildTargetsPath": "",
+          "DirectoryPackagesPropsPath": "",
+          "TargetFramework": "net10.0",
+          "RuntimeIdentifier": "",
+          "LangVersion": "14.0",
+          "Nullable": "enable",
+          "DefineConstants": "TRACE;RELEASE",
+          "OutputType": "Library",
+          "UseWPF": "false",
+          "NETCoreSdkVersion": "10.0.400",
+          "MSBuildToolsPath": "C:\\Program Files\\dotnet\\sdk\\10.0.400"
+        },
+        "compileItems": [
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendController.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendReceipts.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanBackendTransport.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\Asus\\AsusFanCurveWriter.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\FanCapabilityCatalog.cs",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\capabilities\\AsusFanCapabilitySession.cs"
+        ],
+        "arguments": [
+          "msbuild",
+          "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab\\fan-backend\\YeManFanBackend.csproj",
+          "-nologo",
+          "-p:Configuration=Release",
+          "-getItem:Compile,Content,EmbeddedResource,ProjectReference,AdditionalFiles,Analyzer,EditorConfigFiles,GlobalAnalyzerConfigFiles",
+          "-getProperty:MSBuildAllProjects,DirectoryBuildPropsPath,DirectoryBuildTargetsPath,DirectoryPackagesPropsPath,TargetFramework,RuntimeIdentifier,LangVersion,Nullable,DefineConstants,OutputType,UseWPF,NETCoreSdkVersion,MSBuildToolsPath"
+        ]
+      }
+    ],
+    "externalInputs": [
+      {
+        "path": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\Sdks\\Microsoft.NET.Sdk\\analyzers\\Microsoft.CodeAnalysis.CSharp.NetAnalyzers.dll",
+        "sha256": "b944eee0710b72f0f93913312802455e6cd49dd963c1e54295b5a0a8797255e0",
+        "bytes": 210768,
+        "role": "Analyzer"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\sdk\\10.0.400\\Sdks\\Microsoft.NET.Sdk\\analyzers\\Microsoft.CodeAnalysis.NetAnalyzers.dll",
+        "sha256": "4467896c4485876e72dc43a942c2b5c7e563be474b02e9f8e3cfebdcec9480ca",
+        "bytes": 5408552,
+        "role": "Analyzer"
+      }
+    ]
+  },
+  "sourceChangedDuringCapture": false,
+  "actualCWritten": false,
+  "hostBuilt": false,
+  "hostStarted": false,
+  "hardwareIo": false,
+  "baseSnapshot": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-candidate-20261019\\source-snapshot-msi-selftest-fix-62f1b857c6464427934c31fc1841948b\\source-snapshot.json",
+    "sha256": "e965ba1d8f551718785ac917bfcb17359c39e7088171d6fc1229490ab7f4eee3",
+    "uncompiledLightingMetadataNotImported": true
+  },
+  "postBatchAmendments": [
+    {
+      "schemaVersion": 1,
+      "status": "SELFTEST_EXPECTATIONS_FIXED_PENDING_REBUILD",
+      "changedUtc": "2026-10-19T11:23:40.23783+08:00",
+      "path": "FanLab/real-host/MsiFamilyFanCurveSelfTest.cs",
+      "beforeSha256": "fc1ef727f643ba12f04fba317125aefdaf4a9cc565d500138c1e02b3469091a8",
+      "afterSha256": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392",
+      "basis": "Actual frozen HC metadata and catalog aliases: first three classes live directly in Devices; only CG3EM has MSI namespace",
+      "positiveCanonicalRoutes": 4,
+      "newRejectedUnregisteredIdentityChecks": 4,
+      "writerOrLifecycleAlgorithmChanged": false,
+      "originalFailure": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-candidate-20261019\\pinned-harness-regression\\msi.json",
+      "actualCWritten": false
+    },
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "liveBeforeSha256": "17c83294ddedf62fca834b60b846d4744988d44bcebaca2156072f75857395d2",
+      "liveAfterSha256": "d0d7e6814621c5badf3988e494238289cc62d71dac45866e95252f3b24df8da3",
+      "batchBeforeSha256": "24f5b3d7309f4dd91469b02ccae9c7db971bd0cca41fa2896d7f0fd1f8bb69d8",
+      "batchAfterSha256": "b66eb309092c1f3b9b6081b19ab55b2be93ec565bdff2d0fedf6fd68e43ddd8f",
+      "positiveCanonicalIdentityCorrections": 5,
+      "newUnknownNamespaceRefusalChecks": 1,
+      "outsideSelftestSectionUnchanged": true,
+      "productionRouteOrWriterChanged": false,
+      "originalFullSelftestFailure": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\full-host-selftest-latest.json"
+    }
+  ]
+}

@@ -2,7 +2,19 @@
 export const PROBE_SIGNATURE = 'ymcc-steam-hud-probe-v1';
 export const MAX_PROBE_MS = 180000;
 export type ProbeScope = 'overlay-only' | 'main-window-test';
-export interface ProbeConfig { kind:'integration-test'; runId:string; expiresAt:number; scope:ProbeScope; }
+export interface ProbeGameBinding {
+  appId:number;gameId:string;browserGameId:string;overlayTitle:string;overlayPid:number;
+  overlayBrowserId:number;ownerBrowserId:number;overlayBrowserType:number;overlayNativeAppId:number;
+}
+export interface ProbeConfig { kind:'integration-test'; runId:string; expiresAt:number; scope:ProbeScope;
+  carrier?:'root-dom'|'native-popup';popupPin?:'creation'|'none';gameBinding?:ProbeGameBinding; }
+export function validGameBinding(value:unknown):value is ProbeGameBinding {
+  const b=value as ProbeGameBinding,integer=(n:unknown,min:number)=>typeof n==='number'&&Number.isSafeInteger(n)&&n>=min&&n<=0xffffffff;
+  return !!b&&integer(b.appId,1)&&integer(b.overlayPid,1)&&integer(b.overlayBrowserId,1)&&integer(b.ownerBrowserId,1)&&integer(b.overlayNativeAppId,1)&&
+    integer(b.overlayBrowserType,0)&&typeof b.gameId==='string'&&typeof b.browserGameId==='string'&&
+    /^\d{1,20}$/.test(b.gameId)&&/^\d{1,20}$/.test(b.browserGameId)&&BigInt(b.gameId)>0n&&BigInt(b.gameId)<=0xffffffffffffffffn&&BigInt(b.browserGameId)>0n&&BigInt(b.browserGameId)<=0xffffffffffffffffn&&
+    b.overlayTitle==='SP Overlay: '+b.overlayPid+'/'+b.overlayBrowserId+'/'+b.overlayBrowserType;
+}
 export interface ProbeData {
   runId:string; seq:number; collectedAt:number; source:'fixture'|'ymcc-uniform';
   fps:number|null; cpuPowerW:number|null; cpuTempC:number|null; gpuUsage:number|null;
@@ -26,7 +38,10 @@ export function validProbeConfig(value:unknown,now:number):value is ProbeConfig 
   const v=value as ProbeConfig;
   return !!v && v.kind==='integration-test' && /^hud-probe-[a-zA-Z0-9-]{1,55}$/.test(v.runId) &&
     Number.isSafeInteger(v.expiresAt) && v.expiresAt>now && v.expiresAt-now<=MAX_PROBE_MS &&
-    (v.scope==='overlay-only'||v.scope==='main-window-test');
+    (v.scope==='overlay-only'||v.scope==='main-window-test') &&
+    (v.carrier===undefined||v.carrier==='root-dom'||v.carrier==='native-popup') &&
+    (v.popupPin===undefined||v.popupPin==='creation'||v.popupPin==='none') &&
+    (v.carrier==='native-popup'?v.scope==='overlay-only'&&validGameBinding(v.gameBinding):v.gameBinding===undefined&&v.popupPin===undefined);
 }
 export function validProbeData(value:unknown,config:ProbeConfig,now:number,lastSeq:number):value is ProbeData {
   const v=value as ProbeData;
@@ -66,10 +81,10 @@ export function makeProbeState(now=()=>Date.now()) {
   const trace=(event:string,detail?:Record<string,unknown>)=>{if(traces.length===160)traces.shift();traces.push({event,at:now(),detail});};
   const publish=()=>{for(const f of listeners)try{f();}catch{}};
   return {
-    snapshot:()=>({config:config?{...config}:null,data:data?{...data}:null,appearance:{...appearance}}), signal:publish,
+    snapshot:()=>({config:config?{...config,...(config.gameBinding?{gameBinding:{...config.gameBinding}}:{})}:null,data:data?{...data}:null,appearance:{...appearance}}), signal:publish,
     traces:()=>structuredClone(traces),trace,
     subscribe(f:()=>void){listeners.add(f);return()=>{listeners.delete(f);};},
-    start(value:unknown){if(config||!validProbeConfig(value,now()))return false;config={...value};data=null;appearance={...DEFAULT_PROBE_APPEARANCE};trace('start',{runId:config.runId,scope:config.scope});publish();return true;},
+    start(value:unknown){if(config||!validProbeConfig(value,now()))return false;config={...value,...(value.gameBinding?{gameBinding:{...value.gameBinding}}:{})};data=null;appearance={...DEFAULT_PROBE_APPEARANCE};trace('start',{runId:config.runId,scope:config.scope});publish();return true;},
     update(value:unknown){if(!config||config.expiresAt<=now()||!validProbeData(value,config,now(),data?.seq??-1))return false;data={...value};trace('data',{seq:data.seq,source:data.source});publish();return true;},
     setAppearance(runId:string,value:unknown){
       if(!config||config.runId!==runId||config.expiresAt<=now()||!validProbeAppearance(value))return false;

@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-derived-sta-counterexamples-basis",
+  "roleOrder": [
+    "self-stop",
+    "startup-stop",
+    "ended-owner",
+    "start-atomic",
+    "pending-work"
+  ],
+  "roles": {
+    "self-stop": {
+      "mode": "fault-sta-self-stop",
+      "signature": "System.Void YeManFanHost.RealHcBackend::Dispose()",
+      "failedIds": [
+        "sta-disposal-from-own-thread-stops-pump"
+      ],
+      "failureFragments": {
+        "sta-disposal-from-own-thread-stops-pump": "Disposal on the lifecycle STA must stop its own message pump"
+      },
+      "generatorBudgetMs": 30000,
+      "portsBudgetMs": 30000,
+      "replayBudgetMs": 45000,
+      "expectedCanonicalSha256": "c3fa0356a6bb7686a0b16718219300fb207c95011c9dae38a98cac851b1f59dc"
+    },
+    "startup-stop": {
+      "mode": "fault-sta-startup-stop",
+      "signature": "System.Void YeManFanHost.RealHcBackend::StaDispatcherLoop()",
+      "failedIds": [
+        "sta-disposal-during-startup-does-not-leak-pump"
+      ],
+      "failureFragments": {
+        "sta-disposal-during-startup-does-not-leak-pump": "A disposed pre-publication STA must not enter an unowned message pump"
+      },
+      "generatorBudgetMs": 30000,
+      "portsBudgetMs": 30000,
+      "replayBudgetMs": 45000,
+      "expectedCanonicalSha256": "23784026f9b6f7d112085dfe94d9e6d1e3afe27e11f10db2c431f2d8c039c0df"
+    },
+    "ended-owner": {
+      "mode": "fault-sta-ended-owner",
+      "signature": "System.Void YeManFanHost.RealHcBackend::StaDispatcherLoop()",
+      "failedIds": [
+        "sta-ended-pump-cannot-be-reused"
+      ],
+      "failureFragments": {
+        "sta-ended-pump-cannot-be-reused": "Expected ObjectDisposedException; got"
+      },
+      "generatorBudgetMs": 30000,
+      "portsBudgetMs": 30000,
+      "replayBudgetMs": 45000,
+      "expectedCanonicalSha256": "830001657da50554ab3f9a703b45c1d3a30795df2cd58f33a75036f1f808ad4c"
+    },
+    "start-atomic": {
+      "mode": "fault-sta-start-atomic",
+      "signature": "System.Windows.Threading.Dispatcher YeManFanHost.RealHcBackend::EnsureStaDispatcher()",
+      "failedIds": [
+        "sta-concurrent-cold-start-has-one-owner",
+        "sta-dispose-before-thread-start-does-not-join-unstarted"
+      ],
+      "failureFragments": {
+        "sta-concurrent-cold-start-has-one-owner": "The actual Thread.Start boundary must remain inside its published owner gate",
+        "sta-dispose-before-thread-start-does-not-join-unstarted": "Concurrent disposal must not Join an unstarted thread"
+      },
+      "generatorBudgetMs": 30000,
+      "portsBudgetMs": 30000,
+      "replayBudgetMs": 45000,
+      "expectedCanonicalSha256": "8bf60500e6c2fd3083a4fd44484c793af530096d3da3de3412a692066bc68e61"
+    },
+    "pending-work": {
+      "mode": "fault-sta-pending-work",
+      "signature": "System.Void YeManFanHost.RealHcBackend/StaWorkItem`1::RejectUnexecuted()",
+      "failedIds": [
+        "sta-pump-exit-rejects-pending-public-work"
+      ],
+      "failureFragments": {
+        "sta-pump-exit-rejects-pending-public-work": "Pending public work must be rejected promptly by its ended dispatcher"
+      },
+      "generatorBudgetMs": 30000,
+      "portsBudgetMs": 30000,
+      "replayBudgetMs": 45000,
+      "expectedCanonicalSha256": "07bf1d496fec652f0268a75ad4737d942549a3b891a857f0149ed061bc508d06"
+    }
+  },
+  "caseIds": [
+    "sta-existing-real-dispatcher-selftest",
+    "sta-public-handshake-real-pump",
+    "sta-public-initialization-retry-same-thread",
+    "sta-public-reentrant-handshake-refused",
+    "sta-normal-disposal-joins-owned-thread",
+    "sta-start-failure-is-terminal-and-disposable",
+    "sta-disposed-before-start-does-not-bootstrap",
+    "sta-disposal-from-own-thread-stops-pump",
+    "sta-disposal-during-startup-does-not-leak-pump",
+    "sta-ended-pump-cannot-be-reused",
+    "sta-concurrent-cold-start-has-one-owner",
+    "sta-dispose-before-thread-start-does-not-join-unstarted",
+    "sta-busy-admission-serializes-public-handshake",
+    "sta-workitem-error-retires-before-next-call",
+    "sta-pump-exit-rejects-pending-public-work",
+    "sta-failed-factory-disposal-joins-thread"
+  ],
+  "positiveChecksThreshold": 100,
+  "negativeStartGateRule": "Original negative branch does not demand every startGateHeld value true; start-atomic intentionally tests false. Exact failures/errors and every owned-thread cleanup still required.",
+  "frameworkImportScope": "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e",
+  "scopeContract": "Only original reflection-imported Thread.get_CurrentThread and Monitor.Enter(Object)/Exit(Object) use this exact pinned CoreLib definition scope. Existing compiler-emitted System.Runtime or System.Threading.Thread operands remain unchanged; no scope normalization, simple-name matching or facade fallback. Actual self-stop raw plus pinned CoreLib method definitions bind this change.",
+  "sources": {
+    "sta-proof.mjs": "3f86e61ea36b9c6161b8f3a997d0dfbbc2f174a04201d8e3c830b25b11465419",
+    "StaCases.cs": "2d569ae54e132957031223eacde1980e632e7444ac93ba4cb8f7ee559456515d",
+    "FactoryCases.cs": "bb62318b9984696ccc9af34bfd844fdfb43b5f27cafd5103d8f3c637ca2b123b",
+    "Harness.cs": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8",
+    "HarnessLoadContexts.cs": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230"
+  },
+  "staPrepareSha256": "921804d22aaaaf88089995bd8a7ee4c5b6fe812e2ada4d3d738ae86c852f7676",
+  "staBasisSha256": "aca2a0dda1079a3a26a694d97fe48a3e515252a2da0aadd06ce6ee501d87dcf5",
+  "rawReaderSha256": "3bd052bb0165ad8ce1765e2b9ab3504ccec443fa350f365dca1bf899b50e928e",
+  "cleanRaw": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-current-sta-bootstrap-prepare-20261021-r1/evidence/STA-CLEAN-RAW.json",
+    "sha256": "64b91bccec8a86d2e41a83b403be13da8e1b5c75ad1d857c05926efb5846f273"
+  },
+  "mutatorMetadata": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-current-sta-counterexamples-prepare-20261021-r1/evidence/STA-FAULT-MUTATOR-RESULT.json",
+    "sha256": "9bf32f5ec57505272a138444878404eb23c2312d14c63fc9ebc2fa7b5b50313d"
+  },
+  "originalSourceOrder": [
+    "fault-sta-role(cleanHost,freshFault,proof)",
+    "sta-leaf-ports(fault,freshPorted,proof)",
+    "sta-init(ported,light,metadataRawHC,result)"
+  ],
+  "positiveSourceNeverFaultInput": true
+}

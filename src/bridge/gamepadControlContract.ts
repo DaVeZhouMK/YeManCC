@@ -14,15 +14,12 @@
  *   C = normal consumers/observations of E or an allowlisted B projection
  */
 
+import { isVirtualOutputPersona, type VirtualOutputPersona } from './controllerPersona';
+
 export type GamepadControlMode =
   | 'hold'
   | 'physical-pass-through'
-  | 'virtual-xbox360'
-  | 'virtual-dualshock4'
-  | 'virtual-dualsense'
-  | 'virtual-steamdeck'
-  | 'virtual-elite'
-  | 'virtual-dualsense-edge';
+  | `virtual-${VirtualOutputPersona}`;
 
 export type GamepadControlPhase =
   | 'disabled'
@@ -48,7 +45,7 @@ export type PhysicalSourceState =
 
 export type SourceKind = 'local' | 'external';
 export type EndpointKind = 'physical' | 'virtual';
-export type VirtualPersona = 'xbox360' | 'dualshock4' | 'steamdeck' | 'dualsense' | 'elite' | 'dualsense-edge';
+export type VirtualPersona = VirtualOutputPersona;
 export type EndpointTransport = 'physical-hid' | 'virtual-hid';
 export type EndpointWriter = 'none' | 'hid-virtual-writer';
 
@@ -517,6 +514,7 @@ export class GamepadControl {
 
   prepareVirtualEndpoint(persona: VirtualPersona, endpointIdentity: string): GamepadControlSnapshot {
     const source = this.requireSelectedSource();
+    if (!isVirtualOutputPersona(persona)) return this.failClosed('virtual-persona-unsupported');
     if (!validIdentity(endpointIdentity)) return this.failClosed('virtual-endpoint-identity-required');
     if (source.identity === endpointIdentity || source.physicalEndpointIdentity === endpointIdentity) {
       return this.failClosed('virtual-endpoint-self-echo');
@@ -576,14 +574,12 @@ export class GamepadControl {
     if (!this.antiEchoVerified) return this.failClosed('admit-without-anti-echo');
     if (!this.consumerEvidenceReady) return this.failClosed('admit-without-consumer-evidence');
     if (this.endpoint.kind === 'virtual' && this.pendingPersona === null) return this.failClosed('virtual-persona-missing');
-    this.mode = this.endpoint.kind === 'physical'
-      ? 'physical-pass-through'
-      : this.pendingPersona === 'xbox360' ? 'virtual-xbox360'
-      : this.pendingPersona === 'steamdeck' ? 'virtual-steamdeck'
-      : this.pendingPersona === 'dualsense' ? 'virtual-dualsense'
-      : this.pendingPersona === 'elite' ? 'virtual-elite'                    // 批112
-      : this.pendingPersona === 'dualsense-edge' ? 'virtual-dualsense-edge'  // 批112
-      : 'virtual-dualshock4';
+    if (this.endpoint.kind === 'physical') {
+      this.mode = 'physical-pass-through';
+    } else {
+      if (!isVirtualOutputPersona(this.pendingPersona) || this.endpoint.persona !== this.pendingPersona) return this.failClosed('virtual-persona-unsupported');
+      this.mode = `virtual-${this.pendingPersona}`;
+    }
     this.phase = 'admitted';
     this.failClosedReason = null;
     return this.snapshot();
@@ -664,7 +660,7 @@ export class GamepadControl {
 
   /** Release only a virtual endpoint and restore the physical public endpoint. */
   disableVirtual(neutral: LogicalFrame): GamepadControlSnapshot {
-    if (this.mode !== 'virtual-xbox360' && this.mode !== 'virtual-dualshock4' && this.mode !== 'virtual-steamdeck' && this.mode !== 'virtual-dualsense' && this.mode !== 'virtual-elite' && this.mode !== 'virtual-dualsense-edge') return this.failClosed('virtual-mode-not-active');
+    if (this.mode !== 'virtual-steamdeck' && this.mode !== 'virtual-elite' && this.mode !== 'virtual-dualsense-edge') return this.failClosed('virtual-mode-not-active');
     const source = this.requireSelectedSource();
     if (!neutral.neutral || !this.sameSelectedSource(neutral)) return this.failClosed('virtual-release-neutral-required');
     if (!this.endpoint || this.endpoint.kind !== 'virtual') return this.failClosed('virtual-release-endpoint-missing');

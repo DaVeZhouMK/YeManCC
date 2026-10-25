@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "HC-COMPACT-PARENT-PROMOTED-20261018",
+  "runtimeId": "YMCC-DEVICECORE-20261018-v1",
+  "referenceOnly": true,
+  "compatibilityAcceptance": "historical reference only; current ABI, consumer and release gates required",
+  "purpose": "Reject silent restoration/expansion or other unreviewed HC payload drift against the user-approved compact baseline",
+  "files": {
+    "profile": {
+      "path": "deps/ymcc-device-core-runtime/export-baseline/profile.json",
+      "sha256": "c3c35ee0e3e348c6dcdd28009d9e9ff5e679515c8d711456c7de9320780393a0"
+    },
+    "manifest": {
+      "path": "deps/ymcc-device-core-runtime/export-baseline/runtime.json",
+      "sha256": "64b6aba8840aeb2d6b212a027df6ea991439ec38ef4e45216227cd8f37fe7626"
+    },
+    "inventory": {
+      "path": "deps/ymcc-device-core-runtime/export-baseline/inventory.json",
+      "sha256": "76175778ed62ff16f3d7be4d47407b785c2c9d75ddeca8fc17bae8edb97475e8"
+    }
+  },
+  "approvedChanges": {
+    "path": "deps/ymcc-device-core-runtime/export-baseline/approved-20261024-canonical-lhm.json",
+    "sha256": "4149db4ce59d6cfd3deeeafdc3dddef56fa3eed5ca782851a5ed63950bb63cea"
+  },
+  "provenance": {
+    "parentPromotionReceipt": "tools/hc-winrt-second-pass/PARENT-PROMOTION-RECEIPT.json",
+    "parentPromotionReceiptSha256": "b5fafc2125ccb80a8aeeecdf3a92fac84d71e47da6e321ff66ef883690632d08",
+    "historicalProfileSha256": "c3c35ee0e3e348c6dcdd28009d9e9ff5e679515c8d711456c7de9320780393a0",
+    "files": 86,
+    "bytes": 11849647
+  },
+  "currentExpandedPayloadApproved": false
+}

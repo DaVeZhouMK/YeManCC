@@ -1,0 +1,11 @@
+/* Peer charts: FPS, efficiency, and four CPU/GPU score curves over TDP. */
+.charts.with-gpu-ts{grid-template-columns:repeat(3,minmax(0,1fr))}
+.gpu-ts-chart{min-width:0;grid-template-rows:19px 26px minmax(0,1fr)}
+.gpu-ts-chart .chart-title{display:flex;align-items:center;justify-content:space-between;gap:4px;white-space:nowrap}
+.gpu-ts-chart .chart-title strong{font-size:14px}.gpu-ts-chart .chart-title span{font-size:11px;color:var(--muted,#a7bccd)}
+.ts-live-legend{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));grid-template-rows:repeat(2,12px);gap:0 4px;align-content:start}
+.ts-live-legend span{font-size:10px;line-height:12px;white-space:nowrap;display:flex;align-items:center;gap:4px}
+.ts-live-legend span::before{content:'';width:14px;flex:0 0 14px;border-top:2px solid currentColor}.ts-live-legend .baseline::before{border-top-style:dashed;opacity:.7}
+.ts-live-legend .cpu{color:#f6bc74}.ts-live-legend .gpu{color:#70c8ff}
+#gpu-ts-chart{width:100%;height:100%;min-height:0;overflow:hidden}#gpu-ts-chart text{fill:#9db3c5;font:10px sans-serif}.ts-grid{stroke:#344755;stroke-width:.7;stroke-dasharray:2 4}.ts-grid-x{stroke:#30424f;stroke-width:.5;opacity:.3}
+.ts-power-line{fill:none;stroke-width:1.8;stroke-linejoin:round;stroke-linecap:round}.ts-power-line.cpu{stroke:#f6bc74}.ts-power-line.gpu{stroke:#70c8ff}.ts-power-line.baseline{stroke-dasharray:4 3;opacity:.65;stroke-width:1.3}.ts-current{stroke:#c9d8e3;stroke-width:.7;stroke-dasharray:2 3}.ts-no-data{fill:#a8bccb;opacity:.09}

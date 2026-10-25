@@ -1,0 +1,205 @@
+{
+  "parts": {
+    "CLASSIFICATION": "            const DWORD slotBit = (1u << i);\r\n            const bool edgeProbe = (g_xinputVirtualEndpointProbed & slotBit) == 0;\r\n            const bool reprobeRequested =\r\n                (g_xinputSlotReprobeMask.load(std::memory_order_relaxed) & slotBit) != 0;\r\n            const bool unknownBefore = (g_xinputSlotUnknownMask & slotBit) != 0;\r\n            // R103: a connected slot can change occupant without an edge.\r\n            // Revalidate its identity on the existing discovery/boundary pass.\r\n            if (edgeProbe || reprobeRequested || unknownBefore || dirtyDiscovery || boundaryFullScan) {\r\n                const bool backoffActive = !edgeProbe && !reprobeRequested &&\r\n                    g_xinputSlotReprobeAt[i] != 0 && probeNow < g_xinputSlotReprobeAt[i];\r\n                if (backoffActive) {\r\n                    // 路径暂不可读：保持 Unknown，按有界节拍重查（不逐帧重试）。\r\n                } else if (!ymccOpenXInputAvailable()) {\r\n                    ++g_feedbackSlotGeneration[i];\r\n                    // OpenXInput 不可用 ⇒ 判为物理（掩码位不置）= 原行为，零回归。\r\n                    g_xinputVirtualEndpointProbed |= slotBit;\r\n                    g_xinputVirtualEndpointMask &= ~slotBit;\r\n                    g_xinputSlotUnknownMask &= ~slotBit;\r\n                    g_xinputSlotReprobeAt[i] = 0;\r\n                    g_xinputSlotIdentityResolvedEpoch[i] =\r\n                        g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);\r\n                    g_xinputSlotReprobeMask.fetch_and(~slotBit, std::memory_order_relaxed);\r\n                } else {\r\n                    ++g_feedbackSlotGeneration[i];\r\n                    const std::wstring slotPath = ymccOpenXInputGetDevicePath(i);\r\n                    const XInputSlotIdentity slotIdentity = xinputSlotIdentityVerdict(\r\n                        /*openXInputAvailable=*/true, /*pathReadable=*/!slotPath.empty(),\r\n                        /*virtualIdentity=*/!slotPath.empty() &&\r\n                            hidHideIsVirtualIdentity(W2U(slotPath), {}));\r\n                    if (slotIdentity == XInputSlotIdentity::Unknown) {\r\n                        // GP-GBRETURN-2：路径读不回 = Unknown，不是 Physical。不置 probed\r\n                        // （有界退避后重查）；既不算虚拟也不算物理——物理连接掩码排除\r\n                        // Unknown 位 ⇒ 不把未知占用者当成\"已恢复的物理源\"（错签 sourceReacquired）。\r\n                        const bool newlyUnknown = !unknownBefore;\r\n                        g_xinputSlotUnknownMask |= slotBit;\r\n                        g_xinputVirtualEndpointMask &= ~slotBit;\r\n                        g_xinputVirtualEndpointProbed &= ~slotBit;\r\n                        g_xinputSlotReprobeAt[i] = probeNow + kXInputSlotReprobeBackoffMs;\r\n                        g_xinputSlotIdentityResolvedEpoch[i] = 0;   // 未解析：任何映射代都不算新鲜\r\n                        if (newlyUnknown) {\r\n                            appendNativeLifecycleLog(\"gamepad-xinput-slot-identity-unknown\", {\r\n                                {\"slot\", i}, {\"reprobeRequested\", reprobeRequested},\r\n                                {\"backoffMs\", kXInputSlotReprobeBackoffMs},\r\n                                {\"policy\", \"unknown-not-physical-not-virtual\"}\r\n                            });\r\n                        }\r\n                        g_xinputSlotReprobeMask.fetch_and(~slotBit, std::memory_order_relaxed);\r\n                    } else {\r\n                        const bool wasVirtual = (g_xinputVirtualEndpointMask & slotBit) != 0;\r\n                        const bool wasProbed = (g_xinputVirtualEndpointProbed & slotBit) != 0;\r\n                        g_xinputSlotUnknownMask &= ~slotBit;\r\n                        g_xinputVirtualEndpointProbed |= slotBit;\r\n                        g_xinputSlotReprobeAt[i] = 0;\r\n                        g_xinputSlotIdentityResolvedEpoch[i] =\r\n                            g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);\r\n                        if (slotIdentity == XInputSlotIdentity::Virtual) {\r\n                            g_xinputVirtualEndpointMask |= slotBit;\r\n                            if (!wasVirtual || unknownBefore || reprobeRequested) {\r\n                                appendNativeLifecycleLog(\"gamepad-xinput-virtual-endpoint-slot\", {\r\n                                    {\"slot\", i}, {\"path\", W2U(slotPath)},\r\n                                    {\"reclassified\", wasProbed && !wasVirtual},\r\n                                    {\"identityEpoch\", g_xinputSlotIdentityResolvedEpoch[i]},\r\n                                    {\"policy\", \"virtual-endpoint-never-a-physical-source\"}\r\n                                });\r\n                            }\r\n                        } else {\r\n                            g_xinputVirtualEndpointMask &= ~slotBit;\r\n                            if (wasVirtual) {\r\n                                // 映射变更后旧结论被推翻：原虚拟槽现由物理占用者占用\r\n                                // （现场：随映射变动，旧身份被沿用 ⇒ 输入源接错/归还判据失真）。\r\n                                appendNativeLifecycleLog(\"gamepad-xinput-slot-identity-reclassified\", {\r\n                                    {\"slot\", i}, {\"path\", W2U(slotPath)},\r\n                                    {\"from\", \"virtual\"}, {\"to\", \"physical\"},\r\n                                    {\"identityEpoch\", g_xinputSlotIdentityResolvedEpoch[i]},\r\n                                    {\"policy\", \"identity-reverified-after-mapping-change\"}\r\n                                });\r\n                            }\r\n                        }\r\n                        g_xinputSlotReprobeMask.fetch_and(~slotBit, std::memory_order_relaxed);\r\n                    }\r\n                }\r\n            }",
+    "IDENTITY_ENUM": "enum class XInputSlotIdentity : int { Unknown = 0, Virtual = 1, Physical = 2 };",
+    "TARGET": "struct PhysicalFeedbackTarget {\r\n    bool msi=false;\r\n    DWORD slot=4;\r\n    unsigned identityEpoch=0;\r\n    unsigned long long sourceGeneration=0,powerGeneration=0,msiModeGeneration=0;\r\n    unsigned sourceTopology=0;\r\n    std::shared_ptr<const HidHideMsiMainSourceRecord> record;\r\n};",
+    "METHODS": "static DWORD xinputNonVirtualConnectedMask() {\r\n    return g_xinputConnectedMask & ~g_xinputVirtualEndpointMask;\r\n}\nstatic DWORD xinputPhysicalConnectedMask() {\r\n    // GP-GBRETURN-2：Unknown（路径读不回）不是物理——不并入物理域（旧行为=空路径永久按物理）。\r\n    return xinputNonVirtualConnectedMask() & ~g_xinputSlotUnknownMask;\r\n}\nstatic XInputSlotIdentity xinputSlotIdentityVerdict(bool openXInputAvailable, bool pathReadable,\r\n                                                    bool virtualIdentity) {\r\n    if (!openXInputAvailable) return XInputSlotIdentity::Physical;\r\n    if (!pathReadable) return XInputSlotIdentity::Unknown;\r\n    return virtualIdentity ? XInputSlotIdentity::Virtual : XInputSlotIdentity::Physical;\r\n}\nstatic inline void xinputSlotsMarkDiscoveryDirty() {\r\n    g_xinputDiscoveryDirty.store(true, std::memory_order_relaxed);\r\n    g_xinputTopologyEpoch.fetch_add(1, std::memory_order_acq_rel);\r\n    if (tickCostEnabled()) g_xinputDiscoveryDirtyTick.store(GetTickCount64(), std::memory_order_relaxed);\r\n}\nstatic void xinputSlotsRequestIdentityReprobe(DWORD slots, const char* why) {\r\n    slots &= 0xFu;\r\n    if (slots == 0) return;\r\n    g_xinputSlotReprobeMask.fetch_or(slots, std::memory_order_acq_rel);\r\n    const unsigned epoch = g_xinputSlotIdentityEpoch.fetch_add(1, std::memory_order_acq_rel) + 1;\r\n    appendNativeLifecycleLog(\"gamepad-xinput-slot-identity-reprobe\", {\r\n        {\"slots\", slots}, {\"why\", why ? why : \"mapping-change\"},\r\n        {\"identityEpoch\", epoch},\r\n        {\"policy\", \"mapping-change-invalidates-slot-identity\"}\r\n    });\r\n}\nstatic std::string hidHideUpper(std::string value) {\r\n    for (char& c : value) c = static_cast<char>(toupper(static_cast<unsigned char>(c)));\r\n    return value;\r\n}\nstatic bool hidHideIsVirtualIdentity(const std::string& deviceInstanceId, const std::string& base) {\r\n    const std::string joined = hidHideUpper(deviceInstanceId + \"|\" + base);\r\n    return joined.find(\"HIDMAESTRO\") != std::string::npos ||\r\n        joined.find(\"HM-CTL\") != std::string::npos ||\r\n        joined.find(\"VIGEM\") != std::string::npos;\r\n}",
+    "CURRENT": "static bool physicalFeedbackSlotCurrent(const PhysicalFeedbackTarget& target) {\r\n    const DWORD allowed=xinputPhysicalConnectedMask() & (g_xinputPhysicalSourceLocked?g_xinputPhysicalSourceMask:0xFu);\r\n    return target.slot<4 && (allowed&(1u<<target.slot)) &&\r\n        !(g_xinputSlotReprobeMask.load(std::memory_order_acquire)&(1u<<target.slot)) &&\r\n        target.identityEpoch==g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) &&\r\n        target.identityEpoch==g_xinputSlotIdentityResolvedEpoch[target.slot] &&\r\n        target.sourceGeneration==g_feedbackSlotGeneration[target.slot];\r\n}",
+    "STOP": "static void physicalFeedbackStopTarget(const PhysicalFeedbackTarget& target,bool touch=false) {\r\n    if(target.powerGeneration!=currentPowerGeneration() || !hardwareWriteAllowed())return;\r\n    if(target.msi) {\r\n        if(!target.record)return;\r\n        if(target.msiModeGeneration!=g_msiFeedbackModeGeneration.load(std::memory_order_acquire))return;\r\n        const ymcc::touchhaptic::SourceToken token{ymcc::touchhaptic::Backend::Msi,target.record->generation,\r\n            target.msiModeGeneration,target.powerGeneration,4,target.sourceTopology};\r\n        (void)msiDinputFeedbackWrite(0,0,false,\"pulse-stop\",target.record.get(),touch,&token);\r\n    } else {\r\n        std::lock_guard<std::mutex> sourceLock(g_gamepadReadMx);\r\n        if(physicalFeedbackSlotCurrent(target)) { XINPUT_VIBRATION zero{};(void)g_feedbackSetState(target.slot,&zero); }\r\n    }\r\n}",
+    "FINISH": "static void physicalFeedbackFinish(unsigned long long generation) {\r\n    std::lock_guard<std::mutex> lock(g_feedbackPulseMx);\r\n    if(!g_feedbackPulseActive || generation!=g_rogVibratePulseGen)return;\r\n    physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch);g_feedbackPulseActive=false;\r\n}",
+    "READY": "static ymcc::touchhaptic::SourceToken nativePhysicalFeedbackReady() {\r\n    using namespace ymcc::touchhaptic;SourceToken token;token.power=currentPowerGeneration();\r\n    if(!hardwareWriteAllowed()||g_exitRequested.load(std::memory_order_acquire))return token;\r\n    const auto msiGeneration=g_msiFeedbackSourceGeneration.load(std::memory_order_acquire);\r\n    if(msiGeneration){\r\n        const auto mode=g_msiFeedbackModeGeneration.load(),topology=(unsigned long long)g_xinputTopologyEpoch.load();\r\n        if(g_msiDinputSourceValid.load(std::memory_order_acquire)&&g_msiFeedbackSamplePower.load()==token.power&&\r\n            g_msiFeedbackSampleMode.load()==mode&&g_msiFeedbackSampleTopology.load()==topology){\r\n            token.backend=Backend::Msi;token.generation=msiGeneration;token.identity=mode;token.topology=topology;\r\n        }\r\n        return token; // A bound but unreadable MSI source never falls through to an arbitrary XInput slot.\r\n    }\r\n    std::lock_guard<std::mutex> sourceLock(g_gamepadReadMx);\r\n    PhysicalFeedbackTarget target;target.slot=g_xinputPrimarySlot;target.identityEpoch=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);\r\n    if(target.slot<4)target.sourceGeneration=g_feedbackSlotGeneration[target.slot];\r\n    if(physicalFeedbackSlotCurrent(target)){token.backend=Backend::XInput;token.slot=target.slot;\r\n        token.identity=target.identityEpoch;token.generation=target.sourceGeneration;token.topology=g_xinputTopologyEpoch.load();}\r\n    return token;\r\n}",
+    "START": "static ymcc::touchhaptic::Receipt nativePhysicalFeedbackStart(int strength,int durationMs,bool touch,\r\n    const ymcc::touchhaptic::SourceToken* expected=nullptr) {\r\n    using namespace ymcc::touchhaptic;Receipt receipt;receipt.strength=std::clamp(strength,0,100);\r\n    receipt.durationMs=std::clamp(durationMs,10,1000);\r\n    std::lock_guard<std::mutex> lock(g_feedbackPulseMx);\r\n    if(!hardwareWriteAllowed()||g_exitRequested.load(std::memory_order_acquire)){\r\n        receipt.reason=Reason::PowerTransition;return receipt;}\r\n    if(touch&&g_feedbackPulseActive&&!g_feedbackPulseTouch){receipt.reason=Reason::ManualPulseActive;return receipt;}\r\n    PhysicalFeedbackTarget target;target.powerGeneration=currentPowerGeneration();\r\n    if(expected&&expected->power!=target.powerGeneration){receipt.reason=Reason::PowerTransition;return receipt;}\r\n    const auto source=msiDinputFeedbackSourceSnapshot();\r\n    if(source){\r\n        const auto& record=*source;\r\n        receipt.backend=Backend::Msi;receipt.managed=true;\r\n        if(expected&&(expected->backend!=Backend::Msi||expected->generation!=record.generation||expected->identity!=g_msiFeedbackModeGeneration.load())){\r\n            receipt.reason=Reason::SourceChanged;return receipt;}\r\n        target.msi=true;target.record=source;target.msiModeGeneration=expected?expected->identity:g_msiFeedbackModeGeneration.load();\r\n        target.sourceTopology=expected?(unsigned)expected->topology:g_xinputTopologyEpoch.load();\r\n        if(touch&&(!g_msiDinputSourceValid.load(std::memory_order_acquire)||g_msiFeedbackSamplePower.load()!=target.powerGeneration||\r\n            g_msiFeedbackSampleMode.load()!=target.msiModeGeneration||g_msiFeedbackSampleTopology.load()!=target.sourceTopology)){\r\n            receipt.reason=Reason::SourcePending;return receipt;}\r\n        if(g_feedbackPulseActive&&!g_feedbackPulseTarget.msi)physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch);\r\n        const bool a1m=g_machineIdentity.deviceClass==\"HandheldCompanion.Devices.ClawA1M\";\r\n        receipt.motor=a1m?(receipt.strength>0?193:0):(receipt.strength*255+50)/100;\r\n        const SourceToken token{Backend::Msi,record.generation,target.msiModeGeneration,target.powerGeneration,4,target.sourceTopology};\r\n        const auto fb=msiDinputFeedbackWrite((BYTE)receipt.motor,(BYTE)receipt.motor,a1m,touch?\"touch-feedback\":\"vibrate\",&record,touch,&token);\r\n        receipt.ok=fb.ok;receipt.attempted=fb.attempted;receipt.written=fb.written;receipt.error=fb.lastError;\r\n        if(!fb.ok)receipt.reason=fb.reason;\r\n        if(!fb.attempted)return receipt;\r\n    }else{\r\n        std::lock_guard<std::mutex> sourceLock(g_gamepadReadMx);\r\n        target.slot=g_xinputPrimarySlot;target.identityEpoch=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);\r\n        if(target.slot<4)target.sourceGeneration=g_feedbackSlotGeneration[target.slot];\r\n        receipt.backend=Backend::XInput;receipt.slot=target.slot;\r\n        if(!physicalFeedbackSlotCurrent(target)){receipt.reason=Reason::SourcePending;return receipt;}\r\n        if(expected&&(expected->backend!=Backend::XInput||expected->slot!=target.slot||\r\n            expected->generation!=target.sourceGeneration||expected->identity!=target.identityEpoch||expected->topology!=g_xinputTopologyEpoch.load())){\r\n            receipt.reason=Reason::SourceChanged;return receipt;}\r\n        // Retire the former MSI or physical slot only after leaving the source lock.\r\n        if(g_feedbackPulseActive&&g_feedbackPulseTarget.msi){\r\n            physicalFeedbackStopTarget(g_feedbackPulseTarget,g_feedbackPulseTouch);\r\n        }else if(g_feedbackPulseActive&&g_feedbackPulseTarget.slot!=target.slot&&physicalFeedbackSlotCurrent(g_feedbackPulseTarget)){\r\n            XINPUT_VIBRATION zero{};(void)g_feedbackSetState(g_feedbackPulseTarget.slot,&zero);\r\n        }\r\n        const WORD level=(WORD)((DWORD)receipt.strength*65535u/100u);XINPUT_VIBRATION pulse{level,level};\r\n        const DWORD rc=g_feedbackSetState(target.slot,&pulse);receipt.ok=rc==ERROR_SUCCESS;receipt.attempted=true;\r\n        receipt.error=rc;receipt.motor=level;if(!receipt.ok)receipt.reason=Reason::WriteFailed;\r\n        if(!touch)appendNativeLifecycleLog(\"gamepad-vibrate\",{{\"slot\",target.slot},{\"connectedMask\",g_xinputConnectedMask},\r\n            {\"admittedMask\",g_xinputAdmittedMask},{\"primarySlot\",g_xinputPrimarySlot},{\"strength\",receipt.strength},\r\n            {\"level\",level},{\"durationMs\",receipt.durationMs},{\"touchFeedback\",touch},{\"rc\",rc},{\"ok\",receipt.ok}});\r\n    }\r\n    g_feedbackPulseTarget=target;g_feedbackPulseActive=true;g_feedbackPulseTouch=touch;\r\n    receipt.pulseGeneration=++g_rogVibratePulseGen;return receipt;\r\n}",
+    "SCHEDULE": "static bool gamepadSerialScheduleFeedbackStop(unsigned long long generation,int durationMs) {\r\n    std::lock_guard<std::mutex> lock(g_gamepadSerialMx);\r\n    if(g_gamepadSerialStopping||g_exitRequested.load(std::memory_order_acquire))return false;\r\n    gamepadSerialStartLocked();g_gamepadSerialFeedbackStop=FeedbackStopDeadline{generation,GetTickCount64()+(unsigned)durationMs};\r\n    g_gamepadSerialCv.notify_one();return true;\r\n}",
+    "DISCONNECT": "            g_xinputKnownSlotMask &= ~(1u << i);\r\n            xinputSlotsMarkDiscoveryDirty();\r\n            // 批113：槽号复用/重枚举必须重新解析身份（与\"不继承旧准入\"同一条纪律）。\r\n            g_xinputVirtualEndpointProbed &= ~(1u << i);\r\n            g_xinputVirtualEndpointMask &= ~(1u << i);\r\n            // GP-GBRETURN-2：Unknown/重查节拍/解析代随掉线一并复位（槽号复用一切重来）。\r\n            g_xinputSlotUnknownMask &= ~(1u << i);\r\n            g_xinputSlotReprobeAt[i] = 0;\r\n            g_xinputSlotIdentityResolvedEpoch[i] = 0;\r"
+  },
+  "ranges": [
+    {
+      "name": "slot identity classification",
+      "kind": "block",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 41915,
+      "end_line": 41996,
+      "start_utf8_byte": 2518378,
+      "end_utf8_byte_exclusive": 2524286,
+      "sha256": "44aa649f4dbb2febc4dce790565e407244f37e493a552918174eabaa99b609a3"
+    },
+    {
+      "name": "XInputSlotIdentity",
+      "kind": "type",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7649,
+      "end_line": 7649,
+      "start_utf8_byte": 402723,
+      "end_utf8_byte_exclusive": 402802,
+      "sha256": "8a32543e8bd73153d27fdfbbd91dafbccf3d9c65d662b4307f06c433ffdbe1d0"
+    },
+    {
+      "name": "PhysicalFeedbackTarget",
+      "kind": "type",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61748,
+      "end_line": 61755,
+      "start_utf8_byte": 3618411,
+      "end_utf8_byte_exclusive": 3618694,
+      "sha256": "f2d4f9d0a296741af35c17e5d3775d5a2f8bf87993fc1d415e429c1b72545b14"
+    },
+    {
+      "name": "xinputNonVirtualConnectedMask",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7638,
+      "end_line": 7640,
+      "start_utf8_byte": 401827,
+      "end_utf8_byte_exclusive": 401942,
+      "sha256": "3b3dd9704bf196ee8b382c012db4f69ca611f0fa787175af0561994a8724bf58"
+    },
+    {
+      "name": "xinputPhysicalConnectedMask",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7641,
+      "end_line": 7644,
+      "start_utf8_byte": 401944,
+      "end_utf8_byte_exclusive": 402195,
+      "sha256": "294db7b2830f4f091ac34c716ae9478783602de85c795897074dc80fac95bd80"
+    },
+    {
+      "name": "xinputSlotIdentityVerdict",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7650,
+      "end_line": 7655,
+      "start_utf8_byte": 402804,
+      "end_utf8_byte_exclusive": 403198,
+      "sha256": "7b8d0919dba3946ea294dca542cf59df4459f8f0d12e7c04afbe4f2a45e2ef2e"
+    },
+    {
+      "name": "xinputSlotsMarkDiscoveryDirty",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7702,
+      "end_line": 7706,
+      "start_utf8_byte": 407386,
+      "end_utf8_byte_exclusive": 407684,
+      "sha256": "0432fb4cb9fce37f4adb2c0b5eb38e4cc84579d0794a5ce1897900cf50f6dda9"
+    },
+    {
+      "name": "xinputSlotsRequestIdentityReprobe",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 7711,
+      "end_line": 7721,
+      "start_utf8_byte": 408164,
+      "end_utf8_byte_exclusive": 408711,
+      "sha256": "5384247e0661a4d9e75d4c87ffcf087a39bd69776f767a2c5175de5c6e892e40"
+    },
+    {
+      "name": "hidHideUpper",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 22523,
+      "end_line": 22526,
+      "start_utf8_byte": 1317353,
+      "end_utf8_byte_exclusive": 1317517,
+      "sha256": "4d691e81f579585e263884193dfb9fc642f1d789361cfd918de3e9c6093cff55"
+    },
+    {
+      "name": "hidHideIsVirtualIdentity",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 23364,
+      "end_line": 23369,
+      "start_utf8_byte": 1370944,
+      "end_utf8_byte_exclusive": 1371293,
+      "sha256": "df201e408bed63154399f8dd00e1a40974756668e08e9cf3ea1a53c998e4d5fe"
+    },
+    {
+      "name": "physicalFeedbackSlotCurrent",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61761,
+      "end_line": 61768,
+      "start_utf8_byte": 3618992,
+      "end_utf8_byte_exclusive": 3619590,
+      "sha256": "d937ca3127b0308fc0d69cccc1838164a33aa3a692cd0bec297a05b6fcc7e244"
+    },
+    {
+      "name": "physicalFeedbackStopTarget",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61771,
+      "end_line": 61783,
+      "start_utf8_byte": 3619750,
+      "end_utf8_byte_exclusive": 3620606,
+      "sha256": "266517d55c7e40dfc70ddfbcc2542758cda580926a06b02d08b91f843e7c36ee"
+    },
+    {
+      "name": "physicalFeedbackFinish",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61784,
+      "end_line": 61788,
+      "start_utf8_byte": 3620608,
+      "end_utf8_byte_exclusive": 3620916,
+      "sha256": "3472be07892c530eabad10f4629fc6cbae0ca8df20553a6db6c0d0818c902f6c"
+    },
+    {
+      "name": "nativePhysicalFeedbackReady",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61789,
+      "end_line": 61807,
+      "start_utf8_byte": 3620918,
+      "end_utf8_byte_exclusive": 3622416,
+      "sha256": "3c5a818fbd1882409e88b1d18cd88f190c4322ce4edce958439622bb6153bc58"
+    },
+    {
+      "name": "nativePhysicalFeedbackStart",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 61808,
+      "end_line": 61861,
+      "start_utf8_byte": 3622418,
+      "end_utf8_byte_exclusive": 3627113,
+      "sha256": "1742fea42ca74c211ec895b0f13000e53568685c31fc52c21d5c790ae60584d8"
+    },
+    {
+      "name": "gamepadSerialScheduleFeedbackStop",
+      "kind": "function",
+      "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+      "source_sha256": "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b",
+      "start_line": 900,
+      "end_line": 905,
+      "start_utf8_byte": 40300,
+      "end_utf8_byte_exclusive": 40730,
+      "sha256": "b8bb1b4746955572ab7a83d863e7cd9d32fd8230808d8fcfa75b9163f94a6edd"
+    }
+  ],
+  "disconnectBinding": {
+    "name": "known-slot disconnect",
+    "kind": "block",
+    "file": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\native\\main.cpp",
+    "source_sha256": "066810045f17ea7aa852479a711e2b797e1eb64f42fb755a050a8dd6dd71d55a",
+    "start_line": 42036,
+    "end_line": 42044,
+    "start_utf8_byte": 2526996,
+    "end_utf8_byte_exclusive": 2527591,
+    "sha256": "77e4d8da5c0937ce9c27855959400e791f33852b866c029465c424c0afcdce1b",
+    "code": "            g_xinputKnownSlotMask &= ~(1u << i);\r\n            xinputSlotsMarkDiscoveryDirty();\r\n            // 批113：槽号复用/重枚举必须重新解析身份（与\"不继承旧准入\"同一条纪律）。\r\n            g_xinputVirtualEndpointProbed &= ~(1u << i);\r\n            g_xinputVirtualEndpointMask &= ~(1u << i);\r\n            // GP-GBRETURN-2：Unknown/重查节拍/解析代随掉线一并复位（槽号复用一切重来）。\r\n            g_xinputSlotUnknownMask &= ~(1u << i);\r\n            g_xinputSlotReprobeAt[i] = 0;\r\n            g_xinputSlotIdentityResolvedEpoch[i] = 0;\r"
+  }
+}

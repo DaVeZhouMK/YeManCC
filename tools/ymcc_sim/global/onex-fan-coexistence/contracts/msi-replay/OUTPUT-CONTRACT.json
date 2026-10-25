@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-replay26-from-accepted-manual92",
+  "api": {
+    "inspect": "inspectMsiReplayInputs({inputsPin:{path,sha256}})",
+    "prepare": "prepareMsiReplay({inputsPin:{path,sha256}})",
+    "model": "projectMsiReplayMODEL_ONLY(bundle)",
+    "parentInspect": "inspectMsiReplayParentInputs({acceptedMsiManual92:{summaryPin,preparedPin,graphPin,jointReviewPin}})"
+  },
+  "inputContract": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-replay-parent-bound-source-prepare-20261022-r1/INPUT-CONTRACT.json",
+    "sha256": "52a4976c9a97e897f0f586b903c65d46eb4d5a01c9b7a45d95438f46d8deebdf",
+    "bytes": 9079
+  },
+  "return": {
+    "planPin": "New PREPARED-PLAN.json exact pin",
+    "plan": "Same object"
+  },
+  "plan": {
+    "schemaVersion": 1,
+    "kind": "msi-original-replay-prepared",
+    "profile": "msi-original-replay26-from-accepted-manual92",
+    "role": [
+      "positive",
+      "sta",
+      "timer-owner",
+      "admitted-owner",
+      "mode-settlement",
+      "profile-complete",
+      "followup"
+    ],
+    "ownedRoot": "Fresh direct child of explicit ownedParent; not created by inspect",
+    "program": "Original exact dotnet pin inherited from actual accepted manual",
+    "artifacts": "Exact producerC9/Ports399/authority4962/STA8e/deps/runtimeconfig bytes, relocated",
+    "host": "Reviewed replayHostdc70 positive or own exact original one-method Host fault",
+    "hc": "Original HC1827 for ALL seven roles, no replacement permitted",
+    "policy": "Fresh schema6 Default92/framework64/alias6; only fresh relocation and selected Host SHA differs",
+    "runtimePins": "Fresh exact116 native/device guard; frameworks stay excluded",
+    "argv": "Fresh business-argv.json with exact9 args and SHA",
+    "args": [
+      "Fresh selected Host",
+      "Fresh unchanged HC1827",
+      "Fresh runtime directory",
+      "Fresh shared directory",
+      "Fresh runtime-pins.json",
+      "Fresh original constructor inventory.json",
+      "Fresh original YeManFanHost.json",
+      "Fresh resultPath",
+      "msi-replay"
+    ],
+    "resultPath": "ownedRoot/Build/msi-replay/<role>/case/result.json",
+    "nativeProbeRoot": "case/n length<239; nativeboundary259 unchanged",
+    "budgets": {
+      "business": 90000,
+      "parent": 360000,
+      "generation": 30000,
+      "compile": 120000
+    },
+    "metadataBudgetMs": 60000,
+    "preloadBudgetMs": 60000,
+    "expectedCaseIds": [
+      "msi-replay-original-firmware:ClawA1M",
+      "msi-replay-original-external-profile:ClawA1M",
+      "msi-replay-original-power-edge:ClawA1M",
+      "msi-replay-original-firmware:ClawA2VM",
+      "msi-replay-original-external-profile:ClawA2VM",
+      "msi-replay-original-power-edge:ClawA2VM",
+      "msi-replay-original-firmware:ClawBZ2EM",
+      "msi-replay-original-external-profile:ClawBZ2EM",
+      "msi-replay-original-power-edge:ClawBZ2EM",
+      "msi-replay-original-firmware:ClawCG3EM",
+      "msi-replay-original-external-profile:ClawCG3EM",
+      "msi-replay-original-power-edge:ClawCG3EM",
+      "msi-replay-original-old-timer-after-command",
+      "msi-replay-original-old-timer-after-reopen",
+      "msi-replay-original-discard-waits-applied",
+      "msi-replay-original-old-profile-generation",
+      "msi-replay-original-sleep-blocks-callback",
+      "msi-replay-original-close-blocks-callback",
+      "msi-replay-original-mode-duplicate-and-coalesce",
+      "msi-replay-original-mode-failure-once",
+      "msi-replay-original-profile-retry-bounded",
+      "msi-replay-original-new-applied-during-write",
+      "msi-replay-original-queued-owner-replaced",
+      "msi-replay-original-queued-sleep-announcement",
+      "msi-replay-original-no-pending-no-rearm",
+      "msi-replay-original-manual-fullspeed-replayed"
+    ],
+    "expectedFailureMask": "Exact source role array",
+    "expectedMarkers": "Exact source role marker strings",
+    "expectedExitCode": "0 positive,2 all original negatives",
+    "failureMasks": {
+      "positive": [],
+      "sta": [
+        "msi-replay-original-firmware:ClawA1M",
+        "msi-replay-original-external-profile:ClawA1M",
+        "msi-replay-original-power-edge:ClawA1M",
+        "msi-replay-original-firmware:ClawA2VM",
+        "msi-replay-original-external-profile:ClawA2VM",
+        "msi-replay-original-power-edge:ClawA2VM",
+        "msi-replay-original-firmware:ClawBZ2EM",
+        "msi-replay-original-external-profile:ClawBZ2EM",
+        "msi-replay-original-power-edge:ClawBZ2EM",
+        "msi-replay-original-firmware:ClawCG3EM",
+        "msi-replay-original-external-profile:ClawCG3EM",
+        "msi-replay-original-power-edge:ClawCG3EM",
+        "msi-replay-original-old-timer-after-command",
+        "msi-replay-original-old-timer-after-reopen",
+        "msi-replay-original-discard-waits-applied",
+        "msi-replay-original-mode-duplicate-and-coalesce",
+        "msi-replay-original-new-applied-during-write",
+        "msi-replay-original-queued-owner-replaced",
+        "msi-replay-original-queued-sleep-announcement",
+        "msi-replay-original-manual-fullspeed-replayed"
+      ],
+      "timer-owner": [
+        "msi-replay-original-old-timer-after-command",
+        "msi-replay-original-old-timer-after-reopen"
+      ],
+      "admitted-owner": [
+        "msi-replay-original-queued-owner-replaced"
+      ],
+      "mode-settlement": [
+        "msi-replay-original-firmware:ClawA1M",
+        "msi-replay-original-firmware:ClawA2VM",
+        "msi-replay-original-firmware:ClawBZ2EM",
+        "msi-replay-original-firmware:ClawCG3EM",
+        "msi-replay-original-old-timer-after-command",
+        "msi-replay-original-mode-duplicate-and-coalesce"
+      ],
+      "profile-complete": [
+        "msi-replay-original-external-profile:ClawA1M",
+        "msi-replay-original-external-profile:ClawA2VM",
+        "msi-replay-original-external-profile:ClawBZ2EM",
+        "msi-replay-original-external-profile:ClawCG3EM",
+        "msi-replay-original-new-applied-during-write"
+      ],
+      "followup": [
+        "msi-replay-original-discard-waits-applied",
+        "msi-replay-original-profile-retry-bounded"
+      ]
+    },
+    "expectedMsiReplayContract": {
+      "caseCount": 26,
+      "types": [
+        "HandheldCompanion.Devices.ClawA1M",
+        "HandheldCompanion.Devices.ClawA2VM",
+        "HandheldCompanion.Devices.ClawBZ2EM",
+        "HandheldCompanion.Devices.MSI.ClawCG3EM"
+      ],
+      "ownedStaLifecycles": 26,
+      "readonlyOsIdentityCalls": 26,
+      "openCycles": 26,
+      "positivePublicAttempts": 31,
+      "positivePublicSuccesses": 31,
+      "positiveThreadPoolMtaCallbacks": 63,
+      "originalBclTimerCreationAndDisposalUsed": true,
+      "callbackContext": "ThreadPool MTA",
+      "checks": "UNKNOWN_UNTIL_ACTUAL_EXECUTION",
+      "forcedThreadCleanup": 0,
+      "deniedNative": 0,
+      "originalBaseOpenAndStructuredReleasePreserved": true,
+      "originalPublicApplyCurveAndTableBitWritersPreserved": true,
+      "originalTimerCallbacksAndReplayConsumersUnchanged": true,
+      "restoredEndpointOperandsEqualOriginalBodies": true,
+      "originalBclTimerCreatedUnarmed": true,
+      "originalTimerDisposalPreserved": true,
+      "physicalPowerIoOnlyTerminalReplaced": true,
+      "originalSentryModuleInitializerPreserved": true,
+      "ownedBuildPayloadWritesRemain": true,
+      "hostNoRegistryPnpGeneralOpenAdded": true,
+      "wallClockTimerDeliveryProven": false,
+      "rawWmiDecoderAccepted": false,
+      "nativeIoZeroClaim": false,
+      "physicalOemAcknowledgement": "UNKNOWN",
+      "instrumentationScopeAppliesTo": "canonical-reviewed-replay-host3-before-original-fault"
+    },
+    "selectedOriginalFault": "null positive; otherwise exact original role,targetKind=host,sourcePin,targetPin,proofPin,changedMethods",
+    "acceptedMsiManual92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/SUMMARY.json",
+        "sha256": "b801daa46a5d77411de04c54a61d4e9f5a3dae0b2cc54dd922b36b907e13769c"
+      },
+      "preparedPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/msim67-positive-r1/PREPARED-PLAN.json",
+        "sha256": "48c58335563b99e98c070e8cb5dff02591a5e16172962beed0340a4a54061643"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-positive-actual-r1/LOADED-GRAPH.json",
+        "sha256": "6cf06bd4f6d1c08efc0b034f62f40359440ca4bb846dda9a36178803aedc65ca"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r67-msi-manual-seven-independent-joint/SUMMARY.json",
+        "sha256": "705713a0dd1c5af5e2834e5f7cdb5c48e6e4fa0fd5b8f82c4b8628b3dcff14e3"
+      }
+    },
+    "derivativeQualificationPin": "Actual exact replay parent-qualified input pin",
+    "replayOracle": {
+      "basisPin": "Exact current source basis pin",
+      "sourcePins": [
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/msi-replay-proof.mjs",
+          "sha256": "82b2f7e2d9c587543aae83274b7fb66ff8aa0a453bce61ad0d1eb1ef6897845c"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiReplayInstrumentation.cs",
+          "sha256": "901925e373353bf66359337ee958f9e51fbb8443962057d7a124a72e614bbe9d"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiReplayIoPorts.cs",
+          "sha256": "b019a5d80615eded45564749f0b5d15e7ea3bd937cc0e0598be3c769a51388ba"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiReplayCases.cs",
+          "sha256": "e643de2aad9c43e736c199ba3457d3ea396ce0afb6ddeb5b768427286bad9ab3"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiManualCases.cs",
+          "sha256": "e08215e14da6bd07e665ac5bc4b894fe5c3274cbdc06c225815c89c79526131d"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiManualIoPorts.cs",
+          "sha256": "430e844eb828a78fa2e8e2885d9a917cc3a67040378dfff44f88c41708639b4e"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryEntry.cs",
+          "sha256": "39e302e7937f9e3acfd1bfccbd23dcceea7a4dddfa6797127a337a6288a70f3d"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryProbe.cs",
+          "sha256": "da6fe877d16abc596d7d9ec9d7430a6f5c6727fe317e24b51f646140aadc3a1c"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+          "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+        }
+      ]
+    },
+    "sourceMsiManualCaseIds": "All original44 from actual accepted manual plan",
+    "sourceProjectionProof": "Exact SOURCE-PROJECTION-PROOF.json pin",
+    "metadataReceiptPath": "receipts/metadata.json",
+    "preloadReceiptPath": "receipts/preload.json",
+    "launchPath": "receipts/tool-launch-000.json",
+    "metadataArguments": [
+      "STA",
+      "validate",
+      "POLICY.path",
+      "POLICY.sha256",
+      "metadataReceiptPath"
+    ],
+    "preloadArguments": [
+      "STA",
+      "preload",
+      "POLICY.path",
+      "POLICY.sha256",
+      "preloadReceiptPath"
+    ],
+    "businessArguments": [
+      "STA",
+      "run",
+      "POLICY.path",
+      "POLICY.sha256",
+      "launchPath",
+      "...args9"
+    ],
+    "sourceEvidencePins": "All exact verified accepted/generated/source inputs; no extra runtime permission",
+    "outputPins": "115 copied files; generated controls additionally bound by named plan fields",
+    "compileReceipt": "Inherited original qualification, no compilation",
+    "originalCompileReceipt": "Inherited exact original receipt",
+    "osIdentityReview": "Inherited read-only OS identity review",
+    "acceptedPublic88": "Original exact public premise",
+    "frameworkExtension": "Exact83+5 provenance",
+    "frameworkFourExtension": "Exact88+4 provenance",
+    "initializeRole": "UNKNOWN",
+    "unknownReferences": "Original static ungranted list",
+    "nativeBoundaryLength": 259,
+    "metadataApprovalGranted": false,
+    "executionApprovalGranted": false,
+    "targetExecutions": 0,
+    "msiReplayBusinessAccepted": false,
+    "currentPrimaryAccepted": false,
+    "wholeFanPassed": false,
+    "nativeIoZeroClaim": false,
+    "physicalOemAcknowledgement": "UNKNOWN",
+    "cpuPowerBenefit": null
+  },
+  "notProven": [
+    "No actual replay derivative qualification or successful full replay input inspect yet",
+    "No actual replay prepare or product run by this task",
+    "No wall-clock Timer delivery",
+    "No raw WMI decoder acceptance",
+    "No hardware/OEM/RPM acceptance",
+    "No manager Start/cross-process owner acceptance"
+  ]
+}

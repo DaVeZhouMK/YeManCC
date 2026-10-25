@@ -1,0 +1,1151 @@
+{
+  "schemaVersion": 1,
+  "kind": "literal-field-evidence-data",
+  "timestampBasis": "Original log local timestamps; no timezone conversion inferred",
+  "scope": "Data fixture for later classification/reproduction work; not an executable product regression or physical sleep acceptance",
+  "case": "watchdog_failures_overlapping_standby_session_20260930",
+  "sourceArchive": "C:\\Users\\DaVe\\Desktop\\日志-侧边栏全开后\\YeManCC-logs-20261003-152048.zip",
+  "sourceArchiveSha256": "229eac2422b1038f6676110fc37486e3554a82666d9b42966dc8d6709d5fd99b",
+  "expected": {
+    "classification": "standby-overlap-unresolved-awake-status",
+    "watchdogConfirmationCount": 105,
+    "observedSpanMs": 423183,
+    "deferredCount": 12,
+    "deferredReasonCounts": {
+      "system-sleeping": 5,
+      "wake-grace": 7
+    },
+    "lifecycleObservationCount": 93,
+    "watchdogPid": 10040,
+    "targetYmccPid": 9296,
+    "recordedKernelSessionCoversInterval": true,
+    "confirmedAwakeUiHang": false,
+    "candidateForIneffectiveLowPowerInvestigation": true,
+    "physicalLowPowerSuccessProven": false
+  },
+  "kernelSessionRecords": [
+    {
+      "member": "sleep-facts.log",
+      "line": 1451,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-09-30 19:21:13.000",
+        "reason": 16777220,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-09-30 19:21:14.197"
+    },
+    {
+      "member": "sleep-facts.log",
+      "line": 1453,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-09-30 20:00:42.000",
+        "reason": 28,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-09-30 20:00:43.750"
+    }
+  ],
+  "confirmations": [
+    {
+      "member": "recovery-service.log",
+      "line": 82,
+      "time": "2026-09-30T19:21:17.965",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 86,
+      "time": "2026-09-30T19:21:21.935",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 90,
+      "time": "2026-09-30T19:21:28.917",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 94,
+      "time": "2026-09-30T19:21:32.873",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 101,
+      "time": "2026-09-30T19:21:40.695",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 105,
+      "time": "2026-09-30T19:21:44.658",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 109,
+      "time": "2026-09-30T19:21:48.632",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 113,
+      "time": "2026-09-30T19:21:52.606",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 118,
+      "time": "2026-09-30T19:21:56.568",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 123,
+      "time": "2026-09-30T19:22:00.540",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 128,
+      "time": "2026-09-30T19:22:04.512",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 133,
+      "time": "2026-09-30T19:22:08.479",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 138,
+      "time": "2026-09-30T19:22:12.448",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 143,
+      "time": "2026-09-30T19:22:16.419",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 148,
+      "time": "2026-09-30T19:22:20.382",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 153,
+      "time": "2026-09-30T19:22:24.356",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 158,
+      "time": "2026-09-30T19:22:28.330",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 163,
+      "time": "2026-09-30T19:22:32.299",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 168,
+      "time": "2026-09-30T19:22:36.274",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 173,
+      "time": "2026-09-30T19:22:40.245",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 178,
+      "time": "2026-09-30T19:22:44.214",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 183,
+      "time": "2026-09-30T19:22:48.186",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 188,
+      "time": "2026-09-30T19:22:52.156",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 193,
+      "time": "2026-09-30T19:22:56.124",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 198,
+      "time": "2026-09-30T19:23:00.096",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 203,
+      "time": "2026-09-30T19:23:04.069",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 208,
+      "time": "2026-09-30T19:23:08.036",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 213,
+      "time": "2026-09-30T19:23:12.000",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 218,
+      "time": "2026-09-30T19:23:15.969",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 223,
+      "time": "2026-09-30T19:23:19.931",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 228,
+      "time": "2026-09-30T19:23:23.903",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 233,
+      "time": "2026-09-30T19:23:27.875",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 238,
+      "time": "2026-09-30T19:23:31.841",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 243,
+      "time": "2026-09-30T19:23:35.808",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 248,
+      "time": "2026-09-30T19:23:39.769",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 253,
+      "time": "2026-09-30T19:23:43.743",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 258,
+      "time": "2026-09-30T19:23:47.715",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 263,
+      "time": "2026-09-30T19:23:51.682",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 268,
+      "time": "2026-09-30T19:23:55.647",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 273,
+      "time": "2026-09-30T19:23:59.620",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 278,
+      "time": "2026-09-30T19:24:03.581",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 283,
+      "time": "2026-09-30T19:24:07.551",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 288,
+      "time": "2026-09-30T19:24:11.517",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 293,
+      "time": "2026-09-30T19:24:15.489",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 298,
+      "time": "2026-09-30T19:24:19.458",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 303,
+      "time": "2026-09-30T19:24:23.417",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 308,
+      "time": "2026-09-30T19:24:27.388",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 313,
+      "time": "2026-09-30T19:24:31.389",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 318,
+      "time": "2026-09-30T19:24:35.365",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 323,
+      "time": "2026-09-30T19:24:39.337",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 328,
+      "time": "2026-09-30T19:24:43.307",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 333,
+      "time": "2026-09-30T19:24:47.274",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 338,
+      "time": "2026-09-30T19:24:51.244",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 343,
+      "time": "2026-09-30T19:24:55.216",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 348,
+      "time": "2026-09-30T19:24:59.175",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 353,
+      "time": "2026-09-30T19:25:03.135",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 358,
+      "time": "2026-09-30T19:25:07.104",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 363,
+      "time": "2026-09-30T19:25:11.075",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 368,
+      "time": "2026-09-30T19:25:15.041",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 375,
+      "time": "2026-09-30T19:25:22.501",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 379,
+      "time": "2026-09-30T19:25:26.470",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 383,
+      "time": "2026-09-30T19:25:30.441",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 387,
+      "time": "2026-09-30T19:25:34.413",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 392,
+      "time": "2026-09-30T19:25:38.383",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 397,
+      "time": "2026-09-30T19:25:42.351",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 402,
+      "time": "2026-09-30T19:25:46.323",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 407,
+      "time": "2026-09-30T19:25:50.283",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 412,
+      "time": "2026-09-30T19:25:54.247",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 417,
+      "time": "2026-09-30T19:25:58.218",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 422,
+      "time": "2026-09-30T19:26:02.190",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 427,
+      "time": "2026-09-30T19:26:06.163",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 432,
+      "time": "2026-09-30T19:26:10.137",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 437,
+      "time": "2026-09-30T19:26:14.109",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 442,
+      "time": "2026-09-30T19:26:18.070",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 447,
+      "time": "2026-09-30T19:26:22.041",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 452,
+      "time": "2026-09-30T19:26:26.014",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 457,
+      "time": "2026-09-30T19:26:29.987",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 462,
+      "time": "2026-09-30T19:26:33.950",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 467,
+      "time": "2026-09-30T19:26:37.923",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 472,
+      "time": "2026-09-30T19:26:41.893",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 477,
+      "time": "2026-09-30T19:26:45.860",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 482,
+      "time": "2026-09-30T19:26:49.831",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 487,
+      "time": "2026-09-30T19:26:53.799",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 492,
+      "time": "2026-09-30T19:26:57.769",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 497,
+      "time": "2026-09-30T19:27:01.737",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 502,
+      "time": "2026-09-30T19:27:05.710",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 507,
+      "time": "2026-09-30T19:27:09.680",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 512,
+      "time": "2026-09-30T19:27:13.654",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 517,
+      "time": "2026-09-30T19:27:17.625",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 522,
+      "time": "2026-09-30T19:27:21.592",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 527,
+      "time": "2026-09-30T19:27:25.551",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 532,
+      "time": "2026-09-30T19:27:29.522",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 537,
+      "time": "2026-09-30T19:27:33.491",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 542,
+      "time": "2026-09-30T19:27:37.450",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 547,
+      "time": "2026-09-30T19:27:41.425",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 552,
+      "time": "2026-09-30T19:27:45.397",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 557,
+      "time": "2026-09-30T19:27:49.367",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 562,
+      "time": "2026-09-30T19:27:53.342",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 567,
+      "time": "2026-09-30T19:27:57.317",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 572,
+      "time": "2026-09-30T19:28:01.311",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 577,
+      "time": "2026-09-30T19:28:05.286",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 582,
+      "time": "2026-09-30T19:28:09.254",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 587,
+      "time": "2026-09-30T19:28:13.223",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 592,
+      "time": "2026-09-30T19:28:17.194",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 597,
+      "time": "2026-09-30T19:28:21.148",
+      "event": "unresponsive-confirmed",
+      "pid": 10040,
+      "failedSamples": 3,
+      "channels": "hwnd,webview"
+    }
+  ],
+  "sleepDeferrals": [
+    {
+      "member": "recovery-service.log",
+      "line": 83,
+      "time": "2026-09-30T19:21:17.966",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "system-sleeping"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 87,
+      "time": "2026-09-30T19:21:21.936",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "system-sleeping"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 91,
+      "time": "2026-09-30T19:21:28.917",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 95,
+      "time": "2026-09-30T19:21:32.873",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "system-sleeping"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 102,
+      "time": "2026-09-30T19:21:40.695",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 106,
+      "time": "2026-09-30T19:21:44.658",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 110,
+      "time": "2026-09-30T19:21:48.632",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 369,
+      "time": "2026-09-30T19:25:15.042",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "system-sleeping"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 376,
+      "time": "2026-09-30T19:25:22.502",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 380,
+      "time": "2026-09-30T19:25:26.470",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 384,
+      "time": "2026-09-30T19:25:30.441",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "wake-grace",
+      "graceMs": 15000
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 598,
+      "time": "2026-09-30T19:28:21.148",
+      "event": "confirmation-deferred-sleep",
+      "pid": 10040,
+      "reason": "system-sleeping"
+    }
+  ],
+  "observationBounds": [
+    {
+      "member": "recovery-service.log",
+      "line": 114,
+      "time": "2026-09-30T19:21:52.607",
+      "event": "recovery-observation",
+      "pid": 10040,
+      "source": "lifecycle-snapshot",
+      "targetPid": 9296,
+      "processStartKey": 134351502939635847,
+      "sequence": 90382,
+      "lifecycleBusy": false,
+      "lifecyclePhase": "idle",
+      "lifecycleStartedAt": 0,
+      "lastHostCommand": "SHUTDOWN",
+      "persona": "steamdeck",
+      "fanOwnerState": "released",
+      "ageMs": 125,
+      "heartbeatFresh": true,
+      "exitIntent": false,
+      "snapshot": "ok"
+    },
+    {
+      "member": "recovery-service.log",
+      "line": 593,
+      "time": "2026-09-30T19:28:17.194",
+      "event": "recovery-observation",
+      "pid": 10040,
+      "source": "lifecycle-snapshot",
+      "targetPid": 9296,
+      "processStartKey": 134351502939635847,
+      "sequence": 91150,
+      "lifecycleBusy": false,
+      "lifecyclePhase": "idle",
+      "lifecycleStartedAt": 0,
+      "lastHostCommand": "SHUTDOWN",
+      "persona": "steamdeck",
+      "fanOwnerState": "released",
+      "ageMs": 594,
+      "heartbeatFresh": true,
+      "exitIntent": false,
+      "snapshot": "ok"
+    }
+  ],
+  "caution": "A recorded standby session and intermittent system-sleeping flags do not establish either continuous awake operation or effective low-power residency. Preserve this as an unresolved overlap control."
+}

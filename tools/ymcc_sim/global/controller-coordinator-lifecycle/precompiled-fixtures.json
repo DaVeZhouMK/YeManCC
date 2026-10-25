@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 3,
+  "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+  "sourceVersion": "VC-R3-B46-368BADC1-20261020",
+  "fixtures": [
+    {
+      "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/positive/coordinator-fixture-r3-lifecycle-manifest.json",
+      "sha256": "946ffff35a4c577927699661289b60e1bdb5857069b3f8b7a904ac00ba1b9a71"
+    },
+    {
+      "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/admission/coordinator-fixture-r3-lifecycle-manifest.json",
+      "sha256": "09b95b9173b108984a8e9650e53a07044aa917568502e1143ecb421894697384"
+    },
+    {
+      "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/inheritance/coordinator-fixture-r3-lifecycle-manifest.json",
+      "sha256": "f8ec03a16ad053826c5d597247653cad948dfc4aecfdeed17221a61e88af85ba"
+    },
+    {
+      "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/switch-return/coordinator-fixture-r3-lifecycle-manifest.json",
+      "sha256": "9064f6dc52b3803154d084c0914fab46be5fc50c66e6ed927a149460318888f7"
+    },
+    {
+      "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/switch-owner/coordinator-fixture-r3-lifecycle-manifest.json",
+      "sha256": "de11c339f8d0e5937a33385a0fbd67300f7a6cf42d2c299e04b57329499b3308"
+    }
+  ],
+  "pipe": {
+    "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/positive/coordinator-fixture-r3-pipe-manifest.json",
+    "sha256": "5508d23af4872733e7c606feab5c1b7e06f1dc46ccf44ca2a8deb0a24c209002"
+  },
+  "meaning": "Fresh D-only exact B46 compiled prerequisites. Raw behavioral results and original scenario gates remain authoritative; no old artifact is renamed or resigned."
+}

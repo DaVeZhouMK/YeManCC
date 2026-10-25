@@ -1,0 +1,75 @@
+{
+  "schemaVersion": 1,
+  "productionModified": false,
+  "acceptedCandidate": "sdk-data-only-recursive",
+  "attempts": [
+    {
+      "failedSoftware": [
+        "reflection-async-action-task-bridge",
+        "reflection-async-operation-task-bridge"
+      ],
+      "pairBytes": 1554944,
+      "id": "guarded",
+      "rootDescriptorFailure": "Nested Cecil names were emitted using +, which ILLink did not resolve; original IL2008 diagnostics retained.",
+      "decision": "REJECT"
+    },
+    {
+      "failedSoftware": [
+        "reflection-async-action-task-bridge",
+        "reflection-async-operation-task-bridge"
+      ],
+      "pairBytes": 1587200,
+      "id": "guarded-v2",
+      "cause": "Static root narrowing omitted current System.WindowsRuntimeSystemExtensions bridge APIs.",
+      "decision": "REJECT"
+    },
+    {
+      "softwarePassed": 26,
+      "pairBytes": 2083840,
+      "id": "full-dynamic",
+      "cause": "WinRT valid upstream strong name/certificate lost and compiler container type ABI changed.",
+      "decision": "REJECT"
+    },
+    {
+      "softwarePassed": 26,
+      "pairBytes": 2097200,
+      "id": "sdk-repack",
+      "cause": "No size reduction despite all retained IL/ABI passing.",
+      "decision": "NO_GAIN_RETAIN_BASELINE"
+    }
+  ],
+  "harnessFailures": [
+    {
+      "cause": "API-set absolute path resolution / reflection overload selection / generic GetIID misuse corrected in fixture; all original failure evidence retained. Final original baseline has 26/26.",
+      "files": [
+        "software-baseline.json",
+        "software-baseline-r2.json"
+      ]
+    },
+    {
+      "cause": "Legacy verifier reported 98 function-pointer incidental Scope differences; canonical complete signatures/opcodes/EH are identical. Updated exact-IL reports zero.",
+      "files": [
+        "attempt-guarded-v2/retained-IL.json",
+        "runtime-il-before.json",
+        "runtime-il-after.json"
+      ]
+    },
+    {
+      "cause": "Two empty removal arrays were counted as two arrays by PowerShell. Fixed flattening/counting; final gate passes without candidate mutation.",
+      "files": [
+        "VALIDATION-RECEIPT.initial-reporting-array-count.json"
+      ]
+    }
+  ],
+  "status": "ALL_FAILED_CANDIDATES_RETAINED_NOT_PROMOTED",
+  "acceptedNetSavedBytes": 493568,
+  "finalRecursiveCoverageCorrection": {
+    "rtssTypes": 400,
+    "newExplorationStrategy": false,
+    "additionalRoot": "Resources/RTSS/RTSSSharedMemoryNET.dll",
+    "candidateSHAUnchanged": true,
+    "finalManagedRoots": 83,
+    "originalAndCandidateAllGetTypesPassed": true,
+    "initialManagedRoots": 82
+  }
+}

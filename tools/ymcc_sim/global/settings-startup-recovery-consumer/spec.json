@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "original": "tools/settings_startup_recovery_browser_selftest.mjs",
+  "originalSha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b",
+  "expectedCaseNames": [
+    "healthy override startup reaches schedule without wrong-root I/O or reset",
+    "future config yields an actionable recovery surface outside inert app",
+    "cancelled user confirmation writes no files and buttons remain usable",
+    "native semantic confirm activates focused recovery control without hidden page input",
+    "pending confirmation prevents duplicate actions or fallback replacement",
+    "backup failure is visible, originals remain, recovery can be retried",
+    "confirmed successful retry reloads to ready schedule after exact-byte archives",
+    "corrupt main without backup stays byte-identical and presents recovery",
+    "reload button really navigates even when app is inert and does not reset",
+    "legacy schema remains compatible and preserves unrelated/protected branches",
+    "error text is safe and transient fallback restores previous inert state"
+  ],
+  "originalAssertCallSites": 56,
+  "buildInputs": [
+    "<stdin>",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+reactivity@3.5.41/node_modules/@vue/reactivity/dist/reactivity.esm-bundler.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-core@3.5.41/node_modules/@vue/runtime-core/dist/runtime-core.esm-bundler.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-dom@3.5.41/node_modules/@vue/runtime-dom/dist/runtime-dom.esm-bundler.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+shared@3.5.41/node_modules/@vue/shared/dist/shared.esm-bundler.js",
+    "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/dist/vue.runtime.esm-bundler.js",
+    "src/bridge/api.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/ipc.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/robust/routeFallback.ts",
+    "src/robust/startupReadiness.ts"
+  ],
+  "sources": [
+    "package.json",
+    "src/bridge/api.ts",
+    "src/bridge/controllerPersona.ts",
+    "src/bridge/hcInputUtils.ts",
+    "src/bridge/inputConfigHash.ts",
+    "src/bridge/inputStartupPolicy.ts",
+    "src/bridge/ipc.ts",
+    "src/bridge/quickAppDefaults.ts",
+    "src/bridge/settingsRepository.ts",
+    "src/bridge/settingsSnapshot.ts",
+    "src/robust/routeFallback.ts",
+    "src/robust/startupReadiness.ts",
+    "tools/settings_startup_recovery_browser_selftest.mjs",
+    "tools/ymcc_sim/global/fan-monitor-browser-consumer/io.cjs",
+    "tools/ymcc_sim/global/fan-monitor-browser-consumer/observe.cjs",
+    "tools/ymcc_sim/global/fan-monitor-browser-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/fan-monitor-browser-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-recovery-ui-consumer/cleanup.mjs",
+    "tools/ymcc_sim/global/sleep-recovery-ui-consumer/contract.mjs",
+    "tsconfig.json",
+    "tsconfig.node.json"
+  ],
+  "originalOutput": "browser-results.json",
+  "positivePages": 6,
+  "negativePages": 2,
+  "fault": {
+    "id": "failed-startup-task-falsely-ready",
+    "path": "src/robust/startupReadiness.ts",
+    "before": "return (await Promise.all(this.tasks)).every(Boolean);",
+    "after": "return (await Promise.all(this.tasks)).every(() => true);",
+    "meaning": "Failed repository startup task is incorrectly accepted as ready; actual barrier consumer fault",
+    "expectedOriginalAssertionLine": 59,
+    "expectedOriginalCase": "future config yields an actionable recovery surface outside inert app",
+    "compileSuccessRequired": true,
+    "timeoutOrCompilerFailureNotDetection": true,
+    "expectedLine": 59
+  },
+  "pathParameterMaintenance": {
+    "schemaVersion": 1,
+    "kind": "only-explicit-runtime-and-browser-path-compatibility",
+    "priorOriginalSha256": "bc4618992b7e8fc7695dc9094f825585644741e11ae1b752790f76ce441a5c8e",
+    "currentOriginalSha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b",
+    "changes": [
+      {
+        "before": "const runtime='C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+        "after": "const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+        "count": 1
+      },
+      {
+        "before": "chromium.launch({headless:true,channel:'msedge'})",
+        "after": "chromium.launch({headless:true,...(process.env.YMCC_UI_BROWSER_EXE?{executablePath:process.env.YMCC_UI_BROWSER_EXE}:{channel:'msedge'})})",
+        "count": 1
+      }
+    ],
+    "businessExpectationsAndMemoryPortsUnchanged": true,
+    "originalCaseNamesAndOrderUnchanged": true,
+    "originalOutputArgv2Retained": true,
+    "originalLinesUnchangedExceptTwoPaths": true,
+    "defaultBrowserChannelRetained": true,
+    "coordinatorAuthorization": "01a14d5e-f558-77e0-bcd0-39e028ed43ed"
+  },
+  "originalBusinessExpectationsUnchanged": true,
+  "productChanges": 0
+}

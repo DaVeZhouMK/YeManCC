@@ -1,0 +1,82 @@
+{
+  "budget": 2500000,
+  "bytes": 2100427,
+  "files": [
+    {
+      "file": "muzzle-flash-source.json",
+      "bytes": 326
+    },
+    {
+      "file": "muzzle-flash.webp",
+      "bytes": 27694
+    },
+    {
+      "file": "range3d.js",
+      "bytes": 649524
+    },
+    {
+      "file": "three-LICENSE.txt",
+      "bytes": 1081
+    },
+    {
+      "file": "models\\5447a9cd4bdc2dbd208b4567.glb",
+      "bytes": 170012
+    },
+    {
+      "file": "models\\55d355e64bdc2d962f8b4569.glb",
+      "bytes": 100496
+    },
+    {
+      "file": "models\\55d3632e4bdc2d972f8b4569.glb",
+      "bytes": 30488
+    },
+    {
+      "file": "models\\55d4887d4bdc2d962f8b4570.glb",
+      "bytes": 55904
+    },
+    {
+      "file": "models\\55d4ae6c4bdc2d8b2f8b456e.glb",
+      "bytes": 104692
+    },
+    {
+      "file": "models\\55d4b9964bdc2d1d4e8b456e.glb",
+      "bytes": 40484
+    },
+    {
+      "file": "models\\5649be884bdc2d79388b4577.glb",
+      "bytes": 62184
+    },
+    {
+      "file": "models\\56eabcd4d2720b66698b4574.glb",
+      "bytes": 49688
+    },
+    {
+      "file": "models\\5b3b99475acfc432ff4dcbee.glb",
+      "bytes": 151944
+    },
+    {
+      "file": "models\\5c6d710d2e22165df16b81e7.glb",
+      "bytes": 87304
+    },
+    {
+      "file": "models\\5ea16ada09aa976f2e7a51be.glb",
+      "bytes": 180868
+    },
+    {
+      "file": "models\\5ea16d4d5aad6446a939753d.glb",
+      "bytes": 114836
+    },
+    {
+      "file": "models\\618b9643526131765025ab35.glb",
+      "bytes": 154144
+    },
+    {
+      "file": "models\\651a8bf3a8520e48047bf708.glb",
+      "bytes": 113124
+    },
+    {
+      "file": "models\\m4-vudu.json",
+      "bytes": 5634
+    }
+  ]
+}

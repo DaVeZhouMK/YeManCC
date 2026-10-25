@@ -1,0 +1,213 @@
+{
+  "schemaVersion": 1,
+  "kind": "explicit-current-design-fixture-contract",
+  "originalScript": "tools/sleep_wake_password_ui_browser_selftest.mjs",
+  "originalSha256": "7e65a713b014cf955f4e20a49d5965f45c8e698c99af679f5e50e584df15f274",
+  "currentFixture": "fixtures/current-design-v1.mjs.txt",
+  "currentSha256": "d9e28554a882822088cea3ef7c1a94028d0f55bece166cf9ed7cbeadb281a17f",
+  "changes": [
+    {
+      "id": "exact-semantic-switch",
+      "before": "const button=row.locator('button.switch');",
+      "after": "const button=row.getByRole('switch',{name:'唤醒需要密码',exact:true});",
+      "count": 1,
+      "kind": "semantic locator only"
+    },
+    {
+      "id": "checked-property-owner",
+      "before": "const checked=()=>row.getAttribute('aria-checked');",
+      "after": "const checked=()=>button.getAttribute('aria-checked');",
+      "count": 1,
+      "kind": "same state assertion, actual role element"
+    },
+    {
+      "id": "current-description-design",
+      "before": "row.locator('.toggle-desc').textContent(),'无效可能是组策略锁定了'",
+      "after": "row.locator('.toggle-desc').textContent(),'无效时可能受系统组策略限制'",
+      "count": 1,
+      "kind": "explicit historical design replacement mapped to renamed case"
+    },
+    {
+      "id": "current-real-groups",
+      "before": "const labels=await page.locator('.card').filter({has:page.locator('.card-title',{hasText:'睡眠操作'})}).locator('.toggle-label').allTextContents();",
+      "after": "const groups=page.locator('.sleep-group');const wakeGroup=groups.filter({has:page.getByRole('heading',{name:'系统与保护',exact:true})});const gameGroup=groups.filter({has:page.getByRole('heading',{name:'游戏与唤醒',exact:true})});",
+      "count": 1,
+      "kind": "explicit current design contract; old shared card retired"
+    },
+    {
+      "id": "current-real-group-order",
+      "before": "assert.deepEqual(labels.slice(0,2),['唤醒需要密码','睡眠时暂停游戏']);",
+      "after": "assert.equal(await wakeGroup.getByRole('switch',{name:'唤醒需要密码',exact:true}).count(),1);assert.equal(await gameGroup.getByRole('switch',{name:'睡眠时暂停游戏',exact:true}).count(),1);assert.deepEqual((await wakeGroup.locator('.toggle-label').allTextContents()).slice(0,2),['唤醒需要密码','睡眠电源计划优化']);assert((await gameGroup.boundingBox()).y<(await wakeGroup.boundingBox()).y);",
+      "count": 1,
+      "kind": "explicit current group membership/order replaces old opposite placement; no product reorder"
+    },
+    {
+      "id": "renamed-design-case",
+      "before": "Default is off; exact title/description appear immediately above pause-game; page mount sends zero wake-password system IPC",
+      "after": "Current design: default off and exact current description in System and Protection; Game and Wake is separate, and mounting sends zero wake-password system IPC",
+      "count": 1,
+      "kind": "new case name prevents claiming original layout unchanged"
+    },
+    {
+      "id": "status-dom-wait-target",
+      "before": "document.querySelector('.msg')",
+      "after": "document.querySelector('[role=\"status\"]')",
+      "count": 3,
+      "kind": "same original warning text expectations and timeouts"
+    },
+    {
+      "id": "status-role-text-target",
+      "before": "page.locator('.msg')",
+      "after": "page.getByRole('status')",
+      "count": 2,
+      "kind": "same original failure/preference-save message checks"
+    },
+    {
+      "id": "versioned-report-identity",
+      "before": "suite:'Sleep wake password UI browser'",
+      "after": "suite:'Sleep wake password UI browser (current design v1)'",
+      "count": 1,
+      "kind": "explicit versioned fixture report, not original14 PASS"
+    }
+  ],
+  "mapping": [
+    {
+      "ordinal": 1,
+      "originalCaseName": "Source contract: only one user-action setter, no system-read getter or automatic wake-password path; unrelated sleep saves preserve preference",
+      "currentCaseName": "Source contract: only one user-action setter, no system-read getter or automatic wake-password path; unrelated sleep saves preserve preference",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 2,
+      "originalCaseName": "Default is off; exact title/description appear immediately above pause-game; page mount sends zero wake-password system IPC",
+      "currentCaseName": "Current design: default off and exact current description in System and Protection; Game and Wake is separate, and mounting sends zero wake-password system IPC",
+      "status": "HISTORICAL_DESIGN_REPLACED_WITH_EXPLICIT_CURRENT_CASE",
+      "reason": "Current UI intentionally places pause/recovery in Game and Wake then wake-password in System and Protection with revised helper text; original relative order/card/description remain historical, not passed by this fixture",
+      "originalAssertionLines": [
+        93,
+        94,
+        95,
+        96,
+        97,
+        98,
+        99
+      ]
+    },
+    {
+      "ordinal": 3,
+      "originalCaseName": "The switch uses a real focusable button for keyboard/controller activation",
+      "currentCaseName": "The switch uses a real focusable button for keyboard/controller activation",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 4,
+      "originalCaseName": "Idle, page remount and global refresh do not read/write/activate the wake-password power setting",
+      "currentCaseName": "Idle, page remount and global refresh do not read/write/activate the wake-password power setting",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 5,
+      "originalCaseName": "Only a user Space/A-style click sends enabled=true, unifies AC/DC and does not modify the sleep guard",
+      "currentCaseName": "Only a user Space/A-style click sends enabled=true, unifies AC/DC and does not modify the sleep guard",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 6,
+      "originalCaseName": "User disable sends enabled=false for AC/DC=0 without a current/Balanced scheme argument",
+      "currentCaseName": "User disable sends enabled=false for AC/DC=0 without a current/Balanced scheme argument",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 7,
+      "originalCaseName": "Pending write disables duplicate clicks and the switch changes only after verified ACK",
+      "currentCaseName": "Pending write disables duplicate clicks and the switch changes only after verified ACK",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 8,
+      "originalCaseName": "Saved user choice survives F5 via existing sleep configuration only; restarting the page does not reapply it",
+      "currentCaseName": "Saved user choice survives F5 via existing sleep configuration only; restarting the page does not reapply it",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 9,
+      "originalCaseName": "Failed DC/policy write keeps original UI state and reports failure instead of pretending success",
+      "currentCaseName": "Failed DC/policy write keeps original UI state and reports failure instead of pretending success",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 10,
+      "originalCaseName": "Missing/unreadable fixed plan reports error and leaves a retryable user switch; no automatic fallback to another plan",
+      "currentCaseName": "Missing/unreadable fixed plan reports error and leaves a retryable user switch; no automatic fallback to another plan",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 11,
+      "originalCaseName": "Power-transition/transport exception re-enables controls without automatic retries or false state",
+      "currentCaseName": "Power-transition/transport exception re-enables controls without automatic retries or false state",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 12,
+      "originalCaseName": "Hardware success plus preference-save failure reports only the memory failure, not a false power-setting failure",
+      "currentCaseName": "Hardware success plus preference-save failure reports only the memory failure, not a false power-setting failure",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 13,
+      "originalCaseName": "Other sleep switches and refresh preserve the remembered wake-password choice without touching its power setting",
+      "currentCaseName": "Other sleep switches and refresh preserve the remembered wake-password choice without touching its power setting",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    },
+    {
+      "ordinal": 14,
+      "originalCaseName": "No wake-password polling, deferred reactivation, scheduled retry or idle work after the user action",
+      "currentCaseName": "No wake-password polling, deferred reactivation, scheduled retry or idle work after the user action",
+      "status": "FUNCTIONAL_EXPECTATIONS_PRESERVED",
+      "reason": "All original functional assertions, receipt values, original failure/error texts, waits, native action counts and preference/AC/DC expectations retained; DOM targets adjusted only where obsolete"
+    }
+  ],
+  "originalCaseCount": 14,
+  "currentCaseCount": 14,
+  "functionalCaseNamesPreserved": 13,
+  "historicalDesignCasesReplaced": 1,
+  "allEffectiveFunctionalChecksPreserved": true,
+  "originalScriptUnmodified": true,
+  "productDesignUnmodified": true,
+  "timeLimitsUnchanged": true,
+  "originalErrorTextAssertionsUnchanged": true,
+  "allLinesSameExceptListedDiff": true,
+  "originalLineCount": 165,
+  "currentLineCount": 165,
+  "originalFailure": {
+    "executionRoot": "D:/Codex/2026-10-19/wo-z/work/b0wp1",
+    "kind": "TimeoutError",
+    "line": 94,
+    "oldLocator": "button.switch",
+    "originalBusinessEndpointNotReached": true
+  },
+  "domEvidence": {
+    "observation": "D:\\Codex\\2026-10-19\\wo-z\\work\\b0wp1\\ui-observation.json",
+    "screenshot": "D:\\Codex\\2026-10-19\\wo-z\\work\\b0wp1\\diagnostic-before-close.png",
+    "pageErrors": [],
+    "consoleMessages": [],
+    "actualRole": "switch",
+    "actualLabel": "唤醒需要密码",
+    "actualClass": "ymcc-switch",
+    "checked": "false",
+    "nativeInvokes": 0
+  },
+  "currentFixtureExecuted": false
+}

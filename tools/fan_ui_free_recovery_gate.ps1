@@ -3,8 +3,8 @@ param(
 )
 # FAN-926 P2 (adjudication item 3): UI-free single-owner recovery chain - process-level gate.
 #   A) a successor instance may NOT acquire HC write authority while the predecessor is alive;
-#      it must WAIT (same process), and
-#   B) once the predecessor really exits, that SAME successor acquires and writes the takeover
+#      it must EXIT promptly; only a neutral launcher may wait, and
+#   B) once the predecessor really exits, a new successor acquires and writes the takeover
 #      receipt whose proof is the OS lifetime mutex (not a port/PID/timeout guess),
 #   C) negative: a path with no formal HC receipt is never reported as a completed recovery,
 #   D) end to end (sandbox trigger): the predecessor tries one same-process recovery, spawns
@@ -84,33 +84,23 @@ try {
         throw $why
     }
 
-    # ---- A) ONE successor must WAIT while the predecessor is alive ----
-    # The discriminating shape: a single successor process must still be waiting (not exited)
-    # while the predecessor holds the lifetime lease, and must then take over by itself once
-    # the predecessor really exits. A fresh second process would prove nothing.
+    # FAN-951 A: an early successor is rejected promptly, never a second resident.
     $successorEarly = Start-Process -FilePath $hostExe -ArgumentList ($commonArgs + @('--successor-takeover', '--predecessor-instance', 'uifree-gate-predecessor')) -PassThru -WindowStyle Hidden
-    Start-Sleep -Seconds 4
-    $successorEarly.Refresh()
-    if ($successorEarly.HasExited) {
-        throw "FAN-926: a successor must WAIT for the predecessor, not exit while it is alive (exit=$($successorEarly.ExitCode))"
+    if (!$successorEarly.WaitForExit(3000) -or $successorEarly.ExitCode -ne 4) {
+        throw 'FAN-951: an early successor must exit 4, not wait as another FanHost'
     }
     if (Test-Path -LiteralPath $faultLog) {
         $earlyTakeover = Select-String -LiteralPath $faultLog -Pattern '"eventName":"recovery.host-replacement-took-over"' -SimpleMatch | Select-Object -Last 1
-        if ($null -ne $earlyTakeover) {
-            throw 'FAN-926: a waiting successor must not write a takeover receipt before the predecessor exited'
-        }
+        if ($null -ne $earlyTakeover) { throw 'early successor wrote a takeover receipt' }
     }
-    Write-Output 'fan P2 successor-waits-for-live-predecessor: PASS (still waiting after 4 s, wrote no takeover receipt)'
+    Write-Output 'fan P2 early-successor-rejected: PASS (exit=4; no waiting second Host)'
 
-    # ---- B) the SAME successor takes over once the predecessor really exits ----
+    # B: a new successor starts only after the exact predecessor exit is observed.
     Stop-Process -Id $predecessor.Id -Force
-    $predecessor.WaitForExit(8000) | Out-Null
+    if (!$predecessor.WaitForExit(8000)) { throw 'exact predecessor exit not observed' }
     $predecessor = $null
-    if (-not (Wait-Health 80)) { throw 'FAN-926: the waiting successor did not take over after the predecessor exited' }
-    if ($successorEarly.HasExited) {
-        throw "FAN-926: the waiting successor must survive the takeover, but it exited with $($successorEarly.ExitCode)"
-    }
-    $successorLate = $successorEarly
+    $successorLate = Start-Process -FilePath $hostExe -ArgumentList ($commonArgs + @('--successor-takeover', '--predecessor-instance', 'uifree-gate-predecessor')) -PassThru -WindowStyle Hidden
+    if (-not (Wait-Health 80)) { throw 'successor did not take over after exact predecessor exit' }
     $takeoverRow = $null
     # Window sizing (see the note in phase D): keep every observation window strictly larger than the
     # sandbox trigger latency so this gate cannot become order/timing dependent. Waiting longer never
@@ -130,7 +120,7 @@ try {
     if ($row.details.predecessorInstanceId -ne 'uifree-gate-predecessor') {
         throw 'FAN-926: the takeover receipt must name the predecessor it replaced'
     }
-    Write-Output 'fan P2 successor-takeover-receipt: PASS (same process waited then acquired; proof=lifetime-mutex)'
+    Write-Output 'fan P2 successor-takeover-receipt: PASS (new Host after exact exit; proof=machine-lifetime-mutex)'
 
     # ---- C) negative: the takeover path never claims a completed recovery ----
     # A fresh successor legitimately starts Stopped; what must NOT exist is a recovery

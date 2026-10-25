@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "kind": "CURRENT105_TERMINAL22_STEAM_COMPILE_GUARD_V1",
+  "managedInputContract": "current105-terminal22-v1",
+  "baselineProfileSha256": "8c8a5803990da252418f91be0dc5df13b89efd589b14a197f962e12ba9943674",
+  "baselineRuntimeHeaderSha256": "1604c3ac08570d678f193c266d1866ca50898703d9e0c6634471477df5710032",
+  "runtimeHeader": {
+    "relative": "native/steam_original_recovery_runtime.h",
+    "sha256": "fe9a15e6dae584a9ed16b74bf2b5f748fd412cefbd0a337493ff6ff01803a317"
+  },
+  "extraCompileHeaders": [
+    {
+      "relative": "native/steam_original_recovery_dual_route.h",
+      "sha256": "4e8fca5da0859521ff02c328a867d4167164ddbb39e0425320728468f57c5fd0"
+    }
+  ],
+  "startSha256": "d100d77c08f9e11e62ad8661700d63326bf001c70b2d839fa9c5bbdc0894fe4e",
+  "bridgeSha256": "e11e62dc1dbd443d301523c46d4bfa5093e3000d7417de10bc20202bb2b497dd",
+  "review": {
+    "entryBodiesUnchanged": true,
+    "newRecoveryRouteMayExecute": false,
+    "normalProductMainMayExecute": false,
+    "fullCoordinatorRuntimeAccepted": false,
+    "scope": "Compile-only exact newer runtime/header inputs. The same original Start entry is renamed and replaced with a throw; the whole original engine bridge is replaced with a throw. Original105 fixture/order/failure masks and public exact21 validator remain unchanged."
+  }
+}

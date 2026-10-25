@@ -11,10 +11,10 @@ namespace ymcc::fan_session {
 struct ResumeReply {
     bool parsed = false, noop = false, accepted = false, ready = false;
     bool unknown = false, faultLocked = false, cleanupPending = false;
-    std::string stateName, phase, powerState, opStatus, opOutcome, errorCode;
+    std::string stateName, phase, powerState, opStatus, opOutcome, errorCode, leaseId;
     long long retryAfterMs = 0, attempt = 0;
     long long responseGeneration = -1, phaseGeneration = -1, operationGeneration = -1;
-    int controlAccepting = -1, openCalled = -1, openEventsCalled = -1, fanCapabilitySupported = -1;
+    int responseOk = -1, controlAccepting = -1, openCalled = -1, openEventsCalled = -1, fanCapabilitySupported = -1;
 };
 enum class ResumeVerdict { Pending, Recovered, NoWork, Failed, Superseded };
 inline std::string text(const nlohmann::json& value, const char* field) {
@@ -39,14 +39,14 @@ inline int boolean(const nlohmann::json& value, const char* field) {
 }
 /** Parse into a temporary value: malformed/null fields cannot leave a partial
  * parsed=true/accepted=true object for the production classifier to consume. */
-inline bool parseResumeReply(const std::string& body, ResumeReply* out) {
+inline bool parseResumeReplyValue(const nlohmann::json& root, ResumeReply* out) {
     if (!out) return false;
     *out = ResumeReply{};
     try {
-        const auto root = nlohmann::json::parse(body);
         if (!root.is_object()) return false;
         const auto& state = root.contains("state") && root["state"].is_object() ? root["state"] : root;
         ResumeReply result;
+        result.responseOk = boolean(root, "ok");
         result.noop = boolean(root, "resumeNoop") == 1;
         result.accepted = boolean(root, "resumeAccepted") == 1;
         if (root.contains("retryAfterMs")) result.retryAfterMs = generation(root, "retryAfterMs");
@@ -72,11 +72,17 @@ inline bool parseResumeReply(const std::string& body, ResumeReply* out) {
         result.fanCapabilitySupported = state.contains("fanCapabilitySupported") && !state["fanCapabilitySupported"].is_null()
             ? boolean(state, "fanCapabilitySupported") : -1;
         result.faultLocked = result.stateName == "FaultLocked" || result.stateName == "ListenerFaultLocked";
-        result.ready = result.stateName == "Ready" && !result.unknown && !result.faultLocked && !result.cleanupPending;
+        result.ready = result.responseOk != 0 && result.stateName == "Ready" && !result.unknown && !result.faultLocked && !result.cleanupPending;
         result.parsed = true;
         *out = std::move(result);
         return true;
     } catch (...) { return false; }
+}
+inline bool parseResumeReply(const std::string& body, ResumeReply* out) {
+    if (!out) return false;
+    *out = ResumeReply{};
+    try { return parseResumeReplyValue(nlohmann::json::parse(body), out); }
+    catch (...) { return false; }
 }
 inline bool isTerminalResumeRejection(unsigned long status, const ResumeReply& r) {
     if (status == 401 || status == 403) return true;
@@ -93,7 +99,7 @@ inline bool isTerminalResumeRejection(unsigned long status, const ResumeReply& r
 inline ResumeVerdict classifyResumeReply(const ResumeReply& r, std::uint64_t expectedGeneration) {
     if (!r.parsed) return ResumeVerdict::Pending;
     if (r.errorCode == "HC_RESUME_SUPERSEDED" || r.errorCode == "HC_RESUME_RESULT_EXPIRED") return ResumeVerdict::Superseded;
-    if (!r.errorCode.empty() || r.unknown || r.faultLocked || r.cleanupPending || r.fanCapabilitySupported == 0) return ResumeVerdict::Failed;
+    if (r.responseOk == 0 || !r.errorCode.empty() || r.unknown || r.faultLocked || r.cleanupPending || r.fanCapabilitySupported == 0) return ResumeVerdict::Failed;
     if (r.phaseGeneration >= 0 && r.operationGeneration >= 0 && r.phaseGeneration != r.operationGeneration) return ResumeVerdict::Failed;
     const long long receipt = r.phaseGeneration >= 0 ? r.phaseGeneration : r.operationGeneration;
     for (const auto actual : {r.responseGeneration, receipt}) {

@@ -60,6 +60,15 @@ $segments = @(
   [ordered]@{ name = 'pad-sleep';    kind = 'window';   args = @('-Domain', 'gamepad', '-Scenario', 'sleep', '-Confirm'); skip = $false }
 )
 
+# Share these exact paths between the plan and execution branches. Child roots
+# stay fresh until their original domain creates them.
+foreach ($segment in $segments) {
+  $childEvidence = Join-Path $segDir $segment.name
+  $segment['evidenceDir'] = $childEvidence
+  if ($segment.args[0] -eq '-File') { $segment.args += @('-OutDir', $childEvidence) }
+  else { $segment.args += @('-EvidenceDir', $childEvidence) }
+}
+
 $exitCode = 5
 try {
   Write-Host '=== 整机虚拟测试域（ymcc_sim -Domain full）===' -ForegroundColor White
@@ -72,11 +81,11 @@ try {
     switch ($s.name) {
       'sleep-typing' { $note = '离线判型（不触发睡眠）' }
       'sleep-forms'  { $note = '20 形态注入（沙箱宿主，自启自清）' }
-      'sim-suites'   { $note = '工具总门 -Quick（tool_gate/invariants/extremes/regressions/gyro_core/signals/api_contract = 7 套件；不带 -Quick 时含 cycle = 8）' }
+      'sim-suites'   { $note = '工具总门 -Quick（fan_connection/tool_gate/invariants/extremes/regressions/gyro_core/signals/api_contract = 8 套件；不带 -Quick 时含 cycle = 9）' }
       'sleep-live'   { $ready = [bool]$WithApp; $note = '真实 App 边沿 + 自有关闭 + 重启探测（需授权窗口）' }
       'pad-sleep'    { $ready = [bool]$WithApp; $note = '合成电源广播（需 App 在跑 + 操作者在场；入睡会冻结最大工作集进程）' }
     }
-    $readyList += [ordered]@{ name = $s.name; kind = $s.kind; ready = $ready; args = $s.args; note = $note; skip = [bool]$s.skip }
+    $readyList += [ordered]@{ name = $s.name; kind = $s.kind; ready = $ready; args = $s.args; evidenceDir = $s.evidenceDir; note = $note; skip = [bool]$s.skip }
   }
   $script:Run.extra['segments'] = $readyList
 
@@ -115,11 +124,13 @@ try {
         $sw = [Diagnostics.Stopwatch]::StartNew()
         $out = & powershell @childArgs 2>&1 | Out-String
         $code = $LASTEXITCODE
+        $stdoutLog = Join-Path $segDir ($s.name + '-stdout.log')
+        [IO.File]::WriteAllText($stdoutLog, $out, [Text.UTF8Encoding]::new($false))
         $sw.Stop()
         $tail = (@($out -split "`r?`n") | Where-Object { "$_".Trim() -ne '' } | Select-Object -Last 2) -join ' | '
         $s['exitCode'] = [int]$code
         $s['seconds'] = [Math]::Round($sw.Elapsed.TotalSeconds, 1)
-        $script:Run.extra[("segment-" + $s.name)] = [ordered]@{ exitCode = [int]$code; seconds = $s.seconds; tail = $tail }
+        $script:Run.extra[("segment-" + $s.name)] = [ordered]@{ exitCode = [int]$code; seconds = $s.seconds; tail = $tail; evidenceDir = $s.evidenceDir; stdoutLog = (Get-SimFileIdentity $stdoutLog 'segment-stdout'); arguments = $childArgs }
         # 窗口段被请求（-WithApp）时同样计入必需：请求了就不得静默放过
         $required = [bool](($s.kind -eq 'required') -or $WithApp)
         Add-SimCheck -Run $script:Run -Form 'SEGMENT' -Name ("{0} exit=0" -f $s.name) -Ok ($code -eq 0) -Required $required `
@@ -143,11 +154,31 @@ finally {
     coreLibrary = (Get-SimFileIdentity (Join-Path $simRoot 'lib\sim_core.ps1') 'sim_core')
     version = 'full_domain v2 (2026-09-23, 204-N: -Mode run composed; window segments require -WithApp)'
   }
+  # Scope is explicit even when the original receipt's checks are ALL_PASS.
+  # Skips, plan rows and unrequested installed-app windows are never executions.
+  $actualSegments = @($readyList | Where-Object { $_.Contains('exitCode') })
+  $expectedSegments = @($readyList | Where-Object { $_.ready -and -not $_.skip })
+  $skippedSegments = @($readyList | Where-Object { $_.skip } | ForEach-Object { $_.name })
+  $notRequestedSegments = @($readyList | Where-Object { -not $_.ready -and -not $_.skip } | ForEach-Object { $_.name })
+  $scopePassed = ($Mode -eq 'run' -and -not $DryRun -and $actualSegments.Count -gt 0 -and $actualSegments.Count -eq $expectedSegments.Count -and @($actualSegments | Where-Object { $_.exitCode -ne 0 }).Count -eq 0 -and $sum.requiredFailed -eq 0)
+  $completePassed = ($scopePassed -and $actualSegments.Count -eq $segments.Count)
+  $script:Run.extra['executionCoverage'] = [ordered]@{
+    executed = @($actualSegments | ForEach-Object { $_.name })
+    selected = @($expectedSegments | ForEach-Object { $_.name })
+    skipped = $skippedSegments
+    notRequested = $notRequestedSegments
+    mode = $Mode
+    dryRun = [bool]$DryRun
+    selectedScopePassed = [bool]$scopePassed
+    fullDomainAcceptance = [bool]$completePassed
+    globalFullAcceptance = $false
+    note = 'Original composed domain only; skipped/plan/window-not-requested rows are not executed tests. Global profile full and physical acceptance require their own receipts.'
+  }
+  $script:Run.extra['verdictNote'] = ('actual segments {0}/{1}; skipped {2}; window not requested {3}; fullDomainAcceptance={4}' -f $actualSegments.Count, $segments.Count, $skippedSegments.Count, $notRequestedSegments.Count, $completePassed)
   $agg = Save-SimEvidence -Run $script:Run -EvidenceDir $EvidenceDir -Prefix 'full-sim'
   if ($agg -ne 0) { $exitCode = $agg }   # SIM-1: single verdict source
-  elseif ($Mode -eq 'run' -and $exitCode -eq 0 -and -not $WithApp) {
-    $script:Run.extra['verdictNote'] = 'required segments all green; window segments were NOT_RUN (pass -WithApp in an authorized window)'
-    Write-Host '必需段全绿；窗口段未跑（授权窗口内用 -WithApp 追加）' -ForegroundColor Yellow
+  elseif ($Mode -eq 'run' -and $exitCode -eq 0) {
+    Write-Host $script:Run.extra['verdictNote'] -ForegroundColor Yellow
   }
 }
 exit $exitCode

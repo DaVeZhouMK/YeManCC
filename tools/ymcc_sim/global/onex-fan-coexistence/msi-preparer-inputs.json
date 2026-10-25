@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "kind": "msi-preparer-static-input-declaration",
+  "claim": "SOURCE_INPUT_MEMBERSHIP_ONLY",
+  "runtimeInputs": [
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-lifecycle.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/msi-lifecycle-basis.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-manual.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/msi-manual-basis.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-replay.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/msi-replay-basis.json"
+  ],
+  "testInputs": [
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-lifecycle.test.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/msi-lifecycle-model.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/refusal-missing-accepted.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/refusal-missing-joint.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/refusal-missing-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/refusal-unreviewed-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-lifecycle/unreviewed-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-manual.test.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/model-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/msi-manual-model.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/refusal-missing-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/refusal-model-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/refusal-unreviewed-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/refusal-wrong-accepted.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-manual/unreviewed-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-replay.test.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/msi-replay-model.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/pending-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/refusal-missing-manual-parent.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/refusal-missing-qualification.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/refusal-model-document.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/refusal-partial-manual-parent.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/models/msi-replay/refusal-pending-qualification.json"
+  ],
+  "contractInputs": [
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-lifecycle/INPUT-CONTRACT.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-lifecycle/OUTPUT-CONTRACT.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-manual/INPUT-CONTRACT.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-manual/OUTPUT-CONTRACT.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-replay/INPUT-CONTRACT.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/contracts/msi-replay/OUTPUT-CONTRACT.json"
+  ],
+  "declarationInputs": [
+    "tools/ymcc_sim/global/onex-fan-coexistence/msi-preparer-inputs.json",
+    "tools/ymcc_sim/global/onex-fan-coexistence/MSI-PREPARER-CONTRACT.json"
+  ],
+  "extendsExistingAdapterId": "fan.onex-lighting-coexistence",
+  "newAdapterIds": [],
+  "businessAcceptanceGranted": false,
+  "currentQualificationGranted": false
+}

@@ -1,0 +1,124 @@
+// Append to the unchanged complete Clear fixture prefix. Current production
+// consumers are inserted verbatim by the private evidence runner.
+@@BASE_COMMON@@
+static void pipeOnlySeed(){
+ seed();
+ g_inputHostProcess=nullptr;g_inputHostHello=false;g_inputHostPrepared=false;
+ g_inputHostPrepareMayHaveReachedHost=false;g_inputHostNeutralized=false;g_inputHostActive=false;
+ g_inputHostHostInstanceId.clear();g_inputHostBoundPersona.clear();
+ g_hidHideVisibilityJournal.active=false;g_msiSteamDeckReleaseDebt.owed=false;
+ g_psEndpointOwnership.owed=false;g_msiDinputReturnOwed=false;
+ ports.historySettled=true;g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;
+ g_xinputPreTargetSlots=0;g_xinputAdmittedMask=0;g_xinputConnectedMask=0;
+}
+static json pipeOnlyFacts(){return {
+ {"hostProcessOwned",g_inputHostProcess!=nullptr},{"hello",g_inputHostHello},
+ {"prepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost},
+ {"runId",g_inputHostRunId},{"epoch",g_inputHostEpoch},{"quarantined",g_inputHostReleaseQuarantined},
+ {"startBlocked",g_inputHostStartBlocked},{"physicalSourceLocked",g_xinputPhysicalSourceLocked},
+ {"physicalMask",g_xinputPhysicalSourceMask},{"connectedMask",g_xinputConnectedMask},
+ {"visibilityJournal",g_hidHideVisibilityJournal.active},{"targetHistorySettled",ports.historySettled},
+ {"msiSdDebt",g_msiSteamDeckReleaseDebt.required()},{"psDebt",g_psEndpointOwnership.retirementRequired()},
+ {"physicalRestoreCalls",ports.restores},{"rearmCalls",ports.rearmCalls},{"busQueueCalls",ports.queued},
+ {"rawSlotRetained",g_inputHostUnadoptedPipe!=nullptr},{"pipe",pipeState()}};}
+static void pipeOnlyCase(bool raw){
+ pipeOnlySeed();auto* owner=tr::existingProcessRuntime();
+ HANDLE h=nullptr;
+ if(raw){h=memoryApi::source();g_inputHostUnadoptedPipe=h;}
+ else{owner=&tr::processRuntime();h=adopt(*owner,L"pipe-only-no-prepare");}
+ memoryApi::failRoles=memoryApi::Original;clearCall();const auto failed=pipeOnlyFacts();
+ check(g_inputHostRunId=="old-run"&&g_inputHostEpoch==17,"failed pipe-only Close retains exact old tuple");
+ check(g_inputHostReleaseQuarantined&&g_inputHostStartBlocked,"failed pipe-only Close fences future writer");
+ check(!g_inputHostHello&&!g_inputHostPrepared&&!g_inputHostPrepareMayHaveReachedHost,"pipe-only retained session has never sent PREPARE");
+ check(memoryApi::live.count(h)==1,"same real failed-close owner remains live");
+ memoryApi::failRoles=0;g_inputHostLastQuarantineProbeTick=0;
+ inputHostReconcileQuarantine();const auto afterBus=pipeOnlyFacts();
+ // Invoke the real lifecycle entry even when its actual BUS admission did not
+ // enqueue work. This independently observes both possible continuation gates.
+ inputHostReconcileQuarantineOnLifecycleThread();const auto afterLifecycle=pipeOnlyFacts();
+ check(inputHostPipeRetirementProvenLocked(),"pipe-only handles actually retired after fault clearance");
+ check(memoryApi::live.empty(),"pipe-only independent real HANDLE oracle zero before exit");
+ check(ports.queued==1,"pipe-only admitted BUS continuation must queue cleanup");
+ check(cleared(),"pipe-only paid local resources must clear tuple without physical source");
+ check(!g_inputHostReleaseQuarantined,"pipe-only no-PREPARE no-history cleanup must leave quarantine");
+ check(inputHostOwnedCleanupProvenLocked(),"pipe-only debt-free session must complete Owned cleanup");
+ check(!g_hidHideVisibilityJournal.active,"pipe-only no owned visibility journal is fabricated");
+ check(ports.createTargets==0,"pipe-only retirement never creates a target");
+ check(ports.durableHistoryWrites==0,"pipe-only retirement does not delete independent history");
+ // Close debt is paid even if the logical session remains stuck. No manual
+ // clearing of quarantine/run/epoch is counted as successful product cleanup.
+ cleanPrivateOwner();
+ cases.push_back({{"case",raw?"raw-slot-no-source-no-PREPARE":"runtime-original-no-source-no-PREPARE"},
+ {"afterFailedClose",failed},{"afterActualBus",afterBus},{"afterActualLifecycle",afterLifecycle}});
+}
+
+#if HAS_PIPE_ONLY_HELPER
+static void independentVeto(const char* name){
+ pipeOnlySeed();g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;ports.endpointAbsent=false;
+ if(std::strcmp(name,"PrepareMay")==0)g_inputHostPrepareMayHaveReachedHost=true;
+ else if(std::strcmp(name,"Hello")==0)g_inputHostHello=true;
+ else if(std::strcmp(name,"Prepared")==0)g_inputHostPrepared=true;
+ else if(std::strcmp(name,"Journal")==0)g_hidHideVisibilityJournal.active=true;
+ else if(std::strcmp(name,"MSI-SD")==0)g_msiSteamDeckReleaseDebt.owed=true;
+ else if(std::strcmp(name,"PS")==0)g_psEndpointOwnership.owed=true;
+ else if(std::strcmp(name,"History")==0)ports.historySettled=false;
+ else if(std::strcmp(name,"ModeReturn")==0)g_msiDinputReturnOwed=true;
+ else throw std::runtime_error("unknown guard case");
+ check(!inputHostPipeOnlyReturnAdmittedLocked(),"independent known-or-unknown duty vetoes pipe-only admission");
+ inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostRunId=="old-run"&&g_inputHostEpoch==17&&g_inputHostReleaseQuarantined,"independent duty prevents no-source tuple retirement");
+ check(ports.restores==0&&ports.rearmCalls==0,"pipe-only shortcut cannot overtake separate duty");
+ // MSI/PS use the original independent debt probe/queue even while unresolved;
+ // observing that queue is not shortcut admission or proof of debt completion.
+ if(!g_msiSteamDeckReleaseDebt.owed&&!g_psEndpointOwnership.owed)
+  check(ports.queued==0,"non-endpoint veto cannot queue pipe-only cleanup");
+ const auto refused=pipeOnlyFacts();cleanPrivateOwner();
+ cases.push_back({{"case",std::string("veto-")+name},{"refused",refused}});
+}
+static void processVeto(){
+ pipeOnlySeed();const auto h=::CreateEventW(nullptr,TRUE,FALSE,nullptr);require(h!=nullptr,"private process-fact handle");
+ g_inputHostProcess=h;g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
+ check(!inputHostPipeOnlyReturnAdmittedLocked(),"owned process blocks pipe-only admission");
+ inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostRunId=="old-run"&&ports.restores==0,"owned process prevents lifecycle shortcut");
+ g_inputHostProcess=nullptr;require(::CloseHandle(h)!=FALSE,"private process-fact returned");
+ cleanPrivateOwner();cases.push_back({{"case","veto-owned-process"}});
+}
+static void livePipeVeto(){
+ pipeOnlySeed();auto& owner=tr::processRuntime();const auto h=adopt(owner,L"pipe-only-live-veto");
+ g_inputHostServerPipe=nullptr;g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
+ check(!inputHostPipeOnlyReturnAdmittedLocked(),"active lease blocks pipe-only admission even with no pending IO");
+ inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostRunId=="old-run"&&ports.queued==0&&ports.restores==0,"active pipe owner cannot retire tuple");
+ inputHostPipeCloseOwned(h);cleanPrivateOwner();cases.push_back({{"case","veto-active-pipe-lease"}});
+}
+static void busyPipeVeto(){
+ pipeOnlySeed();auto& owner=tr::processRuntime();const auto h=adopt(owner,L"pipe-only-busy-veto");g_inputHostServerPipe=nullptr;
+ g_inputHostReleaseQuarantined=true;g_inputHostStartBlocked=true;
+ memoryApi::entered=::CreateEventW(nullptr,TRUE,FALSE,nullptr);memoryApi::release=::CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ require(memoryApi::entered&&memoryApi::release,"busy controls");tr::Result result;
+ std::thread thread([&]{unsigned char bytes[8]{};result=owner.run(h,tr::Kind::Read,bytes,8,1,0);});
+ if(::WaitForSingleObject(memoryApi::entered,2000)!=WAIT_OBJECT_0){::SetEvent(memoryApi::release);thread.join();throw std::runtime_error("busy helper not entered");}
+ const auto began=std::chrono::steady_clock::now();
+ check(!inputHostPipeOnlyReturnAdmittedLocked(),"busy snapshot stays unknown and blocks pipe-only admission");
+ inputHostReconcileQuarantine();inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostRunId=="old-run"&&ports.queued==0&&ports.restores==0,"busy pipe cannot queue or restore pipe-only session");
+ check(std::chrono::steady_clock::now()-began<std::chrono::milliseconds(500),"busy pipe-only observation remains nonblocking");
+ ::SetEvent(memoryApi::release);thread.join();require(result.ok,"busy IO helper completed");
+ require(::CloseHandle(memoryApi::entered)&&::CloseHandle(memoryApi::release),"busy controls closed");memoryApi::entered=memoryApi::release=nullptr;
+ inputHostPipeCloseOwned(h);cleanPrivateOwner();cases.push_back({{"case","veto-busy-pipe-snapshot"}});
+}
+#endif
+int main(){try{
+ DWORD before=0,after=0;require(::GetProcessHandleCount(::GetCurrentProcess(),&before)!=FALSE,"initial private handle census");
+ pipeOnlyCase(true);pipeOnlyCase(false);
+#if HAS_PIPE_ONLY_HELPER
+ for(const char* name:{"PrepareMay","Hello","Prepared","Journal","MSI-SD","PS","History","ModeReturn"})independentVeto(name);
+ processVeto();livePipeVeto();busyPipeVeto();
+#endif
+ require(::GetProcessHandleCount(::GetCurrentProcess(),&after)!=FALSE,"final private handle census");
+ check(before==after,"private resources returned before process exit");
+ const bool pass=failures.empty();std::cout<<json({{"pass",pass},{"checks",checks},{"failures",failures},{"cases",cases},
+ {"handlesBefore",before},{"handlesAfter",after},{"oracleLiveBeforeExit",memoryApi::live.size()},
+ {"currentNativeConsumerExecuted",true},{"hostSdkPhysicalDevicesExecuted",false}}).dump(2)<<'\n';return pass?0:2;
+ }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 3;}}

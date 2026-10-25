@@ -1,0 +1,21 @@
+const fs=require('fs'),path=require('path'),crypto=require('crypto');
+const out=process.argv[2],source=process.argv[3],legacy=process.argv[4];
+function member(s,name){const re=new RegExp('^ {4,8}private (?:static )?[^\\n]+\\b'+name+'\\([^\\n]*\\)\\r?$','m'),m=re.exec(s);if(!m)throw Error('missing '+name);let b=s.indexOf('{',m.index),depth=0,mode='code',verbatim=false;for(let i=b;i<s.length;i++){const c=s[i],n=s[i+1];if(mode==='line'){if(c==='\n')mode='code';continue}if(mode==='block'){if(c==='*'&&n==='/'){mode='code';i++}continue}if(mode==='str'){if(verbatim&&c==='"'&&n==='"'){i++;continue}if(!verbatim&&c==='\\'){i++;continue}if(c==='"'){mode='code';verbatim=false}continue}if(mode==='char'){if(c==='\\'){i++;continue}if(c==="'")mode='code';continue}if(c==='/'&&n==='/'){mode='line';i++;continue}if(c==='/'&&n==='*'){mode='block';i++;continue}if(c==='"'){mode='str';verbatim=s[i-1]==='@';continue}if(c==="'"){mode='char';continue}if(c==='{')depth++;if(c==='}'&&--depth===0)return s.slice(m.index,i+1)}throw Error('unbalanced '+name)}
+const preamble=`using System.Diagnostics; using System.Text; using System.Text.Json; using YeManInputHost.Diagnostics;
+`;
+const scaffold=fs.readFileSync(path.join(path.dirname(process.argv[1]),'Scaffold.txt'),'utf8');
+const old=fs.readFileSync(legacy,'utf8'),current=fs.readFileSync(source,'utf8');
+const names=['RecordCostFrame','MaybeEmitCostWindow','ResetCostWindow'];
+const oldMethods=names.map(n=>member(old,n));
+const newMethods=[...names,'QueueMsiCostWindow'].map(n=>member(current,n));
+fs.mkdirSync(out,{recursive:true});
+fs.writeFileSync(path.join(out,'LegacyCostHost.cs'),preamble+'internal sealed class LegacyCostHost {\n'+scaffold.replaceAll('COST_HOST_NAME','LegacyCostHost')+oldMethods.join('\n')+'\n}\n');
+fs.writeFileSync(path.join(out,'CurrentCostHost.cs'),preamble+'internal sealed class CurrentCostHost {\n'+scaffold.replaceAll('COST_HOST_NAME','CurrentCostHost')+newMethods.join('\n')+'\n}\n');
+const hash=s=>crypto.createHash('sha256').update(s).digest('hex');
+const commonTail=s=>s.slice(s.indexOf('                _costFlagEnabled = CostLoggingRequestedByFlag();'));
+const protectedNames=['TrySubmitFrame','TrySubmitNeutral','TryParseEnvelope'];
+const preservation=protectedNames.map(n=>({name:n,unchanged:member(old,n)===member(current,n)}));
+preservation.push({name:'Non-MSI cost window full diagnostic tail',unchanged:commonTail(member(old,'MaybeEmitCostWindow'))===commonTail(member(current,'MaybeEmitCostWindow'))});
+if(preservation.some(r=>!r.unchanged))throw Error('protected path changed');
+const receipt={source,sourceSha256:hash(current),legacy,legacySha256:hash(old),members:newMethods.map((s,i)=>({name:[...names,'QueueMsiCostWindow'][i],sha256:hash(s)})),preservation,substitutions:['SDK observer and stage types replaced by inert fake classes; no SDK assembly referenced.','Host state is a pure fixture. Actual cost methods are extracted verbatim.','External flag reader is a fake callback; legacy blocked test returns false before reaching OS process/file code.'],productExecuted:false};
+fs.writeFileSync(path.join(out,'extraction-receipt.json'),JSON.stringify(receipt,null,2));console.log(JSON.stringify({output:out,sourceSha256:receipt.sourceSha256,preservation},null,2));

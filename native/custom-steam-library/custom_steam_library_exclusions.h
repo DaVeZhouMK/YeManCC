@@ -43,7 +43,8 @@ inline bool builtinExcludedSteamToolName(const std::string& text) {
         "gamemaker", "gamemakerstudio", "rpgmaker",
         "steamcmd", "steamvr", "steamlink", "steamworkssdk", "steamsdk",
         "sourcesdk", "sourcesdkbase", "sourcefilmmaker",
-        "epicgameslauncher", "proton", "steamlinuxruntime"
+        "epicgameslauncher", "proton", "steamlinuxruntime",
+        "wallpaperengine", "crosshairx", "obsstudio", "soundpad"
     };
     if (exact.contains(key)) return true;
     const auto versioned = [](const std::string& prefix, const std::string& rest) {

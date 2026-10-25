@@ -145,7 +145,7 @@ for (const token of [
 ]) {
   assert.equal(native.includes(token), false, `obsolete fixed retry policy remains: ${token}`);
 }
-assert.ok(yeman.includes('{ timeoutMs: 0 }'), 'download IPC must not impose a wall-clock timeout');
+assert.match(yeman, /\{\s*timeoutMs:\s*0(?:\s*,\s*signal)?\s*\}/, 'download IPC must not impose a wall-clock timeout');
 assert.ok(updateManager.includes("['available', 'failed', 'interrupted']"), 'failed updates need a direct resume path');
 assert.ok(updateManager.includes('retryInstall'), 'installation failures need an install-only retry path');
 assert.ok(updateManager.includes('restoreSavedUpdateInfo'), 'restart must restore failed update metadata');
@@ -165,7 +165,7 @@ const updaterEnd = native.indexOf('ipc_on("app.installUpdate"', updaterStart);
 assert.ok(updaterStart >= 0 && updaterEnd > updaterStart, 'native download updater block must exist');
 const updater = native.slice(updaterStart, updaterEnd);
 assert.ok(
-  updater.indexOf('downloadFileAttempt(url, part') < updater.indexOf('const auto got = sha256File(part)'),
+  updater.indexOf('downloadFileAttempt(url, part') < updater.indexOf('const auto got = hashPackage(part)'),
   'each downloaded package must be checksummed inside the retry loop',
 );
 assert.ok(
@@ -235,7 +235,8 @@ for (const token of ['parseUnsigned64', 'parseContentRange', 'resumeValidator', 
 for (const token of ['#include "update_download_resume.h"', 'responseReady(result)', 'persistResumeMetadata();', 'Cannot save download resume metadata', 'knownComplete', 'completedHash', 'acceptedResumeBytes', 'Cannot hash the cached partial package']) {
   assert.ok(native.includes(token), `native resume integration missing: ${token}`);
 }
-assert.ok(!native.includes('WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER'), 'download length must not be limited to DWORD');
+const downloadTransport = native.slice(native.indexOf('static std::string queryWinHttpHeader('), native.indexOf('static bool downloadFile(', native.indexOf('static std::string queryWinHttpHeader(')));
+assert.ok(!downloadTransport.includes('WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER'), 'update download length must not be limited to DWORD');
 const updateManagerSource = readFileSync(resolve('src/bridge/updateManager.ts'), 'utf8');
 assert.ok(updateManagerSource.includes("['checking', 'downloading', 'validating', 'installing'].includes(updateSnapshot.phase)"), 'large-file hashing must keep the update operation busy');
 console.log('updater policy self-test: PASS');

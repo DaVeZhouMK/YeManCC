@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 2,
+  "runtimeManifest": "..\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.runtime.json",
+  "runtimeId": "YMCC-DEVICECORE-20261018-v1",
+  "files": [
+    {
+      "path": "install-fan-host-payload.ps1",
+      "sha256": "5a6d68f5ae5573f78cc77f147b295af802cc757d1855d0996239b14af6f3fbdf"
+    },
+    {
+      "path": "run-emergency-fan-restore.ps1",
+      "sha256": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6"
+    },
+    {
+      "path": "YeManFanBackend.dll",
+      "sha256": "f8fdbd516d2a002fa65e1cad5bc02405f16ec7b04208d4f6a8c2d26f330dea09"
+    },
+    {
+      "path": "YeManFanHost.authorization.md",
+      "sha256": "6b5f652e34bc19d8b6c1183d9d60c176ccba300067d4f30f6e5bd2c6b564db25"
+    },
+    {
+      "path": "YeManFanHost.deps.json",
+      "sha256": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec"
+    },
+    {
+      "path": "YeManFanHost.dll",
+      "sha256": "7f4136c87fe97b10c375b1e2e53d2074f6fc1899e34a4b2a37203ea633adcc5f"
+    },
+    {
+      "path": "YeManFanHost.exe",
+      "sha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab"
+    },
+    {
+      "path": "YeManFanHost.json",
+      "sha256": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e"
+    },
+    {
+      "path": "YeManFanHost.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3"
+    }
+  ]
+}

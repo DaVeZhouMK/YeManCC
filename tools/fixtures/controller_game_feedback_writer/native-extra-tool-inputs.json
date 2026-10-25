@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "origin": "Finite actual Release compilation /showIncludes; explicit additions to inherited complete925 closure",
+  "baseClosureNotTrimmed": true,
+  "sharedLimit": 1024,
+  "files": [
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\condition_variable",
+      "sha256": "be511dcb80ec92b697d4f81f2d8c99be8a384f9c54dc3a87ccacbb4cff1d8308",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\deque",
+      "sha256": "5a2cf95749f1cb7f2760818b1db1945db17fa3c7e15fe9ce7aa54ac60ce06352",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\cwctype",
+      "sha256": "80c8ceaf1ef9555b6c3ca65edac8781231fa2f658779e7bd73b142e7150ccf4c",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Windows Kits\\10\\Include\\10.0.26100.0\\ucrt\\wctype.h",
+      "sha256": "eacb0758b8e8b7fbe81110329db555a6279f91d35baeb462d10dcf6c3b2d11f5",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\future",
+      "sha256": "999707cdad4b19a8007ffb9769b6a77080ea413e6549b0e4fabbba9a5dd3498f",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\ppltasks.h",
+      "sha256": "3d03ca7e3adf0164fa76caa3c8a1aa0f9f5a5ba23d75e88d38c2a0437a67aedc",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\pplwin.h",
+      "sha256": "ff322a8707ee3d84386dd46c6fc921397c7f95ce594115922008ceb926c5e83b",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\pplinterface.h",
+      "sha256": "b7a3697e1285cc03cddacf25dccbe1aa444e194b397adba823615000cb592b60",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\ppltaskscheduler.h",
+      "sha256": "e26280040ae00860751c5f172fd47ccdb96fed29124a4d9d9f96a3feca05524c",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\include\\pplcancellation_token.h",
+      "sha256": "96d80acdfd872ca88b2376e5f2ff44a9bcb63678a2964e8996effa7552dfe6ca",
+      "role": "Observed current compiler include for D8 same-source serial writer fixture"
+    }
+  ]
+}

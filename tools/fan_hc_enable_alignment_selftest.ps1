@@ -100,7 +100,8 @@ Assert-Check (([regex]::Matches($allDeviceSource, 'override\s+void\s+Initialize\
 Assert-Check ($ayanFlip1.Contains('if (FirstStart)') -and $flipDsInitialize.Contains('if (FirstStart)') -and
   -not $ayanFlip1.Contains('SetFan') -and -not $ayanFlip1.Contains('EcWrite') -and
   -not $flipDsInitialize.Contains('SetFan') -and -not $flipDsInitialize.Contains('EcWrite')) 'frozen HC Initialize overrides are FirstStart-only and fan-write-free'
-Assert-Check ($hostSourceText.Contains('Invoke(device, "Initialize", false, false);')) 'Host handshake uses non-FirstStart HC initialization'
+$initializeStages = [regex]::Matches($hostSourceText, 'RunHcInitializationStage\("device\.initialize",\s*\(\)\s*=>\s*Invoke\(device!?,\s*"Initialize",\s*false,\s*false\),\s*Diagnostic\);')
+Assert-Check ($initializeStages.Count -eq 1) 'Host handshake uses non-FirstStart HC initialization through the formal stage'
 
 # Frozen HC fan transition: PowerProfileManager calls the virtual device
 # callback, then FanProfile owns smoothing/range and SetFanDuty dispatch.
@@ -152,7 +153,7 @@ $hostOpen = $hostSourceText.Substring($hostOpenStart, $hostOpenEnd - $hostOpenSt
 # 入口现为 `private HcDeviceOpenNeed OpenEventsBeginCore()`，由 `RealHcBackend.OpenEvents()`
 # 经 `OnStaBounded` 调用（见 `open-events-begin`）。断言内容不变，只重定位入口。
 $hostEventsStart = Get-Boundary $hostSourceText 'private HcDeviceOpenNeed OpenEventsBeginCore()'
-$hostEventsEnd = Get-Boundary $hostSourceText 'private void OpenEventsFinalizeCore()'
+$hostEventsEnd = Get-Boundary $hostSourceText 'private void OpenEventsFinalizeCore(OpenEventsAdmission admission)'
 $hostEvents = $hostSourceText.Substring($hostEventsStart, $hostEventsEnd - $hostEventsStart)
 Assert-Check ($hostOpenStart -ge 0 -and $hostOpenEnd -gt $hostOpenStart) 'Host Open boundary present'
 Assert-Check (-not $hostOpen.Contains('StartHcDeviceManager();') -and
@@ -191,16 +192,34 @@ Assert-Check ($hostSourceText.Contains('private void EnsureHcSessionReadyForOpen
 # Non-temperature writes are exactly one HC device profile callback. The one
 # SetFanDuty dispatch is the explicitly allowed temperature source boundary.
 $forbiddenWriters = @(
-  'WriteEcByte', 'ECRamDirectWriteByte', 'WriteMsiWmiFanTable',
+  'WriteEcByte', 'WriteMsiWmiFanTable',
   'WriteMsiWmiData', 'ApplyMsiFanCurve', 'ApplyMsiHcDefaultRelease',
   'ApplyLenovoFanCurve', 'ApplyLenovoHcDefaultTable',
   'ApplyLegionGo2FanCurve', 'ApplyLegionGo2OemRelease',
   'ApplySmartFanModeBaseline', 'InvokeSetFanControl'
 )
-Assert-Check ((@($forbiddenWriters | Where-Object { $hostSourceText.Contains($_) }).Count -eq 0)) 'no Host-side vendor fan writer'
+Assert-Check ((@($forbiddenWriters | Where-Object { $hostSourceText.Contains($_) }).Count -eq 0)) 'no independent Host-side vendor fan writer'
+# The existing result-aware inherited consumer may use only the exact original
+# root bool boundary. Vendor overrides retain their own audited HC consumers.
+$writerStart = Get-Boundary $hostSourceText 'private sealed class InheritedEcFanWriter'
+$writerEnd = Get-Boundary $hostSourceText 'private object? inheritedEcFanWriterDevice;'
+$inheritedWriter = $hostSourceText.Substring($writerStart, $writerEnd - $writerStart)
+$outsideInheritedWriter = [regex]::Replace($hostSourceText.Substring(0, $writerStart) + $hostSourceText.Substring($writerEnd), '(?m)^\s*//.*$', '')
+Assert-Check (([regex]::Matches($inheritedWriter, 'GetMethod\("ECRamDirectWriteByte"\)')).Count -eq 1 -and
+  -not $outsideInheritedWriter.Contains('ECRamDirectWriteByte') -and
+  $inheritedWriter.Contains('control?.DeclaringType != root || duty?.DeclaringType != root') -and
+  $inheritedWriter.Contains('boundary.DeclaringType != root || boundary.ReturnType != typeof(bool)') -and
+  $inheritedWriter.Contains('if (!write(address, value))') -and
+  $inheritedWriter.Contains('"FAN_CURVE_WRITE_FAILED"') -and
+  $inheritedWriter.Contains('RequireMetadataCurrent();') -and
+  $inheritedWriter.Contains('if (!ready())')) 'inherited EC bool consumer retains exact root ownership, metadata, readiness and failure gates'
 Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\("PowerProfileManager_Applied"')).Count -eq 1) 'single HC profile callback write entry'
 Assert-Check ($hostSourceText -match 'Enum\.Parse\(updateType,\s*"Background"(?:,\s*ignoreCase:\s*false)?\)') 'Host uses HC Background callback context for the source-independent device fan callback'
-Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\("SetFanDuty"')).Count -eq 1 -and $hostSourceText.Contains('Invoke(activeFanProfile, "SetTemperature", temp)')) 'single allowed HC temperature dispatch'
+Assert-Check (([regex]::Matches($hostSourceText, 'Invoke\(currentDevice, "SetFanDuty", fanDutyDispatchArgs\)')).Count -eq 1 -and
+  ([regex]::Matches($hostSourceText, 'Invoke\(fanProfile, "SetTemperature", temperatureDispatchArgs\)')).Count -eq 1 -and
+  $hostSourceText.Contains('SetFanProfileTemperature(fanProfile, temp);') -and
+  $hostSourceText.Contains('var duty = ReadFanProfileSpeed(fanProfile);') -and
+  $hostSourceText.Contains('WriteFanProfileDuty(duty);')) 'single HC temperature/duty consumer retains its cached delegates and result-aware inherited routes'
 Assert-Check ($hostSourceText.Contains('CaptureHcProfileTemplate();') -and
   ($hostSourceText.Contains('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') -or
    $hostSourceText.Contains('CloneHcPowerProfile(hcProfileTemplate)') -or
@@ -300,8 +319,11 @@ Assert-Check ($engineRestoreStart -ge 0 -and $engineRestoreEnd -gt $engineRestor
   $engineRestore.IndexOf('realBackend.RestoreOem();') -gt $closeSessionIndex) 'profile handoff uses HC Hardware; sleep/process close uses direct HC virtual Close'
 Assert-Check (([regex]::Matches($engineRestore, 'state\.HcCloseCleanupPending = true;')).Count -ge 1 -and
   (([regex]::Matches($engineRestore, 'return false;')).Count -ge 2)) 'any HC Close exception remains pending and cannot be reported as a successful stopped boundary'
-Assert-Check ($hostSourceText.Contains('TimedOutOperationReturned?.Invoke(workItem.Failure is null)') -and
-  $hostSourceText.Contains('private void OnTimedOutHcOperationReturned(bool operationSucceeded)') -and
+Assert-Check ($hostSourceText.Contains('var receipt = new TimedOutHcReturn(workItem.Failure is null, returnOwner);') -and
+  $hostSourceText.Contains('TimedOutOperationReturned?.Invoke(receipt)') -and
+  $hostSourceText.Contains('if (!backend.IsFanDispatchOwnerCurrent(receipt.ReturnOwner))') -and
+  $hostSourceText.Contains('private void OnTimedOutHcOperationReturned(RealHcBackend.TimedOutHcReturn receipt)') -and
+  $hostSourceText.Contains('var operationSucceeded = receipt.OperationSucceeded;') -and
   $hostSourceText.Contains('if (!operationSucceeded && state.OemRestoreConfirmed && !state.HardwareWritesEnabled)') -and
   $hostSourceText.Contains('var completedHcClose =') -and
   $hostSourceText.Contains('(completedHcClose || backend.OemRestoreVerified)') -and
@@ -408,16 +430,17 @@ Assert-Check ($verifySessionStart -ge 0 -and $verifySessionEnd -gt $verifySessio
 # Hardware callback; only a real fan-dispatch exception or failed handoff may
 # enter FaultLocked. This preserves HC fan-route semantics while keeping the
 # isolated temperature source fail-safe.
-$staleHandlerStart = $hostSourceText.IndexOf('private void OnBackendTemperatureMonitorStale()')
+$staleHandlerStart = Get-Boundary $hostSourceText 'private void OnBackendTemperatureMonitorStale(RealHcBackend.TemperatureStaleSignal signal)'
 $staleHandlerEnd = $hostSourceText.IndexOf("`n    internal void MarkOperationTimeoutForSelfTest()", $staleHandlerStart)
 $staleHandler = $hostSourceText.Substring($staleHandlerStart, $staleHandlerEnd - $staleHandlerStart)
 Assert-Check ($hostSourceText.Contains('public Action<Exception>? FanDispatchFailure { get; set; }') -and
-  $hostSourceText.Contains('public Action? TemperatureMonitorStale { get; set; }') -and
-  $hostSourceText.Contains('TemperatureMonitorStale?.Invoke()') -and
+  $hostSourceText.Contains('public Action<TemperatureStaleSignal>? TemperatureMonitorStale { get; set; }') -and
+  $hostSourceText.Contains('TemperatureMonitorStale?.Invoke(signal)') -and
   $hostSourceText.Contains('FanDispatchFailure?.Invoke(ex)') -and
   $hostSourceText.Contains('realBackend.TemperatureMonitorStale = OnBackendTemperatureMonitorStale;') -and
   $staleHandlerStart -ge 0 -and $staleHandlerEnd -gt $staleHandlerStart -and
-  $staleHandler.IndexOf('RestoreHardware(close: false)') -ge 0 -and
+  $staleHandler.IndexOf('!realBackend.IsTemperatureStaleCurrent(signal)') -ge 0 -and
+  $staleHandler.IndexOf('RestoreHardware(close: false)') -gt $staleHandler.IndexOf('!realBackend.IsTemperatureStaleCurrent(signal)') -and
   $staleHandler.IndexOf('state.State = "Ready";') -gt $staleHandler.IndexOf('RestoreHardware(close: false)') -and
   $staleHandler.IndexOf('state.UnknownState = false;') -gt $staleHandler.IndexOf('RestoreHardware(close: false)') -and
   $staleHandler.IndexOf('FaultLocked') -gt $staleHandler.IndexOf('return;')) 'a stale isolated temperature sample restores OEM and remains resumable; only failed recovery fault-locks'

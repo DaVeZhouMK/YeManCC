@@ -1,0 +1,68 @@
+{
+  "kind": "archived-manual-wake-dispatch-race",
+  "classification": "异常睡眠类/电源键唤醒被自主重睡阻拦",
+  "archiveSha256": "d06397166daa29bc7cd01a53e4e71e74cfb6efd73f134aa8cfb9f6c5e7f1880a",
+  "sourceMember": "sleep-facts.log",
+  "sourceLines": [
+    80,
+    83,
+    85,
+    88,
+    89,
+    90,
+    92,
+    94,
+    95,
+    96,
+    103,
+    124
+  ],
+  "originalObservedPowerCalls": 1,
+  "expectedPowerCallsAfterFix": 0,
+  "originalIntent": "2026-10-24 22:32:34.833",
+  "kernelWakeFileTime": "134373737374684869",
+  "events": [
+    {
+      "event": "pbt-auto",
+      "at": "2026-10-25 11:48:57.402"
+    },
+    {
+      "event": "retry-scheduled",
+      "at": "2026-10-25 11:48:57.552",
+      "delayMs": 2000
+    },
+    {
+      "event": "retry-start",
+      "at": "2026-10-25 11:48:59.560"
+    },
+    {
+      "event": "kernel507-callback",
+      "at": "2026-10-25 11:48:59.845",
+      "originalAt": "2026-10-25 11:48:57.468",
+      "reason": 1
+    },
+    {
+      "event": "request-route",
+      "at": "2026-10-25 11:49:00.060"
+    },
+    {
+      "event": "request-dispatch",
+      "at": "2026-10-25 11:49:00.060",
+      "api": "SC_MONITORPOWER"
+    },
+    {
+      "event": "request-accepted",
+      "at": "2026-10-25 11:49:02.306"
+    },
+    {
+      "event": "kernel507-gui",
+      "at": "2026-10-25 11:49:02.326"
+    }
+  ],
+  "orderingNote": "Original507 is before request helper start; callback observed between internal-request marker and route/dispatch facts. Exact position inside helper unavailable; test all bounded pre-API phases. Original user sleep spans an automatic internal re-entry; keep both old and current-cycle semantics explicit.",
+  "originalIntentFileTime": "134373259548333214",
+  "latestObservedInternalEntryFileTime": "134373331556494856",
+  "requestPreparationFileTime": "134373737395600000",
+  "routeObservedFileTime": "134373737400600000",
+  "precisionNote": "Original intent and manual wake exact100ns values from sleep-steam witnesses; helper preparation and route retain displayed millisecond precision."
+}

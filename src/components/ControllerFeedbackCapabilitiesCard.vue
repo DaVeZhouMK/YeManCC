@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { computed, onActivated, onMounted, ref } from 'vue';
+// [AI:USER:FEEDBACK] 震动测试/灯光调整→请求对应实体效果；能力与当前设备/消费者绑定，先查 capabilities/ 总库。
+// 保存强度、手动测试、触摸反馈与真实游戏反馈分别判断；不支持或未确认时如实呈现，不能由一项成功推断其他项。
+import { computed, onActivated, onBeforeUnmount, onDeactivated, onMounted, ref } from 'vue';
 import InlineIcon from '@/components/InlineIcon.vue';
 import Dropdown from '@/components/Dropdown.vue';
 import Slider from '@/components/Slider.vue';
@@ -7,11 +9,13 @@ import Toggle from '@/components/Toggle.vue';
 import { gamepadFeedback, type LedFeedbackCapabilities } from '@/bridge/api';
 import { invoke } from '@/bridge/ipc';
 import { loadSettings, saveSettingsSection } from '@/bridge/settingsRepository';
+import { EDIT_REPEAT_BASE_MS } from '@/gamepad/sliderRepeat';
 
 interface LightingSettings {
   enabled: boolean;
   off: boolean;
   mode: string;
+  presetId: string;
   color: string;
   color2: string;
   speed: number;
@@ -24,7 +28,7 @@ interface FeedbackSettings {
 
 const DEFAULT_FEEDBACK: FeedbackSettings = {
   vibrationStrength: 70,
-  lighting: { enabled: false, off: false, mode: 'solid', color: '#2ea6ff', color2: '#9d7cff', speed: 55, brightness: 65 },
+  lighting: { enabled: false, off: false, mode: 'solid', presetId: '', color: '#2ea6ff', color2: '#9d7cff', speed: 55, brightness: 65 },
 };
 
 const settings = ref<FeedbackSettings>(structuredClone(DEFAULT_FEEDBACK));
@@ -35,6 +39,11 @@ const caps = ref<LedFeedbackCapabilities>({
   vibrationAvailable: false,
   physicalPrimarySlot: -1,
 });
+let feedbackActive = false;
+let feedbackEpoch = 0;
+let feedbackLoaded = false;
+let capabilitiesRequest = 0;
+const currentFeedbackSession = (epoch: number) => feedbackActive && epoch === feedbackEpoch;
 const capsError = ref('');
 const status = ref('');
 // 能力探测进行中（首帧 capabilites 未返回）：灯光块显示"加载中"，控件禁用。
@@ -66,11 +75,12 @@ const effectLabels: Record<string, string> = {
   gradient: '渐变',
   preset: '预设',
 };
+const presetOptions = computed(() => (caps.value.ledPresets ?? []).map((preset) => ({ value: preset.id, label: preset.label })));
 const effectOptions = computed(() =>
   caps.value.ledEffects
-    .filter((effect) => effectLabels[effect])
+    .filter((effect) => effectLabels[effect] && (effect !== 'preset' || presetOptions.value.length > 0))
     .map((effect) => ({ value: effect, label: effectLabels[effect]! })));
-const speedRelevant = computed(() => !['solid', 'ambilight'].includes(settings.value.lighting.mode));
+const speedRelevant = computed(() => !['solid', 'ambilight', 'preset'].includes(settings.value.lighting.mode));
 // 颜色预设：HC 用开放式 ColorPicker（任意色），YMCC 以常用色下拉近似。
 // 主/副颜色均由 native 能力过滤（supportsSecondColor 才显示副颜色）。
 const lightColors = [
@@ -100,15 +110,20 @@ function validColor(value: unknown): string {
 // invalid-mode，表现为「灯光无法开启」；此处把模式收敛到本机 ledEffects 内，
 // 保证下拉框、设置与 native 三者一致。空列表（后端未实现族，fail-closed）不动。
 function clampLedModeToCaps(): void {
-  const supported = caps.value.ledEffects;
+  const supported = effectOptions.value.map((option) => option.value);
   if (supported.length === 0 || supported.includes(settings.value.lighting.mode)) return;
   const fallback = supported[0];
   if (fallback) settings.value.lighting.mode = fallback;
 }
+function clampPresetToCaps(): void {
+  if (presetOptions.value.length && !presetOptions.value.some((option) => option.value === settings.value.lighting.presetId))
+    settings.value.lighting.presetId = presetOptions.value[0]!.value;
+}
 
-async function loadFeedback(): Promise<void> {
+async function loadFeedback(epoch: number): Promise<void> {
   try {
     const all = await loadSettings();
+    if (!currentFeedbackSession(epoch)) return;
     const raw = all.gamepad?.feedback as Partial<FeedbackSettings> | undefined;
     const lighting = raw?.lighting as Partial<LightingSettings> | undefined;
     settings.value = {
@@ -117,6 +132,7 @@ async function loadFeedback(): Promise<void> {
         enabled: lighting?.enabled === true,
         off: lighting?.off === true,
         mode: typeof lighting?.mode === 'string' && effectLabels[lighting.mode] ? lighting.mode : DEFAULT_FEEDBACK.lighting.mode,
+        presetId: typeof lighting?.presetId === 'string' ? lighting.presetId : '',
         color: validColor(lighting?.color ?? DEFAULT_FEEDBACK.lighting.color),
         color2: validColor(lighting?.color2 ?? DEFAULT_FEEDBACK.lighting.color2),
         speed: clampInt(lighting?.speed, DEFAULT_FEEDBACK.lighting.speed, 0, 100),
@@ -124,21 +140,30 @@ async function loadFeedback(): Promise<void> {
       },
     };
   } catch {
+    if (!currentFeedbackSession(epoch)) return;
     settings.value = structuredClone(DEFAULT_FEEDBACK);
   }
+  feedbackLoaded = true;
   clampLedModeToCaps();
+  clampPresetToCaps();
 }
 
-async function refreshCapabilities(showLoading = false): Promise<void> {
+async function refreshCapabilities(showLoading = false, epoch = feedbackEpoch): Promise<void> {
+  const request = ++capabilitiesRequest;
+  if (!currentFeedbackSession(epoch)) return;
   if (showLoading) capsLoading.value = true;
   try {
-    caps.value = await gamepadFeedback.capabilities();
+    const result = await gamepadFeedback.capabilities();
+    if (!currentFeedbackSession(epoch) || request !== capabilitiesRequest) return;
+    caps.value = result;
   } catch {
+    if (!currentFeedbackSession(epoch) || request !== capabilitiesRequest) return;
     caps.value = { ledAvailable: false, brightnessAvailable: false, ledEffects: [], vibrationAvailable: false, physicalPrimarySlot: -1 };
   } finally {
-    capsLoading.value = false;
+    if (currentFeedbackSession(epoch) && request === capabilitiesRequest) capsLoading.value = false;
   }
   clampLedModeToCaps();
+  clampPresetToCaps();
 }
 
 async function saveFeedback(): Promise<void> {
@@ -151,9 +176,13 @@ async function saveFeedback(): Promise<void> {
 
 let applyTimer: number | undefined;
 function scheduleLedApply(): void {
-  if (!ledAvailable.value) return;
+  if (!feedbackActive || !ledAvailable.value) return;
   if (applyTimer !== undefined) window.clearTimeout(applyTimer);
-  applyTimer = window.setTimeout(() => { void applyLed(); }, 250);
+  const epoch = feedbackEpoch;
+  applyTimer = window.setTimeout(() => {
+    applyTimer = undefined;
+    if (currentFeedbackSession(epoch)) void applyLed();
+  }, 250);
 }
 
 async function copyDiagnostics(): Promise<void> {
@@ -170,7 +199,11 @@ async function copyDiagnostics(): Promise<void> {
     status.value = `复制失败：${(error as Error).message}`;
   }
 }
+let ledApplyRequest = 0;
 async function applyLed(): Promise<void> {
+  if (!feedbackActive || !ledAvailable.value) return;
+  const epoch = feedbackEpoch;
+  const request = ++ledApplyRequest;
   const light = settings.value.lighting;
   try {
     // HC 语义分层（对比 DevicePage / DynamicLightingManager）：
@@ -179,23 +212,31 @@ async function applyLed(): Promise<void> {
     const result = await gamepadFeedback.setLed({
       enabled: light.enabled && !light.off,
       mode: light.mode,
+      presetId: light.mode === 'preset' ? light.presetId : undefined,
       color: light.color,
       color2: light.color2,
       speed: light.speed,
       brightness: light.enabled ? (light.off ? 0 : light.brightness) : 0,
     });
+    if (request !== ledApplyRequest) return;
+    if (!currentFeedbackSession(epoch)) return;
     status.value = result.ok ? '掌机灯光已应用。' : `灯光应用失败：${result.reason ?? '未知原因'}`;
   } catch (error) {
+    if (request !== ledApplyRequest) return;
+    if (!currentFeedbackSession(epoch)) return;
     status.value = `灯光应用失败：${(error as Error).message}`;
   }
 }
 
 async function onLightingChanged(): Promise<void> {
+  if (!feedbackActive) return;
+  const epoch = feedbackEpoch;
   await saveFeedback();
-  scheduleLedApply();
+  if (currentFeedbackSession(epoch)) scheduleLedApply();
 }
 function onEnabled(value: boolean): void { settings.value.lighting.enabled = value; void onLightingChanged(); }
 function onOff(value: boolean): void { settings.value.lighting.off = !value; void onLightingChanged(); } // B1-ext: 模型正向（开=!off）
+function onPreset(value: string | number): void { settings.value.lighting.presetId = String(value); void onLightingChanged(); }
 function onMode(value: string | number): void { settings.value.lighting.mode = String(value); void onLightingChanged(); }
 function onColor(value: string | number): void { settings.value.lighting.color = String(value); void onLightingChanged(); }
 function onColor2(value: string | number): void { settings.value.lighting.color2 = String(value); void onLightingChanged(); }
@@ -206,35 +247,70 @@ function onBrightness(value: number): void {
 }
 function onSpeed(value: number): void { settings.value.lighting.speed = value; void onLightingChanged(); }
 
-async function onStrength(value: number): Promise<void> {
+const strengthRow = ref<HTMLElement | null>(null);
+let strengthEditStart: number | undefined;
+function beginStrengthEdit(): void {
+  strengthEditStart ??= settings.value.vibrationStrength;
+}
+function cancelStrengthEdit(): void {
+  if (strengthEditStart !== undefined) settings.value.vibrationStrength = strengthEditStart;
+  strengthEditStart = undefined;
+}
+function commitStrength(): void {
+  strengthEditStart = undefined;
+  void saveFeedback();
+}
+function onStrength(value: number): void {
   settings.value.vibrationStrength = value;
-  await saveFeedback();
 }
 async function triggerVibration(): Promise<void> {
-  if (!vibrationAvailable.value) return;
+  if (!feedbackActive || !vibrationAvailable.value) return;
+  const epoch = feedbackEpoch;
   try {
     // 双脉冲：HC Rumble 一次按下也会以默认延迟连续两次脉冲；
     // 这里显式连发两次，中间隔 125ms（HC Rumble 默认脉冲时长）。
     await gamepadFeedback.vibrate(settings.value.vibrationStrength);
     await new Promise((resolve) => window.setTimeout(resolve, 125));
+    if (!currentFeedbackSession(epoch)) return;
     await gamepadFeedback.vibrate(settings.value.vibrationStrength);
   } catch {
     // 诊断静默；UI 不再显示状态小字。
   }
 }
 
-onMounted(() => {
-  void refreshCapabilities(true).then(() => {
-    void loadFeedback().then(() => {
-      if (ledAvailable.value && settings.value.lighting.enabled) void applyLed();
-    });
+function activateFeedback(): void {
+  // KeepAlive calls activated after the first mount as well. Keep one initial
+  // capability/settings flow and revoke its continuation whenever we leave.
+  if (feedbackActive) return;
+  feedbackActive = true;
+  const epoch = ++feedbackEpoch;
+  const initialize = !feedbackLoaded;
+  void refreshCapabilities(true, epoch).then(async () => {
+    if (!currentFeedbackSession(epoch)) return;
+    if (initialize) await loadFeedback(epoch);
+    if (!currentFeedbackSession(epoch)) return;
+    if (initialize && ledAvailable.value && settings.value.lighting.enabled) void applyLed();
   });
-});
-// 能力在打开 YMCC 时识别一次即可（挂载/重新激活），后台不持续轮询刷新，
-// 避免灯光/震动切片每 2 秒重绘导致"还在刷新"的观感。
-onActivated(() => {
-  void refreshCapabilities(true);
-});
+}
+function deactivateFeedback(): void {
+  if (strengthRow.value) window.dispatchEvent(new CustomEvent('gp:slider-edit-invalidated', { detail: { panel: strengthRow.value, input: strengthRow.value.querySelector('input[type=range]') } }));
+  cancelStrengthEdit();
+  feedbackActive = false;
+  ++feedbackEpoch;
+  ++ledApplyRequest;
+  ++capabilitiesRequest;
+  if (applyTimer !== undefined) {
+    window.clearTimeout(applyTimer);
+    applyTimer = undefined;
+  }
+}
+onMounted(activateFeedback);
+// Refresh once per page activation, never poll hidden controls. Returning to
+// an interrupted initial load starts a fresh flow; old replies cannot write.
+onActivated(activateFeedback);
+onDeactivated(deactivateFeedback);
+onBeforeUnmount(deactivateFeedback);
+
 </script>
 
 <template>
@@ -260,17 +336,19 @@ onActivated(() => {
           </span>
         </div>
         <p v-if="!capsLoading && !vibrationAvailable && vibrationReasonText" class="unavailable-reason">{{ vibrationReasonText }}</p>
-        <div class="rumble-row">
+        <div ref="strengthRow" class="rumble-row" data-gp-slider-draft @gp:slider-edit-start="beginStrengthEdit" @gp:slider-edit-cancel="cancelStrengthEdit">
           <Slider
             :model-value="settings.vibrationStrength"
             :min="0"
             :max="100"
             :step="1"
+            :repeat-interval-ms="EDIT_REPEAT_BASE_MS"
             label="震动强度"
             unit="%"
             :value-text="`${settings.vibrationStrength}%`"
             :disabled="!vibrationAvailable"
             @update:model-value="onStrength"
+            @commit="commitStrength"
           />
           <button type="button" class="vibrate-button" :disabled="!vibrationAvailable" @click="triggerVibration">
             立即震动
@@ -324,7 +402,12 @@ onActivated(() => {
               @update:model-value="onMode"
             />
           </div>
-          <div class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
+          <div v-if="settings.lighting.mode === 'preset'" class="setting-field preset-field" :class="{ muted: !settings.lighting.enabled }">
+            <span class="field-label">灯光预设</span>
+            <Dropdown :model-value="settings.lighting.presetId" :options="presetOptions" :disabled="!settings.lighting.enabled" color="accent" @update:model-value="onPreset" />
+          </div>
+          <p v-if="caps.presetDeclared && caps.presetImplemented === false" class="unavailable-hint">此机型的灯光预设暂不可用。</p>
+          <div v-if="settings.lighting.mode !== 'preset'" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
             <span class="field-label">主颜色</span>
             <Dropdown
               :model-value="settings.lighting.color"
@@ -334,7 +417,7 @@ onActivated(() => {
               @update:model-value="onColor"
             />
           </div>
-          <div v-if="supportsSecondColor" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
+          <div v-if="supportsSecondColor && settings.lighting.mode !== 'preset'" class="setting-field color-field" :class="{ muted: !settings.lighting.enabled }">
             <span class="field-label">副颜色</span>
             <Dropdown
               :model-value="settings.lighting.color2"
@@ -346,6 +429,7 @@ onActivated(() => {
           </div>
           <div class="light-slider-grid">
             <Slider
+              v-if="caps.brightnessAvailable"
               :model-value="settings.lighting.brightness"
               :min="0"
               :max="100"
@@ -371,6 +455,7 @@ onActivated(() => {
         </template>
       </div>
     </div>
+    <p v-if="status" class="feedback-status" role="status" aria-live="polite">{{ status }}</p>
   </section>
 </template>
 

@@ -1,0 +1,19 @@
+{
+  "sourceReceipt": "G:\\YeManCC-Work\\Build\\Validation\\VC-ENV-20261021\\consumer-run03-final\\SOURCE-BINDINGS.json",
+  "files": [
+    {
+      "file": "Program.cs.txt",
+      "source": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\field170350-backup1018\\prerequisite-readiness-fix\\prechange\\GamepadPrerequisites\\Program.cs",
+      "sha256": "611a720870997ae32ce1a111b1b8fb6b280eb807518827ec220e616863d31639",
+      "bytes": 16149,
+      "purpose": "Exact preserved pre-fix production source; only compiled for the historical expected-red consumer"
+    },
+    {
+      "file": "AutoSetup.cs.txt",
+      "source": "G:\\YeManCC-Work\\Build\\Validation\\VirtualController-Lifecycle-20261021-G3E-XboxSwitch\\field170350-backup1018\\prerequisite-sdk200-official-prepare\\consumer-run02-final\\old-policy-red\\source\\AutoSetup.cs",
+      "sha256": "6fbbe3c194154109a4fa77a7a7a044f44b2e23102133761a264142d4daee6d04",
+      "bytes": 20463,
+      "purpose": "Exact preserved pre-fix production source; only compiled for the historical expected-red consumer"
+    }
+  ]
+}

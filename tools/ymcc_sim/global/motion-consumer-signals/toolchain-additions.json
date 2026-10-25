@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "sharedManifest": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+  "sharedManifestSha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d",
+  "additional": [
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/msvcrt.lib",
+      "sha256": "07670951a39739b6d1b50421ae61707ef23c8dff50cdf35f99408711478f3a7c"
+    },
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/msvcrtd.lib",
+      "sha256": "7bb5b7a7d2042c2eb9f0c93b95630dc6d011319e8af133ab759d957318fd47ce"
+    },
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/msvcprt.lib",
+      "sha256": "59d3ab1065f0a14bd9b27debef4008a91eafbc7411290013f61091bf12dfca0f"
+    },
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/msvcprtd.lib",
+      "sha256": "dd585a0b1c98c865dcea6bec8533dc32c85774ba34aa0539d36c9196199305f8"
+    },
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/vcruntime.lib",
+      "sha256": "1acbd98b43a4be8373e25c65dcae4412f36f6111d6b64e47e4a2a97a1d16b27b"
+    },
+    {
+      "path": "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC/14.44.35207/lib/x64/vcruntimed.lib",
+      "sha256": "d4185af4ea776f639deda9e413ec5939dd84d68cf5138eb03eccde20775d02f3"
+    },
+    {
+      "path": "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/ucrt.lib",
+      "sha256": "7ef4eac926bf597d2f243f16cdfed7e0db22cb3ca34a1d7e088a84c994a03d66"
+    },
+    {
+      "path": "C:/Program Files (x86)/Windows Kits/10/Lib/10.0.26100.0/ucrt/x64/ucrtd.lib",
+      "sha256": "0f7f2f05de9b472d3447aca287b8ef908a22f2997282a0fc799eadcb921f6a9c"
+    }
+  ]
+}

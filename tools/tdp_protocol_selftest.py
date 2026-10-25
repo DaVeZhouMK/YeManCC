@@ -95,6 +95,41 @@ def check_intel_encoding(module):
     assert (pl1, pl2, unit) == (40, 41, 0.125)
 
 
+def check_intel_single_targets(module):
+    """Single-target CLI/daemon share PL1=W, PL2=W+1 without hardware calls."""
+    calls = []
+    previous = (module.intel_set, module.intel_set_pawn, module.amd_set)
+    try:
+        module.intel_set = lambda p1, p2, dry=False: (calls.append(("cli", p1, p2, dry)) or 0)
+        module.intel_set_pawn = lambda backend, p1, p2, dry=False: (calls.append(("daemon", p1, p2, dry)) or 0)
+        module.amd_set = lambda *args: (calls.append(("amd",) + args) or 0)
+        for watts in (2, 8, 16, 23, 30, 35, 65, 120, 200, 30.5, 31.5):
+            expected = (int(round(watts)), int(round(watts)) + 1)
+            assert module.apply_tdp("intel", watts) == 0
+            assert calls[-1] == ("cli", *expected, False), (watts, calls[-1])
+            response, stop = module._daemon_dispatch_request(
+                "intel", {"intel": object()},
+                {"version": 1, "requestId": "single-target-fixture", "op": "set", "args": {"watts": watts}})
+            assert not stop and response["ok"] and response["rc"] == 0
+            assert calls[-1] == ("daemon", *expected, False), (watts, calls[-1])
+        assert module.apply_tdp("intel", 30, dry=True) == 0
+        assert calls[-1] == ("cli", 30, 31, True)
+        assert module.apply_tdp("intel", 30, intel_delta=5) == 0
+        assert calls[-1] == ("cli", 30, 35, False)
+        assert module.apply_tdp("intel", 30, intel_delta=0) == 0
+        assert calls[-1] == ("cli", 30, 31, False)
+        assert module.apply_tdp("amd", 30) == 0
+        assert calls[-1] == ("amd", 30000, 30000, 30000, False)
+        for invalid in (0, 1, 201, -1, float("nan"), float("inf")):
+            before = len(calls)
+            response, stop = module._daemon_dispatch_request(
+                "intel", {"intel": object()},
+                {"version": 1, "requestId": "invalid-target-fixture", "op": "set", "args": {"watts": invalid}})
+            assert not stop and response["rc"] == 2 and len(calls) == before
+    finally:
+        module.intel_set, module.intel_set_pawn, module.amd_set = previous
+
+
 def check_daemon_client_allowlist(module):
     parent = str(Path(__file__).resolve().parents[1] / "native" / "testrun" / "sleep_cycles_current" / "YeManCC-sleep-cycles.exe")
     allowed = module._daemon_allowed_client_paths(parent)
@@ -111,6 +146,7 @@ def main():
     check_families(module)
     check_amd_routes(module)
     check_intel_encoding(module)
+    check_intel_single_targets(module)
     check_daemon_client_allowlist(module)
     print("tdp protocol self-test: PASS")
 

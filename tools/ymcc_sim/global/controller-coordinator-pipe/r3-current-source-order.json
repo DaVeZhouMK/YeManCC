@@ -1,0 +1,2515 @@
+{
+  "schemaVersion": 2,
+  "kind": "STATIC_SOURCE_PROJECTION_NOT_NATIVE_EXECUTION",
+  "plannedOccurrences": 101,
+  "plannedUniqueNames": 100,
+  "expectedRuntimeChecks": null,
+  "expectedOwnedChildren": null,
+  "sourceInputs": [
+    {
+      "path": "fixture.cpp",
+      "sha256": "d1c23e7c652bd6ee20e3ebca8203a25f7d70ffbdef92f2dc3273d18fda4750d1"
+    },
+    {
+      "path": "pipe_cases.inc",
+      "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99"
+    },
+    {
+      "path": "target_return_cases.inc",
+      "sha256": "4b6fae563968da232a158cea64338ac7aa87ab51becd0ff55729a30fadbdcd5d"
+    },
+    {
+      "path": "prepare_ack_cases.inc",
+      "sha256": "3d45b27866a12dec759ffa01d123f8b64376e9ba788ae0245772d923a377c02a"
+    },
+    {
+      "path": "off_lifecycle_cases.inc",
+      "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e"
+    },
+    {
+      "path": "ps_return_cases.inc",
+      "sha256": "7958fa04f7befd3ba9357c059bf1b8a6ec14ea42c017946e2ff16b3f3fe89122"
+    },
+    {
+      "path": "ps_wake_cases.inc",
+      "sha256": "e3719ca4d2811fc5179935568d8e5e21e2bdcf8935a22c4435a2ddf8966471b6"
+    }
+  ],
+  "functionInputs": [
+    {
+      "definition": "pipe_cases.inc:fullPipeCases",
+      "sha256": "000569e23863c2c5f0092ed62253bff9ca190d54cf86c60c542f86069d7fc902"
+    },
+    {
+      "definition": "pipe_cases.inc:fullPipeVerifiedSourceLineageCase",
+      "sha256": "3dacf54ccee14ad9ec9325629758af7501d71b760b7de9dee2b2fd33f2384884"
+    },
+    {
+      "definition": "pipe_cases.inc:fullPipePsProtectedCycleCase",
+      "sha256": "71db7cf256fbd8dc907b920d80ac0752ff6cb205913e97ce702bf0ab41f0fd04"
+    },
+    {
+      "definition": "pipe_cases.inc:fullPipeInitialBudgetCase",
+      "sha256": "d720b782662d2bfa8e7cc8b6473c4e0183f97764006802d59aad81fa7737e5d5"
+    },
+    {
+      "definition": "pipe_cases.inc:fullPipeQueuedInitialAuthorityCase",
+      "sha256": "63f733d79f7cef36067e90d9da7c47ca80a645352f8df723d2efde5d119e5afa"
+    },
+    {
+      "definition": "ps_wake_cases.inc:psEndpointProbeCases",
+      "sha256": "b01194b199f9e75f13e34deb0aa251099117072bd823b581f1346667a5aa8a9f"
+    },
+    {
+      "definition": "prepare_ack_cases.inc:fullPipePrepareAckLostCase",
+      "sha256": "c0a522ed85c8db140f7ba58d8996d1330eeb85597452a2a0344b37fc5ce391f1"
+    },
+    {
+      "definition": "ps_return_cases.inc:fullPipePsReturnEvidenceCases",
+      "sha256": "528f2908470fe1bba42182763092e7d5374ff5f50390c2eca8367e552be5ae8e"
+    },
+    {
+      "definition": "ps_return_cases.inc:fullPipePsReturnEvidenceCase",
+      "sha256": "ea0e5bef997bc41e8e49be937d17e19b6527dc32ee7f3f7311b77bbc7c132b83"
+    },
+    {
+      "definition": "off_lifecycle_cases.inc:fullPipeOffLifecycleCases",
+      "sha256": "8065020a1145c2d14cad7cbeb7dd091a4874e236ce6d8024217c7c2399e55b19"
+    },
+    {
+      "definition": "off_lifecycle_cases.inc:fullPipeOffLifecycleCase",
+      "sha256": "2ca6e29f97078aa24b506cd6f215df8afe6630ca1e8e84a971693632c6006993"
+    },
+    {
+      "definition": "target_return_cases.inc:fixtureTargetReturnFullPipeCases",
+      "sha256": "13e552e82afe9edfd94d1737fdba69e79bb3e1f2cb73e795bcbee6c77025371e"
+    },
+    {
+      "definition": "target_return_cases.inc:preparePcCase",
+      "sha256": "3952ecc2265acb67492469cb12d2ecd7b9542db6da02b7e00f61e8a20cc0e6d3"
+    }
+  ],
+  "occurrences": [
+    {
+      "sourceOrdinal": 1,
+      "nameOccurrence": 1,
+      "occurrenceId": "1:1:full-coordinator-real-managed-pipe/none",
+      "name": "full-coordinator-real-managed-pipe/none",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "none",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"none\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 2,
+      "nameOccurrence": 1,
+      "occurrenceId": "2:1:full-coordinator-real-managed-pipe/controller-dispose-once",
+      "name": "full-coordinator-real-managed-pipe/controller-dispose-once",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "controller-dispose-once",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"controller-dispose-once\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 3,
+      "nameOccurrence": 1,
+      "occurrenceId": "3:1:full-coordinator-real-managed-pipe/context-dispose-once",
+      "name": "full-coordinator-real-managed-pipe/context-dispose-once",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "context-dispose-once",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"context-dispose-once\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 4,
+      "nameOccurrence": 1,
+      "occurrenceId": "4:1:ROG/full-coordinator-real-managed-pipe/none",
+      "name": "ROG/full-coordinator-real-managed-pipe/none",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "none",
+        "family": 1,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"none\",1}"
+      }
+    },
+    {
+      "sourceOrdinal": 5,
+      "nameOccurrence": 1,
+      "occurrenceId": "5:1:GPD/full-coordinator-real-managed-pipe/none",
+      "name": "GPD/full-coordinator-real-managed-pipe/none",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "none",
+        "family": 2,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"none\",2}"
+      }
+    },
+    {
+      "sourceOrdinal": 6,
+      "nameOccurrence": 1,
+      "occurrenceId": "6:1:full-coordinator-real-managed-pipe/recreate-owned-ids-rotate",
+      "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-rotate",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "recreate-owned-ids-rotate",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"recreate-owned-ids-rotate\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 7,
+      "nameOccurrence": 1,
+      "occurrenceId": "7:1:full-coordinator-real-managed-pipe/recreate-owned-ids-foreign",
+      "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-foreign",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "recreate-owned-ids-foreign",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"recreate-owned-ids-foreign\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 8,
+      "nameOccurrence": 1,
+      "occurrenceId": "8:1:full-coordinator-real-managed-pipe/recreate-owned-ids-unbound-ack",
+      "name": "full-coordinator-real-managed-pipe/recreate-owned-ids-unbound-ack",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "recreate-owned-ids-unbound-ack",
+        "family": 0,
+        "persona": "steamdeck"
+      },
+      "callSite": {
+        "driverText": "{\"recreate-owned-ids-unbound-ack\",0}"
+      }
+    },
+    {
+      "sourceOrdinal": 9,
+      "nameOccurrence": 1,
+      "occurrenceId": "9:1:ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "none",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"none\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 10,
+      "nameOccurrence": 1,
+      "occurrenceId": "10:1:ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "off-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"off-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 11,
+      "nameOccurrence": 1,
+      "occurrenceId": "11:1:ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "exit-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"exit-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 12,
+      "nameOccurrence": 1,
+      "occurrenceId": "12:1:ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "power-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"power-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 13,
+      "nameOccurrence": 1,
+      "occurrenceId": "13:1:ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "generation-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"generation-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 14,
+      "nameOccurrence": 1,
+      "occurrenceId": "14:1:ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "persona-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"persona-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 15,
+      "nameOccurrence": 1,
+      "occurrenceId": "15:1:ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "reentry-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"reentry-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 16,
+      "nameOccurrence": 1,
+      "occurrenceId": "16:1:ROG/full-coordinator-real-managed-pipe/refresh-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/refresh-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "refresh-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"refresh-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 17,
+      "nameOccurrence": 1,
+      "occurrenceId": "17:1:ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "target-during-ps-probe",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"target-during-ps-probe\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 18,
+      "nameOccurrence": 1,
+      "occurrenceId": "18:1:ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+      "name": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 999,
+      "symbol": "fullPipeCases/scenarios",
+      "namingExpression": "std::string(family==1?\"ROG/\":family==2?\"GPD/\":\"\")+\"full-coordinator-real-managed-pipe/\"+fault+(edge?\"/dualsense-edge\":\"\")",
+      "bindings": {
+        "fault": "ps-late-ownership-read",
+        "family": 1,
+        "persona": "dualsense-edge"
+      },
+      "callSite": {
+        "driverText": "{\"ps-late-ownership-read\",1,\"dualsense-edge\"}"
+      }
+    },
+    {
+      "sourceOrdinal": 19,
+      "nameOccurrence": 1,
+      "occurrenceId": "19:1:VERIFICATION/current-source-lineage-real-managed-pipe",
+      "name": "VERIFICATION/current-source-lineage-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 373,
+      "symbol": "fullPipeVerifiedSourceLineageCase",
+      "namingExpression": "\"VERIFICATION/current-source-lineage-real-managed-pipe\"",
+      "bindings": {},
+      "callSite": {
+        "driverText": "fullPipeVerifiedSourceLineageCase();",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 20,
+      "nameOccurrence": 1,
+      "occurrenceId": "20:1:PS-WAKE/central-protection-same-power-real-managed-pipe",
+      "name": "PS-WAKE/central-protection-same-power-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "central",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase();",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 21,
+      "nameOccurrence": 1,
+      "occurrenceId": "21:1:PS-WAKE/protected-boundary/natural-return",
+      "name": "PS-WAKE/protected-boundary/natural-return",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "natural-return",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "natural-return"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 22,
+      "nameOccurrence": 1,
+      "occurrenceId": "22:1:PS-WAKE/protected-boundary/expired-queued-task",
+      "name": "PS-WAKE/protected-boundary/expired-queued-task",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "expired-queued-task",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "expired-queued-task"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 23,
+      "nameOccurrence": 1,
+      "occurrenceId": "23:1:PS-WAKE/protected-boundary/new-same-persona-ticket",
+      "name": "PS-WAKE/protected-boundary/new-same-persona-ticket",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "new-same-persona-ticket",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "new-same-persona-ticket"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 24,
+      "nameOccurrence": 1,
+      "occurrenceId": "24:1:PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+      "name": "PS-WAKE/protected-boundary/unprotected-task-new-ticket",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "unprotected-task-new-ticket",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "unprotected-task-new-ticket"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 25,
+      "nameOccurrence": 1,
+      "occurrenceId": "25:1:RECEIPT/receipt-owned-replay-real-managed-pipe",
+      "name": "RECEIPT/receipt-owned-replay-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "receipt-owned-replay",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "receipt-owned-replay"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 26,
+      "nameOccurrence": 1,
+      "occurrenceId": "26:1:RECEIPT/receipt-untrusted-asset-real-managed-pipe",
+      "name": "RECEIPT/receipt-untrusted-asset-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "receipt-untrusted-asset",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "receipt-untrusted-asset"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 27,
+      "nameOccurrence": 1,
+      "occurrenceId": "27:1:RECEIPT/receipt-untrusted-identity-real-managed-pipe",
+      "name": "RECEIPT/receipt-untrusted-identity-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "receipt-untrusted-identity",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "receipt-untrusted-identity"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 28,
+      "nameOccurrence": 1,
+      "occurrenceId": "28:1:WAKE/MSI/wake-old-generation-real-managed-pipe",
+      "name": "WAKE/MSI/wake-old-generation-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-old-generation",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-old-generation"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 29,
+      "nameOccurrence": 1,
+      "occurrenceId": "29:1:WAKE/MSI/wake-power-not-ready-real-managed-pipe",
+      "name": "WAKE/MSI/wake-power-not-ready-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-not-ready",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-power-not-ready"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 30,
+      "nameOccurrence": 1,
+      "occurrenceId": "30:1:WAKE/MSI/wake-new-player-real-managed-pipe",
+      "name": "WAKE/MSI/wake-new-player-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-new-player",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-new-player"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 31,
+      "nameOccurrence": 1,
+      "occurrenceId": "31:1:WAKE/MSI/wake-duplicate-arm-real-managed-pipe",
+      "name": "WAKE/MSI/wake-duplicate-arm-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-duplicate-arm",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-duplicate-arm"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 32,
+      "nameOccurrence": 1,
+      "occurrenceId": "32:1:WAKE/MSI/wake-power-during-hide-real-managed-pipe",
+      "name": "WAKE/MSI/wake-power-during-hide-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-during-hide",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-power-during-hide"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 33,
+      "nameOccurrence": 1,
+      "occurrenceId": "33:1:WAKE/MSI/wake-inspection-pending-real-managed-pipe",
+      "name": "WAKE/MSI/wake-inspection-pending-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-inspection-pending",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-inspection-pending"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 34,
+      "nameOccurrence": 1,
+      "occurrenceId": "34:1:WAKE/MSI/wake-player-expired-real-managed-pipe",
+      "name": "WAKE/MSI/wake-player-expired-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-player-expired",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI",
+          "variant": "wake-player-expired"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 35,
+      "nameOccurrence": 1,
+      "occurrenceId": "35:1:WAKE/ROG/wake-old-generation-real-managed-pipe",
+      "name": "WAKE/ROG/wake-old-generation-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-old-generation",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-old-generation"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 36,
+      "nameOccurrence": 1,
+      "occurrenceId": "36:1:WAKE/ROG/wake-power-not-ready-real-managed-pipe",
+      "name": "WAKE/ROG/wake-power-not-ready-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-not-ready",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-power-not-ready"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 37,
+      "nameOccurrence": 1,
+      "occurrenceId": "37:1:WAKE/ROG/wake-new-player-real-managed-pipe",
+      "name": "WAKE/ROG/wake-new-player-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-new-player",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-new-player"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 38,
+      "nameOccurrence": 1,
+      "occurrenceId": "38:1:WAKE/ROG/wake-duplicate-arm-real-managed-pipe",
+      "name": "WAKE/ROG/wake-duplicate-arm-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-duplicate-arm",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-duplicate-arm"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 39,
+      "nameOccurrence": 1,
+      "occurrenceId": "39:1:WAKE/ROG/wake-power-during-hide-real-managed-pipe",
+      "name": "WAKE/ROG/wake-power-during-hide-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-during-hide",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-power-during-hide"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 40,
+      "nameOccurrence": 1,
+      "occurrenceId": "40:1:WAKE/ROG/wake-inspection-pending-real-managed-pipe",
+      "name": "WAKE/ROG/wake-inspection-pending-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-inspection-pending",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-inspection-pending"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 41,
+      "nameOccurrence": 1,
+      "occurrenceId": "41:1:WAKE/ROG/wake-player-expired-real-managed-pipe",
+      "name": "WAKE/ROG/wake-player-expired-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-player-expired",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG",
+          "variant": "wake-player-expired"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 42,
+      "nameOccurrence": 1,
+      "occurrenceId": "42:1:WAKE/GPD/wake-old-generation-real-managed-pipe",
+      "name": "WAKE/GPD/wake-old-generation-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-old-generation",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-old-generation"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 43,
+      "nameOccurrence": 1,
+      "occurrenceId": "43:1:WAKE/GPD/wake-power-not-ready-real-managed-pipe",
+      "name": "WAKE/GPD/wake-power-not-ready-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-not-ready",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-power-not-ready"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 44,
+      "nameOccurrence": 1,
+      "occurrenceId": "44:1:WAKE/GPD/wake-new-player-real-managed-pipe",
+      "name": "WAKE/GPD/wake-new-player-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-new-player",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-new-player"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 45,
+      "nameOccurrence": 1,
+      "occurrenceId": "45:1:WAKE/GPD/wake-duplicate-arm-real-managed-pipe",
+      "name": "WAKE/GPD/wake-duplicate-arm-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-duplicate-arm",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-duplicate-arm"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 46,
+      "nameOccurrence": 1,
+      "occurrenceId": "46:1:WAKE/GPD/wake-power-during-hide-real-managed-pipe",
+      "name": "WAKE/GPD/wake-power-during-hide-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-power-during-hide",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-power-during-hide"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 47,
+      "nameOccurrence": 1,
+      "occurrenceId": "47:1:WAKE/GPD/wake-inspection-pending-real-managed-pipe",
+      "name": "WAKE/GPD/wake-inspection-pending-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-inspection-pending",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-inspection-pending"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 48,
+      "nameOccurrence": 1,
+      "occurrenceId": "48:1:WAKE/GPD/wake-player-expired-real-managed-pipe",
+      "name": "WAKE/GPD/wake-player-expired-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-player-expired",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD",
+          "variant": "wake-player-expired"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 49,
+      "nameOccurrence": 1,
+      "occurrenceId": "49:1:WAKE/PC/wake-pc-recreate-real-managed-pipe",
+      "name": "WAKE/PC/wake-pc-recreate-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-pc-recreate",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-pc-recreate\",\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 50,
+      "nameOccurrence": 1,
+      "occurrenceId": "50:1:WAKE/PC/wake-pc-retry-transient-real-managed-pipe",
+      "name": "WAKE/PC/wake-pc-retry-transient-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-pc-retry-transient",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-pc-retry-transient"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 51,
+      "nameOccurrence": 1,
+      "occurrenceId": "51:1:WAKE/PC/wake-pc-retry-exhausted-real-managed-pipe",
+      "name": "WAKE/PC/wake-pc-retry-exhausted-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-pc-retry-exhausted",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-pc-retry-exhausted"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 52,
+      "nameOccurrence": 1,
+      "occurrenceId": "52:1:WAKE/PC/wake-pc-retry-deadline-real-managed-pipe",
+      "name": "WAKE/PC/wake-pc-retry-deadline-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-pc-retry-deadline",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-pc-retry-deadline"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 53,
+      "nameOccurrence": 1,
+      "occurrenceId": "53:1:WAKE/PC/wake-pc-retry-source-timeout-real-managed-pipe",
+      "name": "WAKE/PC/wake-pc-retry-source-timeout-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-pc-retry-source-timeout",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-pc-retry-source-timeout"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 54,
+      "nameOccurrence": 1,
+      "occurrenceId": "54:1:PIPE-BUDGET/PC/pipe-budget-write-remaining-real-managed-pipe",
+      "name": "PIPE-BUDGET/PC/pipe-budget-write-remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-write-remaining",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "pipe-budget-write-remaining"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 55,
+      "nameOccurrence": 1,
+      "occurrenceId": "55:1:PIPE-BUDGET/PC/pipe-budget-write-expiry-real-managed-pipe",
+      "name": "PIPE-BUDGET/PC/pipe-budget-write-expiry-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-write-expiry",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "pipe-budget-write-expiry"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 56,
+      "nameOccurrence": 1,
+      "occurrenceId": "56:1:PIPE-BUDGET/PC/pipe-budget-connect-remaining-real-managed-pipe",
+      "name": "PIPE-BUDGET/PC/pipe-budget-connect-remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-connect-remaining",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "pipe-budget-connect-remaining"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 57,
+      "nameOccurrence": 1,
+      "occurrenceId": "57:1:PIPE-BUDGET/PC/pipe-budget-connect-expiry-real-managed-pipe",
+      "name": "PIPE-BUDGET/PC/pipe-budget-connect-expiry-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-connect-expiry",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "pipe-budget-connect-expiry"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 58,
+      "nameOccurrence": 1,
+      "occurrenceId": "58:1:PIPE-BUDGET/MSI/pipe-budget-write-remaining-real-managed-pipe",
+      "name": "PIPE-BUDGET/MSI/pipe-budget-write-remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-write-remaining",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"pipe-budget-write-remaining\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 59,
+      "nameOccurrence": 1,
+      "occurrenceId": "59:1:PIPE-BUDGET/ROG/pipe-budget-write-remaining-real-managed-pipe",
+      "name": "PIPE-BUDGET/ROG/pipe-budget-write-remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-write-remaining",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"pipe-budget-write-remaining\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 60,
+      "nameOccurrence": 1,
+      "occurrenceId": "60:1:PIPE-BUDGET/GPD/pipe-budget-write-remaining-real-managed-pipe",
+      "name": "PIPE-BUDGET/GPD/pipe-budget-write-remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "pipe-budget-write-remaining",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"pipe-budget-write-remaining\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 61,
+      "nameOccurrence": 1,
+      "occurrenceId": "61:1:INITIAL-PIPE-BUDGET/MSI/remaining-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/MSI/remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "MSI",
+        "expires": false,
+        "expiredBeforeEntry": false
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(family,false);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 62,
+      "nameOccurrence": 1,
+      "occurrenceId": "62:1:INITIAL-PIPE-BUDGET/ROG/remaining-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/ROG/remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "ROG",
+        "expires": false,
+        "expiredBeforeEntry": false
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(family,false);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 63,
+      "nameOccurrence": 1,
+      "occurrenceId": "63:1:INITIAL-PIPE-BUDGET/GPD/remaining-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/GPD/remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "GPD",
+        "expires": false,
+        "expiredBeforeEntry": false
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(family,false);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 64,
+      "nameOccurrence": 1,
+      "occurrenceId": "64:1:INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/PC/remaining-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "PC",
+        "expires": false,
+        "expiredBeforeEntry": false
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(family,false);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "PC"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 65,
+      "nameOccurrence": 1,
+      "occurrenceId": "65:1:INITIAL-PIPE-BUDGET/PC/expiry-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/PC/expiry-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "PC",
+        "expires": true,
+        "expiredBeforeEntry": false
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(\"PC\",true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 66,
+      "nameOccurrence": 1,
+      "occurrenceId": "66:1:INITIAL-PIPE-BUDGET/PC/expired-before-entry-real-managed-pipe",
+      "name": "INITIAL-PIPE-BUDGET/PC/expired-before-entry-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 412,
+      "symbol": "fullPipeInitialBudgetCase",
+      "namingExpression": "\"INITIAL-PIPE-BUDGET/\"+family+\"/\"+(expiredBeforeEntry?\"expired-before-entry\":expires?\"expiry\":\"remaining\")+\"-real-managed-pipe\"",
+      "bindings": {
+        "family": "PC",
+        "expires": false,
+        "expiredBeforeEntry": true
+      },
+      "callSite": {
+        "driverText": "fullPipeInitialBudgetCase(\"PC\",false,true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 67,
+      "nameOccurrence": 1,
+      "occurrenceId": "67:1:INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/initial-target-admission",
+      "name": "INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/initial-target-admission",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 467,
+      "symbol": "fullPipeQueuedInitialAuthorityCase",
+      "namingExpression": "std::string(\"INITIAL-QUEUED-AUTHORITY/PC/\")+(replaceRequest?\"expired-request-new-persona/\":\"power-generation-changed/\")+reason",
+      "bindings": {
+        "reason": "initial-target-admission",
+        "replaceRequest": true
+      },
+      "callSite": {
+        "driverText": "fullPipeQueuedInitialAuthorityCase(\"initial-target-admission\",true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 68,
+      "nameOccurrence": 1,
+      "occurrenceId": "68:1:INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/persona-transition",
+      "name": "INITIAL-QUEUED-AUTHORITY/PC/expired-request-new-persona/persona-transition",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 467,
+      "symbol": "fullPipeQueuedInitialAuthorityCase",
+      "namingExpression": "std::string(\"INITIAL-QUEUED-AUTHORITY/PC/\")+(replaceRequest?\"expired-request-new-persona/\":\"power-generation-changed/\")+reason",
+      "bindings": {
+        "reason": "persona-transition",
+        "replaceRequest": true
+      },
+      "callSite": {
+        "driverText": "fullPipeQueuedInitialAuthorityCase(\"persona-transition\",true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 69,
+      "nameOccurrence": 1,
+      "occurrenceId": "69:1:INITIAL-QUEUED-AUTHORITY/PC/power-generation-changed/initial-target-admission",
+      "name": "INITIAL-QUEUED-AUTHORITY/PC/power-generation-changed/initial-target-admission",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 467,
+      "symbol": "fullPipeQueuedInitialAuthorityCase",
+      "namingExpression": "std::string(\"INITIAL-QUEUED-AUTHORITY/PC/\")+(replaceRequest?\"expired-request-new-persona/\":\"power-generation-changed/\")+reason",
+      "bindings": {
+        "reason": "initial-target-admission",
+        "replaceRequest": false
+      },
+      "callSite": {
+        "driverText": "fullPipeQueuedInitialAuthorityCase(\"initial-target-admission\",false);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 70,
+      "nameOccurrence": 1,
+      "occurrenceId": "70:1:WAKE/MSI/wake-dead-host-real-managed-pipe",
+      "name": "WAKE/MSI/wake-dead-host-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host",
+        "family": "MSI"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-dead-host\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "MSI"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 71,
+      "nameOccurrence": 1,
+      "occurrenceId": "71:1:WAKE/ROG/wake-dead-host-real-managed-pipe",
+      "name": "WAKE/ROG/wake-dead-host-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host",
+        "family": "ROG"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-dead-host\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "ROG"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 72,
+      "nameOccurrence": 1,
+      "occurrenceId": "72:1:WAKE/GPD/wake-dead-host-real-managed-pipe",
+      "name": "WAKE/GPD/wake-dead-host-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host",
+        "family": "GPD"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-dead-host\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "GPD"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 73,
+      "nameOccurrence": 1,
+      "occurrenceId": "73:1:WAKE/PC/wake-dead-host-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-dead-host\",family);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "family": "PC"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 74,
+      "nameOccurrence": 1,
+      "occurrenceId": "74:1:WAKE/PC/wake-dead-host-not-ready-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-not-ready-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host-not-ready",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(\"wake-dead-host-not-ready\",\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 75,
+      "nameOccurrence": 1,
+      "occurrenceId": "75:1:WAKE/PC/wake-dead-host-new-player-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-new-player-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host-new-player",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-dead-host-new-player"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 76,
+      "nameOccurrence": 1,
+      "occurrenceId": "76:1:WAKE/PC/wake-dead-host-new-power-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-new-power-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host-new-power",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-dead-host-new-power"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 77,
+      "nameOccurrence": 1,
+      "occurrenceId": "77:1:WAKE/PC/wake-dead-host-expired-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-expired-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host-expired",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-dead-host-expired"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 78,
+      "nameOccurrence": 1,
+      "occurrenceId": "78:1:WAKE/PC/wake-dead-host-start-budget-real-managed-pipe",
+      "name": "WAKE/PC/wake-dead-host-start-budget-real-managed-pipe",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sourceLine": 522,
+      "symbol": "fullPipePsProtectedCycleCase",
+      "namingExpression": "variant.rfind(\"pipe-budget-\",0)==0?\"PIPE-BUDGET/\"+family+\"/\"+variant+\"-real-managed-pipe\":variant==\"central\"?\"PS-WAKE/central-protection-same-power-real-managed-pipe\":variant.rfind(\"receipt-\",0)==0?\"RECEIPT/\"+variant+\"-real-managed-pipe\":variant.rfind(\"wake-\",0)==0?\"WAKE/\"+family+\"/\"+variant+\"-real-managed-pipe\":\"PS-WAKE/protected-boundary/\"+variant",
+      "bindings": {
+        "variant": "wake-dead-host-start-budget",
+        "family": "PC"
+      },
+      "callSite": {
+        "driverText": "fullPipePsProtectedCycleCase(variant,\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "variant": "wake-dead-host-start-budget"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 79,
+      "nameOccurrence": 1,
+      "occurrenceId": "79:1:PS-WAKE/read-only-endpoint-enumeration",
+      "name": "PS-WAKE/read-only-endpoint-enumeration",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_wake_cases.inc",
+      "sourceLine": 74,
+      "symbol": "psEndpointProbeCases",
+      "namingExpression": "\"PS-WAKE/read-only-endpoint-enumeration\"",
+      "bindings": {},
+      "callSite": {
+        "driverText": "psEndpointProbeCases();",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 80,
+      "nameOccurrence": 1,
+      "occurrenceId": "80:1:PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+      "name": "PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "PC",
+        "offWhileHeld": false,
+        "unknownReturn": false,
+        "exitSweep": false
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"PC\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 81,
+      "nameOccurrence": 1,
+      "occurrenceId": "81:1:PREPARE-ACK-LOSS/ROG/actual-owned-target-held-cleanup",
+      "name": "PREPARE-ACK-LOSS/ROG/actual-owned-target-held-cleanup",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "ROG",
+        "offWhileHeld": false,
+        "unknownReturn": false,
+        "exitSweep": false
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"ROG\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 82,
+      "nameOccurrence": 1,
+      "occurrenceId": "82:1:PREPARE-ACK-LOSS/ROG/explicit-OFF-while-owned-target-held",
+      "name": "PREPARE-ACK-LOSS/ROG/explicit-OFF-while-owned-target-held",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "ROG",
+        "offWhileHeld": true,
+        "unknownReturn": false,
+        "exitSweep": false
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"ROG\",true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 83,
+      "nameOccurrence": 1,
+      "occurrenceId": "83:1:PREPARE-ACK-LOSS/ROG/app-exit-sweep-while-owned-target-held",
+      "name": "PREPARE-ACK-LOSS/ROG/app-exit-sweep-while-owned-target-held",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "ROG",
+        "offWhileHeld": false,
+        "unknownReturn": false,
+        "exitSweep": true
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"ROG\",false,false,true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 84,
+      "nameOccurrence": 1,
+      "occurrenceId": "84:1:PREPARE-ACK-LOSS/PC/unknown-owned-root-negative-proof",
+      "name": "PREPARE-ACK-LOSS/PC/unknown-owned-root-negative-proof",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "PC",
+        "offWhileHeld": false,
+        "unknownReturn": true,
+        "exitSweep": false
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"PC\",false,true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 85,
+      "nameOccurrence": 1,
+      "occurrenceId": "85:1:PS-RETURN/ROG/owned-HID-present/xinput-mask-0",
+      "name": "PS-RETURN/ROG/owned-HID-present/xinput-mask-0",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 0,
+        "verdict": "present",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 0,
+          "kind": "PsWakeProbe::Present"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 86,
+      "nameOccurrence": 1,
+      "occurrenceId": "86:1:PS-RETURN/ROG/owned-HID-unknown/xinput-mask-0",
+      "name": "PS-RETURN/ROG/owned-HID-unknown/xinput-mask-0",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 0,
+        "verdict": "unknown",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 0,
+          "kind": "PsWakeProbe::Unknown"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 87,
+      "nameOccurrence": 1,
+      "occurrenceId": "87:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0",
+      "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 0,
+        "verdict": "absent",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 0,
+          "kind": "PsWakeProbe::Absent"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 88,
+      "nameOccurrence": 1,
+      "occurrenceId": "88:1:PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+      "name": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 0,
+        "verdict": "foreign-peer",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 0,
+          "kind": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 89,
+      "nameOccurrence": 1,
+      "occurrenceId": "89:1:PS-RETURN/ROG/owned-HID-present/xinput-mask-1",
+      "name": "PS-RETURN/ROG/owned-HID-present/xinput-mask-1",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 1,
+        "verdict": "present",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 1,
+          "kind": "PsWakeProbe::Present"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 90,
+      "nameOccurrence": 1,
+      "occurrenceId": "90:1:PS-RETURN/ROG/owned-HID-unknown/xinput-mask-1",
+      "name": "PS-RETURN/ROG/owned-HID-unknown/xinput-mask-1",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 1,
+        "verdict": "unknown",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 1,
+          "kind": "PsWakeProbe::Unknown"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 91,
+      "nameOccurrence": 1,
+      "occurrenceId": "91:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-1",
+      "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-1",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 1,
+        "verdict": "absent",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 1,
+          "kind": "PsWakeProbe::Absent"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 92,
+      "nameOccurrence": 1,
+      "occurrenceId": "92:1:PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+      "name": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 1,
+        "verdict": "foreign-peer",
+        "blockedStore": false
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(connected,kind);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign",
+          "connected": 1,
+          "kind": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 93,
+      "nameOccurrence": 1,
+      "occurrenceId": "93:1:PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/durable-store-blocked-once",
+      "name": "PS-RETURN/ROG/owned-HID-absent/xinput-mask-0/durable-store-blocked-once",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sourceLine": 9,
+      "symbol": "fullPipePsReturnEvidenceCase",
+      "namingExpression": "\"PS-RETURN/ROG/owned-HID-\"+verdict+\"/xinput-mask-\"+std::to_string(connected)+(blockedStore?\"/durable-store-blocked-once\":\"\")",
+      "bindings": {
+        "connected": 0,
+        "verdict": "absent",
+        "blockedStore": true
+      },
+      "callSite": {
+        "driverText": "fullPipePsReturnEvidenceCase(0,PsWakeProbe::Absent,true);",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 94,
+      "nameOccurrence": 1,
+      "occurrenceId": "94:1:OFF-LIFECYCLE/ROG-returned-with-StartBlocked",
+      "name": "OFF-LIFECYCLE/ROG-returned-with-StartBlocked",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc",
+      "sourceLine": 49,
+      "symbol": "fullPipeOffLifecycleCase",
+      "namingExpression": "\"OFF-LIFECYCLE/\"+variant",
+      "bindings": {
+        "variant": "ROG-returned-with-StartBlocked"
+      },
+      "callSite": {
+        "driverText": "fullPipeOffLifecycleCase(\"ROG-returned-with-StartBlocked\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 95,
+      "nameOccurrence": 1,
+      "occurrenceId": "95:1:OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+      "name": "OFF-LIFECYCLE/expired-OFF-after-expired-new-ON",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc",
+      "sourceLine": 49,
+      "symbol": "fullPipeOffLifecycleCase",
+      "namingExpression": "\"OFF-LIFECYCLE/\"+variant",
+      "bindings": {
+        "variant": "expired-OFF-after-expired-new-ON"
+      },
+      "callSite": {
+        "driverText": "fullPipeOffLifecycleCase(\"expired-OFF-after-expired-new-ON\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 96,
+      "nameOccurrence": 1,
+      "occurrenceId": "96:1:OFF-LIFECYCLE/MSI-return-unproven",
+      "name": "OFF-LIFECYCLE/MSI-return-unproven",
+      "region": "pre-target-return-body",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc",
+      "sourceLine": 49,
+      "symbol": "fullPipeOffLifecycleCase",
+      "namingExpression": "\"OFF-LIFECYCLE/\"+variant",
+      "bindings": {
+        "variant": "MSI-return-unproven"
+      },
+      "callSite": {
+        "driverText": "fullPipeOffLifecycleCase(\"MSI-return-unproven\");",
+        "bindings": {
+          "PsWakeProbe::Present": "PsWakeProbe::Present",
+          "PsWakeProbe::Unknown": "PsWakeProbe::Unknown",
+          "PsWakeProbe::Absent": "PsWakeProbe::Absent",
+          "PsWakeProbe::Foreign": "PsWakeProbe::Foreign"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 97,
+      "nameOccurrence": 1,
+      "occurrenceId": "97:1:TARGET-RETURN/PC/source-free-normal-complete-stop",
+      "name": "TARGET-RETURN/PC/source-free-normal-complete-stop",
+      "region": "target-return-tail",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc",
+      "sourceLine": 27,
+      "symbol": "preparePcCase",
+      "namingExpression": "\"TARGET-RETURN/PC/\"+name",
+      "bindings": {
+        "name": "source-free-normal-complete-stop"
+      },
+      "callSite": {
+        "driverText": "fixtureTargetReturn::preparePcCase(retainHistory?\"retained-old-pin-exact-current-settlement\":\"source-free-normal-complete-stop\");",
+        "bindings": {
+          "retainHistory": false
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 98,
+      "nameOccurrence": 1,
+      "occurrenceId": "98:1:TARGET-RETURN/PC/retained-old-pin-exact-current-settlement",
+      "name": "TARGET-RETURN/PC/retained-old-pin-exact-current-settlement",
+      "region": "target-return-tail",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc",
+      "sourceLine": 27,
+      "symbol": "preparePcCase",
+      "namingExpression": "\"TARGET-RETURN/PC/\"+name",
+      "bindings": {
+        "name": "retained-old-pin-exact-current-settlement"
+      },
+      "callSite": {
+        "driverText": "fixtureTargetReturn::preparePcCase(retainHistory?\"retained-old-pin-exact-current-settlement\":\"source-free-normal-complete-stop\");",
+        "bindings": {
+          "retainHistory": true
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 99,
+      "nameOccurrence": 1,
+      "occurrenceId": "99:1:TARGET-RETURN/PC/corrupt-file",
+      "name": "TARGET-RETURN/PC/corrupt-file",
+      "region": "target-return-tail",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc",
+      "sourceLine": 27,
+      "symbol": "preparePcCase",
+      "namingExpression": "\"TARGET-RETURN/PC/\"+name",
+      "bindings": {
+        "name": "corrupt-file"
+      },
+      "callSite": {
+        "driverText": "fixtureTargetReturn::preparePcCase(variant)",
+        "bindings": {
+          "variant": "corrupt-file"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 100,
+      "nameOccurrence": 1,
+      "occurrenceId": "100:1:TARGET-RETURN/PC/exclusive-owner-conflict",
+      "name": "TARGET-RETURN/PC/exclusive-owner-conflict",
+      "region": "target-return-tail",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc",
+      "sourceLine": 27,
+      "symbol": "preparePcCase",
+      "namingExpression": "\"TARGET-RETURN/PC/\"+name",
+      "bindings": {
+        "name": "exclusive-owner-conflict"
+      },
+      "callSite": {
+        "driverText": "fixtureTargetReturn::preparePcCase(variant)",
+        "bindings": {
+          "variant": "exclusive-owner-conflict"
+        }
+      }
+    },
+    {
+      "sourceOrdinal": 101,
+      "nameOccurrence": 2,
+      "occurrenceId": "101:2:PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+      "name": "PREPARE-ACK-LOSS/PC/actual-owned-target-held-cleanup",
+      "region": "target-return-tail",
+      "sourcePath": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sourceLine": 7,
+      "symbol": "fullPipePrepareAckLostCase",
+      "namingExpression": "\"PREPARE-ACK-LOSS/\"+family+(exitSweep?\"/app-exit-sweep-while-owned-target-held\":offWhileHeld?\"/explicit-OFF-while-owned-target-held\":unknownReturn?\"/unknown-owned-root-negative-proof\":\"/actual-owned-target-held-cleanup\")",
+      "bindings": {
+        "family": "PC",
+        "offWhileHeld": false,
+        "unknownReturn": false,
+        "exitSweep": false
+      },
+      "callSite": {
+        "driverText": "fullPipePrepareAckLostCase(\"PC\");",
+        "origin": "fixtureTargetReturnFullPipeCases"
+      }
+    }
+  ],
+  "partitionClosureVerified": false,
+  "preTargetReturnBodyBoundary": 96
+}

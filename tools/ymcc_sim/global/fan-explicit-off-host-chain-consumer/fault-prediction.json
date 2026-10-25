@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "generatedBeforeFaultExecution": "2026-10-19T14:11:22.650Z",
+  "source": "src/bridge/fanHost.ts",
+  "originalSha256": "a77d85d93f15e63d34f744279603474b290bf6db64af6b7ecbd2ac628c912c45",
+  "privateFaultSha256": "5c023d1dcc702ea76244f64a9e2042d307949c730b29456d8c81a88046a2e619",
+  "onlyFault": "Return from actual rearmAfterWakeForControlAdmission while suspended with allowManualRescue; all later source unchanged",
+  "sourceAlreadyCompiled": false,
+  "faultBusinessAlreadyExecuted": false,
+  "mode": "allowed",
+  "predictedOriginalManagedFailure": "actual-bridge-control-contract-allowed",
+  "predictedManagedChecks": 82,
+  "predictedManagedFailures": 1,
+  "predictedOtherManagedPassed": 81,
+  "predictedTs": {
+    "ok": false,
+    "error": "Error: Fan Host 当前不可控制: suspended"
+  },
+  "forbiddenFaultSubstitutes": [
+    "compiler error",
+    "launch failure",
+    "timeout",
+    "runtime boundary denial",
+    "fabricated HTTP rejection"
+  ],
+  "originalTsAndOriginalManagedCheckStatementsUnchanged": true,
+  "exactOriginalFailureAuthoritative": true,
+  "noExpectationAdjustmentAfterBusiness": true
+}

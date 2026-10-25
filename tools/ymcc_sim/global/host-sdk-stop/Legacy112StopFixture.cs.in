@@ -1,0 +1,80 @@
+// Frozen 1.12 semantics only. This executable never compiles 2.0 helpers.
+using System;
+using System.Collections.Generic;
+using System.Reflection;
+using System.Text.Json;
+using System.Threading;
+using HIDMaestro;
+using Guard = YeManInputHost.Diagnostics.HostControllerOutputStop;
+#pragma warning disable CS0414, CS0649
+namespace HIDMaestro
+{
+    internal sealed class HMController
+    {
+        private readonly CancellationTokenSource _outputCts;
+        private readonly Thread? _outputThread;
+        private readonly nint _outputView;
+        private readonly CancellationTokenSource _idleCts = new();
+        private Thread? _idleThread;
+        private bool _disposed;
+        private readonly FakeContext _context = new();
+        internal HMController(CancellationTokenSource output, Thread? reader = null) { _outputCts = output; _outputThread = reader; _outputView = 0; }
+        internal int Index => 0;
+        internal CancellationTokenSource Idle => _idleCts;
+        private void SendReleaseFrames() { }
+        @@LEGACY112_DISPOSE@@
+    }
+    internal sealed class FakeContext { internal void OnControllerDisposing(HMController controller) { } }
+    internal static class SharedMemoryIO { internal static void UnregisterOutputPump(int index) { } }
+    internal static class TimeoutScale { internal static int Apply(int ms) => ms; }
+}
+internal static class Legacy112StopFixture
+{
+    private sealed class Runtime : Guard.IRuntime
+    {
+        public Type ControllerType => typeof(HMController);
+        public Type CancellationSourceType => typeof(CancellationTokenSource);
+        public Type ReaderType => typeof(Thread);
+        public bool IsPinnedCore(Type type) => true; // Fake target; original production admission is tested separately.
+        public int ReadJoinBudgetMilliseconds(Type type) => 500;
+        public bool IsCurrentReader(object reader) => ReferenceEquals(reader, Thread.CurrentThread);
+        public void Cancel(object cts) => ((CancellationTokenSource)cts).Cancel();
+        public bool Join(object reader, int ms) => ((Thread)reader).Join(ms);
+    }
+    private static readonly List<object> Cases = new();
+    private static int Failed;
+    private static void Check(bool ok, string message) { if (!ok) throw new Exception(message); }
+    private static void Test(string name, Action test)
+    {
+        try { test(); Cases.Add(new { name, pass = true }); }
+        catch (Exception ex) { Failed++; Cases.Add(new { name, pass = false, error = ex.Message }); }
+    }
+    private static int Main()
+    {
+        Test("frozen 1.12 identity remains historical", () =>
+        {
+            Check(Guard.LockedCoreMvid == "5f1d5fa1-a18d-44e5-aba0-a8dfb3fabdf8", "legacy MVID was relabeled");
+            using var cts = new CancellationTokenSource(); var c = new HMController(cts);
+            try { Check(!Guard.TryStop(c, out var detail) && detail == "sdk-output-stop-core-identity-mismatch" && !cts.IsCancellationRequested, "frozen production entry must reject fake metadata"); }
+            finally { c.Idle.Dispose(); }
+        });
+        Test("legacy unstarted zero-view reader needs no-writer proof", () =>
+        {
+            using var cts = new CancellationTokenSource(); var thread = new Thread(() => { }); var c = new HMController(cts, thread);
+            try { Check(Guard.TryStopAgainstRuntime(c, new Runtime(), out _), "unstarted-zero-view must prove no writer"); }
+            finally { c.Idle.Dispose(); }
+        });
+        Test("legacy idle handle must close after normal SDK Dispose", () =>
+        {
+            using var cts = new CancellationTokenSource(); var c = new HMController(cts);
+            var handle = c.Idle.Token.WaitHandle.SafeWaitHandle;
+            try { c.Dispose(); Check(handle.IsClosed, "idle CTS handle must close after normal SDK Dispose"); }
+            finally { c.Idle.Dispose(); }
+        });
+        Console.WriteLine(JsonSerializer.Serialize(new { schemaVersion = 2, generation = "1.12.0-frozen-historical-negative",
+            passed = Cases.Count - Failed, failed = Failed, cases = Cases, realBclThreads = true, realSdkLoaded = false,
+            realSdkControllerConstructed = false, deviceDriverOrRealMappingAccess = false, exactSdkDisposeBody = true,
+            observations = new[] { new { sdkVersion = "1.12.0.0", sdkSha256 = "f0b048e1b566804226efdf854f6201eb9d2895c1e83f3c1a8813562aab2d186c", mvid = Guard.LockedCoreMvid, targetAssemblyLoaded = false } } }));
+        return Failed == 0 ? 0 : 1;
+    }
+}

@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "scope": "Reviewed actual component/controls, icon data and CSS consumed by the unchanged browser fixture; bridge/settings/focus remain explicit memory fixtures.",
+  "files": [
+    "src/components/ControllerFeedbackCapabilitiesCard.vue",
+    "src/components/Dropdown.vue",
+    "src/components/Slider.vue",
+    "src/components/Toggle.vue",
+    "src/components/SwitchControl.vue",
+    "src/components/InlineIcon.vue",
+    "src/components/AppIcon.vue",
+    "src/icons.ts",
+    "src/icons.json",
+    "src/styles/tokens.css"
+  ]
+}

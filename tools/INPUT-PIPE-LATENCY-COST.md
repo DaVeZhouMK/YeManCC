@@ -1,0 +1,19 @@
+# 管道读回执计时口径与私有管道对照
+
+```powershell
+node tools/input_pipe_latency_cost.mjs --out <全新绝对证据目录>
+```
+
+复用现有input_pipe_transport_real_selftest.cpp，默认运行仍只执行原4类正确性场景。新测量include和命令由YMCC_PIPE_LATENCY_COST显式编译宏开启，只有专用runner传入；旧runner不需要复制新include即可编译。专用runner先完成Release/Checked编译，再跑各自75项原正确性检查，之后只在Release取一次正式数据。没有CPU阈值、没有通过慢样本过滤或重复计时挑结果。
+
+实际生产input_host_pipe_transport.h原字节执行，使用同一进程独有且拒绝远程客户端的真实Win32消息管道，双方PID核对为自己。没有正式YMCC/InputHost/SDK/驱动/设备或外部客户端。试验不会安装、切换或操控手柄。
+
+每模式9个trial，顺序轮换，每trial预热8次后测64次read。模式为预先排入64字节、预先排入4096字节、同进程辅助线程收到signal后Sleep(2)再写64字节。Sleep(2)只是输入，调度和系统计时粒度可能使实际等待大幅不同，必须报告真实QPC而不是宣称延迟固定2ms。辅助线程计时不算在父reader cycles中，但没有据此推断整个程序CPU。
+
+每次QPC/thread cycles覆盖Runtime.run(Read)及计数器本身；payload逐次校验、实际ERROR_IO_PENDING/inline路径、terminal/reap数和pending=0全量记录。另列GetThreadTimes的父batch窗口，包含signal/preload/验证，其边界比read窗口大，不能相减或当精确read CPU；短窗口为0可能是粒度限制。所有数据保留为原样本，qpc换算、9个trial与消息/字节/操作计数要完整，才算可分析，快慢不是PASS条件。
+
+对应产品pipeReadUs：inputHostRequestPreparedLocked的readStarted到readElapsedUs为steady_clock elapsed，包括guard、剩余预算和完整Runtime读/等待；回执解析在它之后。inputHostAfterSubmitFrameAccepted只对成功接受的帧累计该值，不能拿它的n去代表所有BUS tick或错误操作；hostSubmitUs是独立Host上报，不可相加为排他CPU。Runtime中ERROR_IO_PENDING进入WaitForSingleObject，超时取消/退役责任仍必须沿原逻辑保留，不能因旧126us均值直接缩短超时。
+
+本入口仅建立“本机真实管道等待与CPU计数分开”的对照，不能解释G3E旧包126us的具体来源，也不是整机或R7性能验收。原Stage preamble/pipeRead日志互有嵌套、总体不一，要按原字段分别对照。R45复用已采用；R39/R46/R47旧候选已有拒绝结果，不因看到数组分配再次重做。
+
+2026-10-22首测见Build/Validation/VC-PIPE-SCOPE-20261022：预排64字节约2.24us、4096约2.81us；延后返回实际约15.45ms而非输入2ms，cycles未同比增加；保留实际调度结果、不改计时器分辨率。本轮没有改生产逻辑、生命周期/恢复预算或覆盖R7。

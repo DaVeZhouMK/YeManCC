@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "scope": "Fixed deps HC source only. No candidate checkout or metadata-only upstream tree is substituted for a missing dependency.",
+  "baselineSha256": "140a0bc4aa580053b8ee074499ce0d4d49d00b1b0244e3e1cc627afbf54c9914",
+  "indexSha256": "9105b05655c280f99ffffdb214c165955ced5ef3463719d681e7abecf7e904d1",
+  "sourceFiles": {
+    "Controllers/Steam/NeptuneController.cs": "406e99a0991193896773f58d66898ba328fd4074cfc720155f382d3d70e330e8",
+    "Devices/Valve/SteamDeck.cs": "7082cac684afd7cb176bcfd2fb412a66d374bffa2190202aa62415ccd60d81b2",
+    "Controllers/Steam/SteamController.cs": "fcc4ea5bfafa1aa4bdcaa4ddf290cdea8abddac1a084d650ce8054acc68a786a",
+    "Controllers/IController.cs": "4a9da4fe7e2f257df5c78b9af843f0bf424c80d92410a675e3e59c0c3ae68c8a",
+    "Managers/ControllerManager.cs": "c656d93c3e105dc79f9b43171b90eb8dea73809f5afaec927e481dec52d6b2ff",
+    "Managers/SystemManager.cs": "8986ac3ae2767406ab29fbdc3deb4581160a54105639eb94e0a6006310a815e9",
+    "Managers/ManagerFactory.cs": "d3b506df1117b9bd0264fbdd35704c370580feabf01520e86e92b93e0725f060",
+    "Views/Windows/MainWindow.xaml.cs": "4086c236ecf3e17e1bfc1ee46e81902f0a1a3d964924437589d3e042d239fedd",
+    "Inputs/ButtonFlags.cs": "edebd60e9c2038b033eaa47da6e0c49511c31297c2724215c4a9d5d46ffad07c",
+    "Inputs/AxisFlags.cs": "102be91486ff4ceb28be1e224d6c60b90463e2fdf98f09f372261b60030158e6",
+    "Inputs/GyroState.cs": "41ad51bee85e65483ed4f4fb3344a9cc0f20a79197102e7e722e12f630afb5ee",
+    "Targets/SteamDeckTarget.cs": "e3f9b6fdbb8d5439ce9908235c7214250495169ddeec0c76fa7ca80571c0043d",
+    "HandheldCompanion.csproj": "b9a72ff635c04a5ae7d1b95472f0f062aecc1b7c20a3c02713e9415c98815b16"
+  }
+}

@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "source": {
+    "archiveName": "YeManCC-logs-20261014-023942-微星G3E.zip",
+    "archiveSha256": "49d9f092b38d5655ba439994c12a468380eb89f61ce52a6fec0359555aeb9c76",
+    "file": "native-lifecycle.log",
+    "line": 66,
+    "time": "2026-10-14T02:32:03.525",
+    "nativeSha256": "fa7018db8cec98c63a425fd7169e3566a937e630d4254bd6bbc8b29d7255d6fc"
+  },
+  "deviceClass": "HandheldCompanion.Devices.ClawCG3EM",
+  "adapters": [
+    {
+      "adapterName": "Intel(R) Arc(TM) B390 GPU",
+      "capacityRead": true,
+      "classificationSource": "dxcore",
+      "dedicatedBytes": 134217728,
+      "dedicatedSystemBytes": 0,
+      "deviceId": 45184,
+      "dxcoreLuidHr": 0,
+      "flags": 0,
+      "isHardware": true,
+      "isIntegrated": true,
+      "kernelSoftwareKey": "\\REGISTRY\\MACHINE\\SYSTEM\\ControlSet001\\Control\\Class\\{4d36e968-e325-11ce-bfc1-08002be10318}\\0001",
+      "kmtStatus": {
+        "30": 0,
+        "41": 0,
+        "6": 0
+      },
+      "luid": "00000000:0000f24c",
+      "pciAddress": {
+        "bus": 0,
+        "device": 2,
+        "function": 0
+      },
+      "physicalAdapterCount": 1,
+      "sharedSystemBytes": 19287985766,
+      "vendorId": 32902
+    },
+    {
+      "adapterName": "Intel(R) Arc(TM) B390 GPU",
+      "capacityRead": true,
+      "dedicatedBytes": 134217728,
+      "dedicatedSystemBytes": 0,
+      "deviceId": 45184,
+      "dxcoreLuidHr": 2147942487,
+      "flags": 0,
+      "intelUmaHr": 2289696772,
+      "kernelAdapterType": {
+        "hybridDiscrete": false,
+        "indirectDisplay": true,
+        "paravirtualized": false,
+        "renderSupported": false,
+        "softwareDevice": false
+      },
+      "luid": "00000000:0001b8bc",
+      "sharedSystemBytes": 19287985766,
+      "vendorId": 32902
+    }
+  ],
+  "replayScope": "Captured adapter topology and read replies; valid bound registry configuration, installed RAM and boot identity are controlled offline substitutes, not observations from this log."
+}

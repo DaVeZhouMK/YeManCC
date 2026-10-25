@@ -1,0 +1,82 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    "tools/sleep_recovery_api_selftest.py",
+    "tools/sleep_wake_resume_selftest.py",
+    "native/main.cpp",
+    "native/wake_game_recovery.h",
+    "native/wake_game_resume.h",
+    "native/sleep_recovery_api.h",
+    "native/sleep_recovery_auto.h",
+    "native/sleep_recovery_diagnostics.h",
+    "deps/json/json.hpp",
+    "native/sleep_steam_settle.h",
+    "native/sleep_steam_input_context.h",
+    "native/sleep_steam_tracking.h",
+    "native/input_host_transaction_mutex.h",
+    "native/input_host_lifecycle_claim.h",
+    "native/sleep_steam_recovery.h"
+  ],
+  "originalScripts": [
+    {
+      "path": "tools/sleep_recovery_api_selftest.py",
+      "sha256": "19068c9dfd2b58f8365d9e1b418a216825da104b72aa395d3d9f2136858bbc22"
+    },
+    {
+      "path": "tools/sleep_wake_resume_selftest.py",
+      "sha256": "b3af74b0b99568e4fb3b9c4c3ea2b22a2d936acf2729c7803c26c3d9a750bd05"
+    }
+  ],
+  "fault": {
+    "path": "native/sleep_recovery_diagnostics.h",
+    "before": "if(!confirmed)return \"confirmation-required\";",
+    "after": "if(false && !confirmed)return \"confirmation-required\";",
+    "expectedAssertion": "repairGate(false,false,false,true,true,false,false,true,0,0,7,7,true)",
+    "reason": "Private current production source wrongly admits an unconfirmed repair; untouched original first API policy assertion must fail after successful compile."
+  },
+  "boundaryProbe": {
+    "path": "D:\\Codex\\2026-10-19\\mo\\work\\all-simulation-tests\\sleep-native-recovery-consumer\\boundary-probe-2026-10-19T09-33-57-781Z",
+    "sha256": "d442a45940b92f61033c9a3fbfbae1e149f80c37f7fdb5a2c4c748d1b0ba9880",
+    "status": "PASS"
+  },
+  "ioReview": {
+    "originalFixtureExecuted": false,
+    "processEnumeration": "Unmasked API queryThreads port escaped original mocks; forced include returns nullptr only for NtQueryInformationThread, actual original algorithm returns unknown.",
+    "originalAssertionsChanged": true,
+    "originalPathAssertion": "SleepResumeRetry-20261003",
+    "fileOutput": "Only owned --output descendant, including original local feedback bundles; no default output",
+    "realSleep": false,
+    "realResume": false,
+    "realSteam": false,
+    "realInputHost": false,
+    "fullProductAcceptance": false,
+    "originalPolicyAssertionsChanged": false,
+    "maintainedSuccessCountAssertions": 1
+  },
+  "fixtureMaintenance": {
+    "originalApiSha256": "2dd1906fa263283fa064724610e2dfb028f705eb042b86dd8b65c73e92880e73",
+    "allOriginalTestsPreservedAsExactPrefix": false,
+    "addedGroups": 6,
+    "sourceExactRepairAndEpisodeCloseFunctions": true,
+    "actualMemoryMutexAndClaimHeaders": true,
+    "fullLifecycleQueueExecuted": false,
+    "originalWholeApiFailurePreserved": "prototype-20261019-04",
+    "directUnexpectedPortsExit": 91,
+    "originalApiGroupsRetained": 25,
+    "maintainedSuccessCountAssertions": 1,
+    "wakeFixtureMaintainedForCurrentSource": true,
+    "historicalWakeBytesUnchanged": false,
+    "originalWakeGroupsRetained": 43,
+    "addedWakeGroups": 17
+  },
+  "scriptCompatibilityReview": {
+    "schemaVersion": 2,
+    "kind": "exact-api-boundaries-and-early-completion",
+    "historicalApiSha256": "73150a3e4685079a6b267495a1e43d76cedef061106a654ff450ae790aec802a",
+    "historicalWakeSha256": "88a8f3b95e1b64b4d4bd873c9401e0d247091953b2a348a9fab0c07f984d0f13",
+    "reviewedApiSha256": "19068c9dfd2b58f8365d9e1b418a216825da104b72aa395d3d9f2136858bbc22",
+    "reviewedWakeSha256": "b3af74b0b99568e4fb3b9c4c3ea2b22a2d936acf2729c7803c26c3d9a750bd05",
+    "exactDifferencePath": "tools/ymcc_sim/global/sleep-native-recovery-consumer/script-maintenance-v2.json",
+    "exactDifferenceSha256": "58a20eb1a4727b07e9954cfa134edad24e5998bea972bf383817df7dc4d5479a"
+  }
+}

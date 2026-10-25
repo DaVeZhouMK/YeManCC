@@ -1,0 +1,768 @@
+{
+  "schemaVersion": 1,
+  "kind": "current-primary-base144-with-explicit-preparer-extension",
+  "repoRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+  "sources": [
+    {
+      "relative": "tools/ymcc_sim/domains/global/global_domain.ps1",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\domains\\global\\global_domain.ps1",
+      "sha256": "6e5ae81dc1db269faeb9fbd649dca749d29cff48f7c5ce4e44ecd8c76d1968d7"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/candidate-options.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\candidate-options.mjs",
+      "sha256": "f37824a0993e479bc95f0fffa3b0e9c31d5110da492416325d3b0bd506f1171a"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/cli.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\cli.mjs",
+      "sha256": "8d3fa1f95c763343c2d17b521a19b203b8a0a86077300bc4f332577d9ea5452f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/adapter.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\adapter.mjs",
+      "sha256": "a7df7cf8ac3bd3fa5133381815a5b61a92e05a191a047bae85b61ee41633c2a2"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/bootstrap-generate.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\bootstrap-generate.mjs",
+      "sha256": "2f5585f0f6e64ff964b7ca1c45f7675ae9192a3f57f67d94122fc7d27b9c67ed"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/bootstrap-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\bootstrap-proof.mjs",
+      "sha256": "5d1fb61256b1bd8b21f05c6c9c5f95aa41f2ce6efbeba0dccc72fc2ef84e5198"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/BootstrapCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\BootstrapCases.cs",
+      "sha256": "22498016accfb36f8f8347bca663b6a68ff19aa6b188444048e29153fdf6ba8d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/BootstrapFixture.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\BootstrapFixture.csproj",
+      "sha256": "f6a4f5caf7e0b478638565381694ef92c5e27267b5ef8352f9f7439ec98fe934"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/BootstrapFixture.template.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\BootstrapFixture.template.cs",
+      "sha256": "8191b127cd439dd69bdb9adfe47afcbb10164b6bb653b8c21182f5b3b6977c8e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/BootstrapProof.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\BootstrapProof.cs",
+      "sha256": "531bc37aba85c50dc6b94b17e0b4a99b922738578ff5f67fb7bebe6ea5fce121"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/build-current-host-candidate.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\build-current-host-candidate.mjs",
+      "sha256": "d97a74a9998696c2b0bf4ed63d03c240aeb3ab50938bdccb83e9f3e15023d6b2"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/build-current-host-candidate.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\build-current-host-candidate.test.mjs",
+      "sha256": "74bd5f2926a27931122ebdc12161999eb0c28d81bf39cbe1d2cccf21369db9b2"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/build-tools.ps1",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\build-tools.ps1",
+      "sha256": "0b4f75f13f4d9124f43083c081668e00f2a36a5010793cb6fa607a37de81c2d0"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/capability-acl-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\capability-acl-proof.mjs",
+      "sha256": "30b9140fc7b7f2fa02db1f4c613a1193a3662816bea0b097d9645a575b1fffe5"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/CapabilityAclCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\CapabilityAclCases.cs",
+      "sha256": "4fafc99098a1b08d648976ce5e207b5b5c850ee71fe3732248729eef6ffaedf8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/constructor-counterexample-raw.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\constructor-counterexample-raw.mjs",
+      "sha256": "2d64c9dbd30ef7e742ac52f6656afc0d8917f67bff21e01f3f240721743dbd06"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/constructor-counterexample-raw.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\constructor-counterexample-raw.test.mjs",
+      "sha256": "b9f5025a6a41bee4f2f75ad5f936e978cd780faa59c24ee1ec0359d444d91df4"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/constructor-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\constructor-proof.mjs",
+      "sha256": "6d65939667c934d34ad7ebffbe683c086a0a133e0f16832955b75992b4322712"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/constructor-raw-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\constructor-raw-contract.mjs",
+      "sha256": "ff41735ce932d34344983a34a1cd5902a84729d94d831ea58aca815c8d00a7cb"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/constructor-raw-contract.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\constructor-raw-contract.test.mjs",
+      "sha256": "c29582bc790715369176459603e7e170c867365b4010de0c636705a9640ac017"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ConstructorCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ConstructorCases.cs",
+      "sha256": "95bd9e9f30687c5b94f97a4e56432ced75ddb808dc40a8e74d32c3ba5e83e4b7"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ConstructorInventory.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ConstructorInventory.cs",
+      "sha256": "c4b769e583dc8641954eeffdf58ab3e62ff2f5c5ccc2993cb2f9e4be22687d92"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ConstructorIoPorts.cs",
+      "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ConstructorIoPorts.csproj",
+      "sha256": "3ef60c5b820fe91af571299873d90c1556e2db0cb2ad1d21000ba8c747302492"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/current-candidate-branch.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\current-candidate-branch.mjs",
+      "sha256": "86b925010f53027a03bcd54b9fa1c6f80b65f82ce7b4c9520cc55ef4d9016bf0"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/current-candidate-branch.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\current-candidate-branch.test.mjs",
+      "sha256": "3d5f9b1132afcc8ef4a06e531daf58b29c81f2d4c44afb941e44f126bf50c315"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/default-case-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\default-case-contract.mjs",
+      "sha256": "4d181a8556613cb76c4eceb9077986e764cfb2716da7e3e39146175f82d0f00c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/entry.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\entry.test.mjs",
+      "sha256": "b989101064488140e4e9b0754fccec48316531e505d06683a1f6e95f533610af"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/EventAdmissionCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\EventAdmissionCases.cs",
+      "sha256": "99088b53fd9342aeed36537a43ca5d15ad39749e54b372ad992e3c4e373d8b12"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/factory-counterexample-raw.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\factory-counterexample-raw.mjs",
+      "sha256": "e8879f9da3917c3a5204e7398f25af09a9c5718dfc711fcccbd562e77ca08069"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/factory-counterexample-raw.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\factory-counterexample-raw.test.mjs",
+      "sha256": "cd999deebce54332128a69e3221a7d828180fdab2e4eb602e4ac019d60188c3c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/factory-initialization.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\factory-initialization.test.mjs",
+      "sha256": "83d4222fa54e2533cb1f1513666dddcca3e966967fa5860207419ec4f31a17fe"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/factory-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\factory-proof.mjs",
+      "sha256": "49009f2afbac2d7dd0c09b5e91a390486001e2f9530fee595bd363a611690472"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/FactoryCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\FactoryCases.cs",
+      "sha256": "bb62318b9984696ccc9af34bfd844fdfb43b5f27cafd5103d8f3c637ca2b123b"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/fault-payload-staging.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\fault-payload-staging.mjs",
+      "sha256": "58d91272f6ed82e56f29fd84465325592b31037a57f7e3ea3756bcb9eab55e43"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/fault-payload-staging.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\fault-payload-staging.test.mjs",
+      "sha256": "4f957aed6fa1347c4354f1bed4a3e2da6e12066a3380974449da88e5e16ae1ba"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/first-old-stage.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\first-old-stage.mjs",
+      "sha256": "bf3da707e31c194134c31f2f5eaec13f0e2f088f459a88d8b80b6047c1d08483"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/first-old-stage.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\first-old-stage.test.mjs",
+      "sha256": "5a82989bf9d0ec60ff147a5b3e76a416771c38a6b8727d327aa094538c21de3f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/Fixture.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\Fixture.csproj",
+      "sha256": "78d13786ad4c66663f117254945dafa14d88dd8a4a9c516bf7d7c31ec8ff519d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/Fixture.template.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\Fixture.template.cs",
+      "sha256": "eefc8a0ad9a87d4eb866776c953c7b8863fb44c489ad411bf1bb4b79d45ffcb1"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/generate.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\generate.mjs",
+      "sha256": "1705b10c4ec3e69419cac605887344cd60986561178dbfc663b6ad4c384c28f5"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/GenericCloseCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\GenericCloseCases.cs",
+      "sha256": "84ab47c8cd8d1156e1364ec908654d3b73747e4b12bd0f54bcc2f228323d5c1f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/GenericEcWriteCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\GenericEcWriteCases.cs",
+      "sha256": "4e66dbccd1bb2459781192ac846207e656e5a7b8433a370b6ab39516b9e41b1e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/GenericOwnershipCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\GenericOwnershipCases.cs",
+      "sha256": "312090dba8973dd277abbf1947d77a2d442be76e8f574a0a4869f353cbc2d896"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/Harness.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\Harness.cs",
+      "sha256": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/Harness.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\Harness.csproj",
+      "sha256": "1c7d4cc6930c8ad0ec66a73d351fde38609fcba123a092d0f96b7dd86296da9d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/HarnessEntry.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\HarnessEntry.cs",
+      "sha256": "043a3f7c3ca6f899c6bcfb0d7d75b2077e75deba91b87474085598c7a4d9d47e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/HarnessExplicitLoads.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\HarnessExplicitLoads.cs",
+      "sha256": "bf175e07fded9e154d2be89bbb06c28390aaf95d38104349487d814cf73a8c1c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/HarnessLoadContexts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\HarnessLoadContexts.cs",
+      "sha256": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/InitializationCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\InitializationCases.cs",
+      "sha256": "c288b970a29ff1e5680ff71e6dd28603711d51afd12376f7bf37f1c575573b75"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/initialize-first-start.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\initialize-first-start.test.mjs",
+      "sha256": "e802455f7ed210ea95ecf6680f98b33312e14cf4b7a7ccc89be5f3b9ca924b3e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/inputs.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\inputs.mjs",
+      "sha256": "c9e82ca818b90e0f44ec01d43fc787d14efa6be55110fb99f8c1c9c592e6590c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/installer-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\installer-proof.mjs",
+      "sha256": "0f58eabab146a6e4edf0061c8b5d49bea2d9f3fa5c443870ffa00186a79b74b7"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/InstallerCases.ps1",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\InstallerCases.ps1",
+      "sha256": "af3212d787aa630277fac0544d294a249ee79cf4b7ec927d848b11b7d3892387"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/joined-factory-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\joined-factory-proof.mjs",
+      "sha256": "d0c31361814fb667551689e9e85c3bff0ef2107bafa00c11fc0fd80502a9cc4a"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/joined-original123-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\joined-original123-contract.mjs",
+      "sha256": "c6e7920634d78b13990477381a127f99babd5822ba4cf99330945e10a53a497e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryEntry.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedFactoryEntry.cs",
+      "sha256": "39e302e7937f9e3acfd1bfccbd23dcceea7a4dddfa6797127a337a6288a70f3d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryInstrumentation.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedFactoryInstrumentation.cs",
+      "sha256": "a5d5806701ad15e693aa15825a60e154caf2001e71e87af7a627f366332ba032"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryProbe.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedFactoryProbe.cs",
+      "sha256": "da6fe877d16abc596d7d9ec9d7430a6f5c6727fe317e24b51f646140aadc3a1c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryProbe.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedFactoryProbe.csproj",
+      "sha256": "159aa79e6adb6e6d3064a9879095a1be49cff687ed39cea65c7d0a6e2faeaec3"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedLifecycleCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedLifecycleCases.cs",
+      "sha256": "47ac79b25f65e74e6bb46502b12ea4e5c986faa1f924bb1c3574e2376474e2f2"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiLifecycleCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedMsiLifecycleCases.cs",
+      "sha256": "6e502397f3d8da2aeb6b91ea8e60b3e00295b1e273bf2f52679149dbe7fcab3f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiManualCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedMsiManualCases.cs",
+      "sha256": "e08215e14da6bd07e665ac5bc4b894fe5c3274cbdc06c225815c89c79526131d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiReplayCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\JoinedMsiReplayCases.cs",
+      "sha256": "e643de2aad9c43e736c199ba3457d3ea396ce0afb6ddeb5b768427286bad9ab3"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/lifecycle-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\lifecycle-proof.mjs",
+      "sha256": "e81ee95262048ddff7c0b45ba707a8bc831ba5e6e3191bdf0cfbe00f8bed1914"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/LifecycleInstrumentation.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\LifecycleInstrumentation.cs",
+      "sha256": "2a565c7aa5a26309882edd38875a55ea43bec075f2a52153f21e542562d6856b"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/LifecycleIoPorts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\LifecycleIoPorts.cs",
+      "sha256": "dee1b4083a0c0b9f2accd95e9e23232b4155ee573ce1eae40a66d7cf41d78db9"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/DefaultPreloadMetadata.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\DefaultPreloadMetadata.cs",
+      "sha256": "ffd74b0147e6685e1558634b54a9def268d9134b71e754addbe1966f582ebd67"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/exact-framework-version-pairs-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\exact-framework-version-pairs-contract.mjs",
+      "sha256": "9d8e431c663363e71af3d4e01882d89776a1420cf0963083c76749431afc0dbb"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/exact-framework-version-pairs-contract.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\exact-framework-version-pairs-contract.test.mjs",
+      "sha256": "516c4193df98ce5f9fa08d6eaf79619565a6a3d5d36c9ac84182da52f69d99bc"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ExpectedAbsentProbe.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\ExpectedAbsentProbe.cs",
+      "sha256": "21f240014b2b6d22355665da5e5d7e34c1db58d4431ffd3892d24a880a43d2b5"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/joined-default-version-pairs-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\joined-default-version-pairs-contract.mjs",
+      "sha256": "4b642ea73876f3983074a777fd41ca861722d60053b8a13084caf679053d3792"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/MTA.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\MTA.csproj",
+      "sha256": "d17b7c0d3dc4b3da3202e13300d739582bc1fc2c3328dfbf7c646bc51499ef8c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/netstandard-facade-contract.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\netstandard-facade-contract.test.mjs",
+      "sha256": "e081c97a482d4529aaabfc06394a1677d410fec4e393eaea540c12b1f15da4df"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/PinnedPreEntryResolver.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\PinnedPreEntryResolver.cs",
+      "sha256": "21985dc1df6854b9d7ccf5046393c004d9bdccb093a1b954b317634a47b9a8aa"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/reference/TraceEntryDependencyContext.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\reference\\TraceEntryDependencyContext.cs",
+      "sha256": "e08a95127e8a7b66b8682d1ee0e3f639909ead17df2912f15c0a16630947e658"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ScopedLoadAuthority.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\ScopedLoadAuthority.cs",
+      "sha256": "0ce27b3f9d63e2ecbaec61fafda8f2c9c9292452eef3fe7decc2d1136b9e86b9"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ScopedLoadAuthority.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\ScopedLoadAuthority.csproj",
+      "sha256": "16b8b66c9b7f7c161dd1b74bb3e38ca1a482c86323b39383e099ddfefa838089"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\SdkFreeToolEntry.cs",
+      "sha256": "a286d33a18e644619a06a91f69eba97358702a6e1d7a2f4384135b204189ca84"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.MTA.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\SdkFreeToolEntry.MTA.cs",
+      "sha256": "8391b21ace573ad6dea303ae4b0195c94e067784f19e9ad26ae4da8b931e421d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/STA.csproj",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\STA.csproj",
+      "sha256": "d497ff731621e4d73420daa1c3b426aed44b7d6178b575c5ac3f8952eefa19ee"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ToolDefaultLoads.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\ToolDefaultLoads.cs",
+      "sha256": "d16d06e2821aa4099838d33c48f8e4e037b2da94e7e615987b6588f2b5bc15c3"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ToolRuntime.props",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\load-authority\\ToolRuntime.props",
+      "sha256": "0f0fee36ae5450365e8206cf7dff886ae5e9297db2d2f8d58cf8586d07ae5899"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MixedEventsCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MixedEventsCases.cs",
+      "sha256": "81671a0fab9c75e666482fbdd675c36489105e850fa797626d2dbee19f13822c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/msi-lifecycle-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\msi-lifecycle-proof.mjs",
+      "sha256": "77274fdcb849b84f6fe83b5e372376e47ef884e2ecfb98ebfdb6d7300272fee1"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/msi-manual-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\msi-manual-proof.mjs",
+      "sha256": "93365765be5e6606ea6de8a8e06abad54876613dd7ceb202f3be76765d41dae0"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/msi-replay-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\msi-replay-proof.mjs",
+      "sha256": "82b2f7e2d9c587543aae83274b7fb66ff8aa0a453bce61ad0d1eb1ef6897845c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiHidLoad.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiHidLoad.cs",
+      "sha256": "b9de0032c36ffbe1e157360c5c45c20c083690e0c33ae8409e4c910b19a8a88d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiLifecycleInstrumentation.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiLifecycleInstrumentation.cs",
+      "sha256": "27e339f417b364837b0f0b5801a005e7b62a674434b3c9f6acf674d44add7db9"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiLifecycleIoPorts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiLifecycleIoPorts.cs",
+      "sha256": "318b3cfa4d37f85923d7b2f887bd59cc0105dc460e5482b505e88dd132c65d27"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiManualInstrumentation.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiManualInstrumentation.cs",
+      "sha256": "88536a594cb25e9e522f8ad714e1c6b09e05cd81a9b525ae32870686164d029a"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiManualIoPorts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiManualIoPorts.cs",
+      "sha256": "430e844eb828a78fa2e8e2885d9a917cc3a67040378dfff44f88c41708639b4e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiReplayInstrumentation.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiReplayInstrumentation.cs",
+      "sha256": "901925e373353bf66359337ee958f9e51fbb8443962057d7a124a72e614bbe9d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/MsiReplayIoPorts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\MsiReplayIoPorts.cs",
+      "sha256": "b019a5d80615eded45564749f0b5d15e7ea3bd937cc0e0598be3c769a51388ba"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/nested-fault-staging.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\nested-fault-staging.test.mjs",
+      "sha256": "6eca539cfdcd3ce02acc8b5e881708155b9512fd29ed8b87cf136d26ab9b2a72"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/old-write-branch-review.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\old-write-branch-review.mjs",
+      "sha256": "9913789b35a2ea9b6a4bc92cc7fe6bf8ce6035c3138735d6b775bd8701d09e0f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/old-write-branch-review.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\old-write-branch-review.test.mjs",
+      "sha256": "b80258c81e1fde11b19c03f3f17f284f24dac3696cd6124af03ed2f92bc8b32b"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/old-write-metadata-audit.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\old-write-metadata-audit.mjs",
+      "sha256": "02e2410e423e1cd8f29a49587e8f9dd987135252ed52519f3bcf6a7813c9b33d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/old-write-stage.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\old-write-stage.mjs",
+      "sha256": "25ee88f6c73972fbe3e32fc52756200fcd79e5e947cec3eb1a101e2477179498"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/old-write-stage.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\old-write-stage.test.mjs",
+      "sha256": "ae073cda8e808e288b6cb6928d34d384c6032f39a5208a6bbd5f03add92d66ac"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/OldBinaryLoadContexts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\OldBinaryLoadContexts.cs",
+      "sha256": "a650aea5d186cba21604b2007c5d9ae6696389b0dad2549e3e429e06a83391f8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/OldBinaryProbe.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\OldBinaryProbe.cs",
+      "sha256": "b569f0697d686ef57b9e95bccd0ce23b1a596f258020b5de1ef7efb49ddc7145"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/OldWriteLoadContexts.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\OldWriteLoadContexts.cs",
+      "sha256": "1a064e01e44bf1c7e7b8b559d1bff15da869debb9d39a64d13d8c4127346ac9a"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/OldWriteProbe.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\OldWriteProbe.cs",
+      "sha256": "c035dee353b6cb938fbdcbfcaa9f1e0bc7d90a19266be147fccfe7ec105760ea"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-hc-current-frame-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-hc-current-frame-contract.mjs",
+      "sha256": "3cd914d3cd092355b8b1107d60b13809fe2a3ac889cf42ccad25bc21b49bc2f7"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-hc-current-frame.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-hc-current-frame.test.mjs",
+      "sha256": "836901df3714a2ec43f2a4f053d5056d1c78024c648fc2d8411d25640bd0f6bf"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-native-current-frame-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-native-current-frame-contract.mjs",
+      "sha256": "c85b36d512c81edaf7dbe4454c48d1f40a101dcd7b433f7fae720a95db69c02f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-native-current-frame.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-native-current-frame.test.mjs",
+      "sha256": "07dda55f0dc9a2daa65f3a6122c220177330335a3d69c597831a14893668ab18"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-native-fault-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-native-fault-contract.mjs",
+      "sha256": "c31e5620ae115903d8db675116a5a8f39e576e6a568bf21a74331f764c833a5f"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructor-native-fault.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructor-native-fault.test.mjs",
+      "sha256": "1c1f9cb898b54a081ca8c8fb5a909047245cf582d26f32de8cdbfa6282794c95"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/original-constructors.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\original-constructors.test.mjs",
+      "sha256": "d0f04660b062eca066d083ad3a40a8757fa18738bcac8b68d7efe484ef99007d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/passive-sdk-projection-contract.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\passive-sdk-projection-contract.mjs",
+      "sha256": "38b453da3744707e226662a6bebac90faa2d71dfae6792c916bd76021c45585d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/passive-sdk-projection-contract.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\passive-sdk-projection-contract.test.mjs",
+      "sha256": "ad2f5ec6dec35b5f54286b86d0b66ea45277d07e08af58e902805f65f644e277"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/payload-staging.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\payload-staging.mjs",
+      "sha256": "02d96dbab391130207511944bf99279ca042fa978fc1a78e8fe4e1be633a02e8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/preload-metadata.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\preload-metadata.mjs",
+      "sha256": "0c4112e434adf38088a8751af605571e6e11b6b959c5fffcc37d5ef3c75e3943"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-factory-initialization.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-factory-initialization.mjs",
+      "sha256": "3805dc5105d1c7fca2c2bdbe7b442fb49adddbd94ed66f62b048a9bd6305c2d1"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-first-invocation.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-first-invocation.mjs",
+      "sha256": "f038aea275fad4d1e1461f5b604400081b35113c070cf5d8e84b415225f84c1e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-initialize-first-start.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-initialize-first-start.mjs",
+      "sha256": "8fb9de279116ddb2a6cf5a1a1874ae7e366ffc259864fde3cf67bdbd2c651c38"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-joined-configured-file-sink.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-joined-configured-file-sink.mjs",
+      "sha256": "016b4ca89c108001e0f444834216a9d56ddf7ffce349d4c95066efe8a003cc8e"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-joined-configured-file-sink.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-joined-configured-file-sink.test.mjs",
+      "sha256": "9aaec0402183654b75cc8fe37e8129571cb870b745fbc3f310e28370fb8d1362"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-joined-original123.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-joined-original123.mjs",
+      "sha256": "93974ae72d5739f72cb9f174d3145925cf144f0e3168c1b74657d56219f39dd1"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-joined-original123.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-joined-original123.test.mjs",
+      "sha256": "19c40603753f5186bb24cbad9dafe0b3cf80148f0785af6dae743c2fca71229a"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-old-write-stage.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-old-write-stage.mjs",
+      "sha256": "8cfea37b965cc42a4ccee7c9464353040d4c4085cfabc5020721422beef31da8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-old-write-stage.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-old-write-stage.test.mjs",
+      "sha256": "c9dbc6ce1f7d7d963a754a1d3f65461b5f79e591f2f17ff6730e1053133fbd64"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-original-constructor-hc-current-frame.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-original-constructor-hc-current-frame.mjs",
+      "sha256": "44def96f1b1338e484f7bdcb025cfec543c05d94655ae4910b31bd032218c8c6"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-original-constructor-native-current-frame.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-original-constructor-native-current-frame.mjs",
+      "sha256": "ab92a5f4e2db0a21ff36d91c981bc0d27e4940559c2d534362c2ced64fe1a8e4"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-original-constructor-native-fault.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-original-constructor-native-fault.mjs",
+      "sha256": "dfc90d9ee39295ea2c18ff78aabab2b274d7dbc178688d429a928d6711719db6"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-original-constructors.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-original-constructors.mjs",
+      "sha256": "9e4dcb4235d6b8e29f32cdd8cdfe28829a2718ab4d8b7ea74f109f2ab1cfba12"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-sta-bootstrap.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-sta-bootstrap.mjs",
+      "sha256": "921804d22aaaaf88089995bd8a7ee4c5b6fe812e2ada4d3d738ae86c852f7676"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-sta-counterexamples.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-sta-counterexamples.mjs",
+      "sha256": "15531f27aaa6e4791fc8e7c92787b932c3c8d31ad3147464944673953da02a80"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ProducerContextAuthority.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ProducerContextAuthority.cs",
+      "sha256": "668d5085403ffafd816e7e679ec25b067fbb992c0f6eb995801ad3696c886705"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/public-factory-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\public-factory-proof.mjs",
+      "sha256": "2ca5b0b0209e38299660c7452b95986bc3669fe74d2a5e003d2b6bd18c6aebf9"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/run.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\run.mjs",
+      "sha256": "ee79814afe2abaef19a133b1a487665b008013a2ce714881ab34d647d9a3535c"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/schema5-route.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\schema5-route.test.mjs",
+      "sha256": "e23061c4de751a8247a64f57836a55516ca23c2abe5480926b113291d4202731"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/schema6-route.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\schema6-route.test.mjs",
+      "sha256": "4a0410d00ef1a46df36e76171dbb8ce22652a76f0e7c9665a6e86ca576c009d0"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/source-contracts.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\source-contracts.mjs",
+      "sha256": "8992f7ede96b5937abeda349ab4c855a7a94a1cc318efec3b2c55c56051d8567"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/sta-bootstrap.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\sta-bootstrap.test.mjs",
+      "sha256": "c40f6e92ca20aadb6053d4a85720e0b9c0d93b8f14c226caeee5e4ab8f1c6855"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/sta-counterexamples.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\sta-counterexamples.test.mjs",
+      "sha256": "cd719d7bea506e6858ac48b1df3623d9d0b9904bc666982bc21eef29597db3a5"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/sta-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\sta-proof.mjs",
+      "sha256": "3f86e61ea36b9c6161b8f3a997d0dfbbc2f174a04201d8e3c830b25b11465419"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/StaCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\StaCases.cs",
+      "sha256": "2d569ae54e132957031223eacde1980e632e7444ac93ba4cb8f7ee559456515d"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/StrictWriteCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\StrictWriteCases.cs",
+      "sha256": "2c32d8c182aad41188fd067b78424627df38876c60cdbc3c20b63243ac4f781b"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/tool-policy-runtime.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\tool-policy-runtime.mjs",
+      "sha256": "a465e0ef578b28139d696198134241d39a2005a138f852620f7c74f28056ab22"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/validation-proof.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\validation-proof.mjs",
+      "sha256": "098f01df8a57cb72400045f80c611f685cf73e10adced772e0909ccf856ffa62"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/ValidationCases.cs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\ValidationCases.cs",
+      "sha256": "6d4a74733d4b0fd03074fdd06603f391663581a37fb5eb88537d887ec798eba1"
+    }
+  ],
+  "addedSourceRelatives": [
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-public-factory.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/prepare-onex-lifecycle.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/primary-preparers-contract.mjs",
+    "tools/ymcc_sim/global/onex-fan-coexistence/primary-preparers.test.mjs"
+  ],
+  "currentRuntimeAcceptance": false,
+  "concurrentPrimarySourceExtensions": [
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-lifecycle.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-lifecycle.mjs",
+      "sha256": "7e9af7cb3383f05bce374191e19eda0b59a938ad0b66268ef11449b9dd5c94ee"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-lifecycle.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-lifecycle.test.mjs",
+      "sha256": "700804dfcf54f24437de08380658a82479cb864aa8cda2c983f6dc691c24aef8"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-manual.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-manual.mjs",
+      "sha256": "e569332f1fd742ab54eac760522aae451c65c7758ab2b64ea6ee365255f3df53"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-manual.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-manual.test.mjs",
+      "sha256": "0330288136a86aa4f1764c14fa40fa8808d36480ea9317654d6ca46bdbb2cd6b"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-replay.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-replay.mjs",
+      "sha256": "643892244dd195a1681b970f46e190ae3e3a3791581b85051cfa5cedae882d01"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/onex-fan-coexistence/prepare-msi-replay.test.mjs",
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\prepare-msi-replay.test.mjs",
+      "sha256": "afd02c155555156253ef1f062f169e2cab15e21bbdfb59fcdcbeac9a6d69dbb0"
+    }
+  ],
+  "currentPrimaryBaseSourceCount": 150,
+  "concurrentSourceScope": "Observed explicit six MSI preparer/test sources appended after r70 G144 compile. No replacement of original144 source pins and no runtime acceptance."
+}

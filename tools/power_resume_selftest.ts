@@ -75,22 +75,39 @@ await test('native self-commits the wake gate on resume-ready (HC SystemReady pa
 
 await test('Fan manual wake is a Fan-only same-generation rescue and never opens during Suspending', async () => {
   const nativeSource = readFileSync('native/main.cpp', 'utf8');
-  const safeSet = nativeSource.indexOf('"power.lifecycle", "power.activeScheme", "power.hibernateState", "power.resumeComplete", "power.fanManualWake"');
+  const isolatedGateStart = nativeSource.indexOf('static bool aiIsolatedIpcAllowed(');
+  const isolatedGateEnd = nativeSource.indexOf('\nstatic void ipc_on(', isolatedGateStart);
+  const isolatedGate = nativeSource.slice(isolatedGateStart, isolatedGateEnd);
+  // Check membership in the actual isolated gate, independent of list order
+  // or additional safe commands such as power.fanLifecycle.
+  const safeSet = isolatedGate.match(/static const std::set<std::string> safe\s*=\s*\{([\s\S]*?)\};\s*return safe\.count\(cmd\) != 0;/);
+  const safeMembers = new Set(safeSet ? [...safeSet[1].matchAll(/"([^"\n]+)"/g)].map(match => match[1]) : []);
   const handler = nativeSource.indexOf('ipc_on("power.fanManualWake"');
   const handlerEnd = nativeSource.indexOf('\n    // ── proc.running', handler);
-  assert(safeSet >= 0, 'power.fanManualWake must be allowed through the isolated IPC command gate');
+  assert(isolatedGateStart >= 0 && isolatedGateEnd > isolatedGateStart &&
+    ['power.lifecycle', 'power.activeScheme', 'power.hibernateState', 'power.resumeComplete', 'power.fanManualWake'].every(command => safeMembers.has(command)),
+    'power.fanManualWake must be allowed through the isolated IPC command gate');
   assert(handler >= 0 && handlerEnd > handler, 'power.fanManualWake must have one registered handler');
   const body = nativeSource.slice(handler, handlerEnd);
   assert(body.includes('phase == PowerLifecycle::Suspending') && body.includes('power_suspending'),
     'manual Fan wake must reject an active Suspending phase');
   assert(body.includes('generation != current') && body.includes('stale_generation'),
     'manual Fan wake must reject a stale generation');
+  assert(body.includes('const auto sharedCurrent = currentPowerGeneration();') &&
+    body.includes('const auto current = currentFanPowerGeneration();') &&
+    body.includes('const auto generation = requested == 0 ? current : requested;'),
+    'manual Fan wake must bind its requested Fan generation separately from the shared power generation');
+  const sharedReadyMarker = body.indexOf('g_resumeReadyGeneration.store(sharedCurrent');
+  const sharedCommit = body.indexOf('commitPowerResume(sharedCurrent, "fan.manual-control")');
+  const fanRecovery = body.indexOf('fanHostScheduleFanResume(current)');
   assert(body.includes('g_powerLifecycle.store(PowerLifecycle::Resuming') &&
-    body.includes('g_resumeReadyGeneration.store(current'),
-    'manual Fan wake must promote only the current generation to Resuming/resume-ready');
-  assert(body.includes('fanHostScheduleEmergencyResume(current)') &&
-    body.includes('commitPowerResume(current, "fan.manual-control")'),
-    'manual Fan wake must reuse the existing FanHost recovery and single resume commit');
+    sharedReadyMarker >= 0 && sharedCommit > sharedReadyMarker &&
+    !body.includes('g_resumeReadyGeneration.store(current') && !body.includes('commitPowerResume(current,'),
+    'manual Fan wake must use the same shared generation for resume-ready and the single native commit');
+  assert(fanRecovery > body.indexOf('generation != current') &&
+    fanRecovery > body.indexOf('phase == PowerLifecycle::Suspending') &&
+    sharedCommit > fanRecovery && !body.includes('fanHostScheduleEmergencyResume(current)'),
+    'manual Fan wake must reject stale/Suspending before Fan-generation recovery, then commit only the shared generation');
   assert(!body.includes('realBackend') && !body.includes('hardwareWrite'),
     'manual Fan wake must not write hardware directly or bypass Host admission');
 });
@@ -195,7 +212,7 @@ await test('new generation supersedes daemon work after native commit', async ()
   assert.equal(daemonCalled, false);
 });
 
-console.log('power resume selftest: 10/10 passed');
+console.log('power resume selftest: 12/12 passed');
 }
 
 main().catch((error) => {

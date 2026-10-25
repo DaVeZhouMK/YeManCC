@@ -1,0 +1,11 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import crypto from 'node:crypto';
+const out=path.resolve(process.argv[2]),source=path.resolve(process.argv[3]||'native/main.cpp');fs.mkdirSync(out,{recursive:true});
+const text=fs.readFileSync(source,'utf8'),marker='static bool steamAppearanceResumeCommitted(unsigned long long generation) {';const at=text.indexOf(marker);assert(at>=0,'Production CSS Ready callback missing');let depth=0,end=-1,string=null,escape=false;
+for(let i=at+marker.length-1;i<text.length;i++){const c=text[i];if(string){if(escape)escape=false;else if(c==='\\')escape=true;else if(c===string)string=null;continue;}if(c==='"'||c==="'"){string=c;continue;}if(c==='{')depth++;if(c==='}'&&!--depth){end=i+1;break;}}
+assert(end>at);const code=text.slice(at,end);assert(code.includes('requestResumeRecovery(session, generation)'));assert(!/ShellExecute|SetUIMode|RestartJSContext|launchSteam/.test(code));
+const hook=text.slice(text.indexOf('case WM_POWER_RESUME_COMMIT:'),text.indexOf('case WM_POWER_INPUT_RECOVER:'));
+assert(hook.includes('steamAppearanceResumeCommitted(currentPowerGeneration())'),'Committed Ready never reaches CSS recovery');assert(hook.indexOf('PowerLifecycle::Ready')<hook.indexOf('steamAppearanceResumeCommitted('),'Power admission precedes CSS callback');
+const refreshAt=text.indexOf('    cssGuard.refreshMode =');assert(refreshAt>=0);const refreshStart=text.indexOf('[]',refreshAt),refreshEnd=text.indexOf('\n    };',refreshStart);assert(refreshStart>=0&&refreshEnd>refreshStart);const refresh=text.slice(refreshStart,refreshEnd+6).trim();
+assert(refresh.includes('g_steamCssUse.invalidateForResume(session)')&&refresh.includes('g_steamModeObserver.requestRefresh(session)'));
+fs.writeFileSync(path.join(out,'production-css-resume.h'),code+'\ninline const auto productionCssResumeRefresh = '+refresh+';\n');fs.writeFileSync(path.join(out,'source.json'),JSON.stringify({source,sha256:crypto.createHash('sha256').update(text).digest('hex'),callback:code,refreshCallback:refresh,readyHook:hook,scope:'Exact production function and committed Ready hook; external observer/runtime state remains fixture-owned'},null,2));
+console.log('Extracted exact committed CSS resume callback.');

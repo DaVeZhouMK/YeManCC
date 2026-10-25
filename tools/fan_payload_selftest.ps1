@@ -8,7 +8,10 @@ $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
 $workspaceRoot = $repoRoot
 $payloadRoot = if ([string]::IsNullOrWhiteSpace($PayloadRoot)) { Join-Path $repoRoot 'PowerControl\fan-host' } else { [IO.Path]::GetFullPath($PayloadRoot) }
-$runtimeRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $payloadRoot) 'handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902'))
+$coreProfile = Get-Content -LiteralPath (Join-Path $repoRoot 'deps\ymcc-device-core-runtime\profile.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+$runtimeRoot = [IO.Path]::GetFullPath((Join-Path (Split-Path -Parent $payloadRoot) ('handheldcompanion-runtime\' + $coreProfile.runtimeId)))
+. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
+Assert-YmccDeviceCoreRuntime -ProjectRoot $repoRoot -RuntimeRoot $runtimeRoot | Out-Null
 $manifestPath = Join-Path $payloadRoot 'YeManFanHost.payload.json'
 $hostSourcePath = if ([string]::IsNullOrWhiteSpace($HostSourcePath)) { Join-Path $workspaceRoot 'FanLab\real-host\Program.cs' } else { [IO.Path]::GetFullPath($HostSourcePath) }
 $bridgePath = Join-Path $repoRoot 'src\bridge\fanHost.ts'
@@ -41,7 +44,7 @@ if ($manifest.schemaVersion -ne 2 -or $null -eq $manifest.files -or $manifest.fi
 }
 $seen = @{}
 $runtimeManifest = Get-Content -LiteralPath (Join-Path $runtimeRoot 'HandheldCompanion.runtime.json') -Raw -Encoding UTF8 | ConvertFrom-Json
-if ($runtimeManifest.schemaVersion -ne 1 -or $runtimeManifest.runtimeId -ne 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902') { throw 'HC runtime manifest identity mismatch' }
+if ($runtimeManifest.schemaVersion -ne 1 -or $runtimeManifest.runtimeId -cne [string]$coreProfile.runtimeId) { throw 'HC runtime manifest identity mismatch' }
 foreach ($entry in $runtimeManifest.files) {
   $relative = [string]$entry.path
   # R-publisher（2026-09-11，与 install-fan-host-payload.ps1 runtime 段同构）：
@@ -118,6 +121,10 @@ foreach ($entry in $factoryBootstrapHashes.GetEnumerator()) {
 
 $hostSource = Get-Content -LiteralPath $hostSourcePath -Raw -Encoding UTF8
 $bridge = Get-Content -LiteralPath $bridgePath -Raw -Encoding UTF8
+# Read the declared deployment consumer; old full-file snapshots keep their own implementation.
+$deployment = if ($bridge.Contains("from './fanHost/deployment'")) {
+  Get-Content -LiteralPath (Join-Path (Split-Path -Parent $bridgePath) 'fanHost\deployment.ts') -Raw -Encoding UTF8
+} else { $bridge }
 $native = Get-Content -LiteralPath $nativePath -Raw -Encoding UTF8
 $aclScript = Get-Content -LiteralPath $aclScriptPath -Raw -Encoding UTF8
 $payloadBuilder = Get-Content -LiteralPath $payloadBuilderPath -Raw -Encoding UTF8
@@ -181,17 +188,20 @@ $checks = [ordered]@{
     $aclScript.Contains('validationRulesVersion = 1') -and
     $aclScript.Contains('FAN_HOST_DEPLOYMENT_RECORD_WRITTEN')
   launcherChecksDeploymentRecord = $bridge.Contains('ensureFanHostDeployment') -and
-    $bridge.Contains('FAN_HOST_DEPLOYMENT_RECORD_FILE') -and
-    $bridge.Contains('deployment-record-hit') -and
-    $bridge.Contains('deployment-record-miss')
+    $deployment.Contains('FAN_HOST_DEPLOYMENT_RECORD_FILE') -and
+    $deployment.Contains('deployment-record-hit') -and
+    $deployment.Contains('deployment-record-miss')
   # 变异控制：把"运行期逐文件 certutil / 依赖全扫"加回必须被抓。
   bridgeHasNoPerFileRuntimeHash = -not $bridge.Contains('certutil.exe') -and
-    -not $bridge.Contains('validateFanHostDependencies')
+    -not $bridge.Contains('validateFanHostDependencies') -and
+    -not $deployment.Contains('certutil.exe') -and
+    -not $deployment.Contains('validateFanHostDependencies')
   # 部署记录只引用两个小清单的摘要，不遍历依赖目录、不读每个 DLL。
-  bridgeHashesOnlySmallManifests = $bridge.Contains('hashDeploymentFile') -and
-    $bridge.Contains('FAN_HOST_PAYLOAD_MANIFEST_FILE') -and
-    $bridge.Contains('FAN_HOST_RUNTIME_MANIFEST_FILE') -and
-    -not $bridge.Contains('SearchOption.AllDirectories')
+  bridgeHashesOnlySmallManifests = $deployment.Contains('hashDeploymentFile') -and
+    $deployment.Contains('FAN_HOST_PAYLOAD_MANIFEST_FILE') -and
+    $deployment.Contains('FAN_HOST_RUNTIME_MANIFEST_FILE') -and
+    -not $bridge.Contains('SearchOption.AllDirectories') -and
+    -not $deployment.Contains('SearchOption.AllDirectories')
   # FAN-927 §2：payload 变更现在只可能发生在部署边界判定内部（记录未命中时调用一次完整验证）。
   # 原锚点是"start 里直呼 installAndVerifyPayload"；改为锚定**唯一**部署入口，顺序语义不变：
   # 先采纳/回收常驻 Host，才允许进入可能改动 payload 的部署判定。
@@ -237,7 +247,8 @@ $checks = [ordered]@{
     $hostSource.Contains('private void EnsureHcSessionReadyForControl()') -and
     -not $hostSource.Contains('HC_DEVICE_NOT_OPEN_FOR_RESTORE') -and
     ($hostSource.Contains('private void CloseHcDevice()') -or $hostSource.Contains('private void CloseHcDevice(bool stopDeviceManager = true)')) -and
-    $hostSource.Contains('ApplyPowerProfile(profile);') -and
+    $hostSource.Contains('ApplyPowerProfile(profile, source, msiAdmissionEpoch: admittedGateEpoch);') -and
+    $hostSource.Contains('ApplyPowerProfile(BuildPowerProfile(Array.Empty<double>(), software: false));') -and
     $hostSource.Contains('CaptureHcProfileTemplate();') -and
     ($hostSource.Contains('CloneHcPowerProfile(hcProfileTemplate)') -or
       $hostSource.Contains('CloneHcPowerProfilePreservingFanState(hcProfileTemplate)') -or

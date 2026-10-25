@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "oldFrozenDeliveryIndexSha256": "4f8367fd0d67df7d987f27744d1aea500c29ecb274fc53954c30e989ea3ab9a6",
+  "historicalScripts": [
+    {
+      "name": "prepare.mjs",
+      "sha256": "82c4c1c2b9b3e5dee24cf3fd3dfc7925577076dda31debd122758cc2210f4bea"
+    },
+    {
+      "name": "run.mjs",
+      "sha256": "3b42e14d4df211e2fe89f0996604ddfd88b38c963609d4167015ed617a625422"
+    },
+    {
+      "name": "verify.mjs",
+      "sha256": "90cf439c3d83a7bf58b7695b31bf840c8b6f705654b02117ebf18cdb15f2c50b"
+    }
+  ],
+  "historicalTemplates": [
+    {
+      "name": "MemoryPorts.hpp",
+      "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+    },
+    {
+      "name": "ConsumerCases.hpp",
+      "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02"
+    }
+  ],
+  "coreToolManifestSha256": "15cf8a11f8b0852403fc5c9797ace8fa5a6a4567cf52ba688e735607a41f8e61",
+  "powershellManifestReadOnceSha256": "a4f6f7c8093bda31d58fd35f863351ab677c2d341f772e2ea9aa4d50993134a3",
+  "powerShellPackageMembersCopied": 658,
+  "coreMembersKept": 533,
+  "oldArtifactsModified": false,
+  "sharedBefore": [
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    }
+  ],
+  "runtimeDependsOnHistoricalArtifactsOrUiManifest": false
+}

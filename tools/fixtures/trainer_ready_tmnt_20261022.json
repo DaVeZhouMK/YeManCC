@@ -1,0 +1,105 @@
+{
+  "source": "2026-10-22 G3E exported trainers.json; inert IO only",
+  "game": {
+    "pid": 13484,
+    "processCreated": "134371333868323259",
+    "title": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+    "name": "TMNT.exe",
+    "path": "E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe"
+  },
+  "index": {
+    "teenagemutantninjaturtlesshreddersrevenge": {
+      "origin": "ct_other",
+      "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "storageVersion": 2,
+      "state": "ready",
+      "trainerPath": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器\\Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "bytesDownloaded": 0,
+      "gcmResourceId": "GCM/GCM Trainers/Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "identity": {
+        "processId": 13484,
+        "windowTitle": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "method": "ymcc-game-target",
+        "aliases": [
+          "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "忍者神龟：施莱德的复仇"
+        ],
+        "steamAppId": "1361510",
+        "executablePath": "E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe",
+        "executableSha256": "36435cc7e1063f76e4641c92f95601414b62c1faeda39a64ccc270eef6d82cc6",
+        "processCreated": "134371333868323259",
+        "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "snapshotPath": "C:\\SOFT\\YeMan\\PowerControl\\game-target.json"
+      },
+      "checkedAt": 1792661619433,
+      "downloaded": false,
+      "trainerFolder": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器",
+      "libraryRoot": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers",
+      "downloadOutcome": "reused-local",
+      "trainerGameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "sha256": "f516263ddc4c387bf2ca8032da6d173f151696e2962d2d668d4e30eee4a8f8eb"
+    },
+    "teenagemutantninjaturtlesshreddersrevenge|7824902f76fbf78b0c3c1a87d20fbd5ed42d9d891c29fe80237cb7caf533b68c": {
+      "origin": "ct_other",
+      "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "storageVersion": 2,
+      "state": "ready",
+      "trainerPath": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器\\Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "bytesDownloaded": 0,
+      "gcmResourceId": "GCM/GCM Trainers/Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "identity": {
+        "processId": 13484,
+        "windowTitle": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "method": "ymcc-game-target",
+        "aliases": [
+          "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "忍者神龟：施莱德的复仇"
+        ],
+        "steamAppId": "1361510",
+        "executablePath": "E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe",
+        "executableSha256": "36435cc7e1063f76e4641c92f95601414b62c1faeda39a64ccc270eef6d82cc6",
+        "processCreated": "134371333868323259",
+        "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "snapshotPath": "C:\\SOFT\\YeMan\\PowerControl\\game-target.json"
+      },
+      "checkedAt": 1792661619433,
+      "downloaded": false,
+      "trainerFolder": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器",
+      "libraryRoot": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers",
+      "downloadOutcome": "reused-local",
+      "trainerGameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "sha256": "f516263ddc4c387bf2ca8032da6d173f151696e2962d2d668d4e30eee4a8f8eb"
+    },
+    "忍者神龟施莱德的复仇": {
+      "origin": "ct_other",
+      "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "storageVersion": 2,
+      "state": "ready",
+      "trainerPath": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器\\Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "bytesDownloaded": 0,
+      "gcmResourceId": "GCM/GCM Trainers/Teenage Mutant Ninja Turtles_Shredder's Revenge Trainer [GreenHouse].ct",
+      "identity": {
+        "processId": 13484,
+        "windowTitle": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "method": "ymcc-game-target",
+        "aliases": [
+          "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+          "忍者神龟：施莱德的复仇"
+        ],
+        "steamAppId": "1361510",
+        "executablePath": "E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe",
+        "executableSha256": "36435cc7e1063f76e4641c92f95601414b62c1faeda39a64ccc270eef6d82cc6",
+        "processCreated": "134371333868323259",
+        "gameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+        "snapshotPath": "C:\\SOFT\\YeMan\\PowerControl\\game-target.json"
+      },
+      "checkedAt": 1792661619433,
+      "downloaded": false,
+      "trainerFolder": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers\\[GreenHouse]《忍者神龟：施莱德的复仇》修改器",
+      "libraryRoot": "C:\\Users\\DaVe\\AppData\\Roaming\\GCM Trainers",
+      "downloadOutcome": "reused-local",
+      "trainerGameName": "Teenage Mutant Ninja Turtles: Shredder's Revenge",
+      "sha256": "f516263ddc4c387bf2ca8032da6d173f151696e2962d2d668d4e30eee4a8f8eb"
+    }
+  }
+}

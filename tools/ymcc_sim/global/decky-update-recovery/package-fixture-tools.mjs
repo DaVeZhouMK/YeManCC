@@ -1,0 +1,7 @@
+/** Fixed compiler authority for the private test Job class, not a product runtime. */
+import fs from 'node:fs';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+export const PACKAGE_FIXTURE_AUTHORITY_SOURCES=['tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.mjs','tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.json'];
+const pin='2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a',hash=b=>createHash('sha256').update(b).digest('hex');
+export function verifyPackageFixtureTools(){const bytes=fs.readFileSync(new URL('./package-fixture-tools.json',import.meta.url));if(hash(bytes)!==pin)throw Error('PACKAGE_FIXTURE_MANIFEST_CHANGED');const manifest=JSON.parse(bytes);if(manifest.schemaVersion!==1||!Array.isArray(manifest.files)||manifest.files.length>128)throw Error('PACKAGE_FIXTURE_MANIFEST_SCHEMA');const seen=new Set();for(const row of manifest.files){const key=path.resolve(row.path).toLowerCase();if(seen.has(key)||fs.realpathSync(row.path).toLowerCase()!==key||hash(fs.readFileSync(row.path))!==row.sha256)throw Error('PACKAGE_FIXTURE_TOOL_CHANGED:'+row.path);seen.add(key);}if(!seen.has(path.resolve(manifest.compiler).toLowerCase())||manifest.referencedAssemblies.some(file=>!seen.has(path.resolve(file).toLowerCase())))throw Error('PACKAGE_FIXTURE_TOOL_MEMBERSHIP');return {...manifest,manifestSha256:pin};}

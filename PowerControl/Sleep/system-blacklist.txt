@@ -184,6 +184,7 @@ sublime_text.exe
 WindowsTerminal.exe
 git-bash.exe
 vctip.exe
+VBCSCompiler.exe
 
 # ---- 图像 / 设计 / 三维 ----
 photoshop.exe
@@ -284,6 +285,39 @@ CssLoader-Standalone-Headless.exe
 枫织梦境助手客户端.exe
 NVDisplay.Container.exe
 
+# ---- 掌机官方前端（隐藏系统规则；禁止顶部游戏识别）----
+# 这些是厂商控制中心/手柄前端，不是游戏；放在系统侧，顶部不显示也不可由用户名单覆盖。
+# 使用精确基名或厂商专属前缀通配符，禁止扩大到通用 launcher/client/helper/app。
+# MSI Center M
+MSI_Center_M_Server.exe
+MSI Center M.exe
+MCMOSDInfo.exe
+MSI Center OSD Info.exe
+MSI_Center_M_Launcher.exe
+MSI_Center_M_Server_ControlMode.exe
+MSI_Center_M_Server_UserScenario.exe
+MSI_Center_M_Server_GameLibrary.exe
+mongMode.exe
+# ROG / Armoury Crate
+ArmouryCrate.exe
+ArmouryCrateSE.exe
+ArmouryCrateSE.UserSessionHelper.exe
+ArmouryCrate.Service.exe
+ArmouryCrateSE.Service.exe
+ArmouryCrateControlInterface.exe
+ROGLiveService.exe
+AsusAppService.exe
+# AYANEO
+AYASpace*.exe
+# OneXPlayer / AOKZOE（两家共用 OneXConsole；兼容旧 AOKZOE Player Center）
+OneXConsole*.exe
+OneXPlayer*.exe
+AOKZOE.exe
+AOKZOE Player Center.exe
+# GPD
+GPD WinControls.exe
+MotionAssistant.exe
+GPDTool.exe
 # ---- VPN / 代理 / 网络工具 ----
 Astar.exe
 v2rayN.exe

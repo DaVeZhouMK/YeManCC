@@ -1,6 +1,9 @@
+[CmdletBinding()]
+param([string]$NativeSource = '')
 $ErrorActionPreference = 'Stop'
 $repoRoot = Split-Path -Parent $PSScriptRoot
-$native = Get-Content -Raw (Join-Path $repoRoot 'native\main.cpp')
+if ([string]::IsNullOrWhiteSpace($NativeSource)) { $NativeSource = Join-Path $repoRoot 'native\main.cpp' }
+$native = Get-Content -Raw -LiteralPath $NativeSource
 $workspaceRoot = Split-Path -Parent (Split-Path -Parent $repoRoot)
 $hostCandidates = @(
   (Join-Path $workspaceRoot 'FanLab\real-host\Program.cs'),
@@ -35,7 +38,9 @@ $hostCallbackBody = if ($hostCallbackStart -ge 0 -and $hostQueueStart -gt $hostC
 $checks = [ordered]@{
   nativeBoundedHostOperation = $native.Contains('static bool fanHostEmergencyPost')
   nativeAsyncScheduler = $native.Contains('static void fanHostScheduleEmergencySuspend') -and
-    $native.Contains('std::thread([reasonText = std::string(reason ? reason : "unknown"), generation]') -and
+    $native.Contains('g_fanPhysicalWake.beginClose(generation)') -and
+    $native.Contains('next=g_fanPhysicalWake.completeClose(current)') -and
+    $native.Contains('std::thread([reasonText=std::string(reason?reason:"unknown"),generation]') -and
     $native.Contains('}).detach();')
   nativeQueryBoundaryNeverCallsHost = -not ($queryBody.Contains('fanHostEmergencyPost') -or
     $queryBody.Contains('fanHostEmergencySuspend') -or
@@ -47,7 +52,7 @@ $checks = [ordered]@{
   nativeConfirmedQueryBoundaryQueuesOnly = $native.Contains('fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration())')
   nativeKernelPowerBoundaryQueuesOnly = $native.Contains('fanHostScheduleEmergencySuspend("kernel-power-506", generation)')
   safeCloseFallback = $native.Contains('fanHostEmergencyPost(L"/api/close", reason, 1)') -and
-    $native.Contains('if (suspendStatus != 404 && suspendStatus != 405)') -and
+    $native.Contains('if (resultUnknown || (suspendStatus != 404 && suspendStatus != 405))') -and
     $native.Contains('no concurrent close fallback')
   # Older Host revisions subscribed directly to SystemEvents. The current
   # source receives the native tagged boundary through PowerIngress and the
@@ -87,7 +92,10 @@ $checks = [ordered]@{
     $hostSource.Contains('clearOemEvidence: false') -and
     $hostSource.Contains('power.suspend-preclose-release-decision') -and
     $hostSource.Contains('not-attempted-session-not-usable') -and
-    $hostSource.Contains('realBackend.Close(stopDeviceManager);') -and
+    ($hostSource.Contains('realBackend.Close(stopDeviceManager);') -or
+      ($hostSource.Contains('FanLifecycleCloseOrchestrator.Execute(') -and
+       $hostSource.Contains('close: () => realBackend.Close(stopDeviceManager),') -and
+       $hostSource.Contains('releaseStillInFlight: () => realBackend.OperationTimedOut'))) -and
     -not $hostSource.Contains('ExecuteRestoreBeforeCloseBoundary')
   hostSystemPendingDoesNotPrewriteOem = $f4Body.Length -gt 0 -and
     -not $f4Body.Contains('RestoreOem(') -and

@@ -1,0 +1,442 @@
+{
+  "scope": "provided field data, not gameplay proof or a replay of real device APIs",
+  "sourceZipSha256": "4eeb6935c9bf6291b19d27442d7ee6efc95f77edebf83addc0f7abe0dc288b86",
+  "implementation": "steam-wake-round23-ordered-wake-proof",
+  "generation": 3,
+  "game": {
+    "created": "134362349525200713",
+    "exe": "cyberpunk2077",
+    "identityMatches": true,
+    "pid": 10100,
+    "powerGenerationMatches": true,
+    "recoveryBindingMatches": true
+  },
+  "steamClient": {
+    "accountKnown": true,
+    "created": "134362110502634791",
+    "identityToken": "9251500367260225151",
+    "integrityRid": 8192,
+    "pid": 16080,
+    "processVerified": true,
+    "reason": "steam-native-session-current",
+    "registeredPid": 16080,
+    "registeredPidMatchesVerified": true,
+    "source": "verified-active-process"
+  },
+  "wakeAdmission": {
+    "boundaryFileTime": "134362349741478064",
+    "boundaryGeneration": 2,
+    "candidateWaitMs": 0,
+    "continueButtonVerified": false,
+    "deferredCandidateObserved": false,
+    "eventFileTime": "134362349918382379",
+    "gameInputVerified": false,
+    "kernelWakeConfirmed": true,
+    "modernStandby": true,
+    "proofFollowedPreparedBoundary": false,
+    "proofObservedGeneration": 3,
+    "proofOriginallyAwaitedCapture": true,
+    "source": "kernel-power-507-reason-1",
+    "status": "admitted"
+  },
+  "associationHistory": {
+    "continueButtonVerified": false,
+    "evidence": "reliable-native-overview-observations-not-button-proof",
+    "firstCurrentAssociationElapsedMs": 1641,
+    "firstLossAfterCurrentElapsedMs": 12687,
+    "healthVerified": false,
+    "lastReliableElapsedMs": 14234,
+    "lastReliableRecordEpoch": 1791761407.5857935,
+    "lastReliableState": {
+      "appid": 3320061248,
+      "associationVerified": false,
+      "inRunningList": false,
+      "localDisplayStatus": 11,
+      "selectedDisplayStatus": 11
+    }
+  },
+  "attempts": {
+    "input": 1,
+    "inputDispatches": 1,
+    "list": 0,
+    "pidWindow": 0
+  },
+  "inputResume": {
+    "mutated": true,
+    "accepted": false,
+    "actionAcknowledged": true,
+    "windowReturnObserved": true,
+    "verificationPending": true,
+    "originalPid": 10100,
+    "originalCreated": "134362349525200713",
+    "reason": "steam-input-ui-focus-readback-pending"
+  },
+  "observations": [
+    {
+      "association": {
+        "appid": 3320061248,
+        "associationVerified": true,
+        "continueButtonVerified": false,
+        "gameInput": "not-tested",
+        "healthVerified": false,
+        "reason": "steam-association-current",
+        "repairable": false,
+        "scope": "steam",
+        "status": "current"
+      },
+      "continue": {
+        "candidate": true,
+        "continueButtonVerified": false,
+        "displayMutated": false,
+        "localDisplayStatus": 4,
+        "reason": "steam-running-state-observed-button-not-tested",
+        "scope": "steam-continue",
+        "selectedDisplayStatus": 4,
+        "status": "runtime-running-unverified"
+      },
+      "controllerCount": 1,
+      "elapsedMs": 11172,
+      "foreground": {
+        "allowedForOriginalGameReturn": true,
+        "created": "134362349525200713",
+        "originalInstanceMatched": true,
+        "pid": 10100,
+        "role": "original-game"
+      },
+      "input": {
+        "associationVerified": true,
+        "contextMatched": false,
+        "gameInputVerified": false,
+        "healthVerified": false,
+        "reason": "steam-original-input-context-not-focused",
+        "repairable": true,
+        "requireOriginalWindowReturn": false,
+        "returnBasis": "current-association",
+        "scope": "steam-input",
+        "status": "stale-context"
+      },
+      "inputFocus": {
+        "appid": 413080,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "interactive": {
+        "available": true,
+        "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+        "idle": true,
+        "keyboard": false,
+        "lockScreen": false,
+        "menuOpen": 0,
+        "menuSuppressed": false,
+        "overlayOrVrWindow": false,
+        "windowInstanceObserved": false,
+        "windowKindProbesComplete": true,
+        "windowKinds": {
+          "controllerConfigurator": false,
+          "desktopOverlay": false,
+          "gamepadOverlay": false,
+          "vr": false
+        }
+      },
+      "originalGameRecovery": {
+        "continueButtonVerified": false,
+        "gameInputVerified": false,
+        "originalInstanceMatched": true,
+        "originalWindowFocused": true,
+        "sleepPauseReleased": true,
+        "steamSessionMatched": true,
+        "steamUiInputFocusMatched": false,
+        "uiFocusAuthority": "auxiliary-not-active-input-proof",
+        "verificationBasis": "ymcc-captured-pid-created-path"
+      },
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 3320061248,
+          "canonicalInRunningList": true,
+          "gameidString": "14259554480910499840",
+          "gameidValueType": "string",
+          "inRunningList": true,
+          "localDisplayStatus": 4,
+          "localRunning": true,
+          "mostAvailableDisplayStatus": 4,
+          "name": "Cyberpunk 2077",
+          "overviewAvailable": true,
+          "overviewKey": 3320061248,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 4,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "pid": 10100,
+      "reason": "steam-input-context-not-retained"
+    },
+    {
+      "association": {
+        "appid": 3320061248,
+        "associationVerified": false,
+        "continueButtonVerified": false,
+        "gameInput": "not-tested",
+        "healthVerified": false,
+        "reason": "steam-backend-not-running",
+        "repairable": false,
+        "scope": "steam",
+        "status": "blocked"
+      },
+      "continue": {
+        "candidate": false,
+        "continueButtonVerified": false,
+        "displayMutated": false,
+        "reason": "steam-original-game-association-not-current",
+        "scope": "steam-continue",
+        "status": "unknown"
+      },
+      "controllerCount": 0,
+      "elapsedMs": 12687,
+      "foreground": {
+        "allowedForOriginalGameReturn": true,
+        "created": "134362349525200713",
+        "originalInstanceMatched": true,
+        "pid": 10100,
+        "role": "original-game"
+      },
+      "input": {
+        "associationVerified": false,
+        "contextMatched": false,
+        "gameInputVerified": false,
+        "healthVerified": false,
+        "reason": "steam-controller-not-observed",
+        "repairable": false,
+        "returnBasis": "captured-original-tracker",
+        "scope": "steam-input",
+        "status": "waiting-controller"
+      },
+      "inputFocus": {
+        "appid": 3320061248,
+        "available": true,
+        "overlayAppid": 0,
+        "overlayPid": 0,
+        "windowID": "0"
+      },
+      "interactive": {
+        "available": true,
+        "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+        "idle": true,
+        "keyboard": false,
+        "lockScreen": false,
+        "menuOpen": 0,
+        "menuSuppressed": false,
+        "overlayOrVrWindow": false,
+        "windowInstanceObserved": true,
+        "windowKindProbesComplete": true,
+        "windowKinds": {
+          "controllerConfigurator": false,
+          "desktopOverlay": false,
+          "gamepadOverlay": false,
+          "vr": false
+        }
+      },
+      "originalGameRecovery": {
+        "continueButtonVerified": false,
+        "gameInputVerified": false,
+        "originalInstanceMatched": true,
+        "originalWindowFocused": true,
+        "sleepPauseReleased": true,
+        "steamSessionMatched": true,
+        "steamUiInputFocusMatched": false,
+        "uiFocusAuthority": "auxiliary-not-active-input-proof",
+        "verificationBasis": "ymcc-captured-pid-created-path"
+      },
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 3320061248,
+          "canonicalInRunningList": false,
+          "gameidString": "14259554480910499840",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Cyberpunk 2077",
+          "overviewAvailable": true,
+          "overviewKey": 3320061248,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "pid": 10100,
+      "reason": "steam-original-game-association-not-current"
+    }
+  ],
+  "after": {
+    "game": {
+      "created": "134362349525200713",
+      "exe": "cyberpunk2077",
+      "identityMatches": true,
+      "pid": 10100,
+      "powerGenerationMatches": true,
+      "recoveryBindingMatches": true
+    },
+    "steam": {
+      "appBinding": "operator-or-native-tracker-supplied-not-proven-by-js",
+      "controllers": [
+        {
+          "index": 15,
+          "type": 4
+        }
+      ],
+      "gameInput": "unknown",
+      "inputContext": {
+        "configQueries": [
+          {
+            "appid": 3320061248,
+            "index": 15,
+            "selectionType": 0,
+            "status": "available",
+            "urlIdentity": 2151541317,
+            "urlKind": "configured"
+          }
+        ],
+        "configQueriesTruncated": false,
+        "controllerListValid": true,
+        "controllers": [
+          {
+            "index": 15,
+            "type": 4
+          }
+        ],
+        "editor": {
+          "available": true,
+          "dirty": false,
+          "editingActive": true,
+          "editingAppid": 3320061248,
+          "editingAvailable": true,
+          "previewActive": false,
+          "updating": false
+        },
+        "focus": {
+          "appid": 769,
+          "available": true,
+          "overlayAppid": 0,
+          "overlayPid": 0,
+          "windowID": "0"
+        },
+        "gameInput": "not-tested",
+        "inputEventsObserved": false,
+        "interactive": {
+          "available": true,
+          "focusEvidence": "steam-ui-window-instance-cache-not-os-foreground",
+          "idle": true,
+          "keyboard": false,
+          "lockScreen": false,
+          "menuOpen": 0,
+          "menuSuppressed": false,
+          "overlayOrVrWindow": false,
+          "windowInstanceObserved": true,
+          "windowKindProbesComplete": true,
+          "windowKinds": {
+            "controllerConfigurator": false,
+            "desktopOverlay": false,
+            "gamepadOverlay": false,
+            "vr": false
+          }
+        }
+      },
+      "invalidRunningCount": 0,
+      "mutated": false,
+      "ok": true,
+      "overlayEnabled": true,
+      "overviews": [
+        {
+          "appType": 1073741824,
+          "appid": 3320061248,
+          "canonicalInRunningList": false,
+          "gameidString": "14259554480910499840",
+          "gameidValueType": "string",
+          "inRunningList": false,
+          "localDisplayStatus": 11,
+          "localRunning": false,
+          "mostAvailableDisplayStatus": 11,
+          "name": "Cyberpunk 2077",
+          "overviewAvailable": true,
+          "overviewKey": 3320061248,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 11,
+          "windowIDs": [
+            "0"
+          ]
+        }
+      ],
+      "rawRunningCount": 0,
+      "runningAppIDs": [],
+      "runningTruncated": false,
+      "signedAliasesNormalized": false,
+      "stage": "sleep-inspect"
+    },
+    "steamClient": {
+      "accountKnown": true,
+      "created": "134362110502634791",
+      "identityToken": "9251500367260225151",
+      "integrityRid": 8192,
+      "pid": 16080,
+      "processVerified": true,
+      "reason": "steam-native-session-current",
+      "registeredPid": 16080,
+      "registeredPidMatchesVerified": true,
+      "source": "verified-active-process"
+    },
+    "foreground": {
+      "allowedForOriginalGameReturn": false,
+      "created": "134362110505347843",
+      "originalInstanceMatched": false,
+      "pid": 15696,
+      "role": "unknown"
+    },
+    "originalGameRecovery": {
+      "continueButtonVerified": false,
+      "gameInputVerified": false,
+      "originalInstanceMatched": true,
+      "originalWindowFocused": false,
+      "sleepPauseReleased": true,
+      "steamSessionMatched": true,
+      "steamUiInputFocusMatched": false,
+      "uiFocusAuthority": "auxiliary-not-active-input-proof",
+      "verificationBasis": "ymcc-captured-pid-created-path"
+    },
+    "steamRecovery": {
+      "appid": 3320061248,
+      "associationVerified": false,
+      "continueButtonVerified": false,
+      "gameInput": "not-tested",
+      "healthVerified": false,
+      "reason": "steam-backend-not-running",
+      "repairable": false,
+      "scope": "steam",
+      "status": "blocked"
+    },
+    "steamInputRecovery": {
+      "associationVerified": false,
+      "contextMatched": false,
+      "gameInputVerified": false,
+      "healthVerified": false,
+      "reason": "steam-input-foreground-owned-by-user-or-unknown",
+      "repairable": false,
+      "returnBasis": "captured-original-tracker",
+      "scope": "steam-input",
+      "status": "blocked"
+    },
+    "recordEpoch": 1791761407.5857935
+  },
+  "terminalReason": "steam-input-context-not-retained"
+}

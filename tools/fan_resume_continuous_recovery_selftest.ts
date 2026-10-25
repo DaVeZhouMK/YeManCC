@@ -14,6 +14,7 @@
  * 不替代桥、准入、任务调度、UI 受理代码——全部走 FanHostLifecycle 的真实生产路径。
  * 无硬件写入、不启动真实 Host、不触 EC、不睡眠工作机。
  */
+import { readFile } from 'node:fs/promises';
 import { FanHostLifecycle, type FanHostConfig, type FanHostLauncher, type FanHostProcess } from '../src/bridge/fanHost';
 import { FanApiError, type FanApiAdapter, type FanHandshake, type FanLease, type FanNode, type FanState } from '../src/bridge/fanApi';
 import type { PowerLifecycleState } from '../src/bridge/api';
@@ -428,6 +429,7 @@ class GatedMutationAdapter extends FakeAdapter {
 class TerminalFaultAdapter extends FakeAdapter {
   terminal = false;
   pendingClose = false;
+  resourcesRetired = false;
   failClose = false;
   closeEntered = false;
   private closeGate: Promise<void> | null = null;
@@ -438,7 +440,9 @@ class TerminalFaultAdapter extends FakeAdapter {
     if (!this.terminal) return super.getState(timeoutMs);
     this.calls.push('terminal-state');
     return { ...this.craft('FaultLocked', false), unknownState: true, hardwareWritesEnabled: false,
-      hcCloseCleanupPending: this.pendingClose };
+      hcCloseCleanupPending: this.pendingClose,
+      ...(this.resourcesRetired ? { hcVirtualCloseReturned: true, hcDeviceManagerStopCompleted: true,
+        openCalled: false, openEventsCalled: false, controlAccepting: false, oemRestoreConfirmed: false } : {}) };
   }
   override async open(): Promise<FanState> {
     if (this.terminal) throw new FanApiError('FAULT_LOCKED', 409, 'FAULT_LOCKED');
@@ -477,6 +481,15 @@ class TerminalFaultAdapter extends FakeAdapter {
   }
 }
 
+/** FAN-953: a failed resume may truthfully settle to AwaitingControl, not FaultLocked. */
+class FailedResumeAwaitingControlAdapter extends TerminalFaultAdapter {
+  override async getState(timeoutMs?: number): Promise<FanState> {
+    const remote = await super.getState(timeoutMs);
+    if (!this.terminal) return remote;
+    return { ...remote, state: 'AwaitingControl', resumePhase: 'AwaitingControl',
+      unknownState: false, powerOperationStatus: 'failed', controlAccepting: false };
+  }
+}
 /** Real timer/public heartbeat boundary; the response is held before a lease failure. */
 class CancelHeartbeatAdapter extends FakeAdapter {
   heartbeatEntered = false;
@@ -505,6 +518,25 @@ async function runCase(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  for (const retired of [false, true]) {
+    await runCase(`FAN-953 failed resume in AwaitingControl allows one explicit restart (retired=${retired})`, async () => {
+      const adapter = new FailedResumeAwaitingControlAdapter(), launcher = new ScriptedLauncher();
+      const originalStop = launcher.stop.bind(launcher);
+      launcher.stop = async process => { await originalStop(process); adapter.terminal = false; adapter.resourcesRetired = false; adapter.remoteOpenCalled = false; adapter.lease = null; };
+      const lifecycle = makeLifecycle(adapter, async () => nativeState(0, 'ready', true, false), 1200, launcher);
+      try {
+        await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(CURVE);
+        adapter.terminal = true; adapter.resourcesRetired = retired; adapter.calls.length = 0;
+        await lifecycle.start({ manualRecovery: true, reason: 'failed-resume-user-click' });
+        await lifecycle.apply(curveShifted(9));
+        assert(launcher.startCalls === 2 && launcher.stopCalls === 1, 'failed AwaitingControl must retire exactly one owner before replacement');
+        assert(adapter.calls.filter(c => c === 'close').length === (retired ? 0 : 1), 'retired resources must not receive a second Close; unretired resources close exactly once');
+        assert(adapter.calls.filter(c => c === 'shutdown').length === (retired ? 0 : 1), 'retired resource owner exits through the exact-process launcher; live cleanup uses one authenticated shutdown');
+        assert(adapter.calls.slice(-4).join(',') === 'open,open-events,acquire,enable', 'manual retry must establish a fresh HC chain');
+        assert(adapter.enableNodes[1]?.dutyPercent === 34, 'the latest manually requested curve must reach the writer');
+      } finally { await closeQuietly(lifecycle); }
+    });
+  }
   // T4a 承重正例：native 与原 Host 都陈旧报 Suspended，但系统真实唤醒事实 `resumeReady=true`
   // 已按本代持久化（inputReady 故意为 false，证明唤醒依据不是输入链）——手动开启必须被受理并推动恢复。
   await runCase(
@@ -969,10 +1001,11 @@ async function main(): Promise<void> {
       const barrier = new Promise<void>(resolve => { releaseBarrier = resolve; });
       try {
         await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(CURVE);
-        const getState = adapter.getState.bind(adapter);
-        adapter.getState = async timeout => { probeEntered = true; await barrier; return getState(timeout); };
-        const probe = lifecycle.getState();
-        await waitFor(() => probeEntered, 1000, 'state queue barrier');
+        // Telemetry deliberately no longer owns the lifecycle queue. Hold the
+        // actual production queue directly; heartbeat/OFF still use public entries.
+        const queue = lifecycle as unknown as { enqueue(work: () => Promise<void>): Promise<void> };
+        const probe = queue.enqueue(async () => { probeEntered = true; await barrier; });
+        await waitFor(() => probeEntered, 1000, 'actual lifecycle queue barrier');
         const queued = lifecycle.heartbeat().catch(() => undefined);
         const disabled = lifecycle.disable(); releaseBarrier();
         await probe; await queued; await disabled;
@@ -1051,6 +1084,68 @@ async function main(): Promise<void> {
     },
   );
 
+  // FAN-948: a successful TCP probe cannot make pending cleanup write-ready.
+  const routeCatalogPath = process.env.FAN_TEST_ROUTE_CATALOG;
+  const factories: string[] = routeCatalogPath
+    ? (JSON.parse(await readFile(routeCatalogPath, 'utf8')) as Array<{deviceClass: string}>).map(r => r.deviceClass)
+    : ['HandheldCompanion.Devices.ROGAlly', 'HandheldCompanion.Devices.MSI.ClawCG3EM',
+       'HandheldCompanion.Devices.ClawA2VM', 'HandheldCompanion.Devices.Lenovo.LegionGoTablet',
+       'HandheldCompanion.Devices.GPD.GPDWin5', 'HandheldCompanion.Devices.AYANEO.AYANEOAir',
+       'HandheldCompanion.Devices.OneXPlayer.OneXPlayerX1', 'HandheldCompanion.Devices.AynLoki',
+       'HandheldCompanion.Devices.Zotac.GamingZone'];
+  for (const factory of factories) {
+    await runCase('FAN-948 retained cleanup and next manual restart: ' + factory, async () => {
+      const adapter = new TerminalFaultAdapter(), launcher = new ScriptedLauncher();
+      adapter.handshake = async () => ({ ok: true, supported: true, deviceClass: factory,
+        fanRoute: 'ProfileCurve', fanRouteWriteReady: true, deviceIdentity: {} });
+      const lifecycle = makeLifecycle(adapter, async () => nativeState(0, 'ready', true, false), 1200, launcher);
+      try {
+        await lifecycle.start({ manualRecovery: true });
+        adapter.terminal = true; adapter.pendingClose = true; adapter.calls.length = 0;
+        const rejected = await lifecycle.start({ manualRecovery: true }).then(() => '', (e: Error) => e.message);
+        assert(rejected.includes('HC_CLOSE_PENDING'), 'pending resource owner must not return an allowed ready gate');
+        assert(!adapter.calls.includes('close') && launcher.startCalls === 1 && launcher.stopCalls === 0,
+          'a retained cleanup gets neither duplicate Close nor replacement writer');
+        // The original lifecycle completes; the next click must read it again,
+        // rather than retaining a permanent client lock or passing stale Ready.
+        adapter.pendingClose = false;
+        await lifecycle.start({ manualRecovery: true });
+        await lifecycle.apply(curveShifted(8));
+        assert(adapter.calls.filter(c => c === 'close').length === 1 && launcher.startCalls === 2,
+          'the next explicit click must own one close/exit/restart after cleanup settles');
+        assert(adapter.enableCalls === 1, 'the newest curve reaches only the restarted writable Host');
+        adapter.terminal = true; adapter.resourcesRetired = true;
+        const originalStop = launcher.stop.bind(launcher);
+        launcher.stop = async process => { await originalStop(process); adapter.terminal = false; adapter.resourcesRetired = false; adapter.remoteOpenCalled = false; adapter.lease = null; };
+        await lifecycle.start({ manualRecovery: true });
+        await lifecycle.apply(curveShifted(10));
+        assert(adapter.calls.filter(c => c === 'close').length === 1 && launcher.startCalls === 3,
+          'a fully retired previous session must not receive a second Close or wait for physical OEM proof');
+        assert(adapter.enableCalls === 2 && launcher.stopCalls === 2,
+          'manual recovery still requires predecessor exit before the next Host and newest curve');
+
+      } finally { adapter.terminal = false; adapter.pendingClose = false; await closeQuietly(lifecycle); }
+    });
+  }
+
+  await runCase('FAN-948 explicit device write failure is not automatically repeated', async () => {
+    const adapter = new FakeAdapter(); let attempted = 0;
+    const enabled = adapter.enable.bind(adapter);
+    adapter.enable = async (nodes, lease) => { attempted++; if (attempted === 1)
+      throw new FanApiError('FAN_CURVE_WRITE_FAILED', 409, 'FAN_CURVE_WRITE_FAILED');
+      return enabled(nodes, lease); };
+    const lifecycle = makeLifecycle(adapter, async () => nativeState(0, 'ready', true, false));
+    try {
+      await lifecycle.start({ manualRecovery: true });
+      const failure = await lifecycle.apply(CURVE).then(() => '', (e: Error) => e.message);
+      assert(failure.includes('FAN_CURVE_WRITE_FAILED') && attempted === 1,
+        'an explicit hardware write failure must reject exactly once, not become a second mutation');
+      await lifecycle.apply(curveShifted(6));
+      assert(attempted === 2 && adapter.enableNodes[1]?.dutyPercent === 31,
+        'the next deliberate user curve remains usable after the definite failure');
+    } finally { await closeQuietly(lifecycle); }
+  });
+
   await runCase(
     'FAN-941 terminal reachable fault: one explicit Close and restart makes the next manual curve effective',
     async () => {
@@ -1059,7 +1154,8 @@ async function main(): Promise<void> {
       try {
         await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(CURVE);
         adapter.terminal = true; adapter.calls.length = 0;
-        await lifecycle.start();
+        const ordinaryFault = await lifecycle.start().then(() => '', (e: Error) => e.message);
+        assert(ordinaryFault.includes('FAULT_LOCKED'), 'ordinary startup must not call a terminal resident ready');
         assert(!adapter.calls.includes('close') && launcher.startCalls === 1, 'ordinary startup must not automatically restart a terminal resident');
         await lifecycle.start({ manualRecovery: true, reason: 'explicit-terminal-retry' });
         await lifecycle.apply(curveShifted(9));
@@ -1106,7 +1202,8 @@ async function main(): Promise<void> {
         assert(rejected.includes('HC_CLOSE_PENDING'), 'the manual caller must see the unresolved close');
         assert(launcher.startCalls === 1 && launcher.stopCalls === 0 && lifecycle.processId === 30001,
           'an unresolved Close is not exit proof and must retain one owner');
-        await lifecycle.start({ manualRecovery: true });
+        const pendingRetry = await lifecycle.start({ manualRecovery: true }).then(() => '', (e: Error) => e.message);
+        assert(pendingRetry.includes('HC_CLOSE_PENDING'), 'the next click observes pending cleanup instead of reporting ready');
         assert(adapter.calls.filter(c => c === 'close-pending').length === 1,
           'an observed in-flight cleanup must not receive a duplicate virtual Close');
         assert(launcher.startCalls === 1 && !adapter.calls.includes('shutdown'), 'pending cleanup must authorize no replacement or shutdown');
@@ -1151,13 +1248,18 @@ async function main(): Promise<void> {
         assert(rejected.includes('still-running') && lifecycle.processId === 30001 && launcher.startCalls === 1,
           'failed root exit must retain the original owner and reject the replacement');
         const callsAtExitFailure = adapter.calls.length;
+        const stopsAtExitFailure = launcher.stopCalls;
         await lifecycle.apply(CURVE).then(() => { throw new Error('closed owner must not accept a curve'); }, () => undefined);
+        assert(launcher.stopCalls === stopsAtExitFailure + 1, 'an explicit curve retries the retained exact-owner exit once');
         await lifecycle.applyPreset('balanced', CURVE).then(() => { throw new Error('closed owner must not accept a preset'); }, () => undefined);
+        assert(launcher.stopCalls === stopsAtExitFailure + 2 && launcher.startCalls === 1 && lifecycle.processId === 30001,
+          'each explicit retry may attempt exit once, but a denied exit never admits a successor');
         assert(!adapter.calls.slice(callsAtExitFailure).some(c => ['open', 'open-events', 'acquire', 'enable'].includes(c)),
           'pending root exit must not reopen the shutdown writer');
         exitDenied = false;
+        const stopsBeforeFinalRetry = launcher.stopCalls;
         await lifecycle.start({ manualRecovery: true }); await lifecycle.apply(curveShifted(8));
-        assert(launcher.stopCalls === 2 && launcher.startCalls === 2 && lifecycle.processId === 30002,
+        assert(launcher.stopCalls === stopsBeforeFinalRetry + 1 && launcher.startCalls === 2 && lifecycle.processId === 30002,
           'a second explicit retry must settle the retained exit, rather than reuse a shutdown Host');
         assert(adapter.calls.filter(c => c === 'close').length === 1,
           'a settled HC Close must not be replayed just to retry root exit');

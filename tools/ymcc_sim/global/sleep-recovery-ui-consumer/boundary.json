@@ -1,0 +1,271 @@
+{
+  "schemaVersion": 1,
+  "kind": "sleep-recovery-ui-reviewed-terminal-boundaries",
+  "reviewedAt": "2026-10-22T03:50:56.401Z",
+  "original": {
+    "path": "tools/sleep_recovery_ui_browser_selftest.mjs",
+    "sha256": "b312b5615f255b77cebd4d341b47e4031ce08d108248c6b695ac6c6f269cae99",
+    "assertionsUnchanged": true,
+    "fixtureMaintenance": {
+      "reason": "Old CSS class selector incompatible with current real shared control; exact role+setting label proven on prior served bundle; recovery UI moved from SleepGuardView to Settings diagnostics shared SteamRecoveryDiagnostics; exact AppIcon mouse PNG import compiled as an inline data URL",
+      "priorOriginalSha256": "d2914227fba9f4e256585e896acbcb1be7aa0a5d00a1dd6d6b98377e9244906e",
+      "currentOriginalSha256": "b312b5615f255b77cebd4d341b47e4031ce08d108248c6b695ac6c6f269cae99",
+      "changes": [
+        {
+          "before": "panel.locator('button.switch')",
+          "after": "panel.getByRole('switch',{name:'睡眠唤醒 Steam 自动修复',exact:true})",
+          "count": 1
+        },
+        {
+          "before": "cleanPage.locator('.sleep-recovery-auto button.switch')",
+          "after": "cleanPage.locator('.sleep-recovery-auto').getByRole('switch',{name:'睡眠唤醒 Steam 自动修复',exact:true})",
+          "count": 2
+        },
+        {
+          "before": "const mocks={",
+          "after": "const mocks={'@/bridge/uiLifecycle':`export const isUiVisible=()=>true;export const onUiVisibilityChange=()=>()=>{};`,'@/bridge/steamGameLink':`export const getSteamGameLink=async()=>({schemaVersion:1,phase:'unavailable',fresh:false,readOnly:true});`,",
+          "count": 1
+        },
+        {
+          "before": "import Page from './src/views/SleepGuardView.vue'",
+          "after": "import Page from './src/components/SteamRecoveryDiagnostics.vue'",
+          "count": 1
+        },
+        {
+          "before": "platform:'browser',alias:",
+          "after": "platform:'browser',loader:{'.png':'dataurl'},alias:",
+          "count": 1
+        }
+      ],
+      "originalFailurePreserved": true,
+      "businessCaseNamesUnchanged": true,
+      "allOriginalLinesUnchangedExceptThreeSelectors": false,
+      "waitsTimeoutsAndExpectedTextUnchanged": true,
+      "authorizationThread": "01a14d5e-f558-77e0-bcd0-39e028ed43ed",
+      "preRelocationOriginalSha256": "f1172e111caa8e08c2f0f70d559774484c922d29b089da2cccf71d03f99710c5",
+      "businessAssertionsAndCaseOrderPreserved": true,
+      "relocationDate": "2026-10-20",
+      "preAssetOriginalSha256": "a2af1689755c4dcf6e7380804d31264a42d83350c8467f9f29b91455b9cbcdb9",
+      "assetMaintenanceDate": "2026-10-22",
+      "assetLoaderOnly": true
+    }
+  },
+  "registryObservation": {
+    "count": 123,
+    "matchingAdapters": [],
+    "targets": [
+      "tools/sleep_recovery_ui_browser_selftest.mjs",
+      "src/bridge/sleepRecovery.ts",
+      "src/components/SleepRecoveryPanel.vue"
+    ],
+    "registrationFileSha256": "35aac21d039fc9ee90fffb15e0e5737afd16315d58bcfd24aa465a7adb3d17af",
+    "scope": "Actual CLI normal+sleep+extra registry; read only, no business execution"
+  },
+  "reviewedSources": [
+    {
+      "path": "src/bridge/sleepRecovery.ts",
+      "sha256": "b0b2976f032b34f683b262dd8ce51c98ec968fd6c360c181639c82c44ff03f64"
+    },
+    {
+      "path": "src/components/AppIcon.vue",
+      "sha256": "322efa7d1961c5a5dbbc670737f21b2dd49f8b814f7c0b0934263e4aad6f7063"
+    },
+    {
+      "path": "src/components/InlineIcon.vue",
+      "sha256": "bf3f94052bd2774dc9e2d3f684bd049f025f32d83b4eb4c25bbcd089890a8af5"
+    },
+    {
+      "path": "src/components/SleepRecoveryPanel.vue",
+      "sha256": "61f1b186549cb6622ba51f3ab6a0c3482e51d5e1175e7209cac140562450f49b"
+    },
+    {
+      "path": "src/components/SwitchControl.vue",
+      "sha256": "4e3f4e5d244486dceb03c471aeef6b9cdf132a36b6ff9b1d49c448d8c574c080"
+    },
+    {
+      "path": "src/components/Toggle.vue",
+      "sha256": "7dbd393653dc2175593ae7c1993f15dbbdfd6ba0436e23be51040c91b9efdfee"
+    },
+    {
+      "path": "src/icons.json",
+      "sha256": "f0ab4c673721c56b7fff3293ab5cffa8a8fe91eca0fcaec8e1bd3b6621372d07"
+    },
+    {
+      "path": "src/icons.ts",
+      "sha256": "e9d76c604ab5deefe6048ccea91be6952a969c6ce258d025062f36a174e0b86c"
+    },
+    {
+      "path": "src/styles/tokens.css",
+      "sha256": "4909488c688e5230c67e3a86bbc1b6ddd89133a54187e67fd593527993bbd0d7"
+    },
+    {
+      "path": "tools/sleep_recovery_ui_browser_selftest.mjs",
+      "sha256": "b312b5615f255b77cebd4d341b47e4031ce08d108248c6b695ac6c6f269cae99"
+    },
+    {
+      "path": "src/components/SteamRecoveryDiagnostics.vue",
+      "sha256": "2ba8ac7d3845ab4292ab676286e9e40c1a24b30b9a53ebb2e891eaa3a9fc0720"
+    },
+    {
+      "path": "src/assets/mouse-classic.png",
+      "sha256": "2f56d1e54a06841cd6d10e6377be663e4627b4ad0d620680502fd8e5b0f96358"
+    }
+  ],
+  "compilerOnlyReview": {
+    "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\sleep-ui-compiler-review\\review.json",
+    "sha256": "5fb0b6d382e4029e33a3380de6a08ad8c61e68c5af65689eb487ac4d6f16c9d8",
+    "compiledInputs": 24,
+    "runtimeModules": 69,
+    "browserLaunched": 0,
+    "compiledProgramExecuted": false
+  },
+  "nativeContract": {
+    "replacedModules": [
+      "@/bridge/yeman",
+      "@/bridge/api",
+      "@/bridge/ipc",
+      "./ipc only from sleepRecovery.ts"
+    ],
+    "actualSleepRecoveryBridgeAndVuePanel": true,
+    "availableMemoryCommands": [
+      "sleepRecovery.autoGet",
+      "sleepRecovery.autoSet",
+      "sleepRecovery.inspect",
+      "sleepRecovery.repair",
+      "sleepRecovery.exportFeedback"
+    ],
+    "expectedInvokedCommands": [
+      "sleepRecovery.autoGet",
+      "sleepRecovery.autoSet"
+    ],
+    "autoGetArgs": {},
+    "autoSetArgs": "exact one boolean enabled; memory sessionStorage only",
+    "forbiddenInvokedCommands": [
+      "sleepRecovery.inspect",
+      "sleepRecovery.repair",
+      "sleepRecovery.exportFeedback"
+    ],
+    "yemanPowerReads": "constant async memory values",
+    "yemanPowerWrites": "inert memory methods",
+    "wakePasswordSet": "rejecting unrelated-setting trap",
+    "shellOpen": "in-memory opened array; no actual shell"
+  },
+  "browser": {
+    "headless": true,
+    "ownedWindowsJob": true,
+    "ownedPrivateProfile": true,
+    "ownedShortScratch": true,
+    "onlyRandomOwnedLoopbackOrigin": true,
+    "pagesExpected": 2,
+    "pageErrorsExpected": 0,
+    "screenshots": [
+      "sleep-auto-switch-360.png",
+      "sleep-auto-switch-cropped.png"
+    ],
+    "semanticSettingLocator": {
+      "role": "switch",
+      "name": "睡眠唤醒 Steam 自动修复",
+      "exact": true,
+      "parent": ".sleep-recovery-auto",
+      "actualDiagnosticCount": 1
+    }
+  },
+  "ioReview": {
+    "actualCompiledSourceInputs": [
+      "src/assets/mouse-classic.png",
+      "src/bridge/sleepRecovery.ts",
+      "src/components/AppIcon.vue",
+      "src/components/InlineIcon.vue",
+      "src/components/SleepRecoveryPanel.vue",
+      "src/components/SteamRecoveryDiagnostics.vue",
+      "src/components/SwitchControl.vue",
+      "src/components/Toggle.vue",
+      "src/icons.json",
+      "src/icons.ts"
+    ],
+    "guardAndController": "Reuse frozen fan-monitor-browser-consumer/io.cjs,observe.cjs,scratch.mjs and global/host-process.ps1 unchanged",
+    "additionalObserver": "Only served response bytes, actual page errors, read-only memory-call snapshots, natural server/browser close; no program/fixture/assert edits",
+    "explicitOutput": "YMCC_SLEEP_RECOVERY_UI_OUT",
+    "explicitModules": "YMCC_UI_BROWSER_MODULE_DIR",
+    "explicitBrowser": "YMCC_UI_BROWSER_EXE",
+    "externalNetwork": false,
+    "realNativeBridge": false,
+    "realHost": false,
+    "realProcessLookup": false,
+    "userSettings": false,
+    "userMedia": false,
+    "steam": false,
+    "osSleep": false,
+    "deviceIo": false
+  },
+  "claimBoundary": "Standalone actual SteamRecoveryDiagnostics and SleepRecoveryPanel memory settings/status consumers only. Current Settings does not mount them by user decision. No product parent entry, native recovery, OS sleep, Steam or physical input acceptance.",
+  "settingsDiagnosticsRelocation": {
+    "date": "2026-10-20",
+    "onlyHostAndReadonlyFixturesChanged": true,
+    "existing22BusinessCasesAndStaleReplyFaultPreserved": true,
+    "nativeRepairOrSteamExecution": false,
+    "retiredSleepPageCompileInputs": [
+      {
+        "path": "src/components/Dropdown.vue",
+        "sha256": "c41504c0db1ff9ca6095478ba536e332d67314f0c85e49971f7a924fb027e820"
+      },
+      {
+        "path": "src/components/IntegratedPage.vue",
+        "sha256": "8e4ce2e528eddebb59c41f9d906b8d1e1a0a5a74e392dc574cfd87b18a82f96c"
+      },
+      {
+        "path": "src/components/SettingsSectionIcon.vue",
+        "sha256": "170d9fcea7209a849e889c1084411892c3fb3b8738ff04dbd82ec9505a34ac89"
+      },
+      {
+        "path": "src/components/SettingsSections.vue",
+        "sha256": "05f6c752a1f97efb9c56dafa223c443bc52476d1fce0fb3ceb962fa3f205d758"
+      },
+      {
+        "path": "src/components/Slider.vue",
+        "sha256": "ca57d2db9bd8175c7fbf13c166b10bce8a4d10466137579f89135dd86a9075c8"
+      },
+      {
+        "path": "src/gamepad/focus.ts",
+        "sha256": "2e9bace4568ce018f9ce6d3bf44c277ee585549d97fd3288e8d89ab832c36f55"
+      },
+      {
+        "path": "src/views/SleepGuardView.vue",
+        "sha256": "e5e306ab2d30e5748585673d2f3c400b8d52d2313d938e103c06ca31f486809d"
+      }
+    ]
+  },
+  "appIconAssetMaintenance": {
+    "date": "2026-10-22",
+    "priorAppIconSha256": "e65cf67cd652d4fe72c812c57931e307177b455fa464698f2a2a99e1f3723639",
+    "currentAppIconSha256": "322efa7d1961c5a5dbbc670737f21b2dd49f8b814f7c0b0934263e4aad6f7063",
+    "completeAppIconDelta": [
+      "import ../assets/mouse-classic.png",
+      "mouse-only mask span; existing SVG is the else branch",
+      "mouse mask CSS"
+    ],
+    "asset": {
+      "path": "src/assets/mouse-classic.png",
+      "sha256": "2f56d1e54a06841cd6d10e6377be663e4627b4ad0d620680502fd8e5b0f96358",
+      "bytes": 32012,
+      "loader": "dataurl"
+    },
+    "compileGraphDelta": {
+      "added": [
+        "src/assets/mouse-classic.png"
+      ],
+      "removed": []
+    },
+    "workerCopy": "Existing spec.sources snapshot and private-repo copy; no new copy mechanism or read roots",
+    "historicalCompilerOnlyReviewUnchanged": true
+  },
+  "productParentObservation": {
+    "date": "2026-10-22",
+    "path": "src/views/SettingsView.vue",
+    "sha256": "ce628ab254b16eeefec4aa7b976f2ce1cee542e363582917e7e20a56f7ba3d28",
+    "settingsMountsRecoveryDiagnostics": false,
+    "reason": "User removed the Settings UI; existing components remain standalone and are not restored",
+    "observationOnly": true,
+    "compiledByThisFixture": false
+  }
+}

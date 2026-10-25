@@ -552,7 +552,10 @@ internal sealed partial class RealHcBackend
         if (!FanRoutes.ContainsKey(candidateDevice.GetType().FullName ?? string.Empty))
             throw new InvalidOperationException($"no Host route for candidate device {candidateDevice.GetType().FullName}");
         CaptureOemBaseline();
-        sessionRouteMarker = BuildSessionRouteMarker();
+        // Mirror the production four-field session binding, not only the
+        // public diagnostic string. IsHcSessionReadyForControl reads the
+        // captured fields, so the self-test fixture must use the same helper.
+        CaptureSessionRouteMarker();
         if (markSessionOpen)
             IsOpen = true;
     }
@@ -575,7 +578,9 @@ internal sealed partial class RealHcBackend
         oemBaselineCaptured = true;
         baselineStrategy = route.RestoreStrategy;
         baselineRestoreRoute = mockDevice.GetType().FullName;
-        sessionRouteMarker = BuildSessionRouteMarker();
+        // Keep the fixture identical to the production session binding; the
+        // public marker alone is not the admission evidence.
+        CaptureSessionRouteMarker();
         IsOpen = backendOpen;
         // FAN-936 §5：自测会话同样要有一个**有效基线绑定**（生产在 `CaptureOemBaseline()` 末尾
         // 捕获）。这里直接按同一四项（设备/实例/周期/boot identity）落定，使 `RestoreOem()` /

@@ -1,0 +1,120 @@
+{
+  "schemaVersion": 1,
+  "kind": "reviewed-current-gyro-preview-source-contract",
+  "baselineSpecSha256": "8d53543602207bfda7100085820d9eb62e7656c91a325e32f3afe6eb752bddef",
+  "baselineSpecIsHistoricalAndUnmodified": true,
+  "removedHistoricalSource": {
+    "path": "src/gyroSimulation/race.ts",
+    "sha256": "b849d9304a69e3c6c305c614c41f604884b40198d73c7ab2b9e62d26b6550bef"
+  },
+  "replacement": {
+    "historicalScene": "racing",
+    "currentScene": "motorcycle",
+    "model": "src/gyroSimulation/motorcycle.ts",
+    "renderer": "src/gyroSimulation/motorcycleRenderer.ts",
+    "realComponent": "src/components/MotorcycleHandlebar.vue",
+    "proof": "Current GyroSimulationWindow imports the three actual replacements; model.ts re-exports createMotorcycle/updateMotorcycle. No stand-in race model or renderer is introduced."
+  },
+  "lifecycleReview": {
+    "currentSource": "src/bridge/uiLifecycle.ts",
+    "componentOwnedResources": "8 tracked event subscriptions/listeners, IPC subscription, RAF, width owner and haptics; root presentation listeners remain separately counted",
+    "nativeBrowserBlur": "Browser blur clears transient input while native owner remains; ipc:window.blur and real presentation visibility drive neutralize/stop",
+    "safety": "Only actual bridge terminals, DOM visibility/time/RAF/gamepad terminals are inert. Real component/model/haptics/renderers/focus/uiLifecycle are compiled and executed."
+  },
+  "sources": [
+    {
+      "path": "src/components/GyroSimulationWindow.vue",
+      "sha256": "d2d2af5f4e6444f900f21b534695d8fa6a38a582243e07e6a40a739a57aa05f3"
+    },
+    {
+      "path": "src/gyroSimulation/haptics.ts",
+      "sha256": "755a35afc8e10749c98f78357c33e88f312ad7522c0d3c42fc55d31f86d1392e"
+    },
+    {
+      "path": "src/gyroSimulation/model.ts",
+      "sha256": "c9de30a3be5fb16abb39b0df1704cc54c37532c31f664af483521a9ea3fb371e"
+    },
+    {
+      "path": "src/gyroSimulation/motorcycle.ts",
+      "sha256": "4341284d2cda93ec841a1b799900dd1ab2b4777c39eacd5d0a1a90d1ebb6ea32"
+    },
+    {
+      "path": "src/gyroSimulation/motorcycleRenderer.ts",
+      "sha256": "b42a311b8005823140990ca6465aa3095b9e0e7e977372f417d34a243b5026bc"
+    },
+    {
+      "path": "src/components/MotorcycleHandlebar.vue",
+      "sha256": "b0b96b62f2463444e7691ff0466a15d5fe659b2e78cd0cb6fa3e135ad856c8ae"
+    },
+    {
+      "path": "src/gyroSimulation/renderer.ts",
+      "sha256": "820c586f3e2395ecd0b0a85c49ee7a76bedd0a628fdbc2cca00fcddf6acde0e1"
+    },
+    {
+      "path": "src/gyroSimulation/range3d.ts",
+      "sha256": "263f31b4c6e41256bf7db9ae8eb4cff7527b27b5b9051e66fd32472f99ea2b09"
+    },
+    {
+      "path": "src/gamepad/focus.ts",
+      "sha256": "2e9bace4568ce018f9ce6d3bf44c277ee585549d97fd3288e8d89ab832c36f55"
+    },
+    {
+      "path": "src/bridge/uiLifecycle.ts",
+      "sha256": "ba428457023b8a03019a4b0f9740a83714ebac9a910cff4272262c808a0a2d99"
+    },
+    {
+      "path": "src/styles/tokens.css",
+      "sha256": "4909488c688e5230c67e3a86bbc1b6ddd89133a54187e67fd593527993bbd0d7"
+    }
+  ],
+  "authoritySources": [
+    {
+      "path": "tools/ymcc_sim/global/runner.mjs",
+      "sha256": "778598433550e8f2ca985b24125dfe751eb2123d7500cb12d935ffda80cdeea7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/bundled-node-tool-authority.mjs",
+      "sha256": "df4dc4b3b8b410315bb85c38efe73f46a8567497f2d7b22ccb7feb825ce37c46"
+    },
+    {
+      "path": "tools/ymcc_sim/global/snapshot-node-tools.mjs",
+      "sha256": "563521308628c61bacef7377bb2b9ba49c045f5f43f568ce948ba829cca84a1a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/source-snapshot.mjs",
+      "sha256": "5098f2b8a1a221ec8b4940fdc22da6e8b2d2fd171729719cfea2cf819493ba6a"
+    },
+    {
+      "path": "tools/fixtures/battery_ui_native_recovery/snapshot-node-binding.mjs",
+      "sha256": "80e67a366ecec19b1e754294dddfcdbbede48eb7e4c6d775cbc4376c2f283d7a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/execution-completion/index.mjs",
+      "sha256": "d79eb3dbe5eae5a8944fb9d706262d1cef1de0e62f8ab69284da45bef6cf7d5b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/controller-device-diagram-consumer/contract.mjs",
+      "sha256": "0a1cc68fab6f6c768a48d4ebbfb58b5384f15217b0ac476d7c1c54aed50b394c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/tool-inputs.mjs",
+      "sha256": "0cd051fadda048fa302341815365bc8b479f268303dcf49e758158249027d6cb"
+    },
+    {
+      "path": "tools/ymcc_sim/global/ui-navigation/toolchain-inputs.json",
+      "sha256": "5e9e3dffbe6533b1b70c4001f34ed8264e52339fedbb7c37cfdeabd859ea23e7"
+    }
+  ],
+  "moduleFiles": [
+    "adapter.mjs",
+    "contract.mjs",
+    "build.mjs",
+    "browser-entry.ts",
+    "ports.ts",
+    "browser-cases.mjs",
+    "run.mjs",
+    "spec.json",
+    "README.md",
+    "current-source-contract.json"
+  ]
+}

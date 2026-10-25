@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact bounded primary-owner refactor; actual semantic oracles and original live Bound gates remain required.",
+  "preimageSha256": "a4fadfb639e940edbee6263c60878d175a934aba37ce808bf3367c20f243a8ff",
+  "methods": [
+    {
+      "symbol": "inputCaptureDefaultHcMotionIdentity",
+      "before": "static bool inputCaptureDefaultHcMotionIdentity(const MachineIdentity& identity) {\n    const auto* recipe=ymcc::hc_default_motion::find(identity.deviceClass);\n    if(!recipe||!identity.resolved||!identity.gyroMatrixId.empty()||!identity.accelMatrixId.empty()) return false;\n    const auto manufacturer=normalizeHcDmi(identity.manufacturer),product=normalizeHcDmi(identity.product);\n    if(identity.family==YmccFamily::Gpd&&manufacturer==\"GPD\")\n        return (identity.deviceClass==\"HandheldCompanion.Devices.GPDWin2\"&&product==\"WIN2\") ||\n            (identity.deviceClass==\"HandheldCompanion.Devices.GPDWin3\"&&product==\"G1618-03\");\n    return identity.family==YmccFamily::ValveSteamMachine&&manufacturer==\"VALVE\"&&product==\"FREMONT\"&&\n        identity.deviceClass==\"HandheldCompanion.Devices.SteamMachine\";\n}",
+      "beforeSha256": "ced60c8a93f02eec1343dd9f6940d9493e30d7d3a125b496626327c8aaf2e2d8",
+      "afterSha256": "f54cbcbef4e37cde58c5ab35200279aec855e3ceeedf8c10d02a234c876fed5e"
+    },
+    {
+      "symbol": "inputCaptureDefaultHcMotionSelectorBound",
+      "before": "static bool inputCaptureDefaultHcMotionSelectorBound() {\n    if(!inputCaptureDefaultHcMotionIdentity(g_machineIdentity)||!g_hcMotionSelector.attempted||!g_hcMotionSelector.resolved) return false;\n    const auto* recipe=ymcc::capabilities::motion::consume(g_hcMotionSelector.unifiedBinding,\n        ymcc::capabilities::motion::Kind::Default, ymcc::hc_default_motion::recipes);\n    if(!recipe || recipe->deviceClass != g_machineIdentity.deviceClass) return false;\n    return g_hcMotionSelector.nativeFamily==static_cast<int>(g_machineIdentity.family)&&g_hcMotionSelector.deviceClass==g_machineIdentity.deviceClass&&\n        g_hcMotionSelector.dmiManufacturer==g_machineIdentity.manufacturer&&g_hcMotionSelector.dmiProduct==g_machineIdentity.product&&\n        g_hcMotionSelector.dmiSystemProduct==g_machineIdentity.systemProduct&&g_hcMotionSelector.dmiProcessor==g_machineIdentity.processor&&\n        g_hcMotionSelector.dmiSystemVersion==g_machineIdentity.systemVersion&&g_hcMotionSelector.selectorId==recipe->selectorId&&\n        g_hcMotionSelector.gyroMatrixId==recipe->gyroMatrixId&&g_hcMotionSelector.accelMatrixId==recipe->accelMatrixId&&\n        g_hcMotionSelector.matrixSourceSha256==recipe->sourceSha256;\n}",
+      "beforeSha256": "cbea6264c589a6a475292f912ce7b02ad3b7ef86cb8315a02b54fa7e0b597798",
+      "afterSha256": "3b4b65e5f702c48cf60e48b4ac5c47e51aa6332d6c46201e66591a1befe4fa19"
+    },
+    {
+      "symbol": "inputCaptureMotionSelectorBound",
+      "before": "static bool inputCaptureMotionSelectorBound() {\n    if(!g_hcMotionSelector.resolved) return false;\n    if(inputCaptureGenericHcMotionRecipe(g_machineIdentity))return inputCaptureGenericHcMotionSelectorBound();\n    if(ymcc::hc_default_motion::find(g_machineIdentity.deviceClass)) return inputCaptureDefaultHcMotionSelectorBound();\n    if (ymcc::hc_model_motion::find(g_machineIdentity.deviceClass)) return inputCaptureNewHcMotionSelectorBound();\n    if (ymcc::hc_legacy_motion::containsClass(g_machineIdentity.deviceClass)) return inputCaptureLegacyHcMotionSelectorBound();\n    return inputCapturePrivateHcMotionSelectorRecipe()!=nullptr;\n}",
+      "beforeSha256": "3364ea460aaed25157907e8df9765fb670cc7e751ac83a72d0a4400525061429",
+      "afterSha256": "42ef4c1e4d3685c9f76b25c98ec1b3045b74eabe2ba0798ffc6e6e14ba29ebf2",
+      "legacyChecks": [
+        "Original ASUS fast path and MSI-bound comparison tail"
+      ]
+    }
+  ],
+  "preservedMethods": [
+    {
+      "symbol": "inputCapturePrivateHcMotionSelectorRecipe",
+      "sha256": "c8a16c5cd98e2a9373e4b70bf7d00c21a6603840d1ef1e3235d95fa36a29cd31"
+    },
+    {
+      "symbol": "inputCaptureResolveMsiMotionSelector",
+      "sha256": "ef9f8c0685f52cd2269c1a4b49e72820e8467a86088474cc5b9985067986b9ef"
+    },
+    {
+      "symbol": "inputCaptureResolveHcMotionSelector",
+      "sha256": "c6d710cda4356ec52d904551b92d306e780f4b33424c07c99b126c33cbf033dc"
+    },
+    {
+      "symbol": "inputCaptureNewHcMotionSelectorBound",
+      "sha256": "3dce7acbc5466b8c6d4a5fa9f74be67162eba59f7edfcac33384833bbc7f87c8"
+    },
+    {
+      "symbol": "inputCaptureLegacyHcMotionSelectorBound",
+      "sha256": "8357b74ff8b9a4b9c24e5e89b99f57d9b9bb3725334785ca703f20d12bc76f08"
+    }
+  ]
+}

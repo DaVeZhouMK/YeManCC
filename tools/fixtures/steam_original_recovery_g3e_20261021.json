@@ -1,0 +1,62 @@
+{
+  "schema": "ymcc.steam-original-recovery.g3e-field-case.v1",
+  "observedOn": "2026-10-21",
+  "archiveSha256": "1bedc84c307cf13b7acca3acdf438ed1050c375315282b4b739d61b06c5cd156",
+  "userInitialSuccessFeedbackWithdrawn": true,
+  "originalGame": {
+    "pid": 15780,
+    "birthFileTime": "134370377037151739",
+    "gameId": "10307630032478011392",
+    "appid": 2399932135
+  },
+  "extraProcessPid": 2448,
+  "extraProcessInitiator": "unknown",
+  "nativeOriginalRecoveryStatus": "disabled",
+  "nativeOriginalRecoveryCallsProven": 0,
+  "generation": 2,
+  "configEpoch": 1,
+  "wakeAdmission": {
+    "boundaryFileTime": "134370377324681000",
+    "boundaryGeneration": 1,
+    "candidateWaitMs": 0,
+    "continueButtonVerified": false,
+    "deferredCandidateObserved": false,
+    "eventFileTime": "134370377588073654",
+    "gameInputVerified": false,
+    "kernelWakeConfirmed": true,
+    "latestEntryFileTime": "134370377324361352",
+    "modernStandby": true,
+    "proofFollowedPreparedBoundary": false,
+    "proofFresh": true,
+    "proofMaximumAgeMs": 60000,
+    "proofObservedGeneration": 2,
+    "proofOriginallyAwaitedCapture": true,
+    "source": "kernel-power-507-reason-1",
+    "status": "admitted"
+  },
+  "settling": {
+    "contextReady": false,
+    "continueButtonVerified": false,
+    "gameInputVerified": false,
+    "lastElapsedMs": 58547,
+    "maxObserveMs": 60000,
+    "minimumFinalizeMs": 58500,
+    "minimumObserveMs": 30000,
+    "pendingReason": "steam-original-game-association-not-current",
+    "pollMs": 1500,
+    "samples": 28,
+    "stableSinceMs": 58547,
+    "stableWindowMs": 9000
+  },
+  "attempts": {
+    "input": 1,
+    "inputDispatches": 1,
+    "list": 1,
+    "pidWindow": 0
+  },
+  "verdict": "original-instance-not-restored-primary-migrated-extra-instance",
+  "repairAccepted": false,
+  "controllerVerified": false,
+  "continueVerified": false,
+  "sampleScope": "retained logs only; not a live replay or passed generic field acceptance"
+}

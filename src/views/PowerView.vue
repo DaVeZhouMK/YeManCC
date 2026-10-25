@@ -1,189 +1,40 @@
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, onActivated, nextTick, inject, watch, type Ref } from 'vue';
+import BootModesPanel from '@/components/BootModesPanel.vue';
+import SettingsSections from '@/components/SettingsSections.vue';
+import IntegratedPage from '@/components/IntegratedPage.vue';
 import Toggle from '@/components/Toggle.vue';
-import Dropdown from '@/components/Dropdown.vue';
-import { normalizeInputStartupPreferences, STARTUP_PAD_OPTIONS, STARTUP_GYRO_OPTIONS,
-  type StartupPadPersona, type StartupGyroPreset } from '@/bridge/inputStartupPolicy';
-import WarnBar from '@/components/WarnBar.vue';
-import {
-  taskExists,
-  toggleTask,
-  fxExists,
-  fxSet,
-  joyExists,
-  joySet,
-  searchState,
-  openSearchFolder,
-  readGamingHomeConfiguration,
-  writeGamingHomeStartup,
-  BOOT_CONTROL_CENTER_TASK,
-  readBootMirrorState,
-  toggleBootMirror,
-  BOOT_MIRROR_CHANGED_EVENT,
-  readHardwareGpuSchedule,
-  writeHardwareGpuSchedule,
-  readBootRtssState,
-  toggleBootRtss,
-  steamMasterOn,
-  steamMasterSet,
-} from '@/bridge/yeman';
-import { shell, fs } from '@/bridge/api';
-import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
-import { readTrayResident, setTrayResident } from '@/bridge/trayResident';
-import { deleteAllYemanTasks, restoreAllYemanTasks } from '@/bridge/yeman';
 import InlineIcon from '@/components/InlineIcon.vue';
-import type { GamingHomeState } from '@/bridge/gamingHomePolicy';
-
-const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
-const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
-const bootOn = ref(false);
-const startupPad = ref<StartupPadPersona>('disabled');
-const startupGyro = ref<StartupGyroPreset>('off');
-const startupInputLoaded = ref(false);
-const startupInputBusy = ref(false);
-let startupInputGeneration = 0;
-async function refreshInputStartup(): Promise<void> {
-  const generation = ++startupInputGeneration;
-  const raw = await readSettingsSection('startupDesired');
-  if (generation !== startupInputGeneration || startupInputBusy.value) return;
-  const preferences = normalizeInputStartupPreferences(raw);
-  startupPad.value = preferences.virtualGamepadPersona;
-  startupGyro.value = preferences.gyroPreset;
-  startupInputLoaded.value = true;
+import {ref,reactive,onMounted,onUnmounted,onActivated,inject,watch,type Ref} from 'vue';
+import {taskExists,toggleTask,searchState,openSearchFolder,readBootMirrorState,toggleBootMirror,BOOT_MIRROR_CHANGED_EVENT,readHardwareGpuSchedule,writeHardwareGpuSchedule,readBootRtssState,toggleBootRtss,deleteAllYemanTasks,restoreAllYemanTasks} from '@/bridge/yeman';
+import {shell} from '@/bridge/api';
+import {DESKTOP_MODE_BOOT_TASK,DESKTOP_MODE_BOOT_CHANGED_EVENT,setDesktopModeStartup} from '@/bridge/desktopModeStartup';
+import {readSettingsSection,saveSettingsSection} from '@/bridge/settingsRepository';
+const desktopBootOn=ref(false),bootOn=ref(false),fanControlOnBoot=ref(false),rtssBootOn=ref(false),steamCommunityBoot=ref(false),hardwareGpuSchedule=ref(false);
+const tasks=reactive({energyStar:false,cleanMem:false});type TaskKey=keyof typeof tasks;
+const STEAMCOMMUNITY_TASK='Steamcommunity_302';
+const searchSt=ref<'hidden'|'trimmed'|'full'>('full');
+const busy=ref(false),errMsg=ref(''),taskToolsBusy=ref(false),taskToolsMsg=ref('');
+let fanBootSettingRevision=0,desktopBootSettingRevision=0,refreshRevision=0;
+async function safeExists(name:string){return taskExists(name).catch(()=>false);}
+async function refresh(){
+ const revision=++refreshRevision,fanRevision=fanBootSettingRevision,desktopRevision=desktopBootSettingRevision;
+ const results=await Promise.allSettled([safeExists('节能-能源之星'),safeExists('内存-开机自动内存清理并关闭'),safeExists(STEAMCOMMUNITY_TASK),searchState(),readBootMirrorState(),readBootRtssState(),readSettingsSection<{fanControl?:boolean}>('startupDesired'),readHardwareGpuSchedule(),safeExists(DESKTOP_MODE_BOOT_TASK)]);
+ if(revision!==refreshRevision||busy.value)return;
+ const [energy,memory,community,search,boot,rtss,fan,gpu,desktop]=results;
+ if(energy.status==='fulfilled')tasks.energyStar=energy.value;if(memory.status==='fulfilled')tasks.cleanMem=memory.value;
+ if(community.status==='fulfilled')steamCommunityBoot.value=community.value;if(search.status==='fulfilled')searchSt.value=search.value;
+ if(boot.status==='fulfilled')bootOn.value=boot.value;if(rtss.status==='fulfilled')rtssBootOn.value=rtss.value;
+ if(fanRevision===fanBootSettingRevision&&fan.status==='fulfilled')fanControlOnBoot.value=fan.value.fanControl===true;
+ if(gpu.status==='fulfilled')hardwareGpuSchedule.value=gpu.value;
+ if(desktopRevision===desktopBootSettingRevision&&desktop.status==='fulfilled')desktopBootOn.value=desktop.value;
+ if(results.some(result=>result.status==='rejected'))errMsg.value='部分通用启动状态未能读取，可收回后重新打开。';
 }
-async function saveInputStartup(rawPad: string | number, rawGyro: string | number): Promise<void> {
-  if (!startupInputLoaded.value || startupInputBusy.value || busy.value) return;
-  const next = normalizeInputStartupPreferences({ virtualGamepadPersona: rawPad, gyroPreset: rawGyro });
-  startupInputGeneration += 1;
-  startupInputBusy.value = true; errMsg.value = '';
-  try {
-    // Save boot intent only. Never alter the currently running input/persona.
-    await saveSettingsSection('startupDesired', next);
-    startupPad.value = next.virtualGamepadPersona; startupGyro.value = next.gyroPreset;
-  } catch (error) {
-    errMsg.value = '输入开机启动设置失败：' + (error as Error).message;
-  } finally { startupInputBusy.value = false; }
+async function onDesktopBootToggle(v:boolean) {
+ errMsg.value='';busy.value=true;++desktopBootSettingRevision;const previous=desktopBootOn.value;
+ try{await setDesktopModeStartup(v);desktopBootOn.value=v;}
+ catch(error){desktopBootOn.value=previous;errMsg.value='桌面模式开机设置失败：'+(error as Error).message;}
+ finally{busy.value=false;}
 }
-function onStartupPad(raw: string | number): void {
-  if (!STARTUP_PAD_OPTIONS.some(option => option.value === raw)) return;
-  void saveInputStartup(raw, startupGyro.value);
-}
-function onStartupGyro(raw: string | number): void {
-  if (startupPad.value === 'disabled' || !STARTUP_GYRO_OPTIONS.some(option => option.value === raw)) return;
-  void saveInputStartup(startupPad.value, raw);
-}
-const fanControlOnBoot = ref(false);
-const rtssBootOn = ref(false);
-
-const tasks = reactive({ desktopMode: false, energyStar: false, cleanMem: false });
-type TaskKey = keyof typeof tasks;
-const audioOpt = ref(false);
-const steamCommunityBoot = ref(false);
-const STEAMCOMMUNITY_TASK = 'Steamcommunity_302';
-const joyMouse = ref(false);
-const searchSt = ref<'hidden' | 'trimmed' | 'full'>('full');
-
-const busy = ref(false);
-const errMsg = ref('');
-const taskToolsBusy = ref(false);
-const taskToolsMsg = ref('');
-
-// 任务栏常驻（托盘）开关：默认不常驻；由前端持久化 + 启动期套用
-const trayResident = ref(false);
-const hardwareGpuSchedule = ref(false);
-
-// Persistent system state is independent of Steam, tray and legacy task existence.
-const startupGamingHome = ref(false);
-const handheldConfigured = ref(false);
-const steamEarlyStart = ref(false);
-
-async function safeExists(name: string): Promise<boolean> {
-  try {
-    return await taskExists(name);
-  } catch {
-    return false;
-  }
-}
-
-async function readBootState(): Promise<boolean> {
-  let configured = false;
-  try {
-    const startup = await readSettingsSection<any>('startupDesired');
-    configured = startup.bootControlCenter === true;
-  } catch { /* 使用任务计划真实状态 */ }
-  const actual = await readBootMirrorState();
-  if (configured && !actual) {
-    try {
-      await toggleBootMirror(true);
-      return true;
-    } catch { /* 页面显示真实状态 */ }
-  }
-  return actual;
-}
-
-const xboxSuiteEnabled = computed(() => handheldConfigured.value && startupGamingHome.value);
-function applyGamingHomeState(state: GamingHomeState): void {
-  handheldConfigured.value = state?.deviceForm === 46;
-  startupGamingHome.value = state?.startupEnabled === true;
-}
-async function refreshXboxSuiteState(): Promise<void> {
-  // Observe only. Task absence, a failed query or a page visit must NEVER disable startup.
-  applyGamingHomeState(await readGamingHomeConfiguration());
-}
-async function onXboxSuiteToggle(enabled: boolean): Promise<void> {
-  if (busy.value) return;
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    if (!await writeGamingHomeStartup(enabled)) throw new Error('全屏启动配置写入失败');
-    await refreshXboxSuiteState();
-    if (enabled !== xboxSuiteEnabled.value) throw new Error('全屏启动配置回读不一致');
-  } catch (e) {
-    await refreshXboxSuiteState().catch(() => {});
-    errMsg.value = '全屏游戏模式设置失败：' + (e as Error).message;
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function refresh() {
-  errMsg.value = '';
-  void refreshInputStartup().catch((error) => { errMsg.value = '读取输入开机配置失败：' + (error as Error).message; });
-  // 清理旧版本遗留的 AMD395 任务，避免它继续在开机时执行。
-  await toggleTask('Bug修复-AMD-395', false).catch(() => {});
-  // 并行异步加载（不串行等待，不阻塞渲染）
-  const [dmRes, steamEarlyStartRes, gamingRes, esRes, cmRes, fxRes, steamCommunityRes, joyRes, searchRes, bootRes, rtssBootRes, fanBootRes] = await Promise.allSettled([
-    safeExists('桌面模式-开机设置为桌面模式'),
-    steamMasterOn(),
-    readGamingHomeConfiguration(),
-    safeExists('节能-能源之星'),
-    safeExists('内存-开机自动内存清理并关闭'),
-    fxExists(),
-    safeExists(STEAMCOMMUNITY_TASK),
-    joyExists(),
-    searchState(),
-    readBootState(),
-    readBootRtssState(),
-    readSettingsSection<{ fanControl?: boolean }>('startupDesired'),
-  ]);
-  if (dmRes.status === 'fulfilled') tasks.desktopMode = dmRes.value;
-  if (steamEarlyStartRes.status === 'fulfilled') steamEarlyStart.value = steamEarlyStartRes.value;
-  if (gamingRes.status === 'fulfilled') applyGamingHomeState(gamingRes.value);
-  else errMsg.value = '读取全屏启动配置失败：' + String(gamingRes.reason);
-  if (esRes.status === 'fulfilled') tasks.energyStar = esRes.value;
-  if (cmRes.status === 'fulfilled') tasks.cleanMem = cmRes.value;
-  if (fxRes.status === 'fulfilled') audioOpt.value = fxRes.value;
-  if (steamCommunityRes.status === 'fulfilled') steamCommunityBoot.value = steamCommunityRes.value;
-  if (joyRes.status === 'fulfilled') joyMouse.value = joyRes.value;
-  if (searchRes.status === 'fulfilled') searchSt.value = searchRes.value;
-  if (bootRes.status === 'fulfilled') bootOn.value = bootRes.value;
-  if (rtssBootRes.status === 'fulfilled') rtssBootOn.value = rtssBootRes.value;
-  if (fanBootRes.status === 'fulfilled') fanControlOnBoot.value = fanBootRes.value.fanControl === true;
-  trayResident.value = await readTrayResident().catch(() => false);
-  hardwareGpuSchedule.value = await readHardwareGpuSchedule().catch(() => false);
-  // Refresh never writes gaming configuration or changes taskbar residency.
-}
-
 async function onBootToggle(v: boolean) {
   errMsg.value = '';
   busy.value = true;
@@ -201,6 +52,8 @@ async function onBootToggle(v: boolean) {
 }
 
 async function onFanControlBootToggle(v: boolean): Promise<void> {
+  if (busy.value) return;
+  fanBootSettingRevision += 1;
   errMsg.value = '';
   const prev = fanControlOnBoot.value;
   fanControlOnBoot.value = v;
@@ -225,23 +78,6 @@ async function toggleTaskSafe(name: string, on: boolean, key: TaskKey) {
   } catch (e) {
     tasks[key] = await safeExists(name).catch(() => !on); // 回滚到真实状态
     errMsg.value = '任务计划操作失败：' + (e as Error).message + '（需管理员权限）';
-  } finally {
-    busy.value = false;
-  }
-}
-
-// 任务栏常驻：开→任务栏按钮(移除托盘)；关→仅托盘（默认）
-async function onTrayResident(v: boolean) {
-  if (busy.value) return;
-  errMsg.value = '';
-  busy.value = true;
-  const prev = trayResident.value;
-  trayResident.value = v; // 乐观更新
-  try {
-    await setTrayResident(v);
-  } catch (e) {
-    trayResident.value = await readTrayResident().catch(() => prev); // Do not claim rollback unless it persisted.
-    errMsg.value = '任务栏常驻设置失败：' + (e as Error).message;
   } finally {
     busy.value = false;
   }
@@ -289,34 +125,6 @@ async function restoreAllTasks() {
   }
 }
 
-async function onFx(v: boolean) {
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    await fxSet(v);
-    audioOpt.value = v;
-  } catch (e) {
-    audioOpt.value = !v;
-    errMsg.value = 'FxSound 设置失败：' + (e as Error).message;
-  } finally {
-    busy.value = false;
-  }
-}
-
-async function onSteamEarlyStart(v: boolean) {
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    await steamMasterSet(v);
-    steamEarlyStart.value = v;
-  } catch (e) {
-    steamEarlyStart.value = !v;
-    errMsg.value = '写入 .earlystart 失败：' + (e as Error).message;
-  } finally {
-    busy.value = false;
-  }
-}
-
 async function onHardwareGpuSchedule(v: boolean) {
   const prev = hardwareGpuSchedule.value;
   hardwareGpuSchedule.value = v;
@@ -329,6 +137,7 @@ async function onHardwareGpuSchedule(v: boolean) {
     errMsg.value = '硬件加速GPU计划设置失败：' + (e as Error).message;
   }
 }
+
 async function onSteamCommunityBoot(v: boolean) {
   errMsg.value = '';
   const prev = steamCommunityBoot.value;
@@ -344,19 +153,7 @@ async function onSteamCommunityBoot(v: boolean) {
     busy.value = false;
   }
 }
-async function onJoy(v: boolean) {
-  errMsg.value = '';
-  busy.value = true;
-  try {
-    await joySet(v);
-    joyMouse.value = v;
-  } catch (e) {
-    joyMouse.value = !v;
-    errMsg.value = 'Joyxoff 设置失败：' + (e as Error).message;
-  } finally {
-    busy.value = false;
-  }
-}
+
 async function onBootRtssToggle(v: boolean) {
   const prev = rtssBootOn.value;
   rtssBootOn.value = v;
@@ -371,11 +168,6 @@ async function onBootRtssToggle(v: boolean) {
   }
 }
 
-const searchText = computed(() => {
-  if (searchSt.value === 'hidden') return '不可用（系统版本差异）';
-  if (searchSt.value === 'trimmed') return '任务栏搜索已精简 [点击恢复]';
-  return '任务栏搜索存在多进程 [点击精简]';
-});
 async function onSearch() {
   try {
     await openSearchFolder();
@@ -383,113 +175,58 @@ async function onSearch() {
     /* ignore */
   }
 }
-
-
-// ── 全局刷新监听（App 预加载 / 支持页刷新按钮）──
-const globalRefreshKey = inject<Ref<number>>('globalRefreshKey');
-if (globalRefreshKey) {
-  // watch 已在顶部静态导入；动态 import('vue') 会造成异步微任务延迟注册，
-  // 刷新事件可能在注册前触发而丢失（2026-08-05 修复）。
-  watch(globalRefreshKey, () => refresh());
-}
-
-onMounted(() => nextTick(refresh));
-async function onBootMirrorChanged() {
-  try {
-    bootOn.value = await readBootMirrorState();
-  } catch {
-  }
-}
-onMounted(() => window.addEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
-onUnmounted(() => window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT, onBootMirrorChanged));
-// KeepAlive 缓存下切回本页时主动刷新，避免「其它页面改了开机启动项切回来仍显示旧状态」
-// （2026-08-05 补充 onActivated）。
-onActivated(() => {
-  refresh().catch(() => {});
-});
+const globalRefreshKey=inject<Ref<number>>('globalRefreshKey');if(globalRefreshKey)watch(globalRefreshKey,()=>{void refresh();});
+async function onBootMirrorChanged(){bootOn.value=await readBootMirrorState().catch(()=>bootOn.value);}
+function onDesktopModeBootChanged(event:Event){const value=(event as CustomEvent<{enabled:boolean}>).detail?.enabled;if(typeof value==='boolean'){++desktopBootSettingRevision;desktopBootOn.value=value;}}
+onMounted(()=>{window.addEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.addEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);});
+onUnmounted(()=>{refreshRevision++;window.removeEventListener(BOOT_MIRROR_CHANGED_EVENT,onBootMirrorChanged);window.removeEventListener(DESKTOP_MODE_BOOT_CHANGED_EVENT,onDesktopModeBootChanged);});
+onActivated(()=>{void refresh();});
 </script>
 
 <template>
-  <div class="page">
-    <div v-if="errMsg" class="err-bar">{{ errMsg }}</div>
-    <div v-if="taskToolsMsg" class="info-bar">{{ taskToolsMsg }}</div>
-
-    <section class="card">
-      <h3 class="card-title steam-xbox-title"><InlineIcon name="rocket" /> Xbox全屏游戏模式</h3>
-      <p class="steam-xbox-subtitle">基于Xbox全屏兼容Steam大屏启动</p>
-      <Toggle
-        :model-value="xboxSuiteEnabled"
-        label="开机进入Xbox全屏游戏模式"
-        color="accent"
-        :disabled="busy"
-        @update:model-value="onXboxSuiteToggle"
-      />
-      <Toggle :model-value="trayResident" label="任务栏常驻" description="独立控制全屏模式中的 YMCC 任务栏入口" color="accent" :disabled="busy" @update:model-value="onTrayResident" />
-      <WarnBar v-if="startupGamingHome && !trayResident" text="任务栏常驻关闭时，全屏模式中的 YMCC 入口可能不可用；不影响系统全屏自启动配置" />
-    </section>
-
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="steam" /> Steam大屏开机启动</h3>
-      <Toggle v-model="steamEarlyStart" label="Steam高级开机启动(earlystart)" description="开启的是Steam大屏页面的联动模式" color="accent" :disabled="busy" @update:model-value="onSteamEarlyStart" />
-    </section>
-
-    <section class="card">
-      <h3 class="card-title"><InlineIcon name="star" /> 开机启动项</h3>
-      <div class="startup-input-row" data-input-startup="pad">
-        <span>开机启动虚拟手柄</span>
-        <Dropdown :model-value="startupPad" :options="STARTUP_PAD_OPTIONS" aria-label="开机启动虚拟手柄"
-          :disabled="busy || startupInputBusy || !startupInputLoaded" @update:model-value="onStartupPad" />
-      </div>
-      <div class="startup-input-row" data-input-startup="gyro" :class="{ disabled: startupPad === 'disabled' }">
-        <span>开机启动陀螺仪</span>
-        <Dropdown :model-value="startupPad === 'disabled' ? 'off' : startupGyro" :options="STARTUP_GYRO_OPTIONS" aria-label="开机启动陀螺仪"
-          :disabled="busy || startupInputBusy || !startupInputLoaded || startupPad === 'disabled'" @update:model-value="onStartupGyro" />
-      </div>
-      <Toggle
-        v-model="bootOn"
-        label="开机启动野蛮控制中心"
-        description="登录系统后自动启动控制中心"
-        color="accent"
-        :disabled="busy"
-        @update:model-value="onBootToggle"
-      />
-      <Toggle
-        v-model="fanControlOnBoot"
-        label="开机/休眠唤醒启动风扇"
+<IntegratedPage class="boot-startup-page" title="开机模式" hide-heading><div class="page startup-sections" data-gp-scope="power-startup"><BootModesPanel/><section class="boot-common-startup"><header class="boot-common-heading"><h2>通用开机启动</h2></header><div v-if="errMsg" class="err-bar">{{errMsg}}</div><div v-if="taskToolsMsg" class="info-bar">{{taskToolsMsg}}</div>
+ <section class="settings-section-panel" aria-label="启动服务" data-boot-startup-group="services"><div class="startup-setting-list"><Toggle v-model="bootOn" label="启动 YeManCC野蛮系统控制中心" description="登录系统后自动启动控制中心" :disabled="busy" @update:model-value="onBootToggle"/><Toggle :model-value="desktopBootOn" label="全局桌面模式" :disabled="busy" @update:model-value="onDesktopBootToggle"/><Toggle
+        :model-value="fanControlOnBoot"
+        label="风扇控制"
         description="根据适配机型自动启动风扇"
         color="accent"
         :disabled="busy"
         @update:model-value="onFanControlBootToggle"
       />
-      <Toggle v-model="tasks.desktopMode" label="桌面模式" description="开机设置为桌面模式" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('桌面模式-开机设置为桌面模式', v, 'desktopMode')" />
-      <Toggle
+<Toggle
         v-model="rtssBootOn"
-        label="开机启动 RTSS 监控"
+        label="RTSS 监控"
         description="登录系统后自动启动 RTSS 监控"
         color="accent"
         :disabled="busy"
         @update:model-value="onBootRtssToggle"
       />
-      <Toggle v-model="tasks.energyStar" label="开机能源之星自动优化" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
-      <Toggle v-model="tasks.cleanMem" label="开机清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
-      <Toggle v-model="audioOpt" label="开机启动音质优化 (FxSound)" color="accent" :disabled="busy" @update:model-value="onFx" />
-      <Toggle v-model="steamCommunityBoot" label="开机启动加速Steam(Steamcommunity)" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
-      <Toggle v-model="joyMouse" label="开机启动手柄模拟鼠标 (Joyxoff)" color="accent" :disabled="busy" @update:model-value="onJoy" />
-      <Toggle v-model="hardwareGpuSchedule" label="硬件加速GPU计划" description="关闭时解决AMD395游戏BUG" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" />
-      <div class="row">
+<Toggle v-model="tasks.energyStar" label="能源之星" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('节能-能源之星', v, 'energyStar')" />
+<Toggle v-model="tasks.cleanMem" label="清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
+
+<Toggle v-model="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
+<Toggle v-model="hardwareGpuSchedule" label="硬件加速GPU计划" description="关闭时解决AMD395游戏BUG" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" /></div></section>
+ <section class="settings-section-panel" aria-label="系统工具" data-boot-startup-group="tools"><header class="settings-section-heading"><h3><InlineIcon name="tools"/>系统工具</h3></header><div class="startup-setting-list"><div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>
-        <button class="mini-btn" @click="onSearch">{{ searchText }}</button>
-      </div>
-      <div class="task-tools" aria-label="任务计划批量管理">
-        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="openBootTaskTool">开机启动调节程序</button>
-        <button class="task-tool-btn danger" :disabled="taskToolsBusy || busy" @click="closeAllYemanTasks">关闭野蛮系统全部任务</button>
-        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="restoreAllTasks">恢复野蛮系统全部任务</button>
-      </div>
-    </section>
-  </div>
+        <button class="mini-btn" @click="onSearch">{{searchSt==='hidden'?'不可用':searchSt==='trimmed'?'恢复搜索':'精简搜索'}}</button>
+      </div></div><h4 class="startup-tools-title">任务计划维护</h4><div class="task-tools" aria-label="任务计划批量管理">
+        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="openBootTaskTool">打开启动管理</button>
+        <button class="task-tool-btn danger" :disabled="taskToolsBusy || busy" @click="closeAllYemanTasks">关闭全部任务</button>
+        <button class="task-tool-btn" :disabled="taskToolsBusy || busy" @click="restoreAllTasks">恢复全部任务</button>
+      </div></section>
+ </section></div></IntegratedPage>
 </template>
 
 <style scoped>
+/* Async read receipts must not anchor the shared scrollport to lower startup controls. */
+.boot-startup-page{overflow-anchor:none}
+
+.boot-common-heading{display:flex;align-items:center;margin:6px 0 11px}.boot-common-heading h2{font-size:17px;margin:0}
+.boot-common-startup{margin-top:14px!important;padding-top:12px!important}.settings-section-panel{min-width:0;margin:0 0 10px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--console-surface,var(--bg-panel))}.settings-section-heading{padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border)}.settings-section-heading h3{display:flex;align-items:center;gap:7px;font-size:16px;margin:0;color:var(--text)}.settings-section-heading :deep(.inline-icon){color:var(--accent)}
+.boot-common-startup :deep(.toggle-desc){display:none}.boot-common-startup :deep(.startup-setting-list>.toggle-row){padding:9px 0;min-width:0;gap:8px}.boot-common-startup .task-tools{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.boot-common-startup .task-tool-btn{text-align:center;font-size:14px;padding:7px 5px}.boot-common-startup .startup-tools-title{font-size:14px;margin:10px 0 6px}.boot-common-startup .row{display:flex;justify-content:space-between;gap:12px}.boot-common-startup .mini-btn{font-size:14px;white-space:nowrap;min-width:110px;text-align:center}
+
+.boot-common-startup{margin-top:8px;border-top:1px solid var(--border);padding-top:10px}.boot-common-startup>summary{cursor:pointer;font-size:13px;color:var(--text-dim);padding:8px 0}
+
 .startup-input-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:9px 0}
 .startup-input-row>span{flex:0 0 auto;font-size:12px}
 .startup-input-row :deep(.dd){width:180px;max-width:55%;flex:0 1 180px}
@@ -585,4 +322,12 @@ onActivated(() => {
 .mini-btn:focus-visible {
   box-shadow: var(--focus-ring);
 }
+</style>
+
+<style>
+.startup-sections .startup-setting-list>.toggle-row{padding:11px 0!important;margin:0!important;border-bottom:1px solid rgba(146,169,198,.11);border-radius:0!important;background:transparent!important}.startup-sections .startup-setting-list>.toggle-row:last-child{border-bottom:0}.startup-sections .toggle-row .toggle-label{font-size:14px!important}.startup-sections .toggle-row .toggle-desc{font-size:12px!important;line-height:1.5!important}
+.startup-sections .startup-input-row{padding:14px 0;border-bottom:1px solid rgba(146,169,198,.12)}.startup-sections .startup-input-row>span{font-size:14px}.startup-sections .startup-input-row .dd{max-width:62%;width:190px;flex-basis:190px}.startup-sections .startup-input-row .dd-trigger{min-height:40px!important}
+.startup-input-banner{display:flex;align-items:center;gap:12px;padding:18px 0 12px;color:var(--accent)}.startup-input-banner>svg{width:34px;height:34px}.startup-input-banner b{font-size:14px}.startup-input-banner p{font-size:12px;color:var(--text-dim);margin:4px 0 0;line-height:1.6}
+.startup-tools-title{font-size:14px;margin:18px 0 10px;color:var(--text)}.startup-sections .task-tools{grid-template-columns:1fr;gap:8px}.startup-sections .task-tool-btn{font-size:13px;min-height:39px;text-align:left;padding:8px 12px}.startup-sections .row{padding:12px 0;margin:0;font-size:14px}.startup-sections .mini-btn{font-size:13px;min-height:36px}
+
 </style>

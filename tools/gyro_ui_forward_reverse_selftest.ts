@@ -18,7 +18,8 @@ import {
 import { assembleCanonicalFrame } from '../src/bridge/virtualReportAssembler';
 import { normalizeSettings } from '../src/bridge/settingsRepository';
 import type { GyroMotionConfigV1 } from '../src/bridge/inputContracts';
-import { normalizeGyroTelemetry } from '../src/bridge/inputContracts';
+import { normalizeGyroTelemetry, validateInputSnapshot } from '../src/bridge/inputContracts';
+import { VIRTUAL_OUTPUT_PERSONAS } from '../src/bridge/controllerPersona';
 import {
   commitCurveRows,
   curveRowsIssue,
@@ -491,16 +492,16 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
   }
 }
 
-// ---------------------------------------------------------------- U2C outputMode 输出门（virtual-stick/ds4-imu/disabled）
+// ---------------------------------------------------------------- U2C outputMode 输出门（virtual-stick/disabled；废弃模式只作负例）
 {
   // HC 无直接枚举等价（陀螺仪动作恒经虚拟手柄→LayoutManager），YMCC 的
   // outputMode 是持久化输出目标门：
   //   virtual-stick -> 陀螺仪成为混棒贡献（唯一放行模式）；
   //   disabled      -> 零贡献（保留物理帧）；
-  //   ds4-imu       -> persona 冲突拒绝（inputContracts.ts:277：Xbox360 无 IMU 传输）。
+  // 废弃的 ds4-imu 只作不可信旧值负例；Edge 正常报告内的原始 IMU 路径不属于此动作门。
   // native main.cpp:5164-5165: nextMotionActionEnabled = enabled && outputMode=="virtual-stick"。
   // mapper gyroMotionMapperMock.ts:89: outputMode!="virtual-stick" -> zeroFrame。
-  // 正向推演：enabled=true + disabled/ds4-imu -> 零贡献；virtual-stick -> 正常贡献。
+  // 正向推演：enabled=true + disabled -> 零贡献；virtual-stick -> 正常贡献。
   const gActive = { x: 40, y: 0, z: 20 };
   const active = mapGyroSample(context, { ...base, outputMode: 'virtual-stick', motionMode: 'on' }, sample(gActive, 90, 90));
   if (!active.ok || active.frame.contribution.x === 0 || active.frame.contribution.y === 0) {
@@ -512,10 +513,12 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
   if (disabledActive || disabled.frame.contribution.x !== 0 || disabled.frame.contribution.y !== 0) {
     throw new Error('U2C fwd: disabled outputMode must zero contribution');
   }
-  const ds4Imu = mapGyroSample(context, { ...base, outputMode: 'ds4-imu', motionMode: 'on' }, sample(gActive, 92, 92));
-  if (!ds4Imu.ok) throw new Error('U2C fwd: ds4-imu outputMode map failed');
-  if (ds4Imu.frame.contribution.x !== 0 || ds4Imu.frame.contribution.y !== 0) {
-    throw new Error('U2C fwd: ds4-imu (non-virtual-stick) must zero contribution on mapper');
+  // 刻意绕过 TS 类型：旧模式即使抵达 mapper 也不能产生混棒贡献。
+  const retiredMode = 'ds4-imu' as unknown as GyroMotionConfigV1['outputMode'];
+  const retiredModeResult = mapGyroSample(context, { ...base, outputMode: retiredMode, motionMode: 'on' }, sample(gActive, 92, 92));
+  if (!retiredModeResult.ok) throw new Error('U2C fwd: retired mode zero-contribution guard failed');
+  if (retiredModeResult.frame.contribution.x !== 0 || retiredModeResult.frame.contribution.y !== 0) {
+    throw new Error('U2C fwd: retired direct IMU mode produced a stick contribution');
   }
   // 反向推演：零贡献源可还原为 outputMode != virtual-stick；还原后重开 virtual-stick 恢复贡献。
   if (active.frame.contribution.x === disabled.frame.contribution.x) throw new Error('U2C reverse: disabled must differ from active');
@@ -523,23 +526,30 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
   if (!reEnabled.ok || reEnabled.frame.contribution.x !== active.frame.contribution.x || reEnabled.frame.contribution.y !== active.frame.contribution.y) {
     throw new Error('U2C reverse: reopening virtual-stick must restore identical contribution');
   }
-  // settings 归一化：非法输出门回落 disabled；virtual-stick/ds4-imu/disabled 三值保留。
+  // settings 归一化：current 两值保留，非法和废弃输出门回落 disabled。
   const nonVirtualNorm = normalizeSettings({ input: { gyroMotion: { ...base, outputMode: 'bogus' as never } } });
   if (nonVirtualNorm.input.gyroMotion.outputMode !== 'disabled') {
     throw new Error(`U2C fwd: invalid outputMode must normalize to disabled, got=${nonVirtualNorm.input.gyroMotion.outputMode}`);
   }
-  const ds4Norm = normalizeSettings({ input: { gyroMotion: { ...base, outputMode: 'ds4-imu' as never } } });
-  if (ds4Norm.input.gyroMotion.outputMode !== 'ds4-imu') throw new Error('U2C fwd: ds4-imu outputMode must survive normalization');
-  // 契约级排序（inputContracts.ts:277）：xbox360 persona + ds4-imu outputMode -> persona-conflict。
-  const { validateInputSnapshot } = require('../src/bridge/inputContracts') as typeof import('../src/bridge/inputContracts');
-  const conflict = validateInputSnapshot({
-    schemaVersion: 1, revision: 1,
-    outputTarget: { schemaVersion: 1, persona: 'xbox360', gyroEnabled: true, closure: 'CLOSED', descriptorHash: 'd', buttonMappingEnabled: false },
-    gyroMotion: { ...base, outputMode: 'ds4-imu', enabled: true, closure: 'CLOSED', provider: 'fixture', unit: 'deg/s', calibrationId: 'c', revision: 1, schemaVersion: 1 },
-    capability: { realRuntimeAuthorized: false, hcAssetId: 'x' },
-  });
-  if (conflict.ok || conflict.reason !== 'persona-conflict') {
-    throw new Error(`U2C reverse: xbox360 + ds4-imu must be rejected, got=${conflict.reason}`);
+  for (const outputMode of ['virtual-stick', 'disabled'] as const) {
+    const currentNorm = normalizeSettings({ input: { gyroMotion: { ...base, outputMode } } });
+    if (currentNorm.input.gyroMotion.outputMode !== outputMode) throw new Error(`U2C fwd: current outputMode did not survive normalization: ${outputMode}`);
+  }
+  const retiredNorm = normalizeSettings({ input: { gyroMotion: { ...base, outputMode: retiredMode } } });
+  if (retiredNorm.input.gyroMotion.outputMode !== 'disabled') throw new Error('U2C fwd: retired direct IMU mode must normalize to disabled');
+  // current persona 的正常动作合同可用；未归一化的废弃模式在合同边界统一拒绝。
+  for (const persona of VIRTUAL_OUTPUT_PERSONAS) {
+    const snapshot = {
+      schemaVersion: 1, revision: 1,
+      outputTarget: { schemaVersion: 1 as const, persona, gyroEnabled: true, closure: 'CLOSED' as const, descriptorHash: 'd', buttonMappingEnabled: false },
+      gyroMotion: { ...base, enabled: true },
+      capability: { realRuntimeAuthorized: false, hcAssetId: 'x' },
+    };
+    if (!validateInputSnapshot(snapshot).ok) throw new Error(`U2C fwd: current virtual-stick contract rejected: ${persona}`);
+    const conflict = validateInputSnapshot({ ...snapshot, gyroMotion: { ...snapshot.gyroMotion, outputMode: retiredMode } });
+    if (conflict.ok || conflict.reason !== 'persona-conflict') {
+      throw new Error(`U2C reverse: retired direct IMU mode must be rejected for ${persona}, got=${conflict.reason}`);
+    }
   }
 }
 
@@ -687,8 +697,8 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
   const modified = applyHcGyroAxisModifiers(rawShort, { innerDeadzone: 10, outerDeadzone: 0, antiDeadzone: 15, outputShape: 'default' });
   const wantBlend = blendGyroShortIntoStick({ x: hcUnitToShort(baseStick.x), y: hcUnitToShort(baseStick.y) }, modified, 1.2);
   const assembled = assembleCanonicalFrame(
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, inputSequence: 40, timestamp: 40, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, sampleSequence: 41, timestamp: 41, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'elite' as const, configRevision: 1, inputSequence: 40, timestamp: 40, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', configRevision: 1, sampleSequence: 41, timestamp: 41, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
     { gyroWeight: 1.2, innerDeadzone: 10, outerDeadzone: 0, antiDeadzone: 15, outputShape: 'default' },
   );
   if (!assembled.ok) throw new Error(`U14a assemble failed ${'reason' in assembled ? assembled.reason : ''}`);
@@ -710,8 +720,8 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
     responseCurvePoints: [[0, 0], [0.5, 0.25], [1, 1]] as ResponseCurvePoint[],
   };
   const assembledRC = assembleCanonicalFrame(
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, inputSequence: 42, timestamp: 42, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, sampleSequence: 43, timestamp: 43, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'elite' as const, configRevision: 1, inputSequence: 42, timestamp: 42, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', configRevision: 1, sampleSequence: 43, timestamp: 43, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
     rcBlend,
   );
   if (!assembledRC.ok) throw new Error(`U14a-RC assemble failed ${'reason' in assembledRC ? assembledRC.reason : ''}`);
@@ -724,8 +734,8 @@ function forwardLocal(cfg: GyroMotionConfigV1, g: { x: number; y: number; z: num
   }
   // 反向: 同一输入在 boost 曲线下输出必须弱于恒等（0.5→0.25 压平中段）。
   const assembledRCId = assembleCanonicalFrame(
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, inputSequence: 44, timestamp: 44, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
-    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'xbox360' as const, configRevision: 1, sampleSequence: 45, timestamp: 45, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', persona: 'elite' as const, configRevision: 1, inputSequence: 44, timestamp: 44, buttons: 0, axes: {}, triggers: {}, rightStick: baseStick },
+    { runId: 't', epoch: 1, powerGeneration: 1, targetId: 't', configRevision: 1, sampleSequence: 45, timestamp: 45, valid: true, contribution: { x: 0.4, y: 0 }, gyroShort: rawShort },
     { gyroWeight: 1.2, innerDeadzone: 10, outerDeadzone: 0, antiDeadzone: 15, outputShape: 'default' },
   );
   if (!assembledRCId.ok || !assembledRC.ok) throw new Error('U14a-RC identity assemble failed');

@@ -1,0 +1,27 @@
+<script setup lang="ts">
+import { computed, nextTick, onMounted, onBeforeUnmount, ref } from 'vue';
+import ControllerKeyboardPreview from '@/components/ControllerKeyboardPreview.vue';
+import KeyboardKeyGlyph from '@/components/KeyboardKeyGlyph.vue';
+import { focusGamepadElement } from '@/gamepad/focus';
+import { KEYBOARD_KEY_LAYOUT } from '@/bridge/keyboardKeyLayout';
+import { CONTROLLER_SHORTCUT_ACTIONS } from '@/bridge/controllerShortcutRules';
+const props=defineProps<{actionId:string;code:string;fixedAction?:boolean}>();
+const emit=defineEmits<{(event:'select',actionId:string,code:string):void;(event:'close'):void}>();
+const root=ref<HTMLElement|null>(null),focused=ref(props.code||'KeyA'),symbols=ref(props.actionId==='keyboard.symbol');
+const previous=document.activeElement instanceof HTMLElement?document.activeElement:null;
+function outputFor(code:string){const ids=symbols.value?['keyboard.symbol','keyboard.letter','keyboard.numeric','keyboard.leftFunction','keyboard.rightFunction']:['keyboard.letter','keyboard.numeric','keyboard.leftFunction','keyboard.rightFunction'];for(const id of ids){const a=CONTROLLER_SHORTCUT_ACTIONS.find(a=>a.id===id),o=a?.parameters?.find(p=>p.id==='key')?.options?.find(o=>o.value===code);if(o)return{actionId:id,code,label:o.label}}return undefined}
+const enabledCodes=computed<string[]>(()=>KEYBOARD_KEY_LAYOUT.filter(k=>outputFor(k.code)).map(k=>k.code));
+const label=computed(()=>outputFor(focused.value)?.label||focused.value);
+function focusCode(code:string){focused.value=code;void nextTick(()=>focusGamepadElement(root.value?.querySelector<HTMLElement>('[data-key-code="'+code+'"]:is(button)')||null))}
+function move(dx:number,dy:number){const from=KEYBOARD_KEY_LAYOUT.find(k=>k.code===focused.value);if(!from)return;const x=from.x+from.w/2,y=from.y+from.h/2;const targets=KEYBOARD_KEY_LAYOUT.filter(k=>enabledCodes.value.includes(k.code)&&k.code!==from.code).map(k=>({k,dx:k.x+k.w/2-x,dy:k.y+k.h/2-y})).filter(v=>dx?v.dx*dx>1: v.dy*dy>1).sort((a,b)=>{const score=(v:typeof a)=>dx?Math.abs(v.dx)+Math.abs(v.dy)*5:Math.abs(v.dy)+Math.abs(v.dx)*2;return score(a)-score(b)});if(targets[0])focusCode(targets[0].k.code)}
+function spatial(event:Event){const e=event as CustomEvent<{dx:number;dy:number}>;if(!(event.target as Element)?.closest('.keyboard-hit-layer'))return;event.preventDefault();move(e.detail.dx,e.detail.dy)}
+function keydown(event:KeyboardEvent){const direction:Record<string,[number,number]>={ArrowLeft:[-1,0],ArrowRight:[1,0],ArrowUp:[0,-1],ArrowDown:[0,1]};if(event.key==='Escape'){event.preventDefault();event.stopPropagation();emit('close')}else if(direction[event.key]&&(event.target as Element)?.closest('.keyboard-hit-layer')){event.preventDefault();move(...direction[event.key])}}
+function back(event:Event){if(!root.value?.getClientRects().length)return;event.preventDefault();event.stopImmediatePropagation();emit('close')}
+function select(code:string){const output=outputFor(code);if(output)emit('select',output.actionId,output.code)}
+onMounted(()=>{window.addEventListener('ipc:gamepad-back',back,true);const code=enabledCodes.value.includes(focused.value)?focused.value:enabledCodes.value[0];if(code)focusCode(code)});
+onBeforeUnmount(()=>{window.removeEventListener('ipc:gamepad-back',back,true);if(previous?.isConnected)focusGamepadElement(previous)});
+</script>
+<template><div class="keyboard-output-overlay" @pointerdown.self="emit('close')"><section ref="root" class="keyboard-output-dialog" role="dialog" aria-modal="true" aria-label="选择键盘输出" data-gp-modal="keyboard-output" data-gp-inline-edit @gp:spatial-edit="spatial" @keydown="keydown"><header><div><h3>键盘输出</h3><p>{{fixedAction?'默认快捷：更换键盘输出':'选择要发送的按键'}}</p></div><button type="button" :aria-pressed="symbols" @click="symbols=!symbols">符号层 {{symbols?'开':'关'}}</button><button type="button" class="keyboard-close" @click="emit('close')"><b>B</b> 返回</button></header><ControllerKeyboardPreview :inputs="code?[{source:'keyboard',code}]:[]" selectable :focused-code="focused" :enabled-codes="enabledCodes" @select="select" @focus-key="focused=$event"/><footer><span class="keyboard-current"><KeyboardKeyGlyph :code="focused" :label="label"/><b>{{label}}</b></span><span>十字键 / 摇杆移动 <b>A</b> 选择 <b>B</b> 返回</span></footer></section></div></template>
+<style scoped>
+.keyboard-output-overlay{position:fixed;inset:0;z-index:50;display:grid;place-items:center;background:rgba(0,0,0,.65)}.keyboard-output-dialog{width:calc(100% - 72px);max-width:1180px;box-sizing:border-box;padding:22px 24px;border:1px solid var(--border);border-radius:14px;background:var(--bg-solid);color:var(--text);display:grid;gap:22px}.keyboard-output-dialog header{display:flex;align-items:center;gap:12px}.keyboard-output-dialog header>div{flex:1}.keyboard-output-dialog h3{font-size:20px;margin:0 0 6px}.keyboard-output-dialog p{font-size:12px;margin:0;color:var(--text-dim)}.keyboard-output-dialog button:not([data-key-code]){min-height:40px;padding:8px 14px;border:1px solid var(--border);border-radius:7px;background:var(--bg-input);color:var(--text);font:inherit;font-size:12px;cursor:pointer}.keyboard-close b{color:#f04e54;margin-right:5px}.keyboard-output-dialog footer{display:flex;align-items:center;justify-content:space-between;font-size:12px;color:var(--text-dim)}.keyboard-current{display:flex;align-items:center;gap:10px;color:var(--text);font-size:16px}.keyboard-output-dialog footer>span:last-child b{padding:3px 7px;margin:0 5px;background:var(--bg-input);border-radius:50%;color:var(--text)}
+</style>

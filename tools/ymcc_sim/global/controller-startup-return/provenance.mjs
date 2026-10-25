@@ -1,0 +1,47 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {isDeepStrictEqual} from 'node:util';
+import {REPO,MODULE,PRODUCT_INPUTS,sourceFiles,toolchain} from './adapter.mjs';
+import {verifyOwnerLivenessResult} from '../../../msi_crash_owner_liveness_selftest.mjs';
+import {verifyRecordIoResult} from '../../../msi_crash_record_io_selftest.mjs';
+export const need=(v,c)=>{if(!v)throw Error(c);};
+export const hash=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex');
+export const bytesHash=b=>crypto.createHash('sha256').update(b).digest('hex');
+export const read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,''));
+export function write(p,d){fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(d,null,2)+'\n');}
+export function inside(root,p){const r=path.relative(path.resolve(root),path.resolve(p));return r===''||(r!=='..'&&!r.startsWith('..'+path.sep)&&!path.isAbsolute(r));}
+export function evidencePath(value){need(typeof value==='string'&&path.isAbsolute(value)&&!/[\0\r\n]/.test(value),'STARTUP_ABSOLUTE_EVIDENCE_REQUIRED');const p=path.resolve(value);need(inside(path.resolve(REPO,'../../../Build'),p)&&!inside(REPO,p),'STARTUP_EVIDENCE_OUTSIDE_BUILD');for(let d=p;;){if(fs.existsSync(d))need(!fs.lstatSync(d).isSymbolicLink(),'STARTUP_EVIDENCE_REPARSE');const parent=path.dirname(d);if(d===parent)break;d=parent;}need(!fs.existsSync(p),'STARTUP_FRESH_EVIDENCE_REQUIRED');return p;}
+export function walk(root){const result=[];function visit(d){for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);need(!fs.lstatSync(p).isSymbolicLink(),'STARTUP_OUTPUT_REPARSE');if(e.isDirectory())visit(p);else{need(e.isFile(),'STARTUP_OUTPUT_NOT_FILE');result.push(p);need(result.length<20000,'STARTUP_OUTPUT_LIMIT');}}}visit(root);return result.sort();}
+export function capture(root){const sources=sourceFiles().map(relative=>{const p=path.join(REPO,relative),bytes=fs.readFileSync(p),copy=path.join(root,'input-sources',relative);fs.mkdirSync(path.dirname(copy),{recursive:true});fs.writeFileSync(copy,bytes,{flag:'wx'});return {path:relative,sha256:bytesHash(bytes),copy};});const spec=toolchain();need(spec.files.length>0&&spec.files.length<=640,'STARTUP_TOOL_MEMBERSHIP');for(const r of spec.files)need(path.isAbsolute(r.path)&&hash(r.path)===r.sha256,'STARTUP_TOOL_PIN_CHANGED:'+r.path);const node=spec.files.find(r=>r.roles.includes('node'));need(node&&node.path.toLowerCase()===path.resolve(process.execPath).toLowerCase(),'STARTUP_NODE_NOT_PINNED');const result={schemaVersion:1,sources,artifacts:spec.files,toolchain:spec};write(path.join(root,'input-snapshot.json'),result);return result;}
+export function freeze(root,before,name='frozen-project'){const project=path.join(root,name);for(const rel of PRODUCT_INPUTS){const row=before.sources.find(r=>r.path===rel),target=path.join(project,rel);fs.mkdirSync(path.dirname(target),{recursive:true});fs.copyFileSync(row.copy,target,fs.constants.COPYFILE_EXCL);need(hash(target)===row.sha256,'STARTUP_FROZEN_COPY_CHANGED');}return project;}
+export function stable(before){need(isDeepStrictEqual(sourceFiles(),before.sources.map(r=>r.path)),'STARTUP_SOURCE_MEMBERSHIP_CHANGED');need(isDeepStrictEqual(toolchain().files,before.artifacts),'STARTUP_TOOL_MEMBERSHIP_CHANGED');for(const r of before.sources)need(hash(path.join(REPO,r.path))===r.sha256&&hash(r.copy)===r.sha256,'STARTUP_SOURCE_CHANGED:'+r.path);for(const r of before.artifacts)need(hash(r.path)===r.sha256,'STARTUP_TOOL_CHANGED:'+r.path);return true;}
+export function verifyRuntime(raw,spec,{buildExitCode,executeExitCode,negative=false,originalNames=[]}={}){
+ need(buildExitCode===0,'STARTUP_COMPILE_FAILURE_IS_NOT_REJECTION');
+ need(raw&&Array.isArray(raw.cases)&&raw.tests===spec.tests&&raw.cases.length===spec.tests&&raw.assertions===spec.assertions,'STARTUP_ORIGINAL_TEST_OR_ASSERTION_COUNT');
+ need(isDeepStrictEqual(raw.cases.map(c=>c.name),spec.caseNames),'STARTUP_ORIGINAL_CASE_REMOVED');
+ need(raw.cases.reduce((n,c)=>n+c.assertions,0)===raw.assertions,'STARTUP_ASSERTION_ACCOUNTING');
+ const failed=raw.cases.filter(c=>!c.passed);need(raw.passed===(failed.length===0)&&Array.isArray(raw.failures),'STARTUP_REPORT_CONTRADICTION');
+ if(negative){need(executeExitCode===1,'STARTUP_NEGATIVE_NEEDS_EXECUTED_ASSERTIONS');need(isDeepStrictEqual(failed.map(c=>c.name),spec.negative.failedCaseNames)&&isDeepStrictEqual(raw.failures,spec.negative.failures),'STARTUP_WRONG_NEGATIVE_ASSERTIONS');need(isDeepStrictEqual(raw.cases.slice(0,originalNames.length).map(c=>c.name),originalNames)&&raw.cases.slice(0,originalNames.length).every(c=>c.passed),'STARTUP_NEGATIVE_MUST_LEAVE_ORIGINAL_SEEDED_CASES_PASSING');}
+ else need(executeExitCode===0&&raw.passed&&raw.failures.length===0,'STARTUP_POSITIVE_CONSUMER_FAILED');
+ return {status:negative?'EXPECTED_SEMANTIC_FAILURE':'PASS',tests:raw.tests,assertions:raw.assertions,failedCases:failed.length,failedCaseNames:failed.map(c=>c.name),failureAssertions:raw.failures,buildExitCode,executeExitCode,originalSeededCasesStillPass:negative?originalNames.length:undefined};
+}
+export function verifyLedger(text,{exitCode}={}){const rows=[...text.matchAll(/^EXTERNALPAD_LEDGER_SUMMARY passed=(\d+) total=(\d+) assertions=(\d+) hardwareAccess=false productRun=false filesystem=private-temp-only\r?$/gm)].map(m=>({passed:+m[1],tests:+m[2],assertions:+m[3]}));need(exitCode===0&&rows.length===2&&rows.every(r=>r.passed===13&&r.tests===13&&r.assertions>=13)&&!/^FAIL /m.test(text)&&/^EXTERNALPAD_LEDGER_PASSED /m.test(text),'STARTUP_ORIGINAL_LEDGER_DID_NOT_COMPLETE');return {status:'PASS',profiles:rows,realPrivateFilesystem:true,fixtureChildInterruptionExitCode:73,physicalSymlinkCaseUnavailable:/NOTE symlink fixture unavailable/.test(text)};}
+export function verifyOwnerLiveness(root,before,spec){
+ const file=path.join(root,'o/result.json'),raw=read(file),proof=verifyOwnerLivenessResult(raw);
+ need(proof.testsPerExecution===spec.tests&&proof.assertionsPerExecution===spec.assertions&&isDeepStrictEqual(proof.functions.map(r=>r.name),spec.functions)&&isDeepStrictEqual(proof.compiledSemanticNegatives,spec.compiledSemanticNegatives),'STARTUP_OWNER_CONTRACT_CHANGED');
+ for(const row of raw.sourceBindings){const expected=before.sources.find(r=>r.path===row.path);need(expected&&expected.sha256===row.sha256&&inside(root,row.snapshot),'STARTUP_OWNER_SOURCE_NOT_BOUND:'+row.path);}
+ for(const profile of Object.values(raw.profiles))for(const row of Object.values(profile))need(inside(root,row.report.path)&&inside(root,row.executable.path),'STARTUP_OWNER_OUTPUT_OUTSIDE_CASE');
+ return {...proof,result:{path:file,sha256:hash(file)},boundary:raw.boundary};
+}
+export function verifyRecordIo(root,before,spec){
+ const file=path.join(root,'i/result.json'),raw=read(file),proof=verifyRecordIoResult(raw);
+ need(proof.testsPerExecution===spec.tests&&proof.assertionsPerExecution===spec.assertions&&isDeepStrictEqual(proof.functions.map(r=>r.name),spec.functions)&&isDeepStrictEqual(proof.compiledSemanticNegatives,spec.compiledSemanticNegatives),'STARTUP_RECORD_IO_CONTRACT_CHANGED');
+ for(const row of raw.sourceBindings){const expected=before.sources.find(r=>r.path===row.path);need(expected&&expected.sha256===row.sha256&&inside(root,row.snapshot),'STARTUP_RECORD_IO_SOURCE_NOT_BOUND:'+row.path);}
+ for(const profile of Object.values(raw.profiles))for(const row of Object.values(profile))for(const key of ['report','executable','dependencies','build','execute','stdout'])need(inside(root,row[key].path),'STARTUP_RECORD_IO_OUTPUT_OUTSIDE_CASE');
+ return {...proof,result:{path:file,sha256:hash(file)},boundary:raw.boundary};
+}
+export function evaluated(root,before){const external=new Map(before.artifacts.map(r=>[path.resolve(r.path).toLowerCase(),r]));const rows=[],depFiles=walk(root).filter(p=>p.endsWith('.cpp.json'));
+ function add(p,kind,ledger){p=path.resolve(p);need(fs.existsSync(p),'STARTUP_COMPILER_INPUT_MISSING:'+p);const sha256=hash(p);if(!inside(root,p)){const expected=external.get(p.toLowerCase());need(expected&&expected.sha256===sha256,'STARTUP_UNDECLARED_OR_CHANGED_COMPILER_INPUT:'+p);}rows.push({kind,path:p,sha256,ledger});}
+ for(const file of depFiles){const d=read(file);need(d.Data&&Array.isArray(d.Data.Includes),'STARTUP_SOURCE_DEPENDENCY_SCHEMA');need(inside(root,d.Data.Source),'STARTUP_COMPILE_SOURCE_OUTSIDE_CASE');add(d.Data.Source,'Compile',file);for(const p of d.Data.Includes)add(p,'Include',file);}
+ const logs=walk(root).filter(p=>/\.(?:log|txt)$/.test(p));let libraryRows=0;
+ for(const file of logs){const text=fs.readFileSync(file,'utf8');for(const match of text.matchAll(/([A-Za-z]:\\[^\r\n]*?\.lib)/g)){if(fs.existsSync(match[1])){add(match[1],'Library',file);libraryRows++;}}for(const match of text.matchAll(/^\s*(?:Note: including file:|注意:\s*包含文件:)\s*(.+?)\r?$/gm))if(fs.existsSync(match[1]))add(match[1],'Include',file);}
+ need(depFiles.length>=8&&libraryRows>0,'STARTUP_EVALUATED_COMPILER_CLOSURE_MISSING');write(path.join(root,'evaluated-compiler-inputs.json'),{schemaVersion:1,dependencyFiles:depFiles.map(p=>({path:p,sha256:hash(p)})),rows,meaning:'MSVC actual sourceDependencies plus per-build showIncludes/link searches. Original ledger compiles the same source in two profiles and overwrites its dependency JSON; both build logs remain separately bound.'});return {dependencyFiles:depFiles.length,actualInputRows:rows.length,libraries:libraryRows,ledger:path.join(root,'evaluated-compiler-inputs.json')};
+}

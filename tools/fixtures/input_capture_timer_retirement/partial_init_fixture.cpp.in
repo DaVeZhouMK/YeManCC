@@ -1,0 +1,347 @@
+// Whole selected Shutdown, actual RetireResources/ClearExitConfiguration and
+// checked-close helpers. Every OS/COM/HID/child API here is a memory port.
+// No windows.h, real threads/timers/sockets/DLLs/apartments/devices or processes.
+#include <json.hpp>
+#include <input_capture_completion.h>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <stdexcept>
+#include <vector>
+using json=nlohmann::json;
+using DWORD=std::uint32_t; using BOOL=int; using BYTE=unsigned char; using ULONGLONG=unsigned long long;
+constexpr BOOL FALSE=0;
+constexpr DWORD WAIT_OBJECT_0=0,WAIT_TIMEOUT=258,WAIT_FAILED=0xffffffff,
+    ERROR_SUCCESS=0,ERROR_INVALID_HANDLE=6,ERROR_IO_INCOMPLETE=996,ERROR_OPERATION_ABORTED=995;
+constexpr unsigned TIMERR_NOERROR=0;
+struct Observation {
+    std::map<std::string,int> calls,live;
+    std::vector<std::string> order,failures;
+    unsigned checks=0; int queued=0; std::string throwAt;
+    bool dsuOwned=false,dsuStopAllowed=true,sensorWillSettle=true,assets=true,stopBeforeLateDsuAcquire=false;
+    bool resolutionEndAllowed=true,freeLibraryAllowed=true,deleteExportAvailable=true,notificationCloseAllowed=true;
+    bool ioTerminal=false,ioObservationFailed=false; std::uint64_t lastDebt=0;
+};
+static Observation observed;
+static void mark(const char* name){++observed.calls[name];observed.order.push_back(name);}
+static void check(bool ok,const std::string& text){++observed.checks;if(!ok)observed.failures.push_back(text);}
+static void maybeThrow(const char* name){if(observed.throwAt==name){mark("injectedMemoryException");throw std::runtime_error(name);}}
+static int live(const char* kind){return observed.live[kind];}
+struct Resource {
+    std::string kind;
+    explicit Resource(std::string value):kind(std::move(value)){++observed.live[kind];mark("resourceAcquire");}
+    ~Resource(){--observed.live[kind];mark("resourceDestroyed");}
+};
+struct MemoryHandle {
+    std::string kind; std::unique_ptr<Resource> resource;
+    bool closeAllowed=true; DWORD wait=WAIT_OBJECT_0;
+    explicit MemoryHandle(const char* value):kind(value),resource(std::make_unique<Resource>(value)){}
+};
+using HANDLE=MemoryHandle*;
+static MemoryHandle invalidHandle{"sentinel"};
+static HANDLE const INVALID_HANDLE_VALUE=&invalidHandle;
+struct OVERLAPPED { bool terminal=false; };
+static std::vector<std::unique_ptr<MemoryHandle>> handles;
+static HANDLE makeHandle(const char* kind){handles.push_back(std::make_unique<MemoryHandle>(kind));return handles.back().get();}
+@ACTUAL_TYPES@
+struct MemoryOperation { const OVERLAPPED* slot; HANDLE device,event; };
+static std::vector<MemoryOperation> memoryOperations;
+static bool unresolvedOperationOwns(HANDLE h){
+    for(const auto& op:memoryOperations)if((h==op.device||h==op.event)&&!op.slot->terminal&&!observed.ioTerminal)return true;
+    return false;
+}
+static OemHidReadSession g_legionBack,g_legionSBack,g_gpdBack,g_rogOemKey;
+static OnexBackSession g_onexBack;
+static HANDLE g_sensorThread=nullptr,g_sensorThreadWake=nullptr,g_onexX2DeviceNotify=nullptr;
+static bool g_onexX2NotifyAttempted=false;
+static std::mutex g_sensorThreadMx,g_onexX2OwnerMx;
+static std::atomic<bool> g_captureShutdownAttempted{false},g_captureMmTimerRetired{true},g_captureResolutionOwed{false},g_captureEventOverflow{false};
+static std::atomic<bool> g_sensorUnsubscribeRetained{false},g_captureSubscriptionRetryIssued{false};
+static std::array<HANDLE,2> g_captureRetainedEvents{};
+static bool g_gyroReadingChangedSubscribed=false,g_accelReadingChangedSubscribed=false;
+static bool ioOwns(HANDLE h){
+    for(auto* s:{&g_legionBack,&g_legionSBack,&g_gpdBack,&g_rogOemKey})
+        if(s->readPending&&(s->device==h||s->ovEvent==h))return true;
+    return (g_onexBack.readPending&&(g_onexBack.device==h||g_onexBack.ovEvent==h))||
+        (g_onexBack.writeInFlight&&(g_onexBack.device==h||g_onexBack.writeEvent==h));
+}
+static BOOL CloseHandle(HANDLE h){
+    mark("closeHandle");
+    check(h&&h!=INVALID_HANDLE_VALUE&&bool(h->resource),"CloseHandle uses a live memory owner");
+    if(!h||h==INVALID_HANDLE_VALUE||!h->resource)return FALSE;
+    check(!unresolvedOperationOwns(h),"independent pending IO keeps its actual handle/event resource");
+    if(unresolvedOperationOwns(h))return FALSE;
+    if(!h->closeAllowed){mark("closeFailure");return FALSE;}
+    if(h->kind=="sensorThread")mark("sensorThreadReleases");
+    if(h->kind=="sensorEvent")mark("sensorEventReleases");
+    h->resource.reset();mark("closeSuccess");return 1;
+}
+static DWORD WaitForSingleObject(HANDLE h,DWORD ms){
+    mark("wait");check(ms==0||ms==2000,"actual sensor/HID bounded wait budget");
+    if(!h||h==INVALID_HANDLE_VALUE||!h->resource)return WAIT_FAILED;
+    if(h->kind=="sensorThread"&&!observed.sensorWillSettle)return h->wait==WAIT_FAILED?WAIT_FAILED:WAIT_TIMEOUT;
+    if(ioOwns(h))return observed.ioObservationFailed?WAIT_FAILED:(observed.ioTerminal?WAIT_OBJECT_0:WAIT_TIMEOUT);
+    return h->wait;
+}
+static BOOL HasOverlappedIoCompleted(const OVERLAPPED* ov){mark("ioSlotObserve");return ov->terminal||observed.ioTerminal;}
+static DWORD memoryLastError=ERROR_SUCCESS;
+static DWORD GetLastError(){return memoryLastError;}
+static BOOL GetOverlappedResult(HANDLE h,OVERLAPPED* ov,DWORD* bytes,BOOL){
+    mark("ioCompletionObserve");check(h&&h!=INVALID_HANDLE_VALUE&&bool(h->resource),"IO completion observes live device");
+    if(!HasOverlappedIoCompleted(ov)){memoryLastError=ERROR_IO_INCOMPLETE;*bytes=0;return FALSE;}
+    // Terminal successful late bytes exercise the actual discard paths.
+    memoryLastError=ERROR_SUCCESS;*bytes=64;return 1;
+}
+static BOOL CancelIoEx(HANDLE,OVERLAPPED*){mark("cancelRequestOnly");return 1;}
+static void ZeroMemory(void* p,std::size_t n){std::memset(p,0,n);}
+static unsigned long long GetTickCount64(){mark("clock");return 20000;}
+static unsigned timeEndPeriod(unsigned n){mark("timeEndPeriod");check(n==1,"return exactly owned timer resolution");return observed.resolutionEndAllowed?TIMERR_NOERROR:1;}
+static BOOL UnregisterDeviceNotification(HANDLE h){
+    mark("notificationRevoke");if(!observed.notificationCloseAllowed){mark("notificationRevokeFailure");return FALSE;}
+    return CloseHandle(h);
+}
+struct MemoryChild {
+    const char* kind; std::unique_ptr<Resource> resource; bool stopAllowed=true,runningFlag=false;
+    explicit MemoryChild(const char* name):kind(name){}
+    void arm(){resource=std::make_unique<Resource>(kind);}
+    bool stopped() const{return !resource;}
+    bool running() const{return runningFlag;}
+    bool stop(DWORD ms){mark("childStopObserve");check(ms==0,"child retirement observes with zero wait");if(stopAllowed)resource.reset();return stopped();}
+    void pollRetirement(ULONGLONG){mark("x2PollRetirement");if(stopAllowed)resource.reset();}
+};
+static MemoryChild g_msiSensorApiProvider{"msiProvider"},g_hcWindowsSensorApiProvider{"hcProvider"},census{"census"},
+    g_onexX2Transport{"x2"},gamebar{"gamebar"};
+namespace ymcc::sensors::sensorapi_inventory { struct Census {
+    static bool retire(){mark("censusRetire");maybeThrow("censusRetire");return census.stop(0);}
+    static bool stopped(){return census.stopped();}
+}; }
+static bool gamebarTraceStopped(){return gamebar.stopped();}
+static bool gamebarTraceShutdown(DWORD ms){mark("gamebarShutdown");return gamebar.stop(ms);}
+static std::unique_ptr<Resource> dsuResource,gmResource,dllResource,gyroToken,accelToken;
+struct MemoryLog { bool open=false;bool is_open()const{return open;}void flush(){mark("logFlush");}void close(){mark("logClose");open=false;} };
+struct InputCaptureSensorSink { Resource resource{"sink"};~InputCaptureSensorSink(){mark("sinkDestroyed");} };
+static bool g_inputCaptureReady=false,g_realStickTestAdmissionLogged=false;
+static std::atomic<bool> g_inputCaptureStop{false},g_exitRequested{false},g_inputHostExitFence{false};
+static std::atomic<unsigned long long> g_inputHostExitFenceRefusals{0},g_inputHostExitFenceRefusalRows{0};
+static std::atomic<bool> g_inputCaptureSensorsSuspended{false};
+static std::mutex g_inputCaptureBusTickMx,g_inputCaptureMx;
+static MemoryLog g_inputCaptureLog;
+static std::uint32_t g_inputCaptureSampleWrites=0;
+static std::shared_ptr<InputCaptureSensorSink> g_inputCaptureSink;
+static struct {bool enabled=false;} g_realStickTest;
+static int dllToken,gmToken,functionToken;
+using GmDelete=void(*)(void*);
+static void* g_gmDll=nullptr;static void* g_gm=nullptr;
+@GM_GLOBALS@
+struct InputHostVirtualIntentMutation {InputHostVirtualIntentMutation(){mark("intentMutation");}};
+static void appendNativeLifecycleLog(const char*,const json&){mark("lifecycleLog");}
+static void writeLog(const char*,const std::string&){mark("writeLog");}
+static void dsu_stop();
+static bool dsu_start(){
+    mark("dsuStart");
+    if(observed.stopBeforeLateDsuAcquire){g_inputCaptureStop=true;g_exitRequested=true;g_inputHostExitFence=true;dsu_stop();mark("lateDsuAcquisitionAfterStop");}
+    if(!dsuResource){dsuResource=std::make_unique<Resource>("dsu");mark("dsuAcquire");}observed.dsuOwned=true;return true;
+}
+static void dsu_stop(){mark("dsuStop");maybeThrow("dsuStop");if(dsuResource&&observed.dsuStopAllowed){dsuResource.reset();mark("dsuRelease");}observed.dsuOwned=bool(dsuResource);}
+static bool dsu_stopped(){mark("dsuStoppedObserve");return !dsuResource;}
+static void inputCaptureDrainQueuedSamples(){mark("queueDrain");observed.calls["samplesDrained"]+=observed.queued;observed.queued=0;}
+static void inputCaptureAppend(const json& record){mark("captureAppend");check(record.value("kind","")=="stop","Shutdown appends its actual stop record");}
+enum class SensorThreadRequest {Stop,Shutdown};
+static bool inputCaptureSensorThreadPost(SensorThreadRequest req){
+    mark(req==SensorThreadRequest::Stop?"sensorShutdown":"sensorShutdownTicket");
+    maybeThrow("sensorPost");
+    // A request never fakes a successful wait, close, token revoke or child stop.
+    return g_sensorThread!=nullptr;
+}
+static bool inputCaptureSensorThreadPostPower(SensorThreadRequest req){
+    check(req==SensorThreadRequest::Shutdown,"exit retry only posts Shutdown");mark("sensorExitRetryTicket");return g_sensorThread!=nullptr;
+}
+static void inputCaptureStopWinRtSensorsImpl(){mark("legacyWinRtStopMemoryRequest");}
+static void inputCaptureSensorThreadActorReleaseSubscriptions(){
+    // Explicit fixture actor represents apartment-side successful revoke. This
+    // is not the production WinRT Stop or a production recovery mechanism.
+    mark("actorSubscriptionRevoke");gyroToken.reset();accelToken.reset();
+    g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=false;g_sensorUnsubscribeRetained=false;
+}
+static void memoryGmDelete(void* object){
+    mark("gmDelete");check(object==&gmToken&&bool(gmResource)&&bool(dllResource),"GM delete holds actual object and DLL memory resources");
+    check(!live("sensorThread")&&!live("msiProvider")&&!live("hcProvider")&&!live("census"),"sensor/STA/provider/Census dependency holds GM");gmResource.reset();
+}
+static GmDelete GetProcAddress(void* dll,const char* name){
+    mark("getProcAddress");check(dll==&dllToken&&bool(dllResource),"GM lookup uses held DLL");
+    check(std::string(name)=="DeleteGamepadMotion","exact DeleteGamepadMotion export");return observed.deleteExportAvailable?memoryGmDelete:nullptr;
+}
+static bool FreeLibrary(void* dll){
+    mark("freeLibrary");check(dll==&dllToken&&bool(dllResource),"DLL free uses held owner");check(!gmResource,"actual GM object destruction precedes DLL free");
+    if(!observed.freeLibraryAllowed){mark("freeLibraryFailure");return false;}dllResource.reset();return true;
+}
+static void oemHidReadRequestClose(OemHidReadSession&,const char*);
+static void onexX2OwnerStop(){mark("onexStop");maybeThrow("onexStop");}
+static void inputCaptureWindowsProcessingRetire(){mark("windowsRetire");maybeThrow("windowsRetire");}
+static void oemVendorHidShutdown(){mark("vendorShutdown");maybeThrow("vendorShutdown");for(auto* s:{&g_legionBack,&g_legionSBack,&g_gpdBack,&g_rogOemKey})oemHidReadRequestClose(*s,"memory-owner-stop");}
+static void inputCaptureLegionMotionSessionRevoke(){mark("legionRevoke");maybeThrow("legionRevoke");g_onexBack.draining=true;g_onexBack.bound=false;}
+static void onexBackParse(const BYTE*,std::size_t,std::uint64_t){mark("unexpectedInputPublish");check(false,"retirement must never publish input");}
+static void onexBackReadFaultRevoke(const char*){mark("unexpectedInputFaultRebind");check(false,"retirement must not enter live-session fault/rebind");}
+enum class OemProducerId {OneX};
+static bool oemProducerCancel(OemProducerId,std::uint64_t){mark("producerRevoke");return true;}
+static void oemHidClear(){mark("inputStateClear");}
+namespace ymcc {enum class StartupInputState {Failed};}
+static std::string startupReason;
+static void publishStartupInputState(ymcc::StartupInputState status,const char* reason){mark("publishStartupState");check(status==ymcc::StartupInputState::Failed,"prefix publishes Failed");startupReason=reason;}
+static bool inputCaptureAssetsPresent(){mark("assets");return observed.assets;}
+// Forward declarations preserve complete extracted bodies and their call graph.
+static std::uint64_t inputCaptureRetireResources(bool);
+static void inputCaptureClearExitConfiguration();
+static bool inputCaptureSensorThreadReap(DWORD);
+static bool inputCaptureSensorThreadShutdown();
+static OemHidReadCompletion oemHidReadTakeCompletion(OemHidReadSession&);
+static void oemHidReadFinalizeClose(OemHidReadSession&,const char*);
+static void oemHidReadServiceClosing(OemHidReadSession&,const char*);
+static void onexBackFinalizeClose();
+static void onexBackSettleWrite(bool,DWORD);
+static void onexBackRetireStuck();
+static void onexBackRetireReadStuck(const char*);
+static void onexBackServiceWrite();
+static void onexBackServiceRead();
+@EXIT_FENCE_FUNCTIONS@
+@ACTUAL_RETIREMENT_FUNCTIONS@
+@SHUTDOWN_FUNCTION@
+// Only the contiguous original Init prefix is executed; this brace is synthetic.
+@INIT_PREFIX@
+}
+static void gmFunctionsSet(bool value){
+@GM_SET@
+}
+static bool gmFunctionsCleared(){return @GM_CLEAR_CHECK@;}
+static int resourceCount(){int total=0;for(const auto& [kind,n]:observed.live){(void)kind;total+=n;}return total;}
+static json state(){
+    return {{"ready",g_inputCaptureReady},{"sinkPointer",bool(g_inputCaptureSink)},{"sinksAlive",live("sink")},
+        {"sensorThreadsAlive",live("sensorThread")},{"sensorEventsAlive",live("sensorEvent")},
+        {"gmPointer",g_gm!=nullptr},{"gmObjectsAlive",live("gm")},{"dllPointer",g_gmDll!=nullptr},{"dllRefsAlive",live("dll")},
+        {"dsuOwned",bool(dsuResource)},{"logOpen",g_inputCaptureLog.open},{"samplesQueued",observed.queued},
+        {"sampleWrites",g_inputCaptureSampleWrites},{"gmFunctionsCleared",gmFunctionsCleared()},
+        {"sensorDisposalProven",!live("sensorThread")&&!live("sensorEvent")&&!live("sink")},
+        {"sensorThreadPointer",g_sensorThread!=nullptr},{"sensorWakePointer",g_sensorThreadWake!=nullptr},
+        {"oemDevicePointer",g_legionBack.device!=INVALID_HANDLE_VALUE},{"oemEventPointer",g_legionBack.ovEvent!=nullptr},
+        {"onexDevicePointer",g_onexBack.device!=INVALID_HANDLE_VALUE},{"onexReadEventPointer",g_onexBack.ovEvent!=nullptr},
+        {"onexWriteEventPointer",g_onexBack.writeEvent!=nullptr},{"timerEventPointer",g_captureRetainedEvents[0]!=nullptr},
+        {"notificationPointer",g_onexX2DeviceNotify!=nullptr},{"liveByKind",observed.live},{"resourceCount",resourceCount()},
+        {"lastExplicitActorDebt",observed.lastDebt},{"configEnabled",g_realStickTest.enabled},
+        {"shutdownAttempted",g_captureShutdownAttempted.load()},{"processExitUsedAsCleanup",false},{"calls",observed.calls}};
+}
+static bool released(){return resourceCount()==0&&!observed.queued&&!g_inputCaptureLog.open;}
+static void beginCase(){
+    // Independent harness teardown occurs after a row's observations/verdict.
+    // It is never counted as production destruction, including negative leaks.
+    g_inputCaptureSink.reset();gmResource.reset();dllResource.reset();dsuResource.reset();gyroToken.reset();accelToken.reset();
+    for(auto* child:{&g_msiSensorApiProvider,&g_hcWindowsSensorApiProvider,&census,&g_onexX2Transport,&gamebar}){child->resource.reset();child->stopAllowed=true;child->runningFlag=false;}
+    handles.clear();memoryOperations.clear();observed={};startupReason.clear();
+    g_legionBack={};g_legionSBack={};g_gpdBack={};g_rogOemKey={};g_onexBack={};
+    g_sensorThread=g_sensorThreadWake=g_onexX2DeviceNotify=nullptr;g_onexX2NotifyAttempted=false;
+    g_captureRetainedEvents={};g_captureMmTimerRetired=true;g_captureEventOverflow=false;g_captureResolutionOwed=false;
+    g_captureShutdownAttempted=false;g_sensorUnsubscribeRetained=false;g_captureSubscriptionRetryIssued=false;
+    g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=false;
+    g_inputCaptureReady=false;g_inputCaptureStop=false;g_exitRequested=false;g_inputHostExitFence=false;
+    g_inputHostExitFenceRefusals=9;g_inputHostExitFenceRefusalRows=3;
+    g_inputCaptureLog.open=false;g_inputCaptureSampleWrites=0;g_gmDll=g_gm=nullptr;gmFunctionsSet(false);
+    g_realStickTest={};g_realStickTestAdmissionLogged=false;g_inputCaptureSensorsSuspended=false;
+}
+static void seed(bool ready,bool sink,bool thread,bool event,bool dll,bool gm,bool dsu,bool log,int queue){
+    g_inputCaptureReady=ready;if(thread)g_sensorThread=makeHandle("sensorThread");if(event)g_sensorThreadWake=makeHandle("sensorEvent");
+    if(sink)g_inputCaptureSink=std::make_shared<InputCaptureSensorSink>();
+    if(dll)dllResource=std::make_unique<Resource>("dll");if(gm)gmResource=std::make_unique<Resource>("gm");
+    g_gmDll=dll?&dllToken:nullptr;g_gm=gm?&gmToken:nullptr;gmFunctionsSet(dll);
+    if(dsu){dsuResource=std::make_unique<Resource>("dsu");observed.dsuOwned=true;}
+    g_inputCaptureLog.open=log;observed.queued=queue;g_inputCaptureSampleWrites=log?7:0;
+    g_inputCaptureSensorsSuspended=true;g_realStickTest.enabled=true;g_realStickTestAdmissionLogged=true;
+}
+static void expectShutdown(unsigned number,bool settled,int sinkInitially,int gmInitially,int dllInitially,bool dsuInitially,int queueInitially,int logInitially){
+    const int n=static_cast<int>(number);
+    check(observed.calls["onexStop"]==n&&observed.calls["windowsRetire"]==n&&observed.calls["vendorShutdown"]==n&&observed.calls["legionRevoke"]==n,"independent stop requests on each whole Shutdown");
+    check(observed.calls["dsuStop"]>=n&&!dsuResource&&observed.calls["dsuRelease"]==int(dsuInitially),"actual Shutdown stops DSU including partial/no-init");
+    check(observed.calls["queueDrain"]==n&&observed.queued==0&&observed.calls["samplesDrained"]==queueInitially,"actual queue cleanup without lost samples");
+    check(observed.calls["captureAppend"]==n,"actual stop append each Shutdown");
+    check(observed.calls["logFlush"]==logInitially&&observed.calls["logClose"]==logInitially&&!g_inputCaptureLog.open,"log closes exactly once");
+    check(g_inputCaptureSampleWrites==0&&!g_inputCaptureSensorsSuspended,"metadata reset is separately observed");
+    check(observed.calls["sensorShutdown"]==n,"sensor shutdown request even before ready");
+    if(settled){
+        check(!g_inputCaptureSink&&live("sink")==0&&observed.calls["sinkDestroyed"]==sinkInitially,"settled sink destroyed exactly once");
+        check(!live("sensorThread")&&!live("sensorEvent"),"sensor handles actually released");
+        check(observed.calls["gmDelete"]==gmInitially&&live("gm")==0&&!g_gm,"GM object destructor before pointer clear");
+        check(observed.calls["freeLibrary"]==dllInitially&&live("dll")==0&&!g_gmDll,"DLL resource actually released");
+        check(gmFunctionsCleared(),"GM function pointers clear after closure");
+    }else{
+        check(bool(g_inputCaptureSink)==bool(sinkInitially)&&live("sink")==sinkInitially&&observed.calls["sinkDestroyed"]==0,"unsettled STA retains same sink");
+        check(live("sensorThread")==1&&live("sensorEvent")==1,"unsettled sensor retains thread/event owners");
+        check(live("gm")==gmInitially&&live("dll")==dllInitially&&g_gm&&g_gmDll,"unsettled sensor retains GM/DLL dependencies");
+        check(observed.calls["gmDelete"]==0&&observed.calls["freeLibrary"]==0&&!gmFunctionsCleared(),"no delete/unload/function clear over live sensor");
+    }
+    check(!g_inputCaptureReady&&!g_realStickTest.enabled&&!g_realStickTestAdmissionLogged,"non-exit config resets through actual helper");
+    check(observed.calls["intentMutation"]==n,"actual ClearExitConfiguration runs for non-exit");
+}
+static json shutdownCase(const char* name,bool ready,bool sink,bool thread,bool event,bool dll,bool gm,bool dsu,bool log,int queue,bool failSensor=false){
+    beginCase();seed(ready,sink,thread,event,dll,gm,dsu,log,queue);
+    auto weak=std::weak_ptr<InputCaptureSensorSink>(g_inputCaptureSink);auto* identity=g_inputCaptureSink.get();
+    json row={{"name",name},{"kind","whole-actual-Shutdown"},{"initial",state()},{"observations",json::array()}};
+    const unsigned rounds=failSensor?4:2;
+    for(unsigned i=1;i<=rounds;++i){
+        observed.sensorWillSettle=!failSensor||i>=3;inputCaptureShutdown();
+        expectShutdown(i,observed.sensorWillSettle,sink,gm,dll,dsu,queue,log);
+        if(!observed.sensorWillSettle)check(g_inputCaptureSink.get()==identity&&!weak.expired(),"same sink identity across failed sensor shutdown");
+        row["observations"].push_back(state());
+    }
+    row["checks"]=observed.checks;row["failures"]=observed.failures;row["pass"]=observed.failures.empty();row["finalAllResourcesReleased"]=released();
+    row["sensorFailureIsNotDisposal"]=failSensor;row["harnessTeardownExcludedFromAcceptance"]=true;row["laterCallsAreExplicitFixtureActor"]=true;return row;
+}
+static json prefixCase(const char* name,bool stop,bool exitRequested,bool fence,bool ready,bool assets){
+    beginCase();g_inputCaptureStop=stop;g_exitRequested=exitRequested;g_inputHostExitFence=fence;g_inputCaptureReady=ready;observed.assets=assets;inputCaptureInit();
+    const bool cancelled=stop||exitRequested||fence;const bool acquire=!cancelled&&!ready&&assets;
+    check(observed.calls["dsuStart"]==int(acquire)&&observed.calls["dsuAcquire"]==int(acquire)&&bool(dsuResource)==acquire,"prefix DSU admission obeys stop/exit/fence");
+    check(g_inputHostExitFence.load()==fence,"ResetExitFence never reopens terminal fence");
+    check(observed.calls["assets"]==int(!cancelled&&!ready),"cancelled prefix returns before assets");
+    if(cancelled)check(startupReason=="capture-cancelled-before-init"&&observed.calls["publishStartupState"]==1,"cancelled prefix publishes Failed");
+    return {{"name",name},{"kind","actual-contiguous-Init-prefix-only"},{"afterPrefix",state()},
+        {"fullInitExecuted",false},{"checks",observed.checks},{"failures",observed.failures},{"pass",observed.failures.empty()}};
+}
+static json lateDsuCase(){
+    beginCase();observed.stopBeforeLateDsuAcquire=true;inputCaptureInit();
+    check(observed.calls["dsuStop"]==1&&observed.calls["lateDsuAcquisitionAfterStop"]==1,"memory Stop before late worker DSU acquisition");
+    check(bool(dsuResource)&&observed.calls["dsuStart"]==1,"same worker prefix acquired late DSU");
+    json row={{"name","same-worker-late-dsu-start-before-ready"},{"kind","actual-Init-prefix-then-whole-Shutdown"},{"afterPrefix",state()},
+        {"actualWorkerThreadExecuted",false},{"actualStopFunctionExecuted",false},{"observations",json::array()}};
+    g_inputCaptureStop=true;g_exitRequested=true;g_inputHostExitFence=true;
+    for(unsigned i=1;i<=2;++i){inputCaptureShutdown();check(!dsuResource&&observed.calls["dsuStop"]==int(i+1)&&observed.calls["dsuRelease"]==1,"final Shutdown returns late DSU exactly once");row["observations"].push_back(state());}
+    row["checks"]=observed.checks;row["failures"]=observed.failures;row["pass"]=observed.failures.empty();row["finalAllResourcesReleased"]=released();return row;
+}
+@RETIREMENT_CASES@
+int main(){
+    // The sentinel is instrumentation, excluded before the first case verdict.
+    invalidHandle.resource.reset();
+    json cases=json::array();
+    cases.push_back(shutdownCase("normal-ready",true,true,true,true,true,true,true,true,3));
+    cases.push_back(shutdownCase("partial-sensor-start-failed",false,true,true,true,true,true,true,false,0));
+    cases.push_back(shutdownCase("partial-sensor-thread-create-failed-event-owned",false,false,false,true,true,true,true,false,0));
+    cases.push_back(shutdownCase("partial-gm-create-null-dll-owned",false,false,false,false,true,false,true,false,0));
+    cases.push_back(shutdownCase("no-init",false,false,false,false,false,false,false,false,0));
+    cases.push_back(shutdownCase("normal-sensor-shutdown-fails-then-settles",true,true,true,true,true,true,true,true,2,true));
+    cases.push_back(shutdownCase("partial-sensor-shutdown-fails-then-settles",false,true,true,true,true,true,true,false,0,true));
+    cases.push_back(prefixCase("prefix-admitted",false,false,false,false,true));
+    cases.push_back(prefixCase("prefix-stop-refused",true,false,false,false,true));
+    cases.push_back(prefixCase("prefix-exit-requested-refused",false,true,false,false,true));
+    cases.push_back(prefixCase("prefix-terminal-fence-refused",false,false,true,false,true));
+    cases.push_back(prefixCase("prefix-already-ready",false,false,false,true,true));
+    cases.push_back(prefixCase("prefix-assets-absent",false,false,false,false,false));
+    cases.push_back(lateDsuCase());
+@RETIREMENT_DISPATCH@
+@EMERGENCY_DISPATCH@
+    unsigned checks=0,failures=0;for(const auto& c:cases){checks+=c.at("checks").get<unsigned>();failures+=static_cast<unsigned>(c.at("failures").size());}
+    std::cout<<json({{"schemaVersion",2},{"fixturePass",failures==0},{"checks",checks},{"failures",failures},{"cases",cases},
+        {"allLeavesMemoryOnly",true},{"fullInitExecuted",false},{"processExitUsedAsCleanup",false},
+        {"laterCallsAreExplicitFixtureActor",true},{"productionSelfHealingProven",false}}).dump()<<'\n';return failures?2:0;
+}

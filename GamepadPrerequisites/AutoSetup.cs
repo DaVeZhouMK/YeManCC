@@ -1,4 +1,4 @@
-﻿using System.ComponentModel;
+using System.ComponentModel;
 using System.Diagnostics;
 using System.Runtime.InteropServices;
 using System.Security.Principal;
@@ -87,6 +87,10 @@ internal static partial class Program
         // The reboot requirement survives a second dependency's failure. Details remain in the report.
         if (hidHide == "REBOOT_REQUIRED") return ("REBOOT_REQUIRED", 3010);
         if (hidHide == "READY" && hidMaestroExit == 0) return ("READY", 0);
+        if (hidHide == "READY" && hidMaestroExit == HidMaestroPackagePreparation.InventoryUnrecognizedExit)
+            return ("DRIVER_INVENTORY_UNRECOGNIZED", HidMaestroPackagePreparation.InventoryUnrecognizedExit);
+        if (prepare && hidHide == "READY" && hidMaestroExit == HidMaestroPackagePreparation.MaintenanceDeferredExit)
+            return ("DRIVER_MAINTENANCE_DEFERRED", HidMaestroPackagePreparation.MaintenanceDeferredExit);
         if (!prepare && (hidHide == "MISSING" || hidMaestroExit == 10)) return ("MISSING_DEPENDENCY", 10);
         return ("DEPENDENCY_NOT_READY", 11);
     }
@@ -120,31 +124,80 @@ internal static partial class Program
     }
     static int Main(string[] args)
     {
+        YeManCC.ProcessEfficiency.ApplyCurrentProcessOnce();
+        if (args.Length == 1 && args[0] == "--selftest-usbip-upgrade") return UsbipUpgradeSelfTest.Run();
+        if (args.Length == 1 && args[0] == "--selftest-usbip-owned-wait-child") { Console.WriteLine("READY"); Console.ReadLine(); return 0; }
+        if (args.Length == 1 && args[0] == "--selftest-usbip-owned-wait") return UsbipUpgradeSelfTest.WaitBudget();
+        if (args.Length == 1 && args[0] == "--selftest-usbip-boot-id") {
+            var boot = YeManCC.UsbipMaintenanceState.CurrentBootIdentifier;
+            Console.WriteLine(JsonSerializer.Serialize(new { status = boot is null ? "UNKNOWN" : "PASS", bootIdentifier = boot?.ToString("D"), bootSequence = YeManCC.UsbipMaintenanceState.CurrentBootSequence, osReadOnly = true, driverIo = false }));
+            return boot is null ? 1 : 0;
+        }
+        if (args.Length == 2 && args[0] == "--selftest-usbip-sdk-contract") {
+            var c = UsbipUpgrade.WindowsRuntime.ReadSdkContract(args[1]);
+            Console.WriteLine(JsonSerializer.Serialize(new { status = "PASS", targetVersion = c.Target.ToString(),
+                driverHash = c.DriverHash, installerResource = c.Resource, hardwareIo = false, sdkMethodsInvoked = 0 }));
+            return 0;
+        }
+        if (args.Length == 7 && args[0] == "--usbip-observe" && args[1] == "--install-root" &&
+            args[3] == "--owner-pid" && int.TryParse(args[4], out int observerOwner) && observerOwner > 0 &&
+            args[5] == "--setup-session" && System.Text.RegularExpressions.Regex.IsMatch(args[6], @"\A[0-9]+:[0-9]+\z")) {
+            // Deliberately before all setup gates/bootstrap, cleanup and report IO.
+            // Reuse this helper process, without installers, dialogs or another EXE.
+            StartupOwnerPid = observerOwner;
+            StartupRoot = Path.GetFullPath(args[2]);
+            if (!ValidStartupOwner()) return 11;
+            var observer = new UsbipUpgrade.WindowsRuntime(StartupRoot, "", args[6], observerOwner, false, ValidStartupOwner);
+            var observed = UsbipUpgrade.Observe(observer);
+            if (!ValidStartupOwner()) return 11;
+            Console.WriteLine(JsonSerializer.Serialize(new { batch = "GP-USBIP-OBSERVE-1", ownerPid = observerOwner,
+                installRoot = StartupRoot, session = args[6], usbipUpgrade = observed }));
+            return 0;
+        }
         if (args.Contains("--selftest") || args.Contains("--selftest-sdk-contract")) {
             if (args.Length == 1 && args[0] == "--selftest") { int first=SelfTest(); return first == 0 ? AutoSelfTest() : first; }
             return HidMaestroMain(args);
         }
         bool prepare = false, modeSet = false;
+        string setupSession = Environment.ProcessId + ":" + Environment.TickCount64;
+        string moduleCommitState = "";
         string root = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", ".."));
         string report = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "YeManCC", "gamepad-driver-setup.json");
         for (int i=0;i<args.Length;i++) {
             if (args[i] is "--check" or "--prepare") {
                 if (modeSet) return 2;
                 modeSet=true; prepare=args[i]=="--prepare";
-            } else if (args[i]=="--install-root" && i+1<args.Length) root=Path.GetFullPath(args[++i]);
+            } else if (args[i]=="--wait-update-commit" && i+1<args.Length) moduleCommitState=Path.GetFullPath(args[++i]);
+            else if (args[i]=="--install-root" && i+1<args.Length) root=Path.GetFullPath(args[++i]);
             else if (args[i]=="--report" && i+1<args.Length) report=Path.GetFullPath(args[++i]);
             else if (args[i]=="--owner-pid" && i+1<args.Length && int.TryParse(args[++i],out int pid) && pid>0) StartupOwnerPid=pid;
+            else if (args[i]=="--setup-session" && i+1<args.Length && System.Text.RegularExpressions.Regex.IsMatch(args[i+1], @"\A[0-9]+:[0-9]+\z")) setupSession=args[++i];
             else return 2;
         }
         StartupRoot=root;
         var result = new Dictionary<string,object?> { ["batch"]="GP-PREREQ-2", ["startedAt"]=DateTimeOffset.Now,
             ["prepare"]=prepare,["ownerPid"]=StartupOwnerPid,["installRoot"]=root,["hardwareVerified"]=false };
         int exit=11; string status="UNPROVEN"; bool held=false;
+        YeManCC.ModuleMaintenanceGate? moduleLease = null;
         using var mutex=new Mutex(false,@"Global\YeManCC.GamepadPrerequisites.Install");
         void Save() { Directory.CreateDirectory(Path.GetDirectoryName(report)!); File.WriteAllText(report,JsonSerializer.Serialize(result,Json),new UTF8Encoding(false)); }
         try {
             // Check-only does not take the install mutex, clean up files, or run SDK constructors.
             if (prepare) {
+                if (StartupOwnerPid!=0 && !ValidStartupOwner()) { status="INVALID_STARTUP_OWNER"; return exit; }
+                ModulePayloadBootstrap.Apply(root, moduleCommitState, StartupOwnerPid, () => StartupOwnerPid == 0 || ValidStartupOwner());
+                result["modulePayloadReady"]=true;
+                moduleLease=YeManCC.ModuleMaintenanceGate.TryEnter();
+                // The outgoing helper releases its lease just after its commit.
+                // Only this authenticated post-update startup gets a short wait;
+                // ordinary/manual concurrent maintenance still returns promptly.
+                if (moduleLease is null && moduleCommitState.Length != 0) {
+                    var moduleWait=Stopwatch.StartNew();
+                    while (moduleLease is null && moduleWait.Elapsed < TimeSpan.FromSeconds(15) && (StartupOwnerPid == 0 || ValidStartupOwner())) {
+                        Thread.Sleep(100); moduleLease=YeManCC.ModuleMaintenanceGate.TryEnter();
+                    }
+                }
+                if (moduleLease is null) { status="DRIVER_MAINTENANCE_DEFERRED"; result["hidmaestro"]=status; result["guidance"]="YMCC 或模块正在更新，请等待完成后重试。"; exit=19; return exit; }
                 try { held=mutex.WaitOne(0); } catch (AbandonedMutexException) { held=true; status="PREVIOUS_INSTALL_INTERRUPTED"; return exit; }
                 if (!held) { status="SETUP_ALREADY_RUNNING"; return exit; }
                 if (StartupOwnerPid!=0 && !ValidStartupOwner()) { status="INVALID_STARTUP_OWNER"; return exit; }
@@ -154,7 +207,38 @@ internal static partial class Program
             if (File.Exists(report)) File.Copy(report, report + ".previous", overwrite:true);
             Save();
             bool admin=new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+            // Isolated one-shot version upgrade, before controller admission.
+            // Same/newer/unknown installs never enter the uninstall terminal.
+            var usbipRuntime = new UsbipUpgrade.WindowsRuntime(root, report, setupSession, StartupOwnerPid, admin,
+                () => StartupOwnerPid == 0 || ValidStartupOwner());
+            usbipRuntime.UninstallEvidenceChanged = evidence => {
+                result["usbipUninstallEvidence"] = evidence;
+                Save();
+            };
+            using (var usbipGate = new Mutex(false, UsbipUpgrade.GateName)) {
+                bool gateHeld = false, abandoned = false;
+                try {
+                    try { gateHeld = usbipGate.WaitOne(0); }
+                    catch (AbandonedMutexException) {
+                        gateHeld = true; abandoned = true;
+                        usbipRuntime.Publish(new(1, "unverified", "", "", "上次 USB/IP 操作中断，已保留现场。请重启 Windows 后检查。", 1));
+                    }
+                    if (gateHeld && !abandoned) {
+                        result["usbipMaintenanceEvidenceBefore"] = YeManCC.UsbipMaintenanceState.DiagnosticEvidence();
+                        Save();
+                        usbipRuntime.RetireConfirmedPreviousBootFence(prepare);
+                        result["usbipUpgrade"] = UsbipUpgrade.Execute(usbipRuntime, prepare);
+                        result["usbipUninstallEvidence"] = usbipRuntime.UninstallEvidence;
+                        result["usbipMaintenanceEvidenceAfter"] = YeManCC.UsbipMaintenanceState.DiagnosticEvidence();
+                        Save();
+                    }
+                    else if (!gateHeld) usbipRuntime.Publish(new(1, "busy", "", "", "USB/IP 正在由其他会话处理，请等待后重新打开 YMCC。", 1));
+                }
+                finally { if (gateHeld) usbipGate.ReleaseMutex(); }
+            }
             var inventory=Pnp("/enum-drivers","/format","xml");
+            result["driverInventoryEvidence"]=HidMaestroPackagePreparation.CaptureInventory(report,inventory.Output,inventory.Exit,inventory.TimedOut);
+            Save();
             if (inventory.Exit!=0 || inventory.TimedOut) { status="ENUMERATION_UNPROVEN"; return exit; }
             var drivers=ParseDrivers(inventory.Output);
             var service=HidHideService();
@@ -202,11 +286,20 @@ internal static partial class Program
             using(var detail=JsonDocument.Parse(File.ReadAllText(hmReport))) result["hidmaestro"]=detail.RootElement.GetProperty("status").GetString();
             var final=SetupResult(hh,hm,prepare);
             status=final.Status; exit=final.ExitCode;
+            // The USB/IP uninstaller independently requires reboot; do not
+            // publish overall READY while its machine-wide fence is active.
+            if (result.TryGetValue("usbipUpgrade", out var usbipResult) && usbipResult is UsbipUpgrade.Snapshot usbip && usbip.phase == "reboot-required") {
+                status="REBOOT_REQUIRED";exit=3010;
+            }
             return exit;
+        } catch(HidMaestroPackagePreparation.InventorySchemaUnrecognizedException e) {
+            result["error"]=e.ToString(); result["inventoryRoot"]=e.ObservedRoot;
+            result["automaticMaintenanceAttempted"]=false;
+            status="DRIVER_INVENTORY_UNRECOGNIZED"; exit=HidMaestroPackagePreparation.InventoryUnrecognizedExit; return exit;
         } catch(Exception e) { result["error"]=e.ToString(); if (exit!=3010) status="ERROR_UNPROVEN"; return exit; }
         finally {
             result["status"]=status;result["exitCode"]=exit;result["finishedAt"]=DateTimeOffset.Now;
-            try { Save(); } finally { if(held) mutex.ReleaseMutex(); }
+            try { Save(); } finally { try { if(held) mutex.ReleaseMutex(); } finally { moduleLease?.Dispose(); } }
             Console.WriteLine(status);Console.WriteLine(report);
         }
     }
@@ -236,6 +329,9 @@ internal static partial class Program
             Check(SetupResult("REBOOT_REQUIRED",hm,true)==("REBOOT_REQUIRED",3010),"HidMaestro error does not mask required reboot");
         Check(SetupResult("READY",11,true)==("DEPENDENCY_NOT_READY",11),"no reboot inferred from an unrelated failure");
         Check(SetupResult("READY",0,true)==("READY",0),"both dependencies ready admit target");
+        Check(SetupResult("READY",18,true)==("DRIVER_INVENTORY_UNRECOGNIZED",18),"unrecognized inventory stays advisory and is not Ready");
+        Check(SetupResult("REBOOT_REQUIRED",18,true)==("REBOOT_REQUIRED",3010),"reboot requirement still overrides advisory inspection");
+        Check(SetupResult("PRESENT_NOT_READY_NO_REINSTALL",18,true)==("DEPENDENCY_NOT_READY",11),"known dependency fault is not hidden by advisory inspection");
         Check(SetupResult("MISSING",0,false)==("MISSING_DEPENDENCY",10),"check-only remains non-installing");
         Check(StartupOwnerPid==0,"owner exception not globally enabled");
         // Exercise the real retirement implementation with an isolated, test-owned tree.

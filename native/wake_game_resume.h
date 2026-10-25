@@ -7,7 +7,9 @@
 #include <vector>
 
 namespace WakeGameResume {
-inline constexpr ULONGLONG attemptOffsetsMs[] = {1000, 2500, 4500, 7000, 10000};
+// Dispatch immediately once power and input are Ready. Unconfirmed targets
+// keep the original later retry offsets and the same terminal deadline.
+inline constexpr ULONGLONG attemptOffsetsMs[] = {0, 2500, 4500, 7000, 10000};
 inline constexpr size_t attemptCount = sizeof(attemptOffsetsMs) / sizeof(attemptOffsetsMs[0]);
 struct ThreadState {
     bool known = false;

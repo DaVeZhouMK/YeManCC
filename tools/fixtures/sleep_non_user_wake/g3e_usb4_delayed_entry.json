@@ -1,0 +1,97 @@
+{
+  "kind": "archived-delayed-entry",
+  "source": "G3E USB4 actual wake; delayed original506 misclassified as182ms",
+  "classification": "异常睡眠类/USB4唤醒漏判/迟到通知时间关联",
+  "archiveSha256": "e5d6e55a2a4fd1c7be2520f5f3304a044dd952c665d0ed7f10f1574b1e5342d5",
+  "member": "sleep-facts.log",
+  "sourceLines": [
+    89,
+    93,
+    96,
+    99,
+    100,
+    101,
+    104,
+    108,
+    109,
+    110
+  ],
+  "entryFileTime": "134373136882683056",
+  "expectedWakeCyclesAfterFix": 1,
+  "originalObservedRequests": 0,
+  "originalObservedIntentAgeMs": 182,
+  "originalRaw507": {
+    "ActiveResidencyInUs": "23015509",
+    "BootId": "1",
+    "DripsResidencyInUs": "635403977",
+    "DripsTransitions": "3",
+    "DurationInUs": "658419486",
+    "DwmSyncFlushTime": "0",
+    "EnergyDrain": "338",
+    "FirstDripsEntryInUs": "21998650",
+    "GdiOnTime": "0",
+    "HwDripsResidencyInUs": "634927778",
+    "IsCsSessionInProgressOnExit": "false",
+    "MonitorPowerOnTime": "125703",
+    "NonActivatedCpuInUs": "917209",
+    "NonAttributedCpuInUs": "11022",
+    "NonDripsTimeActivatedInUs": "5877772099",
+    "NonResiliencyTimeInUs": "18446744067839379385",
+    "PowerStateAc": "false",
+    "ResiliencyDripsTimeInUs": "635403977",
+    "ResiliencyHwDripsTimeInUs": "634927778",
+    "ScenarioInstanceId": "10",
+    "ScenarioInstanceIdV2": "8",
+    "ScreenOffDurationInUs": "35654",
+    "ScreenOffHwDripsResidencyInUs": "0",
+    "ScreenOffSwDripsResidencyInUs": "0",
+    "SleepDurationInUs": "658383405",
+    "SleepEntered": "true",
+    "SleepHwDripsResidencyInUs": "634927778",
+    "SleepSwDripsResidencyInUs": "635403977"
+  },
+  "events": [
+    {
+      "kind": "kernel-callback",
+      "id": 506,
+      "reason": 1,
+      "observedFileTime": "134373143465620000",
+      "eventFileTime": "134373136882683056"
+    },
+    {
+      "kind": "suspend",
+      "observedFileTime": "134373143468830000"
+    },
+    {
+      "kind": "resume-auto",
+      "observedFileTime": "134373143470650000"
+    },
+    {
+      "kind": "resume-interactive",
+      "observedFileTime": "134373143470650000"
+    },
+    {
+      "kind": "kernel-gui",
+      "id": 506,
+      "reason": 1,
+      "observedFileTime": "134373143470690000",
+      "eventFileTime": "134373136882683056"
+    },
+    {
+      "kind": "kernel-callback",
+      "id": 507,
+      "reason": 5,
+      "observedFileTime": "134373143475350000",
+      "eventFileTime": "134373143466870000",
+      "originalPrecision": "displayed milliseconds"
+    },
+    {
+      "kind": "kernel-gui",
+      "id": 507,
+      "reason": 5,
+      "observedFileTime": "134373143476320000",
+      "eventFileTime": "134373143466870000"
+    }
+  ],
+  "precisionNote": "506 original 100ns value from kernel witness; collector times and507time retain displayed millisecond precision; no reconstructed live low-power events"
+}

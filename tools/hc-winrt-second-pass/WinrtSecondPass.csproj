@@ -1,0 +1,5 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><StartupObject>WinrtSecondPass.Entry</StartupObject></PropertyGroup>
+ <ItemGroup><Compile Remove="Probe/**/*.cs;CallbackProbe/**/*.cs;ConstructProbe/**/*.cs" /></ItemGroup>
+ <ItemGroup><Reference Include="Mono.Cecil"><HintPath>$(UserProfile)/.nuget/packages/microsoft.net.illink.tasks/10.0.11/tools/net/Mono.Cecil.dll</HintPath></Reference><Compile Include="../hc-application-dependency-trim/Program.cs" Link="ExistingVerifier.cs" /></ItemGroup>
+</Project>

@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 3,
+  "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+  "sourceVersion": "VC-R3-B46-368BADC1-20261020",
+  "manifest": "Build/Validation/VirtualController-B46-Current-20261020-R1/cancellation/coordinator-fixture-r3-pipe-manifest.json",
+  "sha256": "5b75bf65f832ff929aaf5d49101fc066227e07cd118f8362d894fb1d4b4dc67b",
+  "meaning": "Fresh exact B46 build of the unchanged original mutation recipe. A raw FAIL or original contract rejection remains unchanged."
+}

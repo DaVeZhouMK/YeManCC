@@ -1,0 +1,22 @@
+/* Fill the first details screen while keeping Steam's full action row and footer.
+   Native action row: 5rem; controller footer: 2.625rem; breathing room: .5rem.
+   Only the hero grows: lower tabs remain reachable through normal scrolling. */
+.BasicUI .appdetails_Header_2gZXh {
+    --ymcc-details-hero-height: max(12rem, calc(100vh - 8.125rem));
+    height: var(--ymcc-details-hero-height) !important;
+    min-height: var(--ymcc-details-hero-height) !important;
+    flex-shrink: 0;
+}
+.BasicUI .appdetails_Header_2gZXh .sharedappdetailsheader_TopCapsule_2meE3 {
+    --header-height: var(--ymcc-details-hero-height);
+    height: var(--ymcc-details-hero-height) !important;
+    min-height: var(--ymcc-details-hero-height) !important;
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-ymcc-game-details: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-7a458641a648f242: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-c351629737ef4149: 1; }

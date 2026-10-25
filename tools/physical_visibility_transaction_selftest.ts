@@ -8,7 +8,7 @@ import {
 
 const request: VisibilityTransactionRequestV1 = {
   schemaVersion: 1, runId: 't13-run', requestId: 't13-request', epoch: 30, powerGeneration: 6,
-  owner: 'none', targetId: 'virtual-ds4-1', persona: 'dualshock4', configRevision: 50,
+  owner: 'none', targetId: 'mock-virtual-edge-1', persona: 'dualsense-edge', configRevision: 50,
   configHash: 'sha256:'.padEnd(71, 'c'), providerId: 'windows-imu', calibrationId: 'calibration-50',
   visibilityTransactionId: 'visibility-50', timestampUtc: '2026-09-04T12:30:00.000Z',
   ymccAllowlist: ['C:\\SOFT\\YeMan\\YeManCC\\YeManCC.exe', 'C:\\SOFT\\YeMan\\YeManCC\\InputHost\\YeManInputHost.exe'],
@@ -18,7 +18,7 @@ const request: VisibilityTransactionRequestV1 = {
     vid: 0x0b05, pid: 0x1b4c, physicalIdentity: 'rog:fixture',
   },
   virtualTarget: {
-    targetId: 'virtual-ds4-1', persona: 'dualshock4', deviceInstanceId: 'ROOT\\HIDMAESTRO\\DS4', baseContainerDeviceInstanceId: 'ROOT\\HIDMAESTRO\\DS4',
+    targetId: 'mock-virtual-edge-1', persona: 'dualsense-edge', deviceInstanceId: 'ROOT\\MOCK\\EDGE', baseContainerDeviceInstanceId: 'ROOT\\MOCK\\EDGE',
   },
 };
 
@@ -118,7 +118,7 @@ const evidence = {
   },
   trace: transaction.trace(), calls, failedCalls,
 };
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/GyroVirtual/T13-E01-physical-visibility-transaction-mock-20260904.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/GyroVirtual'), 'T13-E01-physical-visibility-transaction-mock-20260904.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify(evidence, null, 2));
 console.log(`physical visibility transaction selftest: PASS (${evidencePath})`);

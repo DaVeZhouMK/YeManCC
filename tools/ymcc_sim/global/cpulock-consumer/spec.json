@@ -1,0 +1,79 @@
+{
+  "schemaVersion": 1,
+  "id": "performance.cpulock-consumer",
+  "product": "src/bridge/cpulock.ts",
+  "runtimeFunctions": [
+    "onCpuLockUpdate",
+    "isCpuLocked",
+    "getCpuLock",
+    "isCpuSideLocked",
+    "getCpuLockSide",
+    "loadCpuLock",
+    "setCpuLock",
+    "lockCpuSide",
+    "updateCpuLock",
+    "updateCpuLockSide",
+    "clearCpuLock",
+    "unlockCpuSide",
+    "applyCpuLock"
+  ],
+  "runtimeConstants": [
+    "CPU_LOCK_FILE"
+  ],
+  "typeExports": [
+    "CpuLockSide",
+    "CpuLockCfg",
+    "CpuLockSideCfg",
+    "CpuLockValues",
+    "CpuLockPatch",
+    "CpuLockSidePatch"
+  ],
+  "faults": [
+    {
+      "id": "unlocked-side-update",
+      "before": "if (sideOrValues === 'ac' ? next.acLocked : next.dcLocked) setSideCfg(next, sideOrValues, submitted as CpuLockSidePatch);",
+      "after": "setSideCfg(next, sideOrValues, submitted as CpuLockSidePatch);",
+      "expectedFailedScenario": "unlocked-side-update-is-ignored",
+      "expectedAssertion": "unlocked DC must retain its saved frequency"
+    },
+    {
+      "id": "optimistic-cache-before-save",
+      "before": "if (Object.keys(patch).length) await saveSettingsSection('cpu', { lock: patch }, generation);",
+      "after": "cache = next; if (Object.keys(patch).length) await saveSettingsSection('cpu', { lock: patch }, generation);",
+      "expectedFailedScenario": "failed-save-does-not-publish-cache",
+      "expectedAssertion": "failed save must retain the previous published cache"
+    },
+    {
+      "id": "apply-unlocked-dc",
+      "before": "await applyPowerParams({ ...merged, sides });",
+      "after": "await applyPowerParams({ ...merged, sides: ['ac', 'dc'] });",
+      "expectedFailedScenario": "apply-single-ac-preserves-dc",
+      "expectedAssertion": "AC-only lock must never submit a DC batch"
+    }
+  ],
+  "expectedScenarios": [
+    "runtime-export-surface-and-default-copy",
+    "legacy-migration-sanitizes-values",
+    "failed-legacy-migration-does-not-load-cache",
+    "independent-lock-flags-override-legacy",
+    "observer-copy-error-isolation-and-unsubscribe",
+    "legacy-set-both-sides-captures-submission",
+    "unlocked-side-update-is-ignored",
+    "side-update-alias-and-clear-preserve-values",
+    "lock-side-without-values-uses-real-read-conversions",
+    "missing-dc-values-fall-back-to-ac",
+    "unsupported-reads-use-current-yeman-defaults",
+    "apply-no-lock-does-not-query-power",
+    "apply-single-ac-preserves-dc",
+    "apply-single-dc-preserves-ac",
+    "apply-both-uses-cache-without-power-read",
+    "explicit-lock-and-set-apply-options",
+    "failed-save-does-not-publish-cache",
+    "stored-commit-receipt-controls-cache",
+    "read-error-retains-cache-and-rejects",
+    "generation-change-rejects-old-queue-and-recovers",
+    "queued-updates-are-serialized-and-owned",
+    "power-batch-rejected-is-best-effort",
+    "power-batch-throw-is-best-effort"
+  ]
+}

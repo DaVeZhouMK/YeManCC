@@ -1,0 +1,1557 @@
+{
+  "schemaVersion": 1,
+  "original": {
+    "cases": 64,
+    "checks": 299,
+    "shape": [
+      {
+        "name": "active-zero-dirty",
+        "checks": [
+          {
+            "name": "same identity preserves active zero",
+            "expected": 0
+          },
+          {
+            "name": "owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "one zero",
+            "expected": 1
+          },
+          {
+            "name": "refresh leaves generation",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "active-zero-boundary",
+        "checks": [
+          {
+            "name": "same identity preserves active zero",
+            "expected": 0
+          },
+          {
+            "name": "owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "one zero",
+            "expected": 1
+          },
+          {
+            "name": "refresh leaves generation",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "active-zero-none",
+        "checks": [
+          {
+            "name": "same identity preserves active zero",
+            "expected": 0
+          },
+          {
+            "name": "owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "one zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "A-to-different-physical",
+        "checks": [
+          {
+            "name": "old stop never reaches new occupant",
+            "expected": 0
+          },
+          {
+            "name": "old owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "correct source mask",
+            "expected": 1
+          },
+          {
+            "name": "replacement owns its own zero",
+            "expected": 1
+          },
+          {
+            "name": "new pulse reclaimed",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "A-to-virtual",
+        "checks": [
+          {
+            "name": "old stop never reaches new occupant",
+            "expected": 0
+          },
+          {
+            "name": "old owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "correct source mask",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "same-path-case-normalization",
+        "checks": [
+          {
+            "name": "Windows ASCII case equivalent",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "Unknown-same",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "resolution reclaims retained owner",
+            "expected": false
+          },
+          {
+            "name": "only same identity may receive old zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "Unknown-different",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "resolution reclaims retained owner",
+            "expected": false
+          },
+          {
+            "name": "only same identity may receive old zero",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "Unknown-virtual",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "resolution reclaims retained owner",
+            "expected": false
+          },
+          {
+            "name": "only same identity may receive old zero",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "Unknown-timeout",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "timeout retains outstanding owner",
+            "expected": true
+          },
+          {
+            "name": "timeout leaves no recurring work",
+            "expected": false
+          },
+          {
+            "name": "no blind timeout zero",
+            "expected": 0
+          },
+          {
+            "name": "late same identity still receives owed zero",
+            "expected": 1
+          },
+          {
+            "name": "late same identity retires owner",
+            "expected": false
+          },
+          {
+            "name": "fresh pulse after resolved debt stops",
+            "expected": 2
+          }
+        ]
+      },
+      {
+        "name": "Unknown-disconnect",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "resolution reclaims retained owner",
+            "expected": false
+          },
+          {
+            "name": "only same identity may receive old zero",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "Unknown-provider",
+        "checks": [
+          {
+            "name": "no blind zero during Unknown",
+            "expected": 0
+          },
+          {
+            "name": "new Unknown pulse denied",
+            "expected": true
+          },
+          {
+            "name": "Unknown retains single owner",
+            "expected": true
+          },
+          {
+            "name": "Unknown has bounded deadline",
+            "expected": true
+          },
+          {
+            "name": "resolution reclaims retained owner",
+            "expected": false
+          },
+          {
+            "name": "only same identity may receive old zero",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "Unknown-budget-not-reset-by-repeated-probe",
+        "checks": [
+          {
+            "name": "repeated Unknown does not extend lifetime",
+            "expected": 1518
+          },
+          {
+            "name": "budget expires into dormant ownership",
+            "expected": true
+          },
+          {
+            "name": "dormant has no recurring timer",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "provider-availability-revokes-proof",
+        "checks": [
+          {
+            "name": "availability loss retires old owner",
+            "expected": false
+          },
+          {
+            "name": "compat input remains Physical",
+            "expected": 1
+          },
+          {
+            "name": "legacy pathless feedback remains available",
+            "expected": true
+          },
+          {
+            "name": "fallback stop is independent from retired full-path proof",
+            "expected": 1
+          },
+          {
+            "name": "restored authority fresh pulse zero",
+            "expected": 2
+          }
+        ]
+      },
+      {
+        "name": "legacy-unavailable-dirty",
+        "checks": [
+          {
+            "name": "pathless startup feedback starts",
+            "expected": true
+          },
+          {
+            "name": "pathless provider does not query paths",
+            "expected": 0
+          },
+          {
+            "name": "pathless unchanged provider retains zero",
+            "expected": 1
+          },
+          {
+            "name": "pathless pulse owner released",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "legacy-unavailable-boundary",
+        "checks": [
+          {
+            "name": "pathless startup feedback starts",
+            "expected": true
+          },
+          {
+            "name": "pathless provider does not query paths",
+            "expected": 0
+          },
+          {
+            "name": "pathless unchanged provider retains zero",
+            "expected": 1
+          },
+          {
+            "name": "pathless pulse owner released",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "dormant-debt-same-source",
+        "checks": [
+          {
+            "name": "unknown owner retained past retry budget",
+            "expected": true
+          },
+          {
+            "name": "long unknown never silently drops owner",
+            "expected": true
+          },
+          {
+            "name": "long unknown has no recurring deadline",
+            "expected": false
+          },
+          {
+            "name": "pending log is transition-only",
+            "expected": 2
+          },
+          {
+            "name": "long unknown does not admit new pulse",
+            "expected": false
+          },
+          {
+            "name": "identity event settles dormant ownership",
+            "expected": false
+          },
+          {
+            "name": "only proven same source receives old zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "dormant-debt-different-source",
+        "checks": [
+          {
+            "name": "unknown owner retained past retry budget",
+            "expected": true
+          },
+          {
+            "name": "long unknown never silently drops owner",
+            "expected": true
+          },
+          {
+            "name": "long unknown has no recurring deadline",
+            "expected": false
+          },
+          {
+            "name": "pending log is transition-only",
+            "expected": 2
+          },
+          {
+            "name": "long unknown does not admit new pulse",
+            "expected": false
+          },
+          {
+            "name": "identity event settles dormant ownership",
+            "expected": false
+          },
+          {
+            "name": "only proven same source receives old zero",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "source-mask-replacement-dirty",
+        "checks": [
+          {
+            "name": "initial cached physical admitted",
+            "expected": 1
+          },
+          {
+            "name": "reused virtual slot excluded from physical source",
+            "expected": 0
+          },
+          {
+            "name": "reused physical source returns without edge",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "source-mask-replacement-boundary",
+        "checks": [
+          {
+            "name": "initial cached physical admitted",
+            "expected": 1
+          },
+          {
+            "name": "reused virtual slot excluded from physical source",
+            "expected": 0
+          },
+          {
+            "name": "reused physical source returns without edge",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "zero-write-failure-recovers",
+        "checks": [
+          {
+            "name": "failed zero retains ownership",
+            "expected": true
+          },
+          {
+            "name": "failed zero does not count as stop",
+            "expected": 0
+          },
+          {
+            "name": "failed zero log has actual API code",
+            "expected": 5
+          },
+          {
+            "name": "failed zero log distinguishes reason",
+            "expected": "zero-write-failed"
+          },
+          {
+            "name": "failed zero log does not claim motor observation",
+            "expected": false
+          },
+          {
+            "name": "retry failure is dormant, success clears",
+            "expected": false
+          },
+          {
+            "name": "successful retry alone proves zero",
+            "expected": 1
+          },
+          {
+            "name": "zero-failure retry does not create recurring timer",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "zero-write-failure-retains-debt",
+        "checks": [
+          {
+            "name": "failed zero retains ownership",
+            "expected": true
+          },
+          {
+            "name": "failed zero does not count as stop",
+            "expected": 0
+          },
+          {
+            "name": "failed zero log has actual API code",
+            "expected": 5
+          },
+          {
+            "name": "failed zero log distinguishes reason",
+            "expected": "zero-write-failed"
+          },
+          {
+            "name": "failed zero log does not claim motor observation",
+            "expected": false
+          },
+          {
+            "name": "retry failure is dormant, success clears",
+            "expected": true
+          },
+          {
+            "name": "successful retry alone proves zero",
+            "expected": 0
+          },
+          {
+            "name": "zero-failure retry does not create recurring timer",
+            "expected": false
+          },
+          {
+            "name": "existing source event retries dormant zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "best-effort-log-never-controls-feedback",
+        "checks": [
+          {
+            "name": "logger failure cannot discard owed zero",
+            "expected": true
+          },
+          {
+            "name": "logger failure cannot prevent actual zero",
+            "expected": 1
+          },
+          {
+            "name": "logger failure still retires owner after zero",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "legacy-forced-edge",
+        "checks": [
+          {
+            "name": "forced probe generation invalidates",
+            "expected": true
+          },
+          {
+            "name": "forced episode cannot use old zero",
+            "expected": 0
+          },
+          {
+            "name": "forced owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "new forced episode owns own stop",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "legacy-forced-reprobe",
+        "checks": [
+          {
+            "name": "forced probe generation invalidates",
+            "expected": true
+          },
+          {
+            "name": "forced episode cannot use old zero",
+            "expected": 0
+          },
+          {
+            "name": "forced owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "new forced episode owns own stop",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "legacy-forced-disconnect",
+        "checks": [
+          {
+            "name": "forced probe generation invalidates",
+            "expected": true
+          },
+          {
+            "name": "forced episode cannot use old zero",
+            "expected": 0
+          },
+          {
+            "name": "forced owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "new forced episode owns own stop",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "inflight-epoch-change",
+        "checks": [
+          {
+            "name": "probe drift requests fresh identity",
+            "expected": true
+          },
+          {
+            "name": "drift blocks new feedback",
+            "expected": false
+          },
+          {
+            "name": "drift old zero suppressed",
+            "expected": 0
+          },
+          {
+            "name": "fresh proof recovers",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "inflight-power-change",
+        "checks": [
+          {
+            "name": "probe drift requests fresh identity",
+            "expected": true
+          },
+          {
+            "name": "drift blocks new feedback",
+            "expected": false
+          },
+          {
+            "name": "drift old zero suppressed",
+            "expected": 0
+          },
+          {
+            "name": "fresh proof recovers",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "concurrent-probe-stop-same",
+        "checks": [
+          {
+            "name": "serialized stop sees committed complete identity",
+            "expected": 1
+          },
+          {
+            "name": "concurrent owner reclaimed",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "concurrent-probe-stop-new-physical",
+        "checks": [
+          {
+            "name": "serialized stop sees committed complete identity",
+            "expected": 0
+          },
+          {
+            "name": "concurrent owner reclaimed",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "late-source-notification-vs-new-stop-deadline",
+        "checks": [
+          {
+            "name": "stale notification keeps new generation",
+            "expected": 2
+          },
+          {
+            "name": "stale notification keeps new due",
+            "expected": 1036
+          },
+          {
+            "name": "stale finish cannot clear new owner",
+            "expected": true
+          },
+          {
+            "name": "same owner cannot postpone zero",
+            "expected": 1036
+          },
+          {
+            "name": "new pulse reaches zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "stable-no-extra-poll",
+        "checks": [
+          {
+            "name": "stable tick has no path query",
+            "expected": 1
+          },
+          {
+            "name": "stable tick has no generation churn",
+            "expected": 1
+          },
+          {
+            "name": "stable pulse stops",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "MSI-DInput",
+        "checks": [
+          {
+            "name": "MSI ready bypasses XInput policy",
+            "expected": true
+          },
+          {
+            "name": "MSI pulse succeeds",
+            "expected": true
+          },
+          {
+            "name": "MSI original motor mapping",
+            "expected": 66
+          },
+          {
+            "name": "MSI zero intact",
+            "expected": 1
+          },
+          {
+            "name": "MSI owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "no XInput output",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "MSI-A1M-DInput",
+        "checks": [
+          {
+            "name": "MSI ready bypasses XInput policy",
+            "expected": true
+          },
+          {
+            "name": "MSI pulse succeeds",
+            "expected": true
+          },
+          {
+            "name": "MSI original motor mapping",
+            "expected": 193
+          },
+          {
+            "name": "MSI zero intact",
+            "expected": 1
+          },
+          {
+            "name": "MSI owner reclaimed",
+            "expected": false
+          },
+          {
+            "name": "no XInput output",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "full-key-includes-classification",
+        "checks": [
+          {
+            "name": "classification belongs to full identity",
+            "expected": true
+          },
+          {
+            "name": "same path changed class retires proof",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "R108-common-identity-observer-isolation",
+        "checks": [
+          {
+            "name": "common physical identity does not touch MSI cache",
+            "expected": true
+          },
+          {
+            "name": "common physical identity does not emit MSI event",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "R108-MSI-cache-and-source-edge-without-extra-poll",
+        "checks": [
+          {
+            "name": "MSI path copied from existing probe",
+            "expected": true
+          },
+          {
+            "name": "MSI stable input adds no path query",
+            "expected": 1
+          },
+          {
+            "name": "MSI stable input adds no source event",
+            "expected": 1
+          },
+          {
+            "name": "MSI changed occupant emits existing source edge",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "total-XInput-feedback-consumer",
+        "checks": [
+          {
+            "name": "actual XInput pulse keeps total capability",
+            "expected": 1
+          },
+          {
+            "name": "actual XInput owner retains total binding",
+            "expected": 1
+          },
+          {
+            "name": "actual XInput receipt has total ID",
+            "expected": "controller.feedback.xinput.physical"
+          },
+          {
+            "name": "manual pulse does not prove game forwarding",
+            "expected": false
+          },
+          {
+            "name": "total bound XInput pulse returns original zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "total-MSI-feedback-consumer",
+        "checks": [
+          {
+            "name": "actual MSI pulse keeps total capability",
+            "expected": 2
+          },
+          {
+            "name": "actual MSI owner retains total binding",
+            "expected": 2
+          },
+          {
+            "name": "actual MSI receipt has total ID",
+            "expected": "controller.feedback.msi-dinput.physical"
+          },
+          {
+            "name": "actual MSI pulse uses current physical source",
+            "expected": 1
+          },
+          {
+            "name": "total bound MSI returns original zero",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "total-feedback-pending-release",
+        "checks": [
+          {
+            "name": "pending stop retains total capability",
+            "expected": 1
+          },
+          {
+            "name": "pending stop retains original owned resource",
+            "expected": true
+          },
+          {
+            "name": "total binding does not bypass original release proof",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "total-feedback-provider-integrity",
+        "checks": [
+          {
+            "name": "unknown feedback provider is refused",
+            "expected": false
+          },
+          {
+            "name": "copied provider cannot forge total binding",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "total-feedback-live-authority",
+        "checks": [
+          {
+            "name": "total registration does not grant hardware authority",
+            "expected": false
+          },
+          {
+            "name": "denied physical source leaves no receipt token",
+            "expected": 0
+          },
+          {
+            "name": "denied write touches no actuator",
+            "expected": 0
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-writer-length-6",
+        "checks": [
+          {
+            "name": "real MSI writer accepts selected report length",
+            "expected": true
+          },
+          {
+            "name": "real MSI writer has bound receipt",
+            "expected": 2
+          },
+          {
+            "name": "real MSI WriteFile gets exact report length",
+            "expected": 6
+          },
+          {
+            "name": "real MSI frame has HC report id",
+            "expected": 5
+          },
+          {
+            "name": "real MSI frame has command",
+            "expected": 1
+          },
+          {
+            "name": "real MSI small and large mapping",
+            "expected": 16962
+          },
+          {
+            "name": "real MSI frame tail remains zero",
+            "expected": true
+          },
+          {
+            "name": "real MSI zero uses original writer",
+            "expected": 1
+          },
+          {
+            "name": "real MSI resource is reused for zero",
+            "expected": 1
+          },
+          {
+            "name": "real MSI source cache built once",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-writer-length-32",
+        "checks": [
+          {
+            "name": "real MSI writer accepts selected report length",
+            "expected": true
+          },
+          {
+            "name": "real MSI writer has bound receipt",
+            "expected": 2
+          },
+          {
+            "name": "real MSI WriteFile gets exact report length",
+            "expected": 32
+          },
+          {
+            "name": "real MSI frame has HC report id",
+            "expected": 5
+          },
+          {
+            "name": "real MSI frame has command",
+            "expected": 1
+          },
+          {
+            "name": "real MSI small and large mapping",
+            "expected": 16962
+          },
+          {
+            "name": "real MSI frame tail remains zero",
+            "expected": true
+          },
+          {
+            "name": "real MSI zero uses original writer",
+            "expected": 1
+          },
+          {
+            "name": "real MSI resource is reused for zero",
+            "expected": 1
+          },
+          {
+            "name": "real MSI source cache built once",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-writer-length-64",
+        "checks": [
+          {
+            "name": "real MSI writer accepts selected report length",
+            "expected": true
+          },
+          {
+            "name": "real MSI writer has bound receipt",
+            "expected": 2
+          },
+          {
+            "name": "real MSI WriteFile gets exact report length",
+            "expected": 64
+          },
+          {
+            "name": "real MSI frame has HC report id",
+            "expected": 5
+          },
+          {
+            "name": "real MSI frame has command",
+            "expected": 1
+          },
+          {
+            "name": "real MSI small and large mapping",
+            "expected": 16962
+          },
+          {
+            "name": "real MSI frame tail remains zero",
+            "expected": true
+          },
+          {
+            "name": "real MSI zero uses original writer",
+            "expected": 1
+          },
+          {
+            "name": "real MSI resource is reused for zero",
+            "expected": 1
+          },
+          {
+            "name": "real MSI source cache built once",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-writer-length-96",
+        "checks": [
+          {
+            "name": "real MSI writer accepts selected report length",
+            "expected": true
+          },
+          {
+            "name": "real MSI writer has bound receipt",
+            "expected": 2
+          },
+          {
+            "name": "real MSI WriteFile gets exact report length",
+            "expected": 96
+          },
+          {
+            "name": "real MSI frame has HC report id",
+            "expected": 5
+          },
+          {
+            "name": "real MSI frame has command",
+            "expected": 1
+          },
+          {
+            "name": "real MSI small and large mapping",
+            "expected": 16962
+          },
+          {
+            "name": "real MSI frame tail remains zero",
+            "expected": true
+          },
+          {
+            "name": "real MSI zero uses original writer",
+            "expected": 1
+          },
+          {
+            "name": "real MSI resource is reused for zero",
+            "expected": 1
+          },
+          {
+            "name": "real MSI source cache built once",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-open-refusal-vendor",
+        "checks": [
+          {
+            "name": "real MSI source rejection never attempts write",
+            "expected": false
+          },
+          {
+            "name": "real MSI source rejection has no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI source rejection closes owned open",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-open-refusal-product",
+        "checks": [
+          {
+            "name": "real MSI source rejection never attempts write",
+            "expected": false
+          },
+          {
+            "name": "real MSI source rejection has no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI source rejection closes owned open",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-open-refusal-usage",
+        "checks": [
+          {
+            "name": "real MSI source rejection never attempts write",
+            "expected": false
+          },
+          {
+            "name": "real MSI source rejection has no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI source rejection closes owned open",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-open-refusal-length",
+        "checks": [
+          {
+            "name": "real MSI source rejection never attempts write",
+            "expected": false
+          },
+          {
+            "name": "real MSI source rejection has no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI source rejection closes owned open",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-open-refusal-caps",
+        "checks": [
+          {
+            "name": "real MSI source rejection never attempts write",
+            "expected": false
+          },
+          {
+            "name": "real MSI source rejection has no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI source rejection closes owned open",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-write-failure-1",
+        "checks": [
+          {
+            "name": "real MSI write failure is not success",
+            "expected": false
+          },
+          {
+            "name": "real MSI failed resource is retired",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-write-failure-2",
+        "checks": [
+          {
+            "name": "real MSI write failure is not success",
+            "expected": false
+          },
+          {
+            "name": "real MSI failed resource is retired",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-write-failure-3",
+        "checks": [
+          {
+            "name": "real MSI write failure is not success",
+            "expected": false
+          },
+          {
+            "name": "real MSI failed resource is retired",
+            "expected": true
+          },
+          {
+            "name": "real MSI timeout cancels owned overlapped request",
+            "expected": 1
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-pending-resource-recovery",
+        "checks": [
+          {
+            "name": "pending MSI write retains one resource",
+            "expected": true
+          },
+          {
+            "name": "pending MSI write fails safely",
+            "expected": false
+          },
+          {
+            "name": "unreaped MSI request blocks another resource",
+            "expected": 1
+          },
+          {
+            "name": "unreaped MSI request is pending",
+            "expected": true
+          },
+          {
+            "name": "reaped MSI owner permits fresh write",
+            "expected": true
+          },
+          {
+            "name": "reaped MSI owner opens exactly one successor",
+            "expected": 2
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-asymmetric-original-frame",
+        "checks": [
+          {
+            "name": "real MSI asymmetric report is accepted",
+            "expected": true
+          },
+          {
+            "name": "real MSI small motor preserves index four",
+            "expected": 17
+          },
+          {
+            "name": "real MSI large motor preserves index five",
+            "expected": 93
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-final-authority-refusal",
+        "checks": [
+          {
+            "name": "real MSI final authority is rechecked after open",
+            "expected": false
+          },
+          {
+            "name": "real MSI changed authority reaches no WriteFile",
+            "expected": 0
+          },
+          {
+            "name": "real MSI changed authority retires owned resource",
+            "expected": true
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-zero-failure-retry-1",
+        "checks": [
+          {
+            "name": "MSI zero regression starts real physical writer",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero retains outstanding physical feedback owner",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero schedules bounded retry",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero is not API accepted",
+            "expected": false
+          },
+          {
+            "name": "successful MSI zero alone settles owner",
+            "expected": false
+          },
+          {
+            "name": "successful MSI retry has zero API receipt",
+            "expected": true
+          },
+          {
+            "name": "successful MSI retry does not claim physical observation",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-zero-failure-retry-2",
+        "checks": [
+          {
+            "name": "MSI zero regression starts real physical writer",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero retains outstanding physical feedback owner",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero schedules bounded retry",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero is not API accepted",
+            "expected": false
+          },
+          {
+            "name": "successful MSI zero alone settles owner",
+            "expected": false
+          },
+          {
+            "name": "successful MSI retry has zero API receipt",
+            "expected": true
+          },
+          {
+            "name": "successful MSI retry does not claim physical observation",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-zero-failure-retry-3",
+        "checks": [
+          {
+            "name": "MSI zero regression starts real physical writer",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero retains outstanding physical feedback owner",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero schedules bounded retry",
+            "expected": true
+          },
+          {
+            "name": "failed MSI zero is not API accepted",
+            "expected": false
+          },
+          {
+            "name": "successful MSI zero alone settles owner",
+            "expected": false
+          },
+          {
+            "name": "successful MSI retry has zero API receipt",
+            "expected": true
+          },
+          {
+            "name": "successful MSI retry does not claim physical observation",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-bounded-stop-debt-and-source-wake",
+        "checks": [
+          {
+            "name": "exhausted MSI stop budget retains one owner",
+            "expected": true
+          },
+          {
+            "name": "exhausted MSI stop budget leaves no recurring timer",
+            "expected": false
+          },
+          {
+            "name": "dormant MSI debt does no background writes",
+            "expected": 3
+          },
+          {
+            "name": "late MSI source notification wakes dormant zero",
+            "expected": true
+          },
+          {
+            "name": "late MSI same-owner recovery accepts actual zero",
+            "expected": true
+          },
+          {
+            "name": "late MSI zero reclaims retained owner",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-stop-scheduler-unavailable",
+        "checks": [
+          {
+            "name": "unavailable MSI scheduler reports failure",
+            "expected": false
+          },
+          {
+            "name": "unavailable MSI scheduler does not clear debt",
+            "expected": true
+          },
+          {
+            "name": "available MSI scheduler accepts existing debt",
+            "expected": true
+          },
+          {
+            "name": "MSI debt settles after real retry",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-replacement-source-cannot-receive-old-zero",
+        "checks": [
+          {
+            "name": "MSI replacement source wakes old debt check",
+            "expected": true
+          },
+          {
+            "name": "MSI old zero never writes a replacement source",
+            "expected": 3
+          },
+          {
+            "name": "MSI replaced owner is retired",
+            "expected": false
+          },
+          {
+            "name": "MSI retirement never forges zero API acceptance",
+            "expected": false
+          }
+        ]
+      },
+      {
+        "name": "actual-MSI-old-stop-cannot-steal-newer-pulse",
+        "checks": [
+          {
+            "name": "MSI newer pulse admitted after existing backoff",
+            "expected": true
+          },
+          {
+            "name": "MSI old stop cannot clear newer pulse",
+            "expected": true
+          },
+          {
+            "name": "MSI newer pulse owns its generation",
+            "expected": true
+          },
+          {
+            "name": "MSI newer pulse performs its own zero",
+            "expected": false
+          }
+        ]
+      }
+    ],
+    "rawHistoricalSha256": "e99219c366c4cfa723334f1714afd72d94389c213d3cfd74df1456b757b51a80",
+    "rawHistoricalReference": "D:/HC48x/2026-10-21T01-29-32-695Z-e109880d/cases/controller.xinput-feedback-lifecycle/feedback/positive/original/runs/2026-10-21T01-30-43-595Z-27280/fixed-off-execute.stdout.txt"
+  },
+  "added": {
+    "source": "tools/fixtures/xinput_identity_feedback_lifecycle_fixture.cpp",
+    "sourceSha256": "356797b38b95793532a6be12c6590b747061e63e22f08eb6a4fc4805fe9d9e90",
+    "names": [
+      "touch-output-episode-baseline-is-not-per-move",
+      "touch-output-resume-api-success-is-not-motor-proof",
+      "touch-output-baseline-failure-is-retryable-without-timer",
+      "touch-output-start-failure-does-not-commit-baseline",
+      "touch-output-power-change-during-baseline-is-rechecked",
+      "touch-output-topology-change-during-baseline-is-rechecked",
+      "touch-output-baseline-retains-physical-and-power-admission",
+      "touch-output-baseline-preserves-manual-owner",
+      "touch-output-amplified-three-tiers-retain-stop"
+    ],
+    "checksPerCase": [
+      3,
+      5,
+      2,
+      2,
+      1,
+      1,
+      2,
+      1,
+      6
+    ]
+  },
+  "current": {
+    "cases": 73,
+    "checks": 322
+  }
+}

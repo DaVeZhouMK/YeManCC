@@ -1,0 +1,1296 @@
+{
+  "schemaVersion": 1,
+  "kind": "onex-current-candidate-selected-terminal-basis",
+  "hostSha256": "2b59965fce6909b1a85058e1cf670477090ed858d64eda5484a2fda38eec484a",
+  "backendSha256": "2a3ae2d1fa99c382841dfa6ee690ac3c3c9baf429b726b76a9c67c2d6fcfe236",
+  "reportCount": 10,
+  "methodPins": [
+    {
+      "role": "host",
+      "token": 100667182,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::get_UsesBackendFanWriter()",
+      "instructionListingSha256": "fcb2f925272b9cfa6435cf3bc47e06de0a68e6492a2ae1f4e805ce44e1e5ce01"
+    },
+    {
+      "role": "host",
+      "token": 100667657,
+      "method": "System.Void YeManFanHost.FanHostEngine::.ctor(YeManFanHost.HostOptions,YeManFanHost.HostDiagnosticLog)",
+      "instructionListingSha256": "41fb57c6c925c1520408edf2005b1985fb7cee463dd1498756d5a6bdddbc6afd"
+    },
+    {
+      "role": "host",
+      "token": 100667805,
+      "method": "System.Void YeManFanHost.FanHostEngine::ScheduleRecoveryRetry()",
+      "instructionListingSha256": "5fd0494f51f78c42de5280a1ec6dedc769423c45f8379f62e18ae1f4af993d4e"
+    },
+    {
+      "role": "host",
+      "token": 100667808,
+      "method": "System.Void YeManFanHost.FanHostEngine::StopRecoveryRetry()",
+      "instructionListingSha256": "f3254107f4ea8eda222fdb7cda78a48cb9285af88a5f475f84081b82dadec8bb"
+    },
+    {
+      "role": "host",
+      "token": 100667664,
+      "method": "System.Void YeManFanHost.FanHostEngine::OnBackendFanDispatchFailure(System.Exception)",
+      "instructionListingSha256": "024bb792b97e23ae0dc1f1c1d27b3468d55fbd7845ae048b8328a2b2f21cdf38"
+    },
+    {
+      "role": "host",
+      "token": 100667675,
+      "method": "YeManFanHost.HostState YeManFanHost.FanHostEngine::SnapshotForRead()",
+      "instructionListingSha256": "29eb2f4573d4be062536c4ec4dafc5f1edf42714bd23cfd825ca53ddfe4420fb"
+    },
+    {
+      "role": "host",
+      "token": 100667786,
+      "method": "System.Boolean YeManFanHost.FanHostEngine::CloseHcSessionForLifecycle(System.Boolean,System.Boolean,System.Boolean)",
+      "instructionListingSha256": "6af682f9224c73f7dfcc8cc8e2cddf00ff96a24591a55906bf1972219c83737f"
+    },
+    {
+      "role": "host",
+      "token": 100667787,
+      "method": "System.Boolean YeManFanHost.FanHostEngine::RestoreHardware(System.Boolean,System.Boolean,System.Boolean,System.String)",
+      "instructionListingSha256": "1bbaf39590a42f738773c726955001bb549400153e019f08680795275242bb90"
+    },
+    {
+      "role": "host",
+      "token": 100667726,
+      "method": "System.Void YeManFanHost.FanHostEngine::TryReleaseUnresolvableSuspendProtection()",
+      "instructionListingSha256": "47e5996e084b5dfd981c360b92ba24136c892a7b99f35390e651a6cdc153be3e"
+    },
+    {
+      "role": "host",
+      "token": 100667821,
+      "method": "System.String YeManFanHost.FanHostEngine::CaptureParentEpisodeImagePath(YeManFanHost.HostOptions)",
+      "instructionListingSha256": "f536eef9bddb30d3d08b4db7c1676538304a7eeb56a999c72f012dd5d0e0ba9f"
+    },
+    {
+      "role": "host",
+      "token": 100667809,
+      "method": "System.String YeManFanHost.FanHostEngine::RecoveryCycleStatePath()",
+      "instructionListingSha256": "c6f122dc37629d245bc58e4434022a2d1e1046393cf26a44edcd14446d34a9f5"
+    },
+    {
+      "role": "host",
+      "token": 100666778,
+      "method": "YeManFanHost.HostOptions YeManFanHost.HostOptions::Parse(System.String[])",
+      "instructionListingSha256": "bda16a4cdc3212eb923e1fffe748cbca326883e59c180c511e6763c0daac4ad7"
+    },
+    {
+      "role": "host",
+      "token": 100666805,
+      "method": "System.Void YeManFanHost.HostDiagnosticLog::.ctor(System.String,System.Int32)",
+      "instructionListingSha256": "37f6bbf91aa9edaa4031cae7e06500043261e3ba394c8ec022baacd3e2660545"
+    },
+    {
+      "role": "host",
+      "token": 100667642,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::.cctor()",
+      "instructionListingSha256": "2d28fb0e2b7978e95eef21900199b67c0df2fe0ad26d1bd58d8d2cb7ecba07db"
+    },
+    {
+      "role": "host",
+      "token": 100667616,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::.ctor()",
+      "instructionListingSha256": "8f5c1f6644cec3bb82e0cf71e1690e1f6539b075f9bec07cd57cee97086d0509"
+    },
+    {
+      "role": "host",
+      "token": 100667641,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::Dispose()",
+      "instructionListingSha256": "b356bf91dcfcfec85e930198e6d6c6a91b0468e6e76b79e3b229dbad8336de16"
+    },
+    {
+      "role": "host",
+      "token": 100667617,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::Start(System.Action`1<System.Nullable`1<System.Single>>,System.Action)",
+      "instructionListingSha256": "5c3f779822f1cc3e001bbfc76181baf124620d9a2670b6a95a29663875a58fb9"
+    },
+    {
+      "role": "host",
+      "token": 100667618,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::Poll(System.Object)",
+      "instructionListingSha256": "d759e7076ec30be91ff99c30e9d70b132a65801eedd960eba43adbf42e874655"
+    },
+    {
+      "role": "host",
+      "token": 100667619,
+      "method": "System.Object YeManFanHost.HWiNFOTemperatureMonitor::DiagnosticsSnapshot()",
+      "instructionListingSha256": "8c321cd654602c9337e7e92e245ccbcb736d652463b8319f1ff6ef7b1fbeb9bf"
+    },
+    {
+      "role": "host",
+      "token": 100666534,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::.cctor()",
+      "instructionListingSha256": "c21eaababeab778d2b4b18b78c4d230012f5cd31ca36c1c756058f155be3ca0c"
+    },
+    {
+      "role": "host",
+      "token": 100666516,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::.ctor(System.Object)",
+      "instructionListingSha256": "dcdd023c37793ae7972600cff53da984b698ef4b4533934e43f5f20301808988"
+    },
+    {
+      "role": "host",
+      "token": 100666515,
+      "method": "System.Boolean YeManFanHost.OneXFanDeviceLifecycle::IsFamily(System.Type)",
+      "instructionListingSha256": "386ff4a45ae59fadc831a8427c905b7021ff04049ef924b9095ba88a8b34417c"
+    },
+    {
+      "role": "host",
+      "token": 100666517,
+      "method": "System.Boolean YeManFanHost.OneXFanDeviceLifecycle::Open(System.Func`1<System.Boolean>)",
+      "instructionListingSha256": "226d1b7f08259cf163919c32da54cda55b735dd0b8c0b600229733f8dcbcd8a4"
+    },
+    {
+      "role": "host",
+      "token": 100666526,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::Close()",
+      "instructionListingSha256": "4b6b99f4f0b8fa7fd46d6963772d1b9bcedbd5f51dde53ae7b8c001cebca1489"
+    },
+    {
+      "role": "host",
+      "token": 100666522,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::SetDuty(System.Double,System.Func`1<System.Boolean>)",
+      "instructionListingSha256": "d33dde022f8f1ba2cdc617b6dfd7ede53fd4274b0ddebd1d14d89d26810ce266"
+    },
+    {
+      "role": "host",
+      "token": 100666521,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::SetControl(System.Boolean,System.Func`1<System.Boolean>)",
+      "instructionListingSha256": "a47ca6ac1aa7b0fccdeca461001a63fbcab9e1d3d229bc19fe5314b613ad105e"
+    },
+    {
+      "role": "host",
+      "token": 100666513,
+      "method": "System.Boolean YeManFanHost.OneXFanDeviceLifecycle::get_HasResources()",
+      "instructionListingSha256": "043e5c603e5b71fcf92445d0912d56e38453b5b3a4c2652f03cd8d47910ab83a"
+    },
+    {
+      "role": "producer",
+      "token": 100664120,
+      "method": "System.Int32 Harness::Main(System.String[])",
+      "instructionListingSha256": "16e1c91aa35638bef8a08ccf9755ac886c5ea5fa88f0debaccb020d2afe80eed"
+    },
+    {
+      "role": "producer",
+      "token": 100664106,
+      "method": "System.Object Harness::Backend(HandheldCompanion.Devices.IDevice)",
+      "instructionListingSha256": "e4ad052c51194daabaa16548c8d51390a1ab09a02919dcd433027d8bd962a1b3"
+    },
+    {
+      "role": "producer",
+      "token": 100664148,
+      "method": "System.Action Harness::InitializationAction(System.Object)",
+      "instructionListingSha256": "18f3ed032cb4de3bbe289b2720343fc3d6f5f2c9e66cc73978cd99e6d1778ced"
+    },
+    {
+      "role": "producer",
+      "token": 100664130,
+      "method": "System.Object Harness::Engine(System.Object)",
+      "instructionListingSha256": "dcdb819b1a6fd38a92ba013af176a04dd6471d1d60ac8de4bce1a0348a7cc94d"
+    },
+    {
+      "role": "host",
+      "token": 100667578,
+      "method": "System.Void YeManFanHost.RealHcBackend::.cctor()",
+      "instructionListingSha256": "17ac9b48605164c9a3d46585269fdf2bc4fd096ad3a71725b984447d85f5b7ad"
+    },
+    {
+      "role": "host",
+      "token": 100667131,
+      "method": "System.Void YeManFanHost.RealHcBackend::.ctor(YeManFanHost.HostOptions)",
+      "instructionListingSha256": "b19f234f7c0cf0ca8556f7103f31628bc181c20a0e74802fe11cca2af8e5d7c0"
+    },
+    {
+      "role": "host",
+      "token": 100667271,
+      "method": "System.Void YeManFanHost.RealHcBackend::OpenHcDevice()",
+      "instructionListingSha256": "1df0fc4942a51eff9fce235926e122722d8251879a81a3ff2f9b22ede29c7845"
+    },
+    {
+      "role": "host",
+      "token": 100667383,
+      "method": "System.Void YeManFanHost.RealHcBackend::CloseHcDevice()",
+      "instructionListingSha256": "feb7d412854acb39c978c6d6efca0a211fb3306e4c574f0ab27d4ac8ad9cbabb"
+    },
+    {
+      "role": "host",
+      "token": 100667402,
+      "method": "System.Void YeManFanHost.RealHcBackend::RunHcInitializationStage(System.String,System.Action,System.Action`2<System.String,System.Object>)",
+      "instructionListingSha256": "cf0f96e1e82dfc7f65a829e07f4b7a32a01196eca031238ede5fb4b23205f33d"
+    },
+    {
+      "role": "light",
+      "token": 100663328,
+      "method": "System.Void OneXLightingSession::.ctor(System.Object,System.Reflection.FieldInfo,System.Object)",
+      "instructionListingSha256": "3c65e0ccc43cc90c4e918dc2be035d94550eeabd329335c96404f6eec31bdbaf"
+    },
+    {
+      "role": "light",
+      "token": 100663335,
+      "method": "OneXLightingSession OneXLightingSession::Prepare(System.Object)",
+      "instructionListingSha256": "ee8d07fbc8c513422175965611d14d86e39b3124c9bdb3878d9b2b2b4dadadbb"
+    },
+    {
+      "role": "light",
+      "token": 100663336,
+      "method": "System.Void OneXLightingSession::Dispose()",
+      "instructionListingSha256": "8c39501e1e332fbad01cfe785f443b45a18aa4fec51296a71f46e00b250477c1"
+    },
+    {
+      "role": "light",
+      "token": 100663330,
+      "method": "System.Boolean OneXLightingSession::IsFamily(System.Type)",
+      "instructionListingSha256": "4df5257d2c21c5ed29d365d434be0a2bdd3a49c2f764f641e8c06660bf398cb6"
+    },
+    {
+      "role": "host",
+      "token": 100667676,
+      "method": "YeManFanHost.HostState YeManFanHost.FanHostEngine::SnapshotForReadBounded(System.Int32)",
+      "instructionListingSha256": "12aacc8c4aede566011a8df7c4c0c2261ee7f75a5b8e809cdaaa014ddb1b7f4e"
+    },
+    {
+      "role": "host",
+      "token": 100667802,
+      "method": "System.Void YeManFanHost.FanHostEngine::RecoverAfterHardwareFailure(System.Exception)",
+      "instructionListingSha256": "066ce73875b001913eed02fd0d71ce689138875fcb246829657f9b7b29ac01dd"
+    },
+    {
+      "role": "host",
+      "token": 100667258,
+      "method": "System.Void YeManFanHost.RealHcBackend::RequestPowerProfileWatchdogTick(System.Int32)",
+      "instructionListingSha256": "449988cf87dcfdd884a15e8a6ff877619e13dea797e14d1f548c513e7c7f9f9a"
+    },
+    {
+      "role": "host",
+      "token": 100667326,
+      "method": "System.Object YeManFanHost.RealHcBackend::CloneHcPowerProfile(System.Object)",
+      "instructionListingSha256": "54432118fa39ba4eeee79854ef3124cba91321f4064814af3d3eaa3e81744599"
+    },
+    {
+      "role": "host",
+      "token": 100667301,
+      "method": "System.Void YeManFanHost.RealHcBackend::CaptureBaselineBinding()",
+      "instructionListingSha256": "f926b04b7d8b13ed7dbfa80f9498f760e681ea5d5819a9e5c18a07159fcf284b"
+    },
+    {
+      "role": "host",
+      "token": 100667621,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::InvalidateCachedMapping(System.String)",
+      "instructionListingSha256": "68e4e0e0c85161867e824877e253438652367dd44aefb1c55ae69b7f5efa17cc"
+    },
+    {
+      "role": "host",
+      "token": 100667622,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::InvalidateLabelCache()",
+      "instructionListingSha256": "e3d750ed7a25c000ee75fb3cd960e449d2599bdc5d965adda2304da4d56f02fe"
+    },
+    {
+      "role": "host",
+      "token": 100667596,
+      "method": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_6()",
+      "instructionListingSha256": "db7e5b723830631083f0bed843f3d10685108cf8ab1e5e2c2cbd4eac80bccf98"
+    },
+    {
+      "role": "host",
+      "token": 100667892,
+      "method": "System.Void YeManFanHost.FanHostEngine::<ScheduleRecoveryRetry>b__287_0(System.Object)",
+      "instructionListingSha256": "04bdc0cb17bbbb4a65675e6b10660114ada73447ef23f46e6707345316b9f39a"
+    },
+    {
+      "role": "host",
+      "token": 100667851,
+      "method": "System.Void YeManFanHost.FanHostEngine::MarkReopenRequiredLocked(System.String)",
+      "instructionListingSha256": "d441f317b6d8db973912c1a33b04c3b28c345a3468529f89ab3b19c85d487b87"
+    },
+    {
+      "role": "host",
+      "token": 100666474,
+      "method": "System.Boolean YeManFanHost.MsiFanDeviceLifecycle::IsMsiFamily(System.Type)",
+      "instructionListingSha256": "4fa320c460b63333851ac74a2593d32acd95915dab2e2a521486745e968f1f6f"
+    },
+    {
+      "role": "host",
+      "token": 100667364,
+      "method": "System.Object YeManFanHost.RealHcBackend::BuildPowerProfile(System.Double[],System.Boolean,System.Object)",
+      "instructionListingSha256": "4ca999706fc6bb0f0cb02dc99e4ad3cce8fc72f1b735acedf518d275fd9ae5c5"
+    },
+    {
+      "role": "host",
+      "token": 100667315,
+      "method": "System.Void YeManFanHost.RealHcBackend::CaptureHcProfileTemplate(System.Nullable`1<System.Boolean>)",
+      "instructionListingSha256": "7139825bec7ffe5e6e6012f26a550be1ec26559b65bf5ab7f70d838fcf0873d4"
+    },
+    {
+      "role": "host",
+      "token": 100667327,
+      "method": "System.Object YeManFanHost.RealHcBackend::CloneHcPowerProfilePreservingFanState(System.Object)",
+      "instructionListingSha256": "2fab8db5618c37ea9ce235fe17ef05c376b92d0f9e42d207733e5c85f9c3bd97"
+    },
+    {
+      "role": "host",
+      "token": 100667335,
+      "method": "System.Void YeManFanHost.RealHcBackend::RestoreOemCore()",
+      "instructionListingSha256": "627f33f0dbc9f4eed9061b337617bfcb5232e1dca696ef41a1cbc7695f21b011"
+    },
+    {
+      "role": "host",
+      "token": 100667425,
+      "method": "System.Void YeManFanHost.RealHcBackend::EnsureRestoreSession()",
+      "instructionListingSha256": "9f45fbcbd01c30af0d31a238556236f3dbccc91dc0afa3cbed849ccb26b98b88"
+    },
+    {
+      "role": "host",
+      "token": 100667325,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::IsPowerLineOnline()",
+      "instructionListingSha256": "d895e88b5e918ecc06e470eba22d45c00d64a1aff3b762ca0bf205d5a9bb9317"
+    },
+    {
+      "role": "host",
+      "token": 100667299,
+      "method": "System.Void YeManFanHost.RealHcBackend::StopCpuTemperatureMonitor()",
+      "instructionListingSha256": "16ca36e72a9a1d6784d98596169596f1c6751a0d98ae80994d5d9c785a80e09e"
+    },
+    {
+      "role": "producer",
+      "token": 100664142,
+      "method": "System.Void Harness::PrepareOriginalRestoreContext(System.Object)",
+      "instructionListingSha256": "7cf5813f714fa664545c66f679337723e722e715b32e1e4f10bb676f023a9f3d"
+    },
+    {
+      "role": "producer",
+      "token": 100664131,
+      "method": "System.Void Harness::EndEngine(System.Object)",
+      "instructionListingSha256": "1679945ba2bee689d7645d2df5d4e19647d66b04723ce7c1d2237fec91e61c48"
+    },
+    {
+      "role": "producer",
+      "token": 100664147,
+      "method": "Mono.Cecil.MethodDefinition Harness::InitializationCallback(Mono.Cecil.TypeDefinition)",
+      "instructionListingSha256": "eb69eade161bb2056e95d35484a7b62b755fd326cb78e703b99e7f42de95f242"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663325,
+      "method": "System.Void HandheldCompanion.OpenLibSys::.ctor()",
+      "instructionListingSha256": "0442effeeba3de0a2dbe4386f68051e236b9da5f5e8f10e9efe6a075e2c9d559"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663324,
+      "method": "System.Void HandheldCompanion.OpenLibSys::Dispose()",
+      "instructionListingSha256": "f4152d601d9fe4b7dc21fc96d7f1f843d4719115ac38f99dc1fc12dd035282fb"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663322,
+      "method": "System.Void HandheldCompanion.OpenLibSys::WriteIoPortByte(System.UInt16,System.Byte)",
+      "instructionListingSha256": "6a3cce37c20a08d11f1e88ded5dfa51f5f2417f1b31bbd72586e6f1f2705e649"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663323,
+      "method": "System.Boolean HandheldCompanion.OpenLibSys::InitializeOls()",
+      "instructionListingSha256": "e9b84dcfc36862439cbdf8e84a0bd899789f908e3d82057abb8f6b9ef1925c47"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663316,
+      "method": "System.Void System.IO.Ports.SerialPort::.ctor(System.String,System.Int32,System.IO.Ports.Parity,System.Int32,System.IO.Ports.StopBits)",
+      "instructionListingSha256": "69599af8254d7235b4fa16b9501441be94f2603a10800baf2f4ab8a6708c1f12"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663317,
+      "method": "System.Void System.IO.Ports.SerialPort::Open()",
+      "instructionListingSha256": "c0fc438ff78fb5ad760d40206dc87bb708346148452c33c3b11183f16c569772"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663318,
+      "method": "System.Void System.IO.Ports.SerialPort::Close()",
+      "instructionListingSha256": "adb9c478a3ca50b2c867da9fa913fbf5c78a83697c1a59f825e35d27a03f91a6"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663319,
+      "method": "System.Void System.IO.Ports.SerialPort::Dispose(System.Boolean)",
+      "instructionListingSha256": "46122d4735a98ea2b0f1f429808698b25cbf017cb030d856698954d7c755b1cb"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663314,
+      "method": "System.Boolean System.IO.Ports.SerialPort::get_IsOpen()",
+      "instructionListingSha256": "dc7b340a358530601b26a14f2db7a3bcb40f50ff9546b08d3917cbf99370be55"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663311,
+      "method": "System.String System.IO.Ports.SerialPort::get_PortName()",
+      "instructionListingSha256": "49d2ca266f59bd3802127ed52ecac298cd06e4fe06bcd63dd36579f766b11b63"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663517,
+      "method": "System.Void ConsumerFixture.Trace::.cctor()",
+      "instructionListingSha256": "afcc3a815666abbe06164613456e9c91acc5341d53bd7d576ce6436c1af0ae06"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663412,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::.ctor()",
+      "instructionListingSha256": "bbb12de71dcada43ea2996fb80f83766d15f184718c3c5c2b6e332ba578bd50c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663430,
+      "method": "System.Boolean HandheldCompanion.Devices.IDevice::Open()",
+      "instructionListingSha256": "9d1ebe356385fde8b4215164c3d01a4c2032c9457349dc9eb05f82565b900d6d"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663427,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::Close()",
+      "instructionListingSha256": "bd92d6d02305f425b8f46438956df8d104391ca4d6a167fb0f6039e0aa6de30f"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663429,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::OpenEvents()",
+      "instructionListingSha256": "479b239bc24877b3e14509d3299b6fd88460db29615fd2acc006288b1a6ee918"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663428,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::Initialize(System.Boolean,System.Boolean)",
+      "instructionListingSha256": "de6a29134a825ca44d6de9d20eb381d07c7163b086e24308f5e2bbad153c81fd"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663402,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::SetFanControl(System.Boolean,System.Int32)",
+      "instructionListingSha256": "cd8480999f0e182f96c1143906ada00b6e9a9d4920a9b4b8f7347ba4359912ce"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663403,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::SetFanDuty(System.Double)",
+      "instructionListingSha256": "e27a8857755fa8d8250a26d94bf9f2cf6875e8894723224a3c4fe81d343bdf4c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663431,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::PowerProfileManager_Applied(HandheldCompanion.Misc.PowerProfile,HandheldCompanion.UpdateSource)",
+      "instructionListingSha256": "923e9147a2f5ab0633c06200263ec29f3a7c38ae1f52c9312a6e078af9f924cf"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663401,
+      "method": "System.Boolean HandheldCompanion.Devices.IDevice::get_IsOpen()",
+      "instructionListingSha256": "190b3a4524cc4ffc7187e9d5371916ab8944d8e8b8a0c5eb7699485ea2e0f826"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663395,
+      "method": "System.Void HandheldCompanion.Devices.IDevice::ResetLibrary()",
+      "instructionListingSha256": "e2dbc4aaee182983b4ebea623f1ba9d611f24cd6cf256791866a251145fb932b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663394,
+      "method": "System.Boolean HandheldCompanion.Devices.IDevice::get_LibraryInitialized()",
+      "instructionListingSha256": "d7e1c75268ff3376156d6a20c2312265261af973ff6ac5ff92359bb27e61637c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663404,
+      "method": "System.Boolean HandheldCompanion.Devices.IDevice::ECRamDirectWriteByte(System.UInt16,HandheldCompanion.Devices.ECDetails,System.Byte)",
+      "instructionListingSha256": "324b3f493269ee408818fadddc7317815811fd9663a63a6794ae7e37a0c45604"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663436,
+      "method": "System.Void HandheldCompanion.Devices.OneXAOKZOE::.ctor()",
+      "instructionListingSha256": "1e8c6f1dd487f2525cf26afc6aab65c03176ad721eedce0c4db2ab6630aa4153"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663433,
+      "method": "System.Boolean HandheldCompanion.Devices.OneXAOKZOE::Open()",
+      "instructionListingSha256": "195e80ba6a000fea3b59ac157061e0f4ac2b5f163f7267bf38288c3b2c712809"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663432,
+      "method": "System.Void HandheldCompanion.Devices.OneXAOKZOE::Close()",
+      "instructionListingSha256": "65c3329f62215786556aeb7af3b672f7cf93616b837b29ff1fe914201b69dc24"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663435,
+      "method": "System.Void HandheldCompanion.Devices.OneXAOKZOE::SetFanDuty(System.Double)",
+      "instructionListingSha256": "e27a8857755fa8d8250a26d94bf9f2cf6875e8894723224a3c4fe81d343bdf4c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663440,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayerX1::.ctor()",
+      "instructionListingSha256": "0b8b04ab1c88da5183ed0326a8281411a163a2ae54d61f1603aa853d4248864e"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663442,
+      "method": "System.Boolean HandheldCompanion.Devices.OneXPlayerX1::Open()",
+      "instructionListingSha256": "d385c526585ee68d9f4c1eb8e38196b34bb745ce31ec9f3bca60c469b4c728ae"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663439,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayerX1::Close()",
+      "instructionListingSha256": "4bce564e95f9037121454281560db59775083e48cbf885b8576730e2e3103435"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663444,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayerX1AMD::.ctor()",
+      "instructionListingSha256": "3ccbddad4ef983ec40b759902ada36e0b1a31c249fb836c211585001e098d152"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663445,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayerX1Intel::.ctor()",
+      "instructionListingSha256": "3ccbddad4ef983ec40b759902ada36e0b1a31c249fb836c211585001e098d152"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663446,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayerX1Pro::.ctor()",
+      "instructionListingSha256": "6df9a082f6eb6a0e087a6fde08b0c489c75d34fa1cba14ef60aad77cda941e9b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663494,
+      "method": "System.Void HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex::.ctor()",
+      "instructionListingSha256": "6df9a082f6eb6a0e087a6fde08b0c489c75d34fa1cba14ef60aad77cda941e9b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663466,
+      "method": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::.ctor()",
+      "instructionListingSha256": "59bd66d6f764e08279de52096525f7f3dffb723f15c342a7552fcbf9a7691852"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663463,
+      "method": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::Close()",
+      "instructionListingSha256": "9cf0f520b49154b3e40c6d2a3f0140df9e93075cf1472c94590ba551f2465aca"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663464,
+      "method": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::OpenEvents()",
+      "instructionListingSha256": "cde01c551a2885207eee727a89f59224c8e21502a0fb78dd40c69d9893569c0e"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663465,
+      "method": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::Initialize(System.Boolean,System.Boolean)",
+      "instructionListingSha256": "22ecdfce62d0057c06aa585975cc9b4e500c50424f5d1de3b0d75b8119457828"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663457,
+      "method": "System.Void HandheldCompanion.Devices.AYANEOFlipKB::.ctor()",
+      "instructionListingSha256": "3076ddf13d965cb6cfa6b93487972ffb38603bfdf12c2a4e3b0baff17d4f99ab"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663481,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::.ctor()",
+      "instructionListingSha256": "1e8c6f1dd487f2525cf26afc6aab65c03176ad721eedce0c4db2ab6630aa4153"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663480,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::Close()",
+      "instructionListingSha256": "e10f047bee38fe85b559c85b25c8191eb3bcf405bf38750de6b0c6e9e4e70b68"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663477,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::OpenEvents()",
+      "instructionListingSha256": "8ed0e75bddec52cf478ee480d082962d880be8425474193abb2d14d61a37a8f3"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663482,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::.ctor()",
+      "instructionListingSha256": "e949d7c6123079b654d8eb7481d7226ad2d5a7c24f348bcd7510ab63094f51ba"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663483,
+      "method": "System.Boolean HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::Open()",
+      "instructionListingSha256": "e45040d70f9f500f8b8e6ce01087700e1e6f2cf443412c138b4e2fcddac0da88"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663493,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::Close()",
+      "instructionListingSha256": "7a18b7f61a7d5bdb87f151bdb5864e2729114240ee2d62972b51ef4561f0f77c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663487,
+      "method": "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::OpenEvents()",
+      "instructionListingSha256": "b0a9a3f01de4180e41822cbd73624fbd9200f56e92dffb4ee191683786a69bee"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663375,
+      "method": "System.Void HandheldCompanion.Managers.ManagerFactory::.cctor()",
+      "instructionListingSha256": "0e2ab046dd03cd5c31231c16f04d4596ea556620acff45f0d7ead1209d443a86"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663374,
+      "method": "System.Object[] HandheldCompanion.Managers.ManagerFactory::get_Managers()",
+      "instructionListingSha256": "3a53177c461c8a3366e00193b0caeb2e956a8e36f2d35cae17e18e79a7bdbbb6"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663342,
+      "method": "System.Void HandheldCompanion.Managers.IManager::.ctor()",
+      "instructionListingSha256": "0442effeeba3de0a2dbe4386f68051e236b9da5f5e8f10e9efe6a075e2c9d559"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663338,
+      "method": "HandheldCompanion.Managers.ManagerStatus HandheldCompanion.Managers.IManager::get_Status()",
+      "instructionListingSha256": "3538a86a2618605b19f1c0741470a14558b36eb2b0341141a0e10c0d5598a798"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663339,
+      "method": "System.Void HandheldCompanion.Managers.IManager::set_Status(HandheldCompanion.Managers.ManagerStatus)",
+      "instructionListingSha256": "a20f486518829b0debb5efbb03baca075291d32365f38b48597b512377538ca8"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663352,
+      "method": "System.Void HandheldCompanion.Managers.SettingsManager::.ctor()",
+      "instructionListingSha256": "c2f6a8dc7b4e12c758588b6d7d23302463c1dd59d4ba744cd69dd06f12fd08f8"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663343,
+      "method": "System.Void HandheldCompanion.Managers.SettingsManager::SetProperty(System.String,System.Object,System.Boolean,System.Boolean)",
+      "instructionListingSha256": "12a12cff4f39254d6187e3e1f4c2e40fea0e624676274af39fc5ad5e69524569"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663364,
+      "method": "System.Void HandheldCompanion.Managers.DeviceManager::.ctor()",
+      "instructionListingSha256": "98df84a668ada06da69c006f8c33da9a6e46603eb4792225c3ee120cde86c08b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663373,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::.ctor()",
+      "instructionListingSha256": "3f177091d2cea39b139775167f8750b2ea0bc83f32f1eed090fd336a9845fd4a"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663366,
+      "method": "HandheldCompanion.Misc.PowerProfile HandheldCompanion.Managers.PowerProfileManager::CloneProfile(HandheldCompanion.Misc.PowerProfile)",
+      "instructionListingSha256": "c343ba1bdf48285cf388a7253166bd0c1f8aef104b95791266647bf6b0a59bd1"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663365,
+      "method": "HandheldCompanion.Misc.PowerProfile HandheldCompanion.Managers.PowerProfileManager::GetCurrent()",
+      "instructionListingSha256": "de40d342d702ecee94c564422a08bd5ca593012719e8791ab1965e0c1ba2a145"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663367,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::PublishApplied(System.Object)",
+      "instructionListingSha256": "b0e4f9a2f203cf21a8c0df69596b876439bc34e3f0c60a470d196675551c300b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663368,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::add_Applied(System.Action`2<System.Object,System.Object>)",
+      "instructionListingSha256": "e0ae2984aa7864708dc32b24899c6bfa13dcc7c688aa7d802e3eacad0ebb9f6c"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663369,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::remove_Applied(System.Action`2<System.Object,System.Object>)",
+      "instructionListingSha256": "5aeaf92f080a0fba4ca17d3d9a95dce06b5fc3ff03e9c0950f5143179dee3bcc"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663370,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::add_Discarded(System.Action`2<System.Object,System.Object>)",
+      "instructionListingSha256": "9ee770b01a49b2a882d6f2945f1d9f95496932a0a5377129714eb63f2ec8591f"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663371,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::remove_Discarded(System.Action`2<System.Object,System.Object>)",
+      "instructionListingSha256": "c8f49adf8fabeec66303b41596e024debb3f2f0969a2e64ec0eb672a1bef848b"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663497,
+      "method": "System.Void HandheldCompanion.Misc.FanProfile::.ctor()",
+      "instructionListingSha256": "5ad509deb4e9788a521cb0fb0374eb51098fdf90a05ef0b6c2b0f02fe8fb0eb4"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663495,
+      "method": "System.Void HandheldCompanion.Misc.FanProfile::SetTemperature(System.Double)",
+      "instructionListingSha256": "c63d3a80e07891332c764cfb5624d2c9e2224efd07dcfe4d09b6b319f4af400d"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663496,
+      "method": "System.Double HandheldCompanion.Misc.FanProfile::GetFanSpeed()",
+      "instructionListingSha256": "2c278c3e7cb38003ef0340b761b60b3f4ac1ff94256e46b8f8034fa9178b80ce"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663502,
+      "method": "System.Void HandheldCompanion.Misc.PowerProfile::.ctor()",
+      "instructionListingSha256": "18be5614cf40bf31cbadfe9b6c6cf5f04133941d8fa0a1ae44795ea53dfc3fbf"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663498,
+      "method": "HandheldCompanion.Misc.FanProfile HandheldCompanion.Misc.PowerProfile::get_FanProfile()",
+      "instructionListingSha256": "f90f9eec140685d272bf856d94be29aadd73fa91189854ca2deaa03b297bbccd"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663499,
+      "method": "System.Void HandheldCompanion.Misc.PowerProfile::set_FanProfile(HandheldCompanion.Misc.FanProfile)",
+      "instructionListingSha256": "4bd8df23558e617f1d52161024e3785c265791480a21a4e9efc1b5f1ef9282b7"
+    },
+    {
+      "role": "synthetic",
+      "token": 100663434,
+      "method": "System.Void HandheldCompanion.Devices.OneXAOKZOE::SetFanControl(System.Boolean,System.Int32)",
+      "instructionListingSha256": "cd8480999f0e182f96c1143906ada00b6e9a9d4920a9b4b8f7347ba4359912ce"
+    }
+  ],
+  "fixtureTypes": [
+    {
+      "type": "HandheldCompanion.OpenLibSys",
+      "baseType": "System.Object",
+      "fields": []
+    },
+    {
+      "type": "System.IO.Ports.SerialPort",
+      "baseType": "System.ComponentModel.Component",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.IDevice",
+      "baseType": "System.Object",
+      "fields": [
+        {
+          "name": "DeviceOpen",
+          "type": "System.Boolean",
+          "isStatic": false
+        },
+        {
+          "name": "UseOpenLib",
+          "type": "System.Boolean",
+          "isStatic": false
+        },
+        {
+          "name": "openLibSys",
+          "type": "HandheldCompanion.OpenLibSys",
+          "isStatic": true
+        },
+        {
+          "name": "ECDetails",
+          "type": "HandheldCompanion.Devices.ECDetails",
+          "isStatic": false
+        }
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXAOKZOE",
+      "baseType": "HandheldCompanion.Devices.IDevice",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1",
+      "baseType": "HandheldCompanion.Devices.OneXAOKZOE",
+      "fields": [
+        {
+          "name": "_serialPort",
+          "type": "System.IO.Ports.SerialPort",
+          "isStatic": false
+        },
+        {
+          "name": "_vendorHidMonitor",
+          "type": "System.Object",
+          "isStatic": false
+        }
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "baseType": "HandheldCompanion.Devices.OneXPlayerX1",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "baseType": "HandheldCompanion.Devices.OneXPlayerX1",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "baseType": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "baseType": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Managers.PowerProfileManager",
+      "baseType": "HandheldCompanion.Managers.IManager",
+      "fields": []
+    },
+    {
+      "type": "HandheldCompanion.Misc.FanProfile",
+      "baseType": "System.Object",
+      "fields": []
+    }
+  ],
+  "fixtureMethods": [
+    "System.Void HandheldCompanion.OpenLibSys::.ctor()",
+    "System.Void HandheldCompanion.OpenLibSys::Dispose()",
+    "System.Void HandheldCompanion.OpenLibSys::WriteIoPortByte(System.UInt16,System.Byte)",
+    "System.Boolean HandheldCompanion.OpenLibSys::InitializeOls()",
+    "System.Void System.IO.Ports.SerialPort::.ctor(System.String,System.Int32,System.IO.Ports.Parity,System.Int32,System.IO.Ports.StopBits)",
+    "System.Void System.IO.Ports.SerialPort::Open()",
+    "System.Void System.IO.Ports.SerialPort::Close()",
+    "System.Void System.IO.Ports.SerialPort::Dispose(System.Boolean)",
+    "System.Boolean System.IO.Ports.SerialPort::get_IsOpen()",
+    "System.String System.IO.Ports.SerialPort::get_PortName()",
+    "System.Void ConsumerFixture.Trace::.cctor()",
+    "System.Void HandheldCompanion.Devices.IDevice::.ctor()",
+    "System.Boolean HandheldCompanion.Devices.IDevice::Open()",
+    "System.Void HandheldCompanion.Devices.IDevice::Close()",
+    "System.Void HandheldCompanion.Devices.IDevice::OpenEvents()",
+    "System.Void HandheldCompanion.Devices.IDevice::Initialize(System.Boolean,System.Boolean)",
+    "System.Void HandheldCompanion.Devices.IDevice::SetFanControl(System.Boolean,System.Int32)",
+    "System.Void HandheldCompanion.Devices.IDevice::SetFanDuty(System.Double)",
+    "System.Void HandheldCompanion.Devices.IDevice::PowerProfileManager_Applied(HandheldCompanion.Misc.PowerProfile,HandheldCompanion.UpdateSource)",
+    "System.Boolean HandheldCompanion.Devices.IDevice::get_IsOpen()",
+    "System.Void HandheldCompanion.Devices.IDevice::ResetLibrary()",
+    "System.Boolean HandheldCompanion.Devices.IDevice::get_LibraryInitialized()",
+    "System.Boolean HandheldCompanion.Devices.IDevice::ECRamDirectWriteByte(System.UInt16,HandheldCompanion.Devices.ECDetails,System.Byte)",
+    "System.Void HandheldCompanion.Devices.OneXAOKZOE::.ctor()",
+    "System.Boolean HandheldCompanion.Devices.OneXAOKZOE::Open()",
+    "System.Void HandheldCompanion.Devices.OneXAOKZOE::Close()",
+    "System.Void HandheldCompanion.Devices.OneXAOKZOE::SetFanDuty(System.Double)",
+    "System.Void HandheldCompanion.Devices.OneXPlayerX1::.ctor()",
+    "System.Boolean HandheldCompanion.Devices.OneXPlayerX1::Open()",
+    "System.Void HandheldCompanion.Devices.OneXPlayerX1::Close()",
+    "System.Void HandheldCompanion.Devices.OneXPlayerX1AMD::.ctor()",
+    "System.Void HandheldCompanion.Devices.OneXPlayerX1Intel::.ctor()",
+    "System.Void HandheldCompanion.Devices.OneXPlayerX1Pro::.ctor()",
+    "System.Void HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex::.ctor()",
+    "System.Void HandheldCompanion.Devices.AYANEOFlipDS::.ctor()",
+    "System.Void HandheldCompanion.Devices.AYANEOFlipDS::Close()",
+    "System.Void HandheldCompanion.Devices.AYANEOFlipDS::OpenEvents()",
+    "System.Void HandheldCompanion.Devices.AYANEOFlipDS::Initialize(System.Boolean,System.Boolean)",
+    "System.Void HandheldCompanion.Devices.AYANEOFlipKB::.ctor()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::.ctor()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::Close()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODevice::OpenEvents()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::.ctor()",
+    "System.Boolean HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::Open()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::Close()",
+    "System.Void HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc::OpenEvents()",
+    "System.Void HandheldCompanion.Managers.ManagerFactory::.cctor()",
+    "System.Object[] HandheldCompanion.Managers.ManagerFactory::get_Managers()",
+    "System.Void HandheldCompanion.Managers.IManager::.ctor()",
+    "HandheldCompanion.Managers.ManagerStatus HandheldCompanion.Managers.IManager::get_Status()",
+    "System.Void HandheldCompanion.Managers.IManager::set_Status(HandheldCompanion.Managers.ManagerStatus)",
+    "System.Void HandheldCompanion.Managers.SettingsManager::.ctor()",
+    "System.Void HandheldCompanion.Managers.SettingsManager::SetProperty(System.String,System.Object,System.Boolean,System.Boolean)",
+    "System.Void HandheldCompanion.Managers.DeviceManager::.ctor()",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::.ctor()",
+    "HandheldCompanion.Misc.PowerProfile HandheldCompanion.Managers.PowerProfileManager::CloneProfile(HandheldCompanion.Misc.PowerProfile)",
+    "HandheldCompanion.Misc.PowerProfile HandheldCompanion.Managers.PowerProfileManager::GetCurrent()",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::PublishApplied(System.Object)",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::add_Applied(System.Action`2<System.Object,System.Object>)",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::remove_Applied(System.Action`2<System.Object,System.Object>)",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::add_Discarded(System.Action`2<System.Object,System.Object>)",
+    "System.Void HandheldCompanion.Managers.PowerProfileManager::remove_Discarded(System.Action`2<System.Object,System.Object>)",
+    "System.Void HandheldCompanion.Misc.FanProfile::.ctor()",
+    "System.Void HandheldCompanion.Misc.FanProfile::SetTemperature(System.Double)",
+    "System.Double HandheldCompanion.Misc.FanProfile::GetFanSpeed()",
+    "System.Void HandheldCompanion.Misc.PowerProfile::.ctor()",
+    "HandheldCompanion.Misc.FanProfile HandheldCompanion.Misc.PowerProfile::get_FanProfile()",
+    "System.Void HandheldCompanion.Misc.PowerProfile::set_FanProfile(HandheldCompanion.Misc.FanProfile)",
+    "System.Void HandheldCompanion.Devices.OneXAOKZOE::SetFanControl(System.Boolean,System.Int32)"
+  ],
+  "initializationInstructions": [
+    {
+      "opcode": "ldarg.0",
+      "operand": ""
+    },
+    {
+      "opcode": "ldfld",
+      "operand": "System.Object YeManFanHost.RealHcBackend::device [scope=YeManFanHost.dll]"
+    },
+    {
+      "opcode": "ldstr",
+      "operand": "Initialize"
+    },
+    {
+      "opcode": "ldc.i4.2",
+      "operand": ""
+    },
+    {
+      "opcode": "newarr",
+      "operand": "System.Object [scope=]"
+    },
+    {
+      "opcode": "dup",
+      "operand": ""
+    },
+    {
+      "opcode": "ldc.i4.0",
+      "operand": ""
+    },
+    {
+      "opcode": "ldc.i4.0",
+      "operand": ""
+    },
+    {
+      "opcode": "box",
+      "operand": "System.Boolean [scope=]"
+    },
+    {
+      "opcode": "stelem.ref",
+      "operand": ""
+    },
+    {
+      "opcode": "dup",
+      "operand": ""
+    },
+    {
+      "opcode": "ldc.i4.1",
+      "operand": ""
+    },
+    {
+      "opcode": "ldc.i4.0",
+      "operand": ""
+    },
+    {
+      "opcode": "box",
+      "operand": "System.Boolean [scope=]"
+    },
+    {
+      "opcode": "stelem.ref",
+      "operand": ""
+    },
+    {
+      "opcode": "call",
+      "operand": "System.Object YeManFanHost.RealHcBackend::Invoke(System.Object,System.String,System.Object[]) [scope=YeManFanHost.dll]"
+    },
+    {
+      "opcode": "pop",
+      "operand": ""
+    },
+    {
+      "opcode": "ret",
+      "operand": ""
+    }
+  ],
+  "sourceWitnesses": [
+    {
+      "id": "template-injected-before-restore",
+      "role": "ownership",
+      "startLine": 48,
+      "endLine": 51,
+      "text": "    static void PrepareOriginalRestoreContext(object backend)\r\n    {\r\n        Events(backend);Set(backend,\"hcProfileTemplate\",new HandheldCompanion.Misc.PowerProfile());Invoke(backend,\"CaptureBaselineBinding\");\r\n    }\r"
+    },
+    {
+      "id": "new-engine-empty-options-and-existing-window",
+      "role": "strict",
+      "startLine": 25,
+      "endLine": 38,
+      "text": "    static object Engine(object backend)\r\n    {\r\n        var opts = Candidate.GetType(\"YeManFanHost.HostOptions\", true)!.GetMethod(\"Parse\", All)!.Invoke(null, [Array.Empty<string>()])!;\r\n        var engine = Activator.CreateInstance(Candidate.GetType(\"YeManFanHost.FanHostEngine\", true)!, [opts, null])!;\r\n        Set(engine, \"realBackend\", backend);\r\n        // Start inside a synthetic existing recovery window. This avoids opening\r\n        // a production recovery ledger while exercising the real timer/budget code.\r\n        Set(engine, \"recoveryRetryWindowStartedMonoMs\", Environment.TickCount64);\r\n        return engine;\r\n    }\r\n    static void EndEngine(object engine)\r\n    {\r\n        Invoke(engine, \"StopRecoveryRetry\"); Set(engine, \"realBackend\", null); ((IDisposable)engine).Dispose();\r\n    }\r"
+    },
+    {
+      "id": "timer-armed-failure-and-terminal-cleanup",
+      "role": "strict",
+      "startLine": 125,
+      "endLine": 147,
+      "text": "        });\r\n        Run(\"temperature-failure-feeds-existing-bounded-engine\", () =>\r\n        {\r\n            var b = Backend(new OneXPlayerX1AMD()); Open(b); var monitor = AttachTemperature(b); Exception? failure = null;\r\n            using var delivered = new ManualResetEventSlim();\r\n            b.GetType().GetProperty(\"FanDispatchFailure\")!.SetValue(b, new Action<Exception>(e => { failure = e; delivered.Set(); }));\r\n            Trace.ReleaseThrows = true; Temperature(b, monitor, 65); Check(delivered.Wait(5000), \"Real producer emitted bound failure\");\r\n            var engine = Engine(b);\r\n            try\r\n            {\r\n                Invoke(engine, \"OnBackendFanDispatchFailure\", failure!);\r\n                var state = Get(engine, \"state\")!;\r\n                Check(Get(state, \"State\") is string text && text == \"FaultLocked\" && Get(state, \"UnknownState\") is true, \"Actual engine enters honest failure state\");\r\n                Check(Get(engine, \"RecoveryRetryTimerActiveForSelfTest\") is true && Get(engine, \"RecoveryRetryAttemptForSelfTest\") is int count && count == 1, \"Existing bounded recovery schedules once\");\r\n                Invoke(engine, \"OnBackendFanDispatchFailure\", failure!);\r\n                Check(Get(engine, \"RecoveryRetryAttemptForSelfTest\") is int same && same == 1, \"Duplicate failure does not create another timer or consume another attempt\");\r\n                ((IDisposable)Get(engine, \"recoveryTimer\")!).Dispose(); Set(engine, \"recoveryTimer\", null); Set(engine, \"recoveryRetryAttempt\", 30);\r\n                Invoke(engine, \"ScheduleRecoveryRetry\");\r\n                Check(Get(engine, \"RecoveryRetryTerminalForSelfTest\") is true && Get(engine, \"RecoveryRetryTimerActiveForSelfTest\") is false, \"Actual thirty-attempt cap ends with no automatic timer\");\r\n                Invoke(engine, \"OnBackendFanDispatchFailure\", failure!);\r\n                Check(Get(engine, \"RecoveryRetryTerminalForSelfTest\") is true && Get(engine, \"RecoveryRetryAttemptForSelfTest\") is int terminal && terminal == 30, \"Repeated failure cannot reset terminal budget\");\r\n            }\r\n            finally { EndEngine(engine); Trace.ReleaseThrows = false; Close(b); }\r"
+    },
+    {
+      "id": "generic-temperature-engine-fresh",
+      "role": "genericEc",
+      "startLine": 140,
+      "endLine": 158,
+      "text": "        });\r\n        Run(\"generic-ec-temperature-failure-reaches-existing-engine-recovery\",()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);var monitor=AttachTemperature(b);Exception? failure=null;\r\n            using var delivered=new ManualResetEventSlim();\r\n            b.GetType().GetProperty(\"FanDispatchFailure\")!.SetValue(b,new Action<Exception>(e=>{failure=e;delivered.Set();}));\r\n            Trace.ReleaseThrows=true;object? engine=null;\r\n            try\r\n            {\r\n                Temperature(b,monitor,65);Check(delivered.Wait(5000),\"Current temperature producer must report rejected inherited EC write\");\r\n                Check(Get(b,\"cpuTemperatureMonitor\")is null,\"Failed temperature source is detached before recovery\");\r\n                engine=Engine(b);Invoke(engine,\"OnBackendFanDispatchFailure\",failure!);\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(Get(snapshot,\"State\")is string state&&state==\"FaultLocked\"&&Get(snapshot,\"UnknownState\")is true,\"Actual /api/state snapshot reports failure instead of successful control\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"EC fan write was rejected\")==true,\"Public state feedback retains the actual rejected-write cause\");\r\n                Check(Get(engine,\"RecoveryRetryTimerActiveForSelfTest\")is true,\"Existing bounded recovery is used\");\r\n            }\r\n            finally{if(engine is not null)EndEngine(engine);Trace.ReleaseThrows=false;Close(b);}\r\n        });\r"
+    },
+    {
+      "id": "generic-close-reopen-state-not-scheduled",
+      "role": "genericClose",
+      "startLine": 75,
+      "endLine": 94,
+      "text": "        });\r\n        foreach(var process in new[]{false,true})Run(\"generic-close-rejected-release-keeps-debt:\"+(process?\"process\":\"suspend\"),()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);Events(b);d.SeedFixtureCloseSubscriptions();Profile(b,true);Duty(b,50);var engine=CloseEngine(b);\r\n            try\r\n            {\r\n                var state=Get(engine,\"state\")!;Set(state,\"HardwareWritesObserved\",true);Set(state,\"OpenCalled\",true);Set(state,\"OpenEventsCalled\",true);\r\n                Invoke(b,process?\"BlockWritesForClose\":\"BlockWritesForSuspend\");Trace.Calls.Clear();Trace.ReleaseThrows=true;\r\n                var result=Invoke(engine,\"CloseHcSessionForLifecycle\",process,true,true);\r\n                Check(result is false,\"A returned Close must not settle unproven EC release after real write history\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(Get(snapshot,\"UnknownState\")is true&&Get(snapshot,\"RecoveryReadbackRequired\")is true,\"Actual public state retains unresolved release responsibility\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"释放动作未证\")==true,\"Public state retains current unproven-release cause\");\r\n                Check(Get(snapshot,\"HcVirtualCloseReturned\")is true&&!d.IsOpen&&!IDevice.LibraryInitialized,\"Completed close cleanup remains distinct from unproven release\");\r\n                Check(Get(snapshot,\"OemPhysicalOwnershipConfirmed\")is not true&&Get(snapshot,\"OemRestoreConfirmed\")is not true,\"Neither physical ownership nor callback return is fabricated\");\r\n                Check(Trace.Calls.Any(x=>x.Contains(\"PORT_WRITE_THROW\"))&&!Trace.Calls.Any(x=>x.StartsWith(\"FAN:\")),\"Complete original root setter swallowed a real failed write\");\r\n                CheckCloseSubscriptions(false);\r\n            }\r\n            finally{Trace.ReleaseThrows=false;EndEngine(engine);Close(b);}\r\n        });\r"
+    },
+    {
+      "id": "generic-close-failures-and-finally",
+      "role": "genericClose",
+      "startLine": 95,
+      "endLine": 134,
+      "text": "        Run(\"generic-close-no-write-history-keeps-honest-close\",()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);Events(b);d.SeedFixtureCloseSubscriptions();var engine=CloseEngine(b);\r\n            try\r\n            {\r\n                Trace.ReleaseThrows=true;Check(Invoke(engine,\"CloseHcSessionForLifecycle\",false,true,true)is true,\"No prior control write needs no invented release receipt\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(Get(snapshot,\"UnknownState\")is false&&Get(snapshot,\"OemPhysicalOwnershipConfirmed\")is not true,\"Honest no-history close does not claim physical release\");CheckCloseSubscriptions(false);\r\n            }\r\n            finally{Trace.ReleaseThrows=false;EndEngine(engine);Close(b);}\r\n        });\r\n        foreach(var kind in new[]{\"rgb\",\"dispose\"})Run(\"generic-close-\"+kind+\"-failure-retains-owner\",()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);Events(b);d.SeedFixtureCloseSubscriptions();Duty(b,50);var engine=CloseEngine(b);\r\n            try\r\n            {\r\n                Set(Get(engine,\"state\")!,\"HardwareWritesObserved\",true);Trace.RgbReleaseThrows=kind==\"rgb\";Trace.DisposeThrows=kind==\"dispose\";var starts=Trace.DriverInitializations;\r\n                Check(Invoke(engine,\"CloseHcSessionForLifecycle\",false,true,true)is false,\"Incomplete original Close must remain pending\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(d.IsOpen&&IDevice.LibraryInitialized&&Get(snapshot,\"UnknownState\")is true,\"Failed Close preserves the existing owner and unknown public state\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(kind==\"rgb\"?\"RGB_RELEASE_THROW\":\"OLS_DISPOSE_THROW\")==true,\"Original cleanup failure reaches public feedback\");\r\n                Trace.RgbReleaseThrows=Trace.DisposeThrows=false;Close(b);\r\n                Check(!d.IsOpen&&!IDevice.LibraryInitialized&&Trace.DriverInitializations==starts,\"Same existing owner settles cleanup without a new driver initialization\");CheckCloseSubscriptions(false);\r\n            }\r\n            finally{Trace.RgbReleaseThrows=Trace.DisposeThrows=false;EndEngine(engine);Close(b);}\r\n        });\r\n        Run(\"generic-close-closed-event-failure-never-fabricates-release\",()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);Events(b);d.SeedFixtureCloseSubscriptions();Duty(b,50);var engine=CloseEngine(b);\r\n            IDevice.ClosedEventHandler fail=_=>throw new IOException(\"CLOSED_EVENT_THROW\");d.Closed+=fail;\r\n            try\r\n            {\r\n                Set(Get(engine,\"state\")!,\"HardwareWritesObserved\",true);\r\n                Check(Invoke(engine,\"CloseHcSessionForLifecycle\",false,true,true)is false,\"Throwing original Closed event is not a successful Host boundary\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(!d.IsOpen&&!IDevice.LibraryInitialized&&Get(snapshot,\"UnknownState\")is true,\"Post-dispose event failure retains unknown release without reopening hardware\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"CLOSED_EVENT_THROW\")==true,\"Late original Closed error reaches public feedback\");CheckCloseSubscriptions(false);\r\n            }\r\n            finally{d.Closed-=fail;EndEngine(engine);Close(b);}\r\n        });\r"
+    },
+    {
+      "id": "foreign-owner-no-timer",
+      "role": "ownership",
+      "startLine": 261,
+      "endLine": 273,
+      "text": "        Run(\"generic-owner-close-engine-feedback-retains-foreign-owner\",()=>\r\n        {\r\n            var d=new AYANEOFlipDS();var b=Backend(d);Open(b);Events(b);Duty(b,25);var owned=Library;var engine=CloseEngine(b);\r\n            var foreign=new OpenLibSys();foreign.InitializeOls();EcLibrary.SetValue(null,foreign);Set(Get(engine,\"state\")!,\"HardwareWritesObserved\",true);Trace.Calls.Clear();\r\n            try\r\n            {\r\n                Check(Invoke(engine,\"CloseHcSessionForLifecycle\",false,true,true)is false,\"Foreign transport cannot make actual engine report completed Close\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(ReferenceEquals(Library,foreign)&&foreign.DisposeCalls==0&&foreign.PortWrites==0,\"Actual engine failure cleanup preserves foreign resources\");\r\n                Check(Get(snapshot,\"UnknownState\")is true&&Get(snapshot,\"LastError\")?.ToString()?.Contains(\"transport ownership changed\")==true,\"Actual API snapshot reports the ownership failure\");\r\n            }\r\n            finally{EcLibrary.SetValue(null,owned);EndEngine(engine);Close(b);foreign.Dispose();}\r\n        });\r"
+    },
+    {
+      "id": "event-recovery-error-kinds",
+      "role": "events",
+      "startLine": 134,
+      "endLine": 165,
+      "text": "        Run(\"events-admission-nonpower-rejection-uses-existing-recovery\",()=>\r\n        {\r\n            var b=Backend(new AYANEOFlipDS());Open(b);SeedEventsContext(b);Set(b,\"staThread\",Thread.CurrentThread);var engine=Engine(b);Set(Get(engine,\"state\")!,\"OpenCalled\",true);Set(Get(engine,\"state\")!,\"State\",\"Open\");\r\n            ManagerFactory.powerProfileManager.OnAdd=stage=>{if(stage==\"Applied\")Invoke(Get(b,\"externalProfileQueue\")!,\"BeginSession\");};\r\n            try\r\n            {\r\n                var failure=RejectEventAdmission(()=>Invoke(b,\"OpenEvents\"));ManagerFactory.powerProfileManager.OnAdd=null;\r\n                Check(Get(failure,\"Code\")?.ToString()==\"HC_OPEN_EVENTS_SUPERSEDED\",\"A profile-only replacement cannot impersonate an announced power owner\");\r\n                Invoke(engine,\"RecoverAfterHardwareFailure\",failure);\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(Get(b,\"IsOpen\")is false&&Get(snapshot,\"State\")?.ToString()!=\"Ready\"&&ManagerFactory.powerProfileManager.Subscribers==0,\"A non-power event failure still uses the existing recovery and retires its actual device\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"superseded\")==true,\"Real recovery feedback retains the non-power admission cause\");\r\n            }\r\n            finally{ManagerFactory.powerProfileManager.OnAdd=null;EndEngine(engine);Close(b);}\r\n        });\r\n        Run(\"events-admission-public-failure-reaches-existing-engine-feedback\",()=>\r\n        {\r\n            var b=Backend(new AYANEOFlipDS());Open(b);SeedEventsContext(b);Set(b,\"staThread\",Thread.CurrentThread);var engine=Engine(b);Set(Get(engine,\"state\")!,\"OpenCalled\",true);Set(Get(engine,\"state\")!,\"State\",\"Open\");\r\n            ManagerFactory.powerProfileManager.OnAdd=stage=>{if(stage==\"Applied\")Invoke(b,\"BlockWritesForSuspend\");};\r\n            try\r\n            {\r\n                var failure=RejectEventAdmission(()=>Invoke(b,\"OpenEvents\"));ManagerFactory.powerProfileManager.OnAdd=null;\r\n                var before=Trace.Calls.Count;\r\n                Invoke(engine,\"RecoverAfterHardwareFailure\",failure);\r\n                Check(Get(b,\"IsOpen\")is true&&!Trace.Calls.Skip(before).Any(call=>call.StartsWith(\"FAN:\")||call==\"OpenLib.Dispose\"||call==\"RGB.Release\"),\"A power-superseded OpenEvents error cannot become a second close/restore owner\");\r\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\r\n                Check(Get(snapshot,\"State\")?.ToString()!=\"Ready\"&&Get(snapshot,\"OpenEventsCalled\")is not true,\"Actual recovery/public snapshot cannot publish the superseded OpenEvents as Ready\");\r\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"superseded\")==true,\"Existing public state retains the actual event-admission failure cause\");\r\n                Check(ManagerFactory.powerProfileManager.Subscribers==0,\"Existing engine recovery leaves no obsolete profile handlers\");\r\n            }\r\n            finally{ManagerFactory.powerProfileManager.OnAdd=null;EndEngine(engine);Close(b);}\r\n        });\r"
+    },
+    {
+      "id": "mixed-close-manager-no-timer",
+      "role": "mixed",
+      "startLine": 257,
+      "endLine": 273,
+      "text": "        foreach(var manager in new[]{\"settings\",\"device\",\"profile\"})Run(\"mixed-events-combined-flags-reach-public-cleanup:\"+manager,()=>\n        {\n            var b=MixedBackend();var engine=CloseEngine(b);try\n            {\n                MixedEvents(b);var state=Get(engine,\"state\")!;Set(state,\"OpenCalled\",true);Set(state,\"OpenEventsCalled\",true);\n                // The fixture starts after Open. Match the actual Open() API's\n                // false pending-session marker instead of HostState's idle default.\n                Set(state,\"HcDeviceManagerStopCompleted\",Get(b,\"HcDeviceManagerStopCompleted\"));\n                IManager selected=manager==\"settings\"?ManagerFactory.settingsManager:manager==\"device\"?ManagerFactory.deviceManager:ManagerFactory.powerProfileManager;\n                selected.Status=ManagerStatus.Initialized|ManagerStatus.Busy;\n                Check(Invoke(engine,\"CloseHcSessionForLifecycle\",false,true,true)is false,\"Combined manager flags must keep the actual engine cleanup pending\");\n                var snapshot=Invoke(engine,\"SnapshotForRead\")!;\n                Check(Get(snapshot,\"HcCloseCleanupPending\")is true&&Get(snapshot,\"HcDeviceManagerStopCompleted\")is not true,\"Actual public snapshot cannot report a combined active manager as cleaned\");\n                Check(Get(snapshot,\"LastError\")?.ToString()?.Contains(\"HC_CLOSE_PENDING\")==true,\"Actual public snapshot retains the original pending-cleanup cause\");\n            }\n            finally{EndEngine(engine);MixedClose(b);}\n        });"
+    },
+    {
+      "id": "engine-constructor-false-backend",
+      "role": "hostProgram",
+      "startLine": 12880,
+      "endLine": 12940,
+      "text": "    {\r\n        if (options.MockZeroHardwareEvidence && (!options.MockHandshake || options.RealBackend || options.AllowHardwareWrites))\r\n            throw new ArgumentException(\"MOCK_ZERO_HARDWARE_REQUIRES_MOCK_ONLY\");\r\n        this.options = options;\r\n        this.diagnostics = diagnostics ?? new HostDiagnosticLog();\r\n        parentEpisodeImagePath = CaptureParentEpisodeImagePath(options);\r\n        state = new HostState\r\n        {\r\n            // No assembly is loaded and no native API is touched in this build.\r\n            HardwareCapable = false,\r\n            HardwareWriteAuthorizationGranted = false,\r\n            HardwareWritesEnabled = false,\r\n            HardwareWritesObserved = false,\r\n            HostMode = \"safe-no-hardware\",\r\n            OemRestoreEvidence = options.RealBackend ? \"none\" : \"not-applicable-safe-build\",\r\n            OemOwnershipStatus = options.RealBackend ? \"unknown-no-hc-contract\" : \"not-applicable\",\r\n            ApiSessionProtected = !string.IsNullOrWhiteSpace(options.SessionToken),\r\n            RecoveryReadbackRequired = options.RealBackend,\r\n            ListenerState = \"Starting\",\r\n        };\r\n        realBackend = options.RealBackend && !options.MockHandshake ? new RealHcBackend(options) : null;\r\n        // FAN-204 Q1-b：负例开关（仅 mock）——让读路径退回阻塞读，供 AC15c 负例证明判定非空转。\r\n        if (options.MockHandshake && options.MockNoPublishedSnapshot) publishedSnapshotDisabledForMock = true;\r\n        // FAN-204 Q1-b：启动即发布一份读快照（读者在首次持锁窗口内也有可判定答复）。\r\n        PublishSnapshotLocked();\r\n        if (realBackend is not null)\r\n        {\r\n            realBackend.FanDispatchFailure = OnBackendFanDispatchFailure;\r\n            realBackend.TemperatureMonitorStale = OnBackendTemperatureMonitorStale;\r\n            realBackend.TimedOutOperationReturned = OnTimedOutHcOperationReturned;\r\n            realBackend.Diagnostic = (eventName, details) => this.diagnostics.Write(eventName, details);\r\n            realBackend.DiagnosticLazy = (eventName, detailsFactory) => this.diagnostics.WriteLazy(eventName, detailsFactory);\r\n            realBackend.PowerObservationContext = () => new {\r\n                powerGeneration = state.PowerOperationGeneration > 0 ? (object)state.PowerOperationGeneration : \"not-observed\",\r\n                fanControlCycleId = realBackend?.ControlCycleId, powerPhase = state.PowerState,\r\n                generationScope = \"existing-Host-power-operation-metadata-not-guessed-native-epoch\"\r\n            };\r\n        }\r\n        this.diagnostics.SetContextProvider(BuildDiagnosticContext);\r\n        this.diagnostics.Write(\"route.catalog\", new\r\n        {\r\n            routeCount = RealHcBackend.KnownFanRouteCount,\r\n            routes = RealHcBackend.RouteCatalogForDiagnostics,\r\n        });\r\n        this.diagnostics.Write(\"engine.created\", new { options.RealBackend, options.AllowHardwareWrites });\r\n        // 2026-09-23：mock 只经显式测试开关；遗留旗标文件不再改变行为（只记录）。\r\n        if (options.MockHandshake)\r\n        {\r\n            this.diagnostics.Write(\"mock-handshake-requested\", new { note = \"test-only switch (--mock-handshake); realBackend forced null; zero hardware writes\" });\r\n        }\r\n        else if (MockHandshakeFlagFilePresent)\r\n        {\r\n            this.diagnostics.Write(\"mock-handshake-flag-ignored\", new { note = \"stray mock-handshake.flag present but --mock-handshake was not passed; mock NOT enabled (2026-09-23 architecture fix: test mode is AI-only)\" });\r\n        }\r\n        if (options.RealBackend)\r\n        {\r\n            // Low-frequency process telemetry is diagnostic-only. It lets a\r\n            // real-machine run distinguish HC/route work from a runaway Host\r\n            // loop without changing any fan or recovery timer cadence.\r\n            runtimeDiagnosticsTimer = new Timer(_ => WriteRuntimeDiagnostics(), null, RuntimeSampleNormalIntervalMs, Timeout.Infinite);\r\n        }\r"
+    },
+    {
+      "id": "template-profile-has-no-power-read",
+      "role": "hostProgram",
+      "startLine": 7511,
+      "endLine": 7535,
+      "text": "    private object BuildPowerProfile(double[] duties, bool software, object? templateOverride = null)\r\n    {\r\n        // FAN-934 R2 §3-B：唯一自测 HC 边界（默认关闭）。生产路径 hcBoundaryForSelfTest\r\n        // 恒为 null，走下方真实 HC FanMode/FanProfile 构造。\r\n        if (hcBoundaryForSelfTest is { } selfTestProfileBoundary && templateOverride is null)\r\n            return selfTestProfileBoundary.BuildProfile(duties, software);\r\n        var fanModeType = FindType(\"HandheldCompanion.Misc.FanMode\")\r\n            ?? throw new MissingMemberException(\"HC FanMode not found\");\r\n        var template = templateOverride ?? hcProfileTemplate;\r\n        if (template is null)\r\n            throw new InvalidOperationException(\"HC power-profile context was not captured before fan control\");\r\n        // Clone HC's own device profile rather than constructing a new one.\r\n        // Device callbacks may use Guid/OEMPowerMode alongside FanProfile.\r\n        var profile = CloneHcPowerProfilePreservingFanState(template);\r\n        var fan = GetMember(profile, \"FanProfile\");\r\n        if (fan is null) throw new InvalidOperationException(\"HC FanProfile construction failed\");\r\n        // Keep the profile's original HC FanProfile object and its public\r\n        // smoothing/Tjmax settings. Only replace the 11-point curve through\r\n        // HC's own validation method; do not synthesize a parallel profile.\r\n        if (duties.Length == 11)\r\n            Invoke(fan, \"SetFanSpeed\", duties);\r\n        SetMember(fan, \"fanMode\", Enum.Parse(fanModeType, software ? \"Software\" : \"Hardware\"));\r\n        SetMember(profile, \"FanProfile\", fan);\r\n        return profile;\r\n    }\r"
+    },
+    {
+      "id": "null-watchdog-guard",
+      "role": "hostProgram",
+      "startLine": 4385,
+      "endLine": 4396,
+      "text": "    private void RequestPowerProfileWatchdogTick(int delayMs = 0)\r\n    {\r\n        if (powerProfileWatchdog is null) return;\r\n        try\r\n        {\r\n            // FAN-929：一次性武装（不再把 1 s 周期加回去）。事件驱动：外部 profile\r\n            // Applied/Discarded 到达时只跑这一趟；稳态不再有任何 tick。\r\n            // FAN-931 P1.5：需要\"有界延迟复核\"时按需再多武装**一次**（delayMs > 0）——\r\n            // 这两类边沿各自有有限次数上限，绝不是常驻轮询。\r\n            powerProfileWatchdog.Change(Math.Max(0, delayMs), Timeout.Infinite);\r\n        }\r\n        catch (ObjectDisposedException)\r"
+    },
+    {
+      "id": "null-suspend-record-guard",
+      "role": "hostProgram",
+      "startLine": 14953,
+      "endLine": 14960,
+      "text": "    private void TryReleaseUnresolvableSuspendProtection()\r\n    {\r\n        var owned = suspendBoundaryOwnedRecord;\r\n        if (owned is null) return;\r\n        var stillCurrent = ReferenceEquals(Volatile.Read(ref suspendProtection), owned);\r\n        if (!MayReleaseUnresolvableSuspendProtection(stillCurrent, IsHcCloseOwedForSuspendRelease())) return;\r\n        if (!ClearSuspendProtectionIfCurrent(owned)) return;\r\n        suspendBoundaryOwnedRecord = null;\r"
+    },
+    {
+      "id": "retry-callback-reopen-gate",
+      "role": "hostProgram",
+      "startLine": 17365,
+      "endLine": 17434,
+      "text": "        recoveryTimer = new Timer(_ =>\r\n        {\r\n            lock (gate)\r\n            {\r\n                recoveryTimer?.Dispose();\r\n                recoveryTimer = null;\r\n                if (stopped || (state.State != \"FaultLocked\" && state.State != \"AwaitingCloseCleanup\")) return;\r\n                if (recoveryRetryWindowStartedMonoMs == 0 ||\r\n                    MonoMs() - recoveryRetryWindowStartedMonoMs >= EffectiveRecoveryRetryWindowMs)\r\n                {\r\n                    EnterRecoveryRetryTerminalState(recoveryReopenRequired\r\n                        ? \"reopen-not-completed-within-cycle-budget\"\r\n                        : \"recovery retry window elapsed\");\r\n                    return;\r\n                }\r\n                var strictSystemPendingRetry = recoveryRetryUsesSystemPendingClose;\r\n                // B4（FAN-925 / HC 回函 A1–A3）：route-lost 时宿主**自身出清不了**——\r\n                // `Device_Inserted(true)` 绕过 PnP 重放 + VID/PID 过滤 + 状态门，须由调用方自证\r\n                // \"设备在场\"，且 HC 侧没有任何\"等 HID 稳定\"步骤（等待是调用方责任）\r\n                // ⇒ **重开归 bridge**。这里改成\"有界等待重开收据\"，不再空转被第五道门挡住的 restore。\r\n                // 判据只用**收据**（A1/A5/H4）：`OpenEvents()` 返回 / `IsReady()` / `IsConnected` /\r\n                // `OpenCalled` / `OpenEventsCalled` **都不算**——H4 已源码级证明后两者只代表\"已发起\"。\r\n                // 等待是静默的（不逐轮记日志，遵守\"事件=低频\"）。\r\n                var reopenReceiptDetail = \"not-required\";\r\n                if (recoveryReopenRequired)\r\n                {\r\n                    // §4.5（FAN-925B）：明确**谁在页面不可用期间驱动 Fan 恢复**，并保证\r\n                    // \"永远等旧页面\"不是自动恢复实现：有界等待 → 复用既有受控更换升级路径\r\n                    // （至多一次/周期）；本宿主在此期间保持唯一写入权，不自起第二个 owner。\r\n                    var waited = Math.Max(0, Environment.TickCount64 - reopenWaitStartedMonoMs);\r\n                    var decision = ReopenOwnershipDecision(\r\n                        reopenRequired: true,\r\n                        waitedMs: waited,\r\n                        budgetMs: EffectiveReopenBridgeWaitBudgetMs,\r\n                        replacementAlreadyRequested: controlledReplacementRequested);\r\n                    if (!string.Equals(decision, recoveryOwner, StringComparison.Ordinal))\r\n                    {\r\n                        recoveryOwner = decision;\r\n                        var requestsReplacement = decision == \"fan-host-requests-controlled-replacement\";\r\n                        if (requestsReplacement)\r\n                        {\r\n                            // §4.1（FAN-926 P2）：**先**做恰好一次\"有正式 HC 生命周期收据证明\r\n                            // 的同进程恢复\"；只有拿不到完整收据时才允许请求一次受控更换。\r\n                            if (uiFreeSelfOpenAttempts == 0)\r\n                            {\r\n                                uiFreeSelfOpenAttempts++;\r\n                                if (TryUiFreeSameProcessRecoveryLocked())\r\n                                {\r\n                                    recoveryReopenRequired = false;\r\n                                    recoveryOwner = \"fan-host-same-process-recovered\";\r\n                                    CompleteRecoveryCycleLocked(\"ui-free-same-process-recovered\");\r\n                                    diagnostics.Write(\"recovery.ui-free-same-process-confirmed\", new\r\n                                    {\r\n                                        reopenCount = recoveryReopenCount,\r\n                                        cycleId = recoveryCycle?.CycleId,\r\n                                        selfOpenAttempts = uiFreeSelfOpenAttempts,\r\n                                        scope = \"ui-free-same-process-stage-only\",\r\n                                    });\r\n                                    reopenBinding = null;\r\n                                    state.State = state.PowerState == \"Suspended\" ? \"Suspended\" : \"AwaitingControl\";\r\n                                    return;\r\n                                }\r\n                            }\r\n                            controlledReplacementRequested = true;\r\n                            controlledReplacementRequests++;\r\n                            uiFreeReplacementRequests++;\r\n                            // §4.1（FAN-926 P2）：恰好一次受控更换。拉起成功**不等于**恢复成功——\r\n                            // 恢复由后继实例的\"旧实例已退出\"自证 + 正式收据证明。\r\n                            _ = TryRequestControlledHostReplacementLocked();\r\n                        }\r"
+    },
+    {
+      "id": "retry-normal-close-and-end",
+      "role": "hostProgram",
+      "startLine": 17454,
+      "endLine": 17507,
+      "text": "                var recovered = recoveryReopenRequired\r\n                    ? (realBackend?.TryObserveReopenReceipt(\r\n                        reopenBinding,\r\n                        engineInstanceId,\r\n                        recoveryCycle?.CycleId,\r\n                        CurrentSessionGeneration,\r\n                        AbnormalFinalizeGateWaitMs,\r\n                        out reopenReceiptDetail) ?? false)\r\n                    : (strictSystemPendingRetry ? CloseForSystemPending() : RestoreHardware(close: true));\r\n                if (recovered)\r\n                {\r\n                    if (recoveryReopenRequired)\r\n                    {\r\n                        // bridge 已完成重开：收据 = Outcome==Completed ∧ 四位副作用齐全。\r\n                        recoveryReopenRequired = false;\r\n                        recoveryOwner = \"reopen-confirmed-by-bridge\";\r\n                        CompleteRecoveryCycleLocked(\"reopen-confirmed-by-bridge\");\r\n                        diagnostics.Write(\"recovery.reopen-confirmed\", new\r\n                        {\r\n                            cycleId = recoveryCycle?.CycleId,\r\n                            reopenCount = recoveryReopenCount,\r\n                            binding = reopenBinding?.Describe(),\r\n                            receipt = reopenReceiptDetail,\r\n                            // G-1（2026-09-27 消费侧取证）：确认重开这一拍把 HC 逐轮收据一并带出\r\n                            // —— 重开窗内\"哪几轮被拒/丢弃、绑定是否在场、清理台账是否仍欠\"由此可判。\r\n                            hcReceipts = realBackend?.HcReceiptsEvidence,\r\n                            // §4.4：本事件**只签重开阶段**。原控制意图恢复与\"下一次调整成功\"\r\n                            // 仍由 T0-U 判；不得因为取到 open 收据就把整条恢复算结束。\r\n                            scope = \"reopen-stage-only; intent-restore-and-next-adjustment-still-decide-T0\",\r\n                        });\r\n                        reopenBinding = null;\r\n                        state.State = state.PowerState == \"Suspended\" ? \"Suspended\" : \"AwaitingControl\";\r\n                        return;\r\n                    }\r\n                    ClearLease();\r\n                    CompleteRecoveryCycleLocked(\"retry-recovered\");\r\n                    if (strictSystemPendingRetry)\r\n                    {\r\n                        // The retry completed the same F4 boundary. Do not\r\n                        // reopen or apply a profile until a new native F5.\r\n                        state.PowerState = \"Suspended\";\r\n                        state.State = \"Suspended\";\r\n                    }\r\n                    else if (state.CloseCalled)\r\n                    {\r\n                        state.State = state.PowerState == \"Suspended\" ? \"Suspended\" : \"Stopped\";\r\n                        stopped = state.PowerState != \"Suspended\";\r\n                    }\r\n                    else\r\n                        state.State = state.PowerState == \"Suspended\" ? \"Suspended\" : \"AwaitingControl\";\r\n                }\r\n                else ScheduleRecoveryRetry();\r\n            }\r\n        }, null, delayMs, Timeout.Infinite);\r"
+    },
+    {
+      "id": "mark-reopen-no-schedule",
+      "role": "hostProgram",
+      "startLine": 18307,
+      "endLine": 18351,
+      "text": "    private void MarkReopenRequiredLocked(string source)\r\n    {\r\n        recoveryReopenCount++;\r\n        recoveryReopenRequired = true;\r\n        reopenWaitStartedMonoMs = Environment.TickCount64;\r\n        controlledReplacementRequested = false;\r\n        recoveryOwner = \"fan-host-budgeted-supervision;awaiting-bridge-reopen\";\r\n        // §4.1（FAN-926 P2）：新一轮重开 episode ⇒ \"恰好一次\"的两个计数同时归零；\r\n        // 但**恢复周期与剩余预算不归零**（那是同一个未结算 episode 的账）。\r\n        uiFreeSelfOpenAttempts = 0;\r\n        uiFreeReplacementRequests = 0;\r\n        reopenBinding = new ReopenBinding(\r\n            engineInstanceId,\r\n            recoveryCycle?.CycleId,\r\n            CurrentSessionGeneration,\r\n            realBackend?.LastCompatEntryOperationIdObserved,\r\n            Environment.TickCount64);\r\n        if (recoveryCycle is not null)\r\n        {\r\n            recoveryCycle = recoveryCycle with\r\n            {\r\n                LastReason = $\"reopen-required:{source}\",\r\n                LastUpdatedAtUtc = DateTime.UtcNow,\r\n            };\r\n            PersistRecoveryCycleLocked();\r\n        }\r\n        var capped = ReopenLoopCapReached(recoveryReopenCount);\r\n        diagnostics.Write(capped ? \"recovery.reopen-loop-capped\" : \"recovery.reopen-required\", new\r\n        {\r\n            source,\r\n            reopenCount = recoveryReopenCount,\r\n            cycleId = recoveryCycle?.CycleId,\r\n            binding = reopenBinding?.Describe(),\r\n            sessionGenerationAtBinding = reopenBinding?.SessionGeneration,\r\n            baselineOperationId = reopenBinding?.BaselineOperationId,\r\n            reopenSequence = \"Open() -> Device_Inserted(true) -> wait for open receipt\",\r\n            receiptsOnly = \"OpenEvents() return / IsReady() / IsConnected() are NOT receipts\",\r\n            bindingRule = \"receipt must belong to this host instance + this recovery cycle + a session generation newer than the binding, and must not be the pre-reopen baseline operation\",\r\n            outcome = capped ? \"failure-terminal-not-success\" : \"awaiting-bridge-reopen\",\r\n            // G-1（2026-09-27 消费侧取证）：进入等待重开这一刻拍下 HC 逐轮收据基线\r\n            // （只读、只增字段）—— 与后一拍 `recovery.reopen-confirmed` 对读即可看出\"逐轮\"差异。\r\n            hcReceipts = realBackend?.HcReceiptsEvidence,\r\n        });\r\n        if (capped) EnterRecoveryRetryTerminalState(\"reopen-loop-capped\");\r\n    }\r"
+    },
+    {
+      "id": "route-loss-three-literals",
+      "role": "hostProgram",
+      "startLine": 17306,
+      "endLine": 17310,
+      "text": "    private static bool IsHcRouteLoss(Exception error) =>\r\n        Unwrap(error).Any(item =>\r\n            item.Message.Contains(\"HC_SESSION_ROUTE_LOST\", StringComparison.OrdinalIgnoreCase) ||\r\n            item.Message.Contains(\"hc-device-is-open-false\", StringComparison.OrdinalIgnoreCase) ||\r\n            item.Message.Contains(\"route-marker-lost\", StringComparison.OrdinalIgnoreCase));\r"
+    },
+    {
+      "id": "owned-ledger-root",
+      "role": "hostProgram",
+      "startLine": 17564,
+      "endLine": 17573,
+      "text": "    private static string RecoveryCycleStatePath()\r\n    {\r\n        // 自测/故障注入落在隔离根，绝不污染用户真实状态（与 HostDiagnosticLog 同源规则）。\r\n        var isolated = Environment.GetEnvironmentVariable(HostDiagnosticLog.SelfTestLogRootEnvVar);\r\n        var directory = string.IsNullOrWhiteSpace(isolated)\r\n            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), \"YeManCC\", \"fan-host\")\r\n            : isolated;\r\n        Directory.CreateDirectory(directory);\r\n        return Path.Combine(directory, \"YeManFanHost.recovery-cycle.json\");\r\n    }\r"
+    },
+    {
+      "id": "parent-name-empty-before-process-query",
+      "role": "hostProgram",
+      "startLine": 17722,
+      "endLine": 17735,
+      "text": "    private static string? CaptureParentEpisodeImagePath(HostOptions options)\r\n    {\r\n        try\r\n        {\r\n            if (options.ParentPid is int pid and > 0)\r\n            {\r\n                using var process = Process.GetProcessById(pid);\r\n                return process.HasExited ? null : process.MainModule?.FileName;\r\n            }\r\n            var name = Path.GetFileNameWithoutExtension(options.ParentProcessName);\r\n            if (string.IsNullOrWhiteSpace(name)) return null;\r\n            var matches = Process.GetProcessesByName(name);\r\n            try\r\n            {\r"
+    },
+    {
+      "id": "close-skip-restore-reopen-guard",
+      "role": "hostProgram",
+      "startLine": 16775,
+      "endLine": 16787,
+      "text": "                        ? \"unsettled-responsibility-retained; close-boundary-settled-only\"\r\n                        : \"fault-locked-release-unproven\",\r\n                });\r\n                if (skipOemRestore)\r\n                {\r\n                    // 关闭边界已结算，但释放责任未结算 ⇒ 仍要进入\"等待重开\"，\r\n                    // 由 bridge/native 在同一故障周期预算内驱动重开（唯一 owner）。\r\n                    MarkReopenRequiredLocked(\"close-route-lost-release-unproven\");\r\n                    return false;\r\n                }\r\n                state.State = \"FaultLocked\";\r\n                state.PowerState = \"Unknown\";\r\n                return false;\r"
+    },
+    {
+      "id": "close-exception-route-loss-guard",
+      "role": "hostProgram",
+      "startLine": 16837,
+      "endLine": 16846,
+      "text": "            state.UnknownState = !IsOemReleaseSafe(\r\n                state.HardwareWritesObserved,\r\n                state.OemReleaseActionKind);\r\n            state.RecoveryReadbackRequired = state.UnknownState;\r\n            state.LastError = timedOut\r\n                ? $\"HC Close 资源清理超时，等待原调用返回后重试: {ExceptionText(ex)}\"\r\n                : $\"HC Close 资源清理失败，等待重试: {ExceptionText(ex)}\";\r\n            // B4：route-lost 不是\"HC 卡住\"，是本产品第五道门抛的（HC 回函 D2）⇒ 结算 Close 边界后\r\n            // **重开归 bridge**，宿主不得再空转被门挡住的 restore（每轮都必然同点失败）。\r\n            if (!timedOut && IsHcRouteLoss(ex)) MarkReopenRequiredLocked(\"close-route-lost\");\r"
+    },
+    {
+      "id": "fresh-monitor-null-resources",
+      "role": "hostProgram",
+      "startLine": 12062,
+      "endLine": 12079,
+      "text": "    private ulong lastProducerPollTime;\r\n    private uint lastProducerPeriodMs;\r\n\r\n    private readonly object gate = new();\r\n    // FAN-1035: reuse the stable shared-memory section/view between polls.\r\n    // A producer restart, invalid header, stale sample, or disposal invalidates it.\r\n    private readonly object mappingGate = new();\r\n    private string? cachedMappingName;\r\n    private MemoryMappedFile? cachedMapping;\r\n    private MemoryMappedViewAccessor? cachedMappingView;\r\n    private Timer? timer;\r\n    private Action<float?>? sampleReceived;\r\n    private Action? healthySampleReceived;\r\n    private float? lastPublishedTemperature;\r\n    private long sampleReadTick = -1;\r\n    private const int ForcedSampleDelivery = 2;\r\n    private int sampleDeliveryAccepted;\r\n    internal long SampleReadTick => Volatile.Read(ref sampleReadTick);\r"
+    },
+    {
+      "id": "owned-mapping-null-dispose",
+      "role": "hostProgram",
+      "startLine": 12217,
+      "endLine": 12225,
+      "text": "    private void InvalidateCachedMapping(string? mappingName = null)\r\n    {\r\n        if (mappingName is not null && !string.Equals(cachedMappingName, mappingName, StringComparison.Ordinal)) return;\r\n        try { cachedMappingView?.Dispose(); } catch { }\r\n        try { cachedMapping?.Dispose(); } catch { }\r\n        cachedMappingView = null;\r\n        cachedMapping = null;\r\n        cachedMappingName = null;\r\n        InvalidateLabelCache();\r"
+    },
+    {
+      "id": "oneX-typed-declared-owner-contract",
+      "role": "oneX",
+      "startLine": 42,
+      "endLine": 97,
+      "text": "    {\r\n        device = target;\r\n        var type = target.GetType();\r\n        if (!Models.Contains(type.FullName ?? \"\")) throw Contract(\"unreviewed OneX device type\");\r\n        var x1 = type;\r\n        while (x1 is not null && x1.FullName != X1Name) x1 = x1.BaseType;\r\n        var parent = x1?.BaseType;\r\n        var root = parent?.BaseType;\r\n        var expectedBase = type.FullName is \"HandheldCompanion.Devices.OneXPlayerX1Pro\" or\r\n            \"HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex\"\r\n            ? \"HandheldCompanion.Devices.OneXPlayerX1AMD\" : X1Name;\r\n        if (x1 is null || parent?.FullName != ParentName || root?.FullName != RootName ||\r\n            type.BaseType?.FullName != expectedBase || root.Assembly != type.Assembly)\r\n            throw Contract(\"device hierarchy changed\");\r\n        RequireOwner(type, \"Open\", x1, typeof(bool), Type.EmptyTypes);\r\n        RequireOwner(type, \"Close\", x1, typeof(void), Type.EmptyTypes);\r\n        RequireOwner(type, \"OpenEvents\", root, typeof(void), Type.EmptyTypes);\r\n        RequireOwner(type, \"SetFanDuty\", parent, typeof(void), [typeof(double)]);\r\n        var profileType = type.Assembly.GetType(\"HandheldCompanion.Misc.PowerProfile\") ?? throw Contract(\"power profile type missing\");\r\n        var sourceType = type.Assembly.GetType(\"HandheldCompanion.UpdateSource\") ?? throw Contract(\"profile source type missing\");\r\n        RequireOwner(type, \"PowerProfileManager_Applied\", root, typeof(void), [profileType, sourceType]);\r\n        RequireOwner(type, \"SetFanControl\", parent, typeof(void), [typeof(bool), typeof(int)]);\r\n        if (type.GetProperty(\"IsOpen\")?.GetMethod?.DeclaringType != root)\r\n            throw Contract(\"fan open marker owner changed\");\r\n        deviceOpen = RequireField(root, \"DeviceOpen\", typeof(bool));\r\n        useOpenLib = RequireField(root, \"UseOpenLib\", typeof(bool));\r\n        if (useOpenLib.GetValue(device) is not true)\r\n            throw Contract(\"fan EC transport disabled\");\r\n        openLib = root.GetField(\"openLibSys\", BindingFlags.Static | BindingFlags.NonPublic | BindingFlags.DeclaredOnly)\r\n            ?? throw Contract(\"OpenLib ownership field missing\");\r\n        transportType = type.Assembly.GetType(\"HandheldCompanion.OpenLibSys\") ?? throw Contract(\"OpenLib type missing\");\r\n        if (openLib.FieldType != transportType || transportType.GetConstructor(Type.EmptyTypes) is null)\r\n            throw Contract(\"OpenLib construction contract changed\");\r\n        initialize = transportType.GetMethod(\"InitializeOls\", Type.EmptyTypes) ?? throw Contract(\"OpenLib initialize missing\");\r\n        dispose = transportType.GetMethod(\"Dispose\", Type.EmptyTypes) ?? throw Contract(\"OpenLib dispose missing\");\r\n        if (initialize.ReturnType != typeof(bool) || dispose.ReturnType != typeof(void))\r\n            throw Contract(\"OpenLib lifecycle signature changed\");\r\n        serial = x1.GetField(\"_serialPort\", InstanceFields) ?? throw Contract(\"LED port field missing\");\r\n        vendorHid = x1.GetField(\"_vendorHidMonitor\", InstanceFields) ?? throw Contract(\"vendor HID field missing\");\r\n        ecDetails = root.GetField(\"ECDetails\", InstanceFields) ?? throw Contract(\"EC details missing\");\r\n        var ec = ecDetails.GetValue(device) ?? throw Contract(\"EC details missing\");\r\n        release = RequireOwner(type, \"ECRamDirectWriteByte\", root, typeof(bool), [typeof(ushort), ecDetails.FieldType, typeof(byte)]);\r\n        int Read(string name) => Convert.ToInt32(ec.GetType().GetField(name)?.GetValue(ec) ?? -1);\r\n        if (Read(\"AddressFanControl\") != 0x44a || Read(\"AddressFanDuty\") != 0x44b ||\r\n            Read(\"AddressStatusCommandPort\") != 0x4e || Read(\"AddressDataPort\") != 0x4f ||\r\n            Read(\"FanValueMin\") != 0 || Read(\"FanValueMax\") != 184)\r\n            throw Contract(\"inherited EC fan data changed\");\r\n    }\r\n\r\n    internal bool Open(Func<bool> stillCurrent)\r\n    {\r\n        lock (TransportGate) return OpenCore(stillCurrent);\r\n    }\r\n\r\n    private bool OpenCore(Func<bool> stillCurrent)\r\n    {\r"
+    },
+    {
+      "id": "main-owned-log-before-target-load-default-models",
+      "role": "harness",
+      "startLine": 155,
+      "endLine": 172,
+      "text": "        var capabilityAclOnly=args[0]==\"capability-acl\";\r\n        var validationReal=args[0]==\"validation-real\";\r\n        var validationOnly=args[0]==\"validation-init\";var validationStaticOnly=args[0]==\"validation-static\";\r\n        var staOnly=args[0]==\"sta-init\";\r\n        var factoryOnly=args[0]==\"factory-init\";var mixedOnly=args[0]==\"mixed-reentry\";var mixedFlagsOnly=args[0]==\"mixed-flags\";if(bootstrapOnly||capabilityAclOnly||validationReal||validationOnly||validationStaticOnly||staOnly||factoryOnly||mixedOnly||mixedFlagsOnly)args=args[1..];\r\n        AuthFile = Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[3]))!, \"synthetic-authorization.txt\");\r\n        File.WriteAllText(AuthFile, \"hardwareWritesAuthorized: true\\nallMappedFanRoutesAuthorized: true\\n\");\r\n        Environment.SetEnvironmentVariable(\"YEMANCC_SELFTEST_LOG_ROOT\", Path.Combine(Path.GetDirectoryName(Path.GetFullPath(args[3]))!, \"isolated-host-logs\"));\r\n        Candidate = Load(args[0]); Helper = Load(args[1]);\r\n        if(bootstrapOnly)return RunBootstrapCases(args);\r\n        if(capabilityAclOnly)return RunCapabilityAclCases(args);\r\n        if(validationReal)return RunValidationRealMode(args);\r\n        if(validationOnly||validationStaticOnly)return RunValidationCasesMode(args,validationStaticOnly);\r\n        if(staOnly)return RunStaCasesMode(args);\r\n        if(factoryOnly)return RunFactoryCases(args);\r\n        if(mixedOnly)return RunMixedReproduction(args);\r\n        if(mixedFlagsOnly)return RunMixedFlagReproduction(args);\r\n        foreach (var type in new[] { typeof(OneXPlayerX1AMD), typeof(OneXPlayerX1Intel), typeof(OneXPlayerX1Pro), typeof(HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex) })\r"
+    }
+  ],
+  "timerStateClasses": [
+    {
+      "id": "temperature-failure-armed",
+      "origins": [
+        "temperature-failure-feeds-existing-bounded-engine",
+        "generic-ec-temperature-failure-reaches-existing-engine-recovery"
+      ],
+      "timer": "May run; never use elapsed execution time as proof",
+      "engineState": "New empty-options Engine; state.HardwareWritesObserved=false, recoveryReopenRequired=false, recoveryRetryUsesSystemPendingClose=false",
+      "callback": "RestoreHardware(close:true) -> CloseHcSessionForLifecycle; no release lambda without engine write history; skipOemRestore=false; synthetic Close errors lack the three route-loss markers; no MarkReopen path",
+      "cleanup": "EndEngine stops timer, nulls realBackend and disposes; queued callback remains bounded by same states"
+    },
+    {
+      "id": "direct-close-unproven",
+      "origins": [
+        "generic-close-rejected-release-keeps-debt:suspend/process",
+        "generic-close-no-write-history-keeps-honest-close",
+        "generic-close-rgb/dispose-failure-retains-owner",
+        "generic-close-closed-event-failure-never-fabricates-release",
+        "generic-owner-close-engine-feedback-retains-foreign-owner",
+        "mixed-events-combined-flags-reach-public-cleanup"
+      ],
+      "timer": "Not scheduled by direct CloseHcSessionForLifecycle, SnapshotForRead, MarkReopenRequiredLocked or finally cleanup",
+      "engineState": "May set recoveryReopenRequired=true after a completed unproven skip-restore close; this is not an armed timer",
+      "callback": "No timer callback exists for this per-case engine; no public Close/Shutdown entry invoked",
+      "cleanup": "EndEngine StopRecoveryRetry then realBackend=null before IDisposable.Dispose"
+    },
+    {
+      "id": "event-admission-recovery",
+      "origins": [
+        "events-admission-nonpower-rejection-uses-existing-recovery",
+        "events-admission-public-failure-reaches-existing-engine-feedback"
+      ],
+      "timer": "Power-superseded returns early; other error uses existing close/recovery",
+      "engineState": "HC_OPEN_EVENTS_SUPERSEDED is not a route-loss marker; HardwareWritesObserved=false; no reopen permission",
+      "callback": "RecoverAfterHardwareFailure; only synthetic HC manager events/Close; same no-write/skip-restore=false timer class if scheduled",
+      "cleanup": "Manager OnAdd cleared and EndEngine before separate Close"
+    },
+    {
+      "id": "terminal-and-retired",
+      "origins": [
+        "existing-engine-sixty-second-window-remains-terminal",
+        "old-bound-temperature-failure-does-not-fault-new-engine-owner"
+      ],
+      "timer": "Expired-window/retired-owner guards return without arming",
+      "engineState": "No counter or terminal reset",
+      "callback": "None",
+      "cleanup": "EndEngine retained"
+    }
+  ],
+  "claims": [
+    {
+      "id": "default-dispatch",
+      "conclusion": "Only four-argument Main default body; named modes, FactoryCases and later constructor ports are excluded by exact argv. The LoadAssemblyAndFactory factory body is metadata for InitializationCallback selection, not an invocation root."
+    },
+    {
+      "id": "synthetic-device-terminals",
+      "conclusion": "OneX/AYANEO/OpenLibSys/serial/manager event callbacks bind to the exact HC6d7 synthetic module; selected terminal methods contain no PInvoke or device/registry/process IO. Raw HC08a remains Cecil metadata only. Product source and original assertions unchanged."
+    },
+    {
+      "id": "typed-reflection",
+      "conclusion": "Pinned synthetic hierarchy, declared owner/overload/return type/field contracts satisfy current OneX shim and old Light consumer. SerialPort belongs to HC6d7 even though its namespace matches System.IO.Ports. Missing optional exploration names are not required contract gaps."
+    },
+    {
+      "id": "initialize-callback",
+      "conclusion": "Exact current factory ldftn resolves instance b__574_6; it invokes only current device.Initialize(false,false). Original source checks callback owner, parameter count, stage path, FirstStart/NewUpdate and exception propagation."
+    },
+    {
+      "id": "no-winforms-power-read",
+      "conclusion": "PrepareOriginalRestoreContext injects synthetic hcProfileTemplate. BuildPowerProfile clones it through synthetic manager CloneProfile; it does not capture/select a real profile or query IsPowerLineOnline. Empty restore duties bypass SetFanSpeed. ApplyCurveCore and watchdog polling are not default roots."
+    },
+    {
+      "id": "fresh-monitor",
+      "conclusion": "Harness fresh HWiNFO monitor only gets sampleReadTick and receives explicit temperature samples. Its ctor sets neither timer nor mapping/view; Start/Poll not reached. Dispose/InvalidateCachedMapping guards null timer/view/map. Events callback returns before watchdog work because watchdog is null."
+    },
+    {
+      "id": "recovery-timer",
+      "conclusion": "Use the four per-engine state classes. Reopen-required is NOT universally false; the direct-close instances which set it do not arm Timer. Actual armed temperature failure instances cannot reach the reopen-controlled external replacement branch under the reviewed defaults."
+    },
+    {
+      "id": "parent-process-disabled",
+      "conclusion": "HostOptions.Parse(empty) leaves ParentPid/ParentProcessName absent. CaptureParentEpisodeImagePath returns before Process.GetProcessById/GetProcessesByName. Engine constructor realBackend creation and runtimeDiagnosticsTimer guarded by RealBackend=false; later injected backend does not rewire constructor callbacks."
+    },
+    {
+      "id": "owned-file-io",
+      "conclusion": "Main sets YEMANCC_SELFTEST_LOG_ROOT to result-parent/isolated-host-logs before loading targets. Diagnostic/fault/ledger paths use that root; StaticPowerObservationRuntimeIdentity hashes the loaded synthetic HC file. These owned file reads/writes remain real, permitted test IO; no blanket no-IO claim."
+    }
+  ],
+  "exclusions": [
+    "No business execution evidence from this audit",
+    "No entire Host, all151 frontier, static CLR dependency/nativeGuard or full-policy isolation proof",
+    "No named Main modes, Factory/Bootstrap/STA tests or later constructor ports",
+    "No raw HC/SDK/device target runtime approval",
+    "No modification of original123/119 negatives, 7+2+3 ports, candidate60000ms/parent360000ms/tool3072",
+    "No fullHost approval"
+  ]
+}

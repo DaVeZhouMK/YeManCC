@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "meaning": "Exact Node executable and TypeScript module actually used by original JS extraction consumers; not an SDK/runtime capability assertion",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "typescriptRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript",
+  "files": [
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\package.json",
+      "sha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\lib\\typescript.js",
+      "sha256": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
+    }
+  ]
+}

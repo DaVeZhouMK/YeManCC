@@ -1,0 +1,17 @@
+<Project>
+
+  <!--
+    920-v1.9 §21.3：测试专用构建（-p:YemanAsyncBoundaryTest=true）的**中间目录隔离**。
+    依据：BaseIntermediateOutputPath 必须在 Microsoft.Common.props 求值前设置，
+    因此放在 Directory.Build.props（本目录仅此一个工程）。
+    目的：生产构建与测试构建各自独立 obj/bin，避免两种条件编译产物互相复用增量结果。
+    生产构建（未设该属性）路径保持默认 `obj/` 不变。
+  -->
+  <PropertyGroup Condition="'$(YemanAsyncBoundaryTest)' == 'true'">
+    <BaseIntermediateOutputPath>obj\TestRunner\</BaseIntermediateOutputPath>
+    <!-- 更换中间目录后，默认 glob 不再排除原先的 obj/ 树（其生成的 AssemblyInfo 会造成 CS0579 重复特性），
+         因此显式把整个 obj 树排除在编译项之外。 -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);obj\**;obj/TestRunner/**</DefaultItemExcludes>
+  </PropertyGroup>
+
+</Project>

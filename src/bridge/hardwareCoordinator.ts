@@ -202,6 +202,9 @@ export class FanCoordinatorGate {
     this.requests.clear();
   }
 
+  /** Read the live scalar without constructing a diagnostic snapshot. */
+  get currentPhase(): FanCoordinatorPhase { return this.phase; }
+
   snapshot(): FanCoordinatorSnapshot {
     return {
       phase: this.phase,

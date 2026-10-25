@@ -1,3 +1,9 @@
+﻿candidateOnly: true
+releaseApproved: false
+installed: false
+sourceBatch: candidate-canonical-lhm-20261024
+sourceSnapshotManifestSha256: 561129d604ccbfd20621737d290fad691b127d1ce99b0ffdf4110955972ac03c
+
 # YeManFanHost 正式授权记录
 
 ```text
@@ -6,10 +12,10 @@ hardwareWriteAuthorizationGranted: true
 hardwareWritesAuthorized: true
 allMappedFanRoutesAuthorized: true
 authorizationMode: production-gated
-approvedHostExeSha256: E33CB1604B5DC98AC265A51E1DC867DF4E742F6966ADE9F3E6DA48DFF4890BAA
-approvedHostDllSha256: CC5E5B3FEB877E2B822B91B38BF7220918B8E4E633E558BD6E015A9DC310E1AB
-approvedHcSha256: 0C5132A9D13AEBFC5ADD2AA7C9AC54E8DAAA8EBC816A0C68D099BB9685DC2E49
-baselineId: HC-CANDIDATE-0.32.4.0-06c0b954-20260902
+approvedHostExeSha256: A3CE266B880F67045D3F895E2FC68B1FE81F641D5F1A08A01F0DE19D2458F733
+approvedHostDllSha256: 5C235B39FFA6EB43346D7EB5D0E43AAD5ECCB96BD5C3F19530E9B39131E266DF
+approvedHcSha256: 08A386607A0E5E72C5FCAA98D3A6C0B3B256EB0FCA7D6547F6F124C1F1F33583
+baselineId: YMCC-DEVICECORE-20261018-v1
 previousBaseline: FAN-V6-mainline
 implementationState: hc-candidate-0.32.4.0-fan-host-cp07-acceptance-binding-ui-free-single-owner-recovery
 rebaselineBasis: 2026-09-23 FAN-204 s31 addendum ruling - /api/resume accept separated from the background rebuild (resumeAccepted/resumePhase/generation/retryAfterMs, bounded 15 s state observation, no permanent 409, no second lifecycle owner) + snapshot truth for callers (resumePhase/retryAfterMs/controlAccepting/lastControlWriteEvidence) + sandbox-only slow-rebuild injection for the 10.2 s real-machine window + P-3 read-only HC controller loop-stop evidence; supersedes the prior basis (per-channel receipts + CPU/log reduction + T0 bounded host exit), which remains in force
@@ -32,3 +38,11 @@ fail-closed，不执行风扇写入。
 
 gateBBasis: 202 / R-201-REPAIR GATE B development-mainline write-back and target-tree rebuild (2026-09-22); run-id=202-GATEB-20260922-091500; script sha256=b83a8e254c02487c8a2a5b7c731360de511ce9228498d2f49c771d2a5258c750
 gateBScope: DEVELOPMENT MAINLINE ONLY (in-tree FanHost/payload/HC updated per the 2026-09-22 supplementary ruling; installed directory NOT replaced; no release published; no frozen archive rewritten)
+
+capabilityRepair20261019: User-directed HC slimming repair; real ManagerFactory audio failure reproduced and ABI owners restored; HC initialization diagnostics and heartbeat gate/diagnostic timing compiled from the recorded 28-file Host source snapshot. Native/frontend executable build lineage is inherited. No new firmware protocol or hardware-write authorization is introduced. Software simulation is separate from handheld EC/physical RPM acceptance.
+
+fanColdWakePreparedCandidate: candidate-coldwake-20261023; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-stop-cancellation-20261024; fan-only initialization and authenticated on-demand handshake; staged-not-promoted
+
+fanColdWakePreparedCandidate: candidate-canonical-lhm-20261024; fan-only initialization and authenticated on-demand handshake; staged-not-promoted

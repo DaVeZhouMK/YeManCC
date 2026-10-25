@@ -1,0 +1,6 @@
+{
+  "target": "src/components/ControllerFeedbackCapabilitiesCard.vue",
+  "beforeSha256": "026bba77f2300de6e1ffacbe78843712d8bd81a0cf74b74ca2e83205c86f47cd",
+  "writeOwner": "parent chat",
+  "scope": "render existing status; no new IPC, controls or device operations"
+}

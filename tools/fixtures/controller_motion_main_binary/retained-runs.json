@@ -1,0 +1,18 @@
+{
+  "schema": 1,
+  "runs": [
+    {
+      "run": "ControllerMotion/MainBinaryConsumer/2026-10-17T09-46-54-739Z-40d7e3",
+      "reason": "Fixture-only compile failure: three unused local counters under /WX; DLL not executed.",
+      "semanticDetectionCount": 0
+    },
+    {
+      "run": "ControllerMotion/MainBinaryConsumer/2026-10-17T09-47-30-340Z-77af75",
+      "reason": "Both actual-main/DLL baselines passed 6/2130, 23/23 handles each. Four normal semantic variant executions passed; final Windows variant caused fixture json.value(null) exception after intended assertion. That run was not counted as a semantic detection.",
+      "fix": "Require response.is_object before accessing detail; keep exact issue/request failure expectations.",
+      "abiGap": false,
+      "productionEdited": false
+    }
+  ],
+  "scopeClarification": "Guard success proves admission at the synchronous pre-issue/request check only; no Host write, acknowledgement, game consumption, physical target acceptance or complete pipe lifetime execution."
+}

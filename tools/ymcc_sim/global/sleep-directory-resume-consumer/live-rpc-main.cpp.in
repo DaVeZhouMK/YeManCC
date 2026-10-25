@@ -1,0 +1,26 @@
+int main(){
+ registerMemoryResumeIpc();
+ std::string line;
+ while(std::getline(std::cin,line)){
+  try{
+   const auto request=json::parse(line);const auto id=request.at("id");const auto command=request.at("command").get<std::string>();json result=json::object();
+   if(command=="setup"){
+    reset();seed(SG_MANUAL_DIR);g_manualPausedPid=100;const auto reason=request.value("reason",std::string("success"));
+    if(reason=="unknown")procs[100].queryKnown=false;
+    else if(reason=="denied")procs[100].allowResume=false;
+    else if(reason=="native-fail")procs[100].nativeFail=true;
+    else if(reason=="exists-false"||reason=="exists-true"){existsErrors.insert(SG_MANUAL_DIR);existsErrorValue=reason=="exists-true";}
+    else if(reason=="iterator")iteratorErrors.insert(SG_MANUAL_DIR);
+    else if(reason=="read-open")readDenied.insert(key(SG_MANUAL_DIR));
+    else if(reason=="read-partial")readFailsPartway.insert(key(SG_MANUAL_DIR));
+    else if(reason=="gone")procs[100].alive=false;
+    else if(reason!="success")throw std::runtime_error("unexpected memory setup reason");
+   }else if(command=="recover"){
+    procs[100].queryKnown=true;procs[100].allowResume=true;procs[100].nativeFail=false;existsErrors.clear();iteratorErrors.clear();readDenied.clear();readFailsPartway.clear();
+   }else if(command=="resume")result=memoryResumeHandler(request.at("args"));
+   else if(command!="snapshot")throw std::runtime_error("unexpected memory command");
+   std::cout<<json({{"id",id},{"result",result},{"state",{{"markerRetained",files.count(key(SG_MANUAL_DIR))>0},{"depth",procs[100].depth},{"birth",procs[100].birth},{"manualOwner",g_manualPausedPid.load()},{"ntAttempts",ntAttempts},{"ntSuccesses",ntSuccesses}}},{"trace",operations},{"resumeReceipts",resumeReceipts}}).dump()<<std::endl;
+  }catch(const std::exception& e){std::cout<<json({{"protocolError",e.what()}}).dump()<<std::endl;return 23;}
+ }
+ return 0;
+}

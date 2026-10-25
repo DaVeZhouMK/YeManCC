@@ -18,4 +18,12 @@
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
     <IsPackable>false</IsPackable>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.cs" Link="Capabilities\HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities\HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="..\..\capabilities\FanCapabilityCatalog.cs" Link="Capabilities\FanCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\AsusFanCapabilitySession.cs" Link="Capabilities\AsusFanCapabilitySession.cs" />
+    <Compile Include="..\..\capabilities\HcLightingCapabilityCatalog.cs" Link="Capabilities\HcLightingCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcLightingCapabilityCatalog.generated.cs" Link="Capabilities\HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
 </Project>

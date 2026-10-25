@@ -1,5 +1,10 @@
 <script setup lang="ts">
-import { ref, reactive, computed, inject, watch, nextTick, onMounted, onActivated, onDeactivated, onBeforeUnmount, type Ref } from 'vue';
+// [AI:USER:SLEEP] 开启睡眠相关选项→为之后真实发生的睡眠/唤醒启用对应行为；保存电源键/超时设置不等于立即睡眠。
+// 游戏恢复只针对本轮暂停的原游戏；用户取消或关闭后不能被旧恢复重新接管，未恢复须留具体原因。
+// 插电/电池分别设置；系统睡眠、仅关屏与日志推断不能混写，实际执行继续查 native/main.cpp 与 sleep_recovery_*。
+import IntegratedPage from '@/components/IntegratedPage.vue';
+import SettingsSections from '@/components/SettingsSections.vue';
+import { ref, reactive, computed, inject, watch, nextTick, onMounted, onBeforeUnmount, type Ref } from 'vue';
 import Toggle from '@/components/Toggle.vue';
 import Slider from '@/components/Slider.vue';
 import SegButton from '@/components/SegButton.vue';
@@ -25,11 +30,19 @@ import {
   setSleepTimeout,
   getSleepPowerPlanOptimizationEnabled,
   setSleepPowerPlanOptimizationEnabled,
+  getStaticWakeStatus,
+  scanStaticWakeSources,
+  restoreStaticWakeSources,
+  type StaticWakeStatus,
   type SleepGuardStatus,
   type SleepTimeoutSettings,
   type PowerBtnIdx,
 } from '@/bridge/yeman';
 
+const sleepSections=[{id:'protection',title:'睡眠保护',description:'',icon:'sleep'},{id:'power',title:'按键与休眠',description:'',icon:'power'},{id:'timeouts',title:'空闲超时',description:'',icon:'monitor'}];
+const powerButtonOptions=[{value:0,label:'睡眠'},{value:1,label:'休眠'},{value:2,label:'不操作'},{value:3,label:'关闭屏幕'}];
+const timeoutRows=[{key:'screen',label:'关闭屏幕',icon:'monitor'},{key:'sleep',label:'进入睡眠',icon:'sleep'},{key:'hibernate',label:'进入休眠',icon:'power'}] as const;
+const timeoutValue=(key:string,side:'ac'|'dc')=>sleepTimeouts[`${side}${key[0].toUpperCase()}${key.slice(1)}` as keyof SleepTimeoutSettings] ?? -1;
 const cfg = reactive<SleepGuardStatus>({
   enabled: false,
   mode: 'off',
@@ -37,7 +50,6 @@ const cfg = reactive<SleepGuardStatus>({
   pauseGameOnSleep: true,
   retryOnEntryFailure: true,
   retryOnNonUserWake: true,
-  steamOverlayOffFix: false,
   joyXoffAutoClose: true,
 });
 
@@ -45,6 +57,30 @@ const cfg = reactive<SleepGuardStatus>({
 const acBtnIdx = ref<PowerBtnIdx>(2);
 const dcBtnIdx = ref<PowerBtnIdx>(2);
 const sleepPowerPlanOptimizationEnabled = ref(true);
+let sleepPlanRevision = 0;
+const staticWakeStatus = ref<StaticWakeStatus | null>(null);
+const staticWakeLoading = ref(false);
+const staticWakeAction = ref<'scan' | 'restore' | null>(null);
+const staticWakeError = ref('');
+let staticWakeRevision = 0;
+const staticWakeNeedsRestore = computed(() => !sleepPowerPlanOptimizationEnabled.value &&
+  (staticWakeStatus.value?.enabled || (staticWakeStatus.value?.restorePending ?? 0) > 0 ||
+    staticWakeStatus.value?.phase === 'restore-pending' || staticWakeError.value !== ''));
+const staticWakeSummary = computed(() => {
+  if (staticWakeAction.value) return staticWakeAction.value === 'scan' ? '正在扫描并屏蔽 Windows 支持项…' : '正在恢复本功能修改项…';
+  if (staticWakeError.value) return staticWakeError.value;
+  if (staticWakeLoading.value) return '正在读取屏蔽状态…';
+  const s = staticWakeStatus.value;
+  if (!s) return '屏蔽状态未知';
+  if (!s.enabled && s.phase === 'idle' && !s.restorePending && !s.failed && !s.lastError)
+    return s.lastScanEpoch > 0 ? '本功能修改项已恢复' : '尚未扫描';
+  const phase = s.phase === 'restore-pending' || s.restorePending > 0 ? '恢复待完成' :
+    s.phase === 'partial' || s.failed > 0 ? '部分完成' : s.phase === 'applied' ? '已应用支持项' : '尚未应用';
+  // Diagnostic source health belongs to retry repair; it does not decide static coverage.
+  const warnings = [s.failed ? '失败 ' + s.failed : '', s.restorePending ? '待恢复 ' + s.restorePending : ''].filter(Boolean);
+  return [phase, ...warnings, '设备 ' + s.devices, '软件 ' + s.software, '定时器 ' + s.timers,
+    s.protectedDevices ? '保护 ' + s.protectedDevices : '', s.lastError].filter(Boolean).join(' · ');
+});
 // Default off, but do not read/apply Windows indices until a user toggles it.
 // Reuse the existing sleepGuard snapshot for the remembered UI choice only.
 const wakePasswordOn = ref(false);
@@ -116,7 +152,7 @@ function closeTimeoutMenu(): void {
 }
 
 function onTimeoutGamepadBack(event: Event): void {
-  if (event.defaultPrevented || steamOverlayConfirmOpen.value || !timeoutExpanded.value) return;
+  if (event.defaultPrevented || !timeoutExpanded.value) return;
   // 下拉选项菜单优先消费 B；只有下拉已关闭时，B 才收起这一层气泡。
   if (document.querySelector('[data-gp-timeout-body] [aria-expanded="true"][aria-haspopup="listbox"]')) return;
   event.preventDefault();
@@ -143,6 +179,17 @@ const hibLoading = ref(true); // 独立加载；失败时结束 loading 并保�
 const hibSize = ref(50);
 const memGB = ref<number | null>(null); // 物理内存总量（GB），用于预估休眠文件大小
 const confirmOff = ref(false); // 关闭休眠二次确认（避免整行误触关闭休眠这种销毁性操作）
+function onHibernateConfirmBack(event: Event): void {
+  if (event.defaultPrevented || !confirmOff.value || document.querySelector('.dd-open')) return;
+  const layers = [...document.querySelectorAll<HTMLElement>('[data-gp-modal]')].filter(el => {
+    const rect=el.getBoundingClientRect(), style=getComputedStyle(el);
+    return rect.width>0 && rect.height>0 && style.display!=='none' && style.visibility!=='hidden';
+  });
+  if (!layers[layers.length-1]?.matches('.sleep-confirm')) return;
+  event.preventDefault(); cancelHibernateOff();
+  void nextTick(() => focusGamepadElement(document.querySelector<HTMLElement>('[aria-label="系统休眠开关"]')));
+}
+
 
 const busy = ref(false);
 const msg = ref('');
@@ -164,10 +211,12 @@ onBeforeUnmount(() => {
   if (msgTimer !== null) window.clearTimeout(msgTimer);
   if (pwrActivateTimer !== null) window.clearTimeout(pwrActivateTimer);
   window.removeEventListener('ipc:gamepad-back', onTimeoutGamepadBack);
+  window.removeEventListener('ipc:gamepad-back', onHibernateConfirmBack);
 });
 
 onMounted(() => {
   window.addEventListener('ipc:gamepad-back', onTimeoutGamepadBack);
+  window.addEventListener('ipc:gamepad-back', onHibernateConfirmBack);
 });
 
 async function refreshHibernateState() {
@@ -230,11 +279,29 @@ async function onWakePassword(enabled: boolean) {
   }
 }
 
+async function refreshStaticWakeStatus() {
+  if (staticWakeAction.value) return;
+  const revision = ++staticWakeRevision;
+  staticWakeLoading.value = true;
+  try {
+    const status = await getStaticWakeStatus();
+    if (revision !== staticWakeRevision) return;
+    staticWakeStatus.value = status;
+    // A memory snapshot cannot prove a timed-out write has stopped.
+    if (!staticWakeError.value.includes('结果未确认')) staticWakeError.value = '';
+  } catch {
+    if (revision === staticWakeRevision && !staticWakeError.value) staticWakeError.value = '屏蔽状态读取失败';
+  } finally {
+    if (revision === staticWakeRevision) staticWakeLoading.value = false;
+  }
+}
+
 async function refresh() {
   // 与整页其他检测解耦：AC/DC、电源方案或内存 IPC 异常不能拖死系统休眠开关。
   const hibernateRefresh = refreshHibernateState();
+  void refreshStaticWakeStatus();
+  const planRevision = sleepPlanRevision;
   const wakeRevision = wakePasswordRevision;
-  const steamRevision = steamOverlayRevision;
   try {
     const s = await sleepGuardGet();
     cfg.enabled = s.enabled;
@@ -243,14 +310,14 @@ async function refresh() {
     cfg.pauseGameOnSleep = s.pauseGameOnSleep;
     cfg.retryOnEntryFailure = s.retryOnEntryFailure;
     cfg.retryOnNonUserWake = s.retryOnNonUserWake;
-    if (steamRevision === steamOverlayRevision && !steamOverlaySaving.value) cfg.steamOverlayOffFix = s.steamOverlayOffFix;
     cfg.joyXoffAutoClose = true;
     if (wakeRevision === wakePasswordRevision && !busy.value) wakePasswordOn.value = s.wakePasswordEnabled === true;
   } catch {
     /* 检测不到保持现状，绝不假定关闭 */
   }
   try {
-    sleepPowerPlanOptimizationEnabled.value = await getSleepPowerPlanOptimizationEnabled();
+    const enabled = await getSleepPowerPlanOptimizationEnabled();
+    if (planRevision === sleepPlanRevision) sleepPowerPlanOptimizationEnabled.value = enabled;
   } catch {
     /* 配置读取失败保持现状，绝不假定关闭 */
   }
@@ -333,123 +400,51 @@ async function onNonUserWake(v: boolean) {
   }
 }
 
-// Steam repair is opt-in (default off). Only confirm saves a parameter and
-// queues a background attempt. Rendering/opening/cancelling never inspects Steam.
-const steamOverlayConfirmOpen = ref(false);
-const steamOverlayConfirmTarget = ref(false);
-const steamOverlayConfirmAbove = ref(false);
-const steamOverlayConfirmStyle = ref<Record<string, string>>({});
-const steamOverlayTriggerEl = ref<HTMLElement | null>(null);
-const steamOverlayPanelEl = ref<HTMLElement | null>(null);
-const steamOverlayCancelEl = ref<HTMLElement | null>(null);
-const steamOverlaySaving = ref(false);
-let steamOverlayRevision = 0;
-const steamOverlayConfirmTitle = computed(() => steamOverlayConfirmTarget.value ? '确认开启' : '确认关闭');
-const steamOverlayConfirmDescription = computed(() => steamOverlayConfirmTarget.value
-  ? '影响Steam监控和触摸板转盘显示'
-  : '学习版手柄唤醒容易卡界面');
-
-function restoreSteamOverlayFocus() {
-  // pointerdown cancellation runs before the browser's default focus transfer.
-  // Restore once in the next frame, after that transfer; no timer/polling loop.
-  nextTick(() => requestAnimationFrame(() => {
-    if (steamOverlayConfirmOpen.value) return;
-    const trigger = steamOverlayTriggerEl.value?.querySelector<HTMLElement>('button.switch');
-    if (trigger && !trigger.hasAttribute('disabled')) focusGamepadElement(trigger);
-  }));
-}
-
-function onSteamOverlayOffFix(v: boolean) {
-  if (busy.value || steamOverlayConfirmOpen.value || v === cfg.steamOverlayOffFix) return;
-  const trigger = steamOverlayTriggerEl.value?.querySelector<HTMLElement>('button.switch');
-  const placement = getGamepadPopupPlacement(trigger?.getBoundingClientRect() ?? null,
-    Math.min(420, window.innerWidth - 16), 190, 10);
-  steamOverlayConfirmTarget.value = v;
-  steamOverlayConfirmAbove.value = placement.above;
-  steamOverlayConfirmStyle.value = placement.style;
-  steamOverlayConfirmOpen.value = true;
-  nextTick(() => { if (steamOverlayConfirmOpen.value) focusGamepadElement(steamOverlayCancelEl.value); });
-}
-
-function cancelSteamOverlayConfirm(restoreFocus = true) {
-  if (!steamOverlayConfirmOpen.value) return;
-  steamOverlayConfirmOpen.value = false;
-  if (restoreFocus) restoreSteamOverlayFocus();
-}
-
-async function confirmSteamOverlayChange() {
-  if (!steamOverlayConfirmOpen.value || busy.value) return;
-  const target = steamOverlayConfirmTarget.value;
-  steamOverlayConfirmOpen.value = false;
-  await applySteamOverlayOffFix(target);
-}
-
-async function applySteamOverlayOffFix(v: boolean) {
-  if (busy.value) return;
-  const previous = cfg.steamOverlayOffFix;
-  ++steamOverlayRevision;
-  busy.value = true;
-  steamOverlaySaving.value = true;
-  msg.value = '';
+async function applyStaticWake(action: 'scan' | 'restore') {
+  ++staticWakeRevision; // Invalidate reads started before this explicit action.
+  staticWakeLoading.value = false;
+  staticWakeAction.value = action;
+  staticWakeError.value = '';
   try {
-    // Do not resend pause/retry/mode fields or request a live Steam status.
-    await sleepGuardSetConfig({ steamOverlayOffFix: v });
-    cfg.steamOverlayOffFix = v;
-  } catch (e) {
-    cfg.steamOverlayOffFix = previous;
-    msg.value = 'Steam修复参数保存失败：' + (e as Error).message;
+    const result = await (action === 'scan' ? scanStaticWakeSources() : restoreStaticWakeSources());
+    staticWakeStatus.value = result.status;
+    if (!result.ok) staticWakeError.value = (action === 'scan' ? '屏蔽未完成' : '恢复未完成') +
+      ' · 失败 ' + result.status.failed + ' · 待恢复 ' + result.status.restorePending +
+      ' · 设备 ' + result.status.devices + ' · 软件 ' + result.status.software + ' · 定时器 ' + result.status.timers +
+      (result.status.lastError ? ' · ' + result.status.lastError : '');
+  } catch {
+    // A local IPC timeout does not cancel native. Never retry/scan in the background.
+    staticWakeError.value = action === 'scan' ? '扫描结果未确认，请查看普通日志' : '恢复结果未确认，请查看普通日志';
   } finally {
-    ++steamOverlayRevision;
-    steamOverlaySaving.value = false;
-    busy.value = false;
-    restoreSteamOverlayFocus();
+    staticWakeAction.value = null;
   }
 }
 
-function onSteamOverlayConfirmBack(event: Event) {
-  if (event.defaultPrevented || !steamOverlayConfirmOpen.value) return;
-  event.preventDefault();
-  cancelSteamOverlayConfirm();
+async function onStaticWakeAction() {
+  if (busy.value || staticWakeLoading.value || staticWakeError.value.includes('结果未确认')) return;
+  const action = staticWakeNeedsRestore.value ? 'restore' : 'scan';
+  if (action === 'scan' && !sleepPowerPlanOptimizationEnabled.value) return;
+  busy.value = true;
+  try { await applyStaticWake(action); }
+  finally { busy.value = false; }
 }
-function onSteamOverlayConfirmOutside(event: PointerEvent) {
-  if (!steamOverlayConfirmOpen.value || steamOverlayPanelEl.value?.contains(event.target as Node)) return;
-  cancelSteamOverlayConfirm();
-}
-function onSteamOverlayConfirmEscape(event: KeyboardEvent) {
-  if (event.key !== 'Escape' || !steamOverlayConfirmOpen.value) return;
-  event.preventDefault();
-  cancelSteamOverlayConfirm();
-}
-function registerSteamOverlayConfirmListeners() {
-  window.addEventListener('ipc:gamepad-back', onSteamOverlayConfirmBack);
-  document.addEventListener('pointerdown', onSteamOverlayConfirmOutside);
-  window.addEventListener('keydown', onSteamOverlayConfirmEscape);
-}
-function unregisterSteamOverlayConfirmListeners() {
-  window.removeEventListener('ipc:gamepad-back', onSteamOverlayConfirmBack);
-  document.removeEventListener('pointerdown', onSteamOverlayConfirmOutside);
-  window.removeEventListener('keydown', onSteamOverlayConfirmEscape);
-}
-onMounted(registerSteamOverlayConfirmListeners);
-onActivated(registerSteamOverlayConfirmListeners);
-onDeactivated(() => {
-  cancelSteamOverlayConfirm(false);
-  unregisterSteamOverlayConfirmListeners();
-});
-onBeforeUnmount(() => {
-  cancelSteamOverlayConfirm(false);
-  unregisterSteamOverlayConfirmListeners();
-});
 
 async function onSleepPowerPlanOptimization(v: boolean) {
-  const previous = sleepPowerPlanOptimizationEnabled.value;
-  sleepPowerPlanOptimizationEnabled.value = v;
+  if (busy.value || staticWakeError.value.includes('结果未确认')) return;
+  ++sleepPlanRevision;
+  busy.value = true;
   try {
     await setSleepPowerPlanOptimizationEnabled(v);
+    sleepPowerPlanOptimizationEnabled.value = v;
     msg.value = '';
+    // Keep the original preference/boot/power-change repair path. Enabling it
+    // never scans; disabling it also restores only native-owned static changes.
+    if (!v) await applyStaticWake('restore');
   } catch {
-    sleepPowerPlanOptimizationEnabled.value = previous;
     msg.value = '设置保存失败';
+  } finally {
+    ++sleepPlanRevision;
+    busy.value = false;
   }
 }
 
@@ -529,6 +524,8 @@ async function onHibernate(v: boolean) {
     return;
   }
   confirmOff.value = true;
+  await nextTick();
+  focusGamepadElement(document.querySelector<HTMLElement>('[data-sleep-hibernate-cancel]'));
 }
 async function confirmHibernateOff() {
   msg.value = '';
@@ -559,11 +556,11 @@ async function onHibSize(v: number) {
 
 const hibDesc = computed(() => {
   if (hibLoading.value) return '检测中…';
-  if (hibernateSupported.value === false) return '此设备不支持 Windows S4 休眠';
-  if (hibernateOn.value === null) return 'Windows 状态读取失败；可点击开关安全开启并重新检测';
+  if (hibernateSupported.value === false) return '此设备不支持休眠';
+  if (hibernateOn.value === null) return '状态未知，可点击重新检测';
   if (memGB.value !== null) {
     const est = (memGB.value * hibSize.value) / 100;
-    return `休眠文件大小预估为 ${est.toFixed(1)} G`;
+    return `预计占用 ${est.toFixed(1)} GB`;
   }
   return hibernateOn.value ? '休眠已开启' : '休眠已关闭';
 });
@@ -578,561 +575,115 @@ refresh();
 </script>
 
 <template>
-  <div class="sleep-guard">
-    <Transition name="notice-fade">
-      <div v-if="msg" class="msg" :class="{ 'msg-ok': /已启用|已关闭|已恢复|已暂停|已尝试恢复|完成/.test(msg) }" role="status">
-        {{ msg }}
+ <IntegratedPage title="睡眠优化">
+  <div class="sleep-console">
+   <Transition name="notice-fade"><div v-if="msg" class="sleep-notice" :class="{'is-ok':/已启用|已关闭|已恢复|已暂停|完成/.test(msg)}" role="status">{{msg}}</div></Transition>
+   <SettingsSections :sections="sleepSections" label="睡眠优化">
+    <template #protection>
+     <div class="sleep-group">
+      <div class="sleep-group-head"><h3><InlineIcon name="gamepad"/>游戏恢复</h3><span>入睡暂停，唤醒恢复</span></div>
+      <Toggle :model-value="cfg.pauseGameOnSleep" label="睡眠暂停游戏" description="唤醒后恢复原游戏" :disabled="busy" @update:model-value="onPauseGame" />
+     </div>
+     <div class="sleep-group">
+      <div class="sleep-group-head"><h3><InlineIcon name="sleep"/>系统保护</h3><span>按需开启</span></div>
+      <Toggle :model-value="wakePasswordOn" label="唤醒需要密码" description="唤醒后验证登录身份" :disabled="busy" @update:model-value="onWakePassword" />
+      <Toggle :model-value="sleepPowerPlanOptimizationEnabled" label="睡眠电源修复" description="启动及电源变动时修正睡眠设置" :disabled="busy||staticWakeError.includes('结果未确认')" @update:model-value="onSleepPowerPlanOptimization" />
+      <div class="sleep-static-wake">
+       <div class="sleep-static-action"><button :disabled="busy||staticWakeLoading||staticWakeError.includes('结果未确认')||(!sleepPowerPlanOptimizationEnabled&&!staticWakeNeedsRestore)" @click="onStaticWakeAction">{{staticWakeAction==='scan'?'扫描中…':staticWakeAction==='restore'?'恢复中…':staticWakeNeedsRestore?'重试恢复':'扫描并屏蔽'}}</button><span>Windows 支持项，人工电源键优先</span></div>
+       <p role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
       </div>
-    </Transition>
-
-    <div class="card">
-      <h3 class="card-title"><InlineIcon name="plug" /> 电源按钮与系统休眠</h3>
-      <div class="pwr-row">
-        <span class="pwr-label"><InlineIcon name="bolt" /> AC 插电</span>
-        <SegButton
-          :model-value="acBtnIdx"
-          :options="[
-            { value: 0, label: 'S3 睡眠' },
-            { value: 1, label: 'S4 休眠' },
-            { value: 2, label: '不操作' },
-            { value: 3, label: '关闭显示器' },
-          ]"
-          color="ac"
-          :disabled="busy || !isYemanScheme"
-          @update:model-value="(v: number) => onPwrBtn(true, v as PowerBtnIdx)"
-        />
+      <Toggle :model-value="cfg.retryOnEntryFailure" label="睡眠异常重睡" description="持续异常时重睡，超时休眠或关机" :disabled="busy" @update:model-value="onEntryFailure" />
+      <Toggle :model-value="cfg.retryOnNonUserWake" label="意外唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
+     </div>
+    </template>
+    <template #power>
+     <div class="sleep-group">
+      <div class="sleep-group-head"><h3><InlineIcon name="power"/>电源键操作</h3><span>插电与电池分别设置</span></div>
+      <div class="sleep-power-grid">
+       <label><span class="supply-label ac"><InlineIcon name="plug"/>插电 · AC</span><Dropdown :model-value="acBtnIdx" :options="powerButtonOptions" width="100%" aria-label="插电时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(true,Number(v) as PowerBtnIdx)"/></label>
+       <label><span class="supply-label dc"><InlineIcon name="battery"/>电池 · DC</span><Dropdown :model-value="dcBtnIdx" :options="powerButtonOptions" width="100%" color="dc" aria-label="电池时电源按钮操作" :disabled="busy||!isYemanScheme" @update:model-value="v=>onPwrBtn(false,Number(v) as PowerBtnIdx)"/></label>
       </div>
-      <div class="pwr-row">
-        <span class="pwr-label"><InlineIcon name="battery" /> DC 离电</span>
-        <SegButton
-          :model-value="dcBtnIdx"
-          :options="[
-            { value: 0, label: 'S3 睡眠' },
-            { value: 1, label: 'S4 休眠' },
-            { value: 2, label: '不操作' },
-            { value: 3, label: '关闭显示器' },
-          ]"
-          color="dc"
-          :disabled="busy || !isYemanScheme"
-          @update:model-value="(v: number) => onPwrBtn(false, v as PowerBtnIdx)"
-        />
+      <p v-if="!isYemanScheme" class="sleep-warning">使用野蛮电源计划后可修改按键</p>
+      <p v-if="acBtnIdx===0||dcBtnIdx===0" class="sleep-warning">USB4 电源变动可能触发唤醒</p>
+     </div>
+     <div class="sleep-group">
+      <div class="sleep-group-head"><h3><InlineIcon name="sleep"/>系统休眠</h3><span>保存会话到硬盘</span></div>
+      <Toggle :model-value="hibernateOn===true" label="系统休眠开关" :description="hibDesc" :disabled="busy||hibLoading||hibernateSupported===false" @update:model-value="onHibernate"/>
+      <div v-if="confirmOff" class="sleep-confirm" role="alertdialog" aria-modal="true" aria-label="关闭系统休眠确认" data-gp-modal data-gp-page-lock>
+       <strong>关闭系统休眠？</strong><p>删除休眠文件，休眠按键将失效</p>
+       <div><button class="sleep-danger" data-gp-row="0" data-gp-col="0" @click="confirmHibernateOff">确认关闭</button><button data-sleep-hibernate-cancel data-gp-row="0" data-gp-col="1" @click="cancelHibernateOff">取消</button></div>
       </div>
-      <p v-if="!isYemanScheme" class="pwr-warn">当前电源方案不是野蛮系统电源，AC / DC 电源按钮设置不可用</p>
-      <p v-if="acBtnIdx === 0 || dcBtnIdx === 0" class="pwr-warn">S3 状态插入 USB4 供电可能导致唤醒！</p>
-      <Toggle
-        :model-value="hibernateOn === true"
-        label="系统休眠开关"
-        :description="hibDesc"
-        color="accent"
-        :disabled="busy || hibLoading || hibernateSupported === false"
-        @update:model-value="onHibernate"
-      />
-      <div v-if="confirmOff" class="confirm-bar">
-        <span class="confirm-text">确认关闭系统休眠？将删除 hiberfil.sys 休眠文件（S4 电源按钮会失效）。</span>
-        <div class="confirm-actions">
-          <button class="mini-btn danger" @click="confirmHibernateOff">确认关闭</button>
-          <button class="mini-btn" @click="cancelHibernateOff">取消</button>
-        </div>
+      <div class="sleep-hibernate-size"><Slider v-model="hibSize" :min="30" :max="100" :step="5" label="休眠文件大小" unit="%" :disabled="!hibernateOn" @commit="onHibSize"/><div class="sleep-scale"><span>30%</span><span v-if="memGB">物理内存 {{memGB.toFixed(0)}} GB</span><span>100%</span></div></div>
+     </div>
+    </template>
+    <template #timeouts>
+     <div class="sleep-group-head"><h3><InlineIcon name="monitor"/>空闲超时</h3></div>
+     <div class="sleep-time-table" role="group" aria-label="插电与电池空闲超时">
+      <div class="sleep-time-head"><span>设置项目</span><span class="ac"><InlineIcon name="plug"/>插电</span><span class="dc"><InlineIcon name="battery"/>电池</span></div>
+      <div v-for="row in timeoutRows" :key="row.key" class="sleep-time-row">
+       <span class="sleep-time-label"><InlineIcon :name="row.icon"/>{{row.label}}</span>
+       <Dropdown :model-value="timeoutValue(row.key,'ac')" :options="timeoutOptions" width="100%" :aria-label="'已接通电源：'+row.label+'超时'" :disabled="busy||timeoutLoading||!isYemanScheme||(row.key==='hibernate'&&!hibernateOn)" @update:model-value="v=>onSleepTimeout(row.key,true,v)"/>
+       <Dropdown :model-value="timeoutValue(row.key,'dc')" :options="timeoutOptions" width="100%" color="dc" :aria-label="'使用电池：'+row.label+'超时'" :disabled="busy||timeoutLoading||!isYemanScheme||(row.key==='hibernate'&&!hibernateOn)" @update:model-value="v=>onSleepTimeout(row.key,false,v)"/>
       </div>
-      <Slider
-        v-model="hibSize"
-        :min="30"
-        :max="100"
-        :step="5"
-        label="休眠文件大小百分比"
-        unit="%"
-        color="accent"
-        :disabled="!hibernateOn"
-        @commit="onHibSize"
-      />
-    </div>
-
-    <!-- Windows 11 风格：默认折叠，标题区域（含图标）可用鼠标或手柄展开。 -->
-    <div
-      class="card timeout-card"
-      :class="{ expanded: timeoutExpanded }"
-      data-gp-timeout-panel
-      :data-gp-expanded="timeoutExpanded"
-    >
-      <button
-        type="button"
-        class="timeout-header"
-        :class="{ active: timeoutExpanded }"
-        data-gp-timeout-entry
-        :data-gp-row="timeoutExpanded ? -1 : undefined"
-        :data-gp-col="timeoutExpanded ? 0 : undefined"
-        :aria-expanded="timeoutExpanded"
-        aria-controls="sleep-timeout-settings"
-        @click="toggleTimeoutExpanded"
-      >
-        <span class="timeout-header-main">
-          <span class="timeout-header-icon"><InlineIcon name="monitor" /></span>
-          <span class="timeout-header-copy">
-            <span class="timeout-title">屏幕、睡眠和休眠超时</span>
-            <span class="timeout-subtitle">选择设备在指定时间内处于空闲状态时会发生什么情况</span>
-          </span>
-        </span>
-        <svg class="timeout-caret" :class="{ open: timeoutExpanded }" viewBox="0 0 24 24" aria-hidden="true">
-          <path d="m5 9 7 7 7-7" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-      </button>
-
-      <Transition name="timeout-submenu-pop" @before-leave="disableLeavingTimeoutBody">
-      <div v-if="timeoutExpanded" id="sleep-timeout-settings" class="timeout-body" data-gp-timeout-body>
-        <div class="timeout-grid">
-          <div class="timeout-grid-head" aria-hidden="true">
-            <span>设置项目</span>
-            <span class="timeout-side-ac">已接通电源</span>
-            <span class="timeout-side-dc">使用电池</span>
-          </div>
-
-          <div class="timeout-row">
-            <div class="timeout-label">
-              <span>在此时间后关闭我的屏幕</span>
-            </div>
-            <Dropdown
-              :model-value="sleepTimeouts.acScreen ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              aria-label="已接通电源：关闭屏幕超时"
-              placeholder="读取失败"
-              gp-row="0"
-              gp-col="0"
-              :disabled="busy || timeoutLoading || sleepTimeouts.acScreen === null"
-              @update:model-value="(v) => onSleepTimeout('screen', true, v)"
-            />
-            <Dropdown
-              :model-value="sleepTimeouts.dcScreen ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              color="dc"
-              aria-label="使用电池：关闭屏幕超时"
-              placeholder="读取失败"
-              gp-row="0"
-              gp-col="1"
-              :disabled="busy || timeoutLoading || sleepTimeouts.dcScreen === null"
-              @update:model-value="(v) => onSleepTimeout('screen', false, v)"
-            />
-          </div>
-
-          <div class="timeout-row">
-            <div class="timeout-label"><span>使我的设备在以下时间后进入睡眠状态</span></div>
-            <Dropdown
-              :model-value="sleepTimeouts.acSleep ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              aria-label="已接通电源：睡眠超时"
-              placeholder="读取失败"
-              gp-row="1"
-              gp-col="0"
-              :disabled="busy || timeoutLoading || sleepTimeouts.acSleep === null"
-              @update:model-value="(v) => onSleepTimeout('sleep', true, v)"
-            />
-            <Dropdown
-              :model-value="sleepTimeouts.dcSleep ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              color="dc"
-              aria-label="使用电池：睡眠超时"
-              placeholder="读取失败"
-              gp-row="1"
-              gp-col="1"
-              :disabled="busy || timeoutLoading || sleepTimeouts.dcSleep === null"
-              @update:model-value="(v) => onSleepTimeout('sleep', false, v)"
-            />
-          </div>
-
-          <div class="timeout-row">
-            <div class="timeout-label"><span>使我的设备在以下时间后休眠</span></div>
-            <Dropdown
-              :model-value="sleepTimeouts.acHibernate ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              aria-label="已接通电源：休眠超时"
-              placeholder="读取失败"
-              gp-row="2"
-              gp-col="0"
-              :disabled="busy || timeoutLoading || sleepTimeouts.acHibernate === null"
-              @update:model-value="(v) => onSleepTimeout('hibernate', true, v)"
-            />
-            <Dropdown
-              :model-value="sleepTimeouts.dcHibernate ?? -1"
-              :options="timeoutOptions"
-              width="96px"
-              color="dc"
-              aria-label="使用电池：休眠超时"
-              placeholder="读取失败"
-              gp-row="2"
-              gp-col="1"
-              :disabled="busy || timeoutLoading || sleepTimeouts.dcHibernate === null"
-              @update:model-value="(v) => onSleepTimeout('hibernate', false, v)"
-            />
-          </div>
-        </div>
-      </div>
-      </Transition>
-    </div>
-
-    <!-- 睡眠操作（总开关已移除，子项直接驱动 guard，始终显示） -->
-    <div class="card">
-      <h3 class="card-title"><InlineIcon name="sleep" /> 睡眠操作</h3>
-      <Toggle
-        :model-value="wakePasswordOn"
-        label="唤醒需要密码"
-        description="无效可能是组策略锁定了"
-        :disabled="busy"
-        @update:model-value="onWakePassword"
-      />
-      <Toggle
-        :model-value="cfg.pauseGameOnSleep"
-        label="睡眠时暂停游戏"
-        description="只冻结本轮标记的游戏 PID，唤醒时只恢复同一批 PID"
-        :disabled="busy"
-        @update:model-value="onPauseGame"
-      />
-      <Toggle
-        :model-value="sleepPowerPlanOptimizationEnabled"
-        label="睡眠电源计划优化"
-        description="开启后在程序启动30秒及电源变更时后台优化睡眠相关电源计划"
-        :disabled="busy"
-        @update:model-value="onSleepPowerPlanOptimization"
-      />
-      <Toggle
-        :model-value="cfg.retryOnEntryFailure"
-        label="睡眠失效强制睡眠"
-        description="当睡眠发起后触发报错无法睡眠，将强制入睡"
-        :disabled="busy"
-        @update:model-value="onEntryFailure"
-      />
-      <Toggle
-        :model-value="cfg.retryOnNonUserWake"
-        label="意外唤醒重睡"
-        description="插入供电和非用户唤醒"
-        :disabled="busy"
-        @update:model-value="onNonUserWake"
-      />
-      <div ref="steamOverlayTriggerEl">
-        <Toggle
-          :model-value="cfg.steamOverlayOffFix"
-          label="Steam大屏唤醒手柄卡死修复"
-          description="Steam设置-游戏中-Steam叠加画面关闭"
-          :disabled="busy"
-          @update:model-value="onSteamOverlayOffFix"
-        />
-      </div>
-    </div>
-    <!-- Match PerformanceScheduleView's configuration-reset dialog style. -->
-    <Teleport to="body">
-      <Transition name="rc-pop" @before-leave="disableLeavingTimeoutBody">
-        <div
-          v-if="steamOverlayConfirmOpen"
-          ref="steamOverlayPanelEl"
-          class="reset-confirm steam-overlay-confirm"
-          :class="{ above: steamOverlayConfirmAbove }"
-          :style="steamOverlayConfirmStyle"
-          role="alertdialog"
-          aria-modal="true"
-          :aria-label="steamOverlayConfirmTitle + 'Steam大屏唤醒手柄卡死修复'"
-          data-gp-modal
-          @pointerdown.stop
-          @keydown.esc.prevent="cancelSteamOverlayConfirm()"
-        >
-          <div class="rc-title"><InlineIcon name="warning" />{{ steamOverlayConfirmTitle }}</div>
-          <p class="rc-desc">{{ steamOverlayConfirmDescription }}</p>
-          <div class="rc-actions" data-gp-group="steam-overlay-confirm">
-            <button ref="steamOverlayCancelEl" type="button" data-gp-group="steam-overlay-confirm" @click="cancelSteamOverlayConfirm()">取消</button>
-            <button type="button" class="danger" data-gp-group="steam-overlay-confirm" @click="confirmSteamOverlayChange">{{ steamOverlayConfirmTitle }}</button>
-          </div>
-        </div>
-      </Transition>
-    </Teleport>
+     </div>
+     <div class="sleep-time-help"><InlineIcon name="monitor"/><span>设备空闲时计时，选择“从不”可关闭</span></div>
+     <p v-if="!isYemanScheme" class="sleep-warning">使用野蛮电源计划后可修改超时</p>
+     <p v-if="!hibernateOn" class="sleep-warning">开启系统休眠后可设置休眠超时</p>
+    </template>
+   </SettingsSections>
   </div>
+ </IntegratedPage>
 </template>
-
 <style scoped>
-.sleep-guard { padding: 2px; }
-.muted { color: var(--text-dim); }
+.sleep-console{min-width:0;font-size:15px}
+.sleep-console :deep(.toggle-label),.sleep-console :deep(.toggle-desc){white-space:nowrap;overflow:hidden;text-overflow:ellipsis;overflow-wrap:normal}
+.sleep-group-head h3,.sleep-group-head>span,.sleep-warning,.sleep-time-help>span,.sleep-confirm p{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sleep-time-help>span{min-width:0}
 
-
-.card {
-  background: color-mix(in srgb, var(--bg-panel) 72%, transparent);
-  border-radius: var(--radius);
-  padding: 12px 14px;
-  margin-bottom: 10px;
-}
-.card-title {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-  margin: 0 0 10px;
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-.msg {
-  font-size: 12px;
-  color: var(--danger);
-  margin-bottom: 10px;
-  padding: 8px 10px;
-  border-radius: var(--radius-ctrl);
-  background: rgba(255, 90, 90, 0.08);
-  border: 1px solid rgba(255, 90, 90, 0.25);
-}
-.msg-ok { color: var(--ok); background: rgba(80, 200, 120, 0.08); border-color: rgba(80, 200, 120, 0.25); }
-.notice-fade-enter-active,
-.notice-fade-leave-active { transition: opacity 0.15s ease; }
-.notice-fade-enter-from,
-.notice-fade-leave-to { opacity: 0; }
-
-/* 电源按钮 / 系统休眠 */
-.pwr-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-.pwr-label {
-  font-size: 12px;
-  font-weight: 600;
-  color: var(--text);
-}
-.pwr-warn {
-  margin-top: 4px;
-  font-size: 11px;
-  color: var(--accent-2, #f5b93d);
-  line-height: 1.3;
-}
-.sleep-plan-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0 0; border-top: 1px solid color-mix(in srgb, var(--text-dim) 18%, transparent); }
-
-/* Windows 11 风格的“屏幕、睡眠和休眠超时”二级气泡 */
-.timeout-card { padding: 0; background: transparent; overflow: visible; }
-.timeout-header {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  min-height: 54px;
-  padding: 10px 12px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius-ctrl);
-  background: var(--bg-input);
-  color: var(--text);
-  text-align: left;
-  font: inherit;
-  box-shadow: 0 12px 30px rgba(0,0,0,.28);
-  cursor: pointer;
-}
-.timeout-header.active {
-  color: var(--accent);
-  border-color: color-mix(in srgb, var(--accent) 45%, transparent);
-  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
-}
-.timeout-header:hover { background: color-mix(in srgb, var(--bg-input) 72%, transparent); }
-.timeout-header:focus-visible {
-  outline: none;
-  box-shadow: inset 0 0 0 2px var(--accent), 0 12px 30px rgba(0,0,0,.28);
-}
-.timeout-header.focused {
-  box-shadow: inset 0 0 0 2px var(--accent), inset 0 0 10px color-mix(in srgb, var(--accent) 35%, transparent);
-}
-.timeout-header-main { display: flex; align-items: center; gap: 12px; min-width: 0; }
-.timeout-header-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 28px;
-  height: 28px;
-  flex: 0 0 auto;
-  color: var(--text-dim);
-}
-.timeout-header-copy { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
-.timeout-title { font-size: 13px; font-weight: 600; line-height: 1.25; }
-.timeout-subtitle { color: var(--text-dim); font-size: 11px; line-height: 1.35; }
-.timeout-caret { width: 18px; height: 18px; flex: 0 0 auto; color: var(--text-dim); transition: transform .18s ease, color .18s ease; }
-.timeout-caret.open { transform: rotate(180deg); color: var(--accent); }
-.timeout-body {
-  margin: 8px 0 0;
-  padding: 8px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: var(--radius-ctrl);
-  background: var(--bg-input);
-  box-shadow: 0 16px 40px rgba(0,0,0,.4);
-}
-.timeout-submenu-pop-enter-active,
-.timeout-submenu-pop-leave-active {
-  transition: opacity .16s ease, transform .16s ease;
-  transform-origin: top center;
-}
-.timeout-submenu-pop-enter-from,
-.timeout-submenu-pop-leave-to {
-  opacity: 0;
-  transform: translateY(-5px) scale(.985);
-}
-.timeout-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  margin-top: 10px;
-  background: color-mix(in srgb, var(--bg-input) 52%, transparent);
-  border-radius: var(--radius-ctrl);
-  overflow: hidden;
-}
-.timeout-grid-head,
-.timeout-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(96px, 96px) minmax(96px, 96px);
-  align-items: center;
-  gap: 12px;
-  padding: 9px 12px;
-}
-.timeout-grid-head {
-  padding-top: 11px;
-  padding-bottom: 8px;
-  color: var(--text-dim);
-  font-size: 11px;
-  font-weight: 600;
-}
-.timeout-grid-head span:not(:first-child) { text-align: center; }
-.timeout-side-ac { color: var(--accent); }
-.timeout-side-dc { color: var(--dc-accent); }
-.timeout-row {
-  min-height: 58px;
-  border-top: 1px solid color-mix(in srgb, var(--text-dim) 14%, transparent);
-}
-.timeout-row :deep(.dd) { width: 100% !important; }
-.timeout-label { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px; }
-.timeout-label span { color: var(--text); font-size: 12px; line-height: 1.35; }
-.timeout-label small { color: var(--text-dim); font-size: 10px; line-height: 1.3; }
-
-.confirm-bar {
-  background: rgba(229, 72, 77, 0.12);
-  border: 1px solid rgba(229, 72, 77, 0.4);
-  border-radius: var(--radius-ctrl);
-  padding: 12px 14px;
-  margin-bottom: 10px;
-  font-size: 13px;
-  line-height: 1.5;
-}
-.confirm-text {
-  color: #ff9ea1;
-  display: block;
-  margin-bottom: 10px;
-}
-.confirm-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-}
-.mini-btn {
-  background: var(--bg-input);
-  color: var(--text);
-  border: 1px solid #2a3342;
-  border-radius: 7px;
-  padding: 8px 12px;
-  min-height: 36px;
-  font-size: 13px;
-  cursor: pointer;
-}
-.mini-btn.danger {
-  background: rgba(229, 72, 77, 0.85);
-  color: #fff;
-  border-color: rgba(229, 72, 77, 0.85);
-}
-
-@media (max-width: 520px) {
-  .timeout-grid-head,
-  .timeout-row { grid-template-columns: minmax(0, 1fr) minmax(96px, 96px) minmax(96px, 96px); gap: 6px; padding-left: 8px; padding-right: 8px; }
-  .timeout-row :deep(.dd-trigger) { min-height: 36px; }
-}
-
-/* ── 配置重制确认浮层（自绘，锚定触发按钮）── */
-.reset-confirm {
-  z-index: 1200;
-  background: #161d29;
-  border: 1px solid #2a3342;
-  border-radius: 12px;
-  padding: 18px 20px 17px;
-  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.55);
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  max-width: calc(100vw - 16px);
-  min-height: 0;
-  overflow-y: auto;
-}
-.reset-confirm::before {
-  content: '';
-  position: absolute;
-  width: 13px;
-  height: 13px;
-  background: #161d29;
-  border-left: 1px solid #2a3342;
-  border-top: 1px solid #2a3342;
-  transform: rotate(45deg);
-  top: -7px;
-  right: 32px;
-}
-.reset-confirm.above::before {
-  top: auto;
-  bottom: -7px;
-  border-left: none;
-  border-top: none;
-  border-right: 1px solid #2a3342;
-  border-bottom: 1px solid #2a3342;
-}
-.rc-title {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  font-size: 16px;
-  font-weight: 700;
-  color: var(--text);
-}
-.rc-title :deep(svg) {
-  width: 20px;
-  height: 20px;
-  color: var(--danger);
-}
-.rc-desc {
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 14px;
-  line-height: 1.6;
-}
-.rc-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 10px;
-  margin-top: 3px;
-}
-.rc-actions button {
-  min-height: 44px;
-  border: 1px solid rgba(255,255,255,.08);
-  border-radius: 9px;
-  background: var(--bg-input);
-  color: var(--text);
-  font-size: 14px;
-  font-weight: 600;
-  cursor: pointer;
-}
-.rc-actions button.danger {
-  color: var(--danger);
-  border-color: color-mix(in srgb, var(--danger) 46%, transparent);
-  background: color-mix(in srgb, var(--danger) 8%, var(--bg-input));
-}
-.rc-actions button.danger:hover {
-  background: color-mix(in srgb, var(--danger) 16%, var(--bg-input));
-  border-color: var(--danger);
-}
-.rc-pop-enter-active,
-.rc-pop-leave-active {
-  transition: opacity 0.14s ease, transform 0.14s ease;
-}
-.rc-pop-enter-from,
-.rc-pop-leave-to {
-  opacity: 0;
-  transform: translateY(-5px);
-}
-
+.sleep-console :deep(.settings-section-heading){display:none}
+.sleep-console :deep(.settings-section-tabs){gap:6px;margin-bottom:12px}
+.sleep-console :deep(.settings-section-tabs button){font-size:15px;min-height:42px;padding:8px 5px}
+.sleep-console :deep(.settings-section-panel){padding:14px;background:var(--console-surface);border-color:var(--console-line);border-radius:12px;backdrop-filter:blur(12px)}
+.sleep-group+.sleep-group{margin-top:13px;padding-top:14px;border-top:1px solid var(--console-line)}
+.sleep-group-head{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:28px;margin-bottom:5px}
+.sleep-group-head h3{display:flex;align-items:center;gap:8px;margin:0!important;font-size:16px!important;font-weight:650;color:var(--text)}
+.sleep-group-head h3 :deep(svg){color:var(--accent)}
+.sleep-group-head>span{font-size:12px;white-space:nowrap;color:var(--text-dim)}
+.sleep-console :deep(.toggle-row){min-height:63px;padding:10px 0;gap:12px;border-radius:5px}
+.sleep-console :deep(.toggle-label){font-size:15.5px;line-height:1.45;font-weight:550}
+.sleep-console :deep(.toggle-desc){font-size:12.5px;line-height:1.5;margin-top:3px}
+.sleep-console :deep(.sleep-recovery-auto){border-top:1px solid var(--console-line)}
+.sleep-console :deep(.toggle-row+.toggle-row){border-top:1px solid var(--console-line)}
+.sleep-console :deep(.dd-trigger){font-size:15px;min-height:40px;padding:8px 10px;border-color:var(--console-line);background:var(--console-surface-alt)}
+.sleep-static-wake{padding:0 0 12px;min-width:0}
+.sleep-static-action{display:flex;align-items:center;gap:10px;min-width:0}
+.sleep-static-action button{flex:none;min-height:36px;padding:7px 12px;border:1px solid var(--console-line);border-radius:8px;background:var(--console-surface-alt);color:var(--text);font:inherit;font-size:13px;cursor:pointer}
+.sleep-static-action button:disabled{opacity:.5;cursor:default}
+.sleep-static-action span,.sleep-static-wake p{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;line-height:1.5;color:var(--text-dim)}
+.sleep-static-wake p{margin:6px 0 0}
+.sleep-power-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:12px 0 8px}
+.sleep-power-grid label{min-width:0;display:grid;gap:8px}
+.supply-label{display:flex;align-items:center;gap:6px;font-size:14px;font-weight:600}
+.ac{color:var(--accent)}.dc{color:var(--dc-accent)}
+.sleep-warning{font-size:12.5px!important;line-height:1.55!important;color:var(--accent-2,#e8b94f);margin:10px 0 0;padding:9px 10px;background:color-mix(in srgb,var(--accent-2,#e8b94f) 8%,transparent);border-radius:8px}
+.sleep-hibernate-size{padding-top:14px;margin-top:6px;border-top:1px solid var(--console-line)}
+.sleep-hibernate-size :deep(.slider-label){font-size:15px}.sleep-scale{display:flex;justify-content:space-between;gap:8px;color:var(--text-dim);font-size:12px;margin-top:5px}
+.sleep-time-table{min-width:0;margin-top:10px}
+.sleep-time-head,.sleep-time-row{display:grid;grid-template-columns:minmax(90px,.88fr) repeat(2,minmax(0,1fr));align-items:center;gap:10px}
+.sleep-time-head{font-size:13px;color:var(--text-dim);padding:8px 0 12px}
+.sleep-time-head>span:not(:first-child){display:flex;align-items:center;justify-content:center;gap:5px;font-size:14px;font-weight:600}
+.sleep-time-row{padding:15px 0;border-top:1px solid var(--console-line);min-height:72px}
+.sleep-time-label{display:flex;align-items:center;gap:5px;font-size:14px;white-space:nowrap}
+.sleep-time-label :deep(svg){color:var(--text-dim);width:15px;height:15px}
+.sleep-time-row :deep(.dd-trigger){font-size:14px;padding:8px;min-height:40px}
+.sleep-time-help{display:flex;align-items:flex-start;gap:7px;margin-top:10px;color:var(--text-dim);font-size:12.5px;line-height:1.6;border-radius:8px;padding:10px;background:var(--console-surface-alt)}
+.sleep-time-help :deep(svg){width:15px;height:15px;margin-top:3px;flex-shrink:0}
+.sleep-confirm{padding:12px;border:1px solid color-mix(in srgb,var(--danger) 45%,transparent);border-radius:9px;background:color-mix(in srgb,var(--danger) 8%,var(--bg-panel));margin:8px 0}
+.sleep-confirm strong{font-size:15px}.sleep-confirm p{font-size:13px;color:var(--text-dim);line-height:1.5;margin:6px 0 12px}
+.sleep-confirm>div{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.sleep-confirm button{min-height:38px;font-size:14px;border:1px solid var(--console-line);border-radius:8px;background:var(--console-surface-alt);color:var(--text)}
+.sleep-confirm button.sleep-danger{color:var(--danger);border-color:var(--danger)}
+.sleep-notice{padding:10px 12px;margin-bottom:10px;font-size:13px;line-height:1.55;color:var(--danger);border:1px solid currentColor;border-radius:9px;background:var(--bg-panel)}
+.sleep-notice.is-ok{color:var(--ok)}
+@media(min-height:780px){.sleep-console :deep(.toggle-row){min-height:68px}}
 </style>

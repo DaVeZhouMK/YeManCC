@@ -286,7 +286,7 @@ const MUTATIONS = [
     id: 'recovery-settled-before-curve-write',
     caughtBy: 'D1/R6-01（提前 settle ⇒ 1 次尝试 0 成功）',
     find: [
-      '      const intentRevision = this.controlIntentRevision;',
+      '      const intentRevision = this.controlIntentRevisionValue;',
       '      await this.enqueue(async () => {',
       '        // An explicit writer, close or newer sleep can finish while this owner',
       "        // waits for the queue. Recheck at execution, not only before enqueue.",

@@ -1,0 +1,11 @@
+{
+  "status": "SNAPSHOT_CAPTURED",
+  "manifestPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source-snapshot.json",
+  "manifestSha256": "0af131a0757d71841c5c7d7b437d37780a6aa7daf3620d50600104768eebc25f",
+  "sourceRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source",
+  "productSourcesAndProjectContent": 14,
+  "productCompileSources": 12,
+  "totalInputs": 27,
+  "sourceDrift": 0,
+  "candidateInstalled": false
+}

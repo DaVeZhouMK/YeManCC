@@ -1,0 +1,37 @@
+// Executes the scripts extracted from the original/patched packaged Python bytecode.
+// WSRouter is the exact frontend served by the installed pinned loader; Steam/hardware are absent.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
+import vm from 'node:vm';
+const dir=path.resolve(process.argv[2]||process.env.YMCC_DECKY_ARTIFACT_ROOT+'/validation');
+const original=fs.readFileSync(path.join(dir,'original-injection.js'),'utf8');
+const patched=fs.readFileSync(path.join(dir,'patched-injection.js'),'utf8');
+const routerSource=fs.readFileSync(path.join(dir,'live-loader-wsrouter.js'),'utf8');
+const report=[];const flush=()=>new Promise(r=>setImmediate(r));
+const check=async(name,fn)=>{await fn();report.push({name,status:'passed'});};
+new vm.Script(original);new vm.Script(patched);
+function fixture({loaded=false,backend=null,fetchOK=true,importFail=false}={}){
+ const state={restarts:0,imports:[],fetches:0,connectCalls:0,sockets:[],delays:[],errors:[],timers:new Map(),next:1};
+ class Socket{static CONNECTING=0;static OPEN=1;static CLOSING=2;static CLOSED=3;constructor(url){this.url=url;this.readyState=0;this.handlers={};this.sent=[];state.sockets.push(this);}addEventListener(name,fn){(this.handlers[name]??=[]).push(fn);}emit(name,event={}){for(const fn of this.handlers[name]||[])fn(event);}close(){this.readyState=3;this.emit('close',{target:this,code:1006});}send(value){this.sent.push(JSON.parse(value));}}
+ const win={deckyHasLoaded:loaded,DeckyBackend:backend};
+ const context=vm.createContext({window:win,deckyAuthToken:'old-backend-token',WebSocket:Socket,AbortController,Logger:class{debug(){}error(){}},sleep:ms=>new Promise(resolve=>state.delays.push({ms,resolve})),fetch:async()=>{state.fetches++;return {ok:fetchOK,text:async()=>'new-backend-token'};},console:{error:(...args)=>state.errors.push(String(args[0]))},SteamClient:{Browser:{RestartJSContext:()=>state.restarts++}},setTimeout:(fn,ms)=>{if(ms===100){fn();return 0;}const id=state.next++;state.timers.set(id,{fn,ms});return id;},clearTimeout:id=>state.timers.delete(id),__import:async url=>{state.imports.push(url);if(importFail)throw Error('fixture network error');}});
+ // The production frontend uses the same window global and global token binding.
+ Object.defineProperty(win,'deckyAuthToken',{get:()=>context.deckyAuthToken,set:v=>{context.deckyAuthToken=v;},configurable:true});
+ const Router=vm.runInContext(routerSource.replace(/^import .*;\r?\n/gm,'').replace(/^export \{[^\n]*\};/m,'')+'\nWSRouter;',context);
+ function inject(script=patched){vm.runInContext(script.replaceAll('import(','__import('),context,{timeout:1000});}
+ return {state,win,context,Router,Socket,inject};
+}
+await check('original packaged script reproduces one JS-context restart with an existing frontend',async()=>{const f=fixture({loaded:true});f.inject(original);assert.equal(f.state.restarts,1);});
+await check('fresh context imports the unchanged frontend URL once',async()=>{const f=fixture();f.inject();await flush();assert.deepEqual(f.state.imports,['http://localhost:1337/frontend/index.js?v=v3.1.10']);assert.equal(f.state.restarts,0);assert.equal(f.win.__YMCC_DECKY_INJECTION_POLICY__.phase,'imported');});
+await check('repeated concurrent injection shares one pending initial import',async()=>{const f=fixture();for(let n=0;n<100;n++)f.inject();await flush();assert.equal(f.state.imports.length,1);assert.equal(f.state.restarts,0);});
+await check('loaded frontend keeps its existing router and refreshes the backend token',async()=>{const backend={connect(){throw Error('unexpected duplicate connection');}};const f=fixture({loaded:true,backend});f.inject();await flush();assert.equal(f.win.DeckyBackend,backend);assert.equal(f.win.deckyAuthToken,'new-backend-token');assert.equal(f.state.imports.length,0);assert.equal(f.state.restarts,0);assert.equal(f.win.__YMCC_DECKY_INJECTION_POLICY__.phase,'reused');});
+await check('one hundred notifications neither remount the frontend nor open duplicate sockets',async()=>{const f=fixture({loaded:true,backend:{connect(){throw Error('duplicate');}}});for(let n=0;n<100;n++)f.inject();await flush();assert.equal(f.state.fetches,1);assert.equal(f.state.sockets.length,0);assert.equal(f.state.imports.length,0);assert.equal(f.state.restarts,0);});
+await check('actual production WSRouter reconnects with refreshed auth and preserves queued calls',async()=>{const f=fixture();const router=new f.Router();f.win.DeckyBackend=router;f.win.deckyHasLoaded=true;const connected=router.connect();const old=f.state.sockets[0];old.readyState=1;old.emit('open');await connected;const pending=router.call('fixture/read-only-state');old.readyState=3;const close=router.onError('fixture backend exited');assert.equal(f.state.delays[0].ms,5000);f.inject();await flush();assert.equal(f.state.sockets.length,2);const recovered=f.state.sockets[1];assert.match(recovered.url,/auth=new-backend-token$/);recovered.readyState=1;recovered.emit('open');f.state.delays[0].resolve();await close;assert.equal(f.state.sockets.length,2);assert.equal(router.runningCalls.size,1);assert.equal(recovered.sent[0].type,4);assert.equal(recovered.sent[0].messages[0].route,'fixture/read-only-state');assert.equal(f.state.restarts,0);void pending;});
+await check('already authenticated open socket is retained without forcing another connection',async()=>{const f=fixture();const router=new f.Router();f.win.DeckyBackend=router;f.win.deckyHasLoaded=true;const ready=router.connect();f.state.sockets[0].readyState=1;f.state.sockets[0].emit('open');await ready;f.inject();await flush();assert.equal(f.state.sockets.length,1);assert.equal(f.state.restarts,0);});
+await check('stale loaded marker without a router recovers by importing frontend only',async()=>{const f=fixture({loaded:true});f.inject();await flush();assert.deepEqual(f.state.imports,['http://localhost:1337/frontend/index.js?v=v3.1.10&ymccRecovery=1']);assert.equal(f.state.restarts,0);});
+await check('failed initial import releases the pending flag and permits another recovery',async()=>{const f=fixture({importFail:true});f.inject();await flush();assert.equal(f.win.deckyHasLoaded,false);assert.equal(f.win.__YMCC_DECKY_INJECTION_POLICY__.pending,false);f.inject();await flush();assert.equal(f.state.imports.length,2);assert.equal(f.state.restarts,0);});
+await check('authentication failure preserves the existing router and its recovery state',async()=>{const backend={connect(){}};const f=fixture({loaded:true,backend,fetchOK:false});f.inject();await flush();assert.equal(f.win.DeckyBackend,backend);assert.equal(f.win.deckyHasLoaded,true);assert.equal(f.win.deckyAuthToken,'old-backend-token');assert.equal(f.win.__YMCC_DECKY_INJECTION_POLICY__.pending,false);assert.equal(f.state.restarts,0);assert.equal(f.state.imports.length,0);});
+await check('patched production script has no Steam mode, reload, focus or restart operation',async()=>{for(const word of ['RestartJSContext','SetUIMode','location.reload','restart_webhelper','SetForegroundWindow','SteamClient'])assert.ok(!patched.includes(word),word);});
+fs.writeFileSync(path.join(dir,'loader-no-restart-regression.json'),JSON.stringify({status:'passed',checks:report.length,cases:report,actualPackagedScript:true,actualProductionRouter:true,steamOperated:false},null,2)+'\n');
+console.log(JSON.stringify({status:'passed',checks:report.length,actualPackagedScript:true,actualProductionRouter:true}));

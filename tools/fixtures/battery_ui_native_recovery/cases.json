@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "positiveCases": 3,
+  "sourceFaults": 1,
+  "cases": [
+    "structured-native-failure",
+    "throw-control",
+    "fresh-unknown-control"
+  ],
+  "expectedPositiveExit": 0,
+  "fault": {
+    "name": "software-stop-fallback-removed",
+    "expectedExit": 23,
+    "expectedFailed": [
+      {
+        "case": "structured-native-failure",
+        "assertion": "software-owned-stop-control-survives-native-structured-failure"
+      }
+    ]
+  },
+  "explicitUiReleaseOnly": true,
+  "automaticSetReplay": false
+}

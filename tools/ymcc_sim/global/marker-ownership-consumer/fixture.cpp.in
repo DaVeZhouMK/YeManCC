@@ -1,0 +1,107 @@
+// Pure fixture memory: no Windows header or real file/process operation.
+#include <atomic>
+#include <algorithm>
+#include <cassert>
+#include <cstring>
+#include <cwctype>
+#include <functional>
+#include <iostream>
+#include <map>
+#include <mutex>
+#include <set>
+#include <string>
+#include <system_error>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;using DWORD=unsigned long;using ULONGLONG=unsigned long long;using HANDLE=unsigned long;using LONG=long;
+constexpr bool FALSE=false;constexpr HANDLE INVALID_HANDLE_VALUE=~HANDLE{0};
+constexpr DWORD GENERIC_WRITE=1,CREATE_NEW=1,FILE_ATTRIBUTE_NORMAL=2,FILE_FLAG_WRITE_THROUGH=4,MOVEFILE_REPLACE_EXISTING=1,MOVEFILE_WRITE_THROUGH=2,REPLACEFILE_WRITE_THROUGH=1;
+constexpr int PROCESS_SUSPEND_RESUME=1,PROCESS_QUERY_LIMITED_INFORMATION=2;
+const std::wstring SG_DIR=L"memory",SG_SLEEP_LEASE_DIR=L"memory\\sleep",SG_MANUAL_DIR=L"memory\\manual";
+struct NativeDetectedGame{DWORD pid=100;ULONGLONG processCreated=1234;};
+struct SgSleepTarget{DWORD pid=0;ULONGLONG processCreated=0,valveGeneration=0,powerGeneration=0;bool captured=false,markerOwned=false;};
+struct SgSuspendResult{DWORD pid=0;std::uint64_t ws=0;bool frozen=false;};struct SgResumeResult{int count=0;std::vector<DWORD> pids;};
+enum class PowerLifecycle{Ready,Suspending,Suspended,Resuming};std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Suspending};
+std::atomic<unsigned long long> g_sgManualPauseSerial{11};std::mutex g_sgOpMtx,g_sgSleepTargetMx;SgSleepTarget g_sgSleepTarget;
+bool g_sgPauseResume=true,g_sgRepairEligible=true;
+std::map<std::wstring,std::string> files;std::set<std::wstring> directories;
+struct MemoryHandle{std::wstring path;};std::map<HANDLE,MemoryHandle> fileHandles;HANDLE nextFileHandle=10000;
+std::vector<json> operations,nativeReceipts;std::vector<int> queryModes;
+int queryCalls=0,ntCalls=0,processOpenCalls=0,staleRecoveryCalls=0,writeCalls=0,flushCalls=0,moveCalls=0,replaceCalls=0,closeCalls=0,memorySleeps=0,createCalls=0;
+bool processAlive=true,openedBirthRace=false,failCreate=false,failWrite=false,shortWrite=false,failFlush=false,failClose=false,failMoves=false,failReplace=false,failDirCreate=false,hideDirAfterCreate=false,dieOnMarkerCommit=false;
+DWORD currentSession=1,targetSession=1,lastCreateFlags=0,lastMoveFlags=0,lastReplaceFlags=0;
+const ULONGLONG processBirth=1234;double epoch=1.25;
+std::wstring markerKey(const std::wstring& dir,DWORD pid=100){return dir+L"\\"+std::to_wstring(pid)+L".txt";}
+std::string narrow(const std::wstring& p){return std::string(p.begin(),p.end());}
+void op(const char* kind,json details=json::object()){details["kind"]=kind;operations.push_back(std::move(details));}
+std::string sgReadFile(const std::wstring& p){auto i=files.find(p);return i==files.end()?std::string{}:i->second;}
+namespace fspath{using path=std::wstring;void create_directories(const path& p,std::error_code& ec){if(failDirCreate){ec=std::make_error_code(std::errc::permission_denied);return;}ec.clear();directories.insert(p);}bool exists(const path& p){return files.count(p)||(!hideDirAfterCreate&&directories.count(p));}void remove(const path& p){op("memory-remove",{{"path",narrow(p)}});files.erase(p);}}
+DWORD GetCurrentProcessId(){return 42;}ULONGLONG sgNowFileTime(){return 9001;}double sgNowEpoch(){return epoch;}
+ULONGLONG currentPowerGeneration(){return 7;}
+bool ProcessIdToSessionId(DWORD pid,DWORD* session){*session=pid==42?currentSession:targetSession;return true;}
+bool focusQueryProcessIdentity(DWORD pid,void*,ULONGLONG* created){int mode=queryCalls<int(queryModes.size())?queryModes[queryCalls]:0;++queryCalls;bool ok=processAlive&&mode!=1&&mode!=2;if(mode==2)processAlive=false;if(ok)*created=mode==3?0:processBirth;op("identity-query",{{"call",queryCalls},{"pid",pid},{"ok",ok},{"created",*created},{"alive",processAlive}});return ok;}
+bool nativeValveValidateCurrentTarget(DWORD pid,ULONGLONG created,NativeDetectedGame* target){*target={pid,created};return processAlive&&pid==100&&created==processBirth;}
+bool nativeValveReadCurrentTarget(NativeDetectedGame* target,ULONGLONG* generation){*target={100,processBirth};*generation=11;return true;}
+bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD){return true;}bool sgReleaseConflictingPauseLeaseUnlocked(DWORD){return true;}
+HANDLE OpenProcess(int,bool,DWORD pid){++processOpenCalls;op("memory-process-open",{{"pid",pid},{"alive",processAlive}});return processAlive?pid:0;}
+ULONGLONG nativeProcessCreatedFromHandle(HANDLE){return processBirth+(openedBirthRace?1:0);}
+HANDLE CreateFileW(const wchar_t* path,DWORD,DWORD,void*,DWORD,DWORD flags,void*){++createCalls;lastCreateFlags=flags;const std::wstring p(path);op("memory-create",{{"path",narrow(p)},{"flags",flags},{"fail",failCreate}});if(failCreate||files.count(p))return INVALID_HANDLE_VALUE;files[p]={};const HANDLE h=nextFileHandle++;fileHandles[h]={p};return h;}
+bool WriteFile(HANDLE h,const void* data,DWORD length,DWORD* written,void*){++writeCalls;*written=failWrite?0:shortWrite&&length?length-1:length;op("memory-write",{{"bytesRequested",length},{"bytesWritten",*written},{"ok",!failWrite}});if(!fileHandles.count(h))return false;files[fileHandles[h].path].append(static_cast<const char*>(data),*written);return !failWrite;}
+bool FlushFileBuffers(HANDLE){++flushCalls;op("memory-flush",{{"ok",!failFlush}});return !failFlush;}
+bool CloseHandle(HANDLE h){if(h<10000){op("memory-process-close",{{"handle",h}});return true;}++closeCalls;fileHandles.erase(h);op("memory-file-close",{{"ok",!failClose}});return !failClose;}
+bool DeleteFileW(const wchar_t* path){const std::wstring p(path);op("memory-delete",{{"path",narrow(p)}});return files.erase(p)>0;}
+bool MoveFileExW(const wchar_t* from,const wchar_t* to,DWORD flags){++moveCalls;lastMoveFlags=flags;const std::wstring a(from),b(to);op("memory-move",{{"from",narrow(a)},{"to",narrow(b)},{"flags",flags},{"ok",!failMoves}});if(failMoves||!files.count(a))return false;files[b]=files[a];files.erase(a);if(dieOnMarkerCommit&&b==markerKey(SG_SLEEP_LEASE_DIR))processAlive=false;return true;}
+bool ReplaceFileW(const wchar_t* target,const wchar_t* replacement,void*,DWORD flags,void*,DWORD){++replaceCalls;lastReplaceFlags=flags;const std::wstring a(replacement),b(target);op("memory-replace",{{"flags",flags},{"ok",!failReplace}});if(failReplace||!files.count(a))return false;files[b]=files[a];files.erase(a);return true;}
+void Sleep(DWORD ms){++memorySleeps;op("memory-wait",{{"ms",ms}});}
+static ULONGLONG sgMarkerCreated(const std::wstring&,DWORD);static unsigned long long sgMarkerGeneration(const std::wstring&,DWORD);static bool sgMarkerIsSuspended(const std::wstring&,DWORD);
+LONG countedNativeSuspend(HANDLE h){++ntCalls;json receipt={{"pid",h},{"created",sgMarkerCreated(SG_SLEEP_LEASE_DIR,h)},{"generation",sgMarkerGeneration(SG_SLEEP_LEASE_DIR,h)},{"suspendedState",sgMarkerIsSuspended(SG_SLEEP_LEASE_DIR,h)}};nativeReceipts.push_back(receipt);op("memory-native-suspend",receipt);return 0;}
+using NativeSuspend=LONG(*)(HANDLE);NativeSuspend fnNtSuspend=countedNativeSuspend;void sgInitNt(){fnNtSuspend=countedNativeSuspend;}
+template<class...T>void traceLog(const char*,T...){}
+bool sgReadSleepTarget(SgSleepTarget& target){target=g_sgSleepTarget;return target.captured;}
+void sgClearSleepTargetIfMatches(const SgSleepTarget& target){if(g_sgSleepTarget.pid==target.pid&&g_sgSleepTarget.processCreated==target.processCreated&&g_sgSleepTarget.powerGeneration==target.powerGeneration)g_sgSleepTarget={};}
+void sgWriteFile(const std::wstring& path,const std::string& value){files[path]=value;op("memory-capture-metadata",{{"path",narrow(path)}});}
+bool sgHasMarkerFiles(const std::wstring& dir){for(const auto& item:files)if(item.first.rfind(dir+L"\\",0)==0)return true;return false;}
+SgResumeResult sgResumeMarkedDirectoryUnlocked(const std::wstring&,bool){++staleRecoveryCalls;return {};}
+// EXACT_COMBINATION_FUNCTIONS
+int groups=0,failedGroups=0;
+void record(const char* label,json expected,json actual,bool passed){++groups;if(!passed)++failedGroups;std::cout<<json({{"case",label},{"passed",passed},{"expected",expected},{"actual",actual},{"trace",operations}}).dump()<<std::endl;}
+void reset(){files.clear();directories.clear();fileHandles.clear();operations.clear();nativeReceipts.clear();queryModes.clear();nextFileHandle=10000;queryCalls=ntCalls=processOpenCalls=staleRecoveryCalls=writeCalls=flushCalls=moveCalls=replaceCalls=closeCalls=memorySleeps=createCalls=0;processAlive=true;openedBirthRace=failCreate=failWrite=shortWrite=failFlush=failClose=failMoves=failReplace=failDirCreate=hideDirAfterCreate=dieOnMarkerCommit=false;currentSession=targetSession=1;lastCreateFlags=lastMoveFlags=lastReplaceFlags=0;g_sgSleepTarget={};g_sgPauseResume=g_sgRepairEligible=true;g_powerLifecycle=PowerLifecycle::Suspending;g_sgManualPauseSerial=11;}
+void seed(const std::wstring& dir,ULONGLONG birth=1234,unsigned long long gen=7){directories.insert(dir);files[markerKey(dir)]="pid=100|created="+std::to_string(birth)+"|epoch=1.25|state=suspended|generation="+std::to_string(gen);}
+void pauseCase(const char* label,int expectedNt=-1,int expectedFrozen=-1,unsigned long long generation=7,bool twice=false){auto result=sgPauseSleepTarget(generation);if(twice)result=sgPauseSleepTarget(generation);const auto birth=sgMarkerCreated(SG_SLEEP_LEASE_DIR,100),gen=sgMarkerGeneration(SG_SLEEP_LEASE_DIR,100);const bool owner=nativeValveValidateOwnedSuspendedTarget(SG_SLEEP_LEASE_DIR,100,processBirth);bool everyNativeBound=true;for(const auto& receipt:nativeReceipts)everyNativeBound=everyNativeBound&&receipt.at("created")==processBirth&&receipt.at("generation")==7&&receipt.at("suspendedState")==true;const bool frozenBound=!result.frozen||!processAlive||(owner&&birth==processBirth&&gen==generation);const bool exactExpected=(expectedNt<0||ntCalls==expectedNt)&&(expectedFrozen<0||result.frozen==bool(expectedFrozen));json actual={{"frozen",result.frozen},{"publishedMarkerOwned",g_sgSleepTarget.markerOwned},{"ntCalls",ntCalls},{"processOpenCalls",processOpenCalls},{"markerCreated",birth},{"markerGeneration",gen},{"ownerAccepted",owner},{"everyNativeHadExactLease",everyNativeBound},{"frozenHasExactLease",frozenBound},{"queryCalls",queryCalls},{"processAlive",processAlive},{"markerText",sgReadFile(markerKey(SG_SLEEP_LEASE_DIR))},{"nativeReceipts",nativeReceipts},{"staleRecoveryCalls",staleRecoveryCalls}};record(label,{{"everyNativeHadExactLease",true},{"frozenHasExactLease",true},{"expectedNt",expectedNt},{"expectedFrozen",expectedFrozen}},actual,everyNativeBound&&frozenBound&&exactExpected);}
+void atomicFailureCase(const char* label){const std::wstring p=L"memory\\atomic.txt";files[p]="old-data";const bool result=sgWriteFileAtomic(p,"new-data");record(label,{{"returned",false},{"oldFinalPreserved",true}},{{"returned",result},{"final",sgReadFile(p)},{"ntCalls",ntCalls},{"flushCalls",flushCalls},{"moveCalls",moveCalls},{"replaceCalls",replaceCalls}},!result&&sgReadFile(p)=="old-data"&&ntCalls==0);}
+int main(){
+ reset();pauseCase("healthy-exact-lease",1,1);
+ reset();queryModes={1};pauseCase("first-query-fails-before-marker",0,0);
+ reset();queryModes={0,1,0};pauseCase("pre-marker-query-fails-live-process");
+ reset();queryModes={0,0,1};pauseCase("post-marker-query-fails-live-process");
+ reset();queryModes={0,1,1};pauseCase("both-marker-queries-fail-live-process");
+ reset();openedBirthRace=true;pauseCase("opened-handle-birth-changed",0,0);
+ reset();queryModes={2};pauseCase("process-dead-at-initial-query",0,0);
+ reset();dieOnMarkerCommit=true;pauseCase("process-dies-after-marker-before-open",0,0);
+ reset();failWrite=true;pauseCase("marker-write-api-fails",0,0);
+ reset();shortWrite=true;pauseCase("marker-short-write-fails",0,0);
+ reset();failFlush=true;pauseCase("marker-flush-fails",0,0);
+ reset();failMoves=failReplace=true;pauseCase("marker-move-and-replace-fail",0,0);
+ reset();failCreate=true;pauseCase("marker-create-fails",0,0);
+ reset();failClose=true;pauseCase("marker-close-fails",0,0);
+ reset();seed(SG_SLEEP_LEASE_DIR,1234,6);pauseCase("old-generation-marker-cannot-be-stolen",0,0);
+ reset();seed(SG_SLEEP_LEASE_DIR);pauseCase("same-pid-current-marker-keeps-depth",0,1);
+ reset();seed(SG_SLEEP_LEASE_DIR,999,7);pauseCase("old-birth-marker-replaced-with-current-identity",1,1);
+ reset();seed(SG_MANUAL_DIR);pauseCase("valid-manual-owner-is-not-stolen",0,0);
+ reset();seed(SG_MANUAL_DIR,999);pauseCase("old-manual-birth-cannot-block-current-game",1,1);
+ reset();pauseCase("stale-power-generation-does-not-enter-write",0,0,6);
+ reset();queryModes={1};{const bool ok=sgWriteProcessMarker(SG_SLEEP_LEASE_DIR,100,"suspended",7);record("direct-marker-unknown-identity",{{"committedUnknownIdentity",false}},{{"returned",ok},{"created",sgMarkerCreated(SG_SLEEP_LEASE_DIR,100)},{"text",sgReadFile(markerKey(SG_SLEEP_LEASE_DIR))}},!ok&&files.count(markerKey(SG_SLEEP_LEASE_DIR))==0);}
+ reset();queryModes={3};{const bool ok=sgWriteProcessMarker(SG_SLEEP_LEASE_DIR,100,"suspended",7);record("direct-marker-zero-birth",{{"committedZeroIdentity",false}},{{"returned",ok},{"created",sgMarkerCreated(SG_SLEEP_LEASE_DIR,100)}},!ok&&files.count(markerKey(SG_SLEEP_LEASE_DIR))==0);}
+ reset();{const bool manual=sgWriteProcessMarker(SG_MANUAL_DIR,100,"suspended",7),sleep=sgWriteProcessMarker(SG_SLEEP_LEASE_DIR,100,"suspended",0);const auto a=sgReadFile(markerKey(SG_MANUAL_DIR)),b=sgReadFile(markerKey(SG_SLEEP_LEASE_DIR));record("manual-token-and-generation-format",{{"manualRunToken","42@9001"},{"sleepHasManualFields",false},{"zeroGenerationOmitted",true}},{{"manual",a},{"sleep",b}},manual&&sleep&&a.find("|pauseRun=42@9001|pauseSerial=11")!=std::string::npos&&a.find("|generation=7")!=std::string::npos&&b.find("|pauseRun=")==std::string::npos&&b.find("|generation=")==std::string::npos);}
+ reset();failWrite=true;atomicFailureCase("atomic-write-failure-keeps-old-final");
+ reset();failFlush=true;atomicFailureCase("atomic-flush-failure-keeps-old-final");
+ reset();failMoves=failReplace=true;atomicFailureCase("atomic-rename-failure-keeps-old-final");
+ reset();{const std::string payload((1u<<20)+17,'x');const bool ok=sgWriteFileAtomic(L"memory\\large.txt",payload);record("atomic-multiple-write-chunks",{{"chunks",2},{"bytes",payload.size()},{"flushes",1}},{{"returned",ok},{"chunks",writeCalls},{"bytes",sgReadFile(L"memory\\large.txt").size()},{"flushes",flushCalls}},ok&&writeCalls==2&&flushCalls==1&&sgReadFile(L"memory\\large.txt")==payload);}
+ reset();{const bool ok=sgWriteFileAtomicFlags(L"memory\\transient.txt","transient",false);record("atomic-transient-keeps-replacement-without-flush",{{"flushes",0},{"writeThrough",false}},{{"returned",ok},{"flushes",flushCalls},{"createFlags",lastCreateFlags},{"moveFlags",lastMoveFlags}},ok&&flushCalls==0&&!(lastCreateFlags&FILE_FLAG_WRITE_THROUGH)&&!(lastMoveFlags&MOVEFILE_WRITE_THROUGH));}
+ reset();failMoves=true;{const bool ok=sgWriteFileAtomic(L"memory\\fallback.txt","fallback");record("atomic-six-moves-then-replace",{{"moves",6},{"memoryWaits",5},{"replacements",1}},{{"returned",ok},{"moves",moveCalls},{"memoryWaits",memorySleeps},{"replacements",replaceCalls},{"replaceFlags",lastReplaceFlags}},ok&&moveCalls==6&&memorySleeps==5&&replaceCalls==1&&(lastReplaceFlags&REPLACEFILE_WRITE_THROUGH));}
+ reset();failDirCreate=true;pauseCase("marker-directory-create-fails",0,0);
+ reset();hideDirAfterCreate=true;pauseCase("marker-directory-not-observed",0,0);
+ reset();pauseCase("duplicate-outer-pause-keeps-one-native-call",1,1,7,true);
+ std::cout<<json({{"terminal","native marker-pause-ownership combination"},{"groups",groups},{"failedGroups",failedGroups},{"status",failedGroups?"FAIL":"PASS"},{"realNT",false},{"realFileOperations",false}}).dump()<<std::endl;
+ return failedGroups?23:0;
+}

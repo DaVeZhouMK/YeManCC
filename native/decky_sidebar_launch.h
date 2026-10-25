@@ -1,4 +1,5 @@
 #pragma once
+#include "process_efficiency.h"
 // Third-party loader launch: suspended, caller-owned and always unelevated.
 // UAC TokenLinkedToken may be identification-only and is used only as an identity
 // reference. Obtain a primary token from the verified interactive Windows shell.
@@ -54,14 +55,30 @@ inline Result create(const std::wstring& executable,std::wstring& command,wchar_
     if(!elevation.TokenIsElevated){
         result.mode="unelevated-direct";
         if(!unelevated(caller.value))return fail("caller-token-integrity",ERROR_ACCESS_DENIED);
-        if(!CreateProcessW(executable.c_str(),command.data(),nullptr,nullptr,FALSE,flags,environment,directory.c_str(),&startup,&child))
+        if(!ymcc::processEfficiency::createProcess(executable.c_str(),command.data(),nullptr,nullptr,FALSE,flags,environment,directory.c_str(),&startup,&child))
             return fail("create-process",GetLastError());
     }else{
         result.mode="verified-shell-primary";
-        TOKEN_LINKED_TOKEN linked{};
-        if(!GetTokenInformation(caller.value,TokenLinkedToken,&linked,sizeof(linked),&size))return fail("linked-token-query",GetLastError());
-        expected.value=linked.LinkedToken;identity=expected.value;
-        if(!unelevated(identity)||!equalUser(caller.value,identity)||!sameSession(caller.value,identity))return fail("linked-token-identity",ERROR_ACCESS_DENIED);
+        TOKEN_ELEVATION_TYPE type{};
+        if(!GetTokenInformation(caller.value,TokenElevationType,&type,sizeof(type),&size))return fail("caller-token-elevation-type",GetLastError());
+        if(type==TokenElevationTypeFull){
+            TOKEN_LINKED_TOKEN linked{};
+            if(GetTokenInformation(caller.value,TokenLinkedToken,&linked,sizeof(linked),&size)){
+                expected.value=linked.LinkedToken;identity=expected.value;
+                if(!unelevated(identity)||!equalUser(caller.value,identity)||!sameSession(caller.value,identity))return fail("linked-token-identity",ERROR_ACCESS_DENIED);
+            }else{
+                const DWORD error=GetLastError();
+                if(error!=ERROR_NO_SUCH_LOGON_SESSION)return fail("linked-token-query",error);
+                result.mode="verified-shell-primary-linked-unavailable";
+            }
+        }else if(type==TokenElevationTypeDefault){
+            result.mode="verified-shell-primary-default-token";
+        }else return fail("caller-token-elevation-type",ERROR_ACCESS_DENIED);
+        // Win5 field: a task/full-rights caller can have no linked token (1312).
+        // In that case retain the caller as identity reference. This is NOT an
+        // across-logon fallback: the shell/duplicate/child must still match its
+        // user SID, Windows session AND authentication LUID, and be unelevated.
+        // UAC-off/high-integrity Explorer is rejected; never use elevated launch.
         HWND shellWindow=GetShellWindow();DWORD shellPid=0;
         if(!shellWindow||!GetWindowThreadProcessId(shellWindow,&shellPid)||!shellPid)return fail("shell-not-available",ERROR_NOT_FOUND);
         shell.value=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|SYNCHRONIZE,FALSE,shellPid);
@@ -75,8 +92,13 @@ inline Result create(const std::wstring& executable,std::wstring& command,wchar_
         Handle source;
         if(!OpenProcessToken(shell.value,TOKEN_QUERY|TOKEN_DUPLICATE,&source.value))return fail("shell-token-open",GetLastError());
         TOKEN_TYPE sourceType{};
-        if(!GetTokenInformation(source.value,TokenType,&sourceType,sizeof(sourceType),&size)||sourceType!=TokenPrimary||
-           !unelevated(source.value)||!equalUser(identity,source.value)||!sameSession(identity,source.value)||!sameLogon(identity,source.value))
+        if(!GetTokenInformation(source.value,TokenType,&sourceType,sizeof(sourceType),&size)||sourceType!=TokenPrimary)
+            return fail("shell-token-type",ERROR_ACCESS_DENIED);
+        TOKEN_ELEVATION shellElevation{};
+        if(!GetTokenInformation(source.value,TokenElevation,&shellElevation,sizeof(shellElevation),&size))return fail("shell-token-elevation",GetLastError());
+        if(shellElevation.TokenIsElevated)return fail("shell-token-elevated",ERROR_ACCESS_DENIED);
+        if(!unelevated(source.value))return fail("shell-token-integrity",ERROR_ACCESS_DENIED);
+        if(!equalUser(identity,source.value)||!sameSession(identity,source.value)||!sameLogon(identity,source.value))
             return fail("shell-token-identity",ERROR_ACCESS_DENIED);
         // Secondary Logon on this host also requires default/session adjustment
         // rights on the duplicated handle; no privilege is added to the token.
@@ -100,6 +122,7 @@ inline Result create(const std::wstring& executable,std::wstring& command,wchar_
         CloseHandle(child.hThread);CloseHandle(child.hProcess);child={};
         return fail("child-token-verification",ERROR_ACCESS_DENIED);
     }
+    ymcc::processEfficiency::applyOwnedChild(child.hProcess);
     result.created=true;result.stage="child-token-verified";return result;
 }
 }

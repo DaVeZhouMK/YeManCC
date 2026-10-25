@@ -1,0 +1,270 @@
+{
+  "schemaVersion": 1,
+  "kind": "settings-startup-recovery-original-noio-review",
+  "generatedAt": "2026-10-19T11:44:30.971Z",
+  "registeredCount": 127,
+  "directAssociations": [],
+  "sharedAssociations": {
+    "settingsRepository": [
+      {
+        "id": "sensor.input-contracts",
+        "path": "tools/input_contracts_selftest.ts"
+      },
+      {
+        "id": "settings.cas",
+        "path": "tools/settings_cas_selftest.ts"
+      },
+      {
+        "id": "settings.reactivity",
+        "path": "tools/settings_reactivity_selftest.ts"
+      },
+      {
+        "id": "plugin.game-actions",
+        "path": "tools/decky_sidebar_game_actions_selftest.mjs"
+      },
+      {
+        "id": "game-library.media-shortcuts",
+        "path": "tools/shared_game_media_shortcuts_selftest.ts"
+      },
+      {
+        "id": "game-library.media-downloads",
+        "path": "tools/shared_game_media_downloads_selftest.ts"
+      },
+      {
+        "id": "game-library.media-recovery",
+        "path": "tools/shared_game_media_downloads_reverse_selftest.ts"
+      },
+      {
+        "id": "fan.unconfirmed-resume-consumer",
+        "path": "tools/ymcc_sim/global/fan-unconfirmed-resume-consumer/run.mjs"
+      },
+      {
+        "id": "fan.pending-acquisition-consumer",
+        "path": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/run.mjs"
+      },
+      {
+        "id": "performance.tdp-schedule-consumer",
+        "path": "tools/ymcc_sim/global/tdp-schedule-consumer/run.mjs"
+      },
+      {
+        "id": "controller.external-priority-ui",
+        "path": "tools/ymcc_sim/global/controller-priority-ui/run.mjs"
+      },
+      {
+        "id": "performance.tdp-frontend-consumer",
+        "path": "tools/ymcc_sim/global/tdp-consumer-signals/run.mjs"
+      },
+      {
+        "id": "fan.lifecycle-wake-display",
+        "path": "tools/ymcc_sim/global/consumer/fan-global/run.mjs"
+      },
+      {
+        "id": "network.update-predownload-signals",
+        "path": "tools/ymcc_sim/global/update-download-signals/index.mjs"
+      }
+    ],
+    "routeFallback": [],
+    "startupReadiness": []
+  },
+  "original": {
+    "path": "tools/settings_startup_recovery_browser_selftest.mjs",
+    "sha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b",
+    "caseNames": [
+      "healthy override startup reaches schedule without wrong-root I/O or reset",
+      "future config yields an actionable recovery surface outside inert app",
+      "cancelled user confirmation writes no files and buttons remain usable",
+      "native semantic confirm activates focused recovery control without hidden page input",
+      "pending confirmation prevents duplicate actions or fallback replacement",
+      "backup failure is visible, originals remain, recovery can be retried",
+      "confirmed successful retry reloads to ready schedule after exact-byte archives",
+      "corrupt main without backup stays byte-identical and presents recovery",
+      "reload button really navigates even when app is inert and does not reset",
+      "legacy schema remains compatible and preserves unrelated/protected branches",
+      "error text is safe and transient fallback restores previous inert state"
+    ],
+    "caseCount": 11,
+    "staticAssertCallSites": 56,
+    "explicitOutputArgument": "argv[2]",
+    "reportFormat": "Original PASS lines followed by one final JSON; both must be complete, original report bytes remain",
+    "screenshotOutput": "No original screenshot; passive observer may preserve actual DOM/diagnostic PNG in precreated owned diagnostic child",
+    "pathParameterMaintenance": {
+      "schemaVersion": 1,
+      "kind": "only-explicit-runtime-and-browser-path-compatibility",
+      "priorOriginalSha256": "bc4618992b7e8fc7695dc9094f825585644741e11ae1b752790f76ce441a5c8e",
+      "currentOriginalSha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b",
+      "changes": [
+        {
+          "before": "const runtime='C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+          "after": "const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+          "count": 1
+        },
+        {
+          "before": "chromium.launch({headless:true,channel:'msedge'})",
+          "after": "chromium.launch({headless:true,...(process.env.YMCC_UI_BROWSER_EXE?{executablePath:process.env.YMCC_UI_BROWSER_EXE}:{channel:'msedge'})})",
+          "count": 1
+        }
+      ],
+      "businessExpectationsAndMemoryPortsUnchanged": true,
+      "originalCaseNamesAndOrderUnchanged": true,
+      "originalOutputArgv2Retained": true,
+      "originalLinesUnchangedExceptTwoPaths": true,
+      "defaultBrowserChannelRetained": true,
+      "coordinatorAuthorization": "01a14d5e-f558-77e0-bcd0-39e028ed43ed"
+    }
+  },
+  "compiler": {
+    "originalCompiledInputs": 17,
+    "actualCompilerRuntimeModules": 8,
+    "unpinnedRuntimeModules": 0,
+    "compiledProgramExecuted": false,
+    "browserLaunched": false,
+    "buildInputs": [
+      "<stdin>",
+      "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+reactivity@3.5.41/node_modules/@vue/reactivity/dist/reactivity.esm-bundler.js",
+      "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-core@3.5.41/node_modules/@vue/runtime-core/dist/runtime-core.esm-bundler.js",
+      "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+runtime-dom@3.5.41/node_modules/@vue/runtime-dom/dist/runtime-dom.esm-bundler.js",
+      "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/@vue+shared@3.5.41/node_modules/@vue/shared/dist/shared.esm-bundler.js",
+      "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/node_modules/.pnpm/vue@3.5.41_typescript@5.9.3/node_modules/vue/dist/vue.runtime.esm-bundler.js",
+      "src/bridge/api.ts",
+      "src/bridge/controllerPersona.ts",
+      "src/bridge/hcInputUtils.ts",
+      "src/bridge/inputConfigHash.ts",
+      "src/bridge/inputStartupPolicy.ts",
+      "src/bridge/ipc.ts",
+      "src/bridge/quickAppDefaults.ts",
+      "src/bridge/settingsRepository.ts",
+      "src/bridge/settingsSnapshot.ts",
+      "src/robust/routeFallback.ts",
+      "src/robust/startupReadiness.ts"
+    ]
+  },
+  "consumerChain": "Actual StartupWorkBarrier tracks actual settingsRepository.readSettingsSection -> actual api/settingsStore/fs -> actual ipc WebView mock; actual routeFallback DOM invokes real dialog.confirm + resetApplicationSettings, reloads owned local page",
+  "nativeTerminal": {
+    "method": "Original exposeFunction __nativeFixtureRequest supplied to fake window.chrome.webview",
+    "memoryMethods": [
+      "settings.location",
+      "dialog.confirm",
+      "fs.exists",
+      "fs.readTextFile",
+      "fs.rename",
+      "settings.read",
+      "settings.write",
+      "settings.reset"
+    ],
+    "memoryPath": "G:\\fixture-override\\PowerControl\\yeman-settings.json (Map keys only)",
+    "ownedSections": [
+      "ui",
+      "background",
+      "music",
+      "performanceSchedule",
+      "gameCustom",
+      "tdp",
+      "cpu",
+      "sleep",
+      "quickApps",
+      "power",
+      "tray",
+      "autoclose"
+    ],
+    "realNativeResetNotExecuted": true,
+    "staticCommentNamesNativeTestButDoesNotExecuteIt": true,
+    "protectedBranches": "Original memory reset copies input/fan/future branches and archives exact raw strings; product repository and DOM consume actual replies",
+    "defaultInstallRoot": "Only initial production string; explicit fixture settings.location must win before settings I/O",
+    "unknownMethods": "Original callback rejects",
+    "actualFilesystemAccess": "Node reads only own frozen repository/toolchain; actual files remain Map, settings.reset/dialog/rename are not native operations"
+  },
+  "runtimePlan": {
+    "browserPages": 6,
+    "loopbackServers": 1,
+    "allowedOrigin": "Only one own random http://127.0.0.1:port, actual reloads stay there",
+    "existingController": "Frozen fan-monitor-browser-consumer io/observe/scratch + global owned Job",
+    "cleanup": "Frozen sleep-recovery-ui-consumer cleanup leaf, own short scratch",
+    "passiveObserver": "Capture original exposeFunction calls/returns read only plus actual page errors/DOM/inert/focus/snapshots/served bundle; diagnostic child precreated",
+    "toolPins": 201,
+    "onlyPathCompatibilityRequired": [
+      {
+        "before": "const runtime='C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';",
+        "after": "const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';"
+      },
+      {
+        "before": "chromium.launch({headless:true,channel:'msedge'})",
+        "after": "chromium.launch({headless:true,...(process.env.YMCC_UI_BROWSER_EXE?{executablePath:process.env.YMCC_UI_BROWSER_EXE}:{channel:'msedge'})})"
+      }
+    ],
+    "businessExpectationsUnchanged": true
+  },
+  "fault": {
+    "path": "src/robust/startupReadiness.ts",
+    "before": "return (await Promise.all(this.tasks)).every(Boolean);",
+    "after": "return (await Promise.all(this.tasks)).every(() => true);",
+    "meaning": "Failed repository startup task is incorrectly accepted as ready; actual barrier consumer fault",
+    "expectedOriginalAssertionLine": 59,
+    "expectedOriginalCase": "future config yields an actionable recovery surface outside inert app",
+    "compileSuccessRequired": true,
+    "timeoutOrCompilerFailureNotDetection": true
+  },
+  "exclusiveWriteSet": [
+    "tools/ymcc_sim/global/settings-startup-recovery-consumer/"
+  ],
+  "originalScriptPathParameterMaintenancePending": false,
+  "originalFixtureBusinessExecuted": false,
+  "newModuleCreated": true,
+  "productChanges": 0,
+  "realSettings": false,
+  "realProcesses": false,
+  "realHost": false,
+  "deviceIo": false,
+  "steam": false,
+  "osSleep": false,
+  "fullGoalComplete": false,
+  "reviewedSources": [
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+    },
+    {
+      "path": "src/bridge/controllerPersona.ts",
+      "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+    },
+    {
+      "path": "src/bridge/hcInputUtils.ts",
+      "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+    },
+    {
+      "path": "src/bridge/inputConfigHash.ts",
+      "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+    },
+    {
+      "path": "src/bridge/inputStartupPolicy.ts",
+      "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+    },
+    {
+      "path": "src/bridge/ipc.ts",
+      "sha256": "d9612f011d96f36ac09e2ea7f84b66f8de5d62cca7ad6f86ccaea32913eaf4b5"
+    },
+    {
+      "path": "src/bridge/quickAppDefaults.ts",
+      "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+    },
+    {
+      "path": "src/bridge/settingsRepository.ts",
+      "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+    },
+    {
+      "path": "src/bridge/settingsSnapshot.ts",
+      "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+    },
+    {
+      "path": "src/robust/routeFallback.ts",
+      "sha256": "3036799c305aec24c81985ff85d85347200f8c89dced77c2bca8e63555e04ad5"
+    },
+    {
+      "path": "src/robust/startupReadiness.ts",
+      "sha256": "b8f33c708a48cb4c82027bdad3c0c4aa2fa66ebbe375602977323c62e5f4a45f"
+    },
+    {
+      "path": "tools/settings_startup_recovery_browser_selftest.mjs",
+      "sha256": "47fa4ce04bdfd64b9f0bd8fe700d6655640781b1e3a719bd923002e07155640b"
+    }
+  ]
+}

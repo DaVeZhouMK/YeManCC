@@ -1,12 +1,18 @@
+import { isControllerPersona, migrateControllerPersona } from './controllerPersona';
+import { powerSourceMode } from './powerSource';
+import { defaultContinuousBank, normalizeContinuousControls, normalizeContinuousBank, patchContinuousBank, automaticCpuControls, manualCpuMinimum, continuousCoreAt, stepContinuousCore, toPowerCoreMode, type ContinuousCoreState,
+  type ContinuousControls, type ContinuousSideControls, type ContinuousSidePatch, type ContinuousPerformanceIdentity, type ContinuousPerformanceSnapshot } from './performanceControls';
+import { detectGameCorePolicy, applyGameCorePolicy } from './gameCorePolicy';
+import { getPolicyGame, gamePolicyKey } from './gamePolicyTarget';
 import { fs, powerLifecycle } from './api';
-import { ensureGlobalFrameRates, frameRatePair, dedicatedFrameRatePair, dedicatedFrameRateRecord, frameRateSetting, type FrameRatePair } from './frameRateLimits';
-import { getSettingsGeneration, assertSettingsGeneration, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
+import { ensureGlobalFrameRates, applyIndependentFrameRates, publishFrameRatesChanged, frameRatePair, dedicatedFrameRatePair, dedicatedFrameRateRecord, frameRateSetting, type FrameRatePair } from './frameRateLimits';
+import { getSettingsGeneration, assertSettingsGeneration, updateSettings, mergeSettings, readSettingsSection, replaceSettingsSection, saveSettingsSection } from './settingsRepository';
 import { detectPolicyGame, isPolicyTargetCurrent } from './gamePolicyTarget';
-import { detectGame } from './gamedetect';
+import { validateGameTarget, isCurrentGameTarget } from './gamedetect';
 import {
-  detectPowerMode,
+  detectPowerMode, detectPerformanceTemplate,
+  detectPowerModeReliable, applyManualPowerParams, getTdpHardwareMinimum, getTdpHardwareMaximum, getTdpExecutionCapability, getActiveScheme, PW, setActiveScheme,
   ensureRememberedYemanSchemeActive,
-  applyCpuProfilePowerParams,
   setCoreModeAc,
   setCoreModeDc,
   detectCoreArchitecture,
@@ -14,26 +20,26 @@ import {
   setTdp,
   setRtssLimit,
   readRtssLimit,
+  switchScheme,
 } from './yeman';
 import { loadCpuProfiles } from './cpuProfiles';
 import {
-  applyFloatSettings,
+  enableContinuousFloat,
   disableFloat,
-  enableFloat,
   getFloatInfo,
-  notifyTdpMaxChanged,
-  setFloatTarget,
   type FloatProfile,
   type TdpFloatStrategy,
   cancelPendingRtssSync,
   setFloatRtssLinked,
+  updateContinuousFloatCoreRules,
+  holdContinuousFloatAfterCoreChange,
 } from './autofloat';
 
 export type PowerSide = 'ac' | 'dc';
 export type ScheduleMode = 'eco' | 'balanced' | 'medium' | 'performance' | 'elite' | 'extreme';
 export type AutoScheduleMode = ScheduleMode;
 export type CpuPreset = 'balanced' | 'turbo' | 'elite' | 'extreme';
-export type CoreMode = 'big' | 'only-big' | 'only-small';
+export type CoreMode = 'big' | 'only-big' | 'small' | 'only-small';
 
 export const CORE_MODE_OPTIONS = [
   { value: 'big' as CoreMode, label: '大核为主(推荐)', sub: 'Windows 混合架构' },
@@ -42,6 +48,7 @@ export const CORE_MODE_OPTIONS = [
 ];
 
 export interface ScheduleProfile {
+  controls?: ContinuousSideControls;
   cpuPreset: CpuPreset;
   coreMode: CoreMode;
   tdpMax: number;
@@ -52,9 +59,12 @@ export interface ScheduleProfile {
 }
 
 export interface PerformanceScheduleConfig {
+  controls?: ContinuousControls;
   version: 2;
   configured: boolean;
   enabled: boolean;
+  /** Explicit global OFF includes dedicated, AC/DC, boot and wake recovery. Presets remain stored. */
+  suspended?: boolean;
   active: Record<PowerSide, ScheduleMode>;
   profiles: Record<PowerSide, Record<ScheduleMode, ScheduleProfile>>;
 }
@@ -90,7 +100,6 @@ const AUTO_MODES: ScheduleMode[] = [
   'extreme',
 ];
 const MODE_ORDER = AUTO_MODES;
-let gamepadModeCooldownUntil = 0;
 
 function tdpErrorText(error: unknown): string {
   if (error instanceof Error) return error.message;
@@ -270,7 +279,7 @@ function normalizeProfile(value: unknown, fallback: ScheduleProfile): SchedulePr
       ? raw.cpuPreset
       : fallback.cpuPreset;
   const coreMode: CoreMode =
-    raw.coreMode === 'big' || raw.coreMode === 'only-big' || raw.coreMode === 'only-small'
+    raw.coreMode === 'big' || raw.coreMode === 'only-big' || raw.coreMode === 'small' || raw.coreMode === 'only-small'
       ? raw.coreMode
       : fallback.coreMode;
   const cpuTarget: FloatProfile =
@@ -283,7 +292,7 @@ function normalizeProfile(value: unknown, fallback: ScheduleProfile): SchedulePr
     raw.tdpStrategy === 'large' || raw.tdpStrategy === 'aggressive'
       ? raw.tdpStrategy
       : fallback.tdpStrategy;
-  const tdpMax = Math.max(2, Math.min(200, Math.round(Number(raw.tdpMax) || fallback.tdpMax)));
+  const tdpMax = Math.max(2, Math.min(150, Math.round(Number(raw.tdpMax) || fallback.tdpMax)));
   const fpsRaw = Math.round((Number.isFinite(Number(raw.fpsTarget)) ? Number(raw.fpsTarget) : fallback.fpsTarget) / 5) * 5;
   // 0 = 不锁帧（真实数值 0），其余限制在 30~300
   const fpsTarget = fpsRaw <= 0 ? 0 : Math.max(30, Math.min(300, fpsRaw));
@@ -296,6 +305,8 @@ function normalizeConfig(value: unknown): PerformanceScheduleConfig {
   const activeRaw = raw.active && typeof raw.active === 'object' ? raw.active : {} as Record<PowerSide, ScheduleMode>;
   const profilesRaw = raw.profiles && typeof raw.profiles === 'object' ? raw.profiles : {} as PerformanceScheduleConfig['profiles'];
   const next = defaultPerformanceScheduleConfig();
+  if (raw.controls) next.controls = normalizeContinuousControls(raw.controls);
+  next.suspended = raw.suspended === true;
   next.configured = raw.configured === true;
   next.enabled = raw.enabled === true || (raw.enabled === undefined && raw.configured === true);
   next.active.ac = isMode(activeRaw.ac) ? activeRaw.ac : fallback.active.ac;
@@ -347,7 +358,11 @@ export function onPerformanceScheduleChanged(
 }
 
 export async function loadPerformanceSchedule(): Promise<PerformanceScheduleConfig> {
-  configCache = normalizeConfig(await readSettingsSection('performanceSchedule'));
+  const raw = await readSettingsSection<any>('performanceSchedule');
+  const hasLegacyProfiles = ['ac','dc'].some(side => raw.profiles?.[side] && Object.keys(raw.profiles[side]).length > 0);
+  const template = !raw.controls && !hasLegacyProfiles && typeof detectPerformanceTemplate === 'function' ? await detectPerformanceTemplate() : 'portable';
+  configCache = normalizeConfig(raw);
+  if (!raw.controls && !hasLegacyProfiles) configCache.controls = {version:1,ac:defaultContinuousBank('ac',template),dc:defaultContinuousBank('dc',template)};
   return structuredClone(configCache);
 }
 
@@ -361,30 +376,14 @@ export async function savePerformanceSchedule(config: PerformanceScheduleConfig)
   await queueScheduleWrite(config);
 }
 
-async function applyCpuPresetBaseline(side: PowerSide, preset: CpuPreset): Promise<void> {
-  assertScheduleOpCurrent();
-  const cpuProfiles = await loadCpuProfiles();
-  assertScheduleOpCurrent();
-  await applyCpuProfilePowerParams(cpuProfiles.profiles[preset], side);
-}
-
-async function applyCoreModeIfHybrid(side: PowerSide, mode: CoreMode): Promise<boolean> {
-  assertScheduleOpCurrent();
-  const architecture = await detectCoreArchitecture();
-  // Unknown/uniform CPUs are read-only no-op: never write hybrid-only values
-  // merely because a powercfg subgroup happens to exist.
-  if (!architecture?.heterogeneous) return false;
-  assertScheduleOpCurrent();
-  if (side === 'ac') await setCoreModeAc(mode);
-  else await setCoreModeDc(mode);
-  return true;
-}
-
-// 全局操作串行化：所有调度入口（切档/纯手动/恢复/电源事件）共用此队列，
-// 避免并发写配置/硬件。带 generation 令牌，进入手动模式时使在途切档请求立刻短路。
+// Global scheduling writes share one queue. A newer request invalidates an
+// in-flight legacy adapter before its next hardware commit.
 let scheduleOpQueue: Promise<void> = Promise.resolve();
 let scheduleOpGen = 0;
 let runningScheduleOpGen = 0;
+let scheduleSuspended = false;
+let activeCoreRule: { key: string; update(bank: ContinuousSideControls): Promise<void> } | null = null;
+const coreOwnerKey = (side: PowerSide, pid: number, birth: string, generation: number) => JSON.stringify([side,pid,birth,generation]);
 
 const POWER_TRANSITION_WRITE_BLOCKED = /hardware writes (?:are|were) blocked (?:during|before) power transition/i;
 const POWER_GATE_RETRY_DELAY_MS = 250;
@@ -395,9 +394,8 @@ function isPowerTransitionWriteBlocked(error: unknown): boolean {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return POWER_TRANSITION_WRITE_BLOCKED.test(message);
 }
-
 async function waitForPowerWritesReady(): Promise<boolean> {
-  for (let attempt = 0; attempt < POWER_GATE_RETRY_PROBES; attempt++) {
+  for (let attempt = 0; attempt < POWER_GATE_RETRY_PROBES; attempt += 1) {
     const state = await powerLifecycle.get(POWER_LIFECYCLE_QUERY_TIMEOUT_MS).catch(() => null);
     if (state?.phase === 'ready' && state.hardwareWritesAllowed) return true;
     if (attempt + 1 < POWER_GATE_RETRY_PROBES) {
@@ -406,19 +404,11 @@ async function waitForPowerWritesReady(): Promise<boolean> {
   }
   return false;
 }
-
-async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promise<T> {
-  // Every new scheduling request supersedes work that has not reached its
-  // next commit point. `enabled` remains in the signature for call-site
-  // compatibility; manual mode still uses the same invalidation path.
-  void enabled;
+async function withScheduleOp<T>(_enabled: boolean, fn: () => Promise<T>): Promise<T> {
   const gen = ++scheduleOpGen;
   let resolveNext: (() => void) | null = null;
-  const ticket = new Promise<void>((r) => { resolveNext = r; });
+  const ticket = new Promise<void>((resolve) => { resolveNext = resolve; });
   const prev = scheduleOpQueue;
-  // 队列链始终存活：前一个操作失败（fn 抛异常）时 catch 吞掉该次失败，
-  // 保证后续操作不会被永久阻塞（修复：单次异常打挂整个调度系统 —— 2026-08-05）。
-  // fn 本身的错误仍会向调用方抛出（见下方 return await fn()），仅队列不断链。
   scheduleOpQueue = scheduleOpQueue.catch(() => {}).then(() => ticket);
   await prev;
   try {
@@ -427,7 +417,6 @@ async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promis
     try {
       return await fn();
     } catch (error) {
-      // Retry only after native confirms that its sleep/resume write gate is open.
       if (!isPowerTransitionWriteBlocked(error) || !(await waitForPowerWritesReady())) throw error;
       if (gen !== scheduleOpGen) throw new SkipApplyError();
       return await fn();
@@ -437,116 +426,44 @@ async function withScheduleOp<T>(enabled: boolean, fn: () => Promise<T>): Promis
     resolveNext!();
   }
 }
-
+export function isPerformanceScheduleBusy(): boolean { return runningScheduleOpGen !== 0; }
 function assertScheduleOpCurrent(): void {
-  if (!runningScheduleOpGen || runningScheduleOpGen !== scheduleOpGen) {
-    throw new SkipApplyError();
-  }
+  if (!runningScheduleOpGen || runningScheduleOpGen !== scheduleOpGen) throw new SkipApplyError();
 }
-
 export class SkipApplyError extends Error {
   constructor() { super('outdated'); }
 }
 
-/* legacy helper retained for compatibility history
-async function ensureYemanSchemeActive(): Promise<void> {
-  return ensureRememberedYemanSchemeActive();
-  // legacy implementation retained below only as source context
-  await ensureYemanScheme();
-  if (await getActiveScheme() === PW.YEMAN) return;
-  await setActiveScheme(PW.YEMAN);
-  if (await getActiveScheme() !== PW.YEMAN) {
-    throw new Error('切换野蛮系统电源后仍未生效');
-  }
-}
-
-*/
+/**
+ * Compatibility adapter for old callers. The old six-tier implementation was
+ * removed from the write path; callers are translated to the canonical
+ * continuous bank and use the same owner/queue/checkpoint as the new panel.
+ */
 export async function applyPerformanceSchedule(
   side: PowerSide,
   mode: ScheduleMode,
   config?: PerformanceScheduleConfig,
 ): Promise<boolean> {
   return withScheduleOp(true, async () => {
-    return applyPerformanceScheduleUnsafe(side, mode, config);
+    const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
+    const migrated = current.controls ? normalizeContinuousControls(current.controls) :
+      continuousControlsFromSchedule({ ...current, active: { ...current.active, [side]: mode } }, await loadCpuProfiles());
+    // The canonical apply path checkpoints the persisted owner before every
+    // hardware write. Persist the migrated continuous bank first so this
+    // compatibility adapter cannot be rejected as an unconfigured global
+    // request or briefly write hardware from a bank the runtime cannot reload.
+    const next = {
+      ...current,
+      configured: true,
+      enabled: true,
+      suspended: false,
+      active: { ...current.active, [side]: mode },
+      controls: migrated,
+    };
+    await savePerformanceSchedule(next);
+    scheduleSuspended = false;
+    return applyContinuousBankUnsafe(side, migrated[side], undefined, await ensureGlobalFrameRates());
   });
-}
-
-async function applyPerformanceScheduleUnsafe(
-  side: PowerSide,
-  mode: ScheduleMode,
-  config?: PerformanceScheduleConfig,
-): Promise<boolean> {
-  const current = config ? normalizeConfig(config) : await loadPerformanceSchedule();
-  // Automatic scheduling owns YeMan power scheme. Restore that ownership
-  // before writing CPU/TDP values so they always land on the active scheme.
-  assertScheduleOpCurrent();
-  await ensureRememberedYemanSchemeActive();
-  current.configured = true;
-  current.enabled = true;
-  assertScheduleOpCurrent();
-  current.active[side] = mode;
-  const actualSide = await detectPowerMode();
-  assertScheduleOpCurrent();
-  if (actualSide !== side) {
-    assertScheduleOpCurrent();
-    await savePerformanceSchedule(current);
-    return false;
-  }
-
-  const profile = current.profiles[side][mode];
-  const independent = (await ensureGlobalFrameRates())[side];
-  const optimizationTarget = independent.fps || independent.lastFps;
-  setFloatRtssLinked(false);
-  // CPU 控制轴互斥：cpuTarget!=='none' 时由「CPU 浮动值」接管 autofloat 的 CPU 主频降低策略；
-  // cpuTarget==='none' 时由「CPU 挡位」(cpuPreset) 直接设置硬件 CPU 档位。
-  // 两路不得叠加：cpuTarget!=='none' 不调用 runResetProfile，避免 preset 基线被压制层覆盖。
-  const cpuTarget: FloatProfile = profile.cpuTarget;
-
-  assertScheduleOpCurrent();
-  if ((await detectPowerMode()) !== side) return false;
-
-  if (getFloatInfo().enabled) {
-    // 浮动调度已运行：保留守护、daemon、HWiNFO 与 RTSS 原始快照，只增量更新当前目标。
-    // 热切档统一先下发 TDP，再重新下发 CPU：cpuTarget==='none' 时重设 cpuPreset；
-    // 否则由 autofloat 用 CPU 浮动值接管内核频率。
-    // 写硬件前二次校验电源侧：detectPowerMode 与下发之间若插拔电源，直接中止，
-    // 避免 AC 配置被写到 DC（或反之）造成电池下跑极端档（2026-08-05 修复 TOCTOU）。
-    if ((await detectPowerMode()) !== side) return false;
-    assertScheduleOpCurrent();
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-      await setTdp(side, profile.tdpMax, { apply: false, save: true });
-    });
-    assertScheduleOpCurrent();
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-      await notifyTdpMaxChanged(profile.tdpMax);
-    });
-    assertScheduleOpCurrent();
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-    assertScheduleOpCurrent();
-    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
-    assertScheduleOpCurrent();
-    await applyCoreModeIfHybrid(side, profile.coreMode);
-    assertScheduleOpCurrent();
-    await savePerformanceSchedule(current);
-    return true;
-  }
-
-  // 首次开启走完整初始化。
-  if ((await detectPowerMode()) !== side) return false;
-  // 新预设统一按 TDP 优先：先写入并应用当前侧 TDP，再套用 CPU 浮动/CPU 挡位。
-  assertScheduleOpCurrent();
-  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-    await setTdp(side, profile.tdpMax, { apply: true, save: true });
-  });
-  assertScheduleOpCurrent();
-  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-  assertScheduleOpCurrent();
-  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
-  assertScheduleOpCurrent();
-  await applyCoreModeIfHybrid(side, profile.coreMode);
-  assertScheduleOpCurrent();
-  await savePerformanceSchedule(current);
-  return true;
 }
 
 export type PerformanceScheduleOwnership = 'none' | 'manual' | 'auto';
@@ -554,6 +471,8 @@ export type PerformanceScheduleOwnership = 'none' | 'manual' | 'auto';
 export interface PerformanceScheduleRestoreOptions {
   /** Only inspect/apply an active game-custom owner; never take over global manual mode. */
   dedicatedOnly?: boolean;
+  /** Passive lifecycle/game refreshes must not replay saved manual CPU/TDP values. */
+  automaticOnly?: boolean;
 }
 
 export async function disablePerformanceSchedule(config?: PerformanceScheduleConfig): Promise<void> {
@@ -569,165 +488,146 @@ export async function disablePerformanceSchedule(config?: PerformanceScheduleCon
   });
 }
 
+/** An explicit user action. The simulator may request this, but draft/reset never calls it. */
+export async function stopPerformanceScheduleAndUseWindowsBalanced(): Promise<void> {
+  // Close admission immediately, before waiting behind any older operation.
+  scheduleSuspended = true;
+  activeCoreRule = null;
+  return withScheduleOp(false, async () => {
+    await disableFloat();
+    assertScheduleOpCurrent();
+    const config = await loadPerformanceSchedule();
+    await savePerformanceSchedule({ ...config, suspended: true, enabled: false });
+    assertScheduleOpCurrent();
+    await switchScheme('bal');
+    assertScheduleOpCurrent();
+    if ((await getActiveScheme()).toLowerCase() !== PW.WIN_BAL.toLowerCase())
+      throw new Error('调度已关闭，但 Windows 平衡尚未确认，请重试切换');
+  });
+}
+
 export async function getPerformanceScheduleOwnership(): Promise<PerformanceScheduleOwnership> {
-  const config = await loadPerformanceSchedule();
+  const [config, custom, side, game] = await Promise.all([
+    loadPerformanceSchedule(), loadGameCustomConfig(), detectPowerModeReliable(), detectPolicyGame(),
+  ]);
+  if (!side || scheduleSuspended || config.suspended) return 'none';
+  const entry = game ? custom.entries[gamePolicyKey(game)] : undefined;
+  if (entry && entry.enabled !== false) return continuousControlsForEntry(entry, config)[side].mode;
   if (!config.configured) return 'none';
-  return config.enabled ? 'auto' : 'manual';
+  if (!config.enabled) return 'manual';
+  return continuousControlsFromSchedule(config)[side].mode;
 }
 
 export async function restorePerformanceScheduleIfConfigured(
   expectedSide?: PowerSide,
   options: PerformanceScheduleRestoreOptions = {},
 ): Promise<PerformanceScheduleOwnership> {
+  if (scheduleSuspended) return 'none';
   return withScheduleOp(true, async () => {
-    const config = await loadPerformanceSchedule();
-
-    // 系统级恢复必须独立于性能调度页是否激活：启动、唤醒、AC/DC 切换时，
-    // 当前游戏存在自定义档位则优先恢复自定义；否则才应用普通自动档位。
-    // 专属配置是独立的 owner，即使全局性能调度已经切到手动，也不能被这里
-    // 的“关闭自动优化”提前返回吞掉。
+    const side = await detectPowerModeReliable();
+    if (!side || (expectedSide && side !== expectedSide)) throw new SkipApplyError();
+    const master = await loadPerformanceSchedule();
+    if (scheduleSuspended || master.suspended) return 'none';
     const game = await detectPolicyGame();
-    if (game) {
-      const custom = await loadGameCustomConfig();
-      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
-      const key = (fromPath || game.name || '').toLowerCase().trim();
-      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry && entry.enabled !== false) {
-        // Dedicated profiles are allowed to take ownership independently of
-        // the global scheduler, so make sure writes land on the remembered
-        // YeMan scheme even when the user had left the global page in manual.
-        assertScheduleOpCurrent();
-        await ensureRememberedYemanSchemeActive();
-        assertScheduleOpCurrent();
-        const side = await detectPowerMode();
-        if (expectedSide && side !== expectedSide) throw new SkipApplyError();
-        const resolved = resolveGameCustomProfiles(entry, config);
-        const applied = await applyGameCustomProfilesUnsafe(side, resolved.ac, resolved.dc, {
-          pid: game.pid,
-          processCreated: game.processCreated,
-          policyTarget: true,
-        }, dedicatedFrameRatePair(custom.rtss[key.endsWith('.exe') ? key : `${key}.exe`], await ensureGlobalFrameRates()));
-        if (!applied) throw new SkipApplyError();
-        // “auto” 表示当前硬件已经由性能策略 owner（这里是专属 owner）接管，
-        // 调用方不应再紧接着执行普通 CPU 自动档覆盖它。
-        return 'auto';
+    const custom = await loadGameCustomConfig();
+    const key = game ? gamePolicyKey(game) : '';
+    const entry = key ? custom.entries[key] : undefined;
+    if (entry && entry.enabled !== false) {
+      const snapshot = await getContinuousPerformanceSnapshot('dedicated');
+      if (!snapshot.bank) return 'none';
+      if (options.automaticOnly && snapshot.bank.mode === 'manual') {
+        if (getFloatInfo().enabled) await disableFloat();
+        return 'manual';
       }
+      const applied = await applyContinuousBankUnsafe(side, snapshot.bank, {
+        pid: game!.pid, processCreated: game!.processCreated, policyTarget: true,
+      }, snapshot.frameRates);
+      if (!applied) throw new SkipApplyError();
+      return snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
     }
-
+    // When Windows is currently owned by a non-YMCC scheme, callers may ask
+    // for dedicated-only recovery. Never let the global bank take over that
+    // scheme; the global YMCC default resumes only after the scheme owner is
+    // confirmed as YMCC again.
+    if (options.dedicatedOnly === true) return 'none';
+    const config = await loadPerformanceSchedule();
     if (!config.configured) return 'none';
-
-    if (options.dedicatedOnly) {
-      // The caller has already reconciled a manually-owned Windows scheme. If
-      // there is no dedicated entry, leave that owner untouched; the caller
-      // may continue with the normal manual CPU recovery path.
-      return 'manual';
-    }
-
-    if (!config.enabled) {
-      assertScheduleOpCurrent();
+    const snapshot = await getContinuousPerformanceSnapshot('global');
+    if (!snapshot.bank) return 'none';
+    if (options.automaticOnly && (!config.enabled || snapshot.bank.mode === 'manual')) {
+      // Release a previous automatic owner once, without restoring its CPU/TDP snapshot.
       if (getFloatInfo().enabled) await disableFloat();
-      assertScheduleOpCurrent();
       return 'manual';
     }
-
-    const side = await detectPowerMode();
-    if (expectedSide && side !== expectedSide) throw new SkipApplyError();
-    const mode = config.active[side];
-    await applyPerformanceScheduleUnsafe(side, mode, config);
-    return 'auto';
+    const applied = await applyContinuousBankUnsafe(side, snapshot.bank, undefined, snapshot.frameRates);
+    if (!applied) throw new SkipApplyError();
+    return snapshot.bank.mode === 'auto' ? 'auto' : 'manual';
   });
 }
 
 export async function applyPerformanceScheduleForCurrentPower(): Promise<boolean> {
-  return withScheduleOp(true, async () => {
-    const config = await loadPerformanceSchedule();
-    const side = await detectPowerMode();
-    return applyPerformanceScheduleUnsafe(side, config.active[side], config);
-  });
+  try {
+    const owner = await restorePerformanceScheduleIfConfigured(undefined, { automaticOnly: true });
+    return owner === 'auto';
+  } catch (error) {
+    if (error instanceof SkipApplyError) return false;
+    throw error;
+  }
 }
 
-// Startup needs one delayed hybrid-core refresh because a boot task/OEM policy
-// can rewrite these three power-plan values after the first normal restore.
-// This path is automatic-only and does not reapply TDP, CPU float, FPS, or
-// manual settings.
 export async function refreshPerformanceScheduleCoreMode(): Promise<boolean> {
+  if (scheduleSuspended) return false;
   return withScheduleOp(true, async () => {
+    const snapshot = await getContinuousPerformanceSnapshot();
+    if (scheduleSuspended || (await loadPerformanceSchedule()).suspended || !snapshot.side || !snapshot.bank || !snapshot.configured || snapshot.bank.mode !== 'auto') return false;
+    const architecture = await detectCoreArchitecture();
+    if (!architecture?.heterogeneous) return false;
+    const lifecycle = await powerLifecycle.get();
+    if (lifecycle.phase !== 'ready' || !lifecycle.hardwareWritesAllowed) return false;
+    if ((await getActiveScheme()).toLowerCase() !== PW.YEMAN.toLowerCase()) return false;
+    const latest = await getContinuousPerformanceSnapshot();
     assertScheduleOpCurrent();
-    const config = await loadPerformanceSchedule();
-    if (!config.configured || !config.enabled) return false;
-    const game = await detectPolicyGame();
-    if (game) {
-      const custom = await loadGameCustomConfig();
-      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
-      const key = (fromPath || game.name || '').toLowerCase().trim();
-      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry && entry.enabled !== false) {
-        const side = await detectPowerMode();
-        const current = await detectPolicyGame();
-        if (!current || current.pid !== game.pid || current.processCreated !== game.processCreated) return false;
-        const resolved = resolveGameCustomProfiles(entry, config);
-        return applyCoreModeIfHybrid(side, resolved[side].coreMode);
-      }
-    }
-    const side = await detectPowerMode();
+    if (continuousIdentityKey(snapshot.identity) !== continuousIdentityKey(latest.identity)) return false;
+    const float = getFloatInfo();
+    const watts = float.enabled && float.tdpApplied > 0 ? float.tdpApplied : snapshot.bank.tdp;
+    const mode = toPowerCoreMode(continuousCoreAt(snapshot.bank, watts));
+    if (snapshot.side === 'ac') await setCoreModeAc(mode); else await setCoreModeDc(mode);
+    // The delayed boot check refreshes core policy only. Reapplying the whole
+    // bank here resets the live float experiment and replays TDP/CPU writes.
     assertScheduleOpCurrent();
-    return applyCoreModeIfHybrid(side, config.profiles[side][config.active[side]].coreMode);
-  });
+    if ((await getActiveScheme()).toLowerCase() === PW.YEMAN.toLowerCase()) await setActiveScheme(PW.YEMAN);
+    return true;
+  }).catch(() => false);
 }
 
-// 手柄 Start+上下：自动模式在当前 AC/DC 侧循环已编辑的标准档位。
-// 这里复用正常档位应用链路，确保切换会真正下发 CPU/TDP/浮动设置并落盘，
-// 不走“重制预设”或只改界面状态的旁路。
-export async function cyclePerformanceScheduleMode(direction: 1 | -1): Promise<{
-  applied: boolean;
-  side: PowerSide;
-  mode?: ScheduleMode;
-  blocked?: 'disabled' | 'custom' | 'cooldown' | 'boundary';
+/** Controller repeats use the panel/mirror CAS path. Each admitted delta is saved
+ * in the current bank; the old mode-switch cooldown must not drop held-button steps. */
+export async function adjustContinuousPerformanceTdp(delta: number): Promise<{
+  applied: boolean; side: PowerSide; tdp?: number; blocked?: 'disabled' | 'cooldown' | 'boundary';
 }> {
-  return withScheduleOp(true, async () => {
-    const config = await loadPerformanceSchedule();
-    const side = await detectPowerMode();
-    if (!config.configured || !config.enabled) return { applied: false, side, blocked: 'disabled' };
-    const game = await detectPolicyGame();
-    if (game) {
-      const custom = await loadGameCustomConfig();
-      const fromPath = game.path ? game.path.split(/[\\/]/).pop() : '';
-      const key = (fromPath || game.name || '').toLowerCase().trim();
-      const entry = key ? custom.entries[key.endsWith('.exe') ? key : `${key}.exe`] : undefined;
-      if (entry && entry.enabled !== false) return { applied: false, side, blocked: 'custom' };
-    }
-    if (Date.now() < gamepadModeCooldownUntil) {
-      return { applied: false, side, mode: config.active[side], blocked: 'cooldown' };
-    }
-    const current = MODE_ORDER.indexOf(config.active[side]);
-    const nextIndex = Math.max(0, Math.min(MODE_ORDER.length - 1, current + direction));
-    if (nextIndex === current) {
-      return { applied: false, side, mode: config.active[side], blocked: 'boundary' };
-    }
-    const next = MODE_ORDER[nextIndex];
-    const applied = await applyPerformanceScheduleUnsafe(side, next, config);
-    if (applied) gamepadModeCooldownUntil = Date.now() + 3000;
-    return { applied, side, mode: next };
-  });
+  if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 20) throw new Error('TDP 调节步长无效');
+  // Do not wrap this in withScheduleOp: updateContinuousPerformanceControls
+  // owns that queue. Nesting an operation here waits on its own unreleased ticket.
+  const snapshot = await getContinuousPerformanceSnapshot('effective');
+  const side = snapshot.side;
+  if (!side) throw new SkipApplyError();
+  if (!snapshot.bank) return { applied: false, side, blocked: 'disabled' };
+  const upper = Math.min(snapshot.hardwareMaximum, snapshot.bank.tdpCeiling);
+  const next = Math.max(snapshot.hardwareMinimum, Math.min(upper, snapshot.bank.tdp + delta));
+  if (next === snapshot.bank.tdp) return { applied: false, side, blocked: 'boundary' };
+  const updated = await updateContinuousPerformanceControls(snapshot.identity, { tdp: next });
+  return { applied: updated.bank?.tdp === next, side, tdp: updated.bank?.tdp };
 }
-
-// ──────────────────────────────────────────────────────────────────────────
-// 自定义游戏模式：按识别到的游戏 exe 名存储一套专属 AC/DC 性能档位（覆盖自动模式）。
-// ──────────────────────────────────────────────────────────────────────────
 
 export interface GameCustomProfile {
+  controls?: ContinuousControls;
   displayName: string;
   // Persisted separately from the profile definition: saved does not mean active.
   enabled: boolean;
-  // ac/dc 保留用于兼容旧版快照；新配置只持久化挡位，应用时从自动优化 profiles 实时解析。
+  // ac/dc 保留用于一次性读取旧配置；正式运行只使用 controls。
   ac: ScheduleProfile;
   dc: ScheduleProfile;
-  acMode?: ScheduleMode;
-  dcMode?: ScheduleMode;
-  // Per-game CPU policy.  These fields are appended for compatibility with
-  // existing entries and are intentionally independent from AC/DC profiles.
-  corePolicyEnabled?: boolean;
-  corePolicyMode?: 'default' | 'only-big' | 'big-small' | 'only-small' | 'small-super-small' | 'all';
+  smtIndependent?: boolean;
   hyperThreadPolicyEnabled?: boolean;
   hyperThreadPolicy?: 'default' | 'on' | 'off';
   // 2026-09-29 用户裁决：顶部专属菜单可覆盖全局手柄人格与陀螺仪开关。
@@ -739,6 +639,8 @@ export interface GameCustomProfile {
   gyroOverride?: 'follow' | 'off' | 'on' | 'fps' | 'racing' | 'custom' | 'steam';
   // Remember the original preset while gyroOverride is off; same EXE record, no sidebar store.
   gyroPreset?: 'fps' | 'racing' | 'custom' | 'steam';
+  /** Per-game input tuning; applied as an overlay, never copied into the base. */
+  inputOverrides?: { outputTarget?: Record<string, unknown>; gyroMotion?: Record<string, any> };
 }
 
 export interface GameCustomRtssProfile {
@@ -783,11 +685,7 @@ function defaultGameCustomConfig(): GameCustomConfig {
 
 function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCustomProfile {
   const r = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
-  const corePolicyModes = ['default', 'only-big', 'big-small', 'only-small', 'small-super-small', 'all'] as const;
   const hyperThreadModes = ['default', 'on', 'off'] as const;
-  const corePolicyMode = corePolicyModes.includes(r.corePolicyMode as typeof corePolicyModes[number])
-    ? r.corePolicyMode as typeof corePolicyModes[number]
-    : 'default';
   const hyperThreadPolicy = hyperThreadModes.includes(r.hyperThreadPolicy as typeof hyperThreadModes[number])
     ? r.hyperThreadPolicy as typeof hyperThreadModes[number]
     : 'default';
@@ -795,23 +693,31 @@ function normalizeCustomProfile(raw: unknown, fallback: ScheduleProfile): GameCu
   const gyroOverrides = ['follow', 'on', 'off', 'fps', 'racing', 'custom', 'steam'] as const;
   const padPersona = padPersonas.includes(r.padPersona as typeof padPersonas[number])
     ? r.padPersona as typeof padPersonas[number]
-    : 'follow';
+    : migrateControllerPersona(r.padPersona) !== 'disabled' ? migrateControllerPersona(r.padPersona) : 'follow';
   const gyroOverride = gyroOverrides.includes(r.gyroOverride as typeof gyroOverrides[number])
     ? r.gyroOverride as typeof gyroOverrides[number]
     : 'follow';
+  const inputOverrides = validInputOverrides(r.inputOverrides, true) ? structuredClone(r.inputOverrides) : undefined;
+  const savedTarget = inputOverrides?.outputTarget;
+  if (savedTarget && 'persona' in savedTarget) {
+    const persona = migrateControllerPersona(savedTarget.persona);
+    if (persona !== savedTarget.persona) {
+      savedTarget.persona = persona; savedTarget.descriptorHash = null; savedTarget.closure = 'UNENCLOSED';
+    }
+  }
   return {
+    ...r, // Preserve extension fields while normalizing all owned fields below.
+    ...(r.controls ? { controls: normalizeContinuousControls(r.controls) } : {}),
     displayName: typeof r.displayName === 'string' ? r.displayName : '',
     // Legacy entries were implicitly active; only an explicit false disables them.
     enabled: r.enabled !== false,
     ac: normalizeProfile(r.ac, fallback),
     dc: normalizeProfile(r.dc, fallback),
-    acMode: isMode(r.acMode) ? r.acMode : undefined,
-    dcMode: isMode(r.dcMode) ? r.dcMode : undefined,
-    corePolicyEnabled: r.corePolicyEnabled === true,
-    corePolicyMode,
+    smtIndependent: r.smtIndependent === true,
     hyperThreadPolicyEnabled: r.hyperThreadPolicyEnabled === true,
     hyperThreadPolicy,
     padPersona,
+    inputOverrides,
     gyroOverride,
     gyroPreset: ['fps','racing','custom','steam'].includes(r.gyroOverride as string) ? r.gyroOverride as GameCustomProfile['gyroPreset']
       : ['fps','racing','custom','steam'].includes(r.gyroPreset as string) ? r.gyroPreset as GameCustomProfile['gyroPreset'] : undefined,
@@ -857,10 +763,10 @@ function normalizeGameCustom(value: unknown): GameCustomConfig {
   const restoreRaw = raw.inputRestore && typeof raw.inputRestore === 'object'
     ? (raw.inputRestore as Record<string, unknown>)
     : null;
-  const restorePersonas = ['disabled', 'dualshock4', 'xbox360', 'steamdeck', 'dualsense', 'elite', 'dualsense-edge'];
-  const inputRestore: GameInputRestoreSnapshot | undefined = restoreRaw && restorePersonas.includes(String(restoreRaw.persona))
+  const restoredPersona = migrateControllerPersona(restoreRaw?.persona);
+  const inputRestore: GameInputRestoreSnapshot | undefined = restoreRaw && (isControllerPersona(restoreRaw.persona) || restoredPersona !== 'disabled')
     ? {
-        persona: String(restoreRaw.persona),
+        persona: restoredPersona,
         buttonMappingEnabled: restoreRaw.buttonMappingEnabled === true,
         gyroEnabled: restoreRaw.gyroEnabled === true,
         motionEnabled: restoreRaw.motionEnabled === true,
@@ -1007,6 +913,96 @@ export async function saveGameCustomConfig(config: GameCustomConfig): Promise<vo
   await run;
 }
 
+export type GameCustomProfileTarget = Pick<ContinuousPerformanceIdentity, 'exe' | 'pid' | 'processCreated' | 'generation'>;
+export type GameCustomProfileFieldPatch = Partial<Pick<GameCustomProfile, 'padPersona' | 'gyroOverride' | 'gyroPreset' | 'enabled' | 'inputOverrides'>>;
+function validInputOverrides(value: unknown, saved = false): value is NonNullable<GameCustomProfile['inputOverrides']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+  const record = value as Record<string, unknown>;
+  return Object.keys(record).every(key => ['outputTarget', 'gyroMotion'].includes(key)) &&
+    Object.values(record).every(section => !!section && typeof section === 'object' && !Array.isArray(section)) &&
+    (saved || !record.outputTarget || !('persona' in (record.outputTarget as Record<string, unknown>)) ||
+      isControllerPersona((record.outputTarget as Record<string, unknown>).persona));
+}
+
+/** Field-scoped writes share the file queue with performance edits and controller TDP changes. */
+export async function patchGameCustomProfile(
+  expected: GameCustomProfileTarget, patch: GameCustomProfileFieldPatch, seed?: GameCustomProfile,
+  options: { createOnly?: boolean; expectedAbsent?: boolean; expectedEnabled?: boolean; expectedInputRevision?: string } = {},
+): Promise<void> {
+  const allowed = new Set(['padPersona', 'gyroOverride', 'gyroPreset', 'enabled', 'inputOverrides']);
+  if (Object.keys(patch).some(key => !allowed.has(key))) throw new Error('专属输入编辑不能修改性能参数');
+  if (patch.inputOverrides !== undefined && !validInputOverrides(patch.inputOverrides)) throw new Error('专属输入参数格式无效');
+  if (patch.enabled !== undefined && typeof patch.enabled !== 'boolean') throw new Error('专属配置启用状态无效');
+  for (const [key, values] of Object.entries({padPersona:['follow','disabled','steamdeck','dualsense-edge','elite'],gyroOverride:['follow','on','off','fps','racing','custom','steam'],gyroPreset:['fps','racing','custom','steam']})) {
+    if (Object.prototype.hasOwnProperty.call(patch, key) && !values.includes((patch as Record<string, string>)[key])) throw new Error('专属输入参数无效');
+  }
+  const verify = () => {
+    assertSettingsGeneration(expected.generation);
+    const game = getPolicyGame();
+    if (!expected.exe || !game || gamePolicyKey(game) !== expected.exe || game.pid !== expected.pid ||
+        String(game.processCreated || '') !== expected.processCreated) throw new Error('当前游戏或配置已变化，请重新调整');
+  };
+  verify();
+  await mutateContinuousGameConfig(expected.generation, latest => {
+    verify();
+    const previous = latest.entries[expected.exe];
+    if (options.expectedAbsent && previous) throw new Error('专属配置已变化，请重新启用');
+    if (options.createOnly && previous) return;
+    if (options.expectedEnabled !== undefined && (!previous || (previous.enabled !== false) !== options.expectedEnabled))
+      throw new Error('专属配置启用状态已变化，请重新调整');
+    if (options.expectedInputRevision !== undefined && gameProfileInputRevision(previous) !== options.expectedInputRevision)
+      throw new Error('专属输入参数已变化，请重新调整');
+    const base = previous || seed;
+    if (!base) throw new Error('请先创建当前游戏的专属配置');
+    latest.entries[expected.exe] = { ...base, ...patch };
+  });
+}
+
+/** Compare only input-owned fields, allowing concurrent performance edits. */
+export function gameProfileInputRevision(profile: GameCustomProfile | undefined): string {
+  return JSON.stringify([profile?.padPersona, profile?.gyroOverride, profile?.gyroPreset, profile?.inputOverrides]);
+}
+
+/** Import both current power banks and independent FPS into one confirmed EXE record. */
+export async function importGameCustomProfile(expected: GameCustomProfileTarget, expectedRevision: string,
+  profile: GameCustomProfile, frames: FrameRatePair, checkpoint: () => void = () => {}): Promise<void> {
+  const seed = structuredClone(profile), pair = frameRatePair(frames);
+  if (!seed.controls || seed.enabled !== true) throw new Error('专属配置必须导入当前连续性能参数');
+  const verify = () => {
+    checkpoint(); assertSettingsGeneration(expected.generation);
+    const game = getPolicyGame();
+    if (!expected.exe || !game || gamePolicyKey(game) !== expected.exe || game.pid !== expected.pid ||
+        String(game.processCreated || '') !== expected.processCreated) throw new Error('当前游戏已变化，请重新设为专属');
+  };
+  verify();
+  await mutateContinuousGameConfig(expected.generation, latest => {
+    verify();
+    if (JSON.stringify([latest.entries[expected.exe] ?? null, latest.rtss[expected.exe] ?? null]) !== expectedRevision)
+      throw new Error('专属配置已变化，请重新设为专属');
+    latest.entries[expected.exe] = seed;
+    latest.rtss[expected.exe] = dedicatedFrameRateRecord(pair);
+  });
+}
+
+/** Delete one confirmed game record under the same queue as all profile writers. */
+export async function removeGameCustomProfile(expected: GameCustomProfileTarget, expectedRevision: string): Promise<void> {
+  const verify = () => {
+    assertSettingsGeneration(expected.generation);
+    const game = getPolicyGame();
+    if (!game || gamePolicyKey(game) !== expected.exe || game.pid !== expected.pid ||
+        String(game.processCreated || '') !== expected.processCreated) throw new Error('当前游戏已变化，请重新确认解除专属');
+  };
+  verify();
+  await mutateContinuousGameConfig(expected.generation, latest => {
+    verify();
+    const profile = latest.entries[expected.exe];
+    if (!profile || JSON.stringify([profile, latest.rtss[expected.exe]]) !== expectedRevision)
+      throw new Error('专属配置已变化，请重新确认解除专属');
+    delete latest.entries[expected.exe];
+    delete latest.rtss[expected.exe];
+  });
+}
+
 /** Legacy migration clears ONLY the restore field under the existing config queue. */
 export async function clearGameInputRestoreSnapshot(expected: GameInputRestoreSnapshot): Promise<void> {
   const run = gameCustomWriteQueue.then(async () => {
@@ -1031,23 +1027,17 @@ export function getCustomProfileFor(
 }
 
 /**
- * Resolve a game's dedicated AC/DC profiles from the current automatic
- * optimization configuration. New entries store only acMode/dcMode, so an
- * edit made on the automatic optimization page is used the next time the
- * game profile is applied. The snapshot fields remain a compatibility
- * fallback for entries written by older versions.
+ * Compatibility projection for older readers. Formal runtime consumers use
+ * continuousControlsForEntry; this helper never writes hardware or selects a
+ * named mode.
  */
 export function resolveGameCustomProfiles(
   entry: GameCustomProfile,
   schedule: PerformanceScheduleConfig,
 ): { ac: ScheduleProfile; dc: ScheduleProfile } {
   return {
-    ac: entry.acMode && isMode(entry.acMode)
-      ? schedule.profiles.ac[entry.acMode]
-      : entry.ac,
-    dc: entry.dcMode && isMode(entry.dcMode)
-      ? schedule.profiles.dc[entry.dcMode]
-      : entry.dc,
+    ac: { ...entry.ac, ...(entry.controls ? { controls: normalizeContinuousControls(entry.controls).ac } : {}) },
+    dc: { ...entry.dc, ...(entry.controls ? { controls: normalizeContinuousControls(entry.controls).dc } : {}) },
   };
 }
 
@@ -1056,66 +1046,6 @@ export function getCustomRtssFor(
   exeName: string,
 ): GameCustomRtssProfile | null {
   return config.rtss[exeName.toLowerCase()] ?? null;
-}
-
-async function applyGameCustomProfilesUnsafe(
-  side: PowerSide,
-  acProfile: ScheduleProfile,
-  dcProfile: ScheduleProfile,
-  expectedTarget?: PerformanceScheduleTarget,
-  frameRates?: FrameRatePair,
-): Promise<boolean> {
-  const profile = side === 'ac' ? acProfile : dcProfile;
-  const cpuTarget: FloatProfile = profile.cpuTarget;
-  const independent = (frameRates ?? await ensureGlobalFrameRates())[side];
-  const optimizationTarget = independent.fps || independent.lastFps;
-  setFloatRtssLinked(false);
-
-  const targetStillCurrent = async (): Promise<boolean> => {
-    if (!expectedTarget) return true;
-    if (expectedTarget.policyTarget) return isPolicyTargetCurrent(expectedTarget);
-    const current = await detectGame(true, expectedTarget.pid).catch(() => null);
-    return !!current && current.pid === expectedTarget.pid &&
-      current.processCreated === expectedTarget.processCreated;
-  };
-  const checkpoint = async (): Promise<boolean> => {
-    assertScheduleOpCurrent();
-    return targetStillCurrent();
-  };
-
-  if (!(await checkpoint())) return false;
-  if ((await detectPowerMode()) !== side) return false;
-
-  // 所有耗时硬件阶段前后都复核电源侧，避免插拔窗口中把旧 AC/DC 档位继续写入。
-  if ((await detectPowerMode()) !== side) return false;
-  if (getFloatInfo().enabled) {
-    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-      await setTdp(side, profile.tdpMax, { apply: false, save: true });
-    });
-    if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-    await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-      await notifyTdpMaxChanged(profile.tdpMax);
-    });
-    if (!(await checkpoint())) return false;
-    if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-    if (!(await checkpoint())) return false;
-    await applyFloatSettings(optimizationTarget, cpuTarget, profile.tdpStrategy);
-    if (!(await checkpoint())) return false;
-    await applyCoreModeIfHybrid(side, profile.coreMode);
-    return checkpoint();
-  }
-  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-  await runOptionalPerformanceScheduleTdp(side, profile.tdpMax, async () => {
-    await setTdp(side, profile.tdpMax, { apply: true, save: true });
-  });
-  if (!(await checkpoint())) return false;
-  if (cpuTarget === 'none') await applyCpuPresetBaseline(side, profile.cpuPreset);
-  if (!(await checkpoint()) || (await detectPowerMode()) !== side) return false;
-  await enableFloat(optimizationTarget, cpuTarget, profile.tdpStrategy);
-  if (!(await checkpoint())) return false;
-  await applyCoreModeIfHybrid(side, profile.coreMode);
-  return checkpoint();
 }
 
 /**
@@ -1133,7 +1063,7 @@ export async function applyGameCustomRtssOnly(
 ): Promise<{ applied: boolean; side: PowerSide; fps: number }> {
   const run = customRtssOnlyQueue.then(async () => {
     if (expectedTarget) {
-      const current = await detectGame(true, expectedTarget.pid);
+      const current = await validateGameTarget(expectedTarget);
       if (!current || current.pid !== expectedTarget.pid ||
           String(current.processCreated) !== String(expectedTarget.processCreated)) {
         return { applied: false, side: await detectPowerMode(), fps: 0 };
@@ -1146,6 +1076,7 @@ export async function applyGameCustomRtssOnly(
     const side = await detectPowerMode();
     const {effectiveFrameRates}=await import('./frameRateLimits');
     const fps=(await effectiveFrameRates()).pair[side].fps;
+    if (expectedTarget && !isCurrentGameTarget(expectedTarget)) return { applied: false, side, fps: 0 };
     await setRtssLimit(fps);
     const actual = await readRtssLimit();
     if (actual !== fps) throw new Error(`RTSS FPS 回读不一致：期望 ${fps}，实际 ${actual}`);
@@ -1155,29 +1086,36 @@ export async function applyGameCustomRtssOnly(
   return run;
 }
 // 应用自定义档位：绕开自动档位选择，直接把该游戏的 AC/DC 配置下发到当前电源侧。
+/**
+ * Compatibility adapter for the retired top-menu profile writer. The top menu
+ * now edits ContinuousPerformancePanel directly; this function remains only
+ * for old integrations and never contains a second TDP/CPU algorithm.
+ */
 export async function applyGameCustomProfiles(
   acProfile: ScheduleProfile,
   dcProfile: ScheduleProfile,
   expectedTarget?: PerformanceScheduleTarget,
   frameRates?: FrameRatePair,
 ): Promise<boolean> {
-  // This is an explicit top-menu action. It is allowed in both automatic and
-  // manual global modes; manual mode only changes hardware when the user asks
-  // to apply the dedicated game profile.
-  //
-  // AC/DC broadcasts and boot/resume reconciliation can legitimately supersede
-  // one scheduling operation while this one is between hardware writes. A
-  // dedicated profile must not surface that internal cancellation as the user
-  // visible error "outdated", so retry after the newer operation drains.
   const maxAttempts = 3;
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
     try {
       return await withScheduleOp(true, async () => {
         assertScheduleOpCurrent();
-        await ensureRememberedYemanSchemeActive();
-        assertScheduleOpCurrent();
-        const side = await detectPowerMode();
-        return applyGameCustomProfilesUnsafe(side, acProfile, dcProfile, expectedTarget, frameRates);
+        const global = await loadPerformanceSchedule();
+        const entry: GameCustomProfile = {
+          displayName: 'legacy-profile-adapter',
+          enabled: true,
+          ac: acProfile,
+          dc: dcProfile,
+        };
+        const controls = continuousControlsForEntry(entry, global);
+        if (acProfile.controls) controls.ac = normalizeContinuousBank(acProfile.controls, 'ac', controls.ac);
+        if (dcProfile.controls) controls.dc = normalizeContinuousBank(dcProfile.controls, 'dc', controls.dc);
+        const side = await detectPowerModeReliable();
+        if (!side) return false;
+        const target = expectedTarget ? { ...expectedTarget, policyTarget: expectedTarget.policyTarget ?? true } : undefined;
+        return applyContinuousBankUnsafe(side, controls[side], target, frameRates ?? await ensureGlobalFrameRates());
       });
     } catch (error) {
       if (!(error instanceof SkipApplyError) || attempt === maxAttempts - 1) throw error;
@@ -1185,4 +1123,301 @@ export async function applyGameCustomProfiles(
     }
   }
   return false;
+}
+
+// Continuous controls share the established queues, settings store and hardware paths.
+export type { ContinuousControls, ContinuousSideControls, ContinuousSidePatch, ContinuousPerformanceIdentity, ContinuousPerformanceSnapshot } from './performanceControls';
+
+export function continuousControlsFromSchedule(config: PerformanceScheduleConfig, cpuProfiles?: Awaited<ReturnType<typeof loadCpuProfiles>>): ContinuousControls {
+  if (config.controls) return normalizeContinuousControls(config.controls);
+  const result = normalizeContinuousControls(undefined);
+  if (!config.configured) return result;
+  for (const side of ['ac', 'dc'] as const) {
+    const legacy = config.profiles[side][config.active[side]], bank = result[side];
+    bank.mode = config.enabled ? 'auto' : 'manual';
+    bank.tdp = Math.min(150, legacy.tdpMax); bank.tdpCeiling = Math.min(150, Math.max(45, bank.tdp));
+    bank.auto.saving = legacy.tdpStrategy;
+    const values = cpuProfiles?.profiles[config.enabled ? legacy.cpuPreset : cpuProfiles.active];
+    if (values) {
+      const frequency = side === 'ac' ? values.acFreq : values.dcFreq;
+      bank.manual.frequencyMHz = frequency === 0 ? bank.manual.frequencyMHz : frequency;
+      bank.manual.unlimited = frequency === 0;
+      bank.manual.aggressiveness = side === 'ac' ? values.acAggr : values.dcAggr;
+      bank.manual.turbo = side === 'ac' ? values.acTurbo : values.dcTurbo;
+      const oldMax = legacy.cpuTarget === 'none' ? frequency : { eco:4500,bal:3500,perf:3500,aggressive:3000 }[legacy.cpuTarget];
+      bank.auto.bias = oldMax === 0 ? 0 : Math.max(0,Math.min(100,Math.round((1-(oldMax/1000-.8)/4.2)*20)*5));
+    }
+    bank.manual.coreMode = legacy.coreMode === 'only-small' ? 'littleOnly' : legacy.coreMode === 'only-big' ? 'bigOnly' : legacy.coreMode === 'small' ? 'littleFirst' : 'bigFirst';
+    bank.auto.coreLow = bank.auto.coreHigh = bank.manual.coreMode;
+  }
+  return normalizeContinuousControls(result);
+}
+
+export function continuousControlsForEntry(entry: GameCustomProfile | undefined, global: PerformanceScheduleConfig, cpuProfiles?: Awaited<ReturnType<typeof loadCpuProfiles>>): ContinuousControls {
+  if (entry?.controls) return normalizeContinuousControls(entry.controls);
+  const next = continuousControlsFromSchedule(global, cpuProfiles);
+  if (entry) for (const side of ['ac', 'dc'] as const) {
+    next[side].mode = 'auto'; // Old dedicated entries always owned the automatic controller.
+    const values = cpuProfiles?.profiles[entry[side].cpuPreset];
+    if (values) {
+      const frequency = side === 'ac' ? values.acFreq : values.dcFreq;
+      next[side].manual.frequencyMHz = frequency || next[side].manual.frequencyMHz;
+      next[side].manual.unlimited = frequency === 0;
+      next[side].manual.aggressiveness = side === 'ac' ? values.acAggr : values.dcAggr;
+      next[side].manual.turbo = side === 'ac' ? values.acTurbo : values.dcTurbo;
+      const oldMax = entry[side].cpuTarget === 'none' ? frequency : { eco:4500,bal:3500,perf:3500,aggressive:3000 }[entry[side].cpuTarget];
+      next[side].auto.bias = oldMax === 0 ? 0 : Math.max(0,Math.min(100,Math.round((1-(oldMax/1000-.8)/4.2)*20)*5));
+    }
+    next[side].manual.coreMode = entry[side].coreMode === 'only-small' ? 'littleOnly' : entry[side].coreMode === 'only-big' ? 'bigOnly' : entry[side].coreMode === 'small' ? 'littleFirst' : 'bigFirst';
+    next[side].auto.coreLow = next[side].auto.coreHigh = next[side].manual.coreMode;
+    next[side].tdp = Math.min(150, entry[side].tdpMax);
+    next[side].tdpCeiling = Math.min(150, Math.max(next[side].tdpCeiling, next[side].tdp));
+    next[side].auto.saving = entry[side].tdpStrategy;
+  }
+  return normalizeContinuousControls(next);
+}
+
+export async function getContinuousPerformanceSnapshot(scope: 'effective' | 'global' | 'dedicated' = 'effective', editSide?: PowerSide): Promise<ContinuousPerformanceSnapshot> {
+  const generation = getSettingsGeneration();
+  const [global, custom, actualSide, game, architecture, capability, legacyCpu] = await Promise.all([
+    loadPerformanceSchedule(), loadGameCustomConfig(), detectPowerModeReliable(), detectPolicyGame(),
+    detectGameCorePolicy(), getTdpExecutionCapability().catch(() => null), loadCpuProfiles(),
+  ]);
+  assertSettingsGeneration(generation);
+  const exe = game ? gamePolicyKey(game) : '', entry = exe ? custom.entries[exe] : undefined;
+  const owner = scope === 'effective' ? entry && entry.enabled !== false ? 'dedicated' : 'global' : scope;
+  const controls = owner === 'dedicated' ? continuousControlsForEntry(entry, global, legacyCpu) : continuousControlsFromSchedule(global, legacyCpu);
+  const side = editSide ?? actualSide;
+  const bank = side ? controls[side] : null;
+  const frameRates = owner === 'dedicated' ? dedicatedFrameRatePair(custom.rtss[exe], await ensureGlobalFrameRates()) : await ensureGlobalFrameRates();
+  const hyperThreadMode = entry?.hyperThreadPolicyEnabled ? entry.hyperThreadPolicy || 'default' : 'default';
+  return { frameRates, gameName: entry?.displayName || game?.name || exe, identity: { scope: owner, followEffective: scope === 'effective', side, actualSide, exe, pid: game?.pid || 0, processCreated: String(game?.processCreated || ''), generation,
+      revision: JSON.stringify([!!global.suspended, bank, owner === 'dedicated' ? !!entry && entry.enabled !== false : global.configured, hyperThreadMode, side ? frameRates[side] : null]) },
+    controls, side, actualSide, coreGroups: architecture?.groups, bank, hardwareMinimum: getTdpHardwareMinimum(), hardwareMaximum: Math.min(150, getTdpHardwareMaximum()),
+    hybrid: architecture?.detected === true && architecture.heterogeneous,
+    smtAvailable: !!game && architecture?.detected === true && architecture.smtAvailable,
+    hyperThreadMode, configured: owner === 'dedicated' ? !!entry : global.configured };
+}
+
+export async function updateContinuousPerformanceControls(expected: ContinuousPerformanceIdentity, patch: ContinuousSidePatch, admit?: () => boolean): Promise<ContinuousPerformanceSnapshot> {
+  return withScheduleOp(false, async () => {
+    if (admit && !admit()) throw new SkipApplyError();
+    const current = await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, expected.side ?? undefined);
+    if (!expected.side || continuousIdentityKey(current.identity) !== continuousIdentityKey(expected)) throw new Error('供电、游戏或配置已变化，请重新调整');
+    const verifyContext = () => {
+      if (admit && !admit()) throw new SkipApplyError();
+      assertSettingsGeneration(expected.generation);
+      const game = getPolicyGame();
+      if (expected.followEffective && gameCustomCache) {
+        const entry = gameCustomCache.entries[expected.exe];
+        const owner = entry && entry.enabled !== false ? 'dedicated' : 'global';
+        if (owner !== expected.scope) throw new SkipApplyError();
+      }
+      if ((powerSourceMode.value !== null && powerSourceMode.value !== (expected.actualSide ?? expected.side)) ||
+          (game?.pid || 0) !== expected.pid || String(game?.processCreated || '') !== expected.processCreated ||
+          (game ? gamePolicyKey(game) : '') !== expected.exe) throw new SkipApplyError();
+    };
+    verifyContext();
+    const performanceRequested = Object.keys(patch).some(key => key !== 'hyperThreadMode' && key !== 'frameRate');
+    const side = expected.side, bank = patchContinuousBank(current.controls[side], patch, side);
+    bank.tdpCeiling = Math.max(current.hardwareMinimum, Math.min(current.hardwareMaximum, bank.tdpCeiling));
+    bank.tdp = Math.max(current.hardwareMinimum, Math.min(bank.tdpCeiling, bank.tdp));
+    bank.auto.coreSplit = Math.min(bank.auto.coreSplit, bank.tdpCeiling);
+    const master = await loadPerformanceSchedule();
+    const resumeRequested = patch.mode !== undefined && (master.suspended === true || scheduleSuspended);
+    const withoutCore = (value: ContinuousSideControls) => JSON.stringify({ ...value, auto: { ...value.auto, coreSplit: 0, coreLow: 'bigFirst', coreHigh: 'bigFirst' } });
+    const coreOnly = !resumeRequested && current.configured && withoutCore(bank) === withoutCore(current.controls[side]);
+    const performanceChanged = performanceRequested && (resumeRequested || !current.configured || JSON.stringify(bank) !== JSON.stringify(current.controls[side]));
+    // Focusing/releasing a slider or selecting the already active mode is not a new setting.
+    if (!performanceChanged && patch.hyperThreadMode === undefined && !patch.frameRate) return current;
+    const globalForMigration = await loadPerformanceSchedule();
+    const legacyCpu = await loadCpuProfiles();
+    const custom = await loadGameCustomConfig();
+    const entry = expected.exe ? custom.entries[expected.exe] : undefined;
+    if (patch.hyperThreadMode !== undefined && (!current.smtAvailable || !expected.exe || !['default', 'on', 'off'].includes(patch.hyperThreadMode))) throw new Error('当前游戏或处理器不支持超线程策略');
+    assertScheduleOpCurrent();
+    if ((await detectPowerModeReliable()) !== (expected.actualSide ?? side) || getSettingsGeneration() !== expected.generation) throw new SkipApplyError();
+    if (expected.scope === 'dedicated') {
+      if (!entry) throw new Error('请先从顶部创建当前游戏的专属配置');
+      await mutateContinuousGameConfig(expected.generation, latest => {
+        verifyContext();
+        const previous = latest.entries[expected.exe];
+        if (expected.followEffective && previous?.enabled === false) throw new SkipApplyError();
+        if (!previous || JSON.stringify(continuousControlsForEntry(previous, globalForMigration, legacyCpu)[side]) !== JSON.stringify(current.controls[side])) throw new Error('专属参数已变化，请重新调整');
+        if (performanceChanged) latest.entries[expected.exe] = { ...previous,
+          controls: { ...continuousControlsForEntry(previous, globalForMigration, legacyCpu), [side]: bank } };
+        if (patch.frameRate) {
+          const pair = dedicatedFrameRatePair(latest.rtss[expected.exe], current.frameRates);
+          if (JSON.stringify(pair[side]) !== JSON.stringify(current.frameRates[side])) throw new Error('帧率参数已变化，请重新调整');
+          pair[side] = frameRateSetting(patch.frameRate, pair[side]); latest.rtss[expected.exe] = dedicatedFrameRateRecord(pair);
+        }
+      });
+    } else if (performanceChanged || patch.frameRate) {
+      await updateSettings(settings => {
+        verifyContext();
+        assertSettingsGeneration(expected.generation);
+        const latest = normalizeConfig(settings.performanceSchedule);
+        const raw = settings.performanceSchedule as any;
+        if (!raw.controls && !['ac','dc'].some(s => raw.profiles?.[s] && Object.keys(raw.profiles[s]).length)) latest.controls = globalForMigration.controls;
+        const prior = continuousControlsFromSchedule(latest, legacyCpu);
+        if (JSON.stringify(prior[side]) !== JSON.stringify(current.controls[side])) throw new Error('全局参数已变化，请重新调整');
+        if (performanceChanged) {
+          latest.controls = { ...prior, [side]: bank }; latest.configured = true; if (!coreOnly) latest.enabled = true; if (resumeRequested) latest.suspended = false;
+          settings.performanceSchedule = latest as any;
+        }
+        if (patch.frameRate) {
+          const pair = frameRatePair(settings.rtss.templateDefaults === true ? current.frameRates : settings.rtss.frameRates);
+          if (JSON.stringify(pair[side]) !== JSON.stringify(current.frameRates[side])) throw new Error('帧率参数已变化，请重新调整');
+          pair[side] = frameRateSetting(patch.frameRate, pair[side]); settings.rtss.frameRates = pair as any; settings.rtss.templateDefaults = false;
+        }
+      });
+      if (performanceChanged) emitPerformanceSchedule(await loadPerformanceSchedule());
+    }
+    if (patch.hyperThreadMode !== undefined) {
+      const latest = await loadGameCustomConfig();
+      const prior = latest.entries[expected.exe];
+      // Global performance settings may still store an EXE-only SMT preference.
+      const global = await loadPerformanceSchedule();
+      const base = prior || { displayName: expected.exe, enabled: false, controls: continuousControlsFromSchedule(global, legacyCpu),
+        ac: { ...global.profiles.ac[global.active.ac] }, dc: { ...global.profiles.dc[global.active.dc] } };
+      await mutateContinuousGameConfig(expected.generation, latest => {
+        verifyContext();
+        latest.entries[expected.exe] = { ...(latest.entries[expected.exe] || base), smtIndependent: true,
+          hyperThreadPolicy: patch.hyperThreadMode, hyperThreadPolicyEnabled: patch.hyperThreadMode !== 'default' };
+      });
+      if (!isPolicyTargetCurrent(expected)) throw new SkipApplyError();
+      const applied = await applyGameCorePolicy(expected, 'default', patch.hyperThreadMode);
+      if (!applied.ok || !applied.applied) throw new Error(applied.error || '超线程策略未应用');
+    }
+    assertScheduleOpCurrent();
+    const latestCustom = await loadGameCustomConfig(), activeEntry = expected.exe ? latestCustom.entries[expected.exe] : undefined;
+    let tdpWriteReceipt: ContinuousPerformanceSnapshot['tdpWriteReceipt'];
+    const owns = expected.scope === 'dedicated' ? activeEntry?.enabled !== false : !activeEntry || activeEntry.enabled === false;
+    if (resumeRequested) {
+      if (expected.scope === 'dedicated') await savePerformanceSchedule({ ...(await loadPerformanceSchedule()), suspended: false, enabled: true });
+      scheduleSuspended = false;
+    }
+    if (owns && performanceChanged && side === (expected.actualSide ?? side) && !scheduleSuspended && !(await loadPerformanceSchedule()).suspended) {
+      if (coreOnly) {
+        const key = coreOwnerKey(side, expected.pid, expected.processCreated, expected.generation);
+        if (activeCoreRule?.key === key) await activeCoreRule.update(bank);
+        // No runtime owner/receipt: save the rule without inventing hardware state or restarting a bank.
+      } else {
+        const frames = expected.scope === 'dedicated' ? dedicatedFrameRatePair(latestCustom.rtss[expected.exe], await ensureGlobalFrameRates()) : undefined;
+        const applied = await applyContinuousBankUnsafe(side, bank, expected.scope === 'dedicated' ? { ...expected, policyTarget: true } : undefined, frames, receipt => { tdpWriteReceipt = receipt; }, admit);
+        if (!applied) throw new SkipApplyError();
+      }
+    }
+    let frameRateApplied: boolean | undefined;
+    if (patch.frameRate) {
+      publishFrameRatesChanged((await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, side)).frameRates);
+      frameRateApplied = await applyIndependentFrameRates();
+    }
+    const snapshot = await getContinuousPerformanceSnapshot(expected.followEffective ? 'effective' : expected.scope, side);
+    return { ...snapshot, ...(patch.frameRate ? { frameRateApplied } : {}), ...(tdpWriteReceipt ? { tdpWriteReceipt } : {}) };
+  });
+}
+
+async function applyContinuousBankUnsafe(side: PowerSide, requested: ContinuousSideControls,
+  expectedTarget?: PerformanceScheduleTarget, frameRates?: FrameRatePair, onTdpWrite?: (receipt: NonNullable<ContinuousPerformanceSnapshot['tdpWriteReceipt']>) => void, admit?: () => boolean): Promise<boolean> {
+  const bank = normalizeContinuousBank(requested, side), generation = getSettingsGeneration();
+  const game = await detectPolicyGame(), gameKey = game ? gamePolicyKey(game) : '';
+  let fingerprint = JSON.stringify(bank);
+  const checkpoint = async () => {
+    if (scheduleSuspended || (admit && !admit())) return false;
+    if (generation !== getSettingsGeneration() || (await detectPowerModeReliable()) !== side) return false;
+    const now = getPolicyGame();
+    if ((now?.pid || 0) !== (game?.pid || 0) || String(now?.processCreated || '') !== String(game?.processCreated || '')) return false;
+    if (expectedTarget && !isPolicyTargetCurrent(expectedTarget)) return false;
+    const custom = await loadGameCustomConfig(), entry = gameKey ? custom.entries[gameKey] : undefined;
+    const config = await loadPerformanceSchedule();
+    if (config.suspended) return false;
+    if (expectedTarget) return !!entry && entry.enabled !== false && JSON.stringify((entry.controls ? entry.controls[side] : continuousControlsForEntry(entry, config)[side])) === fingerprint;
+    if (entry && entry.enabled !== false) return false;
+    return config.configured && JSON.stringify((config.controls ? config.controls[side] : continuousControlsFromSchedule(config)[side])) === fingerprint;
+  };
+  assertScheduleOpCurrent();
+  if (!await checkpoint()) return false;
+  await disableFloat(); // drain old CPU writes before the new bank can own the hardware.
+  if (!await checkpoint()) return false;
+  await ensureRememberedYemanSchemeActive();
+  if (!await checkpoint()) return false;
+  const watts = Math.max(getTdpHardwareMinimum(), Math.min(150, getTdpHardwareMaximum(), bank.tdp));
+  let acceptedWatts: number | null = null;
+  await runOptionalPerformanceScheduleTdp(side, watts, async () => {
+    const applied = await setTdp(side, watts, { apply: true, save: true, source: 'schedule',
+      onAccepted: value => { acceptedWatts = value; } });
+    if (!applied) acceptedWatts = null;
+  });
+  onTdpWrite?.({ requested: watts, accepted: acceptedWatts, ok: acceptedWatts !== null, proof: acceptedWatts === null ? 'unconfirmed' : 'write-ack' });
+  if (!await checkpoint()) return false;
+  const automatic = automaticCpuControls(bank);
+  const freq = bank.mode === 'auto' ? automatic.maxMHz : bank.manual.unlimited ? 0 : bank.manual.frequencyMHz;
+  const aggr = bank.mode === 'auto' ? automatic.aggressiveness : bank.manual.aggressiveness;
+  const turbo = bank.mode === 'auto' ? automatic.turbo : bank.manual.turbo;
+  const minState = bank.mode === 'auto' ? automatic.minState : manualCpuMinimum(bank);
+  await applyManualPowerParams({ acFreq: freq, dcFreq: freq, acAggr: aggr, dcAggr: aggr, acTurbo: turbo, dcTurbo: turbo,
+    acMinState: minState, dcMinState: minState, sides: [side], restoreMaxState: false });
+  if (!await checkpoint()) return false;
+  await setActiveScheme(PW.YEMAN);
+  const architecture = await detectCoreArchitecture();
+  let coreState: ContinuousCoreState | null = null;
+  let currentWatts: number | null = acceptedWatts;
+  const applyCore = async (watts: number, immediate = false) => {
+    if (!architecture?.heterogeneous || !await checkpoint()) return;
+    currentWatts = watts;
+    const now = Date.now();
+    const next = immediate || !coreState ? { mode: continuousCoreAt(bank, watts), changedAt: now } : stepContinuousCore(bank, coreState, watts, now);
+    if (coreState?.mode === next.mode) { coreState = next; if (next.pending) holdContinuousFloatAfterCoreChange(); return; }
+    const mode = toPowerCoreMode(next.mode);
+    if (side === 'ac') await setCoreModeAc(mode); else await setCoreModeDc(mode);
+    if (!await checkpoint()) return;
+    await setActiveScheme(PW.YEMAN);
+    const changed = coreState !== null;
+    coreState = next;
+    if (changed) holdContinuousFloatAfterCoreChange();
+  };
+  activeCoreRule = { key: coreOwnerKey(side, game?.pid || 0, String(game?.processCreated || ''), generation),
+    async update(next) {
+      Object.assign(bank.auto, { coreSplit: next.auto.coreSplit, coreLow: next.auto.coreLow, coreHigh: next.auto.coreHigh });
+      fingerprint = JSON.stringify(bank);
+      updateContinuousFloatCoreRules(bank);
+      const lifecycle = await powerLifecycle.get();
+      if (lifecycle.phase === 'ready' && lifecycle.hardwareWritesAllowed && (await getActiveScheme()).toLowerCase() === PW.YEMAN.toLowerCase() &&
+          currentWatts !== null && (!getFloatInfo().enabled || getFloatInfo().tdpApplied > 0) && await checkpoint()) await applyCore(currentWatts, true);
+    } };
+  if (acceptedWatts !== null) await applyCore(acceptedWatts);
+  if (!await checkpoint()) return false;
+  const target = (frameRates ?? await ensureGlobalFrameRates())[side].fps;
+  setFloatRtssLinked(false);
+  if (bank.mode === 'auto' && bank.auto.saving !== 'none' && target > 0) await enableContinuousFloat({ ...bank, tdp: acceptedWatts ?? watts }, side, target, checkpoint, applyCore,
+    acceptedWatts === null ? undefined : { requested: watts, accepted: acceptedWatts });
+  return checkpoint();
+}
+
+export function continuousIdentityKey(identity: ContinuousPerformanceIdentity): string {
+  return JSON.stringify([identity.scope, identity.side, identity.actualSide ?? identity.side, identity.exe, identity.pid, identity.processCreated, identity.generation, identity.revision]);
+}
+
+async function mutateContinuousGameConfig(generation: number, mutate: (latest: GameCustomConfig) => void): Promise<void> {
+  const task = gameCustomWriteQueue.then(async () => {
+    assertSettingsGeneration(generation);
+    const latest = await loadGameCustomConfigUnlocked();
+    mutate(latest);
+    assertSettingsGeneration(generation);
+    if (await fs.exists(GAME_CUSTOM_PATH)) {
+      const previous = await fs.readTextFile(GAME_CUSTOM_PATH, GAME_CUSTOM_MAX_BYTES);
+      if (parseStandaloneGameCustom(previous)) await fs.writeTextFileAtomic(GAME_CUSTOM_BACKUP_PATH, previous);
+    }
+    await writeStandaloneGameCustom(latest);
+    gameCustomCache = latest;
+    notifyGameCustomConfigChanged(latest);
+  });
+  gameCustomWriteQueue = task.catch(() => {});
+  return task;
+}
+
+export async function updateContinuousFrameRate(expected: ContinuousPerformanceIdentity, value: unknown): Promise<FrameRatePair> {
+  const valueSnapshot = frameRateSetting(value);
+  return (await updateContinuousPerformanceControls(expected, { frameRate: valueSnapshot })).frameRates;
 }

@@ -5,6 +5,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include "../process_efficiency.h"
 #include <commdlg.h>
 #include <dwmapi.h>
 #include <shellapi.h>
@@ -16,7 +17,9 @@
 #include <xinput.h>
 #include <wrl.h>
 #include <WebView2.h>
+#include "../webview_process_efficiency.h"
 #include <gdiplus.h>
+#include <psapi.h>
 
 #include <algorithm>
 #include <array>
@@ -51,6 +54,11 @@
 #include "custom_steam_library_paths.h"
 #include "custom_steam_library_inventory.h"
 #include "custom_steam_library_identity_cache.h"
+#include "custom_steam_library_video_catalog.h"
+#include "custom_steam_library_opti_catalog.h"
+#include "../opti_catalog_startup.h"
+#include "../shared_game_media.h"
+#include "../shared_game_media_download_worker.h"
 
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "shell32.lib")
@@ -879,7 +887,7 @@ static void closeSteamForShortcutCommit() {
     startup.dwFlags = STARTF_USESHOWWINDOW;
     startup.wShowWindow = SW_HIDE;
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(
+    if (!ymcc::processEfficiency::createProcess(
             steamPath.c_str(), mutableCommand.data(), nullptr, nullptr, FALSE,
             CREATE_NO_WINDOW, nullptr, fs::path(steamPath).parent_path().c_str(),
             &startup, &process)) {
@@ -893,35 +901,6 @@ static void closeSteamForShortcutCommit() {
     if (hostProcessRunningByName(L"steam.exe")) {
         throw std::runtime_error("Steam 未在温和退出期限内关闭，未写入 Steam 文件；请先手动退出 Steam");
     }
-}
-
-static fs::path steamLaunchPathForTarget(const json& target) {
-    const auto explicitExecutable = fs::path(toWide(jsonStringOr(target, "steamExecutable", {})));
-    if (!explicitExecutable.empty() && fs::is_regular_file(explicitExecutable)) return explicitExecutable;
-    const auto root = fs::path(toWide(jsonStringOr(target, "steamRoot")));
-    if (!root.empty() && fs::is_regular_file(root / L"steam.exe")) return root / L"steam.exe";
-    std::wstring runningPath;
-    hostProcessRunningByName(L"steam.exe", &runningPath);
-    if (!runningPath.empty() && fs::is_regular_file(fs::path(runningPath))) return fs::path(runningPath);
-    return {};
-}
-
-static void restartSteamBigPicture(const json& target) {
-    const auto executable = steamLaunchPathForTarget(target);
-    if (executable.empty()) throw std::runtime_error("Steam 已关闭，但找不到 steam.exe，快捷方式已写入；请手动启动 Steam");
-    std::wstring command = quoteArgument(executable.wstring()) + L" -bigpicture";
-    std::vector<wchar_t> mutableCommand(command.begin(), command.end());
-    mutableCommand.push_back(0);
-    STARTUPINFOW startup{sizeof(startup)};
-    startup.dwFlags = STARTF_USESHOWWINDOW;
-    startup.wShowWindow = SW_SHOWNORMAL;
-    PROCESS_INFORMATION process{};
-    if (!CreateProcessW(executable.c_str(), mutableCommand.data(), nullptr, nullptr, FALSE, 0, nullptr,
-        executable.parent_path().c_str(), &startup, &process)) {
-        throw std::runtime_error("快捷方式已写入，但 Steam 大屏重启失败");
-    }
-    CloseHandle(process.hThread);
-    CloseHandle(process.hProcess);
 }
 
 static int64_t jsonIntegerOr(const json& value, const char* key, int64_t fallback = 0) {
@@ -1139,7 +1118,10 @@ static bool hostTransientFileError(DWORD error, const fs::path& target) {
 static void activateHostStagedFile(const fs::path& staged, const fs::path& target) {
     DWORD error = ERROR_SUCCESS;
     for (int attempt = 1; attempt <= 20; ++attempt) {
-        if (MoveFileExW(custom_steam_library::ioPath(staged).c_str(), custom_steam_library::ioPath(target).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return;
+        if (MoveFileExW(custom_steam_library::ioPath(staged).c_str(), custom_steam_library::ioPath(target).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+            try { ymcc::media::publishInventoryFile(g_dataRoot, target); } catch (...) {} // Notification cannot undo a successful commit.
+            return;
+        }
         error = GetLastError();
         if (!hostTransientFileError(error, target)) break;
         if (g_shuttingDown.load()) break;
@@ -2083,7 +2065,7 @@ static std::optional<fs::path> directNativeSteamLibraryCacheArtwork(
     if (!fs::is_directory(cache, error)) return std::nullopt;
     const std::vector<std::string> prefixes = type == "cover"
         ? std::vector<std::string>{"library_600x900", "library_capsule"}
-        : type == "long" ? std::vector<std::string>{"header"}
+        : type == "long" ? std::vector<std::string>{"library_header", "header"}
         : std::vector<std::string>{"library_hero"};
     std::vector<fs::path> candidates;
     for (fs::recursive_directory_iterator it(cache, fs::directory_options::skip_permission_denied, error), end;
@@ -2093,7 +2075,9 @@ static std::optional<fs::path> directNativeSteamLibraryCacheArtwork(
         const auto name = lowerAscii(toUtf8(it->path().filename().wstring()));
         if (name.find("blur") != std::string::npos || !supportedArtworkFile(it->path()) ||
             std::none_of(prefixes.begin(), prefixes.end(), [&](const auto& prefix) {
-                return name.starts_with(prefix);
+                // Steam stores localized/2x assets below AppID/hash folders.
+                // Match the slot filename boundary, not unrelated prefix names.
+                return name.starts_with(prefix + ".") || name.starts_with(prefix + "_");
             })) { error.clear(); continue; }
         candidates.push_back(it->path());
     }
@@ -2260,7 +2244,7 @@ static void attachNativeSteamArtwork(json& plan, const json& steamAccounts, bool
             if (localTallFound && localLongFound && localHeroFound) break;
         }
         item["nativeSteamArtwork"] = {
-            {"source", localTallFound || localHeroFound ? "steam-local" : "steam-local-missing"},
+            {"source", localTallFound || localLongFound || localHeroFound ? "steam-local" : "steam-local-missing"},
             {"directRead", true},
             {"cacheRead", false},
             {"coverAvailable", localTallFound},
@@ -2699,7 +2683,7 @@ static ProcessResult runProcess(
     catch (...) { CloseHandle(nullInput); CloseHandle(writePipe); CloseHandle(readPipe); throw; }
     extendedStartup.lpAttributeList = attributes.list;
     PROCESS_INFORMATION process{};
-    const BOOL created = CreateProcessW(
+    const BOOL created = ymcc::processEfficiency::createProcess(
         executablePath.c_str(), mutableCommand.data(), nullptr, nullptr, TRUE,
         CREATE_NO_WINDOW | CREATE_SUSPENDED | EXTENDED_STARTUPINFO_PRESENT, nullptr, g_labRoot.c_str(), &startup, &process);
     CloseHandle(nullInput);
@@ -3195,6 +3179,8 @@ static json workspaceSnapshot(
     }
     attachFailureCandidates(snapshot);
     attachResolvedIdentityCache(snapshot);
+    try {snapshot["gameMedia"]=ymcc::media::Store(g_dataRoot).snapshot();for(auto& entry:snapshot["gameMedia"]["entries"]){if(entry.contains("asset")&&!entry.value("deleted",false))entry["previewUrl"]=mappedDataUrl(ymcc::media::Store(g_dataRoot).assetPath(entry["asset"]));if(entry.contains("assets"))for(const auto* slot:{"static","dynamic"})if(entry["assets"].contains(slot))entry[std::string(slot)+"PreviewUrl"]=mappedDataUrl(ymcc::media::Store(g_dataRoot).assetPath(entry["assets"][slot]));}}catch(const std::exception& e){snapshot["gameMedia"]={{"entries",json::object()},{"error",e.what()}};}
+    snapshot["mediaDownloads"] = ymcc::media::downloads::Queue(g_dataRoot).snapshot();
     snapshot["library"] = readJson(g_dataRoot / L"state" / L"library-scan.json", json{{"games", json::array()}});
     for (const auto* section : {"games", "unscannedGames", "missingGames"}) {
         snapshot["library"][section] = custom_steam_library::uniqueExecutableInventory(
@@ -3484,7 +3470,14 @@ static json executeWorkspaceCommand(
     // update library-scan.json and the batch plan while the workspace stays
     // open; merely checking that an older plan file exists left the UI stuck
     // on its previous ready-to-add count.
-    if (command == "state") return workspaceSnapshot(false);
+    if(command=="state"){static const bool mediaInventoryRequested=[](){ymcc::media::downloads::Queue(g_dataRoot).requestSupplement();return true;}();(void)mediaInventoryRequested;static ymcc::media::downloads::Watcher downloadsWatcher(g_dataRoot,L"library",[]{postPipelineEvent("media-download-progress",{{"mediaDownloads",ymcc::media::downloads::Queue(g_dataRoot).snapshot()}});});static ymcc::media::Watcher mediaWatcher(g_dataRoot,[]{postPipelineEvent("game-media-changed");},L"library");return workspaceSnapshot(false);}
+    if(command=="mediaDownloadNow"){ymcc::media::downloads::Queue(g_dataRoot).requestSupplement(true);return ymcc::media::downloads::Queue(g_dataRoot).snapshot();}
+    if(command=="mediaDownloadStatus"){ymcc::media::downloads::Queue queue(g_dataRoot);queue.recheck();return queue.snapshot();}
+    if(command=="mediaDownloadCancel"){ymcc::media::downloads::Queue(g_dataRoot).cancelManual();return ymcc::media::downloads::Queue(g_dataRoot).snapshot();}
+    if(command=="mediaState"){return workspaceSnapshot(false);}
+    if(command=="mediaCreate"){return ymcc::media::Store(g_dataRoot).registerEntry(arguments);}
+    if(command=="mediaEdit"){return ymcc::media::Store(g_dataRoot).edit(arguments);}
+    if(command=="mediaImport"){return ymcc::media::Store(g_dataRoot).publish(arguments,fs::path(toWide(jsonStringOr(arguments,"source"))),true);}
     if (command == "steamAccounts") {
         json roots = json::array();
         for (const auto& root : jsonArrayOr(arguments, "steamRoots")) {
@@ -3508,10 +3501,10 @@ static json executeWorkspaceCommand(
             {"closed", wasRunning && !stillRunning}};
     }
     if (command == "startup") {
-        // Startup is the one automatic native-Steam artwork refresh.  The
-        // result is copied into the portable cache; opening the library and
-        // every background scrape then use that cache without touching Steam.
-        return workspaceSnapshot(false, json::object(), nullptr, true);
+        // Explicitly opening this library reuses its existing plan refresh as
+        // the ownership authority for YMCC managed rules. No new scan, timer
+        // or YMCC-side consumer is introduced; artwork stays cache-only later.
+        return workspaceSnapshot(true, json::object(), nullptr, true);
     }
     if (command == "refreshNativeArtwork") {
         const auto executableText = jsonStringOr(arguments, "executable");
@@ -3557,26 +3550,18 @@ static json executeWorkspaceCommand(
         setSteamTarget(arguments);
         const auto target = arguments;
         const bool forceClose = jsonBoolOr(target, "forceCloseSteam", false);
-        const bool restartBigPicture = jsonBoolOr(target, "restartSteamBigPicture", false);
         if (forceClose && hostProcessRunningByName(L"steam.exe")) closeSteamForShortcutCommit();
-        try {
-            if (target.value("selectionMode", std::string{}) == "all-steam-accounts") {
-                commitToAllSteamAccounts(target);
-            } else {
-                std::vector<std::wstring> workerArguments = {L"--commit-add-library-to-steam", L"--confirm-steam-closed"};
-                const auto targetArguments = steamTargetArguments(target);
-                workerArguments.insert(workerArguments.end(), targetArguments.begin(), targetArguments.end());
-                workerArguments.push_back(L"--output");
-                workerArguments.push_back(workspacePlanPath().wstring());
-                requireSuccess(runWorker(workerArguments));
-            }
-        } catch (...) {
-            if (restartBigPicture) {
-                try { restartSteamBigPicture(target); } catch (...) { }
-            }
-            throw;
+        // Writing shortcuts never authorizes restarting Steam or choosing its UI mode.
+        if (target.value("selectionMode", std::string{}) == "all-steam-accounts") {
+            commitToAllSteamAccounts(target);
+        } else {
+            std::vector<std::wstring> workerArguments = {L"--commit-add-library-to-steam", L"--confirm-steam-closed"};
+            const auto targetArguments = steamTargetArguments(target);
+            workerArguments.insert(workerArguments.end(), targetArguments.begin(), targetArguments.end());
+            workerArguments.push_back(L"--output");
+            workerArguments.push_back(workspacePlanPath().wstring());
+            requireSuccess(runWorker(workerArguments));
         }
-        if (restartBigPicture) restartSteamBigPicture(target);
         return workspaceSnapshot(true, target);
     }
     if (command == "refreshSteamArtwork") {
@@ -3584,15 +3569,9 @@ static json executeWorkspaceCommand(
         setSteamTarget(arguments);
         const auto target = arguments;
         const bool forceClose = jsonBoolOr(target, "forceCloseSteam", false);
-        const bool restartBigPicture = jsonBoolOr(target, "restartSteamBigPicture", false);
         if (forceClose && hostProcessRunningByName(L"steam.exe")) closeSteamForShortcutCommit();
-        try {
-            refreshArtworkForAllSteamAccounts(target);
-        } catch (...) {
-            if (restartBigPicture) { try { restartSteamBigPicture(target); } catch (...) { } }
-            throw;
-        }
-        if (restartBigPicture) restartSteamBigPicture(target);
+        // Success and failure both leave Steam closed; the user owns the next launch.
+        refreshArtworkForAllSteamAccounts(target);
         return workspaceSnapshot(true, target);
     }
     if (command == "deleteFromSteam") {
@@ -3850,6 +3829,23 @@ static json executeWorkspaceCommand(
         requireSuccess(runWorker({L"--set-library-bucket", L"--game-dir", directory, L"--bucket", bucket}));
         return workspaceSnapshot(false);
     }
+    if(command=="mediaSearchVideos"){
+        auto store=ymcc::media::Store(g_dataRoot);const auto entry=store.resolve(arguments);const auto app=entry.value("appId",int64_t{0});
+        if(app<=0||app>2147483647||!entry.value("identityVerified",false))throw std::runtime_error("请先确认此游戏的 Steam 身份，再搜索动态壁纸");
+        auto* cancelFlag=backgroundJob?&backgroundJob->cancelRequested:&g_cancelRequested;auto* activeProcess=backgroundJob?&backgroundJob->activeProcess:&g_activeProcess;
+        const auto response=runWorkerBounded({L"--search-wallpaper-videos",std::to_wstring(app)},30000,cancelFlag,activeProcess);requireSuccess(response);
+        const std::string marker="VIDEO_SEARCH_JSON: ";const auto position=response.output.rfind(marker);if(position==std::string::npos)throw std::runtime_error("动态壁纸搜索没有返回结果，可稍后重试");
+        auto result=json::parse(response.output.substr(position+marker.size()));if(result.value("appId",int64_t{0})!=app)throw std::runtime_error("动态壁纸游戏身份发生变化");
+        const auto token=ymcc::media::randomId();result["searchToken"]=token;result["entryKey"]=entry["key"];result["bindingRevision"]=entry["bindingRevision"];result["createdAt"]=ymcc::media::now();
+        ymcc::media::atomicWrite(g_dataRoot/L"cache"/L"jobs"/L"media-video-search"/ymcc::media::wide(entry["key"].get<std::string>()+".json"),result);return result;
+    }
+    if(command=="mediaSelectVideo"){
+        auto store=ymcc::media::Store(g_dataRoot);auto entry=store.resolve(arguments);const auto key=entry.value("key",std::string{});if(!ymcc::media::safeKey(key))throw std::runtime_error("动态壁纸游戏身份不可用");
+        const auto catalog=ymcc::media::read(g_dataRoot/L"cache"/L"jobs"/L"media-video-search"/ymcc::media::wide(key+".json"));
+        const auto selected=custom_steam_library::video_catalog::selection(entry,catalog,arguments,ymcc::media::now());
+        entry["action"]="select-video";entry["slot"]="dynamic";entry["selectedVideo"]=selected;
+        auto result=store.edit(entry);ymcc::media::downloads::Queue queue(g_dataRoot);auto target=result;target["verified"]=true;queue.enqueue(json::array({target}));queue.requestSupplement(true,result["key"].get<std::string>());return result;
+    }
     if (command == "searchArtwork") {
         custom_steam_library::rejectBuiltinExcludedSteamTool(arguments);
         const auto query = jsonStringOr(arguments, "query");
@@ -3897,14 +3893,14 @@ static json executeWorkspaceCommand(
         payload["type"] = type;
         return payload;
     }
-    if (command == "pickArtwork") {
+    if (command == "pickArtwork" || command == "pickVideo") {
         wchar_t fileName[32768]{};
         OPENFILENAMEW dialog{};
         dialog.lStructSize = sizeof(dialog);
         dialog.hwndOwner = g_window;
         dialog.lpstrFile = fileName;
         dialog.nMaxFile = static_cast<DWORD>(std::size(fileName));
-        dialog.lpstrFilter = L"图片文件\0*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.ico\0所有文件\0*.*\0";
+        dialog.lpstrFilter = command=="pickVideo"?L"视频文件\0*.mp4;*.webm\0所有文件\0*.*\0":L"图片文件\0*.jpg;*.jpeg;*.png;*.webp;*.bmp;*.ico\0所有文件\0*.*\0";
         dialog.nFilterIndex = 1;
         dialog.Flags = OFN_FILEMUSTEXIST | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
         if (!GetOpenFileNameW(&dialog)) return json{{"cancelled", true}};
@@ -4048,6 +4044,7 @@ static json executeWorkspaceCommand(
         writeJsonWithLocalBackup(overridesPath, overrides);
 
         configTransaction.release();
+        if(!wallpaperPath.empty()||clearWallpaper){try{ymcc::media::Store media(g_dataRoot);const auto identified=media.identity(toUtf8(executable.wstring()));json target={{"executable",toUtf8(executable.wstring())}};if(identified.value("verified",false))target["appId"]=identified.value("appId",int64_t{0});media.registerEntry(target);}catch(const std::exception& e){postPipelineEvent("game-media-sync-error",{{"error",e.what()}});}}
         return workspaceSnapshot(false, json::object(), nullptr, isNativeSteam);
     }
     if (command == "wakeNetwork") {
@@ -4060,12 +4057,12 @@ static json executeWorkspaceCommand(
     if (command == "openFolder") {
         const auto path = toWide(jsonStringOr(arguments, "path"));
         if (path.empty()) throw std::runtime_error("Folder path is empty");
-        ShellExecuteW(g_window, L"open", L"explorer.exe", quoteArgument(path).c_str(), nullptr, SW_SHOWNORMAL);
+        ymcc::processEfficiency::shellExecute(g_window, L"open", L"explorer.exe", quoteArgument(path).c_str(), nullptr, SW_SHOWNORMAL);
         return json{{"opened", true}};
     }
     if (command == "openSteamWebsite") {
         static constexpr wchar_t kSteamAboutUrl[] = L"https://store.steampowered.com/about/";
-        const auto result = ShellExecuteW(g_window, L"open", kSteamAboutUrl, nullptr, nullptr, SW_SHOWNORMAL);
+        const auto result = ymcc::processEfficiency::shellExecute(g_window, L"open", kSteamAboutUrl, nullptr, nullptr, SW_SHOWNORMAL);
         if (reinterpret_cast<INT_PTR>(result) <= 32) throw std::runtime_error("无法打开 Steam 官方页面");
         return json{{"opened", true}, {"url", "https://store.steampowered.com/about/"}};
     }
@@ -4084,7 +4081,7 @@ static json executeWorkspaceCommand(
             // touch keyboard. Do not activate TabTip over the workspace:
             // stealing the foreground window here makes the next D-pad/A
             // event appear to be lost until the user clicks back.
-            if (fs::is_regular_file(tabTip)) ShellExecuteW(g_window, L"open", tabTip.c_str(), nullptr, nullptr, SW_SHOWNOACTIVATE);
+            if (fs::is_regular_file(tabTip)) ymcc::processEfficiency::shellExecute(g_window, L"open", tabTip.c_str(), nullptr, nullptr, SW_SHOWNOACTIVATE);
         }
         return json{{"requested", true}};
     }
@@ -4150,6 +4147,331 @@ static void joinHostBackgroundTasks() {
     std::vector<HostBackgroundThread> tasks;
     { std::lock_guard<std::mutex> lock(g_hostThreadsMutex); tasks.swap(g_hostThreads); }
     for (auto& task : tasks) if (task.thread.joinable()) task.thread.join();
+}
+
+// One delayed metadata pass per workspace session. No discovery/network worker
+// or OPT installation work is started by this path.
+static bool optiClientRunningForCatalog() {
+    HostIoHandle snapshot{CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0)};
+    if (snapshot.value == INVALID_HANDLE_VALUE) throw std::runtime_error("Cannot verify OPT client process state");
+    PROCESSENTRY32W entry{sizeof(entry)};
+    if (!Process32FirstW(snapshot.value, &entry)) {
+        if (GetLastError() == ERROR_NO_MORE_FILES) return false;
+        throw std::runtime_error("Cannot enumerate OPT client process state");
+    }
+    do {
+        if (_wcsicmp(entry.szExeFile, L"OptiscalerClient.exe") == 0) return true;
+    } while (Process32NextW(snapshot.value, &entry));
+    if (GetLastError() != ERROR_NO_MORE_FILES) throw std::runtime_error("Incomplete OPT client process enumeration");
+    return false;
+}
+
+static std::string optiCatalogNewId() {
+    GUID value{};
+    if (FAILED(CoCreateGuid(&value))) throw std::runtime_error("Cannot create OPT catalog identity");
+    wchar_t buffer[40]{};
+    if (!StringFromGUID2(value, buffer, static_cast<int>(std::size(buffer))))
+        throw std::runtime_error("Cannot format OPT catalog identity");
+    std::string id = toUtf8(buffer);
+    id.erase(std::remove_if(id.begin(), id.end(), [](char c) { return c == '{' || c == '}' || c == '-'; }), id.end());
+    return id;
+}
+
+// Artwork is optional metadata. Read it only after matching an OPT row with a
+// missing cover. One index per pass replaces one recursive search per game.
+class OptiCatalogArtworkIndex {
+    std::function<bool()> cancelled_;
+    std::map<std::string,json> manual_, plan_, manifests_;
+    json native_;
+    bool scanned_=false;
+    static std::string key(const std::string& path) { return custom_steam_library::opti_catalog::pathKey(path); }
+    void check() const { if(cancelled_()) throw std::runtime_error("OPT supplement cancelled"); }
+    void scanManifests() {
+        if(scanned_)return;scanned_=true;
+        const auto root=g_dataRoot/L"artwork";
+        std::error_code error;
+        if(!fs::is_directory(root,error))return;
+        size_t inspected=0;
+        fs::recursive_directory_iterator it(root,fs::directory_options::skip_permission_denied,error),end;
+        for(;!error&&it!=end&&++inspected<=20000;it.increment(error)) {
+            check();
+            if(inspected%32==0)Sleep(1);
+            const auto path=it->path();const auto attributes=GetFileAttributesW(path.c_str());
+            if(attributes!=INVALID_FILE_ATTRIBUTES&&(attributes&FILE_ATTRIBUTE_REPARSE_POINT)){it.disable_recursion_pending();continue;}
+            if(path.filename()!=L"manifest.json"||!it->is_regular_file(error))continue;
+            const auto manifest=readJson(path,json::object());const auto exe=key(jsonStringOr(manifest,"exe"));
+            if(!exe.empty())manifests_.try_emplace(exe,manifest);
+        }
+    }
+public:
+    explicit OptiCatalogArtworkIndex(std::function<bool()> cancelled):cancelled_(std::move(cancelled)) {
+        check();const auto overrides=readJson(g_dataRoot/L"config"/L"manual-overrides.json",json::object());
+        const auto overrideItems=jsonObjectOr(overrides,"items");
+        for(const auto& [exe,item]:overrideItems.items())manual_.try_emplace(key(exe),item);
+        native_=jsonObjectOr(readJson(nativeSteamArtworkCachePath(),json::object()),"items");
+        for(const auto& item:jsonArrayOr(newestCachedSteamPlan(true).document,"items"))
+            plan_.try_emplace(key(jsonStringOr(item,"primaryExecutable")),item);
+    }
+    std::string coverFor(const custom_steam_library::opti_catalog::Candidate& candidate) {
+        check();const auto exe=key(candidate.executablePath);
+        const auto manual=manual_.find(exe);const auto override=manual==manual_.end()?json::object():manual->second;
+        const auto protection=jsonObjectOr(override,"artworkProtection");
+        // Preserve deliberate cover deletions; a local horizontal image is the
+        // existing fallback and is considered only when its own slot permits it.
+        for(const auto& [slot,type]:{std::pair{"cover","tall"},{"long","long"}}) {
+            if(jsonStringOr(protection,slot)=="deleted")continue;
+            auto source=hostManifestArtworkSource(jsonObjectOr(override,slot));
+            if(!source.empty())return toUtf8(source.wstring());
+            if(candidate.steamAppId>0) {
+                const auto found=native_.find(std::to_string(candidate.steamAppId));
+                if(found!=native_.end())source=hostManifestArtworkSource(jsonObjectOr(jsonObjectOr(*found,"artworkPreview"),type));
+            } else {
+                const auto record=plan_.find(exe);
+                if(record!=plan_.end()) {
+                    source=hostManifestArtworkSource(jsonObjectOr(jsonObjectOr(record->second,"artworkPreview"),type));
+                    const auto path=jsonStringOr(record->second,"artworkManifest");
+                    if(!path.empty()&&!manifests_.contains(exe)) {
+                        const auto manifest=readJson(fs::path(toWide(path)),json::object());
+                        if(key(jsonStringOr(manifest,"exe"))==exe)manifests_.try_emplace(exe,manifest);
+                    }
+                }
+                if(source.empty()&&record!=plan_.end()) {
+                    const auto& item=record->second;
+                    const auto shortId=jsonStringOr(item,"shortAppId"),gridText=jsonStringOr(item,"gridDirectory");
+                    if(!shortId.empty()&&std::all_of(shortId.begin(),shortId.end(),[](char c){return c>='0'&&c<='9';})) {
+                        const auto grid=fs::path(toWide(gridText));
+                        auto account=jsonStringOr(item,"accountId");
+                        if(account.empty()&&!grid.empty())account=toUtf8(grid.parent_path().parent_path().filename().wstring());
+                        const auto cache=g_dataRoot/L"cache"/L"existing-steam-artwork"/
+                            toWide(safeArtworkSegment(account.empty()?"steam":account)+"_"+safeArtworkSegment(shortId));
+                        // Exact known filenames only: retain existing Steam grid
+                        // fallback without copying/scanning all account images.
+                        for(const auto& folder:{cache,grid}) {
+                            if(folder.empty())continue;
+                            const auto stem=folder==cache?std::string(type):shortId+(std::string(type)=="tall"?"p":"");
+                            for(const auto* extension:{L".png",L".jpg",L".jpeg",L".webp",L".bmp",L".ico"}) {
+                                const auto file=folder/(toWide(stem)+extension);
+                                if(fs::is_regular_file(file)){source=file;break;}
+                            }
+                            if(!source.empty())break;
+                        }
+                    }
+                }
+                if(source.empty()) {
+                    if(!manifests_.contains(exe))scanManifests();
+                    const auto found=manifests_.find(exe);
+                    if(found!=manifests_.end())for(const auto& art:jsonArrayOr(found->second,"artwork"))
+                        if(jsonBoolOr(art,"ok",false)&&jsonStringOr(art,"type")==type) {
+                            source=hostManifestArtworkSource(art);if(!source.empty())break;
+                        }
+                }
+            }
+            if(!source.empty())return toUtf8(source.wstring());
+        }
+        return {};
+    }
+};
+
+static std::vector<custom_steam_library::opti_catalog::Candidate> optiCatalogCandidates(
+    const std::function<bool()>& cancelled = [] { return g_shuttingDown.load(); }, bool includeCovers = true) {
+    using namespace custom_steam_library::opti_catalog;
+    const auto library=readJson(g_dataRoot/L"state"/L"library-scan.json",json::object());
+    const auto games=custom_steam_library::uniqueExecutableInventory(jsonArrayOr(library,"games"),pathKey);
+    const auto cached=newestCachedSteamPlan(true);
+    // Exact EXE + installation directory (or recorded current alias), same
+    // library only. A store ID/title never grants non-Steam ownership.
+    std::map<std::pair<std::string,std::string>,const json*> owned;
+    if(isPlanForCurrentLibrary(cached.document)&&cached.document.contains("items")&&cached.document["items"].is_array())for(const auto& item:cached.document["items"]) {
+        if(!steamPlanItemAlreadyOwned(item))continue;
+        const auto exe=pathKey(jsonStringOr(item,"primaryExecutable")),dir=pathKey(jsonStringOr(item,"gameDirectory"));
+        if(!exe.empty()&&!dir.empty())owned.try_emplace(std::make_pair(exe,dir),&item);
+    }
+    std::unique_ptr<OptiCatalogArtworkIndex> artwork;
+    std::vector<Candidate> candidates;size_t inspected=0;
+    for(const auto& game:games) {
+        if(cancelled())throw std::runtime_error("OPT supplement cancelled");
+        if(++inspected%32==0)Sleep(1);
+        const auto executable=jsonStringOr(game,"primaryExecutable"),directory=jsonStringOr(game,"gameDirectory");
+        const bool native=jsonBoolOr(game,"steamNative",false)||jsonStringOr(game,"contentType")=="steam-native";
+        const json* item=&game;
+        if(!native) {
+            auto found=owned.find({pathKey(executable),pathKey(directory)});
+            if(found==owned.end())for(const auto& alias:jsonArrayOr(game,"alternateGameDirectories")) {
+                if(!alias.is_string())continue;
+                found=owned.find({pathKey(executable),pathKey(alias.get<std::string>())});if(found!=owned.end())break;
+            }
+            if(found==owned.end())continue;
+            item=found->second;
+        }
+        Candidate candidate;
+        candidate.installPath=jsonStringOr(*item,"gameDirectory");
+        candidate.executablePath=jsonStringOr(*item,"primaryExecutable");
+        candidate.name=jsonStringOr(*item,"formalName",jsonStringOr(*item,"directoryName",jsonStringOr(game,"directoryName")));
+        if(native) {
+            const auto id=nativeSteamAppIdFromRecord(game);if(id<=0||id>INT_MAX)continue;
+            candidate.steamAppId=static_cast<int>(id);
+        }
+        if(!valid(candidate))continue;
+        std::error_code error;
+        if(!fs::is_directory(fs::path(toWide(candidate.installPath)),error)||error)continue;
+        if(!candidate.executablePath.empty()&&(!fs::is_regular_file(fs::path(toWide(candidate.executablePath)),error)||error))continue;
+        if(includeCovers) {
+            if(!artwork)artwork=std::make_unique<OptiCatalogArtworkIndex>(cancelled);
+            candidate.coverPath=artwork->coverFor(candidate);
+        }
+        candidates.push_back(std::move(candidate));if(candidates.size()>=maxGames)break;
+    }
+    return candidates;
+}
+
+static void writeOptiStartupBytesOnce(const fs::path& path, std::string_view bytes) {
+    fs::create_directories(custom_steam_library::ioPath(path.parent_path()));
+    HostStagedFile temporary{hostTemporaryPath(path)};
+    writeHostBytes(temporary.path, bytes);
+    // The startup task has no retry policy, including locked-file activation.
+    if (!MoveFileExW(custom_steam_library::ioPath(temporary.path).c_str(), custom_steam_library::ioPath(path).c_str(),
+            MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        throw std::runtime_error("OPT startup atomic replacement failed");
+}
+
+static json supplementOptiCatalog(const fs::path& clientRoot,
+    const std::vector<custom_steam_library::opti_catalog::Candidate>& candidates,
+    std::function<bool()> running = optiClientRunningForCatalog,
+    std::function<bool()> cancelled = [] { return g_shuttingDown.load(); },
+    std::function<bool()> permitted = [] { return true; }) {
+    using namespace custom_steam_library::opti_catalog;
+    const auto catalog = clientRoot / L"games.json";
+    Ports ports;
+    ports.read = [&]() -> std::optional<std::string> {
+        if (!hostRegularFile(catalog)) return std::nullopt;
+        return readText(catalog, maxCatalogBytes);
+    };
+    const auto requirePermission = [&] {
+        if (cancelled() || !permitted()) throw std::runtime_error("OPT supplement owner revoked");
+    };
+    ports.backup = [&](const std::string& bytes) { requirePermission(); writeOptiStartupBytesOnce(clientRoot / L"games.json.ymcc.bak", bytes); };
+    ports.commit = [&](const std::string& bytes) { requirePermission(); writeOptiStartupBytesOnce(catalog, bytes); };
+    ports.clientRunning = std::move(running);
+    ports.cancelled = cancelled;
+    ports.pace = [] { Sleep(itemDelayMs); };
+    ports.newId = optiCatalogNewId;
+    std::unique_ptr<OptiCatalogArtworkIndex> artwork;
+    ports.resolveCover = [&](const Candidate& item) {
+        if (!artwork) artwork = std::make_unique<OptiCatalogArtworkIndex>(cancelled);
+        return artwork->coverFor(item);
+    };
+    ports.copyCover = [&](const Candidate& item) -> std::string {
+        requirePermission();
+        const fs::path source(toWide(item.coverPath));
+        if (!source.is_absolute() || !supportedArtworkFile(source)) throw std::runtime_error("Invalid OPT cover path");
+        if (fs::file_size(source) > (25u << 20)) throw std::runtime_error("OPT cover exceeds limit");
+        const auto covers = clientRoot / L"Covers";
+        fs::create_directories(covers);
+        requirePermission();
+        const auto destination = covers / (toWide("YMCC_" + optiCatalogNewId()) + source.extension().wstring());
+        if (!CopyFileW(custom_steam_library::ioPath(source).c_str(), custom_steam_library::ioPath(destination).c_str(), TRUE))
+            throw std::runtime_error("OPT cover copy failed");
+        return toUtf8(destination.wstring());
+    };
+    return supplement(candidates, ports).document();
+}
+
+static fs::path optiCatalogClientRoot() {
+    PWSTR roaming = nullptr;
+    if (FAILED(SHGetKnownFolderPath(FOLDERID_RoamingAppData, KF_FLAG_DONT_VERIFY, nullptr, &roaming)))
+        throw std::runtime_error("Cannot resolve Windows roaming profile");
+    struct FreeRoaming { PWSTR value; ~FreeRoaming() { CoTaskMemFree(value); } } free{roaming};
+    return fs::path(roaming) / L"OptiscalerClient";
+}
+
+struct OptiCatalogCostSample {
+    ULONGLONG tick=GetTickCount64();
+    uint64_t cpu=0;IO_COUNTERS io{};
+    static uint64_t cpuTicks() noexcept {
+        FILETIME created{},exited{},kernel{},user{};
+        if(!GetProcessTimes(GetCurrentProcess(),&created,&exited,&kernel,&user))return 0;
+        const auto ticks=[](FILETIME value){ULARGE_INTEGER n{};n.LowPart=value.dwLowDateTime;n.HighPart=value.dwHighDateTime;return n.QuadPart;};
+        return ticks(kernel)+ticks(user);
+    }
+    OptiCatalogCostSample(){cpu=cpuTicks();GetProcessIoCounters(GetCurrentProcess(),&io);}
+    json finish()const {
+        IO_COUNTERS after{};const bool known=GetProcessIoCounters(GetCurrentProcess(),&after)!=FALSE;
+        PROCESS_MEMORY_COUNTERS_EX memory{};memory.cb=sizeof(memory);
+        const bool memoryKnown=K32GetProcessMemoryInfo(GetCurrentProcess(),reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory),sizeof(memory))!=FALSE;
+        const auto afterCpu=cpuTicks();
+        json result={{"elapsedMs",GetTickCount64()-tick},{"cpuMs",double(afterCpu>=cpu?afterCpu-cpu:0)/10000.0},
+            {"scope","this one process pass; elapsed includes intentional pacing; peak memory is process lifetime"}};
+        if(known){result["readBytes"]=after.ReadTransferCount-io.ReadTransferCount;result["writtenBytes"]=after.WriteTransferCount-io.WriteTransferCount;}
+        if(memoryKnown){result["peakWorkingSetBytes"]=memory.PeakWorkingSetSize;result["privateBytes"]=memory.PrivateUsage;}
+        return result;
+    }
+};
+
+static json runOptiCatalogSupplement(const std::function<bool()>& cancelled,
+    const std::function<bool()>& permitted, const std::string& trigger,
+    const std::function<fs::path()>& clientRootFor = optiCatalogClientRoot,
+    std::function<bool()> running = optiClientRunningForCatalog) {
+    const OptiCatalogCostSample cost;
+    const bool backgroundMode = SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_BEGIN) != FALSE;
+    if (!backgroundMode) SetThreadPriority(GetCurrentThread(), THREAD_PRIORITY_LOWEST);
+    struct EndBackgroundMode {
+        bool active;
+        ~EndBackgroundMode() { if (active) SetThreadPriority(GetCurrentThread(), THREAD_MODE_BACKGROUND_END); }
+    } background{backgroundMode};
+    json receipt;
+    try {
+        if (cancelled() || !permitted()) return {{"status", "cancelled"}};
+        const auto clientRoot = clientRootFor();
+        std::error_code error;
+        if (!fs::is_directory(clientRoot, error) || error) {
+            receipt = {{"status", "idle"}, {"reason", "client-not-configured"}};
+        } else if (running()) {
+            receipt = {{"status", "deferred"}, {"reason", "client-running"}};
+        } else {
+            // A visible window and a media worker can coexist. Only one metadata
+            // transaction owns this user's OPT catalog; the other skips its pass.
+            const auto name = L"Local\\YMCC-OptiCatalog-" + ymcc::media::wide(
+                ymcc::media::digestKey(toUtf8(normalizedPathKey(clientRoot))));
+            HostIoHandle mutex{CreateMutexW(nullptr, FALSE, name.c_str())};
+            if (mutex.value == nullptr || mutex.value == INVALID_HANDLE_VALUE)
+                throw std::runtime_error("Cannot acquire OPT supplement ownership");
+            const auto locked = WaitForSingleObject(mutex.value, 0);
+            if (locked != WAIT_OBJECT_0 && locked != WAIT_ABANDONED) {
+                receipt = {{"status", "deferred"}, {"reason", "supplement-already-running"}};
+            } else {
+                struct Release { HANDLE handle; ~Release() { ReleaseMutex(handle); } } release{mutex.value};
+                receipt = supplementOptiCatalog(clientRoot, optiCatalogCandidates(cancelled, false),
+                    std::move(running), cancelled, permitted);
+            }
+        }
+    } catch (...) {
+        // The single startup attempt ends here. No retry, receipt, renderer
+        // event, notification or dialog is emitted on any error.
+        return {{"status", cancelled() ? "cancelled" : "error"}};
+    }
+    receipt["cost"] = cost.finish();
+    receipt["trigger"] = trigger;
+    receipt["startupDelayMs"] = custom_steam_library::opti_catalog::startupDelayMs;
+    receipt["itemDelayMs"] = custom_steam_library::opti_catalog::itemDelayMs;
+    receipt["recordedAt"] = unixTimeMsHost();
+    if (!cancelled() && permitted()) {
+        try { writeOptiStartupBytesOnce(g_dataRoot / L"state" / L"last-opti-client-supplement.json", receipt.dump(2) + '\n'); }
+        catch (...) { return {{"status", "error"}}; }
+    }
+    return receipt;
+}
+
+static std::optional<int> runLibraryOptiStartupEntrypoint(const fs::path& appRoot,
+    const std::function<fs::path()>& clientRootFor = optiCatalogClientRoot,
+    std::function<bool()> running = optiClientRunningForCatalog) {
+    return ymcc::optiStartup::entrypoint(appRoot, [&](const std::function<bool()>& cancelled) {
+        g_dataRoot = custom_steam_library::defaultDataRoot(appRoot);
+        const HRESULT com = CoInitializeEx(nullptr, COINIT_MULTITHREADED);
+        struct EndCom { bool active; ~EndCom() { if (active) CoUninitialize(); } } endCom{SUCCEEDED(com)};
+        const auto result = runOptiCatalogSupplement(cancelled, [&] { return !cancelled(); },
+            "ymcc-startup-once", clientRootFor, std::move(running));
+        if (result.value("status", std::string{}) == "error") throw std::runtime_error("OPT startup supplement failed");
+    });
 }
 
 static json scrapeStateSnapshot() {
@@ -6586,7 +6908,7 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
     }
     if (command == "cancelArtwork") {
         const bool requested = cancelBackgroundJobs(g_artworkJobs);
-        postWebMessageNoThrow({{"kind", "response"}, {{"id", id}}, {{"ok", true}}, {{"result", {{"cancelled", requested}}}}});
+        postWebMessageNoThrow({{"kind", "response"}, {"id", id}, {"ok", true}, {"result", {{"cancelled", requested}}}});
         return;
     }
     if (command == "cancelIdentitySearch") {
@@ -6596,7 +6918,7 @@ static void beginCommand(uint64_t id, std::string command, json arguments = json
         postWebMessageNoThrow({{"kind", "response"}, {"id", id}, {"ok", true}, {"result", {{"cancelled", requested}}}});
         return;
     }
-    if (command == "searchArtwork" || command == "downloadArtworkCandidate") {
+    if (command == "searchArtwork" || command == "downloadArtworkCandidate" || command == "mediaSearchVideos") {
         startArtworkTask(id, std::move(command), std::move(arguments));
         return;
     }
@@ -7617,6 +7939,7 @@ static void initializeWebView() {
                     return environmentResult;
                 }
                 g_webviewEnvironment = environment;
+                        ymcc::processEfficiency::attachWebViewEfficiency(environment);
                 return environment->CreateCoreWebView2Controller(
                     g_window,
                     Callback<ICoreWebView2CreateCoreWebView2ControllerCompletedHandler>(
@@ -7754,6 +8077,12 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam
 }
 
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int) {
+    (void)ymcc::processEfficiency::applyCurrent();
+    wchar_t mediaExecutable[32768]{};
+    GetModuleFileNameW(nullptr,mediaExecutable,static_cast<DWORD>(std::size(mediaExecutable)));
+    const auto mediaAppRoot = custom_steam_library::applicationRootFromExecutable(fs::path(mediaExecutable));
+    if (const auto result = runLibraryOptiStartupEntrypoint(mediaAppRoot)) return *result;
+    if (const auto result = ymcc::media::downloads::backgroundEntrypoint(mediaAppRoot)) return *result;
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     g_launchOptions = parseLaunchOptions();
     g_updateHealthOnly = g_launchOptions.updateHealthOnly;

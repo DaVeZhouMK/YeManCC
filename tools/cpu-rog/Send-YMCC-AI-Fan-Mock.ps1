@@ -81,6 +81,22 @@ function Confirm-RogFanReply($Options,$Reply,[string]$RequestId,[long]$Sequence,
     # Deliberately no token/lease, arbitrary strings, raw request/response or settings.
     return $safe
 }
+# PowerShell converts a null string argument to an empty string on .NET File.Replace.
+# Keep the true null backup argument in C# while preserving same-volume atomic replacement.
+function Set-RogFanAtomicRequest([string]$Source,[string]$Destination) {
+    if (-not ('RogPortable.FanAtomicFile' -as [type])) {
+        Add-Type -TypeDefinition @"
+namespace RogPortable {
+ public static class FanAtomicFile {
+  public static void Replace(string source,string destination) {
+   System.IO.File.Replace(source,destination,null);
+  }
+ }
+}
+"@ -ErrorAction Stop
+    }
+    [RogPortable.FanAtomicFile]::Replace($Source,$Destination)
+}
 function Invoke-RogFan($Options,$Context) {
     if ($Options.Action -notin @('fan-probe','fan-on','fan-off','fan-close','fan-status')) { throw 'FAN_ACTION_NOT_ALLOWED' }
     Assert-RogAuthorized $Options; [void](Assert-RogTarget $Options -RequireTrusted)
@@ -116,7 +132,7 @@ function Invoke-RogFan($Options,$Context) {
         $temporary=Join-Path $dir ('ai-request.'+$requestId+'.tmp')
         Write-RogNewJson $temporary $request
         [void](Assert-RogProcess $Options); [void](Assert-RogTarget $Options -RequireTrusted); Assert-RogNoReparse $dir; Assert-RogNoReparse $requestPath
-        if (Test-Path -LiteralPath $requestPath) { [IO.File]::Replace($temporary,$requestPath,$null) } else { [IO.File]::Move($temporary,$requestPath) }
+        if (Test-Path -LiteralPath $requestPath) { Set-RogFanAtomicRequest $temporary $requestPath } else { [IO.File]::Move($temporary,$requestPath) }
         $temporary=$null; $deadline=$started.AddSeconds($Options.TimeoutSeconds)
         do {
             [void](Assert-RogProcess $Options); Assert-RogNoReparse $dir

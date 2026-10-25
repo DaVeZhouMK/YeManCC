@@ -1,0 +1,61 @@
+{
+  "schemaVersion": 1,
+  "kind": "onex-current-first-old-fixed-original-contract",
+  "originalStage": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-portable-executor-20261021-r1/RECORDED-STAGE-PLAN.json",
+    "sha256": "f2a0720ae405dc5f9428777a128155c50897bfb80606205b17e43c796841124d"
+  },
+  "stageModule": {
+    "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\first-old-stage.mjs",
+    "sha256": "bf3da707e31c194134c31f2f5eaec13f0e2f088f459a88d8b80b6047c1d08483"
+  },
+  "originalBusiness": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-owned-stage-20261021-r2/owned-stage/old-binary-result.json",
+    "sha256": "98246442f55bab1ac040b5b8ce34d4217a6b86a156bd20e2c93f82c0b7bedf95"
+  },
+  "originalLaunch": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-owned-stage-20261021-r2/owned-stage/first-old-launch-receipt.json",
+    "sha256": "92a223bd04a4c6ad0b6b753cbb14b31ec006fcde635c942fff4b1b4c75b446e3"
+  },
+  "originalProcess": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-owned-stage-20261021-r2/first-old-business-r1/PROCESS.json",
+    "sha256": "f98cc59be1819537d0db21d92bd4dccd5626ee04dcba10c76d03e9c679f095e5"
+  },
+  "originalOuterFailure": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-owned-stage-20261021-r2/first-old-business-r1/SUMMARY.json",
+    "sha256": "fd9d089fda175ace2c78c6b36166e8ef2046c877ff3eb4049f8834316969ec40"
+  },
+  "originalAcceptedAudit": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-old-owned-stage-20261021-r2/first-old-loaded-binding-audit-r2/SUMMARY.json",
+    "sha256": "f534353b47e84a80b28a046d99bc2766b9a3e4e151ac3ee9b2b4d1d4eb7d76d6"
+  },
+  "dotnetSha256": "ab1b71fd3dd71062e074c9fab8312081a81b7f2b3e0327c48c4d249c8d1a3135",
+  "rawHcSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+  "readonlySourceRoot": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC",
+  "parentBuildBudgetProtocol": {
+    "currentFormat": "compile-and-duration-v2",
+    "compileField": "preparedCompileMs",
+    "durationField": "preparedDurationMs",
+    "remainingField": "remainingParentBudgetMs",
+    "historicalFormat": "historical-compile-only-v1",
+    "historicalReceipts": [
+      {
+        "manifest": {
+          "path": "D:/Codex/2026-10-18/kai-s/work/fan71q/PARENT-BUILD-PREPARED.json",
+          "sha256": "a2d1916ef0621b4c039b1401223fa41a567f3f4c2ccea44641e542ed72163903"
+        },
+        "meaning": "Historical fan71q compile-only duration. Explicit caller format and exact receipt pin required; never a fallback for a current receipt."
+      }
+    ],
+    "optionalLaterStageAccounting": {
+      "preparedToolCount": 5,
+      "stageKinds": [
+        "BootstrapFixture",
+        "JoinedFactoryProbe"
+      ],
+      "compileSubtotal": "initial buildProcesses plus both laterStages process durationMs",
+      "duration": "total active parent preparation, including all five compiles, source capture, generation and verification",
+      "historicalFallbackForbidden": true
+    }
+  }
+}

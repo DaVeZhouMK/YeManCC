@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors><EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>LightSetterDeviceCoreConsumerReplay</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../../FanLab/LightSetter/Program.cs" Link="Program.cs" />
+    <Compile Include="../../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs" />
+    <Compile Include="../../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs" />
+    <Compile Include="../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <!-- Generated only in scratch. Keeps a compiled test pin, never a CLI bypass. -->
+    <Compile Include="$(ReplayPinSource)" Link="LightingAssemblyPins.cs" />
+    <Compile Include="../../../FanLab/LightSetter/OneXLightingSession.cs" Link="OneXLightingSession.cs" />
+    <Compile Include="../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+    <Compile Include="../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+  </ItemGroup>
+  <Target Name="RequireReplayPin" BeforeTargets="BeforeCompile">
+    <Error Condition="'$(ReplayPinSource)' == ''" Text="ReplayPinSource must point to the scratch-only compiled fixture pin." />
+  </Target>
+  <ItemGroup>
+    <Compile Include="../../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="../../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="../../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
+    <Compile Include="../../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
+</Project>

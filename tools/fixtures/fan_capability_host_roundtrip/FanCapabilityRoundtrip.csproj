@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <UseWPF>true</UseWPF>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <StartupObject>FanCapabilityRoundtrip</StartupObject>
+    <NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <PropertyGroup Condition="Exists('HcBinaryAdapter.cs')">
+    <DefineConstants>$(DefineConstants);HC_BINARY_ADAPTER_READY</DefineConstants>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Runner.cs" />
+    <Compile Include="HcBinaryAdapter.cs" Condition="Exists('HcBinaryAdapter.cs')" />
+    <Compile Include="../../../FanLab/real-host/*.cs" Link="Host/%(Filename)%(Extension)" />
+    <Compile Include="../../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+    <Compile Include="../../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+    <Compile Include="../../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <ProjectReference Include="../../../FanLab/fan-backend/YeManFanBackend.csproj" />
+  </ItemGroup>
+</Project>

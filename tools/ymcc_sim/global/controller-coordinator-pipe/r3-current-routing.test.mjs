@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {selectCoordinatorProfile} from './r3-current-routing.mjs';
+test('explicit current route wins over an active B54 route',()=>{let historicalReads=0;assert.equal(selectCoordinatorProfile('fixture',{current:()=>true,b54:()=>{historicalReads++;return true;}}),'current');assert.equal(historicalReads,0);});
+test('a pending current declaration cannot silently fall back to B54',()=>{assert.equal(selectCoordinatorProfile('fixture',{current:()=>true,b54:()=>{throw Error('old source must not be consulted');}}),'current');});
+test('a malformed or stale current declaration propagates its failure',()=>{assert.throws(()=>selectCoordinatorProfile('fixture',{current:()=>{throw Error('CURRENT_SOURCE_CHANGED');},b54:()=>true}),/CURRENT_SOURCE_CHANGED/);});
+test('B54 remains available when current is explicitly inactive',()=>assert.equal(selectCoordinatorProfile('fixture',{current:()=>false,b54:()=>true}),'b54'));
+test('both inactive declarations retain the original legacy route',()=>assert.equal(selectCoordinatorProfile('fixture',{current:()=>false,b54:()=>false}),'legacy'));
+test('truthy objects cannot act as profile admission',()=>{assert.throws(()=>selectCoordinatorProfile('fixture',{current:()=>({}),b54:()=>true}),/NOT_BOOLEAN/);assert.throws(()=>selectCoordinatorProfile('fixture',{current:()=>false,b54:()=>({})}),/NOT_BOOLEAN/);});

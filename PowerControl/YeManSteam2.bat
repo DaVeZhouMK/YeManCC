@@ -14,7 +14,10 @@ schtasks /query /tn "%TASK_NAME%" >nul 2>&1
 if %errorlevel%==0 (
     echo 检测到启动任务「%TASK_NAME%」，正在启动 YeManCC...
     if exist "%EXE_PATH%" (
-        start "" "%EXE_PATH%"
+        tasklist /FI "IMAGENAME eq YeManCC.exe" 2>nul | find /I "YeManCC.exe" >nul
+        if errorlevel 1 (
+            start "" "%EXE_PATH%"
+        )
         echo 已发起启动：%EXE_PATH%
     ) else (
         echo 错误：未找到程序文件 %EXE_PATH%

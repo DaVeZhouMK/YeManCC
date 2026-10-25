@@ -88,10 +88,13 @@ int wmain(int argc, wchar_t** argv) {
         expect(!verified, "unrelated PID cannot be adopted");if(verified)CloseHandle(verified);
         Observer observer(registry.path);
         expect(observer.steamPresence()==-1, "Steam presence unknown before observer starts");
+        expect(observer.sessionSnapshot().pid==0, "shared addon snapshot cannot invent a session before startup");
         std::atomic<int> changes{0},retryCalls{0};
         expect(observer.start([&](bool changed){if(changed)++changes;else ++retryCalls;},[]{return false;}), "real asynchronous registry observer starts");
         expect(until([&]{return changes.load()==1;}), "initial session delivered exactly once");
         expect(observer.steamPresence()==1, "verified live session publishes cached Steam presence");
+        const auto shared=observer.sessionSnapshot();
+        expect(shared.pid==first.pi.dwProcessId && shared.created!=0 && _wcsicmp(shared.root.c_str(),root.c_str())==0, "sidebar and CSS guard share the same verified PID/birth snapshot");
         const auto beforeCpu=cpuTime();Sleep(600);const auto idleCpu=cpuTime()-beforeCpu;
         std::cout << "IDLE_CPU_MS " << idleCpu/10000.0 << " over 600ms (isolated observer process)\n";
         expect(idleCpu<1000000 && changes==1 && retryCalls==0, "idle subscription has no work callbacks and negligible CPU");
@@ -124,6 +127,7 @@ int wmain(int argc, wchar_t** argv) {
         const auto postRestartCount=changes.load();
         observer.stop();
         expect(observer.steamPresence()==-1, "stopped observer cannot publish stale Steam absence/presence");
+        expect(observer.sessionSnapshot().pid==0, "observer shutdown clears addon session identity");
         registry.number(L"ActiveUser",99);Sleep(100);
         expect(changes==postRestartCount, "stop closes waits and prevents further callbacks");observer.stop();
         expect(observer.start([&](bool changed){if(changed)++changes;else ++retryCalls;},[]{return true;}), "observer can restart after cleanup");

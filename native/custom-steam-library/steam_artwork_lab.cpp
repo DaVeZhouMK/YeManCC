@@ -2,6 +2,7 @@
 #include <winsock2.h>
 #include <ws2tcpip.h>
 #include <windows.h>
+#include "../process_efficiency.h"
 #include <iphlpapi.h>
 #include <winhttp.h>
 #include <bcrypt.h>
@@ -42,6 +43,8 @@
 #include "custom_steam_library_paths.h"
 #include "custom_steam_library_inventory.h"
 #include "custom_steam_library_identity_cache.h"
+#include "custom_steam_library_video_catalog.h"
+#include "custom_steam_library_ymcc_whitelist.h"
 
 using json = nlohmann::json;
 namespace fs = std::filesystem;
@@ -88,6 +91,36 @@ static std::map<std::string, int> g_configuredArtworkNetworkFailures;
 // endpoint must not occupy the serial queue for several minutes; the host
 // will retry the item in the next automatic pass or when the network wakes.
 static bool g_fastMetadataMode = false;
+static constexpr DWORD HTTP_IDENTITY_TOTAL_BUDGET_MS = 45000;
+static constexpr DWORD HTTP_MAX_PROVIDER_COOLDOWN_MS = 10u * 60u * 1000u;
+static thread_local ULONGLONG g_identityNetworkDeadline = 0;
+class ScopedIdentityNetworkBudget {
+    ULONGLONG previous_;
+public:
+    explicit ScopedIdentityNetworkBudget(bool enabled, DWORD budgetMs = HTTP_IDENTITY_TOTAL_BUDGET_MS)
+        : previous_(g_identityNetworkDeadline) {
+        if (enabled) {
+            const auto deadline = GetTickCount64() + budgetMs;
+            g_identityNetworkDeadline = previous_ ? (std::min)(previous_, deadline) : deadline;
+        }
+    }
+    ~ScopedIdentityNetworkBudget() { g_identityNetworkDeadline = previous_; }
+};
+// Optional icons cannot hold required cover/header/hero publication hostage.
+// One shared deadline covers lookup, asset enumeration and image download.
+static thread_local ULONGLONG g_optionalArtworkDeadline = 0;
+class ScopedOptionalArtworkBudget {
+    ULONGLONG previous_;
+public:
+    explicit ScopedOptionalArtworkBudget(bool enabled, DWORD budgetMs = 8000) : previous_(g_optionalArtworkDeadline) {
+        if (enabled) {
+            const auto deadline = GetTickCount64() + budgetMs;
+            g_optionalArtworkDeadline = previous_ ? (std::min)(previous_, deadline) : deadline;
+        }
+    }
+    ~ScopedOptionalArtworkBudget() { g_optionalArtworkDeadline = previous_; }
+};
+
 
 // The worker is launched as a separate process for each game, so the useful
 // repeat-scrape cache must live below the portable data root rather than only
@@ -218,7 +251,9 @@ static std::string normalizeTitle(const std::string& value) {
 }
 
 static std::string searchQueryKey(const std::string& value) {
-    return normalizeTitle(collapseSpaces(value));
+    // Steam's search endpoint distinguishes joined words from spaced words.
+    // Identity comparison can ignore punctuation; request deduplication cannot.
+    return collapseSpaces(toUtf8(unicodeLower(normalizeSearchWidth(toWide(value)))));
 }
 
 static std::vector<std::string> titleTokens(const std::string& value) {
@@ -318,8 +353,32 @@ static double scoreTitle(const std::string& query, const std::string& candidate)
     return std::clamp(score, 0.0, 0.99);
 }
 
+static std::vector<std::string> officialMultilingualTitleParts(const std::string& title) {
+    std::vector<std::string> parts;
+    size_t start = 0;
+    for (size_t i = 0; i <= title.size(); ++i) {
+        if (i < title.size() && title[i] != '/' && title[i] != '|') continue;
+        const auto part = trim(title.substr(start, i - start));
+        if (!part.empty()) parts.push_back(part);
+        start = i + 1;
+    }
+    if (parts.size() < 2 || parts.size() > 4) return {};
+    bool latin = false, cjk = false;
+    for (const auto& part : parts) {
+        bool partLatin = false, partCjk = false;
+        for (wchar_t ch : toWide(part)) {
+            partLatin = partLatin || (ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z');
+            partCjk = partCjk || (ch >= 0x3040 && ch <= 0x30ff) || (ch >= 0x3400 && ch <= 0x9fff) || (ch >= 0xac00 && ch <= 0xd7af);
+        }
+        latin = latin || (partLatin && !partCjk);
+        cjk = cjk || partCjk;
+    }
+    return latin && cjk ? parts : std::vector<std::string>{};
+}
 static double scoreInstalledTitle(const std::string& installed, const std::string& formal) {
     double score = scoreTitle(installed, formal);
+    for (const auto& alias : officialMultilingualTitleParts(formal))
+        if (normalizeTitle(installed).size() >= 4 && normalizeTitle(installed) == normalizeTitle(alias)) score = 1.0;
     const auto installedKey = normalizeTitle(installed);
     const auto formalKey = normalizeTitle(formal);
     const auto installedAcronym = scanTitleAcronym(installed);
@@ -331,7 +390,9 @@ static double scoreInstalledTitle(const std::string& installed, const std::strin
     return score;
 }
 
-static std::vector<std::string> buildPathEvidence(const fs::path& exePath) {
+static std::string installedDirectoryTitle(const std::string&);
+
+static std::vector<std::string> buildPathEvidence(const fs::path& exePath, const fs::path& gameDirectoryBoundary = {}) {
     std::vector<std::string> evidence;
     std::set<std::string> seen;
     auto add = [&](const std::string& raw) {
@@ -345,9 +406,14 @@ static std::vector<std::string> buildPathEvidence(const fs::path& exePath) {
     for (int depth = 0; !current.empty() && depth < 7; ++depth) {
         const auto name = toUtf8(current.filename().wstring());
         if (!name.empty() && !noisyDirectory(name)) {
+            const auto installed = installedDirectoryTitle(name);
+            add(installed);
+            add(humanizeTitle(installed));
             add(name);
             add(humanizeTitle(name));
         }
+        if (!gameDirectoryBoundary.empty() && unicodeLower(current.lexically_normal().wstring()) ==
+            unicodeLower(gameDirectoryBoundary.lexically_normal().wstring())) break;
         current = current.parent_path();
     }
     return evidence;
@@ -954,17 +1020,12 @@ static DWORD remainingHttpBudget(ULONGLONG deadline, DWORD maximum) {
     return static_cast<DWORD>((std::min)(deadline - now, static_cast<ULONGLONG>(maximum)));
 }
 
-static void setHttpTimeouts(HINTERNET handle, ULONGLONG deadline, bool acceleratorRoute = false) {
-    DWORD resolveTimeout = remainingHttpBudget(deadline,
-        acceleratorRoute ? HTTP_ACCELERATOR_RESOLVE_TIMEOUT_MS : HTTP_RESOLVE_TIMEOUT_MS);
-    DWORD connectTimeout = remainingHttpBudget(deadline,
-        acceleratorRoute ? HTTP_ACCELERATOR_CONNECT_TIMEOUT_MS : HTTP_CONNECT_TIMEOUT_MS);
-    DWORD sendTimeout = remainingHttpBudget(deadline,
-        acceleratorRoute ? HTTP_ACCELERATOR_TIMEOUT_MS : HTTP_TIMEOUT_MS);
-    DWORD receiveTimeout = remainingHttpBudget(deadline,
-        acceleratorRoute ? HTTP_ACCELERATOR_TIMEOUT_MS : HTTP_TIMEOUT_MS);
-    WinHttpSetTimeouts(handle, resolveTimeout, connectTimeout, sendTimeout, receiveTimeout);
+static ULONGLONG effectiveHttpDeadline(ULONGLONG deadline) {
+    if (g_optionalArtworkDeadline) deadline = (std::min)(deadline, g_optionalArtworkDeadline);
+    if (g_identityNetworkDeadline) deadline = (std::min)(deadline, g_identityNetworkDeadline);
+    return deadline;
 }
+
 
 struct HttpResponse {
     DWORD status = 0;
@@ -974,6 +1035,7 @@ struct HttpResponse {
     DWORD retryAfterMs = 0;
     std::string networkRoute = "direct";
     std::string finalUrl;
+    DWORD serverRetryAfterMs = 0;
 };
 
 #ifdef CUSTOM_STEAM_LIBRARY_TEST_RUNTIME
@@ -991,6 +1053,20 @@ private:
     DWORD code_;
     bool retryable_;
 };
+
+class HttpStatusError : public std::runtime_error {
+public:
+    HttpStatusError(const std::string& provider, DWORD status)
+        : std::runtime_error(provider + " HTTP " + std::to_string(status)), status_(status) {}
+    DWORD status() const { return status_; }
+private:
+    DWORD status_;
+};
+
+static json loadMetadataBackoff(const std::string& url);
+static void rememberMetadataBackoff(const std::string& url, DWORD status, DWORD delayMs, bool providerWait = false);
+static uint64_t metadataProviderRetryAt(const json& record);
+static void clearMetadataBackoff(const std::string& url, uint64_t requestStartedAt);
 
 struct InternetHandle {
     HINTERNET value = nullptr;
@@ -1012,6 +1088,15 @@ static bool transientHttpStatus(DWORD status) {
            status == 500 || status == 502 || status == 503 || status == 504;
 }
 
+// The worker requests whole representations and never sends Range. Even a
+// parseable JSON fragment or a decodable picture in 206 must not be cached as
+// a complete search result/asset. Recover through the existing bounded retry.
+static void requireCompleteHttpStatus(DWORD status) {
+    if (status == 206)
+        throw HttpTransportError("Unexpected partial HTTP response for a complete request",
+            ERROR_WINHTTP_INVALID_SERVER_RESPONSE, true);
+}
+
 static std::string winHttpError(const char* stage, DWORD code) {
     wchar_t* buffer = nullptr;
     const DWORD flags = FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM |
@@ -1031,6 +1116,7 @@ static bool retryableWinHttpError(DWORD code) {
         case ERROR_WINHTTP_NAME_NOT_RESOLVED:
         case ERROR_WINHTTP_CANNOT_CONNECT:
         case ERROR_WINHTTP_CONNECTION_ERROR:
+        case ERROR_WINHTTP_INVALID_SERVER_RESPONSE:
         case ERROR_WINHTTP_RESEND_REQUEST:
         case ERROR_WINHTTP_AUTO_PROXY_SERVICE_ERROR:
         case ERROR_WINHTTP_AUTODETECTION_FAILED:
@@ -1044,6 +1130,36 @@ static bool retryableWinHttpError(DWORD code) {
 
 [[noreturn]] static void throwWinHttp(const char* stage, DWORD code = GetLastError()) {
     throw HttpTransportError(winHttpError(stage, code), code, retryableWinHttpError(code));
+}
+
+// Phase timeouts do not enforce a total request deadline. Refuse additional
+// blocking work once the caller's current job/request budget has expired.
+static void requireHttpBudget(ULONGLONG deadline) {
+    if (GetTickCount64() >= effectiveHttpDeadline(deadline))
+        throw HttpTransportError("HTTP operation budget expired", ERROR_WINHTTP_TIMEOUT, true);
+}
+
+static void setHttpTimeouts(HINTERNET handle, ULONGLONG deadline, bool acceleratorRoute = false) {
+    requireHttpBudget(deadline);
+    deadline = effectiveHttpDeadline(deadline);
+    DWORD resolveTimeout = remainingHttpBudget(deadline,
+        acceleratorRoute ? HTTP_ACCELERATOR_RESOLVE_TIMEOUT_MS : HTTP_RESOLVE_TIMEOUT_MS);
+    DWORD connectTimeout = remainingHttpBudget(deadline,
+        acceleratorRoute ? HTTP_ACCELERATOR_CONNECT_TIMEOUT_MS : HTTP_CONNECT_TIMEOUT_MS);
+    DWORD sendTimeout = remainingHttpBudget(deadline,
+        acceleratorRoute ? HTTP_ACCELERATOR_TIMEOUT_MS : HTTP_TIMEOUT_MS);
+    DWORD receiveTimeout = remainingHttpBudget(deadline,
+        acceleratorRoute ? HTTP_ACCELERATOR_TIMEOUT_MS : HTTP_TIMEOUT_MS);
+    if (g_optionalArtworkDeadline || g_identityNetworkDeadline) {
+        // WinHTTP timeouts apply to separate phases, not to the whole job.
+        const auto phase = (std::max)(DWORD{1}, remainingHttpBudget(deadline, HTTP_IDENTITY_TOTAL_BUDGET_MS) / 4);
+        resolveTimeout = (std::min)(resolveTimeout, phase);
+        connectTimeout = (std::min)(connectTimeout, phase);
+        sendTimeout = (std::min)(sendTimeout, phase);
+        receiveTimeout = (std::min)(receiveTimeout, phase);
+    }
+    if (!WinHttpSetTimeouts(handle, resolveTimeout, connectTimeout, sendTimeout, receiveTimeout))
+        throwWinHttp("WinHttpSetTimeouts");
 }
 
 struct ReusableHttpSession {
@@ -1086,17 +1202,17 @@ static std::wstring queryHttpHeader(HINTERNET request, DWORD query) {
     return value;
 }
 
-static DWORD parseRetryAfterMs(const std::wstring& raw) {
+static DWORD parseRetryAfterMs(const std::wstring& raw, DWORD maximumMs = HTTP_MAX_RETRY_AFTER_MS) {
     const auto value = trim(toUtf8(raw));
     if (value.empty()) return 0;
     if (std::all_of(value.begin(), value.end(), [](unsigned char ch) { return std::isdigit(ch) != 0; })) {
         try {
             const auto seconds = std::stoull(value);
-            const auto capSeconds = static_cast<unsigned long long>(HTTP_MAX_RETRY_AFTER_MS) / 1000ull;
-            if (seconds >= capSeconds) return HTTP_MAX_RETRY_AFTER_MS;
+            const auto capSeconds = static_cast<unsigned long long>(maximumMs) / 1000ull;
+            if (seconds >= capSeconds) return maximumMs;
             return static_cast<DWORD>(seconds * 1000ull);
         } catch (...) {
-            return HTTP_MAX_RETRY_AFTER_MS;
+            return maximumMs;
         }
     }
     SYSTEMTIME target{};
@@ -1112,7 +1228,7 @@ static DWORD parseRetryAfterMs(const std::wstring& raw) {
     if (targetValue.QuadPart <= nowValue.QuadPart) return 0;
     const auto milliseconds = (targetValue.QuadPart - nowValue.QuadPart) / 10000ull;
     return static_cast<DWORD>((std::min)(milliseconds,
-        static_cast<unsigned long long>(HTTP_MAX_RETRY_AFTER_MS)));
+        static_cast<unsigned long long>(maximumMs)));
 }
 
 static bool trustedSteamMetadataFinalUrl(const std::string& requested, const std::string& finalUrl) {
@@ -1141,9 +1257,7 @@ static HttpResponse httpRequest(
 #ifdef CUSTOM_STEAM_LIBRARY_TEST_RUNTIME
     throw std::runtime_error("Live HTTP is forbidden by the isolated test runtime");
 #endif
-    if (GetTickCount64() >= deadline) {
-        throw HttpTransportError("HTTP operation budget expired", ERROR_WINHTTP_TIMEOUT, true);
-    }
+    requireHttpBudget(deadline);
     const auto wideUrl = toWide(url);
     URL_COMPONENTS parts{};
     parts.dwStructSize = sizeof(parts);
@@ -1222,10 +1336,15 @@ static HttpResponse httpRequest(
     }
     LPVOID bodyPointer = requestBody.empty() ? WINHTTP_NO_REQUEST_DATA : const_cast<unsigned char*>(requestBody.data());
     const DWORD bodyBytes = static_cast<DWORD>(requestBody.size());
+    setHttpTimeouts(request, deadline, acceleratorRoute);
     if (!WinHttpSendRequest(request, WINHTTP_NO_ADDITIONAL_HEADERS, 0, bodyPointer, bodyBytes, bodyBytes, 0)) {
         throwWinHttp("WinHttpSendRequest");
     }
+    // DNS/connect/TLS/send may have consumed most of the original allowance.
+    // Refresh the receive timeout from the remaining budget at this boundary.
+    setHttpTimeouts(request, deadline, acceleratorRoute);
     if (!WinHttpReceiveResponse(request, nullptr)) throwWinHttp("WinHttpReceiveResponse");
+    requireHttpBudget(deadline);
 
     HttpResponse response;
     response.networkRoute = networkRoute;
@@ -1251,14 +1370,19 @@ static HttpResponse httpRequest(
         WINHTTP_HEADER_NAME_BY_INDEX, &response.status, &statusSize, WINHTTP_NO_HEADER_INDEX)) {
         throwWinHttp("WinHttpQueryHeaders(status)");
     }
+    requireCompleteHttpStatus(response.status);
     markSteamRouteResult(networkRoute, true);
-    response.retryAfterMs = parseRetryAfterMs(queryHttpHeader(request, WINHTTP_QUERY_RETRY_AFTER));
+    const auto retryAfter = queryHttpHeader(request, WINHTTP_QUERY_RETRY_AFTER);
+    response.retryAfterMs = parseRetryAfterMs(retryAfter);
+    response.serverRetryAfterMs = parseRetryAfterMs(retryAfter, HTTP_MAX_PROVIDER_COOLDOWN_MS);
     DWORD expected = 0;
     DWORD expectedSize = sizeof(expected);
     if (WinHttpQueryHeaders(request, WINHTTP_QUERY_CONTENT_LENGTH | WINHTTP_QUERY_FLAG_NUMBER,
         WINHTTP_HEADER_NAME_BY_INDEX, &expected, &expectedSize, WINHTTP_NO_HEADER_INDEX)) {
         response.expectedBytes = expected;
-        if (response.expectedBytes > maxBytes) {
+        // Error bodies are discarded below; their declared size must not
+        // mask a 429/503 or lose its Retry-After scheduling evidence.
+        if (response.status >= 200 && response.status < 300 && response.expectedBytes > maxBytes) {
             throw HttpTransportError("HTTP response declared a size above the limit", ERROR_INVALID_DATA, false);
         }
     }
@@ -1279,13 +1403,12 @@ static HttpResponse httpRequest(
     if (response.status < 200 || response.status >= 300) return response;
 
     for (;;) {
-        if (GetTickCount64() >= deadline) {
-            throw HttpTransportError("HTTP response operation budget expired", ERROR_WINHTTP_TIMEOUT, true);
-        }
+        requireHttpBudget(deadline);
         if (response.expectedBytes > 0 && response.body.size() >= response.expectedBytes) break;
         setHttpTimeouts(request, deadline, acceleratorRoute);
         DWORD available = 0;
         if (!WinHttpQueryDataAvailable(request, &available)) throwWinHttp("WinHttpQueryDataAvailable");
+        requireHttpBudget(deadline);
         if (available == 0) {
             if (response.expectedBytes > response.body.size()) {
                 throw HttpTransportError(
@@ -1309,10 +1432,16 @@ static HttpResponse httpRequest(
         setHttpTimeouts(request, deadline, acceleratorRoute);
         if (!WinHttpReadData(request, response.body.data() + oldSize,
             static_cast<DWORD>(readSize), &read)) throwWinHttp("WinHttpReadData");
+        requireHttpBudget(deadline);
         response.body.resize(oldSize + read);
-        if (read == 0 && response.expectedBytes > response.body.size()) {
-            throw HttpTransportError("WinHttpReadData returned no data before completion",
-                ERROR_WINHTTP_CONNECTION_ERROR, true);
+        if (read == 0) {
+            if (response.expectedBytes > response.body.size()) {
+                throw HttpTransportError("WinHttpReadData returned no data before completion",
+                    ERROR_WINHTTP_CONNECTION_ERROR, true);
+            }
+            // A successful zero-byte read is EOF, including chunked bodies
+            // without Content-Length. Do not spin on an availability hint.
+            break;
         }
         if (response.expectedBytes > 0 && response.body.size() > response.expectedBytes) {
             throw HttpTransportError("HTTP response exceeded declared Content-Length", ERROR_INVALID_DATA, true);
@@ -1322,6 +1451,21 @@ static HttpResponse httpRequest(
         throw HttpTransportError("HTTP response size mismatch", ERROR_WINHTTP_CONNECTION_ERROR, true);
     }
     return response;
+}
+
+// Normal requests and semantic direct-IP fallback share provider scheduling.
+// Persist under the canonical URL so the next worker observes the same wait.
+static bool deferHttpProviderWait(const std::string& url, const HttpResponse& response, json& trace) {
+    if (response.status != 429 &&
+        (!transientHttpStatus(response.status) || response.serverRetryAfterMs == 0)) return false;
+    const auto delay = (std::max)(response.status == 429 ? DWORD{30000} : DWORD{0},
+        (std::max)(response.retryAfterMs, response.serverRetryAfterMs));
+    rememberMetadataBackoff(url, response.status, delay, true);
+    trace["retryable"] = true;
+    trace["retryDeferred"] = true;
+    trace["retryAfterMs"] = delay;
+    trace["retryAt"] = unixTimeMs() + delay;
+    return true;
 }
 
 static HttpResponse httpRequestWithRetry(
@@ -1336,7 +1480,19 @@ static HttpResponse httpRequestWithRetry(
     json* attemptLog = nullptr) {
     std::string lastError;
     const ULONGLONG startedAll = GetTickCount64();
+    const uint64_t requestStartedAt = unixTimeMs();
     const bool fastMetadata = g_fastMetadataMode && !imageRequest;
+    // Manual and background requests share the provider recovery window.
+    const auto cooldown = loadMetadataBackoff(url);
+    if (!cooldown.empty() && (fastMetadata || imageRequest || metadataProviderRetryAt(cooldown) > unixTimeMs())) {
+        json trace = {{"stage", imageRequest ? "image-endpoint-backoff" : "metadata-endpoint-backoff"}, {"attempt", 0},
+            {"provider", provider}, {"url", url}, {"freshSession", false},
+            {"ok", false}, {"retryable", true}, {"skippedNetwork", true},
+            {"retryAt", cooldown["retryAt"]}, {"identityAuthority", false}};
+        if (cooldown.value("status", DWORD{0}) > 0) trace["status"] = cooldown["status"];
+        if (attemptLog) attemptLog->push_back(std::move(trace));
+        throw HttpTransportError(provider + " endpoint is cooling down; retry later", ERROR_WINHTTP_TIMEOUT, true);
+    }
     const std::string acceleratedUrl = steamAcceleratedRequestUrl(url);
     std::string requestUrl = acceleratedUrl;
     std::string forcedSteamHost;
@@ -1345,17 +1501,28 @@ static HttpResponse httpRequestWithRetry(
     bool acceleratorFallbackUsed = false;
     bool directIpFallbackUsed = false;
     std::optional<SteamDirectIpFallback> directIpFallback;
-    const int maxAttempts = fastMetadata || acceleratorRoute ? 2 : HTTP_MAX_ATTEMPTS;
-    const ULONGLONG deadline = startedAll + (imageRequest
+    const int maxAttempts = g_optionalArtworkDeadline ? 1 : fastMetadata || acceleratorRoute ? 2 : HTTP_MAX_ATTEMPTS;
+    const ULONGLONG normalDeadline = startedAll + (imageRequest
         ? (acceleratorRoute ? HTTP_ACCELERATOR_IMAGE_BUDGET_MS : HTTP_IMAGE_BUDGET_MS)
         : (fastMetadata ? 20000ull : (acceleratorRoute
             ? HTTP_ACCELERATOR_METADATA_BUDGET_MS : HTTP_METADATA_BUDGET_MS)));
+    const ULONGLONG deadline = effectiveHttpDeadline(normalDeadline);
     auto scheduleSteamFallback = [&](json& trace, const std::string& reason) {
+        auto fallbackBudgetAvailable = [&]() {
+            if (GetTickCount64() < effectiveHttpDeadline(deadline)) return true;
+            trace["reconnectScheduled"] = false;
+            trace["retryAborted"] = "weak-network-budget";
+            return false;
+        };
+        if (!fallbackBudgetAvailable()) return false;
         const auto canonicalRoute = steamRouteForUrl(url);
         if (directIpFallbackUsed && !forcedSteamHost.empty()) return false;
         if (!directIpFallbackUsed && isLocalSteamRoute(canonicalRoute)) {
             directIpFallbackUsed = true;
             directIpFallback = directSteamIpFallbackForUrl(url);
+            // DNS consumes this request's budget too. Do not advertise a
+            // reconnect or enter another route after the lookup expires it.
+            if (!fallbackBudgetAvailable()) return false;
             if (directIpFallback) {
                 requestUrl = directIpFallback->requestUrl;
                 forcedSteamHost = directIpFallback->originalHost;
@@ -1404,9 +1571,10 @@ static HttpResponse httpRequestWithRetry(
         if (started >= deadline) {
             trace["ok"] = false;
             trace["budgetExhausted"] = true;
+            trace["retryable"] = true;
             trace["elapsedMs"] = started - startedAll;
             if (attemptLog) attemptLog->push_back(trace);
-            throw std::runtime_error(provider + " request exhausted its weak-network budget");
+            throw HttpTransportError(provider + " request exhausted its weak-network budget", ERROR_WINHTTP_TIMEOUT, true);
         }
         try {
             auto consumeInjectedFailure = [&](std::map<std::string, int>& failures) {
@@ -1429,13 +1597,15 @@ static HttpResponse httpRequestWithRetry(
             if (!artworkTestTransport) throw std::runtime_error("Fixture HTTP transport is not configured");
             auto response = artworkTestTransport(provider, method, requestUrl, requestBody);
             trace["fixture"] = true;
-            if (response.body.size() > maxBytes || response.expectedBytes > maxBytes)
+            if (response.status >= 200 && response.status < 300 &&
+                (response.body.size() > maxBytes || response.expectedBytes > maxBytes))
                 throw HttpTransportError("Fixture HTTP response exceeded size limit", ERROR_INVALID_DATA, false);
 #else
             auto response = httpRequest(
                 method, requestUrl, headers, requestBody, maxBytes, imageRequest, imageReferer, deadline,
                 forcedSteamHost);
 #endif
+            requireCompleteHttpStatus(response.status);
             if (provider == "steam" && !imageRequest &&
                 !trustedSteamMetadataFinalUrl(url, response.finalUrl.empty() ? url : response.finalUrl))
                 throw HttpTransportError("Steam AppDetails redirected outside the trusted store endpoint", ERROR_INVALID_DATA, false);
@@ -1444,6 +1614,12 @@ static HttpResponse httpRequestWithRetry(
             trace["expectedBytes"] = response.expectedBytes;
             trace["elapsedMs"] = GetTickCount64() - started;
             trace["ok"] = response.status >= 200 && response.status < 300;
+            // Hand provider waits back to scheduling for metadata and images
+            // in both modes, rather than retrying while the service recovers.
+            if (deferHttpProviderWait(url, response, trace)) {
+                if (attemptLog) attemptLog->push_back(std::move(trace));
+                return response;
+            }
             // A transparent route can return a false CDN 404 or keep a
             // broken TLS forwarder alive. In either case, leaving the mapped
             // hostname is required; otherwise the apparent fallback repeats
@@ -1459,6 +1635,11 @@ static HttpResponse httpRequestWithRetry(
                 rememberDirectSteamStoreAssetRoute(url);
             }
             if (!transientHttpStatus(response.status) || attempt == maxAttempts) {
+                if (fastMetadata && transientHttpStatus(response.status))
+                    rememberMetadataBackoff(url, response.status,
+                        (std::max)(DWORD{15000}, (std::max)(response.retryAfterMs, response.serverRetryAfterMs)));
+                else if (response.status >= 200 && response.status < 300)
+                    clearMetadataBackoff(url, requestStartedAt);
                 if (attemptLog) attemptLog->push_back(trace);
                 return response;
             }
@@ -1473,6 +1654,8 @@ static HttpResponse httpRequestWithRetry(
             if (GetTickCount64() + retryDelay >= deadline) {
                 trace["reconnectScheduled"] = false;
                 trace["retryAborted"] = "weak-network-budget";
+                if (fastMetadata) rememberMetadataBackoff(url, response.status,
+                    (std::max)(DWORD{15000}, (std::max)(response.retryAfterMs, response.serverRetryAfterMs)));
                 if (attemptLog) attemptLog->push_back(trace);
                 return response;
             }
@@ -1487,20 +1670,20 @@ static HttpResponse httpRequestWithRetry(
             trace["retryable"] = error.retryable();
             trace["elapsedMs"] = GetTickCount64() - started;
             markSteamRouteResult(trace.value("networkRoute", "direct"), false);
+            // Discard a failed pool before the terminal branch too, so the
+            // next candidate or task cannot reuse the broken connection.
+            if (error.retryable()) resetReusableHttpSession();
             if (error.retryable() && attempt < maxAttempts &&
                 scheduleSteamFallback(trace, "Steam accelerator route failed; selecting a separate route")) {
                 if (attemptLog) attemptLog->push_back(trace);
-                resetReusableHttpSession();
                 continue;
             }
             if (!error.retryable() || attempt == maxAttempts) {
+                if (fastMetadata && error.retryable()) rememberMetadataBackoff(url, 0, 15000);
                 if (attemptLog) attemptLog->push_back(trace);
                 throw;
             }
-            // A failed WinHTTP connection can retain unusable state. Rebuild
-            // only for transport retries; normal CDN candidates keep the
-            // pooled connection for speed.
-            resetReusableHttpSession();
+
         } catch (const std::exception& error) {
             lastError = error.what();
             trace["ok"] = false;
@@ -1517,10 +1700,14 @@ static HttpResponse httpRequestWithRetry(
         trace["reconnectScheduled"] = true;
         trace["retryDelayMs"] = retryDelay;
         trace["retryReason"] = lastError;
-        if (attemptLog) attemptLog->push_back(trace);
         if (GetTickCount64() + retryDelay >= deadline) {
-            throw std::runtime_error(provider + " reconnect would exceed its weak-network budget");
+            trace["reconnectScheduled"] = false;
+            trace["retryAborted"] = "weak-network-budget";
+            if (attemptLog) attemptLog->push_back(trace);
+            if (fastMetadata) rememberMetadataBackoff(url, 0, 15000);
+            throw HttpTransportError(provider + " reconnect would exceed its weak-network budget", ERROR_WINHTTP_TIMEOUT, true);
         }
+        if (attemptLog) attemptLog->push_back(trace);
         Sleep(retryDelay);
     }
     throw std::runtime_error(provider + " request failed: " + lastError);
@@ -1550,34 +1737,61 @@ static std::optional<HttpResponse> retrySteamResponseAfterSemanticFailure(
     const std::string& imageReferer,
     const std::string& reason,
     json* attemptLog = nullptr) {
+    const auto started = GetTickCount64();
+    const auto budget = imageRequest ? HTTP_ACCELERATOR_IMAGE_BUDGET_MS :
+        HTTP_ACCELERATOR_METADATA_BUDGET_MS;
+    const auto deadline = effectiveHttpDeadline(started + budget);
+    json trace = {{"semanticFallback", true}, {"url", url}, {"reason", reason}, {"ok", false},
+        {"attempt", 1}, {"freshSession", !g_reusableHttpSession.handle.value},
+        {"provider", "steam"}, {"identityAuthority", false}};
+    if (started >= deadline) {
+        trace["retryable"] = true;
+        trace["budgetExhausted"] = true;
+        trace["skippedNetwork"] = true;
+        trace["attempt"] = 0;
+        if (attemptLog) attemptLog->push_back(std::move(trace));
+        return std::nullopt;
+    }
+    const auto cooldown = loadMetadataBackoff(url);
+    if (!cooldown.empty() && ((g_fastMetadataMode && !imageRequest) || imageRequest ||
+        metadataProviderRetryAt(cooldown) > unixTimeMs())) {
+        trace["stage"] = imageRequest ? "image-endpoint-backoff" : "metadata-endpoint-backoff";
+        trace["retryable"] = true;
+        trace["skippedNetwork"] = true;
+        trace["attempt"] = 0;
+        trace["retryAt"] = cooldown["retryAt"];
+        if (attemptLog) attemptLog->push_back(std::move(trace));
+        return std::nullopt;
+    }
     const auto fallback = directSteamIpFallbackForUrl(url);
     if (!fallback) return std::nullopt;
-    json trace = {
-        {"semanticFallback", true},
-        {"fallbackMode", "direct-ip-bypass-hosts"},
-        {"fallbackHost", fallback->originalHost},
-        {"fallbackAddress", fallback->address},
-        {"fallbackDnsServer", fallback->resolver},
-        {"requestUrl", fallback->requestUrl},
-        {"networkRoute", "direct-ip"},
-        {"reason", reason}
-    };
+    trace["fallbackMode"] = "direct-ip-bypass-hosts";
+    trace["fallbackHost"] = fallback->originalHost;
+    trace["fallbackAddress"] = fallback->address;
+    trace["fallbackDnsServer"] = fallback->resolver;
+    trace["requestUrl"] = fallback->requestUrl;
+    trace["networkRoute"] = "direct-ip";
     try {
-        const auto budget = imageRequest ? HTTP_ACCELERATOR_IMAGE_BUDGET_MS :
-            HTTP_ACCELERATOR_METADATA_BUDGET_MS;
         auto response = httpRequest("GET", fallback->requestUrl, headers, {}, maxBytes,
-            imageRequest, imageReferer, GetTickCount64() + budget, fallback->originalHost);
+            imageRequest, imageReferer, deadline, fallback->originalHost);
         trace["status"] = response.status;
         trace["bytes"] = response.body.size();
         trace["ok"] = response.status >= 200 && response.status < 300;
-        if (attemptLog) attemptLog->push_back(trace);
+        deferHttpProviderWait(url, response, trace);
+        if (attemptLog) attemptLog->push_back(std::move(trace));
         return response;
-    } catch (const std::exception& error) {
-        trace["ok"] = false;
+    } catch (const HttpTransportError& error) {
         trace["error"] = error.what();
-        if (attemptLog) attemptLog->push_back(trace);
-        return std::nullopt;
+        trace["win32Error"] = error.code();
+        trace["retryable"] = error.retryable();
+        if (error.retryable()) resetReusableHttpSession();
+        if (g_fastMetadataMode && !imageRequest && error.retryable()) rememberMetadataBackoff(url, 0, 15000);
+    } catch (const std::exception& error) {
+        trace["error"] = error.what();
+        trace["retryable"] = false;
     }
+    if (attemptLog) attemptLog->push_back(std::move(trace));
+    return std::nullopt;
 }
 
 static std::string percentEncode(const std::string& value) {
@@ -1590,21 +1804,37 @@ static std::string percentEncode(const std::string& value) {
     return out.str();
 }
 
+// A successful HTTP status does not make a proxy error page or truncated JSON
+// authoritative. Keep semantic failures visible to the existing retry queue and
+// stale-positive search fallback; never persist them as an empty inventory.
+[[noreturn]] static void throwMetadataSemanticFailure(
+    const std::string& url, const std::string& provider, const char* stage,
+    const char* reason, json* attemptLog) {
+    if (g_fastMetadataMode) rememberMetadataBackoff(url, 0, 15000);
+    if (attemptLog) attemptLog->push_back({
+        {"stage", stage}, {"provider", provider}, {"url", url}, {"attempt", 0},
+        {"freshSession", false}, {"ok", false}, {"retryable", true},
+        {"reason", reason}, {"identityAuthority", false}});
+    throw HttpTransportError(provider + " returned unusable metadata: " + reason,
+        ERROR_INVALID_DATA, true);
+}
+
 static json getJson(const std::string& url, const std::string& provider = "steam", json* attemptLog = nullptr) {
     std::wstring headers = L"Accept: application/json\r\n";
     auto response = httpGet(url, headers, MAX_METADATA_BYTES, false, provider, {}, attemptLog);
     if (response.status < 200 || response.status >= 300) {
-        throw std::runtime_error(provider + " HTTP " + std::to_string(response.status));
+        throw HttpStatusError(provider, response.status);
     }
     try {
         return json::parse(response.body.begin(), response.body.end());
-    } catch (const std::exception& firstError) {
+    } catch (const json::parse_error&) {
         const auto fallback = retrySteamResponseAfterSemanticFailure(
             url, headers, MAX_METADATA_BYTES, false, {}, "HTTP success response was not valid JSON", attemptLog);
         if (fallback && fallback->status >= 200 && fallback->status < 300) {
-            return json::parse(fallback->body.begin(), fallback->body.end());
+            auto parsed = json::parse(fallback->body.begin(), fallback->body.end(), nullptr, false);
+            if (!parsed.is_discarded()) return parsed;
         }
-        throw std::runtime_error(provider + " returned invalid JSON: " + firstError.what());
+        throwMetadataSemanticFailure(url, provider, "metadata-json", "invalid-json-response", attemptLog);
     }
 }
 
@@ -1621,10 +1851,17 @@ static json postJson(
     const auto response = httpRequestWithRetry(
         provider, "POST", url, headers, body, MAX_METADATA_BYTES, false, {}, attemptLog);
     if (response.status < 200 || response.status >= 300) {
-        throw std::runtime_error(provider + " HTTP " + std::to_string(response.status));
+        throw HttpStatusError(provider, response.status);
     }
-    return json::parse(response.body.begin(), response.body.end());
+    try {
+        return json::parse(response.body.begin(), response.body.end());
+    } catch (const json::parse_error&) {
+        throwMetadataSemanticFailure(url, provider, "metadata-json", "invalid-json-response", attemptLog);
+    }
 }
+
+static json getCachedIgdbJson(const std::string& url, const std::string& provider, json* attempts);
+static json postCachedIgdbJson(const std::string& url, const json& payload, const std::string& provider, json* attempts);
 
 static std::string sanitizedVersionTableValue(const wchar_t* value, UINT valueChars) {
     if (!value || valueChars == 0) return {};
@@ -1714,9 +1951,21 @@ static bool noisyDirectory(const std::string& value) {
 // Strip only recognized separated distribution suffixes, never editions or
 // sequel numbers. A P2P suffix was scoring as part of the installed title.
 static std::string installedDirectoryTitle(const std::string& raw) {
-    try { return trim(std::regex_replace(raw,
-        std::regex(R"((?:[-_. ]+)(?:P2P|REPACK|RUNE|TENOKE|SKIDROW|CODEX|FLT)$)", std::regex::icase), "")); }
-    catch (...) { return raw; }
+    try {
+        std::string title = raw;
+        static const std::regex packaging(
+            R"((?:[-_. ]+)(?:P2P|REPACK|RUNE|TENOKE|SKIDROW|CODEX|FLT|Goldberg|GOG)$|\s*\[(?:FitGirl|DODI)(?:[ _-]+Repack)?\]$)", std::regex::icase);
+        // A version must be explicitly prefixed and dotted; never strip a
+        // sequel, Roman numeral, year or an edition from a product title.
+        static const std::regex version(R"([ _.-]+v[0-9]+(?:\.[0-9]+[a-z]?){1,5}$)", std::regex::icase);
+        for (int pass = 0; pass < 4; ++pass) {
+            auto clean = trim(std::regex_replace(title, packaging, ""));
+            clean = trim(std::regex_replace(clean, version, ""));
+            if (clean == title) break;
+            title = std::move(clean);
+        }
+        return normalizeTitle(title).size() >= 3 ? title : raw;
+    } catch (...) { return raw; }
 }
 
 static std::vector<NameRound> buildNameRounds(
@@ -1725,13 +1974,14 @@ static std::vector<NameRound> buildNameRounds(
     bool simulateNoVersion,
     const std::string& manualName,
     const std::string& manualSource,
-    const std::vector<std::pair<std::string, std::string>>& preferredEvidence = {}) {
+    const std::vector<std::pair<std::string, std::string>>& preferredEvidence = {},
+    const fs::path& gameDirectoryBoundary = {}) {
     std::vector<NameRound> rounds;
     std::set<std::string> seen;
     int nextRound = 1;
     auto add = [&](const std::string& source, const std::string& raw) {
         const auto value = collapseSpaces(raw);
-        const auto key = normalizeTitle(value);
+        const auto key = searchQueryKey(value);
         if (value.empty() || key.size() < 2) {
             rounds.push_back({nextRound, source, value, "missing"});
         } else if (!seen.insert(key).second) {
@@ -1766,12 +2016,25 @@ static std::vector<NameRound> buildNameRounds(
             add("parent-directory-" + std::to_string(depth + 1), name);
             add("parent-humanized-" + std::to_string(depth + 1), humanizeTitle(name));
         }
+        // A known scan/config game root is the evidence boundary. Library
+        // parents and unrelated sibling titles must not consume network budget.
+        // Direct diagnostic callers without a known root keep the full fallback.
+        if (!gameDirectoryBoundary.empty() && unicodeLower(current.lexically_normal().wstring()) ==
+            unicodeLower(gameDirectoryBoundary.lexically_normal().wstring())) break;
         current = current.parent_path();
         ++depth;
     }
     const auto stem = toUtf8(exePath.stem().wstring());
-    add("exe-stem", stem);
-    add("exe-humanized", humanizeTitle(stem));
+    // Generic launcher names must not identify the unrelated Steam/IGDB
+    // products literally named "Game" or "Launcher" after a title search fails.
+    static const std::set<std::string> genericExecutables = {
+        "game", "gamewin64shipping", "gamewin32shipping", "launcher", "start",
+        "launch", "shipping", "win64shipping", "application", "main"
+    };
+    if (!genericExecutables.contains(normalizeTitle(stem))) {
+        add("exe-stem", stem);
+        add("exe-humanized", humanizeTitle(stem));
+    }
     return rounds;
 }
 
@@ -1816,6 +2079,8 @@ static std::vector<int> parseLocalSteamAppIds(
     }
     return result;
 }
+
+static std::optional<LocalSteamAppIdEvidence> nativeSteamAppManifestEvidence(const fs::path&);
 
 static fs::path localIdentityRoot(const fs::path& executable) {
     auto root = executable.parent_path();
@@ -1867,6 +2132,7 @@ static std::vector<LocalSteamAppIdEvidence> discoverLocalSteamAppIds(
         if (acceptedNames.count(filename)) addFile(iterator->path());
     }
     std::vector<LocalSteamAppIdEvidence> evidence;
+    if (const auto native = nativeSteamAppManifestEvidence(executable)) evidence.push_back(*native);
     uintmax_t inspectedIdentityBytes = 0;
     for (const auto& path : files) {
         std::error_code sizeError;
@@ -2003,7 +2269,7 @@ static json assessLocalSteamAppIdIdentity(
     const bool repeatedIndependentSource = sourceFiles.size() >= 2 && bestLocalNameScore >= 0.78;
     const bool exactConfiguredTitle = bestTitleHintScore >= 0.94;
     const bool configTargetAndNameAgreement = targetMatchesExecutable && bestLocalNameScore >= 0.78;
-    const bool directNameAgreement = bestLocalNameScore >= 0.94;
+    const bool directNameAgreement = bestLocalNameScore >= 0.94 || bestInstalledAliasScore >= 0.999;
     const bool accepted = !conflict &&
         (repeatedIndependentSource || exactConfiguredTitle || configTargetAndNameAgreement || directNameAgreement);
     return {
@@ -2077,7 +2343,7 @@ static void collectNetworkEvidence(const json& value, NetworkEvidence& evidence)
             if (status >= 200 && status < 300) ++evidence.successfulResponses;
             else if (transientHttpStatus(status)) ++evidence.retryableFailures;
             else ++evidence.nonRetryableResponses;
-        } else if (value.value("retryable", false) || value.contains("win32Error")) {
+        } else if (value.value("retryable", false) || value.value("budgetExhausted", false)) {
             ++evidence.retryableFailures;
         }
     }
@@ -2087,7 +2353,7 @@ static void collectNetworkEvidence(const json& value, NetworkEvidence& evidence)
 static bool networkVerificationPending(const json& rounds) {
     NetworkEvidence evidence;
     collectNetworkEvidence(rounds, evidence);
-    return evidence.successfulResponses == 0 && evidence.retryableFailures > 0;
+    return evidence.retryableFailures > 0;
 }
 
 static int positiveJsonInt(const json& object, const char* key) {
@@ -2656,6 +2922,8 @@ static ResolvedGame verifySteamAppId(
     }
 }
 
+static json steamCandidateSearchJson(const std::string& url, json* attempts);
+
 static std::optional<ResolvedGame> resolveSteamGame(
     const std::vector<NameRound>& rounds,
     const std::vector<std::string>& pathEvidence,
@@ -2832,7 +3100,7 @@ static std::optional<ResolvedGame> resolveSteamGame(
                         "&infinite=1&json=1&cc=" + percentEncode(locale.country) +
                         "&l=" + percentEncode(locale.language);
                     if (gameCategory) url += "&category1=998";
-                    const auto response = getJson(url, "steam", &endpointRecord["networkAttempts"]);
+                    const auto response = steamCandidateSearchJson(url, &endpointRecord["networkAttempts"]);
                     const auto parsed = parseSteamResultsHtml(response, locale.language, locale.country);
                     endpointRecord["responseSuccess"] = response.value("success", 0);
                     endpointRecord["totalCount"] = response.value("total_count", 0);
@@ -2850,7 +3118,10 @@ static std::optional<ResolvedGame> resolveSteamGame(
                 } catch (const std::exception& error) {
                     endpointRecord["ok"] = false;
                     endpointRecord["error"] = error.what();
-                    if (++consecutiveNetworkFailures >= 2) {
+                    if (++consecutiveNetworkFailures >= 2 && (!g_fastMetadataMode ||
+                        (g_identityNetworkDeadline && GetTickCount64() >= g_identityNetworkDeadline))) {
+                        // A throttled HTML endpoint must not stop later compact
+                        // queries or discard cached candidates from other rounds.
                         endpointRecord["circuitOpened"] = true;
                         providerCircuitOpen = true;
                     }
@@ -2859,7 +3130,42 @@ static std::optional<ResolvedGame> resolveSteamGame(
             };
 
             const auto locales = steamSearchLocales(query);
+            // StoreSearch is a compact official candidate inventory. An exact
+            // result avoids the HTML endpoint (which rate-limits much sooner),
+            // but never skips global evidence arbitration or AppDetails checks.
+            bool compactExact = false;
             for (const auto& locale : locales) {
+                json endpointRecord = {{"endpoint", "api-storesearch-compact"},
+                    {"language", locale.language}, {"country", locale.country}, {"networkAttempts", json::array()}};
+                try {
+                    const auto response = steamCandidateSearchJson(
+                        "https://store.steampowered.com/api/storesearch/?term=" + percentEncode(query) +
+                        "&l=" + percentEncode(locale.language) + "&cc=" + percentEncode(locale.country),
+                        &endpointRecord["networkAttempts"]);
+                    int rank = 0;
+                    if (response.is_object() && response.contains("items") && response["items"].is_array())
+                        for (const auto& item : response["items"]) {
+                            if (!item.is_object()) continue;
+                            const auto id = positiveJsonInt(item, "id");
+                            const auto nameIt = item.find("name");
+                            if (id <= 0 || nameIt == item.end() || !nameIt->is_string()) continue;
+                            const auto name = nameIt->get<std::string>();
+                            if (name.empty() || custom_steam_library::builtinExcludedSteamTool(item)) continue;
+                            queryItems.push_back({id, name, ++rank, "api-storesearch-compact", 0, locale.language, locale.country});
+                            compactExact = compactExact || normalizeTitle(query) == normalizeTitle(name);
+                        }
+                    endpointRecord["ok"] = true;
+                    endpointRecord["parsedCount"] = rank;
+                    consecutiveNetworkFailures = 0;
+                } catch (const std::exception& error) {
+                    // A compact endpoint failure must leave HTML fallback open.
+                    endpointRecord["ok"] = false;
+                    endpointRecord["error"] = error.what();
+                }
+                queryRecord["endpoints"].push_back(std::move(endpointRecord));
+                if (compactExact) break;
+            }
+            if (!compactExact) for (const auto& locale : locales) {
                 runResultsSearch(true, locale);
                 const bool exactOfficialCandidate = std::any_of(queryItems.begin(), queryItems.end(), [&](const auto& item) {
                     return scoreTitle(query, item.name) >= 0.96;
@@ -2909,7 +3215,10 @@ static std::optional<ResolvedGame> resolveSteamGame(
                 } catch (const std::exception& error) {
                     endpointRecord["ok"] = false;
                     endpointRecord["error"] = error.what();
-                    if (++consecutiveNetworkFailures >= 2) {
+                    if (++consecutiveNetworkFailures >= 2 && (!g_fastMetadataMode ||
+                        (g_identityNetworkDeadline && GetTickCount64() >= g_identityNetworkDeadline))) {
+                        // A throttled HTML endpoint must not stop later compact
+                        // queries or discard cached candidates from other rounds.
                         endpointRecord["circuitOpened"] = true;
                         providerCircuitOpen = true;
                     }
@@ -3222,9 +3531,23 @@ static std::optional<ResolvedGame> resolveSteamGame(
         selected.game.source.rfind("local-launcher-settings", 0) == 0;
     const bool strongExact = selected.exact && selected.pathScore >= 0.93 &&
         selected.evidenceReliability >= 0.90;
-    const bool accepted = manualExact || peExact || trustedLocalExact ||
+    const bool ambiguousExactIdentity = std::any_of(verified.begin() + 1, verified.end(), [&](const auto& other) {
+        return other.game.appId != selected.game.appId && other.exact && selected.exact &&
+            other.trustedExactTier == selected.trustedExactTier &&
+            normalizeTitle(other.game.name) == normalizeTitle(selected.game.name) &&
+            selected.game.score - other.game.score <= 0.025;
+    });
+    const auto queryKey = normalizeTitle(selected.game.query);
+    const bool shortPartial = queryKey.size() <= 4 && !selected.exact;
+    const bool uppercaseAlias = queryKey.size() <= 4 && selected.game.query.size() >= 2 &&
+        std::all_of(selected.game.query.begin(), selected.game.query.end(), [](unsigned char c) { return c >= 'A' && c <= 'Z'; }) &&
+        selected.game.query != selected.game.name;
+    const bool unsupportedShortAlias = (shortPartial || uppercaseAlias) && !manualExact && !peExact && !trustedLocalExact;
+    globalRecord["unsupportedShortAlias"] = unsupportedShortAlias;
+    const bool accepted = !unsupportedShortAlias && !ambiguousExactIdentity && (manualExact || peExact || trustedLocalExact ||
         (selected.game.score >= 0.94 && strongExact && margin >= 0.025) ||
-        (selected.game.score >= 0.88 && margin >= 0.06);
+        (selected.game.score >= 0.88 && margin >= 0.06));
+    globalRecord["ambiguousExactIdentity"] = ambiguousExactIdentity;
     globalRecord["topScore"] = selected.game.score;
     globalRecord["runnerUpScore"] = runnerUpScore;
     globalRecord["verifiedRunnerUpScore"] = verifiedRunnerUpScore;
@@ -3247,6 +3570,7 @@ static std::optional<ResolvedGame> resolveSteamGame(
                   << ", margin=" << margin << ")\n";
         return selected.game;
     }
+    selected.game.confident = false;
     selected.game.identityStatus = "needs-confirmation";
     roundLog.push_back(std::move(globalRecord));
     return selected.game;
@@ -3286,7 +3610,7 @@ static ResolvedGame verifyIgdbId(uint64_t igdbId, const std::string& platformHin
         {"status", "verifying"}
     };
     try {
-        const auto response = getJson(
+        const auto response = getCachedIgdbJson(
             "https://api2.playnite.link/api/igdb/game/" + std::to_string(igdbId),
             "playnite-igdb",
             &record["networkAttempts"]);
@@ -3392,7 +3716,7 @@ static std::optional<ResolvedGame> resolveIgdbGame(
                 {"networkAttempts", json::array()}
             };
             try {
-                const auto response = postJson(
+                const auto response = postCachedIgdbJson(
                     "https://api2.playnite.link/api/igdb/search",
                     json{{"SearchTerm", query}},
                     "playnite-igdb",
@@ -3476,7 +3800,7 @@ static std::optional<ResolvedGame> resolveIgdbGame(
             const auto& candidate = ranked[index];
             try {
                 json detailAttempts = json::array();
-                const auto response = getJson(
+                const auto response = getCachedIgdbJson(
                     "https://api2.playnite.link/api/igdb/game/" + std::to_string(candidate.id),
                     "playnite-igdb",
                     &detailAttempts);
@@ -3484,6 +3808,14 @@ static std::optional<ResolvedGame> resolveIgdbGame(
                 if (!apiError.empty()) throw std::runtime_error("Playnite IGDB: " + apiError);
                 const auto data = responseData(response);
                 if (!data || !data->is_object()) continue;
+                int detailType = 0;
+                if (data->contains("game_type") && (*data)["game_type"].is_number_integer())
+                    detailType = (*data)["game_type"].get<int>();
+                if (rejectedIgdbGameType(detailType)) {
+                    record["detailRejections"].push_back({{"igdbId", candidate.id}, {"gameType", detailType},
+                        {"reason", "detail-is-not-a-base-game"}, {"networkAttempts", detailAttempts}});
+                    continue;
+                }
                 const auto formalName = data->value("name", candidate.name);
                 const auto platforms = igdbPlatforms(*data);
                 const bool platformKnown = !platforms.empty();
@@ -3930,6 +4262,36 @@ static std::optional<ImageInfo> inspectImage(const std::vector<unsigned char>& d
     return std::nullopt;
 }
 
+// Missing Content-Length (for example chunked proxy responses) can leave a
+// successful transport carrying only a gateway page or part of an image.
+// Keep those bytes out of artwork caches and retain retry evidence. A valid
+// but unsupported format is a decoder limitation, not connectivity loss.
+[[noreturn]] static void throwArtworkDecodeFailure(
+    const std::vector<unsigned char>& bytes, const std::string& url,
+    const std::string& provider, json* attemptLog) {
+    const unsigned char pngSignature[] = {0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a};
+    const bool png = bytes.size() >= sizeof(pngSignature) &&
+        std::equal(std::begin(pngSignature), std::end(pngSignature), bytes.begin());
+    const bool jpeg = bytes.size() >= 2 && bytes[0] == 0xff && bytes[1] == 0xd8;
+    std::string prefix(bytes.begin(), bytes.begin() + (std::min)(bytes.size(), size_t{512}));
+    if (prefix.starts_with("\xEF\xBB\xBF")) prefix.erase(0, 3);
+    prefix = asciiLower(trim(prefix));
+    const bool errorDocument = prefix.starts_with("<!doctype html") || prefix.starts_with("<html") ||
+        prefix.starts_with("<head") || prefix.starts_with("<body") ||
+        (prefix.starts_with("<?xml") && prefix.find("<error") != std::string::npos) ||
+        prefix.starts_with("<error") || prefix.starts_with("{") || prefix.starts_with("[");
+    if (bytes.empty() || prefix.empty() || png || jpeg || errorDocument) {
+        const char* reason = png || jpeg ? "incomplete-or-invalid-image" : "non-image-success-response";
+        if (attemptLog) attemptLog->push_back({
+            {"stage", "artwork-response-validation"}, {"provider", provider}, {"url", url},
+            {"attempt", 0}, {"freshSession", false}, {"ok", false}, {"retryable", true},
+            {"reason", reason}, {"bytes", bytes.size()}, {"identityAuthority", false}});
+        throw HttpTransportError(provider + " returned unusable artwork: " + reason,
+            ERROR_INVALID_DATA, true);
+    }
+    throw std::runtime_error("Response is not a supported PNG/JPEG image");
+}
+
 static ULONG_PTR artworkInspectionGdiPlusToken() {
     static const ULONG_PTR token = []() {
         ULONG_PTR value = 0;
@@ -4089,7 +4451,7 @@ static ArtworkQualityAssessment assessArtworkQuality(
     } else if (type == "icon") {
         preferredWidth = 512; preferredHeight = 512;
         usableWidth = 256; usableHeight = 256;
-        fallbackWidth = 128; fallbackHeight = 128;
+        fallbackWidth = 32; fallbackHeight = 32;
         aspectOk = result.aspectRatio >= 0.85 && result.aspectRatio <= 1.18;
         targetRatio = 1.0;
     } else {
@@ -4519,6 +4881,215 @@ static void saveArtworkNegativeCache(const std::string& url, DWORD status) {
     }
 }
 
+// Endpoint cooldowns are retry scheduling data, never negative identity caches.
+// Metadata APIs and individual image paths have separate keys; query variants
+// share a limit without blocking unrelated images, Search or AppDetails.
+static std::map<std::string, json> g_metadataBackoffs;
+static std::string metadataEndpointKey(const std::string& url) {
+    const auto wide = toWide(url);
+    URL_COMPONENTS parts{}; parts.dwStructSize = sizeof(parts);
+    parts.dwSchemeLength = parts.dwHostNameLength = parts.dwUrlPathLength = parts.dwExtraInfoLength = static_cast<DWORD>(-1);
+    if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &parts)) return {};
+    auto path = toUtf8(std::wstring(parts.lpszUrlPath, parts.dwUrlPathLength));
+    while (path.size() > 1 && path.back() == '/') path.pop_back();
+    return asciiLower(toUtf8(std::wstring(parts.lpszScheme, parts.dwSchemeLength))) + "://" +
+        asciiLower(toUtf8(std::wstring(parts.lpszHostName, parts.dwHostNameLength))) + ":" +
+        std::to_string(parts.nPort) + path;
+}
+static fs::path metadataBackoffCachePath(const std::string& endpoint) {
+    return g_workerDataRoot / L"cache" / L"network-backoff" /
+        toWide(sha256(std::vector<unsigned char>(endpoint.begin(), endpoint.end())) + ".json");
+}
+static uint64_t metadataProviderRetryAt(const json& record) {
+    try {
+        if (record.contains("providerRetryAt")) return record.at("providerRetryAt").get<uint64_t>();
+        // Older records had no origin field. 429 and long server waits were
+        // the provider-directed cases; short transport cooldowns stay manual.
+        const auto retry = record.at("retryAt").get<uint64_t>();
+        const auto observed = record.at("observedAt").get<uint64_t>();
+        const auto status = record.at("status").get<DWORD>();
+        return status == 429 ||
+            (transientHttpStatus(status) && retry > observed && retry - observed > HTTP_MAX_RETRY_AFTER_MS) ? retry : 0;
+    } catch (...) { return 0; }
+}
+static bool validMetadataBackoff(const json& record, const std::string& endpoint, uint64_t now) {
+    try {
+        const auto observed = record.at("observedAt").get<uint64_t>();
+        const auto retry = record.at("retryAt").get<uint64_t>();
+        const auto status = record.at("status").get<DWORD>();
+        return record.value("schemaVersion", 0) == 1 && record.value("endpoint", std::string{}) == endpoint &&
+            metadataProviderRetryAt(record) <= retry &&
+            (!record.contains("providerRetryAt") || record.at("providerRetryAt").is_number_unsigned()) &&
+            observed > 0 && observed <= now && retry > now && retry > observed &&
+            retry - observed <= HTTP_MAX_PROVIDER_COOLDOWN_MS && (status == 0 || transientHttpStatus(status));
+    } catch (...) { return false; }
+}
+static json mergeMetadataBackoffs(const json& left, const json& right) {
+    if (left.empty()) return right;
+    if (right.empty()) return left;
+    // The longest cooldown and newest failure may belong to different
+    // requests. Both are needed so a late success cannot erase a newer fault.
+    auto result = left.at("retryAt").get<uint64_t>() >= right.at("retryAt").get<uint64_t>() ? left : right;
+    result["observedAt"] = (std::max)(left.at("observedAt").get<uint64_t>(), right.at("observedAt").get<uint64_t>());
+    // Keep provider and automatic recovery windows independent: a later
+    // network fault cannot erase or lengthen the server-directed wait.
+    result["providerRetryAt"] = (std::max)(metadataProviderRetryAt(left), metadataProviderRetryAt(right));
+    return result;
+}
+
+static json loadMetadataBackoff(const std::string& url) {
+    const auto endpoint = metadataEndpointKey(url);
+    if (endpoint.empty()) return json::object();
+    const auto path = metadataBackoffCachePath(endpoint);
+    const auto key = toUtf8(path.wstring());
+    const auto now = unixTimeMs();
+    json result = json::object();
+    if (const auto it = g_metadataBackoffs.find(key); it != g_metadataBackoffs.end() &&
+        validMetadataBackoff(it->second, endpoint, now)) result = it->second;
+    if (!g_workerDataRoot.empty()) try {
+        const auto bytes = readBinaryFile(path, 64u << 10);
+        const auto record = json::parse(bytes.begin(), bytes.end());
+        if (validMetadataBackoff(record, endpoint, now)) result = mergeMetadataBackoffs(result, record);
+    } catch (...) { /* Missing/broken scheduling data cannot block a fresh request. */ }
+    if (!result.empty()) g_metadataBackoffs[key] = result;
+    return result;
+}
+class MetadataBackoffTransaction {
+    HANDLE mutex_ = nullptr;
+    bool owned_ = false;
+public:
+    explicit MetadataBackoffTransaction(const fs::path& path) {
+        const auto text = toUtf8(path.wstring());
+        const auto name = L"Local\\YMCCMetadataBackoff-" + toWide(sha256(std::vector<unsigned char>(text.begin(), text.end())));
+        mutex_ = CreateMutexW(nullptr, FALSE, name.c_str());
+        if (mutex_) {
+            const auto state = WaitForSingleObject(mutex_, 50);
+            owned_ = state == WAIT_OBJECT_0 || state == WAIT_ABANDONED;
+        }
+    }
+    ~MetadataBackoffTransaction() { if (owned_) ReleaseMutex(mutex_); if (mutex_) CloseHandle(mutex_); }
+    explicit operator bool() const { return owned_; }
+};
+static void rememberMetadataBackoff(const std::string& url, DWORD status, DWORD delayMs, bool providerWait) {
+    const auto endpoint = metadataEndpointKey(url);
+    if (endpoint.empty()) return;
+    const auto path = metadataBackoffCachePath(endpoint);
+    const auto key = toUtf8(path.wstring());
+    const auto now = unixTimeMs();
+    json record = {{"schemaVersion", 1}, {"endpoint", endpoint}, {"status", status},
+        {"observedAt", now}, {"retryAt", now + (std::min)(delayMs, HTTP_MAX_PROVIDER_COOLDOWN_MS)},
+        {"identityAuthority", false}};
+    record["providerRetryAt"] = providerWait || status == 429 ? record["retryAt"] : json(uint64_t{0});
+    // Keep an in-process fallback when the data directory is full/read-only.
+    const auto previous = loadMetadataBackoff(url);
+    record = mergeMetadataBackoffs(previous, record);
+    g_metadataBackoffs[key] = record;
+    if (g_workerDataRoot.empty()) return;
+    try {
+        MetadataBackoffTransaction transaction(path);
+        if (!transaction) return;
+        const auto current = loadMetadataBackoff(url);
+        record = mergeMetadataBackoffs(current, record);
+        g_metadataBackoffs[key] = record;
+        writeJsonAtomic(path, record);
+    } catch (...) { /* Scheduling persistence cannot fail the request itself. */ }
+}
+static void clearMetadataBackoff(const std::string& url, uint64_t requestStartedAt) {
+    const auto current = loadMetadataBackoff(url);
+    if (current.empty() || current.at("observedAt").get<uint64_t>() >= requestStartedAt) return;
+    const auto path = metadataBackoffCachePath(metadataEndpointKey(url));
+    try {
+        MetadataBackoffTransaction transaction(path);
+        if (!transaction) return;
+        const auto latest = loadMetadataBackoff(url);
+        // A late success cannot erase a newer concurrent worker's rate limit.
+        if (!latest.empty() && latest.at("observedAt").get<uint64_t>() >= requestStartedAt) return;
+        g_metadataBackoffs.erase(toUtf8(path.wstring()));
+        if (!g_workerDataRoot.empty()) { std::error_code error; fs::remove(path, error); }
+    } catch (...) { /* A stale cooldown expires by itself. */ }
+}
+
+static fs::path igdbResponseCachePath(const std::string& url, const json& requestBody) {
+    const auto key = json{{"method", requestBody.is_null() ? "GET" : "POST"},
+        {"url", url}, {"body", requestBody}}.dump();
+    return g_workerDataRoot / L"cache" / L"igdb-responses" /
+        toWide(sha256(std::vector<unsigned char>(key.begin(), key.end())) + ".json");
+}
+static bool usableIgdbResponse(const std::string& url, const json& body, const json& response) {
+    if (!response.is_object() || !responseError(response).empty()) return false;
+    const auto data = responseData(response);
+    if (!data) return false;
+    if (!body.is_null()) return url == "https://api2.playnite.link/api/igdb/search" && data->is_array();
+    const std::string prefix = "https://api2.playnite.link/api/igdb/game/";
+    if (!url.starts_with(prefix) || !data->is_object()) return false;
+    try {
+        const auto tail = url.substr(prefix.size());
+        if (tail.empty() || !std::all_of(tail.begin(), tail.end(), [](unsigned char ch){return std::isdigit(ch)!=0;})) return false;
+        const auto id = data->find("id");
+        if (id == data->end() || !id->is_number_integer() ||
+            (!id->is_number_unsigned() && id->get<int64_t>() <= 0)) return false;
+        return id->get<uint64_t>() == std::stoull(tail) && id->get<uint64_t>() > 0 &&
+            !trim(data->value("name", std::string{})).empty();
+    } catch (...) { return false; }
+}
+static json cachedIgdbRequest(const std::string& url, const json& body, const std::string& provider, json* attempts) {
+    const auto path = igdbResponseCachePath(url, body);
+    json stale = nullptr;
+    uint64_t cachedAt = 0;
+    auto traceCache = [&](bool staleHit) {
+        if (attempts) attempts->push_back({{"stage", "igdb-response-cache"}, {"provider", provider},
+            {"url", url}, {"cacheHit", true}, {"stale", staleHit}, {"ok", true},
+            {"fetchedAt", cachedAt}, {"steamIdentityAuthority", false}, {"verificationStillRequired", true}});
+    };
+    if (!g_workerDataRoot.empty()) try {
+        const auto bytes = readBinaryFile(path, MAX_METADATA_BYTES);
+        const auto record = json::parse(bytes.begin(), bytes.end());
+        const auto at = record.value("fetchedAt", uint64_t{0}), now = unixTimeMs();
+        const auto& data = record.at("data");
+        if (record.value("schemaVersion", 0) == 1 && record.value("url", std::string{}) == url &&
+            record.at("requestBody") == body && at > 0 && at <= now && usableIgdbResponse(url, body, data)) {
+            cachedAt = at;
+            const auto payload = responseData(data);
+            const bool empty = !body.is_null() && payload->empty();
+            const uint64_t ttl = body.is_null() ? 12ull*60*60*1000 : (empty ? 5ull*60*1000 : 6ull*60*60*1000);
+            if (now-at <= ttl) { traceCache(false); return data; }
+            // Only old positive search inventories may survive an outage;
+            // never extend a detail record's formal metadata lifetime.
+            if (!body.is_null() && !empty && now-at <= 7ull*24*60*60*1000) stale = data;
+        }
+    } catch (...) { /* Invalid request keys/envelopes/times require a real response. */ }
+    json result;
+    bool usedStale = false;
+    try {
+        result = body.is_null() ? getJson(url, provider, attempts) : postJson(url, body, provider, attempts);
+        if (!body.is_null() && !usableIgdbResponse(url, body, result))
+            throwMetadataSemanticFailure(url, provider, "igdb-search-envelope", "invalid-provider-envelope", attempts);
+    } catch (const HttpTransportError& error) {
+        if (!error.retryable() || stale.is_null()) throw;
+        result = stale; usedStale = true;
+    } catch (const HttpStatusError& error) {
+        if (!transientHttpStatus(error.status()) || stale.is_null()) throw;
+        result = stale; usedStale = true;
+    }
+    if (usedStale) { traceCache(true); return result; }
+    if (body.is_null() && !usableIgdbResponse(url, body, result)) {
+        if (attempts) attempts->push_back({{"stage", "igdb-detail-binding"}, {"ok", false},
+            {"url", url}, {"reason", "invalid-or-mismatched-detail-id"}});
+        throw HttpTransportError("IGDB detail did not match its requested game ID", ERROR_INVALID_DATA, false);
+    }
+    if (!g_workerDataRoot.empty() && usableIgdbResponse(url, body, result)) try {
+        writeJsonAtomic(path, {{"schemaVersion", 1}, {"url", url}, {"requestBody", body},
+            {"fetchedAt", unixTimeMs()}, {"data", result}});
+    } catch (...) { /* A successful provider response remains valid if persistence fails. */ }
+    return result;
+}
+static json getCachedIgdbJson(const std::string& url, const std::string& provider, json* attempts) {
+    return cachedIgdbRequest(url, nullptr, provider, attempts);
+}
+static json postCachedIgdbJson(const std::string& url, const json& payload, const std::string& provider, json* attempts) {
+    return cachedIgdbRequest(url, payload, provider, attempts);
+}
+
 static fs::path steamDetailsCachePath(int appId) {
     return g_workerDataRoot / L"cache" / L"steam-appdetails" /
         (std::to_wstring(appId) + L"-english-us.json");
@@ -4563,6 +5134,70 @@ static void saveSteamDetailsCache(const SteamDetailsRecord& details) {
         // data directory must never turn a successful network lookup into a
         // scraping failure.
     }
+}
+
+static json steamCandidateSearchJson(const std::string& url, json* attempts) {
+    const auto key = sha256(std::vector<unsigned char>(url.begin(), url.end()));
+    const auto path = g_workerDataRoot / L"cache" / L"steam-search" / toWide(key + ".json");
+    auto usable = [](const json& data) {
+        if (!data.is_object()) return false;
+        if (data.contains("success") && data["success"] != true && data["success"] != 1) return false;
+        for (const auto* key : {"error", "Error"}) {
+            const auto value = data.find(key);
+            if (value != data.end() && !value->is_null() &&
+                !(value->is_string() && trim(value->get<std::string>()).empty())) return false;
+        }
+        const auto items = data.find("items"), html = data.find("results_html");
+        return (items != data.end() && items->is_array()) ||
+            (html != data.end() && html->is_string() && data.contains("success") &&
+             (data["success"] == 1 || data["success"] == true));
+    };
+    json stale = nullptr;
+    uint64_t staleAt = 0;
+    if (!g_workerDataRoot.empty()) try {
+        if (fs::is_regular_file(path)) {
+            const auto bytes = readBinaryFile(path, MAX_METADATA_BYTES);
+            const auto record = json::parse(bytes.begin(), bytes.end());
+            const auto time = record.value("fetchedAt", uint64_t{0}), now = unixTimeMs();
+            const auto& data = record.at("data");
+            const bool empty = (data.contains("items") && data["items"].is_array() && data["items"].empty()) ||
+                (data.contains("results_html") && data["results_html"] == "");
+            const uint64_t ttl = empty ? 5ull*60*1000 : 6ull*60*60*1000;
+            if (record.value("schemaVersion", 0) == 1 && record.value("url", std::string{}) == url &&
+                time > 0 && time <= now && usable(data)) {
+                if (now-time < ttl) {
+                    if (attempts) attempts->push_back({{"stage","steam-search-cache"},{"cacheHit",true},{"ok",true},{"identityAuthority",false}});
+                    return data;
+                }
+                // A bounded old positive inventory can still locate candidates,
+                // but each candidate must pass the existing AppDetails verifier.
+                if (!empty && now-time <= 7ull*24*60*60*1000) { stale = data; staleAt = time; }
+            }
+        }
+    } catch (...) { /* Invalid/future caches cannot supply candidates. */ }
+    json data;
+    bool usedStale = false;
+    try {
+        data = getJson(url, "steam", attempts);
+        if (!usable(data))
+            throwMetadataSemanticFailure(url, "steam", "steam-search-envelope", "invalid-provider-envelope", attempts);
+    } catch (const HttpTransportError& error) {
+        if (!error.retryable() || stale.is_null()) throw;
+        data = stale; usedStale = true;
+    } catch (const HttpStatusError& error) {
+        if (!transientHttpStatus(error.status()) || stale.is_null()) throw;
+        data = stale; usedStale = true;
+    }
+    if (usedStale) {
+        // Never refresh fetchedAt or write a failed request as "no results".
+        if (attempts) attempts->push_back({{"stage","steam-search-stale-fallback"},{"cacheHit",true},
+            {"stale",true},{"ok",true},{"fetchedAt",staleAt},{"identityAuthority",false}});
+        return data;
+    }
+    if (!g_workerDataRoot.empty()) try {
+        writeJsonAtomic(path, {{"schemaVersion",1},{"url",url},{"fetchedAt",unixTimeMs()},{"data",data}});
+    } catch (...) { /* Cache writes must never fail identification. */ }
+    return data;
 }
 
 static std::string canonicalPathKey(const fs::path& path) {
@@ -6481,11 +7116,51 @@ static json steamGridDbIconSearch(const std::string& query, json* attemptLog = n
     };
     auto integer = [](const json& object, const char* key, int fallback = 0) {
         const auto it = object.find(key);
-        return it != object.end() && it->is_number_integer() ? it->get<int>() : fallback;
+        if (it == object.end() || !it->is_number_integer()) return fallback;
+        return positiveJsonInt(object, key);
     };
     json result = {{"candidates", json::array()}, {"networkAttempts", json::array()}};
     if (query.empty()) return result;
     auto& attempts = result["networkAttempts"];
+    const auto cacheMaterial = std::string("exact-icon-v1\n") + query;
+    const auto cachePath = g_workerDataRoot / L"cache" / L"steamgriddb-icons" /
+        toWide(sha256(std::vector<unsigned char>(cacheMaterial.begin(), cacheMaterial.end())) + ".json");
+    auto validCandidate = [&](const json& candidate) {
+        if (!candidate.is_object()) return false;
+        const int width = positiveJsonInt(candidate, "width"), height = positiveJsonInt(candidate, "height");
+        return text(candidate, "url").rfind("https://cdn2.steamgriddb.com/icon/", 0) == 0 &&
+            width >= 128 && height >= 128 && width <= 4096 && height <= 4096 &&
+            static_cast<double>(width) / height >= 0.85 && static_cast<double>(width) / height <= 1.18 &&
+            normalizeTitle(text(candidate, "title")) == normalizeTitle(query) &&
+            positiveJsonInt(candidate, "steamGridDbGameId") > 0;
+    };
+    try {
+        if (!g_workerDataRoot.empty() && fs::is_regular_file(cachePath)) {
+            const auto bytes = readBinaryFile(cachePath, 128u << 10);
+            const auto cache = json::parse(bytes.begin(), bytes.end());
+            const auto at = cache.value("fetchedAt", uint64_t{0});
+            const auto candidates = array(cache, "candidates");
+            const uint64_t ttl = candidates.empty() ? 5ull * 60 * 1000 : 12ull * 60 * 60 * 1000;
+            const auto now = unixTimeMs();
+            if (cache.value("schemaVersion", 0) == 1 && text(cache, "query") == query &&
+                cache.contains("candidates") && cache["candidates"].is_array() && candidates.size() <= 8 &&
+                at > 0 && at <= now && now - at < ttl &&
+                std::all_of(candidates.begin(), candidates.end(), validCandidate)) {
+                result["candidates"] = candidates;
+                attempts.push_back({{"stage", "steamgriddb-icon-cache"}, {"cacheHit", true}, {"ok", true}});
+                if (attemptLog) *attemptLog = attempts;
+                return result;
+            }
+        }
+    } catch (...) { /* Invalid optional cache must not break scraping. */ }
+    auto completed = [&]() {
+        if (!g_workerDataRoot.empty()) try {
+            writeJsonAtomic(cachePath, {{"schemaVersion", 1}, {"query", query}, {"fetchedAt", unixTimeMs()},
+                {"candidates", result["candidates"]}});
+        } catch (...) { /* Locked/full cache is not a download failure. */ }
+        if (attemptLog) *attemptLog = attempts;
+        return result;
+    };
     const auto autocomplete = getJson(
         "https://www.steamgriddb.com/api/public/search/autocomplete?term=" + percentEncode(query),
         "steamgriddb", &attempts);
@@ -6499,15 +7174,19 @@ static json steamGridDbIconSearch(const std::string& query, json* attemptLog = n
         if (name.empty()) continue;
         const auto nameKey = normalizeTitle(name);
         double score = nameKey == queryKey ? 100.0 : 0.0;
-        if (score == 0.0 && (!queryKey.empty() && (nameKey.find(queryKey) != std::string::npos || queryKey.find(nameKey) != std::string::npos))) score = 70.0;
+        if (nameKey != queryKey || queryKey.empty()) continue;
         bool steamType = false;
         for (const auto& type : array(game, "types")) if (type.is_string() && type.get<std::string>() == "steam") steamType = true;
         if (steamType) score += 10.0;
+        if (positiveJsonInt(game, "id") <= 0) continue;
+        if (selected && positiveJsonInt(*selected, "id") != positiveJsonInt(game, "id")) {
+            result["selectionStatus"] = "ambiguous-exact-title";
+            return completed();
+        }
         if (!selected || score > selectedScore) { selected = &game; selectedScore = score; }
     }
-    // Do not download an arbitrary similarly named game's icon.
-    if (!selected || selectedScore < 70.0) return result;
-    const auto gameId = selected->value("id", 0);
+    if (!selected) return completed();
+    const auto gameId = positiveJsonInt(*selected, "id");
     const json payload = {
         {"game_id", json::array({gameId})}, {"asset_type", "icon"},
         {"page", 0}, {"limit", 12}, {"styles", {"all"}},
@@ -6524,18 +7203,18 @@ static json steamGridDbIconSearch(const std::string& query, json* attemptLog = n
         const auto width = integer(asset, "width");
         const auto height = integer(asset, "height");
         if (url.rfind("https://cdn2.steamgriddb.com/icon/", 0) != 0 ||
-            width < 256 || height < 256 || width > 4096 || height > 4096) continue;
+            width < 128 || height < 128 || width > 4096 || height > 4096 ||
+            static_cast<double>(width) / height < 0.85 || static_cast<double>(width) / height > 1.18) continue;
         result["candidates"].push_back({
             {"url", url}, {"previewUrl", text(asset, "thumb", url)},
             {"width", width}, {"height", height}, {"title", text(*selected, "name")},
             {"provider", "steamgriddb"}, {"sourceRole", "steamgriddb-icon"},
-            {"steamGridDbGameId", gameId}, {"assetId", asset.value("id", 0)},
+            {"steamGridDbGameId", gameId}, {"assetId", positiveJsonInt(asset, "id")},
             {"preferred", width >= 512 && height >= 512}
         });
         if (result["candidates"].size() >= 8) break;
     }
-    if (attemptLog) *attemptLog = attempts;
-    return result;
+    return completed();
 }
 
 class GdiPlusRuntime {
@@ -6813,6 +7492,85 @@ static std::string steamLibraryAssetUrl(const json& assets, int appId, const cha
     return "https://shared.steamstatic.com/store_item_assets/"+format;
 }
 
+static bool hasUsableSteamLibraryAssets(const json& assets, int appId) {
+    if (!assets.is_object()) return false;
+    const auto icon = steamArtworkAssetText(assets, "community_icon");
+    if (icon.size() == 40 && std::all_of(icon.begin(), icon.end(), [](unsigned char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    })) return true;
+    for (const auto* field : {"library_capsule", "library_capsule_2x", "header", "header_2x",
+        "main_capsule", "main_capsule_2x", "library_hero", "library_hero_2x", "library_logo", "library_logo_2x"})
+        if (!steamLibraryAssetUrl(assets, appId, field).empty()) return true;
+    return false;
+}
+
+// StoreBrowse transports Steam EResult inside an HTTP 200 envelope. A broken
+// inventory is retryable discovery, while an explicit denial/empty result is
+// definitive absence. Neither may overwrite a verified positive asset index.
+static json steamLibraryAssetsResponse(const json& response, int appId,
+    const std::string& url, json& attempts) {
+    auto invalid = [&](const char* reason) {
+        throwMetadataSemanticFailure(url, "steam-library-assets",
+            "steam-library-assets-envelope", reason, &attempts);
+    };
+    if (!response.is_object()) invalid("invalid-provider-envelope");
+    const auto envelope = response.find("response");
+    if (envelope == response.end() || !envelope->is_object()) invalid("invalid-provider-envelope");
+    const auto items = envelope->find("store_items");
+    if (items == envelope->end() || !items->is_array()) invalid("invalid-asset-inventory");
+    const json* selected = nullptr;
+    for (const auto& item : *items) {
+        if (!item.is_object()) invalid("invalid-asset-record");
+        const auto itemId = positiveJsonInt(item, "id");
+        const auto boundAppId = positiveJsonInt(item, "appid");
+        if (itemId != appId && boundAppId != appId) continue;
+        if ((itemId > 0 && itemId != appId) || (boundAppId > 0 && boundAppId != appId))
+            invalid("mismatched-asset-id");
+        if (item.contains("item_type") &&
+            (!item["item_type"].is_number_integer() || item["item_type"] != 0))
+            invalid("invalid-asset-item-type");
+        if (selected) invalid("duplicate-asset-record");
+        selected = &item;
+    }
+    if (!selected) {
+        if (!items->empty()) invalid("missing-requested-asset-record");
+        return json::object();
+    }
+    const auto result = selected->find("success");
+    if (result == selected->end() || !result->is_number_integer() ||
+        positiveJsonInt(*selected, "success") == 0) invalid("missing-asset-result");
+    if (*result != 1) {
+        // Steam API EResult: Fail, NoConnection, Busy, Timeout,
+        // ServiceUnavailable, RemoteDisconnect and RateLimitExceeded.
+        const bool transient = *result == 2 || *result == 3 || *result == 10 ||
+            *result == 16 || *result == 20 || *result == 38 || *result == 84;
+        attempts.push_back({{"stage", "steam-library-assets-result"}, {"appId", appId},
+            {"steamResult", *result}, {"ok", false}, {"retryable", transient},
+            {"attempt", 0}, {"freshSession", false}, {"identityAuthority", false}});
+        if (transient) {
+            if (*result == 84) rememberMetadataBackoff(url, 0, 30000, true);
+            invalid("temporary-provider-result");
+        }
+        return json::object();
+    }
+    if (positiveJsonInt(*selected, "appid") != appId) invalid("mismatched-asset-id");
+    const auto assets = selected->find("assets");
+    if (assets == selected->end() || !assets->is_object()) invalid("invalid-asset-payload");
+    if (!hasUsableSteamLibraryAssets(*assets, appId)) {
+        // Small store thumbnails/page backgrounds alone are a valid inventory
+        // with no library artwork; do not turn that absence into an outage.
+        for (const auto* field : {"community_icon", "library_capsule", "library_capsule_2x", "header", "header_2x",
+            "main_capsule", "main_capsule_2x", "library_hero", "library_hero_2x", "library_logo", "library_logo_2x"}) {
+            const auto value = assets->find(field);
+            if (value != assets->end() && !value->is_null() &&
+                (!value->is_string() || !value->get_ref<const std::string&>().empty()))
+                invalid("unusable-asset-payload");
+        }
+        return json::object();
+    }
+    return *assets;
+}
+
 static std::map<std::string,json> g_steamLibraryAssetsSession;
 static json fetchSteamLibraryAssets(int appId, json& attempts) {
     if(appId<=0)return json::object();
@@ -6825,7 +7583,7 @@ static json fetchSteamLibraryAssets(int appId, json& attempts) {
         if(!g_workerDataRoot.empty()&&fs::is_regular_file(path)) {
             const auto bytes=readBinaryFile(path,2u<<20);const auto record=json::parse(bytes.begin(),bytes.end());
             if(positiveJsonInt(record,"steamAppId")==appId&&record.contains("assets")&&record["assets"].is_object()&&
-               !steamLibraryAssetUrl(record["assets"],appId,"library_capsule").empty()) {
+               hasUsableSteamLibraryAssets(record["assets"],appId)) {
                 cached=record["assets"];
                 if(record.contains("fetchedAt")&&record["fetchedAt"].is_number_unsigned())fetchedAt=record["fetchedAt"].get<uint64_t>();
             }
@@ -6840,23 +7598,19 @@ static json fetchSteamLibraryAssets(int appId, json& attempts) {
     try {
         const json request={{"ids",json::array({{{"appid",appId}}})},{"context",{{"country_code","US"},{"language","english"}}},
             {"data_request",{{"include_assets",true},{"include_assets_without_overrides",true}}}};
-        const auto response=getJson("https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="+percentEncode(request.dump()),"steam-library-assets",&attempts);
-        const auto envelope=response.find("response");
-        if(envelope==response.end()||!envelope->is_object())throw std::runtime_error("Steam library assets response is invalid");
-        const auto items=envelope->find("store_items");
-        if(items==envelope->end()||!items->is_array())throw std::runtime_error("Steam library assets inventory is invalid");
-        for(const auto& item:*items) {
-            if(!item.is_object()||positiveJsonInt(item,"appid")!=appId||positiveJsonInt(item,"success")!=1)continue;
-            const auto value=item.find("assets");
-            if(value==item.end()||!value->is_object())continue;
-            assets=*value;break;
-        }
-        if(!assets.empty()&&!g_workerDataRoot.empty())try {
+        const auto url="https://api.steampowered.com/IStoreBrowseService/GetItems/v1/?input_json="+percentEncode(request.dump());
+        const auto response=getJson(url,"steam-library-assets",&attempts);
+        assets=steamLibraryAssetsResponse(response,appId,url,attempts);
+        if(hasUsableSteamLibraryAssets(assets,appId)&&!g_workerDataRoot.empty())try {
             writeJsonAtomic(path,{{"schemaVersion",1},{"steamAppId",appId},{"fetchedAt",now},{"source","IStoreBrowseService"},{"assets",assets}});
         }catch(...) { /* Discovery still succeeds when the cache is locked. */ }
     }catch(const std::exception& error) {
         attempts.push_back({{"stage","steam-library-assets"},{"appId",appId},{"ok",false},{"error",error.what()}});
-        if(!cached.empty()&&fetchedAt>0&&fetchedAt<=now&&now-fetchedAt<30ull*24*60*60*1000)assets=cached;
+        if(!cached.empty()&&fetchedAt>0&&fetchedAt<=now&&now-fetchedAt<30ull*24*60*60*1000) {
+            assets=cached;
+            attempts.push_back({{"stage","steam-library-assets-cache"},{"appId",appId},
+                {"cacheHit",true},{"stale",true},{"ok",true},{"fetchedAt",fetchedAt}});
+        }
     }
     // Do not repeatedly query a failing asset endpoint for each slot in one worker.
     g_steamLibraryAssetsSession[sessionKey]=assets;
@@ -6940,6 +7694,16 @@ static std::vector<ArtworkCandidate> artworkUrls(const ResolvedGame& game, const
             json assetAttempts=json::array();
             const auto assets=fetchSteamLibraryAssets(artworkAppId,assetAttempts);
             if(discoveryAttempts)for(const auto& attempt:assetAttempts)discoveryAttempts->push_back(attempt);
+            if (spec.type == "icon") {
+                const auto hash = assets.contains("community_icon") && assets["community_icon"].is_string()
+                    ? assets["community_icon"].get<std::string>() : std::string{};
+                if (hash.size() == 40 && std::all_of(hash.begin(), hash.end(), [](unsigned char c) {
+                    return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+                })) add("https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/" +
+                    std::to_string(artworkAppId) + "/" + hash + ".jpg", "steam-store", "community-icon",
+                    "https://store.steampowered.com/", false, "steam:" + std::to_string(artworkAppId) + ":icon:" + hash, rankBase, identityPriority);
+                continue;
+            }
             const auto fields=spec.type=="tall"?std::vector<const char*>{"library_capsule_2x","library_capsule"}:
                 spec.type=="hero"?std::vector<const char*>{"library_hero_2x","library_hero"}:
                 spec.type=="long"?std::vector<const char*>{"header_2x","header"}:std::vector<const char*>{"library_logo_2x","library_logo"};
@@ -7270,7 +8034,7 @@ static json describeResolutionFailure(
     collectNetworkEvidence(steamRounds, evidence);
     collectNetworkEvidence(igdbRounds, evidence);
     std::string kind;
-    if (evidence.successfulResponses == 0 && evidence.retryableFailures > 0) {
+    if (evidence.retryableFailures > 0) {
         kind = "network-unavailable";
     } else if (directIdMode) {
         kind = "manual-id-rejected";
@@ -7891,9 +8655,14 @@ static std::string gameDataId(const fs::path& gameDirectory) {
     return sha256(std::vector<unsigned char>(key.begin(), key.end()));
 }
 
+static fs::path refineLibraryGameBoundary(const fs::path&, const fs::path&, const fs::path&);
+static fs::path nativeSteamGameBoundaryForExecutable(const fs::path&);
+
 static fs::path persistentGameDirectoryForExecutable(
     const fs::path& dataRoot,
-    const fs::path& executable) {
+    const fs::path& executable,
+    bool* fromLibraryState = nullptr) {
+    if (fromLibraryState) *fromLibraryState = false;
     const auto wanted = canonicalPathKey(executable);
     const auto statePath = dataRoot / L"state" / L"library-scan.json";
     if (fs::is_regular_file(statePath)) {
@@ -7922,13 +8691,20 @@ static fs::path persistentGameDirectoryForExecutable(
                     matches = wanted.starts_with(directoryKey);
                 }
                 if (matches) {
-                    if (!directory.empty()) return directory;
+                    if (!directory.empty()) {
+                        if (fromLibraryState) *fromLibraryState = true;
+                        return refineLibraryGameBoundary(directory, executable, dataRoot);
+                    }
                 }
             }
         } catch (...) {
             // Artwork still remains usable in the diagnostic output if the
             // portable state snapshot is missing or temporarily corrupt.
         }
+    }
+    if (const auto native = nativeSteamGameBoundaryForExecutable(executable); !native.empty()) {
+        if (fromLibraryState) *fromLibraryState = true;
+        return refineLibraryGameBoundary(native, executable, dataRoot);
     }
     // A recovery fallback for a just-created or partially recoverable scan
     // state: roots define immediate game directories, so retain that game root
@@ -7945,7 +8721,8 @@ static fs::path persistentGameDirectoryForExecutable(
             const auto remainder = wanted.substr(rootKey.size());
             const auto separator = remainder.find('\\');
             if (separator != std::string::npos && separator != 0) {
-                return root / fs::path(toWide(remainder.substr(0, separator)));
+                if (fromLibraryState) *fromLibraryState = true;
+                return refineLibraryGameBoundary(root / fs::path(toWide(remainder.substr(0, separator))), executable, dataRoot);
             }
         }
     } catch (...) {
@@ -8714,7 +9491,7 @@ static DWORD runLabChildProcess(
     STARTUPINFOW startup{};
     startup.cb = sizeof(startup);
     PROCESS_INFORMATION process{};
-    if (!CreateProcessW(labExecutable.c_str(), command.data(), nullptr, nullptr, TRUE, 0,
+    if (!ymcc::processEfficiency::createProcess(labExecutable.c_str(), command.data(), nullptr, nullptr, TRUE, 0,
         nullptr, nullptr, &startup, &process)) {
         throw std::runtime_error("Cannot launch isolated retry worker: " + winHttpError("CreateProcess", GetLastError()));
     }
@@ -8799,7 +9576,9 @@ static std::vector<std::string> readGameRuleFile(const fs::path& path) {
     std::vector<std::string> rules;
     if (!fs::is_regular_file(path)) return rules;
     const auto bytes = readBinaryFile(path, 1u << 20);
-    std::istringstream input(std::string(bytes.begin(), bytes.end()));
+    std::string content(bytes.begin(), bytes.end());
+    if (content.starts_with("\xEF\xBB\xBF")) content.erase(0, 3);
+    std::istringstream input(content);
     std::string line;
     while (std::getline(input, line)) {
         const auto comment = line.find('#');
@@ -8852,6 +9631,45 @@ static void writeGameRuleFileAtomic(const fs::path& target, const std::vector<un
     throw std::runtime_error("PID rule atomic activation failed: " + std::to_string(lastError));
 }
 
+
+struct LibraryExecutableExclusion { std::string rule, source; };
+static std::vector<LibraryExecutableExclusion> libraryExecutableExclusions() {
+    static const wchar_t* defaults[] = {
+#include "../game_detection_blacklist_entries.h"
+    };
+    std::vector<LibraryExecutableExclusion> rules;
+    for (const auto* value : defaults) rules.push_back({normalizeGameRule(toUtf8(value)), "ymcc-built-in"});
+    std::vector<fs::path> systemPaths;
+    if (const auto configured = environmentPath(L"YEMAN_SYSTEM_BLACKLIST_PATH")) systemPaths.push_back(*configured);
+    else {
+        systemPaths.emplace_back(LR"(C:\SOFT\YeMan\PowerControl\Sleep\system-blacklist.txt)");
+        wchar_t module[MAX_PATH]{};
+        if(GetModuleFileNameW(nullptr,module,MAX_PATH)>0)
+            systemPaths.push_back(fs::path(module).parent_path().parent_path()/L"PowerControl"/L"Sleep"/L"system-blacklist.txt");
+    }
+    systemPaths.push_back(playerBlacklistPath());
+    std::set<std::string> seen;
+    for(const auto& path:systemPaths) if(seen.insert(canonicalPathKey(path)).second)
+        for(const auto& rule:readGameRuleFile(path)) rules.push_back({rule,toUtf8(path.wstring())});
+    return rules;
+}
+static bool libraryRuleMatches(const std::wstring& value,const std::wstring& pattern) {
+    size_t valueIndex=0,patternIndex=0,starIndex=std::wstring::npos,starValue=0;
+    while(valueIndex<value.size()) {
+        if(patternIndex<pattern.size()&&(pattern[patternIndex]==L'?'||pattern[patternIndex]==value[valueIndex])){++valueIndex;++patternIndex;}
+        else if(patternIndex<pattern.size()&&pattern[patternIndex]==L'*'){starIndex=patternIndex++;starValue=valueIndex;}
+        else if(starIndex!=std::wstring::npos){patternIndex=starIndex+1;valueIndex=++starValue;}
+        else return false;
+    }
+    while(patternIndex<pattern.size()&&pattern[patternIndex]==L'*')++patternIndex;
+    return patternIndex==pattern.size();
+}
+static std::optional<json> libraryExecutableExclusion(const fs::path& executable,const std::vector<LibraryExecutableExclusion>& rules) {
+    const auto name=toWide(normalizedExecutableRule(executable));
+    for(const auto& entry:rules)if(libraryRuleMatches(name,toWide(entry.rule)))
+        return json{{"path",toUtf8(executable.wstring())},{"rule",entry.rule},{"source",entry.source},{"reason","ymcc-executable-blacklist"}};
+    return std::nullopt;
+}
 static json stringVectorJson(const std::vector<std::string>& values) {
     json out = json::array();
     for (const auto& value : values) out.push_back(value);
@@ -8879,6 +9697,8 @@ static std::string classifyLibraryIdentityText(const std::string& identity) {
              "nmm.exe", "vortex", "r2modman", "thunderstore", "overwolf",
              "modlauncher", "mod launcher", "cncnet", "syringe", "cncmaps", "finalalert",
              "map renderer", "map editor", "exeproxy"})) return "mod-manager";
+    if (has({"anticheat", "anti-cheat", "anti cheat", "ea javelin"})) return "helper";
+    if (has({"createdump.exe"})) return "crash-handler";
     // Support clients shipped next to a real game client. They must never
     // become the primary PID/Steam target.
     if (has({"battleye", "beservice", "aces_be", "bpreport",
@@ -9907,6 +10727,8 @@ static json scanOneGameDirectory(
     const json& config,
     const std::vector<TrainerRecord>& trainers) {
     std::vector<LibraryExeCandidate> candidates;
+    const auto executableExclusions = libraryExecutableExclusions();
+    json excludedExecutables = json::array();
     size_t executableCount = 0;
     bool candidateLimitReached = false;
     std::error_code ec;
@@ -9926,6 +10748,10 @@ static json scanOneGameDirectory(
         if (!isRegularFile) continue;
         if (asciiLower(toUtf8(it->path().extension().wstring())) != ".exe") continue;
         ++executableCount;
+        if (const auto excluded = libraryExecutableExclusion(it->path(), executableExclusions)) {
+            excludedExecutables.push_back(*excluded);
+            continue;
+        }
         if (candidates.size() >= 250) {
             candidateLimitReached = true;
             continue;
@@ -9949,7 +10775,10 @@ static json scanOneGameDirectory(
         const auto manualPath = fs::path(toWide(manualIt->value("exe", std::string{})));
         selectionSource = "manual";
         selectionLocked = true;
-        if (fs::is_regular_file(manualPath) && pathWithin(manualPath, gameDirectory)) {
+        if (libraryExecutableExclusion(manualPath, executableExclusions)) {
+            status = "unrecognized-tool";
+            selectionSource = "ymcc-executable-blacklist";
+        } else if (fs::is_regular_file(manualPath) && pathWithin(manualPath, gameDirectory)) {
             auto found = std::find_if(candidates.begin(), candidates.end(), [&](const auto& item) {
                 return canonicalPathKey(item.path) == canonicalPathKey(manualPath);
             });
@@ -9987,7 +10816,7 @@ static json scanOneGameDirectory(
             status = "unrecognized-tool";
         }
     } else {
-        status = "no-executable";
+        status = excludedExecutables.empty() ? "no-executable" : "unrecognized-tool";
     }
 
     // Automatic directory classification is deliberately applied after PE
@@ -10068,6 +10897,7 @@ static json scanOneGameDirectory(
         {"contentType", status == "unrecognized-tool" ? "non-game" : "game"},
         {"classification", status == "unrecognized-tool" ? "明确非游戏" : "游戏候选"},
         {"executableCount", executableCount},
+        {"excludedExecutables", excludedExecutables},
         {"candidateLimitReached", candidateLimitReached},
         {"primaryExecutable", selected ? json(toUtf8(selected->path.wstring())) : json(nullptr)},
         {"primaryRole", selected ? json(selected->role) : json(nullptr)},
@@ -10128,6 +10958,92 @@ static void annotateNativeSteamGame(json& game, const fs::path& gameDirectory,
     game["discoverySource"] = "steam-native";
 }
 
+
+static std::optional<std::vector<json>> independentCollectionGames(
+    const fs::path& directory, const json& parentGame, int maxDepth,
+    const json& config, const std::vector<TrainerRecord>& trainers) {
+    if (maxDepth < 2 || jsonBoolSafe(parentGame, "selectionLocked", false) ||
+        steamNativeGameInfoForDirectory(directory)) return std::nullopt;
+    // An installation with its own primary executable owns its child bins,
+    // mods and bundled components. Never split Win32/Win64 or patch folders.
+    for (const auto& candidate : parentGame.value("candidates", json::array()))
+        if (candidate.value("depth", -1) == 0 && jsonStringOr(candidate, "role") == "main-game") return std::nullopt;
+    std::vector<json> games;
+    std::set<std::string> identities;
+    std::error_code error;
+    size_t inspected = 0;
+    for (const auto& entry : fs::directory_iterator(directory, fs::directory_options::none, error)) {
+        if (error) return std::nullopt;
+        if (!entry.is_directory(error) || error) { if(error)return std::nullopt;continue; }
+        if (++inspected > 128) return std::nullopt;
+        if (excludedLibrarySubdirectory(entry.path()) || platformLibraryKind(entry.path()) ||
+            configuredDirectory(config.value("excludedGameDirectories", json::array()), entry.path())) continue;
+        auto child = scanOneGameDirectory(entry.path(), maxDepth - 1, config, trainers);
+        if (!child.value("scanComplete", true)) return std::nullopt;
+        if (jsonStringOr(child,"status") != "ready" || jsonStringOr(child,"primaryRole") != "main-game") continue;
+        auto identity = jsonStringOr(child,"primaryProductName");
+        if (identity.empty() || genericPeIdentityValue(identity)) identity = installedDirectoryTitle(toUtf8(entry.path().filename().wstring()));
+        if (normalizeTitle(identity).size() < 3 || noisyDirectory(identity)) continue;
+        identities.insert(normalizeTitle(identity));
+        games.push_back(std::move(child));
+    }
+    if (games.size() < 2 || identities.size() < 2) return std::nullopt;
+    std::sort(games.begin(),games.end(),[](const auto& a,const auto& b){return jsonStringOr(a,"gameDirectory") < jsonStringOr(b,"gameDirectory");});
+    return games;
+}
+static fs::path nativeSteamGameBoundaryForExecutable(const fs::path& executable) {
+    auto directory = executable.parent_path();
+    for (int depth = 0; depth < 10 && !directory.empty(); ++depth) {
+        if (steamNativeGameInfoForDirectory(directory)) return directory;
+        const auto parent = directory.parent_path();
+        if (parent == directory) break;
+        directory = parent;
+    }
+    return {};
+}
+static std::optional<LocalSteamAppIdEvidence> nativeSteamAppManifestEvidence(const fs::path& executable) {
+    const auto directory = nativeSteamGameBoundaryForExecutable(executable);
+    if (directory.empty()) return std::nullopt;
+    const auto info = steamNativeGameInfoForDirectory(directory);
+    if (!info || info->appId <= 0) return std::nullopt;
+    const auto config = defaultLibraryConfig();
+    const auto game = scanOneGameDirectory(directory, 6, config, {});
+    // A bundled game/helper cannot inherit the parent product's identity.
+    if (canonicalPathKey(fs::path(toWide(jsonStringOr(game,"primaryExecutable")))) != canonicalPathKey(executable)) return std::nullopt;
+    return LocalSteamAppIdEvidence{info->appId, info->manifestPath, "native-steam-appmanifest", 1.0,
+        info->manifestName, toUtf8(executable.wstring()), true};
+}
+static fs::path refineLibraryGameBoundary(const fs::path& directory,const fs::path& executable,const fs::path& dataRoot) {
+    try {
+        if (!fs::is_directory(directory)) return directory;
+        const auto config=loadLibraryConfig(dataRoot/L"config"/L"library-config.json");
+        const auto parent=scanOneGameDirectory(directory,5,config,{});
+        // A native installation may bundle another independent game. Its
+        // explicitly targeted EXE cannot use the outer game's title or cache.
+        if (steamNativeGameInfoForDirectory(directory) && parent.value("scanComplete",false) &&
+            jsonStringOr(parent,"status")=="ready" &&
+            canonicalPathKey(fs::path(toWide(jsonStringOr(parent,"primaryExecutable")))) != canonicalPathKey(executable)) {
+            auto child=executable.parent_path();
+            while (!child.empty() && child.parent_path()!=directory && child!=directory) {
+                const auto next=child.parent_path(); if(next==child)break; child=next;
+            }
+            if (!child.empty() && child.parent_path()==directory &&
+                !noisyDirectory(toUtf8(child.filename().wstring())) && !excludedLibrarySubdirectory(child)) {
+                const auto nested=scanOneGameDirectory(child,5,config,{});
+                auto identity=[](const json& game,const fs::path& root){auto name=jsonStringOr(game,"primaryProductName");if(name.empty()||genericPeIdentityValue(name))name=installedDirectoryTitle(toUtf8(root.filename().wstring()));return normalizeTitle(name);};
+                const auto parentName=identity(parent,directory),childName=identity(nested,child);
+                if(nested.value("scanComplete",false) && jsonStringOr(nested,"status")=="ready" &&
+                    jsonStringOr(nested,"primaryRole")=="main-game" && parentName.size()>=3 && childName.size()>=3 &&
+                    parentName!=childName &&
+                    canonicalPathKey(fs::path(toWide(jsonStringOr(nested,"primaryExecutable"))))==canonicalPathKey(executable) &&
+                    !pathWithin(fs::path(toWide(jsonStringOr(parent,"primaryExecutable"))),child)) return child;
+            }
+        }
+        if(const auto children=independentCollectionGames(directory,parent,5,config,{}))
+            for(const auto& game:*children){const auto child=fs::path(toWide(jsonStringOr(game,"gameDirectory")));if(pathWithin(executable,child))return child;}
+    }catch(...) { /* A directory read failure must not invent another game's root. */ }
+    return directory;
+}
 static json scanLibraryRoots(
     const std::vector<fs::path>& roots,
     const std::vector<fs::path>& trainerRoots,
@@ -10198,6 +11114,22 @@ static json scanLibraryRoots(
             return;
         }
         auto game = scanOneGameDirectory(directory, maxDepth, config, trainers);
+        // A blacklisted installed application must not reappear under a
+        // fallback runtime/helper EXE left in the same directory.
+        for (const auto& excluded : game.value("excludedExecutables", json::array())) {
+            const auto stem = toUtf8(fs::path(toWide(jsonStringOr(excluded,"path"))).stem().wstring());
+            if (!stem.empty() && (normalizeTitle(stem) == normalizeTitle(nativeInfo.manifestName) ||
+                normalizeTitle(stem) == normalizeTitle(toUtf8(directory.filename().wstring())))) {
+                game["status"] = "unrecognized-tool";
+                game["primaryExecutable"] = nullptr;
+                recordAutomaticRejection(game);
+                return;
+            }
+        }
+        if (jsonStringOr(game, "status") == "unrecognized-tool" && !game.value("excludedExecutables", json::array()).empty()) {
+            recordAutomaticRejection(game);
+            return;
+        }
         annotateNativeSteamGame(game, directory, nativeInfo);
         game["steamNativeRecord"] = game["nativeSteam"];
         ++steamNativeGames;
@@ -10363,6 +11295,29 @@ static json scanLibraryRoots(
 
             auto parentGame = scanOneGameDirectory(directory, maxDepth, config, trainers);
             if (!parentGame.value("scanComplete", true)) rootScanComplete = false;
+            if (const auto children = independentCollectionGames(directory, parentGame, maxDepth, config, trainers)) {
+                collectionContainers.push_back({{"path",toUtf8(directory.wstring())},
+                    {"reason","structurally-independent-game-directories"},{"discoveredGames",children->size()}});
+                // Migrate only an exact old selected EXE from this specific
+                // collapsed container. This preserves existing shortcut
+                // ownership without granting sibling games the same owner.
+                json previousGames = json::array();
+                try { const auto bytes=readBinaryFile(g_workerDataRoot/L"state"/L"library-scan.json",64u<<20);
+                    const auto state=json::parse(bytes.begin(),bytes.end());previousGames=state.value("games",json::array()); }
+                catch (...) { /* No usable legacy state: no ownership alias. */ }
+                for(auto game:*children) {
+                    for(const auto& old:previousGames) {
+                        if(canonicalPathKey(fs::path(toWide(jsonStringOr(old,"gameDirectory"))))==canonicalPathKey(directory) &&
+                           canonicalPathKey(fs::path(toWide(jsonStringOr(old,"primaryExecutable"))))==
+                           canonicalPathKey(fs::path(toWide(jsonStringOr(game,"primaryExecutable"))))) {
+                            game["alternateGameDirectories"]=json::array({toUtf8(directory.wstring())});
+                            break;
+                        }
+                    }
+                    appendGame(std::move(game));
+                }
+                continue;
+            }
             if (parentGame.value("status", std::string{}) == "ready" ||
                 parentGame.value("status", std::string{}) == "manual-primary-missing" ||
                 parentGame.value("status", std::string{}) == "scan-incomplete-needs-review") {
@@ -10776,6 +11731,51 @@ static json loadJsonDocument(const fs::path& path, size_t maximumBytes = 64u << 
     return json::parse(bytes.begin(), bytes.end());
 }
 
+// Auxiliary publication is outside Steam rollback. This existing transaction
+// mutex serializes the full cross-account read/modify/write, not only rename.
+static void publishYmccGameWhitelist(json& event, const fs::path& dataRoot, bool completeAccount,
+    const fs::path& destination = gameWhitelistPath()) noexcept {
+    namespace membership = custom_steam_library::ymcc_whitelist;
+    try {
+        if (!membership::authoritativeEvent(event)) return;
+        DataTransactionMutex transaction;
+        const auto statePath = dataRoot / L"state" / L"ymcc-game-whitelist-membership.json";
+        const auto previous = fs::exists(statePath) ? loadJsonDocument(statePath, 1u << 20) : membership::emptyMembership();
+        membership::prepareLiveEvent(event, previous, completeAccount);
+        const auto update = membership::applyPrepared(previous, event, normalizeGameRule);
+        if (!update.accepted) {
+            event["ymccWhitelistPublication"] = {{"status", "skipped"}, {"reason", update.reason}};
+            return;
+        }
+        const auto originalBytes = fs::exists(destination) ? readBinaryFile(destination, 1u << 20) : std::vector<unsigned char>{};
+        const std::string original(originalBytes.begin(), originalBytes.end());
+        const auto desired = membership::renderManagedBlock(original, membership::unionRules(update.membership));
+        const bool membershipChanged = update.membership != previous;
+        const bool rulesChanged = desired != original;
+        // Persist account ownership first. A subsequent rules-file write failure
+        // is retried by the next normal library refresh, without losing peers.
+        if (membershipChanged) writeJsonAtomic(statePath, update.membership);
+        if (rulesChanged) {
+            // YMCC's manual editor does not share our library mutex. Preserve
+            // a rewrite observed since the initial read and retry next event.
+            const auto latest = fs::exists(destination) ? readBinaryFile(destination, 1u << 20) : std::vector<unsigned char>{};
+            if (latest != originalBytes) throw std::runtime_error("YMCC manual whitelist changed during publication; preserved newer manual file, retry next library event");
+            writeAtomic(destination, std::vector<unsigned char>(desired.begin(), desired.end()));
+        }
+        event["ymccWhitelistPublication"] = {{"status", membershipChanged || rulesChanged ? "updated" : "unchanged"},
+            {"membershipChanged", membershipChanged}, {"rulesFileChanged", rulesChanged},
+            {"ruleCount", membership::unionRules(update.membership).size()},
+            {"manualRulesPreserved", true}, {"markerlessLinesPreserved", original.find(membership::beginMarker) == std::string::npos}};
+    } catch (const std::exception& error) {
+        try {
+            event["ymccWhitelistPublication"] = {{"status", "warning"}, {"error", error.what()}, {"steamResultPreserved", true}};
+            std::cerr << "WARNING_YMCC_WHITELIST_PUBLICATION: " << error.what() << "\n";
+        } catch (...) {}
+    } catch (...) {
+        try { event["ymccWhitelistPublication"] = {{"status", "warning"}, {"error", "Unknown auxiliary publication failure"}, {"steamResultPreserved", true}}; } catch (...) {}
+    }
+}
+
 static std::optional<json> portableArtworkManifestAtDirectory(
     const fs::path& dataRoot,
     const json& game,
@@ -10955,6 +11955,9 @@ static json buildSteamLibraryAddPlan(
     const fs::path& outputPath,
     const std::set<std::string>& selectedGameDirectories = {},
     bool explicitSelection = false) {
+    // Keep the authoritative read and membership publication ordered with
+    // add/delete commits, so a pre-delete plan cannot publish after deletion.
+    DataTransactionMutex membershipTransaction;
     const auto state = loadLibraryScanState(statePath);
     const auto manualOverrides = loadManualOverrides(dataRoot / L"config" / L"manual-overrides.json");
     const bool shortcutsVdfExists = fs::is_regular_file(target.path);
@@ -11006,6 +12009,9 @@ static json buildSteamLibraryAddPlan(
             {"directoryName", game.value("directoryName", std::string{})},
             {"primaryExecutable", executable.empty() ? json(nullptr) : json(toUtf8(executable.wstring()))},
             {"primarySelectionStatus", game.value("status", std::string{"unknown"})},
+            {"primaryRole", jsonStringOr(game, "primaryRole")},
+            {"contentType", jsonStringOr(game, "contentType")},
+            {"unrecognizedTool", jsonBoolSafe(game, "unrecognizedTool", false)},
             {"selectionSource", game.value("selectionSource", std::string{})},
             {"primarySelectionConfidence", primarySelectionConfidence},
             {"primarySelectionConfidenceBand", game.contains("primaryPathEvidence") &&
@@ -11082,6 +12088,10 @@ static json buildSteamLibraryAddPlan(
             continue;
         }
 
+        // A valid selected primary was checked against this fresh complete
+        // shortcuts read. Partial inventory may revoke this explicit absence,
+        // but never infer absence for games missing from the inventory.
+        item["ymccSteamMembership"] = "absent";
         auto manifest = portableArtworkManifest(dataRoot, game, executable);
         const auto manualArtwork = manualArtworkForExecutable(manualOverrides, executable);
         const bool idCleared = jsonBoolSafe(manualArtwork, "idCleared", false);
@@ -11355,6 +12365,7 @@ static json buildSteamLibraryAddPlan(
         }},
         {"items", items}
     };
+    publishYmccGameWhitelist(plan, dataRoot, custom_steam_library::ymcc_whitelist::completeInventory(state, items));
     writeJsonAtomic(outputPath, plan);
     return plan;
 }
@@ -11860,6 +12871,7 @@ static json commitPreparedSteamAddPlan(
         item["simulatedRecentSignal"] = injectSimulatedRecent;
         item["simulatedRecentSignalTime"] = injectSimulatedRecent ? json(simulatedRecentTime) : json(nullptr);
     }
+    publishYmccGameWhitelist(plan, dataRoot, false);
     publishCommittedSteamResult(plan, {dataRoot / L"state" / L"last-steam-add.json",
         dataRoot / L"state" / toWide("last-steam-add-" + accountFileToken + ".json"), planPath});
     return plan;
@@ -12274,7 +13286,7 @@ static bool isHorizontalArtworkSearchType(const std::string& type) {
 }
 
 static int artworkSearchMinimumWidth(const std::string& type) {
-    return isHorizontalArtworkSearchType(type) ? 800 : 240;
+    return type == "long" ? 460 : isHorizontalArtworkSearchType(type) ? 800 : 240;
 }
 
 static json buildSteamLibraryDeletePlan(
@@ -12422,15 +13434,16 @@ static json commitSteamLibraryDeletePlan(
     plan["mode"] = "steam-library-delete-commit"; plan["committed"] = true; plan["committedAt"] = unixTimeMs();
     plan["shortcutsVdfModified"] = true; plan["shortcutsAfterSha256"] = shortcutsAfterHash;
     plan["backup"] = toUtf8(backupFile.wstring()); plan["deletedCount"] = deleteCount;
+    publishYmccGameWhitelist(plan, dataRoot, false);
     publishCommittedSteamResult(plan, {dataRoot / L"state" / L"last-steam-delete.json", planPath});
     return plan;
 }
 
 static int artworkSearchMinimumHeight(const std::string& type) {
-    return isHorizontalArtworkSearchType(type) ? 250 : 360;
+    return type == "long" ? 215 : isHorizontalArtworkSearchType(type) ? 250 : 360;
 }
 
-static json baiduArtworkSearch(const std::string& query, const std::string& type, bool automaticFallback = false) {
+static json baiduArtworkSearch(const std::string& query, const std::string& type, bool automaticFallback = false, json* exportedAttempts = nullptr) {
     if (query.empty()) throw std::runtime_error("Artwork search query is empty");
     std::string networkQuery;
     networkQuery.reserve(query.size());
@@ -12446,7 +13459,9 @@ static json baiduArtworkSearch(const std::string& query, const std::string& type
     const auto encoded = percentEncode(networkQuery);
     const auto url = std::string("https://image.baidu.com/search/acjson?tn=resultjson_com&ipn=rj&ct=201326592&fp=result&fr=ala&word=") + encoded +
         "&queryWord=" + encoded + "&cl=2&lm=-1&ie=utf-8&oe=utf-8&st=-1&z=0&ic=0&hd=0&latest=0&copyright=0&face=0&istype=2&nc=1&pn=0&rn=30";
-    json attempts = json::array();
+    json localAttempts = json::array();
+    json& attempts = exportedAttempts ? *exportedAttempts : localAttempts;
+    if (!attempts.is_array()) attempts = json::array();
     const auto response = httpRequestWithRetry(
         "baidu-image", "GET", url,
         L"Accept: application/json, text/plain, */*\r\nAccept-Language: zh-CN,zh;q=0.9\r\n",
@@ -12457,8 +13472,13 @@ static json baiduArtworkSearch(const std::string& query, const std::string& type
     std::string text(response.body.begin(), response.body.end());
     const auto first = text.find('{');
     const auto last = text.rfind('}');
-    if (first == std::string::npos || last <= first) throw std::runtime_error("百度图片返回不是有效 JSON");
-    const auto document = json::parse(text.substr(first, last - first + 1));
+    if (first == std::string::npos || last <= first)
+        throwMetadataSemanticFailure(url, "baidu-image", "artwork-search-json", "invalid-json-response", &attempts);
+    const auto document = json::parse(text.substr(first, last - first + 1), nullptr, false);
+    if (document.is_discarded())
+        throwMetadataSemanticFailure(url, "baidu-image", "artwork-search-json", "invalid-json-response", &attempts);
+    if (!document.is_object() || !document.contains("data") || !document["data"].is_array())
+        throwMetadataSemanticFailure(url, "baidu-image", "artwork-search-envelope", "invalid-provider-envelope", &attempts);
     json candidates = json::array();
     const auto dataIt = document.find("data");
     if (dataIt != document.end() && dataIt->is_array()) {
@@ -12495,7 +13515,7 @@ static json baiduArtworkSearch(const std::string& query, const std::string& type
     };
 }
 
-static json playniteIgdbArtworkSearch(const std::string& query, const std::string& type) {
+static json playniteIgdbArtworkSearch(const std::string& query, const std::string& type, json* exportedAttempts = nullptr) {
     if (query.empty()) throw std::runtime_error("Artwork search query is empty");
 
     struct Match {
@@ -12519,7 +13539,9 @@ static json playniteIgdbArtworkSearch(const std::string& query, const std::strin
     addQuery(steamSearchFriendlyTitle(query));
 
     std::map<uint64_t, Match> found;
-    json attempts = json::array();
+    json localAttempts = json::array();
+    json& attempts = exportedAttempts ? *exportedAttempts : localAttempts;
+    if (!attempts.is_array()) attempts = json::array();
     bool successfulSearch = false;
     std::string lastError;
     for (const auto& searchTerm : queries) {
@@ -12529,7 +13551,7 @@ static json playniteIgdbArtworkSearch(const std::string& query, const std::strin
             {"networkAttempts", searchAttempts}, {"ok", false}
         };
         try {
-            const auto response = postJson(
+            const auto response = postCachedIgdbJson(
                 "https://api2.playnite.link/api/igdb/search",
                 json{{"SearchTerm", searchTerm}},
                 "playnite-igdb",
@@ -12627,7 +13649,7 @@ static json playniteIgdbArtworkSearch(const std::string& query, const std::strin
             {"name", match.name}, {"networkAttempts", detailAttempts}, {"ok", false}
         };
         try {
-            const auto response = getJson(
+            const auto response = getCachedIgdbJson(
                 "https://api2.playnite.link/api/igdb/game/" + std::to_string(match.id),
                 "playnite-igdb",
                 &detailAttempts);
@@ -12794,6 +13816,41 @@ static size_t appendAutomaticArtworkSearchCandidates(
     return added;
 }
 
+
+// Discovery can fail before there is an image URL to download. Preserve those
+// receipts in the same queue as image transfer failures, including partial 200s.
+static void appendArtworkDiscoveryNetworkFailure(const std::string& type,
+    const std::string& provider, const json& attempts, json& failures) {
+    NetworkEvidence evidence;
+    collectNetworkEvidence(attempts, evidence);
+    if (evidence.retryableFailures > 0) {
+        failures.push_back({{"stage", "artwork-discovery"}, {"type", type}, {"provider", provider},
+            {"successfulResponses", evidence.successfulResponses}, {"retryableFailures", evidence.retryableFailures},
+            {"networkAttempts", attempts}});
+    }
+}
+
+static json appendAutomaticArtworkFallback(const std::string& title,
+    const ArtworkSpec& spec, const std::string& provider,
+    std::vector<ArtworkCandidate>& candidates, json& networkFailures) {
+    const auto type = spec.type == "tall" ? "cover" : spec.type == "hero" ? "wallpaper" : "long";
+    json attempt = {{"stage", "automatic-slot-fallback"}, {"provider", provider}, {"type", spec.type},
+        {"ok", false}, {"networkAttempts", json::array()}};
+    try {
+        const auto search = provider == "playnite-igdb"
+            ? playniteIgdbArtworkSearch(title, type, &attempt["networkAttempts"])
+            : baiduArtworkSearch(title, type, true, &attempt["networkAttempts"]);
+        attempt["networkAttempts"] = search.value("networkAttempts", json::array());
+        const auto appended = appendAutomaticArtworkSearchCandidates(search, title, spec, candidates);
+        attempt["candidateCount"] = appended;
+        attempt["ok"] = appended > 0;
+    } catch (const std::exception& error) {
+        attempt["error"] = error.what();
+    }
+    appendArtworkDiscoveryNetworkFailure(spec.type, provider, attempt["networkAttempts"], networkFailures);
+    return attempt;
+}
+
 static json steamIdArtworkSearch(const std::string& appId, const std::string& type) {
     json result = {
         {"candidates", json::array()},
@@ -12842,7 +13899,9 @@ static json steamIdArtworkSearch(const std::string& appId, const std::string& ty
             addCandidate(url, title + " · Steam " + name, width, height, role, rank);
         };
 
-        if (horizontal) {
+        if (type == "long") {
+            field("header_image", "store-header", 460, 215, 1000);
+        } else if (horizontal) {
             field("background_raw", "background-raw", 1920, 1080, 1000);
             field("background", "background", 1920, 1080, 980);
             if (details.data.contains("screenshots") && details.data["screenshots"].is_array()) {
@@ -12880,14 +13939,18 @@ static json steamIdArtworkSearch(const std::string& appId, const std::string& ty
         const auto parsed=std::stoll(appId);
         if(parsed<=0||parsed>INT_MAX)throw std::runtime_error("Steam AppID is out of range");
         const auto assets=fetchSteamLibraryAssets(static_cast<int>(parsed),detailAttempts);
-        const auto fields=horizontal?std::vector<const char*>{"library_hero_2x","library_hero"}:
+        const auto fields=type=="long"?std::vector<const char*>{"header_2x","header","main_capsule_2x","main_capsule"}:
+            horizontal?std::vector<const char*>{"library_hero_2x","library_hero"}:
             std::vector<const char*>{"library_capsule_2x","library_capsule"};
         for(const auto* field:fields) {
             const auto url=steamLibraryAssetUrl(assets,static_cast<int>(parsed),field);
             if(url.empty())continue;
             const bool doubled=std::string(field).ends_with("_2x");
-            addCandidate(url,"Steam AppID "+appId+" · "+field,horizontal?(doubled?3840:1920):(doubled?1200:600),
-                horizontal?(doubled?1240:620):(doubled?1800:900),"library-assets-"+std::string(field),doubled?1800:1700);
+            const bool capsule = std::string(field).starts_with("main_capsule");
+            const int width = type=="long" ? (capsule?616:460)*(doubled?2:1) : horizontal?(doubled?3840:1920):(doubled?1200:600);
+            const int height = type=="long" ? (capsule?353:215)*(doubled?2:1) : horizontal?(doubled?1240:620):(doubled?1800:900);
+            addCandidate(url,"Steam AppID "+appId+" · "+field,width,height,
+                "library-assets-"+std::string(field),(capsule?1400:1700)+(doubled?100:0));
             hashedStoreAssets=hashedStoreAssets||isHashedSteamStoreAssetUrl(url);
         }
     }catch(const std::exception& error) {result["libraryAssetsError"]=error.what();}
@@ -12899,19 +13962,23 @@ static json steamIdArtworkSearch(const std::string& appId, const std::string& ty
     if (!detailsLoaded || result["candidates"].empty() || !hashedStoreAssets) {
         const std::string base = "https://shared.steamstatic.com/store_item_assets/steam/apps/" + appId + "/";
         const std::string fallback = "https://cdn.cloudflare.steamstatic.com/steam/apps/" + appId + "/";
-        const std::vector<std::string> files = horizontal
-            ? std::vector<std::string>{"library_hero.jpg", "library_hero_2x.jpg", "header.jpg"}
-            : std::vector<std::string>{"library_600x900_2x.jpg", "library_600x900.jpg", "capsule_616x353.jpg"};
+        const std::vector<std::string> files = type=="long" ? std::vector<std::string>{"header.jpg", "header_2x.jpg", "capsule_616x353.jpg"} : horizontal
+            ? std::vector<std::string>{"library_hero.jpg", "library_hero_2x.jpg"}
+            : std::vector<std::string>{"library_600x900_2x.jpg", "library_600x900.jpg"};
         for (const auto& file : files) {
             const bool portrait = file.find("600x900") != std::string::npos;
-            const int width = horizontal ? 1920 : (portrait ? 600 : 616);
-            const int height = horizontal ? 620 : (portrait ? 900 : 353);
+            const bool doubled=file.find("_2x")!=std::string::npos;
+            const int width = type=="long" ? (file.starts_with("header")?460:616)*(doubled?2:1) : horizontal ? 1920*(doubled?2:1) : 600*(doubled?2:1);
+            const int height = type=="long" ? (file.starts_with("header")?215:353)*(doubled?2:1) : horizontal ? 620*(doubled?2:1) : 900*(doubled?2:1);
             addCandidate(base + file, "Steam AppID " + appId + " · legacy · " + file,
                 width, height, "legacy-cdn", 100);
             addCandidate(fallback + file, "Steam AppID " + appId + " · legacy CDN fallback · " + file,
                 width, height, "legacy-cdn-fallback", 90);
         }
     }
+    std::stable_sort(result["candidates"].begin(), result["candidates"].end(), [](const json& a, const json& b) {
+        return a.value("rank",0) > b.value("rank",0);
+    });
     result["detailsLoaded"] = detailsLoaded;
     result["hashedStoreAssets"] = hashedStoreAssets;
     return result;
@@ -12957,6 +14024,7 @@ static json downloadBaiduArtwork(const std::string& url, const std::string& type
 }
 
 int wmain(int argc, wchar_t** argv) {
+    (void)ymcc::processEfficiency::applyCurrent();
     SetConsoleOutputCP(CP_UTF8);
     SetConsoleCP(CP_UTF8);
     try {
@@ -13169,6 +14237,14 @@ int wmain(int argc, wchar_t** argv) {
             return 0;
         }
 
+        if (_wcsicmp(argv[1],L"--search-wallpaper-videos")==0){
+            if(argc!=3)throw std::runtime_error("media-video-appid-required");
+            const auto appId=parsePositiveId(argv[2],"--search-wallpaper-videos");if(appId>2147483647)throw std::runtime_error("media-video-appid-invalid");
+            g_fastMetadataMode=true;ScopedIdentityNetworkBudget budget(true);json attempts=json::array();
+            const auto details=fetchSteamDetails(static_cast<int>(appId),attempts);
+            auto result=custom_steam_library::video_catalog::candidates(static_cast<int>(appId),details.data);
+            std::cout<<"VIDEO_SEARCH_JSON: "<<result.dump()<<"\n";return 0;
+        }
         if (_wcsicmp(argv[1], L"--search-artwork") == 0) {
             if (argc < 3) throw std::runtime_error("--search-artwork requires a query");
             std::string query = trim(toUtf8(argv[2]));
@@ -14529,6 +15605,10 @@ int wmain(int argc, wchar_t** argv) {
         if (!fs::is_regular_file(exePath) || asciiLower(toUtf8(exePath.extension().wstring())) != ".exe") {
             throw std::runtime_error("Input must be an existing EXE file");
         }
+        if (const auto excluded = libraryExecutableExclusion(exePath, libraryExecutableExclusions()))
+            throw std::runtime_error("YMCC_EXE_EXCLUDED: " + jsonStringOr(*excluded, "rule"));
+        if (definitePidBlacklistRole(classifyLibraryExecutable(exePath)))
+            throw std::runtime_error("YMCC_EXE_EXCLUDED: non-game helper executable");
         bool simulateNoVersion = false;
         bool simulateApply = false;
         bool realApply = false;
@@ -14681,6 +15761,7 @@ int wmain(int argc, wchar_t** argv) {
         if (artworkSteamAppId && !igdbArtworkOnly) throw std::runtime_error("--artwork-steam-id requires --igdb-artwork-only");
         if (steamIdentityOnly || steamComprehensiveIdentityOnly) metadataOnly = true;
         g_fastMetadataMode = steamComprehensiveIdentityOnly;
+        ScopedIdentityNetworkBudget identityNetworkBudget(g_fastMetadataMode);
         if (saveDirectId && !explicitSteamAppId && !explicitIgdbId) {
             throw std::runtime_error("--save-id requires --steam-id or --igdb-id");
         }
@@ -14856,7 +15937,6 @@ int wmain(int argc, wchar_t** argv) {
         }
         const auto version = (emulatorGame || emulatorLauncher)
             ? std::map<std::string, std::string>{} : versionStrings(exePath);
-        const auto pathEvidence = buildPathEvidence(identificationPath);
         const bool directIdMode = explicitSteamAppId.has_value() || explicitIgdbId.has_value();
         const auto localSteamEvidence = (emulatorGame || emulatorLauncher)
             ? std::vector<LocalSteamAppIdEvidence>{}
@@ -14866,9 +15946,14 @@ int wmain(int argc, wchar_t** argv) {
                 preferredEvidence.push_back({"local-" + item.key + "-display-name", item.titleHint});
             }
         }
+        bool rootFromLibraryState = false;
+        const auto identityDirectory = persistentGameDirectoryForExecutable(dataRoot, identificationPath, &rootFromLibraryState);
+        const auto identityBoundary = rootFromLibraryState && pathWithin(identificationPath, identityDirectory) ? identityDirectory : fs::path{};
+        const auto pathEvidence = buildPathEvidence(identificationPath, identityBoundary);
         const auto rounds = buildNameRounds(
             identificationPath, version, simulateNoVersion || emulatorGame || emulatorLauncher,
-            manualName, manualSource, preferredEvidence);
+            manualName, manualSource, preferredEvidence,
+            identityBoundary);
         // A user-cleared ID is an explicit opt-out from local AppID
         // resurrection as well as from persisted manual IDs.
         const auto localSteamAppId = manualIdCleared
@@ -15014,41 +16099,9 @@ int wmain(int argc, wchar_t** argv) {
                             "automatic-steam-identity-only", "automatic-steam-id");
                     } else {
                         if (localSteamAppId) {
-                            if (steamComprehensiveIdentityOnly) {
-                                std::string localTitleHint;
-                                for (const auto& evidence : localSteamEvidence) {
-                                    if (evidence.appId == *localSteamAppId && !evidence.titleHint.empty()) {
-                                        localTitleHint = evidence.titleHint;
-                                        break;
-                                    }
-                                }
-                                if (!localTitleHint.empty()) {
-                                    ResolvedGame localEvidenceResolved;
-                                    localEvidenceResolved.appId = *localSteamAppId;
-                                    localEvidenceResolved.name = localTitleHint;
-                                    localEvidenceResolved.displayName = localTitleHint;
-                                    localEvidenceResolved.query = localTitleHint;
-                                    localEvidenceResolved.source = "local-install-metadata-offline";
-                                    localEvidenceResolved.score = 1.0;
-                                    localEvidenceResolved.confident = true;
-                                    localEvidenceResolved.primaryProvider = "steam";
-                                    localEvidenceResolved.identityStatus = "verified";
-                                    localEvidenceResolved.steamVerificationStatus = "steam-verified";
-                                    localEvidenceResolved.metadataVerificationStatus = "not-available";
-                                    localEvidenceResolved.identityKind = "steam-base-game-local-appid";
-                                    localEvidenceResolved.contentType = "game";
-                                    localEvidenceResolved.storefrontAppId = *localSteamAppId;
-                                    localEvidenceResolved.baseGameAppId = *localSteamAppId;
-                                    localEvidenceResolved.contentRelation = "canonical-base-game";
-                                    localSteamIdentity["status"] = "verified-local-evidence";
-                                    localSteamIdentity["verificationSource"] = "local-config-title-fast-path";
-                                    localSteamIdentity["offlineTitleHint"] = localTitleHint;
-                                    localSteamIdentity["offlineTitleScore"] = 1.0;
-                                    arbitration["localSteamIdentity"] = localSteamIdentity;
-                                    arbitration["decision"] = "local-steam-appid-offline-evidence";
-                                    resolved = std::move(localEvidenceResolved);
-                                }
-                            }
+                            // Local config comments/URLs supply candidates, not Steam
+                            // verification. The official AppDetails cache is the fast
+                            // offline path; a title comment cannot fabricate authority.
                             if (!resolved) try {
                                 auto localResolved = verifySteamAppId(
                                     *localSteamAppId, steamRoundLog,
@@ -15066,62 +16119,12 @@ int wmain(int argc, wchar_t** argv) {
                             } catch (const std::exception& error) {
                                 NetworkEvidence localNetworkEvidence;
                                 collectNetworkEvidence(steamRoundLog, localNetworkEvidence);
-                                const bool networkPending = localNetworkEvidence.successfulResponses == 0 &&
-                                    localNetworkEvidence.retryableFailures > 0;
+                                const bool networkPending = localNetworkEvidence.retryableFailures > 0;
                                 localSteamIdentity["status"] = networkPending
                                     ? "network-pending" : "verification-failed-falling-back-to-fuzzy";
                                 localSteamIdentity["steamVerificationStatus"] = networkPending
                                     ? "network-pending" : "needs-confirmation";
                                 localSteamIdentity["verificationError"] = error.what();
-                                if (networkPending && steamComprehensiveIdentityOnly) {
-                                    std::string localTitleHint;
-                                    double localTitleScore = 0.0;
-                                    for (const auto& evidence : localSteamEvidence) {
-                                        if (evidence.appId != *localSteamAppId || evidence.titleHint.empty()) continue;
-                                        // A provider config's inline title is an
-                                        // independent identity signal. It does
-                                        // not need to match the executable's
-                                        // often localized PE name byte-for-byte.
-                                        if (localTitleHint.empty()) {
-                                            localTitleHint = evidence.titleHint;
-                                            localTitleScore = 1.0;
-                                        }
-                                        for (const auto& round : rounds) {
-                                            if (!round.skipReason.empty()) continue;
-                                            const double score = scoreTitle(evidence.titleHint, round.value);
-                                            if (score > localTitleScore) {
-                                                localTitleScore = score;
-                                                localTitleHint = evidence.titleHint;
-                                            }
-                                        }
-                                    }
-                                    if (!localTitleHint.empty() && localTitleScore >= 0.94) {
-                                        ResolvedGame localEvidenceResolved;
-                                        localEvidenceResolved.appId = *localSteamAppId;
-                                        localEvidenceResolved.name = localTitleHint;
-                                        localEvidenceResolved.displayName = localTitleHint;
-                                        localEvidenceResolved.query = localTitleHint;
-                                        localEvidenceResolved.source = "local-install-metadata-offline";
-                                        localEvidenceResolved.score = localTitleScore;
-                                        localEvidenceResolved.confident = true;
-                                        localEvidenceResolved.primaryProvider = "steam";
-                                        localEvidenceResolved.identityStatus = "verified";
-                                        localEvidenceResolved.steamVerificationStatus = "steam-verified";
-                                        localEvidenceResolved.metadataVerificationStatus = "not-available";
-                                        localEvidenceResolved.identityKind = "steam-base-game-local-appid";
-                                        localEvidenceResolved.contentType = "game";
-                                        localEvidenceResolved.storefrontAppId = *localSteamAppId;
-                                        localEvidenceResolved.baseGameAppId = *localSteamAppId;
-                                        localEvidenceResolved.contentRelation = "canonical-base-game";
-                                        localSteamIdentity["status"] = "verified-local-evidence";
-                                        localSteamIdentity["verificationSource"] = "local-config-title-network-pending";
-                                        localSteamIdentity["offlineTitleHint"] = localTitleHint;
-                                        localSteamIdentity["offlineTitleScore"] = localTitleScore;
-                                        arbitration["localSteamIdentity"] = localSteamIdentity;
-                                        arbitration["decision"] = "local-steam-appid-offline-evidence";
-                                        resolved = std::move(localEvidenceResolved);
-                                    }
-                                }
                             }
                         }
                         if (!resolved) {
@@ -15307,8 +16310,7 @@ int wmain(int argc, wchar_t** argv) {
                         } catch (const std::exception& error) {
                             NetworkEvidence localNetworkEvidence;
                             collectNetworkEvidence(steamRoundLog, localNetworkEvidence);
-                            const bool networkPending = localNetworkEvidence.successfulResponses == 0 &&
-                                localNetworkEvidence.retryableFailures > 0;
+                            const bool networkPending = localNetworkEvidence.retryableFailures > 0;
                             localSteamIdentity["status"] = networkPending
                                 ? "network-pending" : "verification-failed-falling-back-to-fuzzy";
                             localSteamIdentity["steamVerificationStatus"] = networkPending
@@ -15454,6 +16456,8 @@ int wmain(int argc, wchar_t** argv) {
                 {"connectTimeoutMs", HTTP_CONNECT_TIMEOUT_MS},
                 {"sendReceiveIdleTimeoutMs", HTTP_TIMEOUT_MS},
                 {"metadataLogicalBudgetMs", HTTP_METADATA_BUDGET_MS},
+                {"automaticIdentityTotalBudgetMs", HTTP_IDENTITY_TOTAL_BUDGET_MS},
+                {"maximumEndpointCooldownMs", HTTP_MAX_PROVIDER_COOLDOWN_MS},
                 {"imageLogicalBudgetMs", HTTP_IMAGE_BUDGET_MS},
                 {"acceleratorResolveTimeoutMs", HTTP_ACCELERATOR_RESOLVE_TIMEOUT_MS},
                 {"acceleratorConnectTimeoutMs", HTTP_ACCELERATOR_CONNECT_TIMEOUT_MS},
@@ -15595,6 +16599,7 @@ int wmain(int argc, wchar_t** argv) {
             writeJsonAtomic(gameOutput / L"manifest.json", manifest);
             std::cout << "METADATA_ONLY: true\n";
         } else for (const auto& spec : artworkSpecs()) {
+            ScopedOptionalArtworkBudget optionalBudget(spec.type == "icon");
             json item = {
                 {"type", spec.type},
                 {"steamSuffix", spec.steamSuffix},
@@ -15763,9 +16768,12 @@ int wmain(int argc, wchar_t** argv) {
             }
             json discoveryAttempts=json::array();
             auto candidates = artworkUrls(*resolved, spec, &discoveryAttempts);
-            if (spec.type == "icon" && !steamArtworkOnly && resolved->appId > 0 &&
+            if (spec.type == "icon" && resolved->appId > 0 &&
                 resolved->identityStatus == "verified") {
                 try {
+                    // Reserve time to download the official fallback even if
+                    // the optional third-party metadata connection stalls.
+                    ScopedOptionalArtworkBudget lookupBudget(true, 3000);
                     json gridAttempts = json::array();
                     const auto grid = steamGridDbIconSearch(resolved->name, &gridAttempts);
                     for (const auto& attempt : gridAttempts) discoveryAttempts.push_back(attempt);
@@ -15780,6 +16788,7 @@ int wmain(int argc, wchar_t** argv) {
                     item["steamGridDbError"] = error.what();
                 }
             }
+            appendArtworkDiscoveryNetworkFailure(spec.type, "artwork-inventory", discoveryAttempts, artworkNetworkFailures);
             if(!discoveryAttempts.empty())item["discoveryNetworkAttempts"]=std::move(discoveryAttempts);
             std::stable_sort(candidates.begin(), candidates.end(), [](const auto& a, const auto& b) {
                 return automaticArtworkProviderPriority(a.provider) > automaticArtworkProviderPriority(b.provider);
@@ -15793,18 +16802,9 @@ int wmain(int argc, wchar_t** argv) {
             for (;;) {
                 if (candidateIndex >= candidates.size()) {
                     if (bestUsable || steamArtworkOnly || spec.type == "logo" || spec.type == "icon" || fallbackStage >= 2) break;
-                    const auto type = spec.type == "tall" ? "cover" : spec.type == "hero" ? "wallpaper" : "long";
                     const auto provider = fallbackStage++ == 0 ? "playnite-igdb" : "baidu-image";
-                    json searchAttempt = {{"stage", "automatic-slot-fallback"}, {"provider", provider}, {"type", spec.type}, {"ok", false}};
-                    try {
-                        const auto search = std::string(provider) == "playnite-igdb"
-                            ? playniteIgdbArtworkSearch(resolved->name, type) : baiduArtworkSearch(resolved->name, type, true);
-                        searchAttempt["networkAttempts"] = search.value("networkAttempts", json::array());
-                        const auto appended = appendAutomaticArtworkSearchCandidates(search, resolved->name, spec, candidates);
-                        searchAttempt["candidateCount"] = appended;
-                        searchAttempt["ok"] = appended > 0;
-                    } catch (const std::exception& error) { searchAttempt["error"] = error.what(); }
-                    item["attempts"].push_back(std::move(searchAttempt));
+                    item["attempts"].push_back(appendAutomaticArtworkFallback(
+                        resolved->name, spec, provider, candidates, artworkNetworkFailures));
                     item["candidateCount"] = candidates.size();
                     continue;
                 }
@@ -15890,6 +16890,9 @@ int wmain(int argc, wchar_t** argv) {
                             }
                         }
                     }
+                    if (!info && response.status >= 200 && response.status < 300)
+                        throwArtworkDecodeFailure(response.body, artworkRequestUrl, candidate.provider,
+                            &attempt["networkAttempts"]);
                     if (!info) throw std::runtime_error("Response is not a supported PNG/JPEG image");
                     if (spec.type == "logo") inspectLogoVisiblePixels(response.body, *info);
                     if (!candidate.assetKey.empty()) successfullyFetchedAssets.insert(candidate.assetKey);

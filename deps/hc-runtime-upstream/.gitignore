@@ -1,0 +1,2 @@
+# The frozen HC reference is required by catalog generation and verification.
+# Delivery still uses the separately pinned compact PowerControl runtime.

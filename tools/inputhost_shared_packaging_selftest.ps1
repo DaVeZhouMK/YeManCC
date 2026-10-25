@@ -8,7 +8,9 @@ $env:PSModulePath = (Join-Path $PSHOME 'Modules') + ';' + $env:PSModulePath
 $project = Split-Path -Parent $PSScriptRoot
 $root = [IO.Path]::GetFullPath($CandidateRoot)
 $vgComplete = Join-Path $root 'PowerControl\feature-assets\virtual-gamepad'
-$hcRuntimeComplete = Join-Path $root 'PowerControl\handheldcompanion-runtime\HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+$sharedRuntimeComplete = Join-Path $root 'PowerControl\ymcc-shared-runtime'
+. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+Assert-YmccSharedRuntimeStaged $project $sharedRuntimeComplete
 function Get-Sha256([string]$Path) { return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash }
 $tokens=$null; $errors=$null
 $ast=[System.Management.Automation.Language.Parser]::ParseFile((Join-Path $PSScriptRoot 'package-release.ps1'),[ref]$tokens,[ref]$errors)
@@ -41,6 +43,7 @@ foreach ($script in @('deploy-installed.ps1')) {
  foreach ($name in $sharedRuntimeFallbackDlls) { if ($otherMap[$name] -cne $sharedRuntimeFallbackHashes[$name]) { throw "Map drift: $name" } }
 }
 $config=Get-Content -LiteralPath (Join-Path $PSScriptRoot 'opt-baseline.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($config.sharedRuntimeRoutes.directory -cne 'ymcc-shared-runtime') { throw 'Shared authority config path drift' }
 $cs=Get-Content -LiteralPath (Join-Path $project 'InputHost\RuntimeSharedDependencies.cs') -Raw -Encoding UTF8
 foreach ($name in $sharedRuntimeFallbackDlls) {
  if ($config.sharedRuntimeRoutes.sha256.$name -cne $sharedRuntimeFallbackHashes[$name] -or -not $cs.Contains($sharedRuntimeFallbackHashes[$name])) { throw "Resolver/config pin drift: $name" }

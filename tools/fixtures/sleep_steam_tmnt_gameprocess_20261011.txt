@@ -1,0 +1,10 @@
+[2026-10-11 00:23:53] Client version: 1788652215
+[2026-10-11 00:26:05] Client version: 1788652215
+[2026-10-11 00:34:50] Client version: 1788652215
+[2026-10-11 00:40:22] Client version: 1788652215
+[2026-10-11 07:43:26] Client version: 1788652215
+[2026-10-11 10:21:11] Client version: 1788652215
+[2026-10-11 10:32:51] Client version: 1788652215
+[2026-10-11 10:34:57] AppID 10307630032478011392 adding PID 12932 as a tracked process ""E:\GAME\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\TMNT.exe""
+[2026-10-11 10:34:58] SSGL: change [-1895035161] LCT 414457920->0
+[2026-10-11 10:36:08] SSGL: logged on while running

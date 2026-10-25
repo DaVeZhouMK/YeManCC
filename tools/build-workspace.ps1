@@ -11,10 +11,19 @@
 #>
 [CmdletBinding()]
 param(
-  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
+  [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
+  [switch]$TestExport,
+  [switch]$FullAcceptance
 )
 
 $ErrorActionPreference = 'Stop'
+# Export execution mode: ordinary export never implicitly runs fixtures.
+if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+$TestExport = -not [bool]$FullAcceptance
+$env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
+$fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
+# End export execution mode.
+. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
 
 # ---- module-path self-heal ----------------------------------------------------------
 # Same measured remedy as tools/ymcc_sim/lib/sim_core.ps1 (2026-09-22) and
@@ -57,6 +66,7 @@ function Get-Sha256([string]$Path) {
 }
 
 $ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $PSScriptRoot 'monitor-hud-export.ps1')
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath (Join-Path $ProjectRoot '..\..')
 } else {
@@ -86,6 +96,10 @@ if ((Get-FullPath $AppBuildRoot) -ne (Get-FullPath (Join-Path $WorkspaceRoot 'Bu
 # record the delta, keep previous values nested, then re-run the read-only verifier as the cross-check.
 # No-op when already in step; any failure aborts the build.
 # ================================================================
+# Generated capability data must match the frozen sources before build/export mutates outputs.
+$capabilityCheckEvidence = Join-Path $WorkspaceRoot ('Build\Validation\CapabilityCatalog\build-' + [Guid]::NewGuid().ToString('N'))
+& (Join-Path $ProjectRoot 'tools\verify-unified-capability-catalog.ps1') -EvidenceDir $capabilityCheckEvidence
+
 $ensureSourceBaseline = Join-Path $ProjectRoot 'tools\ensure-fanhost-source-baseline.ps1'
 if (!(Test-Path -LiteralPath $ensureSourceBaseline -PathType Leaf)) {
   throw "FanLab source-baseline guard missing: $ensureSourceBaseline"
@@ -213,6 +227,8 @@ function Assert-PublishPreGate([string]$ProjectRoot) {
 }
 & (Join-Path $PSScriptRoot 'sync-fan-host-installer-asset.ps1') -ProjectRoot $ProjectRoot
 Assert-PublishPreGate $ProjectRoot
+$deviceCoreReceipt = Assert-YmccDeviceCoreRuntime -ProjectRoot $ProjectRoot
+Write-Output ('DEVICECORE_RUNTIME_OK ' + $deviceCoreReceipt.runtimeId + ' files=' + $deviceCoreReceipt.files)
 & (Join-Path $PSScriptRoot 'verify-input-host-dependencies.ps1') -ProjectRoot $ProjectRoot
 & (Join-Path $PSScriptRoot 'verify-source-release-inputs.ps1') -ProjectRoot $ProjectRoot
 & (Join-Path $PSScriptRoot 'verify-hc-source-baseline.ps1') -RuntimeRoot (Join-Path $ProjectRoot 'deps\handheldcompanion-runtime')
@@ -238,6 +254,10 @@ try {
   & node (Join-Path $ProjectRoot 'scripts\write-version.mjs')
   if ($LASTEXITCODE -ne 0) { throw "Version generation failed: exit=$LASTEXITCODE" }
 
+  # Read-only configuration baseline/default/native-contract gate.
+  & node (Join-Path $ProjectRoot 'tools\settings-baseline-contract.mjs')
+  if ($LASTEXITCODE -ne 0) { throw "Settings baseline validation failed: exit=$LASTEXITCODE" }
+
   # Pin compiler inputs after version generation, before any compiler runs.
   $exportSourcesBefore = @(Get-ExportSourceIndex $ProjectRoot)
   # YMCC Decky sidebar: build the additive passive payload from the authoritative mainline sources.
@@ -249,6 +269,22 @@ try {
   & pnpm exec vue-tsc --noEmit
   if ($LASTEXITCODE -ne 0) { throw "Type check failed: exit=$LASTEXITCODE" }
 
+  # Keep source documentation in public/, outside the release payload.
+  # A fresh public-assets staging directory needs no output-file deletion.
+  $webPublic = Join-Path $BuildRoot ('WebPublic-' + [Guid]::NewGuid().ToString('N'))
+  Assert-ChildPath $webPublic $WorkspaceRoot 'Web public assets staging'
+  function Copy-WebPublicAssets([string]$Source, [string]$Destination) {
+    New-Item -ItemType Directory -Force -Path $Destination | Out-Null
+    foreach ($asset in @(Get-ChildItem -LiteralPath $Source -Force)) {
+      if ($asset.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Web public asset is a reparse point: $($asset.FullName)" }
+      $target = Join-Path $Destination $asset.Name
+      if ($asset.PSIsContainer) { Copy-WebPublicAssets $asset.FullName $target }
+      elseif ($asset.Extension -ine '.md') { Copy-Item -LiteralPath $asset.FullName -Destination $target -Force }
+    }
+  }
+  Copy-WebPublicAssets (Join-Path $ProjectRoot 'public') $webPublic
+  $env:YEMAN_BUILD_PUBLIC_DIR = $webPublic
+
   & pnpm exec vite build
   if ($LASTEXITCODE -ne 0) { throw "Frontend build failed: exit=$LASTEXITCODE" }
 
@@ -259,12 +295,12 @@ try {
 
   $inputHostProj = Join-Path $ProjectRoot 'InputHost\YeManInputHost.csproj'
   if (Test-Path -LiteralPath $inputHostProj) {
-    & dotnet build $inputHostProj -c Release --nologo
-    if ($LASTEXITCODE -ne 0) { throw "InputHost build failed: exit=$LASTEXITCODE" }
-    $hostOut = Join-Path $ProjectRoot 'InputHost\bin\Release\net10.0-windows'
+    # Build directly into this export lane; the project's x64 platform may
+    # change its default bin path. Never copy a stale/default-platform output.
     $hostDest = Join-Path $NativeBuild 'InputHost'
     New-Item -ItemType Directory -Force -Path $hostDest | Out-Null
-    Copy-Item -Path (Join-Path $hostOut '*') -Destination $hostDest -Force
+    & dotnet build $inputHostProj -c Release --nologo --output $hostDest
+    if ($LASTEXITCODE -ne 0) { throw "InputHost build failed: exit=$LASTEXITCODE" }
     # 2026-09-16 用户裁决「不需要就去掉」：原先这里会把锁定版 HIDMaestro 运行时（外部
     # Migration-Backup 里的 HIDMaestroTest 目录）的 WinRT 投影复制进 InputHost 导出 lane，
     # 并对其做存在性硬校验。已核实两条都不需要：
@@ -275,43 +311,33 @@ try {
     # ⇒ 复制与校验整块移除，构建不再依赖那个外部备份路径。
   }
 
-  # light-setter（L1 方案 B，2026-09-16）：一次性灯光设置器（直驱 HC 程序集，
-  # 覆盖非 ROG 机型的灯光后端）。publish 输出为"源 payload"（落 PowerControl\
-  # light-setter，与 fan-host 同模式），由 deploy-installed.ps1 复制到安装位。
-  $lightSetterProj = Join-Path $ProjectRoot 'FanLab\LightSetter\YeManLightSetter.csproj'
-  if (Test-Path -LiteralPath $lightSetterProj) {
-    & dotnet publish $lightSetterProj -c Release --nologo
-    if ($LASTEXITCODE -ne 0) { throw "LightSetter publish failed: exit=$LASTEXITCODE" }
-    $lightSetterPublish = Join-Path $ProjectRoot 'FanLab\LightSetter\bin\Release\net10.0-windows\win-x64\publish'
-    if (-not (Test-Path -LiteralPath $lightSetterPublish -PathType Container)) {
-      throw "LightSetter publish output not found: $lightSetterPublish"
-    }
-    $lightSetterDest = Join-Path $ProjectRoot 'PowerControl\light-setter'
-    New-Item -ItemType Directory -Force -Path $lightSetterDest | Out-Null
-    Copy-Item -Path (Join-Path $lightSetterPublish '*') -Destination $lightSetterDest -Force
-    # 2026-09-16 用户裁决：TFM 去掉 -windows10.0.19041.0 后不再随包 WinRT 投影；
-    # 清掉历史遗留副本（copy 不删除，旧文件会一直留在源 payload 与安装位）。
-    foreach ($stale in @('Microsoft.Windows.SDK.NET.dll', 'WinRT.Runtime.dll')) {
-      $stalePath = Join-Path $lightSetterDest $stale
-      if (Test-Path -LiteralPath $stalePath) { Remove-Item -LiteralPath $stalePath -Force }
-    }
-  }
+  & (Join-Path $PSScriptRoot 'build-battery-host.ps1') -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+
+  # Publish current lighting sources into a separate candidate. The actual
+  # helper/core, source/PDB pair and maintained consumers must pass before
+  # the candidate builder promotes the canonical lighting payload.
+  & (Join-Path $PSScriptRoot 'build-lightsetter-payload.ps1') -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 } finally {
   Pop-Location
 }
 
 $required = @(
   (Join-Path $WebBuild 'index.html'),
+  (Join-Path $WebBuild 'hud-output.html'),
+  (Join-Path $WebBuild 'notice-output.html'),
   (Join-Path $WebBuild 'assets'),
   (Join-Path $WebBuild 'app.config.json'),
+  (Join-Path $AppBuildRoot 'BatteryHost\YeManBatteryHost.exe'),
   (Join-Path $NativeBuild 'YeManCC.exe'),
   (Join-Path $NativeBuild 'YeManRecoveryService.exe'),
+  (Join-Path $NativeBuild 'YeManControllerVisibilityProbe.exe'),
   (Join-Path $NativeBuild 'YMCCRtssProfileHelper.exe'),
   (Join-Path $NativeBuild 'YMCCOverlayBridge.dll'),
   (Join-Path $NativeBuild 'InputHost\YeManInputHost.exe'),
   (Join-Path $NativeBuild 'InputHost\HIDMaestro.Core.dll'),
   (Join-Path $NativeBuild 'InputHost\Nefarius.Utilities.DeviceManagement.dll')
 )
+if (@(Get-YmccProductWebEntryPages $ProjectRoot) -contains 'radial-output.html') { $required += Join-Path $WebBuild 'radial-output.html' }
 foreach ($path in $required) {
   if (-not (Test-Path -LiteralPath $path)) {
     throw "Build output is incomplete: $path"
@@ -326,6 +352,8 @@ foreach ($path in $required) {
 # aborts BEFORE BUILD_OK, so no packaging / deployment can start from a build
 # that does not inherit the adopted optimization set.
 # ================================================================
+Assert-YmccProductWebExport $WebBuild $ProjectRoot
+Assert-MonitorHudDeckyExport $DeckyBuild | Out-Null
 $OptGateScript = Join-Path $ProjectRoot 'tools\opt-inheritance-gate.ps1'
 $OptBuildManifest = Join-Path $WorkspaceRoot 'Build\Validation\opt-gate\BUILD__build.json'
 & $OptGateScript -Mode Capture -Stage build -WorkspaceRoot $WorkspaceRoot -Out $OptBuildManifest
@@ -334,6 +362,12 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 $exportBuildIdentity = Write-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -SourceBefore $exportSourcesBefore
+# Required release node: both Decky update channels and YMCC updater ownership.
+if ($TestExport) {
+  Write-Output 'TEST_EXPORT_BUILD: full Decky release regressions skipped; no formal Build PASS is issued.'
+} else {
+  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Build -WorkspaceRoot $WorkspaceRoot
+}
 Write-Output ('EXPORT_BUILD_ID=' + $exportBuildIdentity.buildId)
 $exe = Get-Item -LiteralPath (Join-Path $NativeBuild 'YeManCC.exe')
 $hash = Get-Sha256 $exe.FullName

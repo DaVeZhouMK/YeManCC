@@ -9,7 +9,11 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const out = path.resolve(process.env.YMCC_SHORTCUT_OUT || path.join(root, '../../Build/Validation/input-shortcut-toggles-20261006'));
 fs.mkdirSync(out, { recursive: true });
 const mainPath = process.env.YMCC_SHORTCUT_SOURCE || path.join(root, 'native/main.cpp');
-const source = fs.readFileSync(mainPath, 'utf8').replace('#include "oem_vendor_stack.h"', () => fs.readFileSync(path.join(path.dirname(mainPath), 'oem_vendor_stack.h'), 'utf8'));
+let source = fs.readFileSync(mainPath, 'utf8');
+// Keep extracting the real consumers as their helpers move into source headers.
+for (const header of ['oem_vendor_stack.h','shortcut_feedback_native.h','shortcut_steam_buttons.h','shortcut_action_runtime.h']) {
+  source = source.replace('#include "' + header + '"', () => fs.readFileSync(path.join(root, 'native', header), 'utf8'));
+}
 const fieldInput = process.env.YMCC_SHORTCUT_FIELD_SETTINGS ? JSON.parse(fs.readFileSync(process.env.YMCC_SHORTCUT_FIELD_SETTINGS, 'utf8').replace(/^\uFEFF/, '')).input : null;
 function extract(name) {
   const marker = new RegExp(String.raw`^static [^\n]*\b` + name + String.raw`\([^;]*?\)\s*\{`, 'm');
@@ -46,13 +50,20 @@ const functions = [...(hasReadSlots ? ['oemHidReadTakeCompletion','oemHidReadFin
   'nativeInputShortcutDesktopKey', 'nativeInputShortcutDesktopKeys',
   ...(hasWmi ? ['msiWmiGenerationCurrent','msiWmiShortcutAuthoritative','msiWmiWithdrawGeneration','msiWmiTryPopClick','msiWmiHandleEvent','msiWmiSubscriptionComplete','msiWmiReapThreadLocked','msiWmiStartLocked','msiWmiStart','msiWmiSetEnabled','msiWmiPump','nativeOemKeyMask','nativeKeyboardShortcutDispatch','nativeMsiWmiShortcutDrain'] : []),
   ...(hasProducer ? ['oemProducerName','oemProducerCurrent','oemProducerAuthorityMask','oemProducerTokensCurrent','oemProducerTokensFor','oemProducerBegin','oemProducerCancel','oemProducerActionMask','oemProducerPhysicalMask','oemProducerPhysicalBackState','oemProducerPublish',...(hasRogClick ? ['oemProducerPublishRogClick','nativeRogClickDispatch','rogOemKeyParse','rogOemKeyClose','rogOemKeyExpirePulse'] : []),'oemProducerTryPop','nativeOemKeyboardActionMask','nativeOemProducerDrain','oemBackMergedKeyMask','oemBackMergedDisplayState','oemLiveBackBits','oemHidClear','legionBackParse','legionSBackParse','gpdBackParse','onexBackParse','legionBackClose','legionSBackClose','gpdBackClose','onexBackClose','onexBackFinalizeClose','onexBackRetireStuck','onexBackRetireReadStuck','onexBackRequestReinit','msiDinputShortcutCancel','msiDinputShortcutBeginRead','msiDinputShortcutPublish'] : []),
-  'nativeInputShortcutToggle', ...(source.includes('static bool nativeYmccShortcutAction(') ? ['nativeYmccShortcutAction', 'nativeYmccShortcutDelta', 'nativeYmccShortcutSubmit', 'nativeYmccShortcutSummon', 'nativeFrontendButtonTargetEpoch', 'nativeFrontendButtonReceipt', 'nativeFrontendButtonSendGamebar', 'nativeYmccShortcutEmit'] : []), ...(source.includes('static int nativeShortcutLegacyDefaultSlot(') ? ['nativeShortcutLegacyDefaultSlot','nativeShortcutLegacyTemplateMatches','nativeShortcutLegacyDefaultAllowed'] : []),
+  ...(source.includes('static bool msiQsKeyboardMirrorSourceCurrent(')?['msiQsKeyboardMirrorSourceCurrent']:[]), 'nativeInputShortcutToggle', ...(source.includes('static bool nativeYmccShortcutAction(') ? ['nativeYmccShortcutAction', 'nativeYmccShortcutDelta', 'nativeYmccShortcutSubmit', 'nativeYmccShortcutSummon', 'nativeFrontendButtonTargetEpoch', 'nativeFrontendButtonReceipt', 'nativeFrontendButtonSendGamebar', 'nativeYmccShortcutEmit'] : []), ...(source.includes('static int nativeShortcutLegacyDefaultSlot(') ? ['nativeShortcutLegacyDefaultSlot','nativeShortcutLegacyTemplateMatches','nativeShortcutLegacyDefaultAllowed'] : []),
   ...(source.includes('static std::vector<std::wstring> oemVendorServiceNamesForFamily(') ? ['oemVendorServiceNamesForFamily','oemVendorStackFamilySupported','oemVendorStackFrontMask','oemVendorStackRuleCanTakeover'] : []), 'nativeKeyboardShortcutsRefresh', ...(source.includes('static void nativeOemKeyboardConsumePublish(') ? ['nativeOemKeyboardConsumePublish', 'nativeOemKeyboardConsumeMaintain'] : []), 'nativeKeyboardShortcutsEvaluate', ...(source.includes('static void nativeKeyboardShortcutHandleOemEdge(') ? ['nativeKeyboardShortcutHandleOemEdge'] : [])];
 const familyStart = source.indexOf('enum class YmccFamily');
 const familyEnum = source.slice(familyStart, source.indexOf('};',familyStart)+2);
 const catalogDeclarations = source.slice(source.indexOf('enum class OemKeyForm'),source.indexOf('static OemCatalogRef oemCatalogForFamily('));
 functions.push('legionHcInputReportView','oemCatalogForFamily');
-const prelude = `${hasReadSlots ? "#define YMCC_HID_READ_SLOT_SOURCE\n" : ""}${hasRogClick ? "#define YMCC_ROG_CLICK_SOURCE\n" : ""}${hasProducer ? "#define YMCC_PRODUCER_EDGE_SOURCE\n" : ""}${hasWmi ? "#define YMCC_WMI_CLICK_SOURCE\n" : ""}${source.includes("static void nativeKeyboardShortcutHandleOemEdge(") ? "#define YMCC_SHORTCUT_EDGE_SOURCE\n" : ""}${source.includes("bool controllerAllowed = true") ? "#define YMCC_SHORTCUT_SOURCE_SCOPES\n" : ""}#define YMCC_SHORTCUT_FIXTURE
+for (const name of ['nativeKeyboardShortcutAllInputs','nativeKeyboardShortcutClickMatches',
+  'oemVendorTaskNamesForFamily','oemVendorProcessNamesForFamily','onexX2HomeDisplayMask','nativeOnexX2HomeDispatch',
+  'nativeShortcutFeedback','nativeShortcutUnixMs','nativeShortcutUiDispatch','nativeShortcutTdpEvent',
+  'nativeFrontendButtonNoVirtual','nativeFrontendButtonSendCtrl1','nativeSteamShortcutEmit']) {
+  if (new RegExp('^static [^\\n]*\\b' + name + '\\(', 'm').test(source)) functions.push(name);
+}
+const prelude = `${hasReadSlots ? "#define YMCC_HID_READ_SLOT_SOURCE\n" : ""}${hasRogClick ? "#define YMCC_ROG_CLICK_SOURCE\n" : ""}${hasProducer ? "#define YMCC_PRODUCER_EDGE_SOURCE\n" : ""}${hasWmi ? "#define YMCC_WMI_CLICK_SOURCE\n" : ""}${source.includes("static void nativeKeyboardShortcutHandleOemEdge(") ? "#define YMCC_SHORTCUT_EDGE_SOURCE\n" : ""}${source.includes("bool controllerAllowed = true") ? "#define YMCC_SHORTCUT_SOURCE_SCOPES\n" : ""}${source.includes("g_msiQsKeyboardMirrorPolicy")?"#define YMCC_MSI_QS_MIRROR_SOURCE":""}
+#define YMCC_SHORTCUT_FIXTURE
 #define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
@@ -73,6 +84,13 @@ const prelude = `${hasReadSlots ? "#define YMCC_HID_READ_SLOT_SOURCE\n" : ""}${h
 #include "input_shortcut_toggle.h"
 #include "shortcut_window_toggle.h"
 #include "shortcut_frontend_button.h"
+#include "shortcut_action_protocol.h"
+#include "keyboard_modifier_event_evidence.h"
+#include "screen_special_actions.h"
+#include "virtual_target_policy.h"
+#include <chrono>
+#include <cstring>
+${source.includes("g_msiQsKeyboardMirrorPolicy")?'#include "msi_qs_keyboard_mirror.h"':''}
 ${source.match(/enum OemVkBit : uint32_t \{[\s\S]*?\};/)[0]}
 ${source.slice(source.indexOf("static constexpr uint64_t kOemBitM1"), source.indexOf("// ── GP-FAMILY-CAPABILITY-4 C4-D2"))}
 ${source.slice(source.indexOf("struct OemChordRule {"), source.indexOf("static uint32_t oemBackHookVkBit("))}
@@ -104,7 +122,8 @@ static bool focusMainWindowIsForeground() { return fixtureWindowForeground; }
 static ymcc::FrontendButtonPulse g_frontendButtonPulse;
 static std::atomic<unsigned long long> g_inputHostEpochMirror{1};
 static std::string fixtureFrontendPersona = "disabled";
-static std::mutex g_inputHostMx;
+using InputHostMutex = std::mutex;
+static InputHostMutex g_inputHostMx;
 static HANDLE g_inputHostProcess = reinterpret_cast<HANDLE>(1);
 static bool g_inputHostPrepared = true, g_inputHostNeutralized = true, g_inputHostTransportFault = false;
 static std::atomic<bool> g_inputHostFaultHoldsStart{false};
@@ -135,6 +154,24 @@ static bool fixtureAssets = true;
 static bool fixtureJobAccept = true;
 static int fixtureRefreshes = 0, fixtureJoyxoffCloses = 0;
 static std::atomic<bool> g_exitRequested{false}, g_shortcutRecordingActive{false};
+// Power, platform identity and evidence sinks are memory-only fixture boundaries.
+enum class PowerLifecycle : uint8_t { Ready, Suspending, Suspended, Resuming };
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static unsigned long long currentPowerGeneration() { return 1; }
+static std::atomic<bool> g_inputReleaseRequired{false};
+static bool customSteamLibraryInputSuppressed() { return false; }
+static const char* inputHostMachineTargetRejectionReason(const std::string& persona) noexcept {
+    return ymcc::input::virtualTargetPolicy::rejectionReason(false, persona);
+}
+static void focusShortcutInputEvidence(const char*, unsigned long long, bool) noexcept {}
+// Recording notifications end at the same memory-only UI event boundary.
+static void gamepadRecordShortcutClick(uint64_t) {}
+static void gamepadRecordShortcutChord(uint64_t) {}
+static std::atomic<bool> g_keyboardModifierHookInstalled{false}, g_inputSignalMouseHookInstalled{false};
+static std::atomic<ULONGLONG> g_keyboardModifierHookObservedTick{0}, g_onexX2HomeDisplayUntil{0};
+static void keyboardModifierObserveSelfSend(ymcc::keyboardEvents::SourceId,const INPUT*,UINT,UINT) noexcept {}
+static void keyboardModifierObserveLowLevel(const KBDLLHOOKSTRUCT&,WPARAM,ymcc::keyboardEvents::HookObservation) noexcept {}
+static void inputSignalObserveMouse(const MSLLHOOKSTRUCT&,WPARAM,bool) noexcept {}
 static std::mutex g_inputShortcutRuntimeMx;
 static ymcc::InputShortcutRuntime g_inputShortcutRuntime;
 static const std::string& gameInputOwnerSession() { static const std::string s = "memory-session"; return s; }
@@ -144,8 +181,9 @@ static void inputCaptureRefreshRealStickSettings(bool) { ++fixtureRefreshes; }
 static void closeJoyXoffAsync(const char*) { ++fixtureJoyxoffCloses; }
 static void appendNativeLifecycleLog(const char* event, const json& payload) { auto row = payload; row["event"] = event; fixtureLogs.push_back(row); }
 static void ipc_emit(const char*, const json&) {}
-static void nativeKeyboardShortcutSend(WORD key, bool shift) { fixtureInjections.emplace_back(key, shift); }
+static void nativeKeyboardShortcutSend(WORD key, bool shift, bool = false) { fixtureInjections.emplace_back(key, shift); }
 ${hasWmi ? "static bool msiWmiShortcutAuthoritative();\nstatic uint64_t nativeOemKeyMask(bool forActions = false);" + (hasProducer ? "\nstatic uint64_t nativeOemKeyboardActionMask();\nstatic uint64_t oemProducerAuthorityMask();" : "") : "static uint64_t nativeOemKeyMask();"}
+${source.includes("static bool msiQsKeyboardMirrorSourceCurrent(")?"static bool msiQsKeyboardMirrorSourceCurrent(uint64_t);":""}
 static constexpr uint64_t kOemShortcutUnboundEpoch = UINT64_MAX;
 ${source.includes("struct OemKeyboardConsumeState {") ? `#define YMCC_OEM_CONSUME_SOURCE
 ${source.slice(source.indexOf("struct OemKeyboardConsumeState {"), source.indexOf("static unsigned oemKeyboardConsumeSlot("))}
@@ -342,6 +380,15 @@ ${hasProducer ? "static uint64_t oemBackMergedKeyMask() { return fixtureOemMask 
  enum class SerialJobKind { YmccOwn, ExternalInjection };
 static std::vector<std::pair<std::function<void()>, SerialJobKind>> fixtureJobs;
 static bool gamepadSerialSubmit(std::function<void()> job, SerialJobKind kind = SerialJobKind::YmccOwn) { if (!fixtureJobAccept) return false; fixtureJobs.emplace_back(std::move(job), kind); return true; }
+static UINT keyboardSelfSendWithEvidence(ymcc::keyboardEvents::SourceId,UINT count,INPUT* inputs) {
+    return fixtureSendInput(count,inputs,sizeof(INPUT));
+}
+static ymcc::ShortcutActionMailbox g_shortcutActionMailbox("memory-shortcut-session");
+struct NativeKeyboardShortcutRule;
+static bool nativeInputShortcutDesktopKey(const std::string&,WORD&);
+static bool nativeInputShortcutDesktopKeys(const json&,std::vector<WORD>&);
+static bool nativeKeyboardShortcutClickMatches(const NativeKeyboardShortcutRule&,uint64_t);
+static json nativeShortcutTdpEvent(int);
 `;
 const hasDefaultOwner = source.includes('static int nativeShortcutLegacyDefaultSlot(');
 const legacyStart = source.indexOf('    const bool shoulderDown = ', source.indexOf('static void gamepadEval() {'));
@@ -373,8 +420,50 @@ static void fixtureLegacyEval(WORD w, ULONGLONG now) {
  g_prevW=w;
 }
 ` : '';
+// Memory-only support for the real MSI keyboard policy introduced in main.
+// Native firmware and observer runtimes have separate all-fake tests; they are
+// not executed by the shortcut evaluator fixture.
+const msiExtraPrelude=source.includes('static std::atomic<bool> g_msiNativeRearDemand') ? `
+#define YMCC_MSI_NATIVE_ONLY_REAR_SOURCE
+#include "msi_rear_protocol.h"
+static std::atomic<bool> g_msiNativeRearDemand{false};
+static bool fixtureMsiKnownBoard=true;
+static bool msiClawKnownBoardAuthority(){return fixtureMsiKnownBoard&&g_oemBackProfileId.load()==static_cast<int>(OemChordProfileId::Msi);}
+static bool msiTargetIntentEvidenceEnabled() noexcept{return false;}
+static void msiTargetIntentObserveInput(const json&,const json&,bool,bool) noexcept{}
+static void msiNativeRearKeyboardEdgeNote(uint64_t){}
+static void msiOemSuppressionObservationPump(){}
+static void msiOemSuppressionObserveClick(const MsiWmiClickReceipt&,bool,bool){}
+` : '';
+// The shared historical suite still lists two personas rejected by the current
+// production contract. Migrate its fixture expectations without changing product headers.
+let summonCases = fs.readFileSync(path.join(root, 'tools/shortcut_summon_frontend_cases.h'), 'utf8');
+const oldPersonas = '{{"steam","steamdeck"},{"ps","dualsense-edge"},{"ps","dualsense"},{"xbox","elite"},{"xbox","xbox360"}}';
+if (summonCases.includes(oldPersonas)) {
+  summonCases = summonCases.replace(oldPersonas, '{{"steam","steamdeck"},{"ps","dualsense-edge"},{"xbox","elite"}}');
+  const unsupportedCases = `    for (const auto& entry : std::vector<std::pair<std::string,std::string>>{{"ps","dualsense"},{"xbox","xbox360"}}) {
+        resetRoute(json::array()); fixtureFrontendPersona=g_inputHostBoundPersona=entry.second;
+        check(!nativeYmccShortcutEmit("input.frontendButton",static_cast<int>(ymcc::frontendButton(entry.first))) &&
+              !g_frontendButtonPulse.pending(), "historical unsupported frontend persona is explicitly rejected: "+entry.second);
+    }
+`;
+  summonCases = summonCases.replace('    resetRoute(json::array());fixtureFrontendPersona="steamdeck";g_inputHostBoundPersona="elite";', unsupportedCases + '    resetRoute(json::array());fixtureFrontendPersona="steamdeck";g_inputHostBoundPersona="elite";');
+}
+let regressionSource = fs.readFileSync(path.join(root, 'tools/input_shortcut_toggle_selftest.cpp'), 'utf8')
+  .replace('#include "shortcut_summon_frontend_cases.h"', summonCases);
+const cases = process.env.YMCC_SHORTCUT_CASES || 'all';
+assert(['all','retired-start-f7','baseline-without-retirement'].includes(cases), 'Unknown shortcut case selection');
+const retirementCall = '        startF7RetirementCases();';
+assert(regressionSource.includes(retirementCall), 'Missing real-consumer retirement registration');
+if (cases === 'retired-start-f7') {
+  regressionSource = regressionSource.replace(retirementCall, retirementCall + '\n        std::cout << "retired Start F7 real consumer: " << passed << " cases passed\\n"; return 0;');
+} else if (cases === 'baseline-without-retirement') {
+  // Original product source is expected to fail the new case; run the preserved
+  // old suite separately to identify unrelated baseline failures.
+  regressionSource = regressionSource.replace(retirementCall, '        // New retirement cases excluded only for explicit old-suite baseline replay.');
+}
 const generated = path.join(out, 'input-shortcut-real-route.fixture.cpp');
-fs.writeFileSync(generated, prelude + source.slice(structStart, structEnd) + '\n' + functions.map(extract).sort((a,b) => source.indexOf(a)-source.indexOf(b)).map(text => hasProducer ? text.replace(/^static uint64_t oemBackMergedKeyMask\(/, 'static uint64_t fixtureRealOemBackMergedKeyMask(') : text).join('\n') + (hasWmi ? '\n' + source.slice(source.indexOf('class MsiWmiSink final'), source.indexOf('static DWORD WINAPI msiWmiThreadProc(')) : '') + legacyFixture + '\n#include "' + path.join(root, 'tools/input_shortcut_toggle_selftest.cpp').replaceAll('\\', '/') + '"\n');
+fs.writeFileSync(generated, prelude + msiExtraPrelude + source.slice(structStart, structEnd) + '\n' + functions.map(extract).sort((a,b) => source.indexOf(a)-source.indexOf(b)).map(text => hasProducer ? text.replace(/^static uint64_t oemBackMergedKeyMask\(/, 'static uint64_t fixtureRealOemBackMergedKeyMask(') : text).join('\n') + (hasWmi ? '\n' + source.slice(source.indexOf('class MsiWmiSink final'), source.indexOf('static DWORD WINAPI msiWmiThreadProc(')) : '') + legacyFixture + '\n' + regressionSource + '\n');
 const exe = path.join(out, 'input-shortcut-real-route.fixture.exe');
 const batch = path.join(out, 'compile-native-fixture.cmd');
 fs.writeFileSync(batch, '@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\nif errorlevel 1 exit /b 1\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"' + path.join(root, 'native') + '" /I"' + path.join(root, 'deps/json') + '" "' + generated + '" /Fo"' + path.join(out, 'input-shortcut-real-route.fixture.obj') + '" /Fe"' + exe + '"' + (hasWmi ? ' /link oleaut32.lib wbemuuid.lib' : '') + '\r\nexit /b %errorlevel%\r\n');
@@ -395,7 +484,7 @@ console.log('PASS all effective consumers use the runtime overlay; toggle action
 const frontendRoute = extract('nativeYmccShortcutEmit');
 assert(!/ymSettingsWrite|SettingsFileGuard|input\["revision"\]/.test(frontendRoute), 'Frontend buttons must not persist intent');
 const frame = extract('inputHostSubmitPad');
-const hostLock = frame.indexOf('std::lock_guard<std::mutex> lock(g_inputHostMx)');
+const hostLock = frame.search(/std::lock_guard<(?:std::mutex|InputHostMutex)> lock\(g_inputHostMx\)/);
 const pulseSample = frame.indexOf('g_frontendButtonPulse.sample');
 assert(hostLock >= 0 && pulseSample > hostLock, 'Guide sample must be generation-bound under live target lock');
 assert(frame.includes('hostFrameReady && !semanticNeutral && physicalSourceAdmitted'), 'Guide must respect frame/source admission');

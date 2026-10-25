@@ -3,5 +3,6 @@
 // the Loader's plugin event-listener map). Production index uses its normal SDK once.
 import { installSteamHudProbe } from '../../decky-plugin/src/steamHudProbe';
 declare const SP_REACT:any;
+declare const SP_REACTDOM:any;
 declare const DFL:any;
-installSteamHudProbe({host:window,react:SP_REACT,ui:DFL,routerHook:(window as any).DeckyPluginLoader?.routerHook});
+installSteamHudProbe({host:window,react:SP_REACT,reactDom:typeof SP_REACTDOM==='undefined'?undefined:SP_REACTDOM,ui:DFL,routerHook:(window as any).DeckyPluginLoader?.routerHook});

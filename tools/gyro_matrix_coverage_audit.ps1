@@ -23,11 +23,16 @@
 # Exit code 0 = no gaps.
 
 param(
-    [string]$HcDevicesRoot = 'g:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Devices',
-    [string]$MainCpp       = 'g:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\native\main.cpp'
+    [string]$HcDevicesRoot = '',
+    [string]$HcConfigsRoot = '',
+    [string]$MainCpp       = ''
 )
 
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $HcDevicesRoot) { $HcDevicesRoot = Join-Path $repoRoot 'deps\handheldcompanion-runtime\source\Devices' }
+if (-not $MainCpp) { $MainCpp = Join-Path $repoRoot 'native\main.cpp' }
+Write-Output ("HC_SOURCE_ROOT={0}" -f (Resolve-Path -LiteralPath $HcDevicesRoot).Path)
 foreach ($p in @($HcDevicesRoot, $MainCpp)) { if (-not (Test-Path -LiteralPath $p)) { throw "missing input: $p" } }
 
 $bases = @{}; $ownGyro = @{}; $ownAccel = @{}
@@ -59,6 +64,63 @@ foreach ($f in (Get-ChildItem -Path $HcDevicesRoot -Recurse -Filter *.cs)) {
     }
 }
 
+
+# HC 1.x moved matrices into Resources/Devices JSON. Model the actual filename
+# lookup, not DeviceClass metadata: the loader does not use that metadata as a key.
+$sourceDiagnostics = New-Object System.Collections.Generic.List[string]
+$idSource = Get-Content -LiteralPath (Join-Path $HcDevicesRoot 'IDevice.cs') -Raw
+if ($idSource -match 'DeviceConfigurationHelper\.LoadConfiguration') {
+    if (-not $HcConfigsRoot) { $HcConfigsRoot = Join-Path (Split-Path -Parent $HcDevicesRoot) 'Resources\Devices' }
+    if (-not (Test-Path -LiteralPath $HcConfigsRoot)) { throw "matrix-config-source-missing: $HcConfigsRoot" }
+    $configs = @{}
+    function Convert-JsonMatrix($value, [string]$label) {
+        $axis = @(1.0, 1.0, 1.0)
+        $swap = @{ X = 'X'; Y = 'Y'; Z = 'Z' }
+        if ($null -ne $value) {
+            $i = 0
+            foreach ($key in @('X','Y','Z')) {
+                if ($value.Axis -and $null -ne $value.Axis.$key) { $axis[$i] = [double]$value.Axis.$key }
+                if ($value.AxisSwap -and $value.AxisSwap.$key) { $swap[$key] = [string]$value.AxisSwap.$key }
+                $i++
+            }
+        }
+        if (@($axis | Where-Object { $_ -notin @(-1.0,1.0) }).Count -gt 0 -or (@($swap.Values | Sort-Object -Unique) -join '') -cne 'XYZ') {
+            $sourceDiagnostics.Add("matrix-config-invalid: $label; expected signed unit axes and an XYZ permutation")
+            return @{ Invalid = $true }
+        }
+        return @{ Axis = $axis; Swap = $swap }
+    }
+    foreach ($file in Get-ChildItem -LiteralPath $HcConfigsRoot -Filter '*.json') {
+        $config = Get-Content -LiteralPath $file.FullName -Raw | ConvertFrom-Json
+        $configs[$file.BaseName] = $config
+        if ($config.DeviceClass -and $file.BaseName -cne $config.DeviceClass) {
+            if ($bases.ContainsKey($file.BaseName)) {
+                Write-Output "matrix-config-metadata-note: $($file.Name) declares $($config.DeviceClass); existing filename is the lookup key"
+            } else {
+                $sourceDiagnostics.Add("matrix-config-filename-mismatch: $($file.Name) declares $($config.DeviceClass); HC looks up the class name, then its base")
+            }
+        }
+    }
+    if ($configs.Count -eq 0) { throw 'matrix-config-empty: zero JSON configurations' }
+    $ownGyro = @{}; $ownAccel = @{}
+    foreach ($cls in $bases.Keys) {
+        $cursor = $cls; $visited = @{}
+        while ($cursor -and -not $configs.ContainsKey($cursor) -and $bases.ContainsKey($cursor)) {
+            if ($visited.ContainsKey($cursor)) { throw "matrix-inheritance-cycle: $cls" }
+            $visited[$cursor] = $true
+            $cursor = $bases[$cursor]
+        }
+        $config = if ($cursor -and $configs.ContainsKey($cursor)) { $configs[$cursor] } else { $null }
+        # A found config replaces the whole lookup; missing fields do not merge a parent.
+        $ownGyro[$cls] = Convert-JsonMatrix $(if ($config) { $config.GyroMatrix } else { $null }) "$cls/$cursor/GyroMatrix"
+        $ownAccel[$cls] = Convert-JsonMatrix $(if ($config) { $config.AcceleroMatrix } else { $null }) "$cls/$cursor/AcceleroMatrix"
+    }
+    Write-Output "HC_MATRIX_SOURCE=json configs=$($configs.Count)"
+}
+if ($ownGyro.Count -eq 0 -or $ownAccel.Count -eq 0) {
+    throw "matrix-parse-empty: gyro=$($ownGyro.Count) accel=$($ownAccel.Count); source schema may have changed"
+}
+
 function Resolve-Matrix([string]$cls, [hashtable]$table) {
     $seen = 0
     while ($cls -and $seen -lt 12) {
@@ -71,6 +133,7 @@ function Resolve-Matrix([string]$cls, [hashtable]$table) {
 }
 
 function HC-Canonical($matrix) {
+    if ($matrix.Invalid) { return "(invalid-source-matrix)" }
     $s = @{}; foreach ($k in 'X','Y','Z') { $s[$k] = $matrix.Swap[$k] }
     $inv = @{}
     foreach ($k in $s.Keys) { $inv[$s[$k]] = $k }
@@ -133,6 +196,7 @@ foreach ($m in [regex]::Matches($cppText, ':(?:gyro|accel):([a-z0-9\-]+)"')) { $
 
 $failures = New-Object System.Collections.Generic.List[string]
 $identity = 'pX-pY-pZ'
+foreach ($diagnostic in $sourceDiagnostics) { $failures.Add($diagnostic) }
 
 # A) global coverage
 foreach ($cls in ($bases.Keys | Sort-Object -Unique)) {

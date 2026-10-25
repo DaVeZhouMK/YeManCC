@@ -1,0 +1,11 @@
+{
+  "schema": "ymcc.monitor-output-legacy-audit.v1",
+  "status": "UNRESOLVED_EXPECTATION",
+  "originalTest": "tools/monitor_output_templates_selftest.mjs",
+  "originalTestSha256": "1a9e14d9a15a1519726f68ac671bf03d250d5146acf034ab9f6c2615d834d24d",
+  "productModelSha256AtAudit": "e1e1fd1c4eb8be5dcf5a69d14e11d2c6efe343d409f9be30767d1e6396759df0",
+  "originalFailure": "node:internal/modules/run_main:122\n    triggerUncaughtException(\n    ^\n\nAssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:\n+ actual - expected\n\n  [\n+   '精简',\n    '简约',\n-   '精简',\n    '标准',\n    '详细'\n  ]\n\n    at file:///D:/Codex/2026-10-18/ymcc-lighting-signals-20261018/work/monitor-output/retained-01/templates/retained.mjs:31:10\n    at check (file:///D:/Codex/2026-10-18/ymcc-lighting-signals-20261018/work/monitor-output/retained-01/templates/retained.mjs:14:50)\n    at file:///D:/Codex/2026-10-18/ymcc-lighting-signals-20261018/work/monitor-output/retained-01/templates/retained.mjs:26:1 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: [ '精简', '简约', '标准', '详细' ],\n  expected: [ '简约', '精简', '标准', '详细' ],\n  operator: 'deepStrictEqual'\n}\n\nNode.js v22.14.0\n",
+  "changedAssertions": false,
+  "runtimeAcceptanceUse": false,
+  "meaning": "Legacy template preset label order expects 简约/精简 while current actual module exports 精简/简约. Kept as unresolved expectation; excluded from new targeted output acceptance, never reported PASS. No product change made to satisfy old label order."
+}

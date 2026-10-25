@@ -1,0 +1,12 @@
+--- a/tools/ymcc_sim/global/runner.mjs
++++ b/tools/ymcc_sim/global/runner.mjs
+@@ -216,7 +216,8 @@
+     result.structuredEvidence = evidence.paths;
+     result.requiredEvidenceMissing = evidence.missing;
+     result.requiredEvidenceFailed = evidence.failed;
+-    result.status = adapter.kind === 'powershell' && result.exitCode === 10 && !result.timedOut ? 'BLOCKED' : evaluateResult(result);
++    const explicitBlockedExit = adapter.blockedExitCodes?.includes(result.exitCode) === true;
++    result.status = !result.timedOut && ((adapter.kind === 'powershell' && result.exitCode === 10) || explicitBlockedExit) ? 'BLOCKED' : evaluateResult(result);
+   } catch (error) {
+     result.status = 'FAIL'; result.buildError = true;
+     result.reason = String(error.message ?? error).slice(0, 1600);

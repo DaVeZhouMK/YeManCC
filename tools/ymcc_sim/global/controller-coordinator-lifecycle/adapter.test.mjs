@@ -1,0 +1,13 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
+import {getControllerCoordinatorLifecycleAdapters} from './adapter.mjs';
+import {executeAdapter,verdictFor} from '../runner.mjs';
+const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
+const out=path.resolve(process.env.YMCC_ADAPTER_PREREQUISITE_EVIDENCE||path.join(repo,'Build/AdapterPrerequisiteSelfTest'));
+const blocked=getControllerCoordinatorLifecycleAdapters({readSources(){throw Error('fixture manifest unavailable')},readArtifacts(){throw Error('must not manufacture artifacts')}})[0];
+assert.match(blocked.blockedReason,/COORDINATOR_LIFECYCLE_PREREQUISITE_UNAVAILABLE/);assert.deepEqual(blocked.artifactInputs,[]);
+const artifactBlocked=getControllerCoordinatorLifecycleAdapters({readSources:()=>['current-source'],readArtifacts(){throw Error('fixture binary unavailable')}})[0];assert.match(artifactBlocked.blockedReason,/fixture binary unavailable/);
+const ready=getControllerCoordinatorLifecycleAdapters({readSources:()=>['current-source'],readArtifacts:()=>['pinned-artifact']})[0];assert.equal(ready.blockedReason,undefined);assert.deepEqual(ready.evidenceInputs,['current-source']);assert.deepEqual(ready.artifactInputs,['pinned-artifact']);
+const result=await executeAdapter(blocked,{repoRoot:repo,runDir:out});assert.equal(result.status,'BLOCKED');assert.equal(result.claims.installedApplicationExercised,false);const verdict=verdictFor({results:[result],selectedCount:1});assert.notEqual(verdict.status,'PASS');
+fs.writeFileSync(path.join(out,'PREREQUISITE-ISOLATION.json'),JSON.stringify({pass:true,missingFixtureRemainsBlocked:true,selectedMissingFixtureCannotPass:verdict.status,readyIdentityPreserved:true,productProcessesStarted:0},null,2));
+console.log('ADAPTER_PREREQUISITE_ISOLATION_PASS');

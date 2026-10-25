@@ -1,0 +1,10 @@
+{
+  "schema": 1,
+  "launchSuffixes": [
+    "\\s*[-|:\\u2013\\u2014\\s]*(?:direct\\s*x|directx|dx)\\s*(?:9|10|11|12)(?:\\s*x64)?\\s*$",
+    "\\s*\\((?:direct\\s*x|directx|dx)\\s*(?:9|10|11|12)(?:\\s*x64)?\\)\\s*$",
+    "\\s*[-|:\\u2013\\u2014\\s]*(?:vulkan|open\\s*gl)(?:\\s*x64)?\\s*$",
+    "\\s*\\((?:vulkan|open\\s*gl)(?:\\s*x64)?\\)\\s*$"
+  ],
+  "copyrightSuffix": "\\s+(?:\\(\\s*c\\s*\\)|\\[\\s*c\\s*\\]|©|copyright)\\s*[0-9]{4}(?:\\s+by\\s+[^\\r\\n]+)?\\s*$"
+}

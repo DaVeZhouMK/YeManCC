@@ -133,26 +133,20 @@ async function fixture(options = {}) {
     unmount(){app.unmount();},
   };
 }
-await check('睡眠优化完全移除Steam状态小字，修复开关及保存逻辑保留',()=>{
+await check('睡眠优化保留默认开启自动修复，移除已弃用Overlay关闭入口',()=>{
   const source=fs.readFileSync(path.join(root,'src/views/SleepGuardView.vue'),'utf8');
   const {descriptor,errors}=parse(source,{filename:'SleepGuardView.vue'});assert.equal(errors.length,0);
   assert(!source.includes('SteamOverlayFixStatus'));
   assert(!source.includes('steam-overlay-fix-status'));
   assert(!source.includes('无需重启 Steam'));
-  assert(source.includes(':model-value="cfg.steamOverlayOffFix"'));
-  assert(source.includes('label="Steam大屏唤醒手柄卡死修复"'));
-  assert(source.includes('@update:model-value="onSteamOverlayOffFix"'));
-  assert(source.includes('steamOverlayOffFix: v'));
-  assert(source.includes('steamOverlayOffFix: false'));
-  assert(source.includes('description="Steam设置-游戏中-Steam叠加画面关闭"'));
-  assert(source.includes('影响Steam监控和触摸板转盘显示'));
-  assert(source.includes('学习版手柄唤醒容易卡界面'));
-  assert(source.includes("? '确认开启' : '确认关闭'"));
-  assert(source.includes('class="reset-confirm steam-overlay-confirm"'));
-  assert(source.includes('data-gp-group="steam-overlay-confirm"'));
-  const compiled=compileScript(descriptor,{id:'sleep-steam-status-removed'});
-  assert(!compiled.content.includes('steamOverlayFixGet'));
-  assert(!compiled.content.includes('steamOverlayFix.updated'));
+  assert(!source.includes(':model-value="cfg.steamOverlayOffFix"'));
+  assert(!source.includes('onSteamOverlayOffFix'));
+  assert(!source.includes('Steam大屏唤醒手柄卡死修复'));
+  assert(!source.includes('<SleepRecoveryPanel'));
+  assert(fs.readFileSync(path.join(root,'src/components/SteamRecoveryDiagnostics.vue'),'utf8').includes('<SleepRecoveryPanel'));
+  assert(fs.readFileSync(path.join(root,'src/views/SettingsView.vue'),'utf8').includes('<SteamRecoveryDiagnostics'));
+  assert(fs.readFileSync(path.join(root,'src/bridge/settingsRepository.ts'),'utf8').includes('autoWakeRecovery: true'));
+
 });
 const pageSource=fs.readFileSync(path.join(root,'src/views/ButtonMappingView.vue'),'utf8');
 const cardSource=fs.readFileSync(path.join(root,'src/components/ControllerShortcutsCard.vue'),'utf8');

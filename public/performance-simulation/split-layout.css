@@ -1,0 +1,62 @@
+/* The split uses the original renderer and monitoring nodes; no simulated UI values. */
+@media (min-width: 980px) {
+  html, body { width:100%; height:100%; overflow:hidden; }
+  .app { width:100%; max-width:none; height:100dvh; min-height:0; padding:var(--simulation-top-inset,10px) 12px 10px; display:grid; grid-template-rows:40px var(--simulation-workspace-height,calc(100dvh - 92px)) 16px; align-content:start; gap:8px; }
+  .masthead { position:relative; top:auto; display:grid; grid-template-columns:minmax(240px,1fr) 176px 90px 90px 110px; grid-template-rows:40px; grid-template-areas:"profile save quick reset back"; padding:0; gap:8px; }
+  .masthead .brand { display:none; }
+  .masthead .profile-setting { grid-area:profile; display:block; width:270px; min-width:0; }
+  .masthead .profile-setting label { display:none; }
+  .masthead #profile { width:100%; min-height:36px; height:36px; }
+  .masthead .header-end { display:contents; }
+  .masthead .header-end button, .masthead .header-end #session-save { height:36px; min-height:36px; font-size:13px; padding:5px 10px; }
+  .masthead .header-end #session-save { font-size:14px; }
+  .workspace { display:grid; grid-template-columns:minmax(0,1fr) 432px; min-height:0; gap:12px; align-items:stretch; }
+  .visual-column { zoom:var(--simulation-left-scale,1); width:var(--simulation-left-logical-width,auto); height:var(--simulation-left-logical-height,100%); display:grid; grid-template-rows:minmax(180px,1fr) 204px 120px; gap:8px; min-height:0; min-width:0; }
+  .data-column { display:flex; flex-direction:column; gap:8px; min-width:0; min-height:0; }
+  .preview-panel { display:grid; grid-template-rows:36px minmax(0,1fr) 30px; padding:0; gap:0; overflow:hidden; position:relative; min-height:0; }
+  .scene-buttons { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:0; padding:0; border-bottom:1px solid var(--line); }
+  .scene-buttons button { border-radius:0; height:35px; min-height:35px; padding:4px 6px; font-size:14px; border:0; }
+  .arena { width:100%; height:100%; min-height:0; aspect-ratio:auto; max-height:none; border:0; border-radius:0; }
+  .scene-meta { display:flex; align-items:center; justify-content:space-between; margin:0; padding:0 8px; min-height:0; gap:10px; }
+  .live-phase { display:flex; align-items:center; gap:10px; font-size:11px; min-width:0; }
+  .resolutions button { height:25px; min-height:25px; padding:2px 9px; font-size:12px; }
+  .comparison { padding:5px 8px; display:grid; grid-template-rows:30px repeat(3,minmax(0,1fr)); gap:0; min-height:0; }
+  .comparison-heading, .comparison .strategy { display:grid; grid-template-columns:58px minmax(0,.9fr) minmax(0,.9fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,1.12fr) repeat(3,minmax(0,.95fr)); align-items:center; gap:4px; }
+  .comparison-heading { padding:0 8px; min-height:0; font-size:12px; text-align:right; white-space:nowrap; }
+  .comparison-heading span:first-child { text-align:left; }
+  .comparison .strategy { width:100%; padding:0 8px; min-height:0; height:auto; border-radius:6px; font-size:13px; }
+  .comparison .strategy-primary, .comparison .strategy-scores { display:contents; }
+  .comparison .strategy-name { font-size:15px; text-align:left; gap:5px; }
+  .comparison .summary-cell { padding:0; display:flex; justify-content:flex-end; align-items:baseline; gap:1px; }
+  .comparison .summary-cell b { font-size:21px; font-weight:650; line-height:26px; }
+  .comparison .summary-cell small { display:none; }
+  .comparison .strategy-score { display:block; padding:0; min-height:0; border:0; text-align:right; }
+  .comparison .strategy-score span { display:none; }
+  .comparison .strategy-score b { font-size:17px; line-height:26px; }
+  .charts { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; min-height:0; }
+  .chart { display:grid; grid-template-rows:23px minmax(0,1fr); padding:6px 9px; min-height:0; }
+  .chart-title { min-height:0; font-size:14px; }
+  .chart-title strong { font-size:14px; }
+  .chart-title span, .legend { font-size:11px; }
+  .chart svg { width:100%; height:100%; min-height:0; }
+  footer { margin:0; padding:0; display:flex; justify-content:space-between; align-items:center; font-size:10px; line-height:16px; white-space:nowrap; gap:12px; overflow:hidden; }
+  footer #insight { overflow:hidden; text-overflow:ellipsis; }
+  .navigation-hint { display:flex; align-items:center; gap:5px; color:var(--muted); }
+  .navigation-hint b { color:var(--ink); }
+  html[data-native-editor] .data-column { visibility:hidden; pointer-events:none; }
+  html[data-native-editor] .workspace { grid-template-columns:minmax(0,1fr) var(--editor-width,432px); }
+  html[data-native-editor] #insight { display:none; }
+}
+/* The existing single-column editor remains usable if the width lease is unavailable. */
+@media (max-width:979px) {
+ .masthead { grid-template-columns:repeat(6,minmax(0,1fr));grid-template-rows:48px 48px 40px;grid-template-areas:"title title title title back back" "save save quick quick reset reset" "profile profile profile profile profile profile"; }
+ .masthead .profile-setting { display:block; grid-area:profile; width:100%; }
+ .masthead .profile-setting label { display:none; }
+ .masthead #profile { width:100%;min-height:36px; }
+ .summary-current-low { display:none; }
+ .comparison-heading span:nth-child(3),.comparison-heading span:nth-last-child(-n+3) { display:none; }
+ .preview-telemetry { display:none; }
+ .navigation-hint { display:none; }
+}
+
+@media(min-width:980px){.comparison .summary-cell:last-child b{font-size:19px}.comparison .strategy{font-variant-numeric:tabular-nums}.chart svg text{font-size:11px}.live-phase{font-size:12px}}

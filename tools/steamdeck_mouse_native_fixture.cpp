@@ -64,6 +64,9 @@ static int gameInputOwnerSession() { return 0; }
 namespace ymcc { static json effectiveGameInput(const json& j,int) { return j; } }
 // Match the current effective-input accessor; this fixture models one desktop owner.
 static json effectiveRuntimeInputSettings() { return ymcc::effectiveGameInput(ymSettingsSection("input"),gameInputOwnerSession()); }
+static bool steamDesktopMouseSelected(){return false;}
+static json steamDesktopMouseRead(){throw std::runtime_error("unexpected-standard-read");}
+static json steamDesktopMouseWrite(bool,int,bool){throw std::runtime_error("unexpected-standard-write");}
 static std::string liveMode = "live-debug-unavailable";
 static int liveRequests = 0, liveMutations = 0, overlayRequests = 0, overlayRuntime = 0, overlayFile = 0;
 static bool livePersist = true, poolOk = true, failFinish = false, poolHold = false;

@@ -251,7 +251,8 @@ function Resolve-Rule([hashtable]$stageDir, [string]$rule, [string]$cls) {
           (Split-Path -Leaf $features) -ine 'feature-assets' -or
           (Split-Path -Leaf $power) -ine 'PowerControl') { throw 'Shared sdk artifact route requires the production PowerControl layout.' }
       if (Test-Path -LiteralPath $full) { throw ('Thin production contains unexpected local duplicate: ' + $rel) }
-      $full = Join-Path $power ('handheldcompanion-runtime\' + [string]$routes['runtimeId'] + '\' + $rel)
+      if ([string]$routes['directory'] -cne 'ymcc-shared-runtime') { throw 'Shared sdk authority directory is invalid.' }
+      $full = Join-Path (Join-Path $power ([string]$routes['directory'])) $rel
       $probe = $full
       while ($probe -and $probe.Length -ge $power.Length) {
         if ((Test-Path -LiteralPath $probe) -and (Get-Item -LiteralPath $probe -Force).Attributes.HasFlag([IO.FileAttributes]::ReparsePoint)) {

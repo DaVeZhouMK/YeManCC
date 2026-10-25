@@ -118,7 +118,7 @@ class Broker {
     std::string token_,runId_,connection_;
     std::deque<std::pair<std::string,std::string>> replies_;
     Config config_;
-    unsigned long long nextConnection_=0, revision_=0;
+    unsigned long long nextConnection_=0, revision_=0, connectionRevision_=0;
     void run() {
         SOCKET peer=INVALID_SOCKET;WSAEVENT peerEvent=WSA_INVALID_EVENT;
         std::vector<unsigned char> input;std::string output,connection;
@@ -127,7 +127,7 @@ class Broker {
         auto closePeer=[&]{
             if(peer!=INVALID_SOCKET){closesocket(peer);peer=INVALID_SOCKET;}
             if(peerEvent!=WSA_INVALID_EVENT){WSACloseEvent(peerEvent);peerEvent=WSA_INVALID_EVENT;}
-            {std::lock_guard lock(state_);connection_.clear();replies_.clear();}
+            {std::lock_guard lock(state_);if(!connection_.empty())++connectionRevision_;connection_.clear();replies_.clear();}
             if(authenticated)changed(false);authenticated=false;connection.clear();input.clear();output.clear();deadline=0;fragmentDeadline=0;
         };
         auto drain=[&]{
@@ -179,7 +179,7 @@ class Broker {
                                 output+=handshake(header.substr(0,end+4),token_,"127.0.0.1:"+std::to_string(port_));
                                 input.erase(input.begin(),input.begin()+static_cast<std::ptrdiff_t>(end+4));
                                 authenticated=true;connection=std::to_string(++nextConnection_);
-                                {std::lock_guard lock(state_);connection_=connection;}
+                                {std::lock_guard lock(state_);connection_=connection;++connectionRevision_;}
                                 changed(true);
                             }
                         }
@@ -194,7 +194,7 @@ class Broker {
                             const auto request=Json::parse(frame.payload);
                             if(!request.is_object()||request.value("runId",std::string{})!=runId_)throw std::runtime_error("stale-run");
                             const auto command=request.value("command",std::string{});
-                            if(command!="snapshot"&&command!="game.setField"&&command!="fan.setEnabled"&&command!="fan.setPreset"&&command!="frame.setField"&&command!="touchpad.setField"&&command!="global.setField")throw std::runtime_error("command-denied");
+                            if(command!="snapshot"&&command!="game.setField"&&command!="fan.setEnabled"&&command!="fan.setPreset"&&command!="fan.setChoice"&&command!="frame.setField"&&command!="touchpad.setField"&&command!="global.setField"&&command!="audioOptimization.setEnabled"&&command!="monitor.setEnabled"&&command!="performance.setControls"&&command!="hud.status"&&command!="hud.ack"&&command!="wallpaper.context"&&command!="wallpaper.status"&&command!="wallpaper.neighbors"&&command!="updater.status"&&command!="updater.request")throw std::runtime_error("command-denied");
                             if(reporting_.load()&&config_.request)config_.request(connection,request);
                         }
                         if(authenticated&&peer!=INVALID_SOCKET&&!input.empty()&&!fragmentDeadline)fragmentDeadline=GetTickCount64()+3000;
@@ -213,7 +213,7 @@ class Broker {
         if(worker_.joinable())worker_.join();
         if(listener_!=INVALID_SOCKET){closesocket(listener_);listener_=INVALID_SOCKET;}
         for(auto* event:{&stop_,&listenEvent_,&sendEvent_})if(*event!=WSA_INVALID_EVENT){WSACloseEvent(*event);*event=WSA_INVALID_EVENT;}
-        {std::lock_guard lock(state_);active_=false;port_=0;token_.clear();runId_.clear();connection_.clear();replies_.clear();revision_=0;}
+        {std::lock_guard lock(state_);active_=false;port_=0;token_.clear();runId_.clear();++connectionRevision_;connection_.clear();replies_.clear();revision_=0;}
         if(wsaStarted_){WSACleanup();wsaStarted_=false;}
     }
     bool wsaStarted_=false;
@@ -236,8 +236,8 @@ public:
             worker_=std::thread([this]{run();});return true;
         }catch(...){stopLocked();return false;}
     }
-    Json bootstrap() {std::lock_guard lock(state_);if(!active_)return Json::object();return {{"endpoint","ws://127.0.0.1:"+std::to_string(port_)+"/mirror"},{"token",token_},{"runId",runId_}};}
-    Json status() {std::lock_guard lock(state_);return {{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_}};}
+    Json bootstrap() {std::lock_guard lock(state_);if(!active_)return Json::object();return {{"endpoint","ws://127.0.0.1:"+std::to_string(port_)+"/mirror"},{"token",token_},{"runId",runId_},{"hudProtocol",1},{"wallpaperProtocol",1},{"wallpaperPrefetchProtocol",0},{"updaterProtocol",1}};}
+    Json status() {std::lock_guard lock(state_);return {{"active",active_},{"runId",runId_},{"connection",connection_},{"connected",!connection_.empty()},{"revision",revision_},{"connectionRevision",connectionRevision_}};}
     bool reply(const std::string& connection,const Json& message) {
         const auto text=message.dump();if(text.size()>kMaxPayload)return false;
         std::lock_guard lock(state_);

@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sharedManifest": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+  "additional": [
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\cwctype",
+      "sha256": "80c8ceaf1ef9555b6c3ca65edac8781231fa2f658779e7bd73b142e7150ccf4c"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\ucrt\\wctype.h",
+      "sha256": "eacb0758b8e8b7fbe81110329db555a6279f91d35baeb462d10dcf6c3b2d11f5"
+    }
+  ]
+}

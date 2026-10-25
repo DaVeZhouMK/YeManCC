@@ -1,0 +1,36 @@
+/** Public preset -> real recovery owner; inert Host with current Host default preset receipts. */
+import assert from 'node:assert/strict';
+import {FanHostLifecycle} from '../src/bridge/fanHost';
+import {FanApiError,type FanNode,type FanState} from '../src/bridge/fanApi';
+import {NoIoHost} from './fixtures/fan_no_io_host';
+const oldCurve=[0,40,70,100].map(tempC=>({tempC,dutyPercent:100}));
+const manual=[0,40,70,100].map(tempC=>({tempC,dutyPercent:85}));
+const defaults={soft:[0,0,20,80],balanced:[0,20,45,90],aggressive:[0,30,75,100]};
+const preset=(name:keyof typeof defaults)=>[0,40,70,100].map((tempC,i)=>({tempC,dutyPercent:defaults[name][i]}));
+const held=<T>()=>{let resolve!:(v:T)=>void;const promise=new Promise<T>(r=>resolve=r);return{resolve,promise};};
+class Host extends NoIoHost {
+ active:FanNode[]|null=null;resolvedPresetOverride:FanNode[]|null=null;writes=false;written:FanNode[][]=[];shape:unknown=undefined;hold:ReturnType<typeof held<void>>|null=null;failHeartbeat=false;lastReply:FanState|null=null;
+ override async handshake(){return {...await super.handshake(),fanRoute:this.factoryType.includes('GPD')||this.factoryType.includes('OneX')?'GenericDuty':'ProfileCurve'};}
+ override snapshot():FanState{return {...super.snapshot(),hardwareWritesEnabled:this.writes,hardwareWrites:this.writes,hardwareWritesObserved:true,lastControlWriteEvidence:'compat-route-callback-returned-no-scope',activeCurve:this.shape===undefined?this.active?.map(n=>({...n}))??null:this.shape,oemRestoreConfirmed:false};}
+ override async enable(nodes:readonly FanNode[]=[],id?:string){if(id!==this.lease?.leaseId)throw new FanApiError('LEASE_INVALID',409,'LEASE_INVALID');this.calls.push('enable');this.active=nodes.map(n=>({...n}));this.written.push(this.active);this.writes=true;this.stateName='Ready';return this.snapshot();}
+ override async applyPreset(name:'soft'|'balanced'|'aggressive'='balanced',id?:string,nodes?:readonly FanNode[]){this.calls.push('preset');await this.enable(nodes??this.resolvedPresetOverride??preset(name),id);const reply=this.snapshot();this.lastReply=reply;if(this.hold){const hold=this.hold;this.hold=null;await hold.promise;}return reply;}
+ override async heartbeat(){this.calls.push('heartbeat');if(this.failHeartbeat){this.failHeartbeat=false;this.lease=null;this.writes=false;this.stateName='AwaitingControl';throw new FanApiError('LEASE_INVALID',409,'LEASE_INVALID');}return {...this.lease!};}
+ override async suspend(){this.active=null;this.writes=false;this.lease=null;return super.suspend();}
+ override async close(){this.writes=false;this.active=null;return super.close();}
+}
+async function fixture(family='MSI.ClawCG3EM'){
+ const host=new Host();host.factoryType='HandheldCompanion.Devices.'+family;host.completeResume=true;let generation=1;
+ const life=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:0,resumeWaitDeadlineMs:500,readNativeActivity:async()=>null,readNativePowerState:async()=>({generation,phase:'ready',resumeReady:true,inputReady:true,hardwareWritesAllowed:true,hibernateAvailable:true}),launcher:{async start(){return{pid:120300,executable:'inert.exe'};},async stop(){}}});
+ life.setPowerGeneration(1);life.observePowerBoundary('resume-ready',1);await life.start();await life.apply(oldCurve);
+ return{life,host,async wake(){generation++;life.setPowerGeneration(generation);life.observePowerBoundary('suspending',generation);await host.suspend();await life.suspend();await host.resume({generation});life.observePowerBoundary('resuming',generation);life.observePowerBoundary('resume-ready',generation);await life.resume();},async done(){host.shape=undefined;host.hold?.resolve();await life.close().catch(()=>{});}};
+}
+const results:any[]=[];
+async function check(name:string,work:(f:Awaited<ReturnType<typeof fixture>>)=>Promise<unknown>,family?:string){const f=await fixture(family);try{results.push({name,family,ok:true,evidence:await work(f)});}catch(error){results.push({name,family,ok:false,error:String(error),written:f.host.written});}finally{await f.done();}}
+for(const family of ['ROGAlly','MSI.ClawCG3EM','GPDWin5','OneXPlayerX1Mini','Lenovo.LegionGo'])for(const name of ['soft','balanced','aggressive'] as const)await check('named '+name+' resumes its actual receipt curve',async f=>{await f.life.applyPreset(name);await f.wake();assert.deepEqual(f.host.written.at(-1),preset(name),'wake replayed the previous manual curve');assert.deepEqual((f.life as any).desiredCurve,preset(name));return {written:f.host.written};},family);
+await check('named preset follows the Host receipt rather than a client default table',async f=>{const actual=[{tempC:0,dutyPercent:0},{tempC:0,dutyPercent:10},{tempC:62,dutyPercent:45},{tempC:100,dutyPercent:50}];f.host.resolvedPresetOverride=actual;await f.life.applyPreset('balanced');await f.wake();assert.deepEqual(f.host.written.at(-1),actual);});
+await check('named preset heartbeat repair uses the acknowledged new curve',async f=>{await f.life.applyPreset('balanced');f.host.failHeartbeat=true;await f.life.heartbeat();assert.deepEqual(f.host.written.at(-1),preset('balanced'));});
+await check('explicit custom preset nodes keep caller precedence over extra reply fields',async f=>{f.host.shape=preset('soft');await f.life.applyPreset('balanced',manual);f.host.shape=undefined;await f.wake();assert.deepEqual(f.host.written.at(-1),manual);});
+for(const bad of [null,[],[null],preset('balanced').map((n,i)=>i===0?{...n,tempC:1}:n),preset('balanced').map((n,i)=>i===2?{...n,tempC:10}:n),preset('balanced').map((n,i)=>i===3?{...n,dutyPercent:40}:n),preset('balanced').map((n,i)=>i===2?{...n,dutyPercent:101}:n),preset('balanced').map((n,i)=>i===2?{...n,tempC:'70'}:n)])await check('unknown named receipt never retains older replay curve: '+JSON.stringify(bad),async f=>{f.host.shape=bad;await f.life.applyPreset('balanced');const owner=f.life as any;assert.equal(owner.activeCurve,null);assert.equal(owner.desiredCurve,null);assert.equal(owner.resumeCurve,null);assert.equal(owner.activeCurveReceipt,null);f.host.shape=undefined;await f.life.apply(manual);assert.deepEqual(f.host.written.at(-1),manual,'unknown receipt blocked the next explicit control');});
+await check('receipt curve is copied before its source object can change',async f=>{await f.life.applyPreset('balanced');const reply=f.host.lastReply!;(reply.activeCurve as FanNode[])[0].dutyPercent=99;await f.wake();assert.deepEqual(f.host.written.at(-1),preset('balanced'));});
+for(const edge of ['off','curve'] as const)await check('late named preset reply cannot replace a newer '+edge,async f=>{const gate=held<void>();f.host.hold=gate;const old=f.life.applyPreset('balanced').catch(()=>null);for(let i=0;i<100&&!f.host.lastReply;i++)await Promise.resolve();assert(f.host.lastReply);const next=edge==='off'?f.life.disable():f.life.apply(manual);gate.resolve();await old;await next;assert.deepEqual((f.life as any).desiredCurve,edge==='off'?null:manual);});
+console.log(JSON.stringify({ok:results.every(x=>x.ok),checks:results.length,results,scope:'actual public lifecycle; inert authenticated Host receipt/native power/exact-exit transport, no Host Main/HC/device/CPU benchmark'}));if(results.some(x=>!x.ok))process.exitCode=1;

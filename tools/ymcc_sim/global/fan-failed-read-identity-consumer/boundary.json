@@ -1,0 +1,1006 @@
+{
+  "schemaVersion": 1,
+  "kind": "reviewed-fan-failed-read-terminal-boundaries",
+  "reviewedAt": "2026-10-20T18:28:26.843Z",
+  "original": {
+    "path": "tools/fan_failed_state_read_identity_selftest.ts",
+    "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06",
+    "all85LinesUnchanged": true
+  },
+  "originalMatrix": {
+    "retiredWritesAndStates": 36,
+    "queuedRetries": 6,
+    "currentClosedSession": 3,
+    "total": 45
+  },
+  "ioTerminals": {
+    "host": "Original NoIoHost memory adapter, generation/state/lease/open/events arrays and method overrides",
+    "launcher": "Original memory pid116401/inert.exe; start/stop inert promises, never process spawn",
+    "nativeActivity": "Original async null callback",
+    "nativePower": "Original memory native snapshot and setNative",
+    "manualWake": "Default invoke may reject without actual WebView; must prove no real bridge supplied and runtime IO guard remains active",
+    "heldReadbacks": "Original held Promises and flush microtasks; real product queues/gates/retries unchanged",
+    "timers": "Original real bounded observers/heartbeat timers; no global clock replacement; exact45 endpoint+natural process termination required",
+    "filter": "Delete inherited YMCC_FAN_FAILED_READ_CASE so original45 cannot silently subset"
+  },
+  "compilerOnly": {
+    "path": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\failed-read-compiler-review\\review.json",
+    "sha256": "5bf9ce99f3f4cf175701aa3598d6e3993197d95c77554808256277ac9f3720e7",
+    "actualInputCount": 97,
+    "capturedActualInputs": 97,
+    "externalImports": [
+      "node:assert/strict"
+    ],
+    "toolRuntimeModules": 1,
+    "unpinnedModules": 0,
+    "businessExecuted": false
+  },
+  "runtimePlan": {
+    "existingGuard": "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "ownedJob": "tools/ymcc_sim/global/host-process.ps1",
+    "existingToolProfile": "tools/ymcc_sim/global/fan-pending-acquisition-consumer/toolchain-inputs.json",
+    "toolPins": 58,
+    "output": "Fresh absolute owned evidence only",
+    "onlyExternalModule": "node:assert/strict",
+    "runtimeObservation": "Thin preload reuses guard, verifies absence of window.chrome.webview, captures natural beforeExit and Node V8 source coverage; no program/consumer rewrite"
+  },
+  "privateSourceFault": {
+    "id": "retired-failure-starts-readback",
+    "predictedFailures": 12,
+    "assertionLine": 49,
+    "compilerOrTimeoutNotBehavioralDetection": true
+  },
+  "sourceReview": [
+    {
+      "path": "src/bridge/aiFanMock.ts",
+      "sha256": "7d6d250039f78b44200f524ba9a085ab9789348c192b179294b25d7448100ac7"
+    },
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+    },
+    {
+      "path": "src/bridge/autofloat.ts",
+      "sha256": "c81b3b8ae4565145f31353befc62232462b16085e945e9e3f3a89d1c79b6e237"
+    },
+    {
+      "path": "src/bridge/controllerPersona.ts",
+      "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+    },
+    {
+      "path": "src/bridge/controllerShortcutRules.ts",
+      "sha256": "cb850b5828df07bb0fbeae017d147b828639b70f91c4e7e0d7a095b6b62d2dfc"
+    },
+    {
+      "path": "src/bridge/cpuProfiles.ts",
+      "sha256": "be7d197a7655ca6a01e8ad9fca9776f7548a15c83eef2bdfb16e6a0df9056784"
+    },
+    {
+      "path": "src/bridge/fanApi.ts",
+      "sha256": "2f8c1de17935b9ff016a2deaefb041cf52e5a763aacaea194593da120e8a59a2"
+    },
+    {
+      "path": "src/bridge/fanCurve.ts",
+      "sha256": "a5679d7a7024101932ede8daef756a625d254bae44200a3a0c708000aaaa9d9a"
+    },
+    {
+      "path": "src/bridge/fanDiagnostics.ts",
+      "sha256": "427617ae42ae7d5474631fdf034ce2fe80694dbc92c1b16868c1a5ded04d8918"
+    },
+    {
+      "path": "src/bridge/fanFeature.ts",
+      "sha256": "17f447f88957db8bce18db66fdcf095d8309159202fac27a94cf8caad4d1cfe7"
+    },
+    {
+      "path": "src/bridge/fanHost.ts",
+      "sha256": "b4fede80ba42ee19c7a2d6e86a12d1206335bdde6ac2f0a5667fd00da53146f4"
+    },
+    {
+      "path": "src/bridge/fanHost/capabilityAdmission.ts",
+      "sha256": "f1f64c14a03f3b233ec3004c04f42e51fcc1a345c86dbc8c378ccdc8480ee8ef"
+    },
+    {
+      "path": "src/bridge/fanHost/deployment.ts",
+      "sha256": "2524655a2cb6e4a1bc05f8771718621cc8a0b9af295c81a1413195f11a6f8eb1"
+    },
+    {
+      "path": "src/bridge/fanHost/startupConfiguration.ts",
+      "sha256": "6afaa2666057245295bae56a563524b0ce839394ab36fca0e02ee71bf6cfc919"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerAsset.json",
+      "sha256": "26c84052d51d29bcf27789652f79c000ba3cbd8c77d995717e9688b38c641936"
+    },
+    {
+      "path": "src/bridge/fanHostInstallerRepair.ts",
+      "sha256": "7890e2ac4d246fe9bc30edb3d391b74aec1202c618aff3b7fbfcabd8c0668145"
+    },
+    {
+      "path": "src/bridge/fanSessionEvidence.ts",
+      "sha256": "1f64ca84057429cfef1e4f297d632e24c0f74685034a0cb3cc07ff161a266827"
+    },
+    {
+      "path": "src/bridge/frameRateLimits.ts",
+      "sha256": "c4554ac2064f422c604244a6ff4465f731e3055e54163e4b70d458c93ac58d27"
+    },
+    {
+      "path": "src/bridge/frameRateModel.ts",
+      "sha256": "e8494c827db9f5d86661ff4ec366e019c0b93e79475e6de21f863d4490111f3f"
+    },
+    {
+      "path": "src/bridge/gameCorePolicy.ts",
+      "sha256": "07c76a6447c213f4b9b87759b7d06c5ac9967ef73fe57bee366daada828bf838"
+    },
+    {
+      "path": "src/bridge/gamedetect.ts",
+      "sha256": "6e137e758786ae47df7936dc2de9544219acb38bc7db1e13994cf136256903a1"
+    },
+    {
+      "path": "src/bridge/gamePolicyHysteresis.ts",
+      "sha256": "adadbee7224b36e725e71bcf787e6c21864e8cfcf6e0a673ca041c5934382701"
+    },
+    {
+      "path": "src/bridge/gamePolicyTarget.ts",
+      "sha256": "6f4651aab3231de59daf48d6cb6a11c5188885e3dc68d5c9fa4901acef39df83"
+    },
+    {
+      "path": "src/bridge/gamingHomePolicy.ts",
+      "sha256": "5a55fb0f37f5a5bb64123a6eb2a7bd4c4fa6c159643cc6e456e01b52b2301acd"
+    },
+    {
+      "path": "src/bridge/hardwareCoordinator.ts",
+      "sha256": "98e4bee792e3d98c57b449657a174738c7ef19cdf1efa2b8fec2bb6c7212cba0"
+    },
+    {
+      "path": "src/bridge/hcInputUtils.ts",
+      "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+    },
+    {
+      "path": "src/bridge/inputConfigHash.ts",
+      "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+    },
+    {
+      "path": "src/bridge/inputStartupPolicy.ts",
+      "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+    },
+    {
+      "path": "src/bridge/ipc.ts",
+      "sha256": "78a2a5c370b2d11312b7cade48402b001456bcbe0d39a2faffb7c26c71fa52b6"
+    },
+    {
+      "path": "src/bridge/monitorAppliedTdp.ts",
+      "sha256": "09ca9e6801bfcf3933cf10a74f51a674531c8a60a6d7d42d4a33d66c3061f3b2"
+    },
+    {
+      "path": "src/bridge/monitorCoreTiles.ts",
+      "sha256": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e"
+    },
+    {
+      "path": "src/bridge/monitorData.ts",
+      "sha256": "a33b814e52baa2a43e7aa64b6fe99ff47759d674021cfa0b4eac703be3aede6e"
+    },
+    {
+      "path": "src/bridge/monitorDisplayFeed.ts",
+      "sha256": "fbd20173626d2a94f62255b5502f0ded49f51774799db26bb9ad464af35edfa8"
+    },
+    {
+      "path": "src/bridge/monitorFpsHardware.ts",
+      "sha256": "9e0e9e35178fd428f4f1e6d9348b2db4614395d7c0c497077161cdddc0554692"
+    },
+    {
+      "path": "src/bridge/monitorFrameTime.ts",
+      "sha256": "5a07e28a7013e787d6cf4d735bd604230cf5747537423c03bb27c035ddc598dc"
+    },
+    {
+      "path": "src/bridge/monitorHudFreshness.ts",
+      "sha256": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee"
+    },
+    {
+      "path": "src/bridge/monitorNativeDemand.ts",
+      "sha256": "8e2cc37ff20d17f05856c0d8b22ec000099c44b39da4ff9c2a4184a4b334c6b5"
+    },
+    {
+      "path": "src/bridge/monitorPayloadDecoder.ts",
+      "sha256": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotBudget.ts",
+      "sha256": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9"
+    },
+    {
+      "path": "src/bridge/monitorSnapshotSignals.ts",
+      "sha256": "68a9b98d765b563721ee5045fbaa6f4034c6174102319cf57eea18ed4beec976"
+    },
+    {
+      "path": "src/bridge/monitorTopProjection.ts",
+      "sha256": "e3d741e5bd88760c457c8e37e520674281042112a2c7bef344fa2712c6b81a84"
+    },
+    {
+      "path": "src/bridge/performanceControls.ts",
+      "sha256": "6e576f791dc903402ca11dd19f96a3d622672f87f8d04eaa86ec7bf00b5cddc9"
+    },
+    {
+      "path": "src/bridge/performanceSchedule.ts",
+      "sha256": "2b5422dca7095c678ab3f115089f605a2c1820341d07901141f1a17939501883"
+    },
+    {
+      "path": "src/bridge/powerSource.ts",
+      "sha256": "32c052caa385e033c6d0f0a959a87125cd2ec8319679fb19eaf7e34d15f6a30d"
+    },
+    {
+      "path": "src/bridge/quickAppDefaults.ts",
+      "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+    },
+    {
+      "path": "src/bridge/rtssOverlay.ts",
+      "sha256": "2d3e7fb809eeabecd3055ed1c1c1f5e443ff8e1ad7577c36337ae00dce5493a9"
+    },
+    {
+      "path": "src/bridge/settingsRepository.ts",
+      "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+    },
+    {
+      "path": "src/bridge/settingsSnapshot.ts",
+      "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+    },
+    {
+      "path": "src/bridge/tdpCircuitBreaker.ts",
+      "sha256": "e0e181771869c411576746e15f19a8c4515fcd2043c5735f8c189a5e2f913e00"
+    },
+    {
+      "path": "src/bridge/tdpRuntimeState.ts",
+      "sha256": "c021f00359d3887abfb31aca707def2555ba1fbebfcb318a0fc44959072f0860"
+    },
+    {
+      "path": "src/bridge/tdpStaticDiagnostics.ts",
+      "sha256": "4e3a576453ae1bef5e9f1b4ee86314566e0d02a9bdce5fc0e190604629e039ee"
+    },
+    {
+      "path": "src/bridge/topmon.ts",
+      "sha256": "5936cc3610c75478721ed32d3f08ef8afa9a822e28024562cca6c89ad4242244"
+    },
+    {
+      "path": "src/bridge/uiLifecycle.ts",
+      "sha256": "4358563359424025d2c8a8688ab3c658f3eaa412b4cf0260a0c3f151517a9443"
+    },
+    {
+      "path": "src/bridge/yeman.ts",
+      "sha256": "3be2c603e9e32e9c1cd6de00a9281854a11b5b5c763bfa5639591700f7f39427"
+    },
+    {
+      "path": "src/radial/availability.ts",
+      "sha256": "1b873833125c8727bab698793e8d83367d639baca64b42a294975176f9eecfd4"
+    },
+    {
+      "path": "src/radial/testingState.ts",
+      "sha256": "bcd59a9cf78056887b88f7dfcd729d00e8dc93b54ab4acffef4578a67a5ecf88"
+    },
+    {
+      "path": "src/robust/repairModel.ts",
+      "sha256": "a9b2a1267074dac35513d9ed342d43c9cfe3736a17ef87d4dd177190c0934a65"
+    },
+    {
+      "path": "src/scheduler.ts",
+      "sha256": "5e5d4c31e641a3bdfe0cfa4a403047a6ac723e3ae1e398e6aba8a243a80a95f4"
+    },
+    {
+      "path": "tools/fan_failed_state_read_identity_selftest.ts",
+      "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06"
+    },
+    {
+      "path": "tools/fixtures/fan_no_io_host.ts",
+      "sha256": "27f61b5a8703e713c7ef61c08ceebbae13f7e63b7ba70d576e65bf34d4fe2a3f"
+    }
+  ],
+  "realHttp": false,
+  "realHost": false,
+  "realNativeBridge": false,
+  "realProcessLookupOrControl": false,
+  "realDevices": false,
+  "osSleep": false,
+  "userSettings": false,
+  "userMedia": false,
+  "productChanges": 0,
+  "previousSourceReview": {
+    "boundarySha256": "db19ce7794df818ac130ee55c948cd961fb067a6ab19c9f258c61f8246b15130",
+    "sourceReview": [
+      {
+        "path": "src/bridge/aiFanMock.ts",
+        "sha256": "7d6d250039f78b44200f524ba9a085ab9789348c192b179294b25d7448100ac7"
+      },
+      {
+        "path": "src/bridge/api.ts",
+        "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+      },
+      {
+        "path": "src/bridge/autofloat.ts",
+        "sha256": "c81b3b8ae4565145f31353befc62232462b16085e945e9e3f3a89d1c79b6e237"
+      },
+      {
+        "path": "src/bridge/controllerPersona.ts",
+        "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+      },
+      {
+        "path": "src/bridge/controllerShortcutRules.ts",
+        "sha256": "eb7ed8c8328ab771666ff9441f6974e51044d349699faf506ef10e57f46e39fb"
+      },
+      {
+        "path": "src/bridge/cpuProfiles.ts",
+        "sha256": "be7d197a7655ca6a01e8ad9fca9776f7548a15c83eef2bdfb16e6a0df9056784"
+      },
+      {
+        "path": "src/bridge/fanApi.ts",
+        "sha256": "2f8c1de17935b9ff016a2deaefb041cf52e5a763aacaea194593da120e8a59a2"
+      },
+      {
+        "path": "src/bridge/fanCurve.ts",
+        "sha256": "a5679d7a7024101932ede8daef756a625d254bae44200a3a0c708000aaaa9d9a"
+      },
+      {
+        "path": "src/bridge/fanDiagnostics.ts",
+        "sha256": "427617ae42ae7d5474631fdf034ce2fe80694dbc92c1b16868c1a5ded04d8918"
+      },
+      {
+        "path": "src/bridge/fanFeature.ts",
+        "sha256": "17f447f88957db8bce18db66fdcf095d8309159202fac27a94cf8caad4d1cfe7"
+      },
+      {
+        "path": "src/bridge/fanHost.ts",
+        "sha256": "a77d85d93f15e63d34f744279603474b290bf6db64af6b7ecbd2ac628c912c45"
+      },
+      {
+        "path": "src/bridge/fanHostInstallerAsset.json",
+        "sha256": "92a19daf0cfb08ba3d9adbbf86e6e53041e1116cbd9c6f359e2ae6b268e5b305"
+      },
+      {
+        "path": "src/bridge/fanHostInstallerRepair.ts",
+        "sha256": "7890e2ac4d246fe9bc30edb3d391b74aec1202c618aff3b7fbfcabd8c0668145"
+      },
+      {
+        "path": "src/bridge/fanSessionEvidence.ts",
+        "sha256": "1f64ca84057429cfef1e4f297d632e24c0f74685034a0cb3cc07ff161a266827"
+      },
+      {
+        "path": "src/bridge/frameRateLimits.ts",
+        "sha256": "c4554ac2064f422c604244a6ff4465f731e3055e54163e4b70d458c93ac58d27"
+      },
+      {
+        "path": "src/bridge/frameRateModel.ts",
+        "sha256": "e8494c827db9f5d86661ff4ec366e019c0b93e79475e6de21f863d4490111f3f"
+      },
+      {
+        "path": "src/bridge/gameCorePolicy.ts",
+        "sha256": "07c76a6447c213f4b9b87759b7d06c5ac9967ef73fe57bee366daada828bf838"
+      },
+      {
+        "path": "src/bridge/gamePolicyHysteresis.ts",
+        "sha256": "adadbee7224b36e725e71bcf787e6c21864e8cfcf6e0a673ca041c5934382701"
+      },
+      {
+        "path": "src/bridge/gamePolicyTarget.ts",
+        "sha256": "6f4651aab3231de59daf48d6cb6a11c5188885e3dc68d5c9fa4901acef39df83"
+      },
+      {
+        "path": "src/bridge/gamedetect.ts",
+        "sha256": "6e137e758786ae47df7936dc2de9544219acb38bc7db1e13994cf136256903a1"
+      },
+      {
+        "path": "src/bridge/gamingHomePolicy.ts",
+        "sha256": "5a55fb0f37f5a5bb64123a6eb2a7bd4c4fa6c159643cc6e456e01b52b2301acd"
+      },
+      {
+        "path": "src/bridge/hardwareCoordinator.ts",
+        "sha256": "98e4bee792e3d98c57b449657a174738c7ef19cdf1efa2b8fec2bb6c7212cba0"
+      },
+      {
+        "path": "src/bridge/hcInputUtils.ts",
+        "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+      },
+      {
+        "path": "src/bridge/inputConfigHash.ts",
+        "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+      },
+      {
+        "path": "src/bridge/inputStartupPolicy.ts",
+        "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+      },
+      {
+        "path": "src/bridge/ipc.ts",
+        "sha256": "d9612f011d96f36ac09e2ea7f84b66f8de5d62cca7ad6f86ccaea32913eaf4b5"
+      },
+      {
+        "path": "src/bridge/monitorAppliedTdp.ts",
+        "sha256": "09ca9e6801bfcf3933cf10a74f51a674531c8a60a6d7d42d4a33d66c3061f3b2"
+      },
+      {
+        "path": "src/bridge/monitorCoreTiles.ts",
+        "sha256": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e"
+      },
+      {
+        "path": "src/bridge/monitorData.ts",
+        "sha256": "a33b814e52baa2a43e7aa64b6fe99ff47759d674021cfa0b4eac703be3aede6e"
+      },
+      {
+        "path": "src/bridge/monitorDisplayFeed.ts",
+        "sha256": "fbd20173626d2a94f62255b5502f0ded49f51774799db26bb9ad464af35edfa8"
+      },
+      {
+        "path": "src/bridge/monitorFpsHardware.ts",
+        "sha256": "9e0e9e35178fd428f4f1e6d9348b2db4614395d7c0c497077161cdddc0554692"
+      },
+      {
+        "path": "src/bridge/monitorFrameTime.ts",
+        "sha256": "5a07e28a7013e787d6cf4d735bd604230cf5747537423c03bb27c035ddc598dc"
+      },
+      {
+        "path": "src/bridge/monitorHudFreshness.ts",
+        "sha256": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee"
+      },
+      {
+        "path": "src/bridge/monitorNativeDemand.ts",
+        "sha256": "8e2cc37ff20d17f05856c0d8b22ec000099c44b39da4ff9c2a4184a4b334c6b5"
+      },
+      {
+        "path": "src/bridge/monitorPayloadDecoder.ts",
+        "sha256": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b"
+      },
+      {
+        "path": "src/bridge/monitorSnapshotBudget.ts",
+        "sha256": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9"
+      },
+      {
+        "path": "src/bridge/monitorSnapshotSignals.ts",
+        "sha256": "68a9b98d765b563721ee5045fbaa6f4034c6174102319cf57eea18ed4beec976"
+      },
+      {
+        "path": "src/bridge/monitorTopProjection.ts",
+        "sha256": "e3d741e5bd88760c457c8e37e520674281042112a2c7bef344fa2712c6b81a84"
+      },
+      {
+        "path": "src/bridge/performanceControls.ts",
+        "sha256": "87ac5918e2ca81c657e67bb08d8ae6b73639b7f89bcf4e5a49eeea6015674862"
+      },
+      {
+        "path": "src/bridge/performanceSchedule.ts",
+        "sha256": "1a2b0c9d85310411e9528b412eb4957e5e38895c79630ea785fed7abfcb5cd54"
+      },
+      {
+        "path": "src/bridge/powerSource.ts",
+        "sha256": "32c052caa385e033c6d0f0a959a87125cd2ec8319679fb19eaf7e34d15f6a30d"
+      },
+      {
+        "path": "src/bridge/quickAppDefaults.ts",
+        "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+      },
+      {
+        "path": "src/bridge/rtssOverlay.ts",
+        "sha256": "2d3e7fb809eeabecd3055ed1c1c1f5e443ff8e1ad7577c36337ae00dce5493a9"
+      },
+      {
+        "path": "src/bridge/settingsRepository.ts",
+        "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+      },
+      {
+        "path": "src/bridge/settingsSnapshot.ts",
+        "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+      },
+      {
+        "path": "src/bridge/tdpCircuitBreaker.ts",
+        "sha256": "e0e181771869c411576746e15f19a8c4515fcd2043c5735f8c189a5e2f913e00"
+      },
+      {
+        "path": "src/bridge/tdpRuntimeState.ts",
+        "sha256": "c021f00359d3887abfb31aca707def2555ba1fbebfcb318a0fc44959072f0860"
+      },
+      {
+        "path": "src/bridge/tdpStaticDiagnostics.ts",
+        "sha256": "4e3a576453ae1bef5e9f1b4ee86314566e0d02a9bdce5fc0e190604629e039ee"
+      },
+      {
+        "path": "src/bridge/topmon.ts",
+        "sha256": "5936cc3610c75478721ed32d3f08ef8afa9a822e28024562cca6c89ad4242244"
+      },
+      {
+        "path": "src/bridge/uiLifecycle.ts",
+        "sha256": "d3f5d4ac4cb2da7ce91cdd8112fcdb94d9b9ba5e383467182b5f8ed8c71aec73"
+      },
+      {
+        "path": "src/bridge/yeman.ts",
+        "sha256": "bd49cd55090702a9cdb3136897b259561c40654b42438c307ba1dcbde804431d"
+      },
+      {
+        "path": "src/robust/repairModel.ts",
+        "sha256": "a9b2a1267074dac35513d9ed342d43c9cfe3736a17ef87d4dd177190c0934a65"
+      },
+      {
+        "path": "src/scheduler.ts",
+        "sha256": "5e5d4c31e641a3bdfe0cfa4a403047a6ac723e3ae1e398e6aba8a243a80a95f4"
+      },
+      {
+        "path": "tools/fan_failed_state_read_identity_selftest.ts",
+        "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06"
+      },
+      {
+        "path": "tools/fixtures/fan_no_io_host.ts",
+        "sha256": "27f61b5a8703e713c7ef61c08ceebbae13f7e63b7ba70d576e65bf34d4fe2a3f"
+      }
+    ],
+    "actualOriginalCompiledSourceView": "Historical61-member original compiler snapshot re-read and matched every changed row by exact expected SHA; this does not approve historical code as current."
+  },
+  "currentSourceReview": {
+    "scope": "Finite8 source-change and5 import admission review; new source-qualified boundary only. Original raw results/faults remain immutable.",
+    "changes": {
+      "src/bridge/fanHost.ts": "Definitions moved to3 reviewed TS modules; lifecycle public implementation/identity checks execute unmodified, NoIoHost/launcher/processProbe injection and selected source-fault anchors remain original. Native API calls absent in node child unless explicitly memory-supplied; actual postMessage/proc.findExact must remainzero by original V8 verifier.",
+      "src/bridge/ipc.ts": "Abort/deadline/remote-error bookkeeping stays in frontend. Transport obtained only from absent window.chrome.webview, invocation rejects without native transport; no fs/net/process fallback.",
+      "src/bridge/controllerShortcutRules.ts": "Runtime radial admission uses new pure availability/testingState import; testing flag remains shallowRef(false), no product feature switched by tests.",
+      "src/bridge/fanHostInstallerAsset.json": "Immutable deployment metadata only; actual launcher is original memory port, no production process launch.",
+      "src/bridge/performanceControls.ts": "Pure typed normalization/defaults and settings projections; actual Windows endpoints remain behind original api/ipc bridge.",
+      "src/bridge/performanceSchedule.ts": "Frontend scheduling/settings operations use existing bridge; original runtime denies foreign network/process/filesystem and source V8 verifies actual bridge calls; no direct native import.",
+      "src/bridge/uiLifecycle.ts": "Visibility state and listeners use absent/in-memory DOM guard, no native IO.",
+      "src/bridge/yeman.ts": "Semantic power/fs wrappers depend solely on original api/ipc. No Node builtin IO/native fallback; original fan fixtures provide all requested hardware/native state via memory."
+    },
+    "sourceImportDeclarations": "Five exact additional source modules match original compiler observed graph, no removed graph inputs, external imports unchanged.",
+    "retainedGuards": [
+      "Node child starts without window.chrome.webview",
+      "original actual proc.findExact/postMessage sites zero where required",
+      "original fs/net/child_process/native import deny",
+      "owned Job and natural child exit",
+      "exact original case/failed assertion names and fault source changes",
+      "current source+tool pre/post identity"
+    ],
+    "notAccepted": "A full positive result still requires actual original semantic run+fault and public registered audit; an earlier source-review refusal is not a detected product fault.",
+    "B49FiniteDeltaReview": {
+      "schemaVersion": 1,
+      "reviewId": "B49-fan-three-source-review-20261021-r1",
+      "reviewedAt": "2026-10-20T18:28:26.843Z",
+      "scope": "Finite B49 fan NoIO source admission only: one yeman.ts delta after actual B48/B46/PASS-input comparison. No producer/product/VM guard/fault/budget change; no B49 behavior result reused.",
+      "sourceVersion": "B49_FIXED_POLICY6",
+      "reviewDisposition": "SCOPED_CURRENT_SOURCE_BYTES_REVIEWED_PUBLIC_EXECUTION_PENDING",
+      "productBehaviorApproval": false,
+      "newBusinessExecution": false,
+      "previousBoundarySha256": "51c761a7adcf49d5306f68c723293340e407e3fc165ea614b05f11ec974b2408",
+      "reviewedChanges": [
+        {
+          "path": "src/bridge/yeman.ts",
+          "beforeSha256": "98cd76060a4ae7183b6e6ef918773c1e0fbb8b09a27b6b112c3341a6ff0e3e4e",
+          "afterSha256": "384bdeacb8de5a1806e284c9c989434d05b9cb14fa858f237359fb43bcbd9894",
+          "actualBefore": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261021-B48/src/bridge/yeman.ts",
+          "independentB46": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/src/bridge/yeman.ts",
+          "actualAfter": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261021-B49/src/bridge/yeman.ts",
+          "diff": "D:/Codex/2026-10-18/kai-s/work/global-B49-fan-three-source-review-20261021-r1/source-diffs/src/bridge/yeman.ts.patch",
+          "diffSha256": "d747720449abaed18b025adf9e73d957b488e67911aa99322397ea56428c4b3f",
+          "changedDeclarationLines": [
+            {
+              "name": "STEAM_ADDONS",
+              "beforeLine": 3065,
+              "beforeEndLine": 3069,
+              "afterLine": 3065,
+              "afterEndLine": 3068,
+              "beforeSha256": "54c85d4b4ce5e3ce7c76405bb6e0a6111af5390da4f458f6588a4092f190ef7e",
+              "afterSha256": "baafd63006a8afa0061ea80f377419f5e9b4109386027eebe484866c4a2a86c4"
+            },
+            {
+              "name": "steamCustomAddons",
+              "beforeLine": 3117,
+              "beforeEndLine": 3133,
+              "afterLine": 3117,
+              "afterEndLine": 3133,
+              "beforeSha256": "1289eae2d6b612d72bac1b9eaf23dd8e331a7014d2e7c067b654878da0e886e9",
+              "afterSha256": "1eecef56cb40b1eb98b07018877f15ef9b11e3e7f37fdbde4721271a3f7f2249"
+            },
+            {
+              "name": "steamCustomAddonAdd",
+              "beforeLine": 3138,
+              "beforeEndLine": 3147,
+              "afterLine": 3138,
+              "afterEndLine": 3148,
+              "beforeSha256": "59e890c44496750e11640342335cb60dae2b9eadb0ccc87430c8ad1878ad6710",
+              "afterSha256": "6efcd98f6bd30921f9f7034e924a368bbfe24abff9f36330496a40133601103d"
+            },
+            {
+              "name": "steamCustomAddonSet",
+              "beforeLine": 3148,
+              "beforeEndLine": 3152,
+              "afterLine": 3149,
+              "afterEndLine": 3154,
+              "beforeSha256": "0fd6cfde6ac0179e2566a1d12c6cacd050fc2c95c3f0290b988a8c4df6c9abc7",
+              "afterSha256": "8b88d54545823f6e5fbacf2e4ca16b61501cf2617b0f504edaaa218de5f5e0a8"
+            },
+            {
+              "name": "steamEarlyStartFile",
+              "beforeLine": 3161,
+              "beforeEndLine": 3169,
+              "afterLine": null,
+              "afterEndLine": null,
+              "beforeSha256": "8e484aca31f2a21fee1aafe99c395f5a2894998b49433fb48660f2802b1ec888",
+              "afterSha256": null
+            },
+            {
+              "name": "STEAM_EARLYSTART_CONTENT",
+              "beforeLine": 3170,
+              "beforeEndLine": 3170,
+              "afterLine": null,
+              "afterEndLine": null,
+              "beforeSha256": "79b2ea78f074204fe3f14eba6c8be11dd75ec26704d24962eaf90c06ae4d4477",
+              "afterSha256": null
+            },
+            {
+              "name": "steamMasterOn",
+              "beforeLine": 3171,
+              "beforeEndLine": 3177,
+              "afterLine": 3164,
+              "afterEndLine": 3169,
+              "beforeSha256": "04e2a2872ea8a8110b62d1883039239d95f1f9fa1488ea72446d6a0f6fe59809",
+              "afterSha256": "98a3ca28d377ab087819f1db9216e19b0f2dcfb9e85332ee50db0f9ac5180cba"
+            },
+            {
+              "name": "steamMasterSet",
+              "beforeLine": 3178,
+              "beforeEndLine": 3182,
+              "afterLine": 3170,
+              "afterEndLine": 3173,
+              "beforeSha256": "e1629c9b055b3c289316d9c2c9ae5dfd4f31a5d453b930a11cffba821e374dc0",
+              "afterSha256": "84d48675ebe5bcd666ff6f304db3866af1e23cae78d366f7e4a4e971d0bd9cf1"
+            },
+            {
+              "name": "launchSteam",
+              "beforeLine": 3200,
+              "beforeEndLine": 3230,
+              "afterLine": 3191,
+              "afterEndLine": 3210,
+              "beforeSha256": "f3099a4e98c63ca15e64b3c17bbe82c602c8af197ccdc9e4fcf7fabbdecea55b",
+              "afterSha256": "74135ee20e583b5d1528c0edabf178ab0454172f61b302360abf5ffa30ab6e78"
+            },
+            {
+              "name": "isAppearanceBackend",
+              "beforeLine": null,
+              "beforeEndLine": null,
+              "afterLine": 3070,
+              "afterEndLine": 3070,
+              "beforeSha256": null,
+              "afterSha256": "58fe27cfdcbbefe1328fa64aa619a2c0a35789bedb479eeb03391579295343c7"
+            }
+          ]
+        }
+      ],
+      "reason": "The exact sole sourceReview drift is confined to Steam addon/startup/manual-launch declarations. Import statements and 27 imported yeman roots / conservative 92-declaration closure are unchanged and do not reach changed functions. No new module import, immediate call or native/Node fallback is added to the fan consumer.",
+      "actualCompileBoundary": {
+        "historicalEvidenceOnly": true,
+        "priorInnerResult": "D:/GlobalPrimaryFanThreeRefreshR2/2026-10-20T17-09-59-025Z-2977fdf9/cases/fan.failed-read-identity-consumer/failed-read/result.json",
+        "priorInnerResultSha256": "0f5ffdee709517843dcaadb0706ac828bcb040cf381106b53a2cc1e7adaa5843",
+        "positiveAndNegativeActualInputs": 102,
+        "repositoryInputs": 61,
+        "lockedToolInputs": 41,
+        "externalModules": [
+          "node:assert/strict"
+        ],
+        "nativeCppCsDllExeInputs": 0,
+        "currentSpecBuildInputsExactlySame": true,
+        "B49ActuallyCompiled": false,
+        "warning": "Original compilerOnly/aggregate compilerInputs=97 is retained historical metadata; actual prior metafile + captured byte-load rows + current spec are 102. Do not use 97 to truncate or weaken graph validation."
+      },
+      "retainedProtection": {
+        "NoIoHostMemoryAndInjectedLauncher": true,
+        "defaultNativeBridgeRequiresWebView": true,
+        "noWindowOrChromeAtChildStartAndNaturalEnd": true,
+        "actualCompiledPostMessageZeroRequired": true,
+        "actualNativeProcFindExactZeroRequired": true,
+        "injectedProcessProbeDistinct": true,
+        "nodeFilesystemNetworkProcessNativeDeny": true,
+        "exactCompilerInputGraphAndExternalImports": true,
+        "actualInputShaPrePost": true,
+        "metadataDisabledRebuildByteEquality": true,
+        "ownedWindowsJobAndNaturalExit": true,
+        "originalAssertionsAndSemanticFault": true,
+        "originalTimeouts": true
+      },
+      "guardAndFaultProof": {
+        "unchangedEvidence": "D:/Codex/2026-10-18/kai-s/work/global-B49-fan-three-source-review-20261021-r1/UNCHANGED-CONSUMER-GUARD-FAULT-REVIEW.json",
+        "faultId": "retired-failure-starts-readback",
+        "expectedSemanticFailures": 12,
+        "assertionLine": 49
+      },
+      "priorReviewEvidence": {
+        "integration": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-three-reviewed-boundary-refresh-r1/SOURCE-INTEGRATION.json",
+        "summary": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/primary-fan-three-refresh-r2/SUMMARY.json",
+        "actualCompilerAndV8Evidence": "D:/Codex/2026-10-18/kai-s/work/global-B49-fan-three-source-review-20261021-r1/PRIOR-ACTUAL-COMPILE-NOIO-EVIDENCE.json"
+      },
+      "policy6": {
+        "verifierSha256": "f0d497ac9f639c878baa32c0fdf8b3e20e09b999fec510128583a6b8bf7b9877",
+        "sourceSnapshotApprovalNotReissued": true,
+        "oldB48VerifierNotUsed": true
+      },
+      "limits": [
+        "Existing B49 original rejection is preserved; review refusal is not semantic fault detection.",
+        "No B49 tests/compilation/device/Host/Steam/network executed by this sidecar. Parent must run original public positive + exact fault and registered audit on the actual integrated fixed inputs.",
+        "Steam startup/launch and current whole-product behavior are not approved.",
+        "Only src/bridge/yeman.ts row changes; source membership, producers, runtime/V8 guards, specs, faults, budgets and original IO exclusions stay unchanged."
+      ],
+      "evidenceRoot": "D:/Codex/2026-10-18/kai-s/work/global-B49-fan-three-source-review-20261021-r1"
+    }
+  },
+  "sourceReviewHistory": [
+    {
+      "kind": "prior-immutable-boundary-source-review",
+      "boundarySha256": "51c761a7adcf49d5306f68c723293340e407e3fc165ea614b05f11ec974b2408",
+      "reviewedAt": "2026-10-20T17:08:55.277Z",
+      "sourceReview": [
+        {
+          "path": "src/bridge/aiFanMock.ts",
+          "sha256": "7d6d250039f78b44200f524ba9a085ab9789348c192b179294b25d7448100ac7"
+        },
+        {
+          "path": "src/bridge/api.ts",
+          "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+        },
+        {
+          "path": "src/bridge/autofloat.ts",
+          "sha256": "c81b3b8ae4565145f31353befc62232462b16085e945e9e3f3a89d1c79b6e237"
+        },
+        {
+          "path": "src/bridge/controllerPersona.ts",
+          "sha256": "900df2fb621a380697c785cda4a51177710a53e70c47d2cd01b7e63a47bb8e70"
+        },
+        {
+          "path": "src/bridge/controllerShortcutRules.ts",
+          "sha256": "cb850b5828df07bb0fbeae017d147b828639b70f91c4e7e0d7a095b6b62d2dfc"
+        },
+        {
+          "path": "src/bridge/cpuProfiles.ts",
+          "sha256": "be7d197a7655ca6a01e8ad9fca9776f7548a15c83eef2bdfb16e6a0df9056784"
+        },
+        {
+          "path": "src/bridge/fanApi.ts",
+          "sha256": "2f8c1de17935b9ff016a2deaefb041cf52e5a763aacaea194593da120e8a59a2"
+        },
+        {
+          "path": "src/bridge/fanCurve.ts",
+          "sha256": "a5679d7a7024101932ede8daef756a625d254bae44200a3a0c708000aaaa9d9a"
+        },
+        {
+          "path": "src/bridge/fanDiagnostics.ts",
+          "sha256": "427617ae42ae7d5474631fdf034ce2fe80694dbc92c1b16868c1a5ded04d8918"
+        },
+        {
+          "path": "src/bridge/fanFeature.ts",
+          "sha256": "17f447f88957db8bce18db66fdcf095d8309159202fac27a94cf8caad4d1cfe7"
+        },
+        {
+          "path": "src/bridge/fanHost.ts",
+          "sha256": "b4fede80ba42ee19c7a2d6e86a12d1206335bdde6ac2f0a5667fd00da53146f4"
+        },
+        {
+          "path": "src/bridge/fanHost/capabilityAdmission.ts",
+          "sha256": "f1f64c14a03f3b233ec3004c04f42e51fcc1a345c86dbc8c378ccdc8480ee8ef"
+        },
+        {
+          "path": "src/bridge/fanHost/deployment.ts",
+          "sha256": "2524655a2cb6e4a1bc05f8771718621cc8a0b9af295c81a1413195f11a6f8eb1"
+        },
+        {
+          "path": "src/bridge/fanHost/startupConfiguration.ts",
+          "sha256": "6afaa2666057245295bae56a563524b0ce839394ab36fca0e02ee71bf6cfc919"
+        },
+        {
+          "path": "src/bridge/fanHostInstallerAsset.json",
+          "sha256": "26c84052d51d29bcf27789652f79c000ba3cbd8c77d995717e9688b38c641936"
+        },
+        {
+          "path": "src/bridge/fanHostInstallerRepair.ts",
+          "sha256": "7890e2ac4d246fe9bc30edb3d391b74aec1202c618aff3b7fbfcabd8c0668145"
+        },
+        {
+          "path": "src/bridge/fanSessionEvidence.ts",
+          "sha256": "1f64ca84057429cfef1e4f297d632e24c0f74685034a0cb3cc07ff161a266827"
+        },
+        {
+          "path": "src/bridge/frameRateLimits.ts",
+          "sha256": "c4554ac2064f422c604244a6ff4465f731e3055e54163e4b70d458c93ac58d27"
+        },
+        {
+          "path": "src/bridge/frameRateModel.ts",
+          "sha256": "e8494c827db9f5d86661ff4ec366e019c0b93e79475e6de21f863d4490111f3f"
+        },
+        {
+          "path": "src/bridge/gameCorePolicy.ts",
+          "sha256": "07c76a6447c213f4b9b87759b7d06c5ac9967ef73fe57bee366daada828bf838"
+        },
+        {
+          "path": "src/bridge/gamedetect.ts",
+          "sha256": "6e137e758786ae47df7936dc2de9544219acb38bc7db1e13994cf136256903a1"
+        },
+        {
+          "path": "src/bridge/gamePolicyHysteresis.ts",
+          "sha256": "adadbee7224b36e725e71bcf787e6c21864e8cfcf6e0a673ca041c5934382701"
+        },
+        {
+          "path": "src/bridge/gamePolicyTarget.ts",
+          "sha256": "6f4651aab3231de59daf48d6cb6a11c5188885e3dc68d5c9fa4901acef39df83"
+        },
+        {
+          "path": "src/bridge/gamingHomePolicy.ts",
+          "sha256": "5a55fb0f37f5a5bb64123a6eb2a7bd4c4fa6c159643cc6e456e01b52b2301acd"
+        },
+        {
+          "path": "src/bridge/hardwareCoordinator.ts",
+          "sha256": "98e4bee792e3d98c57b449657a174738c7ef19cdf1efa2b8fec2bb6c7212cba0"
+        },
+        {
+          "path": "src/bridge/hcInputUtils.ts",
+          "sha256": "df095ac09376cd843e5d134dac8b8227ce999ad16436b7c602fd45202b98f8a3"
+        },
+        {
+          "path": "src/bridge/inputConfigHash.ts",
+          "sha256": "43ccca3995fe119473ffd5fce2e51a9440f9542c4b0ddd571985a4e5b20b43f4"
+        },
+        {
+          "path": "src/bridge/inputStartupPolicy.ts",
+          "sha256": "d006082f54f0010d3fbe71b8ab4d0ddc9a4a5f27307de995cc9bea7f5a425bb1"
+        },
+        {
+          "path": "src/bridge/ipc.ts",
+          "sha256": "78a2a5c370b2d11312b7cade48402b001456bcbe0d39a2faffb7c26c71fa52b6"
+        },
+        {
+          "path": "src/bridge/monitorAppliedTdp.ts",
+          "sha256": "09ca9e6801bfcf3933cf10a74f51a674531c8a60a6d7d42d4a33d66c3061f3b2"
+        },
+        {
+          "path": "src/bridge/monitorCoreTiles.ts",
+          "sha256": "a161896cf9d1b0c5c4bdcafdf0ef9a8f55a562193d1f076f67cebdd6c340649e"
+        },
+        {
+          "path": "src/bridge/monitorData.ts",
+          "sha256": "a33b814e52baa2a43e7aa64b6fe99ff47759d674021cfa0b4eac703be3aede6e"
+        },
+        {
+          "path": "src/bridge/monitorDisplayFeed.ts",
+          "sha256": "fbd20173626d2a94f62255b5502f0ded49f51774799db26bb9ad464af35edfa8"
+        },
+        {
+          "path": "src/bridge/monitorFpsHardware.ts",
+          "sha256": "9e0e9e35178fd428f4f1e6d9348b2db4614395d7c0c497077161cdddc0554692"
+        },
+        {
+          "path": "src/bridge/monitorFrameTime.ts",
+          "sha256": "5a07e28a7013e787d6cf4d735bd604230cf5747537423c03bb27c035ddc598dc"
+        },
+        {
+          "path": "src/bridge/monitorHudFreshness.ts",
+          "sha256": "e26eaf771ed38703e07cf05a0346a47a0885dbb59963892a96b373aee163deee"
+        },
+        {
+          "path": "src/bridge/monitorNativeDemand.ts",
+          "sha256": "8e2cc37ff20d17f05856c0d8b22ec000099c44b39da4ff9c2a4184a4b334c6b5"
+        },
+        {
+          "path": "src/bridge/monitorPayloadDecoder.ts",
+          "sha256": "2ce5d4213acc1615bbf0e724e385c9957393a5da235d3b8041cd71ec1686483b"
+        },
+        {
+          "path": "src/bridge/monitorSnapshotBudget.ts",
+          "sha256": "902392fc9201cde17d2bc52b2a17637356e3f8fe9f1de37758bc240cd73af4d9"
+        },
+        {
+          "path": "src/bridge/monitorSnapshotSignals.ts",
+          "sha256": "68a9b98d765b563721ee5045fbaa6f4034c6174102319cf57eea18ed4beec976"
+        },
+        {
+          "path": "src/bridge/monitorTopProjection.ts",
+          "sha256": "e3d741e5bd88760c457c8e37e520674281042112a2c7bef344fa2712c6b81a84"
+        },
+        {
+          "path": "src/bridge/performanceControls.ts",
+          "sha256": "6e576f791dc903402ca11dd19f96a3d622672f87f8d04eaa86ec7bf00b5cddc9"
+        },
+        {
+          "path": "src/bridge/performanceSchedule.ts",
+          "sha256": "2b5422dca7095c678ab3f115089f605a2c1820341d07901141f1a17939501883"
+        },
+        {
+          "path": "src/bridge/powerSource.ts",
+          "sha256": "32c052caa385e033c6d0f0a959a87125cd2ec8319679fb19eaf7e34d15f6a30d"
+        },
+        {
+          "path": "src/bridge/quickAppDefaults.ts",
+          "sha256": "8f40ff28f8d00c968926daf875dbd2084081319062783449bd70d7f31a443bb2"
+        },
+        {
+          "path": "src/bridge/rtssOverlay.ts",
+          "sha256": "2d3e7fb809eeabecd3055ed1c1c1f5e443ff8e1ad7577c36337ae00dce5493a9"
+        },
+        {
+          "path": "src/bridge/settingsRepository.ts",
+          "sha256": "4a6bf7613d4a981461ee31dd52f924a223c24b8dc66630530a5722a31dab8780"
+        },
+        {
+          "path": "src/bridge/settingsSnapshot.ts",
+          "sha256": "a12b387d0bd2067759be829512a3abbe4284e0c2ebcf14981f7332b1d8894f25"
+        },
+        {
+          "path": "src/bridge/tdpCircuitBreaker.ts",
+          "sha256": "e0e181771869c411576746e15f19a8c4515fcd2043c5735f8c189a5e2f913e00"
+        },
+        {
+          "path": "src/bridge/tdpRuntimeState.ts",
+          "sha256": "c021f00359d3887abfb31aca707def2555ba1fbebfcb318a0fc44959072f0860"
+        },
+        {
+          "path": "src/bridge/tdpStaticDiagnostics.ts",
+          "sha256": "4e3a576453ae1bef5e9f1b4ee86314566e0d02a9bdce5fc0e190604629e039ee"
+        },
+        {
+          "path": "src/bridge/topmon.ts",
+          "sha256": "5936cc3610c75478721ed32d3f08ef8afa9a822e28024562cca6c89ad4242244"
+        },
+        {
+          "path": "src/bridge/uiLifecycle.ts",
+          "sha256": "4358563359424025d2c8a8688ab3c658f3eaa412b4cf0260a0c3f151517a9443"
+        },
+        {
+          "path": "src/bridge/yeman.ts",
+          "sha256": "98cd76060a4ae7183b6e6ef918773c1e0fbb8b09a27b6b112c3341a6ff0e3e4e"
+        },
+        {
+          "path": "src/radial/availability.ts",
+          "sha256": "1b873833125c8727bab698793e8d83367d639baca64b42a294975176f9eecfd4"
+        },
+        {
+          "path": "src/radial/testingState.ts",
+          "sha256": "bcd59a9cf78056887b88f7dfcd729d00e8dc93b54ab4acffef4578a67a5ecf88"
+        },
+        {
+          "path": "src/robust/repairModel.ts",
+          "sha256": "a9b2a1267074dac35513d9ed342d43c9cfe3736a17ef87d4dd177190c0934a65"
+        },
+        {
+          "path": "src/scheduler.ts",
+          "sha256": "5e5d4c31e641a3bdfe0cfa4a403047a6ac723e3ae1e398e6aba8a243a80a95f4"
+        },
+        {
+          "path": "tools/fan_failed_state_read_identity_selftest.ts",
+          "sha256": "c6b7075243d0775d3285d84275d4063bf8ff9167d95c495296d5b95ff7da4f06"
+        },
+        {
+          "path": "tools/fixtures/fan_no_io_host.ts",
+          "sha256": "27f61b5a8703e713c7ef61c08ceebbae13f7e63b7ba70d576e65bf34d4fe2a3f"
+        }
+      ],
+      "currentSourceReview": {
+        "scope": "Finite8 source-change and5 import admission review; new source-qualified boundary only. Original raw results/faults remain immutable.",
+        "changes": {
+          "src/bridge/fanHost.ts": "Definitions moved to3 reviewed TS modules; lifecycle public implementation/identity checks execute unmodified, NoIoHost/launcher/processProbe injection and selected source-fault anchors remain original. Native API calls absent in node child unless explicitly memory-supplied; actual postMessage/proc.findExact must remainzero by original V8 verifier.",
+          "src/bridge/ipc.ts": "Abort/deadline/remote-error bookkeeping stays in frontend. Transport obtained only from absent window.chrome.webview, invocation rejects without native transport; no fs/net/process fallback.",
+          "src/bridge/controllerShortcutRules.ts": "Runtime radial admission uses new pure availability/testingState import; testing flag remains shallowRef(false), no product feature switched by tests.",
+          "src/bridge/fanHostInstallerAsset.json": "Immutable deployment metadata only; actual launcher is original memory port, no production process launch.",
+          "src/bridge/performanceControls.ts": "Pure typed normalization/defaults and settings projections; actual Windows endpoints remain behind original api/ipc bridge.",
+          "src/bridge/performanceSchedule.ts": "Frontend scheduling/settings operations use existing bridge; original runtime denies foreign network/process/filesystem and source V8 verifies actual bridge calls; no direct native import.",
+          "src/bridge/uiLifecycle.ts": "Visibility state and listeners use absent/in-memory DOM guard, no native IO.",
+          "src/bridge/yeman.ts": "Semantic power/fs wrappers depend solely on original api/ipc. No Node builtin IO/native fallback; original fan fixtures provide all requested hardware/native state via memory."
+        },
+        "sourceImportDeclarations": "Five exact additional source modules match original compiler observed graph, no removed graph inputs, external imports unchanged.",
+        "retainedGuards": [
+          "Node child starts without window.chrome.webview",
+          "original actual proc.findExact/postMessage sites zero where required",
+          "original fs/net/child_process/native import deny",
+          "owned Job and natural child exit",
+          "exact original case/failed assertion names and fault source changes",
+          "current source+tool pre/post identity"
+        ],
+        "notAccepted": "A full positive result still requires actual original semantic run+fault and public registered audit; an earlier source-review refusal is not a detected product fault."
+      },
+      "origin": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261021-B49/tools/ymcc_sim/global/fan-failed-read-identity-consumer/boundary.json",
+      "priorIntegration": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-three-reviewed-boundary-refresh-r1/SOURCE-INTEGRATION.json"
+    },
+    {
+      "atUtc": "2026-10-20T18:36:35.409Z",
+      "scope": "Actual B49 to current delta exactly replaces the existing unused STEAM_DIR constant and its5 addon path uses with a function joining PC_DIR; no other bytes differ. These Steam-addon declarations are outside the previously reviewed fan consumer reachable closure; no module initialization side effect added.",
+      "path": "src/bridge/yeman.ts",
+      "beforeSha256": "384bdeacb8de5a1806e284c9c989434d05b9cb14fa858f237359fb43bcbd9894",
+      "afterSha256": "3be2c603e9e32e9c1cd6de00a9281854a11b5b5c763bfa5639591700f7f39427",
+      "exactReconstructionVerified": true,
+      "originalNoIoTerminalsAndAssertionsPreserved": true,
+      "physicalAcceptance": false
+    }
+  ]
+}

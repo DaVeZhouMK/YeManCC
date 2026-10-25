@@ -1,0 +1,21 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import os from 'node:os';
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {inputs} from './adapter.mjs';
+import {R3_LAYOUT} from './r3-source-equivalence.mjs';
+import {resolveEquivalenceContext,resolveHistoricalContext} from './r3-maintenance-context.mjs';
+const selected=resolveEquivalenceContext();
+const historyPath=process.env.VC_R3_MAINTENANCE_HISTORY;
+function changedHistory(edit){const value=JSON.parse(fs.readFileSync(historyPath,'utf8'));edit(value);const dir=fs.mkdtempSync(path.join(os.tmpdir(),'r3-maintenance-history-')),file=path.join(dir,'history.json');fs.writeFileSync(file,JSON.stringify(value));return file;}
+test('an unset manifest variable selects the strictly declared positive manifest and exact20 sources',()=>{const before=process.env.VC_R3_EQUIVALENCE_MANIFEST;delete process.env.VC_R3_EQUIVALENCE_MANIFEST;try{const actual=resolveEquivalenceContext();assert.equal(actual.summary.selection,'declared-positive-pin');assert.equal(actual.summary.exactMembers,20);assert.equal(actual.manifest,selected.manifest);assert.equal(actual.summary.wholeCurrentNativeSourceAccepted,false);}finally{if(before===undefined)delete process.env.VC_R3_EQUIVALENCE_MANIFEST;else process.env.VC_R3_EQUIVALENCE_MANIFEST=before;}});
+test('an explicit matching original positive manifest preserves its declared pin',()=>{const context=resolveEquivalenceContext({manifestPath:selected.manifest});assert.equal(context.summary.selection,'explicit-same-positive-pin');assert.equal(context.summary.manifestSha256,inputs('positive').native.value.managedPrerequisite.sha256);});
+test('an explicitly empty manifest receives an actionable precondition error',()=>assert.throws(()=>resolveEquivalenceContext({manifestPath:''}),/^Error: R3_MAINTENANCE_EQUIVALENCE_MANIFEST_ABSOLUTE_PATH_REQUIRED$/));
+test('a relative manifest cannot depend on the caller working directory',()=>assert.throws(()=>resolveEquivalenceContext({manifestPath:'fixture-manifest.json'}),/^Error: R3_MAINTENANCE_EQUIVALENCE_MANIFEST_ABSOLUTE_PATH_REQUIRED$/));
+test('a missing manifest receives an explicit rejection rather than an internal TypeError',()=>assert.throws(()=>resolveEquivalenceContext({manifestPath:path.join(R3_LAYOUT.authorizedBuildRoot,'maintenance-missing-fixture-manifest.json')}),/^Error: R3_MAINTENANCE_EQUIVALENCE_MANIFEST_FILE_MISSING$/));
+test('an existing different compiled manifest cannot replace the declared managed positive',()=>assert.throws(()=>resolveEquivalenceContext({manifestPath:inputs('positive').native.manifest}),/^Error: R3_MAINTENANCE_EQUIVALENCE_MANIFEST_MUST_MATCH_DECLARED_POSITIVE$/));
+test('all three historical files are hash-bound and retain their distinct historical scopes',()=>{const context=resolveHistoricalContext(historyPath);assert.deepEqual(context.identities.map(row=>[row.role,row.checks,row.failures]),[['current',2175,2],['old',2182,13],['normal',921,0]]);assert(context.identities.every(row=>row.scope==='historical-only-not-current-native-acceptance'));});
+test('a historical raw file cannot borrow a changed manifest hash',()=>assert.throws(()=>resolveHistoricalContext(changedHistory(value=>value.receipts.current.sha256='0'.repeat(64))),/^Error: R3_MAINTENANCE_HISTORY_CURRENT_IDENTITY_MISMATCH$/));
+test('a valid historical file in the wrong role is rejected even with its genuine hash',()=>assert.throws(()=>resolveHistoricalContext(changedHistory(value=>value.receipts.current=structuredClone(value.receipts.normal))),/^Error: R3_MAINTENANCE_HISTORY_CURRENT_EXACT_SCOPE_REQUIRED$/));
+test('missing history configuration is an actionable error and never an unconditional skip',()=>assert.throws(()=>resolveHistoricalContext(undefined),/^Error: R3_MAINTENANCE_HISTORY_CONFIG_ABSOLUTE_PATH_REQUIRED$/));

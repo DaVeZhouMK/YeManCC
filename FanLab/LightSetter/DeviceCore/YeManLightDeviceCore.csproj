@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <!-- Normalize both sources and generated files so a reviewed pin survives an output-directory move. -->
+    <PathMap>$(MSBuildProjectDirectory)=/_/lighting-src,$(BaseIntermediateOutputPath)=/_/lighting-obj</PathMap>
+    <DebugType>embedded</DebugType>
+    <Deterministic>true</Deterministic>
+    <!-- The fixed consumer pin depends on component code, not the parent repository HEAD. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    <EnableSourceControlManagerQueries>false</EnableSourceControlManagerQueries>
+    <EnableSourceLink>false</EnableSourceLink>
+    <AssemblyName>YeManLightDeviceCore</AssemblyName>
+    <RootNamespace>YeManCC.Lighting</RootNamespace>
+  </PropertyGroup>
+</Project>

@@ -21,7 +21,7 @@ function Assert-FanHostExistingExport([string]$SourcePayload,[string]$TargetPayl
 }
 function Assert-FanHostToolingPaths([string]$ProjectRoot) {
   $contracts=@(
-    @{file='src/bridge/fanHost.ts';required="joinWindowsPath(powerControlDir, 'fan-host-v2')";forbidden="joinWindowsPath(powerControlDir, 'fan-host')"},
+    @{file='src/bridge/fanHost/startupConfiguration.ts';required="joinWindowsPath(powerControlDir, 'fan-host-v2')";forbidden="joinWindowsPath(powerControlDir, 'fan-host')"},
     @{file='native/main.cpp';required='POWER_CONTROL_DIR + L"\\fan-host-v2\\YeManFanHost.exe"';forbidden='POWER_CONTROL_DIR + L"\\fan-host\\'},
     @{file='tools/package-release.ps1';required="(Join-Path `$StagingPowerControl 'fan-host-v2')";forbidden="(Join-Path `$StagingPowerControl 'fan-host')"},
     @{file='tools/deploy-installed.ps1';required="`$installedFanHost = Join-Path `$installedPowerControl 'fan-host-v2'";forbidden="`$installedFanHost = Join-Path `$installedPowerControl 'fan-host'";extra="Assert-FanHostExistingExport (Join-Path `$sourcePowerControl 'fan-host') (Join-Path (Split-Path -Parent `$InstallRoot) 'PowerControl\fan-host-v2')"},

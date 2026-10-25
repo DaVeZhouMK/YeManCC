@@ -1,0 +1,13 @@
+{
+  "originalGlobalResult": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor-main272d\\2026-10-19T08-36-37-137Z-e23f486f\\result.json",
+  "originalGlobalResultSha256": "cb5f57fc3fd2a4bfd0779c711619638fdd3e6bccb935b4daa532b70f23231499",
+  "caseDir": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor-main272d\\2026-10-19T08-36-37-137Z-e23f486f\\cases\\sensor.passive-fan-monitor-consumer",
+  "payload": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor-main272d\\2026-10-19T08-36-37-137Z-e23f486f\\cases\\sensor.passive-fan-monitor-consumer\\fan-monitor\\positive\\private-output\\NATIVE-FAN-PAYLOADS.json",
+  "payloadSha256": "2b538a66bcac7c1d89d207187c193f3415417afb93730c0479395b3a881814fc",
+  "payloadCount": 21,
+  "sourceReceipt": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\global-passive-fan-monitor-main272d\\2026-10-19T08-36-37-137Z-e23f486f\\cases\\sensor.passive-fan-monitor-consumer\\fan-monitor\\result.json",
+  "sourceReceiptSha256": "eabf5037d7df83b894bc54d32e1b5de39bef1031bd947366fd4322bcde3db19b",
+  "registeredScopeAudit": "D:\\Codex\\2026-10-19\\wo-z\\work\\consumer-extension-b0\\audit-fan-main272d\\2026-10-19T08-37-46-762Z-e65ff8ae\\receipt-audit.json",
+  "nativeBusinessMustNotBeReexecuted": true,
+  "currentSourceAndArtifactCheckRequiredBeforeReuse": true
+}

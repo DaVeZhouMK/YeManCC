@@ -1,0 +1,17 @@
+# 触摸板R37：合帧/鼠标消息合并联网研究
+
+用户明确要求联网搜索后继续active，R36待blocked请求未执行并已标记superseded。所有研究只读/下载固定源码，不运行设备或SDK，不改报告频率、驱动、鼠标路径或显示全局设置。
+
+## 可用结论
+
+微软MOUSEINPUT的MOUSEEVENTF_MOVE_NOCOALESCE禁止WM_MOUSEMOVE合并；RAWMOUSE的MOUSE_MOVE_NOCOALESCE是收到事件的结果标志。它们不能直接调整SD vendor report、SDK共享单槽或USBIP FIFO。当前正常直接Mouse同样只发MOUSEEVENTF_MOVE，不能把该标志加在那里当异常SD路径的修复。
+
+微软PowerToys PR49699已于2026-08-11合并，低级hook只写固定队列、相邻绝对Move覆盖队尾、单次唤醒窗口线程。实际源码也核到容量128溢出时有丢Move或Reset视觉状态，不能称所有按钮边沿无损。可借鉴事件语义分离和低开销，不能照搬视觉Reset、不能把绝对POINT尾覆盖用于相对dx/dy。
+
+HIDMaestro官方v1.12.0发布于2026-10-14T04:05:03Z，固定commit b4d29d9f4b1b91ced6b4755f095184b66339b8be。其键鼠逐事件delivery/ack新路径在源码中要求usbipHandle==null，并受键鼠profile门控；SD USBIP不进入。对应USBIP仍MaxFrameQueue8和最新共享seq读取。标签源码与固定commit字节已重新比对一致。因此不能把更新SDK作为本案现成修复，也不移植新等待/SpinWait节拍门。
+
+CURSORINFO与Desktop Duplication官方文档说明光标坐标、系统visible/suppressed和捕获pointer plane不是同一证据。触摸+合成鼠标的旧最小复现、Sunshine串流闪烁和Valve mixed-input glyph帖子均保留为有限线索；它们没有建立YMCC当前原因，也没有证实故障时有LSFG/AFMF等参与。不能基于这些帖子再改全局显示或focus。
+
+## 对当前任务的影响
+
+同手势绝对Move合并、触摸/UP/cancel/click/epoch边沿独立是可继续研究的低CPU原则；其是否改善连续MOVE闪烁仍未知，上层队列也不能自动补回下层已吞UP。当前没有新增可靠根因修补。完整来源、commit/SHA、适用限制和行动判定见Build/Analysis/Touchpad-Producer-R37-20261016/REPORT.md及SOURCES.json；微软/PowerToys原件在CoalescingPrimaryReview，新SDK原件在UpstreamEventQueue。目标未完成，保持active。

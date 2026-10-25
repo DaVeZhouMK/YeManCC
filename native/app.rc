@@ -18,9 +18,9 @@ BEGIN
     BEGIN
         BLOCK "080404b0"
         BEGIN
-            VALUE "FileDescription", "YeManCC 野蛮系统控制中心"
+            VALUE "FileDescription", "YeManCC野蛮系统控制中心"
             VALUE "FileVersion", APP_VER_STR
-            VALUE "ProductName", "YeManCC"
+            VALUE "ProductName", "YeManCC野蛮系统控制中心"
             VALUE "ProductVersion", APP_VER_STR
             VALUE "LegalCopyright", "DaVeZhouMK"
             VALUE "OriginalFilename", "YeManCC.exe"

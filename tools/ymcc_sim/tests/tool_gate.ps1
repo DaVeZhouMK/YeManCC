@@ -21,6 +21,8 @@ $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
 $D = Get-SimDefaults
+$testPowerShell = Join-Path $PSHOME 'pwsh.exe'
+if(-not (Test-Path -LiteralPath $testPowerShell -PathType Leaf)){throw 'This test suite requires the current PowerShell 7 runtime'}
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'tool-gate' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -66,8 +68,8 @@ function Invoke-Tool {
   $script:ToolRunSeq = $script:ToolRunSeq + 1
   $seq = $script:ToolRunSeq
   $outFile = Join-Path $OutDir ("tool-$stamp-$seq.out")
-  $exe = 'powershell.exe'
-  $all = @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', $ScriptPath) + $ToolArgs
+  $exe = $testPowerShell
+  $all = @('-NoLogo', '-NoProfile', '-File', $ScriptPath) + $ToolArgs
   $merged = ''
   try {
     $merged = (& $exe @all 2>&1 | Out-String)
@@ -83,7 +85,7 @@ function Start-Stub {
   param([int]$Port, [string]$State)
   $log = Join-Path $OutDir "stub-$State-$stamp.jsonl"
   if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
+  $p = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoLogo', '-NoProfile', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
   for ($i = 0; $i -lt 40; $i++) {
     if (Test-SimPort $Port) { break }
     Start-Sleep -Milliseconds 250
@@ -138,7 +140,7 @@ $v5 = Get-SimVerdict $r5
 Add-Case 'T5' 'timeout event -> exit 8 (TIMEOUT)' ($v5.exitCode -eq 8) 'exit 8' ("verdict={0} exit={1}" -f $v5.verdict, $v5.exitCode)
 
 # real child that never reports an exit code (killed by us, our own child only)
-$child = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 120') -PassThru -WindowStyle Hidden
+$child = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 120') -PassThru -WindowStyle Hidden
 $childExited = $child.WaitForExit(1200)
 $childHadNoExit = -not $childExited
 try { if (-not $childExited) { $child.Kill() } } catch { }

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "nativeBaseAliases": [
+    {
+      "name": "AynLoki",
+      "reason": "Native identity normalizes Loki CPU variants to this source base"
+    },
+    {
+      "name": "OneXPlayerG1",
+      "reason": "Retain existing native G1 base-class registration"
+    },
+    {
+      "name": "OneXPlayerX1",
+      "reason": "Retain existing native X1 base-class registration"
+    }
+  ],
+  "effectOrder": [
+    "SolidColor",
+    "Breathing",
+    "Rainbow",
+    "Wave",
+    "Wheel",
+    "Gradient",
+    "Ambilight",
+    "LEDPreset"
+  ],
+  "disabledActions": [
+    {
+      "device": "OneXPlayerX1Mini",
+      "action": "preset",
+      "reason": "The inherited preset writer needs the serial transport disabled by this exact constructor",
+      "sourceFile": "OneXPlayer/OneXPlayerX1Mini.cs",
+      "requiredSourceText": "EnableSerialPort = false"
+    },
+    {
+      "device": "OneXPlayerX1Mini",
+      "action": "status",
+      "reason": "The inherited SetLedStatus only queues serial-port writes; this model disables that transport. Off uses the real HID brightness and black-color writers instead.",
+      "sourceFile": "OneXPlayer/OneXPlayerX1Mini.cs",
+      "requiredSourceText": "EnableSerialPort = false"
+    }
+  ],
+  "independentCore": {
+    "provider": "ymcc-onex-hid-v1",
+    "assemblyFile": "YeManLightDeviceCore.dll",
+    "sha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
+    "device": "OneXPlayerX1Mini",
+    "actions": {
+      "brightness": true,
+      "color": [
+        "solid",
+        "rainbow"
+      ]
+    }
+  },
+  "brightnessCompatibility": [
+    {
+      "classes": [
+        "ClawA1M",
+        "ClawA2VM",
+        "ClawBZ2EM",
+        "ClawCG3EM"
+      ],
+      "methodOwner": "ClawA1M",
+      "reason": "Preserve existing MSI brightness route: source flags omit brightness but SetLedBrightness performs the reviewed device.Write and returns its bool"
+    }
+  ],
+  "nativeAdapters": [
+    {
+      "id": "rog-aura",
+      "devices": [
+        "ROGAlly",
+        "ROGAllyX",
+        "XboxROGAlly",
+        "XboxROGAllyX"
+      ],
+      "consumerSymbols": [
+        "rogAuraApplyColor",
+        "rogAuraApplyAmbilight",
+        "rogAuraSetBrightness"
+      ],
+      "source": "native/main.cpp",
+      "reason": "Retain the existing in-process ASUS Aura writer with its actual handle readiness gate"
+    },
+    {
+      "id": "msi-claw-native-hid",
+      "devices": [
+        "ClawA1M",
+        "ClawA2VM",
+        "ClawBZ2EM",
+        "ClawCG3EM"
+      ],
+      "consumerSymbols": [
+        "msiClawApplyLed"
+      ],
+      "source": "native/main.cpp",
+      "reason": "Retain the reviewed in-process MSI command-interface HID writer; exact model registration replaces family-only dispatch"
+    }
+  ]
+}

@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "scope": "Verified locked-SDK Sony classic decode, Host reply and native fast/DOM receipt stage. Source-bound software writer scope is recorded separately in the catalog policy.",
+  "capabilityId": "controller.feedback.game.dualsense-edge-usb-classic",
+  "profileIdentity": "dualsense-edge",
+  "catalogPolicy": "capabilities/hc-controller-feedback-policy.json",
+  "generatedCatalogs": [
+    "capabilities/HcControllerFeedbackCapabilityCatalog.generated.h",
+    "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs"
+  ],
+  "lockedSdk": {
+    "file": "deps/hidmaestro/HIDMaestro.Core.dll",
+    "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+    "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+    "commit": "30b8faf0f7de746f249edc5f1520eaa0440965cf"
+  },
+  "lockedProfile": {
+    "resource": "HIDMaestro.Profiles.sony\\dualsense-edge.json",
+    "sha256": "da05842ce2439203e264feedcd078289fd0e871dbf1f91ec5776de116cb359ad"
+  },
+  "protocolReview": {
+    "primarySource": "Linux drivers/hid/hid-playstation.c",
+    "commit": "f24ba334afafc70c3149e9db9c0cf8ecc6d52a09",
+    "implementationCopied": false,
+    "transportDelta": "Frozen HC DualSenseTarget consumes VIIPER normalized motor pair; this SDK exposes separate reportId and raw USB body."
+  },
+  "wire": {
+    "reportSource": 0,
+    "reportId": 2,
+    "bodyBytes": 63,
+    "fullReportBytes": 64,
+    "leftBodyOffset": 3,
+    "rightBodyOffset": 2,
+    "flags0BodyOffset": 0,
+    "compatibility1Mask": 1,
+    "selectHapticsMask": 2,
+    "flags2BodyOffset": 38,
+    "compatibility2Mask": 4,
+    "zeroPairMeansStop": true
+  },
+  "host": {
+    "binding": "exact admitted target, profile and callback generation",
+    "pending": "independent raw/motor bits; unrelated LED/audio cannot erase pending stop",
+    "drain": "accepted SUBMIT_FRAME only; stats/neutral/rejection preserve motor state",
+    "storage": "fixed 256-byte raw mailbox and one coalesced motor sample",
+    "threadsAdded": 0
+  },
+  "native": {
+    "header": "native/game_feedback_receipt.h",
+    "consumers": [
+      "inputHostObserveGameMotorBindingLocked",
+      "inputHostConsumeGameMotorReplyLocked"
+    ],
+    "paths": [
+      "actual c7aReceiptFast scanner",
+      "actual DOM receipt parser"
+    ],
+    "admission": "actual physical source admitted, no rejected/neutralized capture, current epoch/power/binding and increasing revision",
+    "revoke": [
+      "clear",
+      "QUIESCE",
+      "RECREATE_TARGET",
+      "RELEASE_TARGET",
+      "SHUTDOWN"
+    ],
+    "authority": "receipt inbox grants no physical write permission"
+  },
+  "gameFeedbackForwardingProven": false,
+  "physicalAcceptance": false,
+  "wholeProcessCpuReduction": null,
+  "remaining": [
+    "current-source certification of the source-bound native/managed/serial software consumer",
+    "independent tuple-bound runtime UI readiness receipts",
+    "physical feedback and complete real-device disconnect/sleep/return acceptance",
+    "Steam/Elite and other unsupported feedback protocol review"
+  ],
+  "sourceBoundSoftwareConsumption": "capabilities/hc-controller-feedback-policy.json#gameMotorSoftwareConsumption",
+  "receiptStageOriginalRemaining": [
+    "actual physical motor writer binding",
+    "game/manual/touch ownership arbitration",
+    "explicit zero, failed stop retention and source replacement",
+    "complete cross-process injected new motor acceptance",
+    "Steam/Elite protocol review where SDK supports it"
+  ]
+}

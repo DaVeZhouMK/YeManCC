@@ -68,6 +68,43 @@ int wmain(int argc,wchar_t** argv){
         test("manual-id-clear-wins-over-cached-verified-identity",[&]{auto s=snapshot;attachResolvedIdentityCache(s);s["manualOverrides"]={{"items",{{toUtf8(exe.wstring()),{{"idCleared",true}}}}}};const auto p=buildLocalSteamPlanSnapshot(s);require(p["items"][0]["status"]=="waiting-steam-verification"&&!p["items"][0].contains("steamStoreAppId"),"Manual ID deletion was undone by identity cache");});
         test("unverified-numeric-candidate-never-promotes-ready",[&]{auto s=snapshot;auto candidate=verified;candidate["identityStatus"]="unverified";candidate["steamVerificationStatus"]="network-pending";s["resolvedIdentities"]={{toUtf8(normalizedPathKey(exe)),candidate}};require(buildLocalSteamPlanSnapshot(s)["items"][0]["status"]=="waiting-steam-verification","Numeric candidate was granted verified identity");});
 
+        test("legacy-local-title-cache-cannot-promote-unverified-import",[&]{auto s=snapshot;auto candidate=verified;candidate["source"]="local-install-metadata-offline";s["resolvedIdentities"]={{toUtf8(normalizedPathKey(exe)),candidate}};require(buildLocalSteamPlanSnapshot(s)["items"][0]["status"]=="waiting-steam-verification","Legacy local-only cache granted official identity");});
+
+
+        wchar_t corpusBuffer[32768]{};
+        if(GetEnvironmentVariableW(L"YMCC_LOCAL_IDENTITY_CORPUS",corpusBuffer,32768)>0) {
+            test("actual-local-worker-manifests-survive-host-cache-and-plan",[&]{
+                const auto corpus=fs::absolute(fs::path(corpusBuffer));require(normalizedPathKey(corpus).starts_with(buildText),"Actual corpus must stay in Build");
+                const auto summary=readJson(corpus/L"cold-summary.json",json::object());require(summary.value("count",0)>=51,"Full local corpus is incomplete");
+                g_dataRoot=root/L"actual-local-host-data";
+                const auto scan=readJson(corpus/L"full-scan-data"/L"state"/L"library-scan.json",json::object());
+                require(jsonArrayOr(scan,"games").size()>=40,"Full game-address scan is missing");
+                for(const auto& row:jsonArrayOr(summary,"cases")){
+                    const auto caseRoot=corpus/L"cold"/toWide(jsonStringOr(row,"key"));
+                    if(fs::is_directory(caseRoot/L"jobs"))persistResolvedIdentityFromOutput(caseRoot/L"jobs",jsonStringOr(row,"executable"));
+                }
+                json state={{"library",scan},{"manualOverrides",{{"items",json::object()}}}};
+                attachResolvedIdentityCache(state);const auto plan=buildLocalSteamPlanSnapshot(state);
+                size_t checked=0;
+                for(const auto& row:jsonArrayOr(summary,"cases")){
+                    if(!jsonBoolOr(row,"steamAccepted",false))continue;
+                    const auto exeText=jsonStringOr(row,"executable");const auto wanted=normalizedPathKey(fs::path(toWide(exeText)));
+                    for(const auto& item:jsonArrayOr(plan,"items")) {
+                        if(normalizedPathKey(fs::path(toWide(jsonStringOr(item,"primaryExecutable"))))!=wanted)continue;
+                        const auto match=jsonObjectOr(row,"match");
+                        require(jsonIntegerOr(item,"steamStoreAppId",0)==jsonIntegerOr(match,"appId",0),"Verified worker identity disappeared at native Host boundary");
+                        if(!jsonBoolOr(item,"steamNative",false))require(jsonStringOr(item,"steamVerificationStatus")=="steam-verified","Native plan demoted formally verified identity");
+                        ++checked;
+                    }
+                }
+                require(checked>=25,"Too few complete local Worker-to-Host identity cases");
+                state["steamPlan"]=plan;
+                state["config"]={{"roots",json::array()},{"automaticScrapingEnabled",false}};
+                state["steamAccounts"]={{"accounts",json::array()}};
+                writeFixtureJson(root/L"actual-local-host-plan.json",plan);
+                writeFixtureJson(root/L"actual-local-host-snapshot.json",state);
+            });
+        }
         size_t failures=0;for(const auto& t:cases)if(!t["passed"].get<bool>())++failures;
         json report={{"allPassed",failures==0},{"caseCount",cases.size()},{"failedCount",failures},{"cases",cases},{"realSteamFilesModified",false}};writeFixtureJson(root/L"summary.json",report);std::cout<<report.dump(2)<<"\n";return failures?1:0;
     }catch(const std::exception& e){std::cerr<<e.what()<<"\n";return 1;}

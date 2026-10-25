@@ -10,6 +10,9 @@ inline std::atomic<UINT_PTR> standaloneGeneration{1},standalonePending{0};
 inline std::atomic<StandaloneStatus> standaloneStatus{StandaloneStatus::Idle};
 inline std::atomic<unsigned long long> standaloneRequests{0},standaloneCompleted{0};
 inline bool (*standaloneSubmit)(StandaloneAction,UINT_PTR)=nullptr;
+// Owner-only notification, after the original button edge. -1 cancels.
+inline void (*quickAccessEdgeObserver)(int,bool)=nullptr;
+inline void (*quickAccessContextObserver)()=nullptr;
 inline StandaloneAction standaloneAction(StandaloneSpecialMode mode,int index) {
     if(index!=1 && index!=2)return StandaloneAction::None;
     if(mode==StandaloneSpecialMode::SteamDeck)return index==1?StandaloneAction::SteamMainMenu:StandaloneAction::SteamQuickAccess;

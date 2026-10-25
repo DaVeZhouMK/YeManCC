@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue';
+import OverflowGameName from './OverflowGameName.vue';
 import AppIcon from '@/components/AppIcon.vue';
 import GameQuickActions from '@/components/GameQuickActions.vue';
 import {
+  getCurrentGame,
   refreshGameStatus,
   refreshGameStatusStrict,
   subscribeGameStatus,
@@ -10,7 +12,7 @@ import {
   type DetectedGame,
 } from '@/bridge/gamedetect';
 import { on as onIpc } from '@/bridge/ipc';
-import { focusGamepadElement, setGamepadFocused } from '@/gamepad/focus';
+import { focusGamepadElement, setGamepadFocused, getGamepadViewportSafeArea } from '@/gamepad/focus';
 import { getLockedGameTarget, isGameTargetSame, unlockGameTarget } from '@/bridge/gameQuickSession';
 
 type SummonCandidate = {
@@ -45,6 +47,18 @@ let activeSummonPid = 0;
 let activeSummonGeneration = 0;
 let blockedSummonPid = 0;
 let refreshAfterIdentification = false;
+let menuResizeObserver: ResizeObserver | null = null;
+
+function updateGameMenuViewport(): void {
+  const panel = gameRulePanelEl.value;
+  if (!panel || !gameRuleMenu.value) return;
+  const rect = panel.getBoundingClientRect();
+  const scale = panel.offsetWidth > 0 ? rect.width / panel.offsetWidth : 1;
+  const safe = getGamepadViewportSafeArea();
+  // The top menu inherits app-stage zoom; its height limit uses local CSS pixels.
+  const height = Math.max(1, (Math.min(window.innerHeight, safe.bottom) - rect.top) / Math.max(.1, scale));
+  panel.style.maxHeight = height + 'px';
+}
 
 function displayProcessName(value: string): string {
   return value.trim().replace(/\.exe$/i, '').trim();
@@ -71,17 +85,15 @@ function syncGame(next: DetectedGame | null, preserveRuleMenu = false): void {
   const locked = getLockedGameTarget();
   const previous = game.value;
   const menuWasOpen = gameRuleMenu.value !== null;
-  // A locked top-menu target owns the quick-action session. Background polls
-  // must not replace it with a newly detected foreground game.
-  if (locked && !next) {
-    // A real disappearance is authoritative: do not leave the top menu bound
-    // to a dead PID while background polling continues.
-    unlockGameTarget();
-    window.dispatchEvent(new CustomEvent('game-quick-target-lost'));
-  } else if (locked && !isGameTargetSame(locked, next)) {
-    return;
-  }
+  // Only the shared recognition owner publishes targets. A late action or
+  // refresh result cannot restore an older game in the top bar.
+  next = getCurrentGame();
   game.value = next;
+  if (locked && !isGameTargetSame(locked, next) && unlockGameTarget(locked.lockGeneration)) {
+    window.dispatchEvent(new CustomEvent('game-quick-target-lost', {
+      detail: { target: locked, lockGeneration: locked.lockGeneration },
+    }));
+  }
   if (gameIdentifying.value) return;
   if (next) {
     summonCandidate.value = null;
@@ -122,8 +134,11 @@ async function refreshGameRecognition(): Promise<void> {
   statusMsg.value = '';
   errMsg.value = '';
   gameIdentifying.value = true;
+  const sequence = summonIdentifySequence;
   try {
-    const detected = await refreshGameStatusStrict();
+    await refreshGameStatusStrict();
+    if (sequence !== summonIdentifySequence) return;
+    const detected = getCurrentGame();
     gameIdentifying.value = false;
     // Refresh is an action inside the root rule menu. Keep that menu open so
     // Y does not look like a back/close operation after the result arrives.
@@ -134,6 +149,7 @@ async function refreshGameRecognition(): Promise<void> {
     refreshAfterIdentification = false;
     statusMsg.value = detected ? '已刷新游戏识别' : '刷新完成，当前未识别游戏';
   } catch (e) {
+    if (sequence !== summonIdentifySequence) return;
     gameIdentifying.value = false;
     refreshAfterIdentification = false;
     errMsg.value = '刷新游戏识别失败：' + (e as Error).message;
@@ -141,7 +157,17 @@ async function refreshGameRecognition(): Promise<void> {
 }
 
 watch(gameRuleMenu, (menu) => {
-  if (menu) focusGameRulePanel();
+  menuResizeObserver?.disconnect();
+  menuResizeObserver = null;
+  if (!menu) return;
+  nextTick(() => {
+    if (!gameRuleMenu.value || !gameRulePanelEl.value) return;
+    updateGameMenuViewport();
+    menuResizeObserver = new ResizeObserver(updateGameMenuViewport);
+    menuResizeObserver.observe(gameRulePanelEl.value);
+    if (gameRuleTriggerEl.value) menuResizeObserver.observe(gameRuleTriggerEl.value);
+    focusGameRulePanel();
+  });
 });
 
 function openGameRuleRoot(): void {
@@ -192,6 +218,7 @@ function beginSummonIdentification(detail: SummonCandidate): void {
   statusMsg.value = '';
   errMsg.value = '';
   summonIdentifyTimer = setTimeout(async () => {
+    if (sequence !== summonIdentifySequence) return;
     gameIdentifying.value = false;
     summonIdentifyTimer = null;
     const blocked = preferredPid > 0 && blockedSummonPid === preferredPid;
@@ -307,6 +334,8 @@ function onGamepadEdit(e: Event): void {
 }
 
 onMounted(() => {
+  window.addEventListener('resize', updateGameMenuViewport);
+  window.visualViewport?.addEventListener('resize', updateGameMenuViewport);
   unsubGame = subscribeGameStatus(syncGame);
   unsubSummonResult = onIpc<SummonRegistrationResult>('gamepad.summon.result', onSummonRegistrationResult);
   window.addEventListener('ipc:gamepad.summon', onGamepadSummon as EventListener);
@@ -315,6 +344,10 @@ onMounted(() => {
 });
 
 onUnmounted(() => {
+  window.removeEventListener('resize', updateGameMenuViewport);
+  window.visualViewport?.removeEventListener('resize', updateGameMenuViewport);
+  menuResizeObserver?.disconnect();
+  menuResizeObserver = null;
   cancelSummonIdentification();
   unsubGame?.();
   unsubGame = null;
@@ -341,8 +374,8 @@ onUnmounted(() => {
       @click="openGameRuleRoot"
     >
       <AppIcon :name="gameIdentifying ? 'search' : 'gamepad'" />
-      <span class="game-recognition-label">{{ gameButtonStatus }}</span>
-      <small class="game-recognition-hint">按<strong class="game-action-key game-action-key-y">Y</strong>编辑</small>
+      <OverflowGameName class="game-recognition-label" :name="gameButtonStatus" :interactive="false" />
+      <small class="game-recognition-hint"><strong class="game-action-key game-action-key-y">Y</strong>菜单</small>
     </button>
 
     <div v-if="gameRuleMenu" ref="gameRulePanelEl" class="game-recognition-popover" data-gp-modal>
@@ -350,7 +383,6 @@ onUnmounted(() => {
         <GameQuickActions
           :game="game"
           :open="gameRuleMenu === 'quick'"
-          @game-updated="(next) => syncGame(next, true)"
           @status="({ message, error }) => { statusMsg = message || ''; errMsg = error || ''; }"
           @close-request="closeQuickMenu"
         />
@@ -414,6 +446,14 @@ onUnmounted(() => {
 .game-recognition-status:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 .game-recognition-popover {
+  box-sizing: border-box;
+  max-height: calc(100dvh - 100px);
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  scroll-padding-block: 12px;
+  touch-action: pan-y;
   position: absolute;
   top: calc(100% + 7px);
   left: 0;

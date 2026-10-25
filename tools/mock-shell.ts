@@ -40,6 +40,9 @@ function dispatch(cmd: string, a: any): any {
     case 'fs.mkdir':
       fs.mkdirSync(a.path, { recursive: true });
       return true;
+    case 'tdp.capability':
+    case 'tdpMsi.capability':
+      return { provider: 'default', selected: false, ready: true, minPL1: 2, maxPL1: 200 };
     case 'shell.run': {
       shellCalls.push({ program: a.program, args: a.args ?? [], timeoutMs: a.timeoutMs });
       const shellResponder = (globalThis as any).__mockShellResponder as

@@ -1,0 +1,52 @@
+/** Real public Fan resume; inert adapter/native/launcher, no HC or device operations. */
+import assert from 'node:assert/strict';
+import {FanApiError,type FanHandshake,type FanNode} from '../src/bridge/fanApi';
+import {NoIoHost} from './fixtures/fan_no_io_host';
+import {proc,type PowerLifecycleState} from '../src/bridge/api';
+const originalProbe=proc.findExact;proc.findExact=async()=>({found:false,pid:0});
+const {FanHostLifecycle}=await import('../src/bridge/fanHost');proc.findExact=originalProbe;
+const families=[['ROG','HandheldCompanion.Devices.XboxROGAllyX','ProfileCurve'],['MSI','HandheldCompanion.Devices.MSI.ClawCG3EM','ProfileCurve'],['GPD','HandheldCompanion.Devices.GPDWin5','GenericDuty'],['OneX','HandheldCompanion.Devices.OneXPlayerX1Mini','GenericDuty'],['Lenovo','HandheldCompanion.Devices.Lenovo.LegionGo','ProfileCurve']] as const;
+const curve:FanNode[]=[0,40,70,100].map(tempC=>({tempC,dutyPercent:75}));
+const outcome=<T>(p:Promise<T>)=>p.then(value=>({value,error:null as unknown}),error=>({value:null,error}));
+function held<T>(){let resolve!:(value:T)=>void,reject!:(error:Error)=>void,enter!:()=>void,entered=false;return{ready:new Promise<void>(r=>enter=r),promise:new Promise<T>((r,j)=>{resolve=r;reject=j;}),enter:()=>{entered=true;enter();},didEnter:()=>entered,resolve:(v:T)=>resolve(v),reject:(e:Error)=>reject(e)};}
+function fixture(family:typeof families[number]=families[1]){
+ const host=new NoIoHost();host.factoryType=family[1];host.completeResume=true;
+ let generation=6,phase='ready',writesAllowed=true,launches=0,stops=0,handshakes=0,identities=0,powerReads=0;
+ let responder:(()=>Promise<FanHandshake>)|null=null;
+ const base:FanHandshake={ok:true,supported:true,hardwareWritesEnabled:true,fanRouteWriteReady:true,deviceClass:family[1],fanRoute:family[2],deviceIdentity:{fixtureReceipt:'fresh'}};
+ host.handshake=async()=>{handshakes++;host.calls.push('handshake');return responder?responder():{...base};};
+ const lifecycle=new FanHostLifecycle({enabled:true,adapter:host,heartbeatIntervalMs:0,resumeWaitDeadlineMs:800,readNativeActivity:async()=>null,
+  readNativePowerState:async()=>{powerReads++;return{generation,phase,hardwareWritesAllowed:writesAllowed,resumeReady:phase==='ready',inputReady:true,hibernateAvailable:true} as PowerLifecycleState;},onDeviceIdentity:()=>identities++,
+  launcher:{async start(){launches++;return{pid:118401,executable:'inert-resume-host.exe',processCreated:'inert-resume-birth',adopted:true};},async stop(){stops++;}}});
+ function power(value:number,next:string){generation=value;phase=next;writesAllowed=next==='ready';host.generation=value;host.attempt=1;host.powerState=next==='ready'?'On':'Suspended';lifecycle.setPowerGeneration(value);lifecycle.observePowerBoundary(next==='ready'?'resume-ready':'suspending',value);}
+ power(6,'ready');lifecycle.rememberDesiredCurve(curve);
+ return{host,lifecycle,base,power,respond:(f:(()=>Promise<FanHandshake>)|null)=>responder=f,counts:()=>({launches,stops,handshakes,identities,powerReads}),
+  async interrupted(){const wait=held<FanHandshake>();responder=()=>{wait.enter();return wait.promise;};const old=outcome(lifecycle.start({manualRecovery:true}));await wait.ready;power(7,'suspending');const sleep=outcome(lifecycle.suspend());wait.resolve({...base,deviceIdentity:{fixtureReceipt:'retired'}});await old;await sleep;responder=null;assert.equal(identities,0,'old initial handshake must not publish identity');power(7,'ready');lifecycle.observePowerBoundary('resuming',7);lifecycle.observePowerBoundary('resume-ready',7);},
+  async healthyWake(){await lifecycle.start({manualRecovery:true});await lifecycle.apply(curve);power(7,'suspending');await lifecycle.suspend();power(7,'ready');lifecycle.observePowerBoundary('resuming',7);lifecycle.observePowerBoundary('resume-ready',7);},
+  async cleanup(){responder=null;await lifecycle.close().catch(()=>{});}};
+}
+const results:any[]=[];
+async function check(name:string,work:(f:ReturnType<typeof fixture>)=>Promise<unknown>,family:typeof families[number]=families[1]){const f=fixture(family);try{results.push({name,ok:true,evidence:await work(f)});}catch(error){results.push({name,ok:false,error:String(error),calls:[...f.host.calls],counts:f.counts()});}finally{await f.cleanup();}}
+for(const family of families)await check(`${family[0]} interrupted initial handshake resumes once without a new launch or click`,async f=>{await f.interrupted();await f.lifecycle.resume();assert.equal(f.counts().handshakes,2);assert.equal(f.counts().launches,1);assert.equal(f.counts().identities,1);assert.equal(f.host.calls.filter(x=>x==='enable').length,1);assert.equal(f.lifecycle.controlReady,true);return{freshHandshake:1,extraLaunches:0,automaticWrites:1};},family);
+for(const family of families)await check(`${family[0]} confirmed normal wake adds no handshake`,async f=>{await f.healthyWake();const before=f.counts();await f.lifecycle.resume();assert.equal(f.counts().handshakes,before.handshakes);assert.equal(f.host.calls.filter(x=>x==='enable').length,2);return{extraHandshakes:0};},family);
+for(const kind of ['read-only','unsupported','identity-mismatch','401','403','route'] as const)await check(`current recovery handshake ${kind} cannot fabricate permission and manual remains reachable`,async f=>{
+ await f.interrupted();const before=f.counts();if(kind==='identity-mismatch')f.lifecycle.setSavedIdentity({model:'saved-model'});
+ f.respond(async()=>{if(kind==='401'||kind==='403')throw new FanApiError('fresh credential refused',Number(kind),'AUTH_REJECTED');if(kind==='route')throw new FanApiError('fresh route conflict',409,'FAN_ROUTE_CONFLICT');return{...f.base,...(kind==='read-only'?{fanRouteWriteReady:false,hardwareWritesEnabled:false}:{}),...(kind==='unsupported'?{supported:false}:{}),...(kind==='identity-mismatch'?{deviceIdentity:{SystemModel:'different-model'}}:{})};});
+ const reply=await outcome(f.lifecycle.resume());assert(reply.error,'refused or read-only handshake became resume success');assert.equal(f.counts().handshakes,before.handshakes+1);assert.equal(f.counts().launches,before.launches);assert.equal(f.host.calls.filter(x=>x==='enable').length,0);assert.equal(f.lifecycle.controlReady,false);
+ f.respond(null);f.lifecycle.setSavedIdentity(null);await f.lifecycle.apply(curve);assert.equal(f.host.calls.filter(x=>x==='enable').length,1);return{kind,automaticWrites:0,currentManualWrites:1};
+},kind==='identity-mismatch'?families[0]:families[1]);
+for(const boundary of ['same-generation-wake','new-generation','session','process','off','close'] as const)for(const shape of ['success','error'] as const)await check(`fresh recovery handshake ${shape} retires across ${boundary}`,async f=>{
+ await f.interrupted();const wait=held<FanHandshake>();f.respond(()=>{wait.enter();return wait.promise;});const pending=outcome(f.lifecycle.resume());await Promise.race([wait.ready,pending]);assert(wait.didEnter(),'resume ended without its required current handshake');
+ const owner=f.lifecycle as unknown as {process:Record<string,unknown>;sessionGeneration:number};const process=owner.process,session=owner.sessionGeneration;let end:ReturnType<typeof outcome>|undefined;
+ if(boundary==='session')owner.sessionGeneration++;else if(boundary==='process')owner.process={...process,adopted:false};else if(boundary==='off'||boundary==='close')end=outcome(boundary==='off'?f.lifecycle.disable():f.lifecycle.close());else{const generation=boundary==='new-generation'?8:7;if(generation===8)f.power(8,'ready');f.lifecycle.observePowerBoundary('resuming',generation);f.lifecycle.observePowerBoundary('resume-ready',generation);}
+ try{if(shape==='error')wait.reject(new Error('late recovery handshake failure'));else wait.resolve(f.base);const retired=await pending;await end;assert.match(String(retired.error),/FAN_CONTROL_INTENT_SUPERSEDED:/,'old recovery handshake lost its superseded classification');assert.equal(f.counts().identities,0,'stale fresh reply published identity');assert.equal(f.host.calls.filter(x=>x==='enable').length,0,'old recovery wrote after replacement');if(boundary==='session'||boundary==='process'){assert.equal(f.counts().stops,0);owner.process=process;owner.sessionGeneration=session;}
+ f.respond(null);await f.lifecycle.apply(curve);assert.equal(f.host.calls.filter(x=>x==='enable').length,1);return{boundary,shape,identitySeamOnly:boundary==='session'||boundary==='process',currentManualWrites:1};}
+ finally{if(boundary==='session'||boundary==='process'){owner.process=process;owner.sessionGeneration=session;}wait.resolve(f.base);f.respond(null);await pending;await end;}
+});
+await check('new manual curve waiting on fresh resume handshake writes only the current curve',async f=>{
+ await f.interrupted();const wait=held<FanHandshake>();f.respond(()=>{wait.enter();return wait.promise;});const pending=outcome(f.lifecycle.resume());await Promise.race([wait.ready,pending]);assert(wait.didEnter(),'resume ended without its required current handshake');
+ let written:readonly FanNode[]|null=null;const enable=f.host.enable.bind(f.host);f.host.enable=async(...args:any[])=>{written=args[0];return enable();};const latest=curve.map(n=>({...n,dutyPercent:65}));const apply=outcome(f.lifecycle.apply(latest));f.respond(null);wait.resolve(f.base);await pending;assert.equal((await apply).error,null);assert.deepEqual(written,latest);assert.equal(f.host.calls.filter(x=>x==='enable').length,1);return{latestCurveWrites:1};
+});
+await check('duplicate current resume shares one fresh handshake and one write',async f=>{await f.interrupted();const wait=held<FanHandshake>();f.respond(()=>{wait.enter();return wait.promise;});const a=outcome(f.lifecycle.resume());await Promise.race([wait.ready,a]);assert(wait.didEnter(),'shared resume ended without its required current handshake');const b=outcome(f.lifecycle.resume());f.respond(null);wait.resolve(f.base);assert.equal((await a).error,null);assert.equal((await b).error,null);assert.equal(f.counts().handshakes,2);assert.equal(f.host.calls.filter(x=>x==='enable').length,1);return{freshHandshakes:1,writes:1};});
+console.log(JSON.stringify({ok:results.every(x=>x.ok),checks:results.length,results,hardwareCalls:0,scope:'actual public initial start/sleep/resume/manual apply, bounded shared queue; inert native/Host/process, identity replacement seams, no device or CPU benchmark'}));
+if(results.some(x=>!x.ok))process.exitCode=1;

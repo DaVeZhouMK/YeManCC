@@ -1,6 +1,7 @@
 // Third-party RTSSHooks is confined to this disposable helper process.
 // YMCC must never LoadLibrary/FreeLibrary RTSSHooks (WebView2 hook lifetime).
 #include <windows.h>
+#include "../process_efficiency.h"
 #include <cwchar>
 #include <string>
 using LoadProfileFn = void (*)(LPCSTR);
@@ -10,6 +11,7 @@ static DWORD invokeSdk(LoadProfileFn load, UpdateProfilesFn update) {
     __except (EXCEPTION_EXECUTE_HANDLER) { return GetExceptionCode(); }
 }
 int wmain(int argc, wchar_t** argv) {
+    (void)ymcc::processEfficiency::applyCurrent();
     SetErrorMode(SEM_FAILCRITICALERRORS | SEM_NOGPFAULTERRORBOX | SEM_NOOPENFILEERRORBOX);
     if (argc != 2) return ERROR_INVALID_PARAMETER;
     const std::wstring path = argv[1];

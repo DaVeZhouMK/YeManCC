@@ -1,0 +1,53 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import {spawnSync} from 'node:child_process';
+import {fileURLToPath} from 'node:url';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
+import {extract} from './fixtures/msi_owned_return_retired_io/source-binding.mjs';
+
+const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
+const args=process.argv.slice(2);
+const option=(name,fallback)=>{const index=args.indexOf(name);return index<0?fallback:args[index+1];};
+const output=path.resolve(option('--output','G:/YeManCC-Work/Build/Validation/NativeGameHidReader-20261018'));
+const sourcePath=path.resolve(option('--source',path.join(repo,'native/main.cpp')));
+const driverPath=path.resolve(option('--driver','D:/Codex/2026-10-16/ni/outputs/shield-hc-fix-r23-20261018/driver-access-review/Logic-v1.4.181.0.c'));
+const baseline=args.includes('--expect-counterexample');
+const hash=data=>crypto.createHash('sha256').update(data).digest('hex');
+const source=fs.readFileSync(sourcePath,'utf8');
+const driver=fs.readFileSync(driverPath,'utf8');
+assert.equal(hash(fs.readFileSync(driverPath)),'a34a4d350fc869a6e42dbd9548b3a94d4df5f0b5d4e72821ca4d2aa35b6b9e6f');
+const fixturePath=path.join(repo,'tools/fixtures/native_game_hid_caps/ReaderExemption.cpp');
+const fixture=fs.readFileSync(fixturePath,'utf8');
+const spans=[];
+const native=['inputHostLegacyExeDirPath','inputHostExecutablePath','hidHideExemptApplicationPaths'].map(name=>extract(source,'function',name,sourcePath,spans)).join('\n');
+const authorizationStart=driver.indexOf('    accessDenied = FALSE;',driver.indexOf('VOID OnDeviceFileCreate('));
+const authorizationEnd=driver.indexOf('    // Handle the request accordingly',authorizationStart);
+assert(authorizationStart>0&&authorizationEnd>authorizationStart);
+const authorization=driver.slice(authorizationStart,authorizationEnd);
+assert(authorization.includes('Whitelisted(processId, &cacheHit)')&&authorization.includes('accessDenied = TRUE;'));
+fs.mkdirSync(output,{recursive:true});
+const identity={sourcePath,sourceSha256:hash(fs.readFileSync(sourcePath)),driverPath,driverSha256:hash(fs.readFileSync(driverPath)),fixtureSha256:hash(Buffer.from(fixture)),spans,authorizationSha256:hash(Buffer.from(authorization)),authorizationStartLine:driver.slice(0,authorizationStart).split('\n').length};
+fs.writeFileSync(path.join(output,'RESULT.json'),JSON.stringify({...identity,passed:false,status:'started'},null,2)+'\n');
+const code=fixture.replace('@@PRODUCTION_READERS@@',native).replace('@@DRIVER_AUTHORIZATION@@',authorization);
+fs.writeFileSync(path.join(output,'Actual.cpp'),code);
+const configurations=[];
+for(const [configuration,flags] of [['Release','/O2 /MD'],['Checked','/Od /RTC1 /MDd']]){
+ const directory=path.join(output,configuration);fs.mkdirSync(directory,{recursive:true});
+ const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';
+ const command=calibrationToolchainPreamble(vcvars)+`cl /nologo /std:c++20 /utf-8 /EHsc ${flags} /I"${path.join(repo,'deps/json')}" "${path.join(output,'Actual.cpp')}" /Fo"${path.join(directory,'Fixture.obj')}" /Fe"${path.join(directory,'Fixture.exe')}"\r\nexit /b %errorlevel%\r\n`;
+ fs.writeFileSync(path.join(directory,'build.cmd'),command);
+ const built=spawnSync('cmd.exe',['/d','/c',path.join(directory,'build.cmd')],{encoding:'utf8',cwd:directory,timeout:60000});
+ fs.writeFileSync(path.join(directory,'build.log'),(built.stdout??'')+(built.stderr??''));assert.equal(built.status,0,built.stdout+built.stderr);
+ const result=spawnSync(path.join(directory,'Fixture.exe'),[path.join(directory,'RESULT.json')],{encoding:'utf8',cwd:directory,timeout:10000});
+ fs.writeFileSync(path.join(directory,'run.log'),(result.stdout??'')+(result.stderr??''));
+ const report=JSON.parse(fs.readFileSync(path.join(directory,'RESULT.json'),'utf8'));
+ configurations.push({configuration,...report,rows:undefined});
+ console.log(configuration+': '+report.cases+' cases / '+report.assertions+' assertions / '+report.failures.length+' failures');
+ if(baseline){assert.equal(result.status,1);assert(report.failures.some(value=>value.includes('helper-read-zero-access-denied')));}else{assert.equal(result.status,0,result.stdout+result.stderr);assert(report.passed);}
+}
+assert.equal(hash(fs.readFileSync(sourcePath)),identity.sourceSha256);
+assert.equal(hash(fs.readFileSync(driverPath)),identity.driverSha256);
+assert.equal(hash(fs.readFileSync(fixturePath)),identity.fixtureSha256);
+fs.writeFileSync(path.join(output,'RESULT.json'),JSON.stringify({...identity,passed:!baseline,counterexampleReproduced:baseline,configurations,realHardwareAccess:false,driverLoaded:false,productMainExecuted:false,limitations:['The production reader-selection functions and driver authorization block are compiled; WDF, registry, processes, and filesystem presence are inert','Normal non-inverse HidHide policy only; this does not verify the installed allowlist or actual device opens','Family labels exercise the shared reader policy; physical model compatibility is checked separately by the HC catalog suite']},null,2)+'\n');

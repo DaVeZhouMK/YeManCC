@@ -1,0 +1,830 @@
+{
+  "schemaVersion": 1,
+  "esbuildVersion": "0.21.5",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "esbuildModule": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+  "esbuildPackageRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild",
+  "esbuildExecutable": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+  "files": [
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\155.0.4283.62.manifest",
+      "sha256": "723e5f48c55ddc5419b7d144400a15c4d757173400104ffcbb3bd025a90ff315"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\concrt140.dll",
+      "sha256": "eae8d7858c9989e2a351eb650ee1663fd8e3fd59c6c5afe09d50f2f2bd5ccc75"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\cookie_exporter.exe",
+      "sha256": "a9c182f6b93e77c799072acf0f80416711afaad5034bbff9b77e426108c9efde"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\copilot_overlay_images_100_percent.pak",
+      "sha256": "3f201f2f03aa37efe782ac8dfaf562d270afcd4bd7f22fcc0c18c0bcaa3790f3"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\copilot_overlay_images_200_percent.pak",
+      "sha256": "fcd36cc1d28982cbadcf6e816568b5a1134e9dbaa3ada9b18c23bd34db69d819"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\copilot_overlay_unscaled_images.pak",
+      "sha256": "56ee1d4392cfd1e16fd3fe3ee64ba0e4cae268c7e3d54eb0ff82b9ad1f908523"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\Copilot.dat",
+      "sha256": "d79e27858722fcb4c2db9a7fa6bb4fb958eb90c2ab12fd35370be8c05dee7878"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\d3dcompiler_47.dll",
+      "sha256": "82764c2e07b54f1331af89e3e8c3821a7eaad4582560e0d43b1b78f5d4847ce2"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\dual_engine_adapter_x64.dll",
+      "sha256": "934381840d704c48c88727cc4c804fc6fd77e6de46a6c1bc55aff4f577b98fa0"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\dxcompiler.dll",
+      "sha256": "e04d7761fb4f4f15ed4c34d70244922c2c53d932be023f08db3ead674b030877"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\Edge.dat",
+      "sha256": "aad5a84356ee96f3d6ca9742b23b6124eafba558f6d60ceed6c3067dac459c81"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\EdgeWebView.dat",
+      "sha256": "482297326005fcb6e961e9b3e327e4cbb151901e7ca55cbe2bf982823bc06934"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\elevated_tracing_service.exe",
+      "sha256": "0fb64cdedbd1c9691586350cfe70f658ce248949da65fd56a6f9271e52812ef5"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\elevation_service.exe",
+      "sha256": "83721b2497edf6b2e9e016d578b079f3abba4ca2b2157a0e82e1bb6dab8d1b2a"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\eventlog_provider.dll",
+      "sha256": "8e4ca2b2c88388ffe6e0559795a271a49deebd3b8f27a760a6ad3ff510707c16"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\ffmpeg.dll",
+      "sha256": "06c015032e0786a3217d09d9760e2c808205e9a4c99ba23fec0bc58b939ced47"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\icudtl.dat",
+      "sha256": "8fa69fc9ebcce09fa8ffac89afcf8088e8f70a177fa90d80a90668f5389f2579"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\identity_helper.exe",
+      "sha256": "992b15b6d3c0f3e8e215deef76e47d551e7e8faa21236fead965e8bec0eb00e9"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\identity_helper.exe.manifest",
+      "sha256": "4a048d22363e0ec10fad2bab34adcd0edceba732d29f993ff897ed28a5653dda"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\learning_tools.dll",
+      "sha256": "54062ccc2b099d8f2db0c6d203e46d373d97c33c2170f473b924e5779c24e8f2"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\Locales\\en-US.pak",
+      "sha256": "8572244169c608f659611617b0d12cfee528375e1cd124cf414a95c7e9e1d54a"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\Locales\\zh-CN.pak",
+      "sha256": "cad80f5ba53f32690b7ebbe4857b8c125f1b19bdbebd30496852e8475eb90e9e"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\microsoft_shell_integration.dll",
+      "sha256": "fa50e818612dbb854508585bd57db349ca9f129185355668b05a58e5956292d6"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\mip_core_gn.dll",
+      "sha256": "c453cff0f8c5a79981e84df824b9d0a7a76983f6bfd507fdcf48e3d7d4a09bfc"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_100_percent.pak",
+      "sha256": "fb01e3c7563a79ef3287cbe9e92688390130cb9d6222f336dfbf880b51b52a3c"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_200_percent.pak",
+      "sha256": "adff1210ea5548e802701fe70f234f81024053424e69231e10e75d0525745bf8"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_elf.dll",
+      "sha256": "ca447464b1ac49577409ca46e2c17cbcea691b56914cabe5b47e1951a7d991dc"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_proxy.exe",
+      "sha256": "8e90fbab1fb353651b79f1aabda6b072b8ff0d71b5024f9b9cf27579ec30b95e"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_pwa_launcher.exe",
+      "sha256": "a5dc17557451373fc06d6e27223e4091f65f54412aae122dc1ad7b62a1b7f519"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge_wer.dll",
+      "sha256": "8317bca999d00a0a279780ea7546202a40035eb993b6371f775f66dc4d8b6a36"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge.dll",
+      "sha256": "1906b766460da798672a9845e2772130674f7d3d866e8c63140ed88a1fe1c88d"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msedge.exe",
+      "sha256": "c2451a012ff88e82449834de5b526ebb42b5a3fc25958d795910d2b172c975b6"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\mspdf.dll",
+      "sha256": "f902b1f1411c34123fb559369e9a3c9a68cef0aed0729fb48577e62c9a7c5797"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msvcp140_codecvt_ids.dll",
+      "sha256": "fed92762621038597f0bb3fc839e9d585855caca15a3a9c20f722d31414942c6"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\msvcp140.dll",
+      "sha256": "14447a4e5593e482adda23a615c451ccd62fe5850c8f8d31643491b0be970a43"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\notification_click_helper.exe",
+      "sha256": "0f5637476fad365b1b4c1e97c6eb3f422864fc0f4b9904501deb496fe11f9170"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\notification_helper.exe",
+      "sha256": "0f5637476fad365b1b4c1e97c6eb3f422864fc0f4b9904501deb496fe11f9170"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\notification_helper.exe.manifest",
+      "sha256": "4a048d22363e0ec10fad2bab34adcd0edceba732d29f993ff897ed28a5653dda"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\oneauth.dll",
+      "sha256": "4207f6a7cc2324d79ec008d2a2a31e3c66250842b1865507be2a2743a8dc5cc1"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\oneds.dll",
+      "sha256": "2fccd3764fbd087655487bea0012fb0c9e562e70ada76de02c550beb5b018d54"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\onnxruntime.dll",
+      "sha256": "558d8472cd1355f45e59e1aa18b14e0efab289784f272b2b5050a25809cf7f8b"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\onramp.dll",
+      "sha256": "07a264c3df0745eb11ba30844fa0b8f6b03e712886f89a35b55be7df22984353"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\passkey_authenticator_plugin.exe",
+      "sha256": "0f5637476fad365b1b4c1e97c6eb3f422864fc0f4b9904501deb496fe11f9170"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\passkey_authenticator_plugin.exe.manifest",
+      "sha256": "4a048d22363e0ec10fad2bab34adcd0edceba732d29f993ff897ed28a5653dda"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\platform_experiences_helper.exe",
+      "sha256": "f397f586697523978a4f8316d6a7f0c664f1fe49e09a8edb5e878fd52d5a0df7"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\prefs_enclave_x64.dll",
+      "sha256": "c49cd6049f97c0de2aceda3718db3bea5f702daf48ef2b0a66420c38d1e5019c"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\pwahelper.exe",
+      "sha256": "f3330d18d11580fdfd5daaa5f8f87a63272da47a4eb3e493000a9bb0ba87d287"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\resources.pak",
+      "sha256": "6cdf501dc386c2835268df2df8eef19bf38b4bd77499b33b028e43a61d47f9e5"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\telclient.dll",
+      "sha256": "40d599d31489567eb6e8998c62495ee038f882879b9bf7189b91929dab6a020f"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\v8_context_snapshot.bin",
+      "sha256": "03b79a0c86d5caccf6bb52bdf85173cc6d189929a089aece804536f29075870c"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vccorlib140.dll",
+      "sha256": "2d3870ee4bb1deff665a296bf911d8b83a1a4a393b3402187baf04b20e09d1b8"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vcruntime140_1.dll",
+      "sha256": "cd94474bf6dd5617ede6a1cc8363e79afe656d42538e8d350e5c52ae1cf354e0"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vcruntime140.dll",
+      "sha256": "03ace324db6329112dffcf50409048ce64dc2378246f8686512a00b639976ace"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vk_swiftshader_icd.json",
+      "sha256": "32d83ff113fef532a9f97e0d2831f8656628ab1c99e9060f0332b1532839afd9"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vk_swiftshader.dll",
+      "sha256": "a635fd5b2580a43c7fa1af16a47dc12accaf9416b9e75436b53b597aa6a97794"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\vulkan-1.dll",
+      "sha256": "3e09c3558aa71182555c7058871afca25805fad1cef123bfd54d266b2dd24579"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\wdag.dll",
+      "sha256": "a7ba9c9dd38ec69ddc04748b2f8fc4d1f7dbe5e7da73627dfea27645bb89a87c"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62\\webview2_integration.dll",
+      "sha256": "431200895db06e8496634064f94fcb9c3b30ab91070e7bffeaf9c0942ff58bcc"
+    },
+    {
+      "path": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe",
+      "sha256": "c2451a012ff88e82449834de5b526ebb42b5a3fc25958d795910d2b172c975b6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe",
+      "sha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\browsers.json",
+      "sha256": "f306eed529599b1eaf2f8a85db9de2b23e1a3fe36c2b66434b7c9434fb627a99"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\cli.js",
+      "sha256": "f1c4075aef116c766092250d7f37b3249a7cee6465d953207fc38c8f6145becd"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\index.js",
+      "sha256": "a58fb2cec4293e7dcf73c58a179898a4f3986666451a19da4e731fa3af63265b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\bootstrap.js",
+      "sha256": "4637f4dbfef9cfc01baeb5f5d2cb63fa0901522c96915ea2227290558d27123e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\coreBundle.js",
+      "sha256": "9393fa79e1c67c74edc26b610d65a4f7ed73d345a762465cc88340a33a2454ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\entry\\cliDaemon.js",
+      "sha256": "062f256fb29a7bf91793a014b9c3f1f9cf2dc6b12e40a8a2ebba88a630ae16a0"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\entry\\dashboardApp.js",
+      "sha256": "209962c6eaeef11629f226d6a2ab33ec7a2480754242b6e19590a9e6eb71d126"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\entry\\mcp.js",
+      "sha256": "cc87dc0020cb41caebbf04f50e42bc7835b033a6d80e9c3f0a3d0b3dbdf341c7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\entry\\oopBrowserDownload.js",
+      "sha256": "87567cdbd67dd2f50bb232d47d3784701ece7c81e39c0287bb7d1b466b68cf06"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\package.js",
+      "sha256": "9f938e1d44a0dd231b1660ca62f7dae964859b79cbdc370b8542c5d375ca3c05"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\server\\electron\\loader.js",
+      "sha256": "8f4f2c20933e7bef2bbed9a1b455278ad1461aa919b0386f360aee5b2580149d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\serverRegistry.js",
+      "sha256": "e9db9d4eaa8c3690f700ea3047af7b0b6e0b16937a969589678c51db92272ae9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\channelSessions.js",
+      "sha256": "6b9c613e87340f48ad7182addd7495a8ff3fbe55feb1bbd0ce04f59f1552e126"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\cli.js",
+      "sha256": "dfde8e9dfde30c4b3914eb25ba1c5a8524ec64651d866171d75cd7b41a827180"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\help.json",
+      "sha256": "d63f1c7e006b1bdfbe656e6bea2b4dca9e1b6c17f8c806fdaca656fef71d234d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\minimist.js",
+      "sha256": "1d200627373a367e0097f1abeaaa4d67cde2c33f2e5efca5cb55222c7667adc3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\output.js",
+      "sha256": "2eace914547a487b2aa1dc34af787fe92168f0b7b3dde24f2b127e817cc9b2b4"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\program.js",
+      "sha256": "4a3ece6f75a707e6af71c1dde8650080e7819421594f251b9397e2e45e89cbb8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\registry.js",
+      "sha256": "c11d278e05542808ba37bdb032018eccf9dc78377f8025bd74fa906ae009ca30"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\cli-client\\session.js",
+      "sha256": "716e87fc77251129adf8c66374cccc6788f76a02b4b33692c7e63a01a659cb5c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\utils\\extension.js",
+      "sha256": "ed1a56cb9a6b4643a6a1dea604c541a4e3a4be8d8971edcfe53c7dc9cceefe98"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\tools\\utils\\socketConnection.js",
+      "sha256": "973c2bea70a1f1445f4673f99e9fa351e50a2ec9fd93d7381b2c41bb4de764dd"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\utilsBundle.js",
+      "sha256": "580f571bf063e2256b51b3946a035bc452fc0e22808d5547b198baea39923a32"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\dashboard\\assets\\index-CyWAfh-p.js",
+      "sha256": "33abc7596e49d241e5b397141073e73bb2fb7eec9880bb1e0e2e6d0f673a150e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\htmlReport\\report.js",
+      "sha256": "f0941744b2ef35b91eafb3d6099f5d4acb342ddbb3000ff293b6e3abf80d29ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\recorder\\assets\\codeMirrorModule-CwYYHbcZ.js",
+      "sha256": "b673acf747a1667bbd90b96d9de583d69905b0bd78a196b2a7979a573f5171fd"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\recorder\\assets\\index-DYjdXIbE.js",
+      "sha256": "f3c0288840bedb5739649f7fe938a30f57469d46d6ca1e56ee885a0860b98df9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\assets\\codeMirrorModule-rXmQmLUY.js",
+      "sha256": "bb0f7c41f9889e4195c2504878e38061288881f426498434c9955479828f7e66"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\assets\\defaultSettingsView-B-dXF5JN.js",
+      "sha256": "2ce8be133fe21a4abd7d8330d9b443092dc2ce28826f191442c14989f9d55b15"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\assets\\urlMatch-L3liM589.js",
+      "sha256": "1bc6321e32d11c31a452bc75896f0b344e6153321854d9f1658818be7f845c16"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\assets\\xtermModule-BuZfJS5v.js",
+      "sha256": "17584c22ad7d49f3c3c9e07e8b2655203cd33e60c1cb527356eabfda6a59c830"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\index.KZ4wOW1K.js",
+      "sha256": "53e2227532161670bc601e241a7a9af00ac54826a9dd2ef9c15b8c1f77e92e63"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\snapshot.B_Jk1wbt.js",
+      "sha256": "d4d09e05451d107d8e1a6bbd041405fe518b9fd2833890e4ebaaad83b7f554f5"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\sw.bundle.js",
+      "sha256": "cfd6662a71914516efe90a5a6f3da2bbe5db6e442939b868ca465f765d33723f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\lib\\vite\\traceViewer\\uiMode.Dzuouizj.js",
+      "sha256": "a584f96f0797144552430d7a04f7e3b84b1baaa0b781a664b1512339ec1c760b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core\\package.json",
+      "sha256": "07c47543631fef9508760365dee9fbe958c562093ec8d122543949ed231f233f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\cli.js",
+      "sha256": "5e79302a6aad7d835d92d5ae6b4244c91cf61b28e94d7917279090e6c231f7a1"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\index.js",
+      "sha256": "4e98f65f0a9d9bcab8cffc0c5cfdd87fd3f5b0be74fc494ff166a466b204cd44"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\jsx-runtime.js",
+      "sha256": "2fefb7ec3a42dcf1cea35ca7e3eb107507c4d80821b1d6abf6cfc9bca36498f0"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\agents\\agentParser.js",
+      "sha256": "a2f630c1c2c9eafa0a3ca9cdbeaa26e74801615bc572e3fce226acb662ceb0eb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\agents\\generateAgents.js",
+      "sha256": "3bae7bde1d05c0fbaaa1a82ce7a39732ff52904de575fe88e69c391a6c41478e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\cli\\reportActions.js",
+      "sha256": "4eeceedf9588d69a153f018aa548e00b73e5f61cb39bb05f0fc87c06131af2b3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\cli\\testActions.js",
+      "sha256": "44a4770714406134d1135b77d3b4388b557a7decb7f24094e637b6a5d517dd48"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\common\\index.js",
+      "sha256": "8f2588ccdb7ce2d245fdbe3222ba67817293799dff1ba2e58303f0d558b6526f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\errorContext.js",
+      "sha256": "ffc1843cebb3e90e1674c07ee2607a4a63152eff609e5f9865bbb2f9eb02e9a1"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\globals.js",
+      "sha256": "f5922eb1fb6051900157492eb9c218e62d07378eed135bca4b2f173ed1184d1c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\index.js",
+      "sha256": "cb793062d359fd495f10e0916523f52c76a47fd0b6c4195451dabcd48638e862"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\isomorphic.js",
+      "sha256": "3d61508f951aa9518adb4bf6594d61dfd1099c95a1a4f0af809a58ccebc59025"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\loader\\loaderProcessEntry.js",
+      "sha256": "45681332f4178770c204b33e5b8dcbba940baf3bc6fc86506bab24027cb513f3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\matchers\\expect.js",
+      "sha256": "b22e4f194830dceb0eb67ceb44523f49bbf49f96fba50cc097b677e94ef360d7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\browserBackend.js",
+      "sha256": "7143473e53c8b76720e42efab95f55227807590d2818104223d5df6ac46b681e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\generatorTools.js",
+      "sha256": "3c53feaeb9fc2ff728f334cb31f9b7211e65b20c692c7585459c3c97bdd13a12"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\plannerTools.js",
+      "sha256": "715abc888d9ea30b532b75c6f09aa34101ab15c1eeb959c50cf9dedcf3a459ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\seed.js",
+      "sha256": "f36f7fb76d4ed33225e80be208cccc9757d363a9d1527cf560736c0f1e5edd31"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\streams.js",
+      "sha256": "8affc240a6a90ee2dbdedcde9927018efe426ec0d390bcd1ee4f0464e75adc0f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\testBackend.js",
+      "sha256": "dcd8d09366617f13213ce544efb5fe47df5a87258ae93545d4d0738623f43ad1"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\testContext.js",
+      "sha256": "74ff4273ea12e6353d4860c9452387b643d7d8899fbd4951389ba94d18df5e37"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\testTool.js",
+      "sha256": "2a8f17d0a61ccb8a4ca9c52a3255d624deca989c0b06281d579629c664f8cc8e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\mcp\\test\\testTools.js",
+      "sha256": "14710b5f34246005d974762b83a2a50e5cc17130af841cd3bc447811d69c6af7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\package.js",
+      "sha256": "544a18417ea51dd4c8a9f3dbc4e2b47e46c80f452e0cd23d55e9b3680bc6241e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\program.js",
+      "sha256": "d453e49272d33d592cac3c55e06536e5451bec135fa8d80d6b134fd5e072c88b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\runner\\index.js",
+      "sha256": "6dcf135a144b0f243848128bb68e0a25898b8ad764a34326f36ab45d9a9e1685"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\transform\\babelBundle.js",
+      "sha256": "01511e45db7646e2a12890de8d7866caa0754c8799db6407a6345236f4bed0c4"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\transform\\esmLoader.js",
+      "sha256": "f4e708ea08083676777a7699c82417d16fa08113f197fbc070ccffb9e8db2beb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\util.js",
+      "sha256": "874c55495773da8c5a2ec46551c2265937bf08446231c09a8b5966e8bea2b1f7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\lib\\worker\\workerProcessEntry.js",
+      "sha256": "cc8274565200e5f5aeecc80aef9518526ff82a32c36e2a2b06e445c238cebcc6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\package.json",
+      "sha256": "ca170ec143a88ed3043ac953eb3b2377b2b97304104f4e1e23316684ce2c35af"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright\\test.js",
+      "sha256": "b97fa53a6ab864f51c9c48b5e4647d0acae45ba2948c5d78e38bfeb56755d974"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@babel+parser@7.29.8\\node_modules\\@babel\\parser\\lib\\index.js",
+      "sha256": "6969920ae0610df927b6b3e675d1309372c268e36d391652af8e3e0183cbe8f8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+      "sha256": "b868c8d988ffe76006c03c91f856312c312e42e2f3932a6bb56d7f4a1790c8b3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\package.json",
+      "sha256": "5fefc397d9fe3a69260545a7bfe570493b41498f3a949652e416a153dfdf695b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@jridgewell+sourcemap-codec@1.5.5\\node_modules\\@jridgewell\\sourcemap-codec\\dist\\sourcemap-codec.umd.js",
+      "sha256": "25f02490d5179a4c28d6799e2c290be162be1010e6a101d77f5511683ccd0ca3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\dist\\compiler-core.cjs.js",
+      "sha256": "8f566fcdf8be11f6070e895f87d29767d626c7cb7a814c9c0e0fc965977d0187"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\index.js",
+      "sha256": "ccc969ede88026f2168f8a6ca482913664ac12b2e0cfe1e34cd211767e521a60"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\dist\\compiler-dom.cjs.js",
+      "sha256": "982dcfb9dd576ca1d72a36b7e6c9850da761c857efa334653954c85e6653867a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\index.js",
+      "sha256": "21407fc5cebe255208627dd039f2284156be88abbd9123281a79581d349b48c1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-sfc@3.5.41\\node_modules\\@vue\\compiler-sfc\\dist\\compiler-sfc.cjs.js",
+      "sha256": "dcc1f6e35275e74f926372c6f546ee2780d3dd3db7d5415958ef0b6496d584a6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-ssr@3.5.41\\node_modules\\@vue\\compiler-ssr\\dist\\compiler-ssr.cjs.js",
+      "sha256": "e6c17aa487e77f3be1d33847ab1260bc265b0602401324819e70864cb5f33bf8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\dist\\reactivity.esm-bundler.js",
+      "sha256": "11b17a5069f0019bb1ec886891022a04bbbbe57c893cd01d313b35ccdededb79"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\dist\\runtime-core.esm-bundler.js",
+      "sha256": "73b808ccf5c04f9202022cade93e10d002d6854c10b8ba56e44e081505f511d3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\dist\\runtime-dom.esm-bundler.js",
+      "sha256": "298253e8e8020d9984cad57c59c771143d2648305c00ec4af279c08cbd4aea59"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.cjs.js",
+      "sha256": "cb8b5c2d5930cb40d6a3b028266cf8bbf0dd99cced447acb55416ffdbd8e2774"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.esm-bundler.js",
+      "sha256": "eee1821dd346d842f4b7b8fe3bfb6d9ed507313b1ed25eb13d18ab8d6b94ec1f"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\index.js",
+      "sha256": "22aeabedc1f2782f67b05c54df4382d4e52a0e0c384ff02349372e2acd9974ed"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode-codepoint.js",
+      "sha256": "98d97fd43e4db015e5afa7c69b1055cd1ade8114530ea01734add86184125271"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode.js",
+      "sha256": "e318cd751279428b7d7e6e9e4c0dc7cc8a4c78e8c2bd00d42da9f8e7b3ef5c07"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-html.js",
+      "sha256": "80b85ad02696af10d597c1353db7eb01fbbe4db5b922ac8693c29cbe18d53ac4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-xml.js",
+      "sha256": "07e89fa83ca837b188e4cc52a8d6d2b6983fc5a63b15abad789da9be2ea777b6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\bin-trie-flags.js",
+      "sha256": "ddb6a8fcaab3a1fb6d60c576bf10302a554d71869b6466a14fc11a800264559a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\decode-shared.js",
+      "sha256": "e68061084a578fa4f95bd96407f2a4e272bb38615ae1b1076d1181981ce95549"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+      "sha256": "ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\package.json",
+      "sha256": "0f35e0d63bd60a43ed85879604a40f7e9688b321904cf28a95be5b1bc629559c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\estree-walker@2.0.2\\node_modules\\estree-walker\\dist\\umd\\estree-walker.js",
+      "sha256": "183597c40a43d2a2ebda3dc85ae2dd70e107b3e5cec305b02a5bffa54e0f4b9b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\magic-string@0.30.21\\node_modules\\magic-string\\dist\\magic-string.cjs.js",
+      "sha256": "15e180b8bbb5a3fa6a945951b5802dfb75a0967e82f9beeec520cb1ea0fa9ee2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\nanoid@3.3.17\\node_modules\\nanoid\\non-secure\\index.cjs",
+      "sha256": "73b3dc5bf17d98fc9b9894748907e338c536f47412ae495a5f8052565381ddb2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\picocolors@1.1.1\\node_modules\\picocolors\\picocolors.js",
+      "sha256": "213bb870fcaad4def0215fe34fbb0f529836cc4d2462e02f14f1a49d09781625"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\at-rule.js",
+      "sha256": "33b932bda8f304e9838a70232673326b6c0fd5fa030df35071bf36c127042a0b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\comment.js",
+      "sha256": "674385438f42526f2c05c19dfb66fcc521f5cf180ccc85b3215ad5c07ac21a40"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\container.js",
+      "sha256": "e2fc6a559238ac8186ef56d13d340b7c62c04ba9551e2edc027e761eb393ddd0"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\css-syntax-error.js",
+      "sha256": "904b4bb371539a6303e4e211f0a8991fde7bc94d8674253d627389ff291d0ec1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\declaration.js",
+      "sha256": "2ccb78406c7a45aab26fc463a0fe5e3e855caf3ab1ba283616ae867046aa3b54"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\document.js",
+      "sha256": "f66f02fde48389fe1a361a8f71da7ee0236a49c94cf22378e70ba6a2e9f4fab1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\fromJSON.js",
+      "sha256": "2d9efb16f305c45f05d30e6727ad3d475c89e08ef893d913c3839f5ce899db17"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\input.js",
+      "sha256": "52358502e6ea455d421d21a98fc0a3be3b974ca624b96f43b318780f3e150bc2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\lazy-result.js",
+      "sha256": "2d716dea3a99836276c67e6d74dc587571a8b7498683044ba3ddc57e3db87104"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\list.js",
+      "sha256": "22794f519e19b280abf5eedd084a53da4f41905e1bf8a880a53291d4c905d2ea"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\map-generator.js",
+      "sha256": "feccbc87472d5d1cc660c2bfd4958cbe5442173f03cbfa518808725f684a313c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\no-work-result.js",
+      "sha256": "11e06a9b30ab844b877f489ad7870e2a319507aed4554a58a757b7dfd7699505"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\node.js",
+      "sha256": "1cc8d56d0c77783fa7fecf702321129936efa3dc504eb4528042a103fe54770d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parse.js",
+      "sha256": "7662c5ad1fd5f97a7c1615f0e5e7bc268e762916bcf6fb7bf9dda45537493764"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\parser.js",
+      "sha256": "5ac73eb5da16ec8f998a1a5aac28b15815c892c2a3957ab06ee8333f8718be6e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\postcss.js",
+      "sha256": "8314c843f5dfa922e6f3fb9b8d8bf3e4b0be0d94b08075e1b4f3599f4276fb67"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\previous-map.js",
+      "sha256": "5ff94015422fc77cc8b68428aa4ccf255d57d0d0be18fe81bc52590e3136433e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\processor.js",
+      "sha256": "9a5280f122b51defbd812007f994f9fe8510e7421f146a14b3a013844e0ec9ac"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\result.js",
+      "sha256": "b4239438538d41187fc9a572c83bb89b09524301764ebd4f46c71fe31edd04dd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\root.js",
+      "sha256": "872a512fa232b23f5231070bd981d3eb390316d8776ba5ccb64f723e4b7088bb"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\rule.js",
+      "sha256": "216ca23a33b1a0145c7925daa442a34e33a9ea41c6f3bb58fca7c4fb355e0166"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringifier.js",
+      "sha256": "76094d7547be325f5155759fa1c6b979b3fd576ab686715ddce51b8efa0de2d7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\stringify.js",
+      "sha256": "99229cdda200513f88f7fee46004d5c39c1492a73451509e66164d26dff34abc"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\symbols.js",
+      "sha256": "eb8ab8b9648d400ec3e8e37e75dc159734b97ba21137f12da11b4afc2547a1b4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\terminal-highlight.js",
+      "sha256": "27f1eb6cc633f3947e053c96f16b1754bcffcda2742ecc9a1e11cc2a75d70d9b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\tokenize.js",
+      "sha256": "ddfcaaa01f5eac9e4e8652044df1401ce6cc70295fd3f9fbb214ca66fb2bec72"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warn-once.js",
+      "sha256": "5683ff69eeb8e77373a4bd0e0b9da611c7575ee434ba3c458c0552ab4806464a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\postcss@8.5.25\\node_modules\\postcss\\lib\\warning.js",
+      "sha256": "eb7656e1b8501c7b7c3b925b3875363e30b5d23477424bc444dc6289993c16b7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\array-set.js",
+      "sha256": "163bb3055aaea7140167740036a83161fd912c344b14f992754b80f21477d754"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64-vlq.js",
+      "sha256": "f3407e528f54ec0787bd0a71eeac0c99fffd98445916fcbe116dc69ca3be928b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64.js",
+      "sha256": "651bf433cf05e9ec8cee0b94639483236a605d48279e83d3d5c5de81c21d6599"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\binary-search.js",
+      "sha256": "c7f4a47a125af0bd860443dfd71d2f412d1a97dcb53ab7038189d63b91dc32bd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\mapping-list.js",
+      "sha256": "35ddb82861f11a70ab84cb47d620fcb28d7f884bb444644e06bde815b836ef9e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\quick-sort.js",
+      "sha256": "72ed4911cdc72232cac53cac995e28e865cd4302186173bba74ff6436c089915"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-consumer.js",
+      "sha256": "78f7a8f6d20f51a99a9cbd8d552321b1a72de9b9fb9c39dbeb27dc84eb2eade5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-generator.js",
+      "sha256": "645482e8d23fd49cd025a0ad07c2e2beb173995138370d6a73e596e18e889bd8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-node.js",
+      "sha256": "b45db8183550ca1e6259976f6ceee89f6764360c56cf206701bd2f7471144e31"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\util.js",
+      "sha256": "0629f3ae2f3049cda3a2e87ea651dcf0cc71108f4681795ab989a8ac1573fc03"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\source-map.js",
+      "sha256": "dc098456c2d9ab90a4c0a17cca9be16665b9813df20906553a98b0088a157be7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\lib\\typescript.js",
+      "sha256": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\package.json",
+      "sha256": "822ef7ca6452205657b6288b066481ecf508bfbf43455d715cf7d3ec457561e6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\index.js",
+      "sha256": "a2226c3eedb827ce90fabd18413c8b6d4008a99269f403f86f160b733c546970"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\compiler-sfc\\register-ts.js",
+      "sha256": "4244727c942ef8afefa2969ea9e4179d885ffb53d91f962812fcb18a405a6ec9"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\dist\\vue.runtime.esm-bundler.js",
+      "sha256": "ed4a516c8aa4931c5683370ddc63846da8898b5fdf6638dae6912874948a1028"
+    }
+  ],
+  "powershellExecutable": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe",
+  "browserExecutable": "C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe",
+  "browserVersion": "155.0.4283.62",
+  "browserRoot": "C:/Program Files (x86)/Microsoft/Edge/Application",
+  "browserVersionRoot": "C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\155.0.4283.62",
+  "playwrightRoot": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright",
+  "playwrightCoreRoot": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\node\\node_modules\\playwright-core",
+  "bundledPackagesRoot": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules",
+  "vuePackageRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue",
+  "repoPackagesRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules",
+  "runtimeReadRoots": [
+    "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64",
+    "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules",
+    "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules",
+    "C:/Program Files (x86)/Microsoft/Edge/Application"
+  ]
+}

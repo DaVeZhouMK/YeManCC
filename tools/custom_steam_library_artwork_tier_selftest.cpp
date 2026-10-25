@@ -1,4 +1,4 @@
-﻿#include "custom_steam_library_test_runtime.h"
+#include "custom_steam_library_test_runtime.h"
 #include <iostream>
 
 static void require(bool value, const char* message) { if (!value) throw std::runtime_error(message); }
@@ -18,6 +18,9 @@ struct ArtworkFixture {
     std::string caption;
     bool withIgdbId=true, landscapeOnly=false, autoFormatImages=false, libraryAssets=false;
     bool igdbImages=true, baiduImages=true, steamImages=true, failIdentity=false, unrelated=false, failAll=false;
+    bool networkOutage=false, malformedBaiduSearch=false;
+    std::optional<std::vector<unsigned char>> imageResponseOverride;
+    std::optional<json> libraryAssetsOverride;
     ArtworkFixture(const fs::path& p):root(p),data(p/L"data"),exe(p/L"Fixture Game"/L"FixtureGame.exe"),output(p/L"output") {
         fixtureText(exe,"not executable; isolated fixture");
         images["tall"]=fixturePng(p/L"fixtures"/L"tall.png",600,900);
@@ -43,6 +46,7 @@ struct ArtworkFixture {
         artworkTestTransport=[this](const std::string& provider,const std::string&,const std::string& request,const std::vector<unsigned char>&)->HttpResponse {
             requests.push_back(provider+":"+request);
             if(failAll) throw std::runtime_error("simulated offline");
+            if(networkOutage) throw HttpTransportError("simulated network outage",ERROR_WINHTTP_TIMEOUT,true);
             if(request.find("/api/public/search/autocomplete")!=std::string::npos)
                 return response({{"success",true},{"data",json::array({{{"id",9022},{"name",toUtf8(title)},{"types",{"steam"}}}})}});
             if(request.find("/api/public/search/assets")!=std::string::npos)
@@ -53,6 +57,7 @@ struct ArtworkFixture {
             }
             if(request.find("/api/igdb/search")!=std::string::npos) return response({{"data",igdbImages?json::array({game()}):json::array()}});
             if(request.find("IStoreBrowseService/GetItems")!=std::string::npos) {
+                if(libraryAssetsOverride)return response(*libraryAssetsOverride);
                 if(!libraryAssets)return response({{"response",{{"store_items",json::array()}}}});
                 json assets={{"asset_url_format","steam/apps/77/${FILENAME}?t=123"},
                     {"library_capsule","hash-cover/library_capsule.jpg"},{"library_capsule_2x","hash-cover/library_capsule_2x.jpg"},
@@ -61,6 +66,7 @@ struct ArtworkFixture {
             }
             if(request.find("api/appdetails")!=std::string::npos) return response({{"77",{{"success",true},{"data",{{"type","game"},{"name","Fixture Game"},{"steam_appid",77}}}}}});
             if(request.find("image.baidu.com/search/acjson")!=std::string::npos) {
+                if(malformedBaiduSearch) {const std::string text="<html>temporary gateway failure</html>";return HttpResponse{200,{},std::vector<unsigned char>(text.begin(),text.end())};}
                 json candidates=json::array();
                 if(baiduImages) for(const auto& type:{"tall","long","hero"}) {
                     if(landscapeOnly && std::string(type)=="tall") continue;
@@ -69,6 +75,7 @@ struct ArtworkFixture {
                 }
                 return response({{"data",candidates}});
             }
+            if(imageResponseOverride) return HttpResponse{200,{},*imageResponseOverride};
             if(autoFormatImages&&request.find("fmt=auto")!=std::string::npos)
                 return HttpResponse{200,{},std::vector<unsigned char>{'R','I','F','F',0,0,0,0,'W','E','B','P'}};
             const bool isSteam=provider.starts_with("steam");
@@ -86,11 +93,12 @@ struct ArtworkFixture {
             return HttpResponse{404};
         };
     }
-    json run(bool steam=false,bool metadata=false) {
+    json run(bool steam=false,bool metadata=false,bool steamOnly=false) {
         install(); std::vector<std::wstring> args={toWide(toUtf8((root/L"bin"/L"SteamArtworkLab.exe").wstring())),exe.wstring(),output.wstring(),L"--name",title,L"--platform",L"pc"};
         if(steam) args.insert(args.end(),{L"--steam-id",L"77"});
         else { args.push_back(L"--igdb-artwork-only"); if(withIgdbId) args.insert(args.end(),{L"--igdb-id",L"7"}); }
         if(metadata) args.push_back(L"--metadata-only");
+        if(steamOnly) args.push_back(L"--steam-artwork-only");
         std::vector<wchar_t*> argv;for(auto& arg:args)argv.push_back(arg.data());
         workerMainNotUsedBySelftest(static_cast<int>(argv.size()),argv.data());
         require(fs::is_regular_file(durable()),"Worker did not publish visual-only manifest");
@@ -166,6 +174,222 @@ int wmain(int argc,wchar_t** argv) {
         test("wrong-storebrowse-appid-is-not-artwork-evidence",[](const auto& p){ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;artworkTestTransport=[&](const auto&,const auto&,const auto&,const auto&){return f.response({{"response",{{"store_items",json::array({{{"appid",78},{"success",1},{"assets",{{"asset_url_format","steam/apps/78/${FILENAME}"},{"library_capsule","hash/library_capsule.jpg"}}}}})}}}});};json attempts=json::array();require(fetchSteamLibraryAssets(77,attempts).empty(),"Foreign StoreBrowse asset selected");});
         test("cached-official-library-assets-are-available-offline",[](const auto& p){ArtworkFixture f(p);f.libraryAssets=true;f.install();g_workerDataRoot=f.data;json attempts=json::array();auto assets=fetchSteamLibraryAssets(77,attempts);require(!assets.empty(),"Official asset index not cached");g_steamLibraryAssetsSession.clear();f.failAll=true;attempts=json::array();assets=fetchSteamLibraryAssets(77,attempts);require(!steamLibraryAssetUrl(assets,77,"library_capsule").empty()&&attempts.size()==1&&attempts[0]["cacheHit"],"Offline official asset cache not reused");});
         test("library-assets-network-fault-falls-back-without-throwing-or-requerying-each-slot",[](const auto& p){ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;f.failAll=true;json attempts=json::array();require(fetchSteamLibraryAssets(77,attempts).empty(),"Offline discovery invented assets");const auto count=f.requests.size();require(fetchSteamLibraryAssets(77,attempts).empty()&&f.requests.size()==count,"Offline endpoint requested again for another slot");});
+        test("manual-long-search-includes-authoritative-steam-header",[](const auto& p){
+            ArtworkFixture f(p);f.libraryAssets=true;f.install();g_workerDataRoot=f.data;
+            const auto result=steamIdArtworkSearch("77","long");bool header=false;
+            for(const auto& candidate:result["candidates"]){
+                if(jsonStringOr(candidate,"sourceRole")=="library-assets-header"){
+                    header=true;require(candidate["width"]==460&&candidate["height"]==215,"Header claimed wallpaper dimensions");
+                }
+                require(jsonStringOr(candidate,"sourceRole")!="store-screenshot","Long cover was replaced with store screenshots");
+            }
+            require(header,"Manual long search lost Steam header field");
+        });
+        test("header-only-library-assets-cache-is-reused",[](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+            const json assets={{"asset_url_format","steam/apps/77/${FILENAME}?t=1"},{"header","hash/header.jpg"}};
+            writeJsonAtomic(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json",{{"steamAppId",77},{"fetchedAt",unixTimeMs()},{"assets",assets}});
+            g_steamLibraryAssetsSession.clear();json attempts=json::array();const auto result=fetchSteamLibraryAssets(77,attempts);
+            require(result==assets&&f.requests.empty(),"Header-only cache was discarded because portrait is missing");
+        });
+        test("manual-long-and-wallpaper-have-distinct-steam-candidates",[](const auto& p){
+            ArtworkFixture f(p);f.libraryAssets=true;f.install();g_workerDataRoot=f.data;
+            const auto longResult=steamIdArtworkSearch("77","long"),heroResult=steamIdArtworkSearch("77","wallpaper");
+            require(longResult["candidates"][0]["sourceRole"]=="library-assets-header","Header not preferred for long");
+            require(heroResult["candidates"][0]["sourceRole"]=="library-assets-library_hero","Hero not preferred for wallpaper");
+        });
+
+        test("host-steam-artwork-only-still-collects-optional-sgdb-icon",[](const auto& p){ArtworkFixture f(p);const auto m=f.run(true,false,true);require(f.slot(m,"icon")["ok"]&&f.slot(m,"icon")["provider"]=="steamgriddb","Host automatic second stage skipped SGDB icon");});
+        test("icon-does-not-consume-library-logo-fields",[](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+            const json assets={{"asset_url_format","steam/apps/77/${FILENAME}"},{"library_logo","logo.png"}};
+            writeJsonAtomic(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json",{{"steamAppId",77},{"fetchedAt",unixTimeMs()},{"assets",assets}});
+            g_steamLibraryAssetsSession.clear();ResolvedGame game;game.appId=77;game.baseGameAppId=77;
+            const auto candidates=artworkUrls(game,artworkSpecs().back());require(candidates.empty(),"Logo downloaded into icon slot");
+        });
+        test("official-community-icon-is-bound-to-exact-appid",[](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+            const json assets={{"community_icon",std::string(40,'a')}};
+            writeJsonAtomic(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json",{{"steamAppId",77},{"fetchedAt",unixTimeMs()},{"assets",assets}});
+            g_steamLibraryAssetsSession.clear();ResolvedGame game;game.appId=77;game.baseGameAppId=77;
+            const auto candidates=artworkUrls(game,artworkSpecs().back());require(candidates.size()==1&&candidates[0].url=="https://cdn.cloudflare.steamstatic.com/steamcommunity/public/images/apps/77/"+std::string(40,'a')+".jpg","Official icon identity or hash path wrong");
+            require(f.requests.empty(),"Icon-only metadata cache was discarded");
+        });
+        test("community-icon-hash-cannot-inject-a-path",[](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+            const json assets={{"community_icon","../../other/app.jpg"},{"asset_url_format","steam/apps/77/${FILENAME}"},{"header","header.jpg"}};
+            writeJsonAtomic(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json",{{"steamAppId",77},{"fetchedAt",unixTimeMs()},{"assets",assets}});
+            g_steamLibraryAssetsSession.clear();ResolvedGame game;game.appId=77;game.baseGameAppId=77;
+            require(artworkUrls(game,artworkSpecs().back()).empty(),"Malformed hash escaped verified AppID icon URL");
+        });
+        test("native-32px-steam-icon-is-low-quality-fallback",[](const auto& p){const auto bytes=fixturePng(p/L"icon.png",32,32);const auto image=*inspectImage(bytes);const auto quality=assessArtworkQuality("icon",image,false);require(quality.band==ArtworkQualityBand::UniqueFallback,"Small official icon was rejected or falsely rated as high quality");});
+
+        test("network-pipeline-discovery-outage-persists-retry-and-recovers-without-steamid",[](const auto& p){
+            ArtworkFixture f(p);f.title=L"維新の嵐 幕末志士伝";f.withIgdbId=false;f.igdbImages=false;f.networkOutage=true;
+            auto m=f.run();
+            require(m["failure"]["kind"]=="network-unavailable"&&m["failure"]["retryWhenNetworkReturns"]==true,"Full worker mislabeled discovery outage as permanent missing artwork");
+            require(m.value("networkRetry",json{}).is_object()&&!m["failure"]["artworkNetworkFailures"].empty(),"Full worker failed to persist the artwork retry job");
+            f.networkOutage=false;m=f.run();
+            require(m["ok"]==true&&m["required"]["tall"]==true&&m["required"]["hero"]==true,"Recovered connection did not apply required artwork");
+            require(m.value("networkRetry",json{}).is_null(),"Recovered worker retained an active network retry job");
+            require(positiveJsonInt(m["match"],"steamAppId")==0&&f.slot(m,"tall")["provider"]=="baidu-image","Recovery falsely required or fabricated a Steam ID");
+        });
+        test("network-pipeline-malformed-baidu-response-persists-retry-job",[](const auto& p){
+            ArtworkFixture f(p);f.withIgdbId=false;f.igdbImages=false;f.malformedBaiduSearch=true;
+            const auto m=f.run();
+            require(m["failure"]["kind"]=="network-unavailable"&&m.value("networkRetry",json{}).is_object(),"HTTP200 gateway page never reached the full worker retry job");
+        });
+        for(const auto* kind:{"empty","html","xml-error","truncated-png","truncated-jpeg"}){
+            const auto label=std::string("network-pipeline-invalid-image-")+kind+"-recovers";
+            test(label.c_str(),[=](const auto& p){
+                ArtworkFixture f(p);
+                std::vector<unsigned char> bad;
+                if(std::string(kind)=="html"){const std::string body=" \r\n<!DOCTYPE HTML><html>temporary gateway error</html>";bad.assign(body.begin(),body.end());}
+                else if(std::string(kind)=="xml-error"){const std::string body="<?xml version=\"1.0\"?><Error><Code>SlowDown</Code></Error>";bad.assign(body.begin(),body.end());}
+                else if(std::string(kind)=="truncated-png")bad={0x89,'P','N','G',0x0d,0x0a,0x1a,0x0a,0,0,0,13,'I','H','D','R'};
+                else if(std::string(kind)=="truncated-jpeg")bad={0xff,0xd8,0xff,0xe0,0,16,'J','F','I','F'};
+                f.imageResponseOverride=bad;
+                auto m=f.run();
+                require(m["failure"]["kind"]=="network-unavailable"&&m.value("networkRetry",json{}).is_object(),"HTTP200 invalid image bytes became permanent missing artwork");
+                for(const auto& artwork:m.at("artwork"))require(!artwork.value("ok",false)&&jsonStringOr(artwork,"file").empty(),"Invalid image was published in the durable manifest");
+                for(const auto& entry:fs::recursive_directory_iterator(f.data)){
+                    const auto ext=asciiLower(toUtf8(entry.path().extension().wstring()));
+                    require(ext!=".png"&&ext!=".jpg"&&ext!=".jpeg","Invalid image bytes reached a durable artwork or URL cache");
+                }
+                f.imageResponseOverride.reset();m=f.run();
+                require(m["ok"]==true&&f.slot(m,"tall")["ok"]&&f.slot(m,"hero")["ok"],"Healthy image response did not recover the worker");
+                require(m.value("networkRetry",json{}).is_null(),"Recovered image retained its active network retry job");
+                for(const auto* type:{"tall","hero"})require(inspectImage(readBinaryFile(fs::path(toWide(f.slot(m,type).at("file").template get<std::string>())))).has_value(),"Recovered durable artwork does not decode");
+                require(positiveJsonInt(m["match"],"steamAppId")==0,"Image repair fabricated Steam identity");
+            });
+        }
+        test("network-pipeline-unsupported-format-is-not-connectivity-loss",[](const auto& p){
+            ArtworkFixture f(p);f.imageResponseOverride=std::vector<unsigned char>{'R','I','F','F',0,0,0,0,'W','E','B','P'};
+            const auto m=f.run();
+            require(m["failure"]["kind"]=="artwork-incomplete"&&m.value("networkRetry",json{}).is_null(),"Unsupported format was incorrectly classified as a network outage");
+        });
+        test("network-pipeline-unsupported-svg-is-not-connectivity-loss",[](const auto& p){
+            ArtworkFixture f(p);const std::string svg="<?xml version=\"1.0\"?><svg xmlns=\"http://www.w3.org/2000/svg\" width=\"600\" height=\"900\"/>";
+            f.imageResponseOverride=std::vector<unsigned char>(svg.begin(),svg.end());
+            const auto m=f.run();
+            require(m["failure"]["kind"]=="artwork-incomplete"&&m.value("networkRetry",json{}).is_null(),"Unsupported SVG was incorrectly classified as a gateway error");
+        });
+        test("network-pipeline-invalid-image-preserves-manual-cover",[](const auto& p){
+            ArtworkFixture f(p);const auto manual=p/L"fixtures"/L"tall.png";
+            f.manual["cover"]={{"file",toUtf8(manual.wstring())}};
+            const auto prior=readBinaryFile(manual);
+            const std::string html="<html>temporary gateway failure</html>";
+            f.imageResponseOverride=std::vector<unsigned char>(html.begin(),html.end());
+            const auto m=f.run();
+            require(f.slot(m,"tall")["ok"]&&f.slot(m,"tall")["provider"]=="manual-override"&&readBinaryFile(manual)==prior,"Invalid automatic download replaced manual artwork");
+            require(m.value("networkRetry",json{}).is_object(),"Other missing slots lost network recovery");
+        });
+        test("network-pipeline-healthy-empty-artwork-does-not-enqueue-outage",[](const auto& p){
+            ArtworkFixture f(p);f.withIgdbId=false;f.igdbImages=false;f.baiduImages=false;
+            const auto m=f.run();
+            require(m["failure"]["kind"]=="artwork-incomplete"&&m.value("networkRetry",json{}).is_null(),"Definitive absence entered an endless network retry loop");
+        });
+
+
+        const json goodAssets={{"asset_url_format","steam/apps/77/${FILENAME}"},{"library_capsule","known/library_capsule.jpg"}};
+        auto assetEnvelope=[](const json& items){return json{{"response",{{"store_items",items}}}};};
+        const json goodItem={{"item_type",0},{"id",77},{"appid",77},{"success",1},{"assets",goodAssets}};
+        std::vector<std::pair<std::string,json>> malformedAssets={
+            {"null-root",nullptr},{"array-root",json::array()},
+            {"missing-envelope",json::object()},{"null-envelope",{{"response",nullptr}}},
+            {"missing-inventory",{{"response",json::object()}}},
+            {"invalid-inventory",assetEnvelope(json::object())},
+            {"invalid-row",assetEnvelope(json::array({nullptr}))}};
+        for(const auto* defect:{"foreign-app","conflicting-id","missing-success","invalid-success","missing-assets","invalid-assets","unsafe-assets","duplicate-app","wrong-item-type","zero-result"}) {
+            auto item=goodItem;
+            if(std::string(defect)=="foreign-app")item["appid"]=78,item["id"]=78;
+            if(std::string(defect)=="conflicting-id")item["id"]=78;
+            if(std::string(defect)=="missing-success")item.erase("success");
+            if(std::string(defect)=="wrong-item-type")item["item_type"]=1;
+            if(std::string(defect)=="zero-result")item["success"]=0;
+            if(std::string(defect)=="invalid-success")item["success"]="1";
+            if(std::string(defect)=="missing-assets")item.erase("assets");
+            if(std::string(defect)=="invalid-assets")item["assets"]=json::array();
+            if(std::string(defect)=="unsafe-assets")item["assets"]["asset_url_format"]="steam/apps/78/${FILENAME}";
+            malformedAssets.push_back({defect,assetEnvelope(std::string(defect)=="duplicate-app"?json::array({item,item}):json::array({item}))});
+        }
+        for(const auto& [defect,body]:malformedAssets) {
+            const auto name="network-storebrowse-malformed-"+defect;
+            test(name.c_str(),[&](const auto& p){
+                ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;f.libraryAssetsOverride=body;
+                const auto cache=f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json";
+                writeJsonAtomic(cache,{{"schemaVersion",1},{"steamAppId",77},{"fetchedAt",unixTimeMs()-25ull*60*60*1000},{"assets",goodAssets}});
+                const auto original=readBinaryFile(cache);json attempts=json::array();
+                const auto result=fetchSteamLibraryAssets(77,attempts);
+                require(result==goodAssets,"Unusable HTTP 200 lost the verified stale asset index");
+                require(readBinaryFile(cache)==original,"Unusable HTTP 200 overwrote/refreshed the positive cache");
+                require(networkVerificationPending(attempts),"Malformed asset index became definitive absence");
+                require(std::any_of(attempts.begin(),attempts.end(),[](const json& row){return row.value("cacheHit",false)&&row.value("stale",false);}),"Stale asset reuse was not disclosed");
+                json failures=json::array();appendArtworkDiscoveryNetworkFailure("tall","steam-library-assets",attempts,failures);
+                require(!failures.empty(),"Malformed discovery did not reach artwork retry accounting");
+                const auto count=f.requests.size();require(fetchSteamLibraryAssets(77,attempts)==goodAssets&&f.requests.size()==count,"One worker queried the broken inventory again for another slot");
+            });
+        }
+        for(const int resultCode:{2,3,10,16,20,38,84}) {
+            const auto name="network-storebrowse-transient-result-"+std::to_string(resultCode);
+            test(name.c_str(),[&](const auto& p){
+                ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+                f.libraryAssetsOverride=assetEnvelope(json::array({{{"item_type",0},{"id",77},{"appid",0},{"success",resultCode}}}));
+                writeJsonAtomic(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json",{{"steamAppId",77},{"fetchedAt",unixTimeMs()-25ull*60*60*1000},{"assets",goodAssets}});
+                json attempts=json::array();require(fetchSteamLibraryAssets(77,attempts)==goodAssets,"Transient API result discarded the stale asset index");
+                require(networkVerificationPending(attempts),"Transient API result did not preserve recovery evidence");
+            });
+        }
+        test("network-storebrowse-rate-limit-persists-across-appids-and-worker-memory",[&](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+            f.libraryAssetsOverride=assetEnvelope(json::array({{{"item_type",0},{"id",77},{"appid",0},{"success",84}}}));
+            json attempts=json::array();require(fetchSteamLibraryAssets(77,attempts).empty(),"Rate limit invented artwork");
+            require(networkVerificationPending(attempts),"HTTP 200 rate limit became definitive absence");
+            const auto count=f.requests.size();g_metadataBackoffs.clear();g_steamLibraryAssetsSession.clear();
+            f.libraryAssetsOverride=assetEnvelope(json::array());attempts=json::array();fetchSteamLibraryAssets(78,attempts);
+            require(f.requests.size()==count,"API result 84 did not persist a provider wait for another app");
+            require(networkVerificationPending(attempts),"Reloaded provider wait lost retry state");
+        });
+        for(const bool expired:{false,true}) {
+            const auto name=std::string("network-storebrowse-no-usable-cache-")+(expired?"expired":"missing");
+            test(name.c_str(),[&](const auto& p){
+                ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;f.libraryAssetsOverride=json::object();
+                const auto cache=f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json";
+                if(expired)writeJsonAtomic(cache,{{"steamAppId",77},{"fetchedAt",unixTimeMs()-31ull*24*60*60*1000},{"assets",goodAssets}});
+                const auto prior=expired?readBinaryFile(cache):std::vector<unsigned char>{};json attempts=json::array();
+                require(fetchSteamLibraryAssets(77,attempts).empty(),"Missing/expired index granted stale authority");
+                require(networkVerificationPending(attempts),"Malformed response without cache lost retry state");
+                require(expired?readBinaryFile(cache)==prior:!fs::exists(cache),"Invalid inventory altered the durable cache");
+            });
+        }
+        for(const auto* control:{"empty-inventory","empty-assets","definitive-denial"}) {
+            const auto name=std::string("network-storebrowse-healthy-")+control;
+            test(name.c_str(),[&](const auto& p){
+                ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;
+                auto item=goodItem;item["assets"]=json::object();
+                if(std::string(control)=="definitive-denial")item={{"item_type",0},{"id",77},{"appid",0},{"success",15}};
+                f.libraryAssetsOverride=assetEnvelope(std::string(control)=="empty-inventory"?json::array():json::array({item}));
+                json attempts=json::array();require(fetchSteamLibraryAssets(77,attempts).empty(),"Definitive absence invented assets");
+                require(!networkVerificationPending(attempts),"Definitive absence entered an endless network retry loop");
+                require(!fs::exists(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json"),"Empty inventory was persisted as a positive cache");
+            });
+        }
+        test("network-storebrowse-healthy-ancillary-assets",[&](const auto& p){
+            ArtworkFixture f(p);f.install();g_workerDataRoot=f.data;auto item=goodItem;
+            item["assets"]={{"asset_url_format","steam/apps/77/${FILENAME}"},{"small_capsule","hash/capsule_231x87.jpg"},{"last_modified",123}};
+            f.libraryAssetsOverride=assetEnvelope(json::array({item}));json attempts=json::array();
+            require(!hasUsableSteamLibraryAssets(fetchSteamLibraryAssets(77,attempts),77),"Store thumbnail became library artwork");
+            require(!networkVerificationPending(attempts),"Ancillary assets alone were mislabeled as a network outage");
+            require(!fs::exists(f.data/L"cache"/L"steam-library-assets"/L"77-english-us.json"),"Unusable index polluted the positive artwork cache");
+        });
+        test("network-storebrowse-invalid-inventory-reaches-full-worker-retry",[&](const auto& p){
+            ArtworkFixture f(p);f.libraryAssetsOverride=json::object();f.steamImages=false;f.igdbImages=false;f.baiduImages=false;
+            const auto m=f.run(true,false,true);
+            require(m.value("networkRetry",json{}).is_object(),"Malformed Steam discovery stopped automatic image recovery");
+            const auto jobs=loadNetworkRetryQueue(f.data);
+            require(!jobs["jobs"].empty(),"Full worker did not persist the recovery job");
+        });
+
         SetEnvironmentVariableW(L"YEMAN_STEAM_BIG_PICTURE_DATA_ROOT",priorRoot.empty()?nullptr:priorRoot.c_str());
         size_t failures=0;for(const auto& t:tests)if(!t["passed"].get<bool>())++failures;
         json report={{"allPassed",failures==0},{"caseCount",tests.size()},{"failedCount",failures},{"cases",tests},{"network","fixture-only"},{"realSteamFilesModified",false}};

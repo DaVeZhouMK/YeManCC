@@ -251,6 +251,17 @@ jobs:
           "RELEASE_NOTES_PATH=$notesFile" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           Write-Output "COMPLETE_RELEASE_ATTACHMENTS_OK releaseTag=$tag buildSourceCommit=$sourceCommit"
 
+      # Historical recovery is not an exemption from the current dependency release policy.
+      - name: Required official Decky latest-stable gate
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          $gate = Join-Path $env:GITHUB_WORKSPACE 'tools/decky-loader-upgrade.ps1'
+          if (-not (Test-Path -LiteralPath $gate -PathType Leaf)) { throw 'Legacy recovery lacks the required official Decky gate; use a current versioned release.' }
+          powershell -NoProfile -ExecutionPolicy Bypass -File $gate -Action ReleaseGate -EvidenceDir (Join-Path $env:GITHUB_WORKSPACE 'Build/Validation/DeckyUpdate/OfficialLoader')
+          if ($LASTEXITCODE -ne 0) { throw 'Official Decky release gate failed; refusing legacy publication.' }
+
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:

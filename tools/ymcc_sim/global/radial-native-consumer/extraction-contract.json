@@ -1,0 +1,161 @@
+{
+  "schemaVersion": 1,
+  "caseId": "controller.radial-native-consumer",
+  "productSources": [
+    "native/radial_overlay.h",
+    "native/radial_input_region.h",
+    "deps/json/json.hpp"
+  ],
+  "definitions": [
+    {
+      "name": "Config",
+      "source": "native/radial_overlay.h",
+      "anchor": "struct Config {",
+      "semicolon": true,
+      "exactSha256": "68f62b721bd7db9eb4b5be8712c32f18a03acbc249cba7b977dd2bb0995b7104"
+    },
+    {
+      "name": "Overlay::State",
+      "source": "native/radial_overlay.h",
+      "anchor": " struct State {",
+      "semicolon": true,
+      "exactSha256": "60f2b3a8919c15fcaa55eb5006dd72446df3b1f6997343d8450801639317cfe3"
+    },
+    {
+      "name": "Overlay::owns",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool owns(",
+      "semicolon": false,
+      "exactSha256": "a220dbe06b2bc0e1a5a48a7530789947100aa090a8e69ae938af14adcae0d621"
+    },
+    {
+      "name": "Overlay::send",
+      "source": "native/radial_overlay.h",
+      "anchor": " void send(",
+      "semicolon": false,
+      "exactSha256": "0075a856ea113bb1d3f4948487b81a314860e3d8528b95b7628a7afdddee5098"
+    },
+    {
+      "name": "Overlay::region",
+      "source": "native/radial_overlay.h",
+      "anchor": " void region(",
+      "semicolon": false,
+      "exactSha256": "10591a7ff167e642c92350e5f153a70236943fa2c93081ac99cfe8e86607f83d"
+    },
+    {
+      "name": "Overlay::receive",
+      "source": "native/radial_overlay.h",
+      "anchor": " void receive(",
+      "semicolon": false,
+      "exactSha256": "c6d961f7d7ef975eaab66640c1420e9510073efc833bc325aa1a6879ba175d6d"
+    },
+    {
+      "name": "Overlay::proc",
+      "source": "native/radial_overlay.h",
+      "anchor": " static LRESULT CALLBACK proc(",
+      "semicolon": false,
+      "exactSha256": "62224c0a98ed83b684ee4b0289f8f71a62831bb4f4e8035e040c384245a41304"
+    },
+    {
+      "name": "Overlay::initialize",
+      "source": "native/radial_overlay.h",
+      "anchor": " void initialize(",
+      "semicolon": false,
+      "exactSha256": "3e6158ce360509d739ec39807f2463dcd8850c2936e522a3a5da1a0a72b873e7"
+    },
+    {
+      "name": "Overlay::active",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool active(",
+      "semicolon": false,
+      "exactSha256": "12efba704c9364e5aa869065a4312ec2b95230391eeafce9e1e57c328f528613"
+    },
+    {
+      "name": "Overlay::close",
+      "source": "native/radial_overlay.h",
+      "anchor": " bool close(",
+      "semicolon": false,
+      "exactSha256": "1756b5e65b423058d492dfce77e969bb3e550685d824c76f4ac8060ecaaee980"
+    },
+    {
+      "name": "Overlay::shutdown",
+      "source": "native/radial_overlay.h",
+      "anchor": " void shutdown(",
+      "semicolon": false,
+      "exactSha256": "0cee914f850b37dda791b2b17d88ed61780b08dbdcc349fccdb3eed9a4aefccb"
+    },
+    {
+      "name": "Overlay::destructor",
+      "source": "native/radial_overlay.h",
+      "anchor": "~Overlay(",
+      "semicolon": false,
+      "exactSha256": "d0826cfc919bc07d36e6785e74fbd476c7a021b2b46e1040d2b298e1b49103e8"
+    },
+    {
+      "name": "makeInputRegion",
+      "source": "native/radial_input_region.h",
+      "anchor": "inline HRGN makeInputRegion(",
+      "semicolon": false,
+      "exactSha256": "bc4605c2c3369356eebea4498df660c066f2e889b88603d2e644fbd4e67ba8b5"
+    }
+  ],
+  "declarations": {
+    "aliases": {
+      "sha256": "1c57c507628cc51c8b8715a1360add312b4c40c4d292d326fd0269461d98153e"
+    },
+    "constants": {
+      "sha256": "7332012455c654fb74de296e90c3e4846c5fa1f4c07711405f07a2eea7bcf7c5"
+    },
+    "fields": {
+      "sha256": "96e88afad7eb2dc402b82e43604269b80554e65b383cf3acb02dc873f19c324c"
+    }
+  },
+  "templates": [
+    {
+      "path": "MemoryPorts.hpp",
+      "sha256": "dfe80e6d302eb2c18a92c2da960a509947fa7a9a7e98b11823bbcf068452e9da"
+    },
+    {
+      "path": "ConsumerCases.hpp",
+      "sha256": "5f76b4ff6148279fae32e72f871d598191a50ecdd625e06e874503c940458d02"
+    }
+  ],
+  "json": {
+    "path": "deps/json/json.hpp",
+    "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+  },
+  "sharedSources": [
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    }
+  ],
+  "faults": [
+    {
+      "id": "owner-or-to-and",
+      "before": "if(a.value(\"wheelId\",0)!=s->id||a.value(\"nonce\",std::string{})!=s->nonce)",
+      "after": "if(a.value(\"wheelId\",0)!=s->id&&a.value(\"nonce\",std::string{})!=s->nonce)"
+    },
+    {
+      "id": "generation-gate-removed",
+      "before": "return current==s&&!s->closed;",
+      "after": "return static_cast<bool>(s);"
+    }
+  ],
+  "assemblyScaffolding": [
+    "same actual Overlay class/namespace and exact private State; existing test friend shape only",
+    "public/private labels and memory transport includes; no copied state algorithm"
+  ],
+  "exclusions": [
+    "Overlay::create",
+    "Overlay::pad",
+    "Overlay::pointer/inputProc",
+    "actual Win32/COM/WinRT and Surface implementations",
+    "main dispatcher and global owner-return callbacks",
+    "actual host action/TDP consumers",
+    "Unicode transport: memory ports are ASCII-only",
+    "real GDI geometry/rasterization",
+    "proc timer/suspend and other unselected branches"
+  ],
+  "reviewedAssembledOriginalSha256": "86e56bf341a0d565186e41a1c728ab0939e16d6c345a9c82cf9ba5a1ac72dc97"
+}

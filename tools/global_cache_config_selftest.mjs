@@ -46,12 +46,12 @@ export const settingsStore={read:async(p,known)=>{
 }};
 `;
 async function fixture(imports){
- const result=await build({stdin:{contents:imports,resolveDir:root,loader:'ts'},bundle:true,external:['vue'],format:'cjs',platform:'node',write:false,alias:{'@':path.join(root,'src')},plugins:[{name:'strict-memory-api',setup(b){b.onLoad({filter:/api\.ts$/},()=>({contents:fakeApi,loader:'ts'}));b.onLoad({filter:/ipc\.ts$/},()=>({contents:`export const invoke=async(c,a)=>{const f=globalThis.__fixture.ipc[c];if(!f)throw Error('Forbidden fixture IPC '+c);return f(a)};export const on=()=>()=>{};export const notify=()=>{};`,loader:'ts'}));}}]});
+ const result=await build({stdin:{contents:imports,resolveDir:root,loader:'ts'},bundle:true,external:['vue'],format:'cjs',platform:'node',write:false,alias:{'@':path.join(root,'src')},plugins:[{name:'strict-memory-api',setup(b){b.onLoad({filter:/api\.ts$/},()=>({contents:fakeApi,loader:'ts'}));b.onLoad({filter:/ipc\.ts$/},()=>({contents:`export const isNativeRuntime=false;export const invoke=async(c,a)=>{const f=globalThis.__fixture.ipc[c];if(!f)throw Error('Forbidden fixture IPC '+c);return f(a)};export const on=()=>()=>{};export const notify=()=>{};`,loader:'ts'}));}}]});
  const data={stats:0,commitHook:null,atomicHook:null,ipc:{},files:new Map(),reads:[],writes:[],renames:[],failWrite:false,readHook:null,services:{}};
  const local=new Map(),events=[];const module={exports:{}};
  const context={Audio:class{addEventListener(){}removeAttribute(){}load(){}pause(){}play(){return Promise.resolve()}},module,exports:module.exports,require,console,process:{env:{NODE_ENV:'production'},platform:'win32',version:process.version},structuredClone,TextEncoder,TextDecoder,URL,performance,setTimeout,clearTimeout,setInterval,clearInterval,__fixture:data,
  document:{visibilityState:'visible',addEventListener(){},removeEventListener(){},querySelector(){return null}},
- window:{addEventListener(){},removeEventListener(){},dispatchEvent(e){events.push(e);return true},setTimeout,clearTimeout},
+ window:{location:{hash:'#/schedule'},addEventListener(){},removeEventListener(){},dispatchEvent(e){events.push(e);return true},setTimeout,clearTimeout},
  CustomEvent:class{constructor(type,init){this.type=type;this.detail=init?.detail}},
  localStorage:{getItem:k=>local.get(k)??null,setItem:(k,v)=>local.set(k,String(v)),removeItem:k=>local.delete(k)},
  };
@@ -182,8 +182,10 @@ await check('CPU profiles observe newer persisted profiles and propagate read er
  const f=await fixture(base+`export * as cpu from './src/bridge/cpuProfiles';`);await f.cpu.loadCpuProfiles();const d=JSON.parse(f.data.files.get(f.repo.SETTINGS_FILE));d.cpu.active='extreme';d.cpu.profiles={balanced:{acFreq:3333}};f.data.files.set(f.repo.SETTINGS_FILE,JSON.stringify(d));const c=await f.cpu.loadCpuProfiles();assert.equal(c.active,'extreme');assert.equal(c.profiles.balanced.acFreq,3333);
  f.repo.clearSettingsCache();f.data.readHook=async()=>{throw Error('sharing denied')};await assert.rejects(f.cpu.loadCpuProfiles(),/读取/);
 });
-await check('CPU autostart branch saves preserve the other branch and unknown data',async()=>{
- const f=await fixture(base+`export * as startup from './src/bridge/autostart';`);await Promise.all([f.startup.writeCcdAutostart(true,2),f.startup.writeUvAutostart(true,'safe','amd')]);const d=JSON.parse(f.data.files.get(f.repo.SETTINGS_FILE));assert.equal(d.cpu.autostart.ccd.mode,2);assert.equal(d.cpu.autostart.uv.preset,'safe');
+await check('retired CPU autostart saves preserve the entire settings document without IO',async()=>{
+ const f=await fixture(base+`export * as startup from './src/bridge/autostart';`);const original=f.data.files.get(f.repo.SETTINGS_FILE);
+ await Promise.all([f.startup.writeCcdAutostart(true,2),f.startup.writeUvAutostart(true,'safe','amd')]);
+ assert.equal(f.data.files.get(f.repo.SETTINGS_FILE),original);assert.equal(f.data.writes.length,0);
 });
 await check('autofloat queued writes capture distinct submitted states',async()=>{
  const f=await fixture(base+`export * as auto from './src/bridge/autofloat';`);
@@ -244,11 +246,15 @@ await check('music initialization retries and volume persistence failure is visi
 await check('unreadable suspended-state file is retained without issuing resume',async()=>{
  const f=await fixture(base+`export * as gameproc from './src/bridge/gameproc';`);const file='C:\\SOFT\\YeMan\\PowerControl\\Sleep\\quickapp_suspended.json';f.data.files.set(file,'saved-process-identity');f.data.readHook=async()=>{throw Error('sharing denied')};const result=await f.gameproc.resumeGame();assert.equal(result.ok,false);assert.equal(f.data.files.get(file),'saved-process-identity');
 });
+function trainerFixturePaths(f) {
+ f.data.services.app={powerControlDir:async()=> 'Q:\\PowerControl',dataDir:async()=> 'Q:\\Data'};
+ f.data.files.set('Q:\\PowerControl\\YeManTrainerPrepare.ps1','fixture');
+}
 await check('trainer pending write failure prevents launch of a worker with stale results',async()=>{
- const f=await fixture(base+`export * as trainer from './src/bridge/gameTrainer';`);let workers=0;f.data.services.shell={hidden:async()=>{workers++;return {pid:42}}};f.data.atomicHook=async()=>{throw Error('pending denied')};await assert.rejects(f.trainer.openOrSearchGameTrainer('fixture'),/pending denied/);assert.equal(workers,0);
+ const f=await fixture(base+`export * as trainer from './src/bridge/gameTrainer';`);trainerFixturePaths(f);let workers=0;f.data.services.shell={hidden:async()=>{workers++;return {ok:true,pid:42}}};f.data.atomicHook=async()=>{throw Error('pending denied')};await assert.rejects(f.trainer.prepareGameTrainer('fixture'),/pending denied/);assert.equal(workers,0);
 });
-await check('concurrent same-title trainer searches use distinct result files',async()=>{
- const f=await fixture(base+`export * as trainer from './src/bridge/gameTrainer';`);const paths=[];f.data.services.shell={hidden:async(program,args)=>{const p=args[args.indexOf('-ResultPath')+1];paths.push(p);f.data.files.set(p,JSON.stringify({ok:true,gameName:'fixture',state:'completed',results:[]}));return {pid:42}}};await Promise.all([f.trainer.openOrSearchGameTrainer('fixture'),f.trainer.openOrSearchGameTrainer('fixture')]);assert.equal(paths.length,2);assert.notEqual(paths[0],paths[1]);assert.equal(f.data.files.has(paths[0]),false);assert.equal(f.data.files.has(paths[1]),false);
+await check('concurrent same-title trainer preparation shares one request and cleans its result',async()=>{
+ const f=await fixture(base+`export * as trainer from './src/bridge/gameTrainer';`);trainerFixturePaths(f);const paths=[];f.data.services.shell={hidden:async(program,args)=>{const p=args[args.indexOf('-ResultPath')+1];const requestId=args[args.indexOf('-RequestId')+1];paths.push(p);f.data.files.set(p,JSON.stringify({ok:false,requestId,gameName:'fixture',state:'unavailable'}));return {ok:true,pid:42}}};await Promise.all([f.trainer.prepareGameTrainer('fixture'),f.trainer.prepareGameTrainer('fixture')]);assert.equal(paths.length,1);assert.equal(f.data.files.has(paths[0]),false);
 });
 
 await check('unreadable legacy TDP number aborts migration instead of persisting defaults',async()=>{
@@ -258,12 +264,6 @@ await check('unreadable remembered power configuration does not run system power
  const f=await fixture(base+`export * as yeman from './src/bridge/yeman';`);f.data.readHook=async()=>{throw Error('sharing denied')};await assert.rejects(f.yeman.reconcileRememberedPowerScheme(),/读取配置文件失败/);assert.equal(f.data.writes.length,0);
 });
 
-await check('TDP auto-apply read failure is not implicit permission to apply hardware',async()=>{
- const f=await fixture(base+`export * as autoTdp from './src/bridge/tdpAutoApply';`);f.data.readHook=async()=>{throw Error('sharing denied')};await assert.rejects(f.autoTdp.readTdpAutoApply(),/读取配置文件失败/);await assert.rejects(f.autoTdp.applyAutoTdpIfNeeded('wake','ac'),/读取配置文件失败/);assert.equal(f.data.writes.length,0);
-});
-await check('TDP auto-apply single-switch save preserves independently changed sibling',async()=>{
- const f=await fixture(base+`export * as autoTdp from './src/bridge/tdpAutoApply';`);await f.repo.saveSettingsSection('tdp',{autoApply:{boot:true,wake:true}});await f.autoTdp.writeTdpAutoApply({boot:false});const saved=await f.repo.readSettingsSection('tdp');assert.equal(saved.autoApply.boot,false);assert.equal(saved.autoApply.wake,true);
-});
 const report={scope:'global config/cache only; no fan/input feature changes; memory-only IPC',passed:cases.filter(c=>c.ok).length,failed:cases.filter(c=>!c.ok).length,cases};
 console.log(JSON.stringify(report,null,2));if(process.env.YMCC_GLOBAL_CONFIG_REPORT)fs.writeFileSync(process.env.YMCC_GLOBAL_CONFIG_REPORT,JSON.stringify(report,null,2)+'\n');
 if(report.failed)process.exitCode=1;

@@ -1,0 +1,15 @@
+{
+  "scope": "Actual-source fake-SDK offline fixture outputs, NOT real controller/driver/game input or complete SteamDeck-path acceptance.",
+  "files": [
+    {
+      "fixture": "host-sdk-parameter-samples.jsonl",
+      "source": "G:\\YeManCC-Work\\Build\\Validation\\VC-SIGNAL-EVIDENCE-20261022\\host\\verified\\sdk-parameter-samples.jsonl",
+      "sha256": "cd5e88b19266e793c3c252153eedbb32f2456c0550ab687164b50b2c4027aad5"
+    },
+    {
+      "fixture": "host-highrate-samples.jsonl",
+      "source": "G:\\YeManCC-Work\\Build\\Validation\\VC-SIGNAL-EVIDENCE-20261022\\host\\verified\\highrate-samples.jsonl",
+      "sha256": "ea050764135817f4a69348333f7d73ee3518dd52a05d6245e0295c4bd050670b"
+    }
+  ]
+}

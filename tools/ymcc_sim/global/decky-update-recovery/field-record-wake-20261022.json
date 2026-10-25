@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "decky-g3e-wake-held-snapshot-20261022",
+  "sourceZip": "G:/YeManCC-Work/日志/微星G3E/YeManCC-logs-20261022-112346-decky唤醒后断开.zip",
+  "observed": {
+    "ymccPid": 8612,
+    "loaderPidLastObserved": 11836,
+    "suspendAt": "2026-10-22T10:15:49.555+08:00",
+    "automaticResumeAt": "2026-10-22T11:16:14.507+08:00",
+    "snapshotAt": "2026-10-22T11:23:23.036+08:00",
+    "snapshotReadElapsedMs": 8,
+    "peerConnected": true,
+    "snapshotReady": false,
+    "nativePowerGeneration": 2,
+    "nativePowerPhase": "suspending-or-suspended",
+    "committedResumeInWindow": false
+  },
+  "conclusions": [
+    "A responsive bridge delivered ready:false; this does not prove broken transport",
+    "Native power gate remained closed; automatic resume alone is not a committed interactive wake",
+    "On committed Ready, rebind once per generation and run bounded backend recovery; do not fake Ready or replay user writes"
+  ],
+  "physicalWakeAcceptance": false
+}

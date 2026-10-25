@@ -1,0 +1,123 @@
+// Execute actual ownership/adoption and full Clear/quarantine/Owned consumers.
+// Only process/endpoint/visibility facts are named memory inputs. The primary
+// thread, its separate join witness, signal event, Wait and Close are real.
+@@COMMON@@
+static bool primaryLoggerThrows=false;
+static unsigned primaryNegativeSalvage=0,primaryThreadJoins=0;
+@@ADOPT_FUNCTION@@
+static unsigned primaryLogRows(){unsigned n=0;for(const auto& r:ports.logs)if(r.at("event")=="input-host-primary-thread-retirement")++n;return n;}
+struct PrivateThread {
+ HANDLE release=nullptr,thread=nullptr,join=nullptr,processFact=nullptr;DWORD id=0;
+ static DWORD WINAPI entry(void* value){return ::WaitForSingleObject(static_cast<HANDLE>(value),10000)==WAIT_OBJECT_0?0:1;}
+ PrivateThread(){
+  release=::CreateEventW(nullptr,TRUE,FALSE,nullptr);require(release!=nullptr,"create private thread release");
+  thread=::CreateThread(nullptr,0,entry,release,0,&id);require(thread!=nullptr,"create private live thread");
+  require(::DuplicateHandle(::GetCurrentProcess(),thread,::GetCurrentProcess(),&join,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"create independent private join witness");
+  processFact=::CreateEventW(nullptr,TRUE,FALSE,nullptr);require(processFact!=nullptr,"private fake process-fact handle");
+ }
+ PROCESS_INFORMATION envelope()const{PROCESS_INFORMATION result{};result.hThread=thread;result.hProcess=processFact;result.dwThreadId=id;return result;}
+ void protect(){require(::SetHandleInformation(thread,HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE)!=FALSE,"protect private creation-thread handle");}
+ void unprotect(){require(::SetHandleInformation(thread,HANDLE_FLAG_PROTECT_FROM_CLOSE,0)!=FALSE,"unprotect same private creation-thread handle");}
+ bool alive()const{return ::WaitForSingleObject(join,0)==WAIT_TIMEOUT;}
+ void settleProcessFact(){
+  if(g_inputHostProcess==processFact)g_inputHostProcess=nullptr;
+  require(::CloseHandle(processFact)!=FALSE,"return explicit fake process-fact handle");processFact=nullptr;
+ }
+ void finish(){
+  if(processFact)settleProcessFact();
+  // Mutants may drop the last owner. Count the failure before a separately
+  // identified oracle reclaims only this fixture's exact same private handle.
+  DWORD flags=0;
+  if(::GetHandleInformation(thread,&flags)){
+   require(::GetThreadId(thread)==id,"salvage cannot close an unrelated reused handle");
+   ++primaryNegativeSalvage;check(false,"current positive needs no primary oracle salvage");
+   require(::SetHandleInformation(thread,HANDLE_FLAG_PROTECT_FROM_CLOSE,0)!=FALSE,"oracle unprotect known private thread");
+   require(::CloseHandle(thread)!=FALSE,"negative-only primary salvage");
+   if(g_inputHostPrimaryThread==thread)g_inputHostPrimaryThread=nullptr;
+  }
+  require(::SetEvent(release)!=FALSE,"release private worker");
+  require(::WaitForSingleObject(join,2000)==WAIT_OBJECT_0,"private worker joined before process exit");++primaryThreadJoins;
+  require(::CloseHandle(join)!=FALSE,"return private join witness");join=nullptr;
+  require(::CloseHandle(release)!=FALSE,"return private release signal");release=nullptr;
+ }
+};
+static void threadFacts(bool prepared){
+ seed();
+ if(!prepared){g_inputHostHello=false;g_inputHostPrepared=false;g_inputHostPrepareMayHaveReachedHost=false;
+  g_inputHostNeutralized=false;g_inputHostActive=false;g_hidHideVisibilityJournal.active=false;
+  ports.historySettled=true;g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;g_xinputConnectedMask=0;}
+}
+static void adoptionCloseFailure(){
+ threadFacts(false);PrivateThread owner;owner.protect();auto pi=owner.envelope();
+ publishCreatedHandles(pi);
+ check(g_inputHostProcess==owner.processFact,"successful create publishes the process owner");
+ check(g_inputHostPrimaryThread==owner.thread,"failed creation-thread Close retains sole owner");
+ check(pi.hThread==nullptr&&pi.hProcess==nullptr,"local PROCESS_INFORMATION no longer owns either handle");
+ check(owner.alive(),"failed handle Close does not terminate the private thread");
+ check(primaryLogRows()==1,"initial failed Close produces one scoped receipt");
+ owner.settleProcessFact();clearCall();
+ check(g_inputHostRunId=="old-run"&&g_inputHostEpoch==17,"Clear preserves old tuple while primary handle remains");
+ check(g_inputHostReleaseQuarantined&&g_inputHostStartBlocked,"primary debt prevents a new writer");
+ check(!inputHostOwnedCleanupProvenLocked(),"primary handle prevents Owned completion");
+ const auto rowsBefore=primaryLogRows();
+ for(unsigned i=0;i<12;++i)(void)inputHostPrimaryThreadRetirementProvenLocked("same-failure");
+ check(primaryLogRows()==rowsBefore,"unchanged Close failure has no periodic receipt storm");
+ const auto restoreBefore=ports.restores;
+ inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.restores==restoreBefore&&ports.rearmCalls==0,"failed primary Close cannot restore or rearm");
+ g_inputHostLastQuarantineProbeTick=0;inputHostReconcileQuarantine();
+ check(ports.queued==1,"source-free primary debt queues existing lifecycle cleanup");
+ owner.unprotect();inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostPrimaryThread==nullptr,"same owner retires after close restriction clears");
+ check(cleared()&&!g_inputHostReleaseQuarantined,"paid source-free primary debt clears old session");
+ check(inputHostOwnedCleanupProvenLocked(),"Owned completes after all named duties clear");
+ check(owner.alive(),"closing primary handle is not proof of thread exit");
+ check(primaryLogRows()==rowsBefore+1,"successful retry has separate actual Close receipt");
+ owner.finish();cleanPrivateOwner();cases.push_back({{"case","actual-adoption-protected-Close-source-free-return"}});
+}
+static void ordinaryAdoption(){
+ threadFacts(false);PrivateThread owner;auto pi=owner.envelope();publishCreatedHandles(pi);
+ check(g_inputHostPrimaryThread==nullptr,"ordinary creation-thread handle returned");
+ check(g_inputHostProcess==owner.processFact,"thread handle return keeps process owner");
+ check(owner.alive(),"ordinary Close does not wait for or stop live private thread");
+ owner.settleProcessFact();clearCall();check(cleared(),"ordinary owner close permits local Clear");
+ owner.finish();cleanPrivateOwner();cases.push_back({{"case","ordinary-primary-Close-keeps-thread-live"}});
+}
+static void independentPrimaryGate(){
+ threadFacts(false);g_inputHostRunId.clear();g_inputHostHostInstanceId.clear();g_inputHostEpoch=0;
+ PrivateThread owner;owner.protect();g_inputHostPrimaryThread=owner.thread;
+ check(!inputHostOwnedCleanupProvenLocked(),"Owned independently rejects a retained primary handle");
+ check(!inputHostDisabledCleanupProvenLocked(),"Disabled independently rejects a retained primary handle");
+ owner.unprotect();check(inputHostPrimaryThreadRetirementProvenLocked("predicate-retry"),"predicate owner actual checked Close succeeds");
+ check(inputHostOwnedCleanupProvenLocked(),"primary debt removal restores resource-only predicate");
+ owner.finish();cleanPrivateOwner();cases.push_back({{"case","primary-independent-of-process-and-configuration"}});
+}
+static void endpointProofDoesNotWaiveHandle(){
+ threadFacts(true);PrivateThread owner;owner.protect();g_inputHostPrimaryThread=owner.thread;
+ clearCall();const auto restores=ports.restores;inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.restores==restores,"proven endpoint absence does not overtake primary handle retirement");
+ owner.unprotect();inputHostReconcileQuarantineOnLifecycleThread();
+ check(cleared()&&g_inputHostPrimaryThread==nullptr,"endpoint-proven same owner closes before Clear");
+ owner.finish();cleanPrivateOwner();cases.push_back({{"case","endpoint-proof-and-primary-return-remain-separate"}});
+}
+static void failedEvidenceCannotDropOwner(){
+ threadFacts(false);PrivateThread owner;owner.protect();g_inputHostPrimaryThread=owner.thread;
+ primaryLoggerThrows=true;const bool failed=inputHostPrimaryThreadRetirementProvenLocked("throwing-log");primaryLoggerThrows=false;
+ check(!failed&&g_inputHostPrimaryThread==owner.thread,"logger failure leaves failed-Close owner intact");
+ owner.unprotect();primaryLoggerThrows=true;const bool closed=inputHostPrimaryThreadRetirementProvenLocked("throwing-log-closed");primaryLoggerThrows=false;
+ check(closed&&g_inputHostPrimaryThread==nullptr,"logger failure does not reverse actual successful Close");
+ owner.finish();clearCall();cleanPrivateOwner();cases.push_back({{"case","evidence-failure-independent-of-handle-return"}});
+}
+int main(){try{
+ DWORD before=0,after=0;require(::GetProcessHandleCount(::GetCurrentProcess(),&before)!=FALSE,"initial private handle census");
+ check(nativeLifecycleEventIsBase("input-host-primary-thread-retirement"),"primary retirement receipt is retained with detailed logging off");
+ check(!nativeLifecycleEventIsBase("input-host-primary-thread-retirement-extra"),"primary receipt registration does not widen the base whitelist");
+ adoptionCloseFailure();ordinaryAdoption();independentPrimaryGate();endpointProofDoesNotWaiveHandle();failedEvidenceCannotDropOwner();
+ require(g_inputHostPrimaryThread==nullptr,"no primary owner at process exit");
+ require(::GetProcessHandleCount(::GetCurrentProcess(),&after)!=FALSE,"final private handle census");
+ check(before==after,"all private thread/event/join handles returned before process exit");
+ const bool pass=failures.empty();std::cout<<json({{"pass",pass},{"checks",checks},{"failures",failures},{"cases",cases},
+  {"negativeOnlyPrimarySalvage",primaryNegativeSalvage},{"privateThreadsJoinedBeforeExit",primaryThreadJoins},
+  {"handlesBefore",before},{"handlesAfter",after},{"primaryOwnerRemaining",g_inputHostPrimaryThread!=nullptr},
+  {"pipeOracleLiveBeforeExit",memoryApi::live.size()},{"realProductSdkDriverOrDeviceExecuted",false}}).dump(2)<<'\n';return pass?0:2;
+}catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 3;}}

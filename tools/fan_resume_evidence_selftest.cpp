@@ -55,6 +55,16 @@ int main() {
         check(parseResumeReply(json{{"state", base}, {"error", {{"code", code}}}}.dump(), &r), "error parsed");
         check(classifyResumeReply(r, 2) != ResumeVerdict::Recovered, "error overrides Ready");
     }
+    for (const bool withNoop : {false, true}) {
+        const auto denied = json{{"ok", false}, {"resumeNoop", withNoop}, {"state", base}};
+        check(parseResumeReply(denied.dump(), &r), "explicit false retains parseable denial evidence");
+        check(!r.ready && classifyResumeReply(r, 2) == ResumeVerdict::Failed, "explicit false cannot become Ready or no-work");
+    }
+    check(parseResumeReplyValue(json{{"ok", true}, {"state", base}}, &r) && r.ready, "already parsed JSON uses the same classifier input");
+    check(!parseResumeReplyValue(json{{"ok", "true"}, {"resumeAccepted", true}, {"state", base}}, &r), "wrong-type top-level ok rejected");
+    check(!r.parsed && !r.accepted && !r.ready, "wrong top-level ok cannot leave partial flags");
+    check(parseResumeReplyValue(json{{"ok", false}, {"error", {{"code", "HC_RESUME_SUPERSEDED"}}}, {"state", base}}, &r), "false envelope keeps original explicit error code");
+    check(classifyResumeReply(r, 2) == ResumeVerdict::Superseded, "explicit superseded retains terminal priority");
     check(isTerminalResumeRejection(401, ResumeReply{}), "401 never waits");
     check(isTerminalResumeRejection(403, ResumeReply{}), "403 never waits");
     ResumeReply transient; transient.errorCode = "POWER_RESUMING";

@@ -1,0 +1,247 @@
+{
+  "schemaVersion": 1,
+  "description": "Classification rules only. Source discovery supplies the capability list on every run; these rules do not assert coverage or acceptance.",
+  "domains": [
+    {
+      "id": "fan",
+      "title": "风扇控制",
+      "patterns": [
+        "fan",
+        "风扇"
+      ]
+    },
+    {
+      "id": "performance",
+      "title": "性能 / CPU / GPU / TDP",
+      "patterns": [
+        "performance",
+        "cpu",
+        "gpu",
+        "tdp",
+        "ryzen",
+        "powerlimit",
+        "frame.?rate",
+        "fpslimit",
+        "cpulock",
+        "energy.?star",
+        "性能",
+        "功耗"
+      ]
+    },
+    {
+      "id": "gyro",
+      "title": "陀螺仪 / 运动输入",
+      "patterns": [
+        "gyro",
+        "motion",
+        "陀螺仪"
+      ]
+    },
+    {
+      "id": "touch",
+      "title": "触控 / 触控板",
+      "patterns": [
+        "touchpad",
+        "touchscreen",
+        "screen.?touch",
+        "触控"
+      ]
+    },
+    {
+      "id": "sensor",
+      "title": "传感器 / 监控",
+      "patterns": [
+        "sensor",
+        "monitor",
+        "telemetry",
+        "hwinfo",
+        "rtss",
+        "topmon",
+        "temperature",
+        "传感器",
+        "监控"
+      ]
+    },
+    {
+      "id": "lighting",
+      "title": "机型灯光",
+      "patterns": [
+        "lighting",
+        "lightsetter",
+        "led(color|status|brightness|preset)",
+        "灯光"
+      ]
+    },
+    {
+      "id": "controller",
+      "title": "输入 / 手柄 / 键鼠",
+      "patterns": [
+        "input",
+        "gamepad",
+        "controller",
+        "keyboard",
+        "mouse",
+        "hidhide",
+        "xinput",
+        "vigem",
+        "hidmaestro",
+        "shortcut",
+        "summon",
+        "oem.?keys",
+        "button.?mapping",
+        "\\brog\\b",
+        "legion",
+        "\\bmsi\\b",
+        "手柄"
+      ]
+    },
+    {
+      "id": "display",
+      "title": "显示",
+      "patterns": [
+        "display",
+        "screen",
+        "brightness",
+        "resolution",
+        "refresh.?rate",
+        "hdr",
+        "window.?placement",
+        "显示",
+        "亮度"
+      ]
+    },
+    {
+      "id": "audio",
+      "title": "音频",
+      "patterns": [
+        "audio",
+        "volume",
+        "music",
+        "speaker",
+        "microphone",
+        "sound",
+        "音频",
+        "音量"
+      ]
+    },
+    {
+      "id": "battery",
+      "title": "电池 / 充电",
+      "patterns": [
+        "battery",
+        "charge",
+        "power.?source",
+        "电池",
+        "充电"
+      ]
+    },
+    {
+      "id": "sleep",
+      "title": "睡眠 / 恢复",
+      "patterns": [
+        "sleep",
+        "suspend",
+        "hibernate",
+        "resume",
+        "wake",
+        "睡眠",
+        "唤醒"
+      ]
+    },
+    {
+      "id": "steam",
+      "title": "Steam 集成",
+      "patterns": [
+        "steam",
+        "bigpicture",
+        "大屏"
+      ]
+    },
+    {
+      "id": "game-library",
+      "title": "游戏库 / 游戏工具",
+      "patterns": [
+        "game",
+        "library",
+        "quick.?app",
+        "quickapp",
+        "trainer",
+        "speedhack",
+        "lossless",
+        "optiscaler",
+        "gamedetect",
+        "gameproc",
+        "游戏",
+        "快捷应用"
+      ]
+    },
+    {
+      "id": "plugins",
+      "title": "插件",
+      "patterns": [
+        "plugin",
+        "decky",
+        "extension",
+        "插件"
+      ]
+    },
+    {
+      "id": "network",
+      "title": "网络",
+      "patterns": [
+        "network",
+        "http",
+        "socket",
+        "download",
+        "proxy",
+        "wifi",
+        "wlan",
+        "网络"
+      ]
+    },
+    {
+      "id": "settings",
+      "title": "设置",
+      "patterns": [
+        "settings",
+        "config",
+        "theme",
+        "appearance",
+        "registry",
+        "language",
+        "locale",
+        "设置"
+      ]
+    },
+    {
+      "id": "lifecycle",
+      "title": "应用生命周期 / 更新 / 启动",
+      "patterns": [
+        "lifecycle",
+        "startup",
+        "boot",
+        "update",
+        "tray",
+        "resident",
+        "autoclose",
+        "process",
+        "window",
+        "app[./:]",
+        "build",
+        "package",
+        "release",
+        "version",
+        "publish",
+        "predev",
+        "type.?check",
+        "退出",
+        "开机"
+      ]
+    },
+    {
+      "id": "unclassified",
+      "title": "未分类 / 待盘点",
+      "patterns": []
+    }
+  ]
+}

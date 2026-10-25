@@ -1,0 +1,10 @@
+{
+  "schema": "ymcc.monitor-test-review.v1",
+  "reviewDate": "2026-10-20",
+  "tests": {
+    "tools/monitor_consumer_lifecycle_selftest.mjs": "fb97976aa4b1428ded1cef5eb5791e3508d26d4525dc750405236ee56f6b768d",
+    "tools/monitor_clock_demand_selftest.mjs": "cac5fc83736f92344e7ee5d767d00bd26da20c66f0428dc8c4785e23dee2cd6f",
+    "tools/monitor_bounded_identity_selftest.mjs": "d77c643beff8ce8c54abd08ff150e6cd263a1490fba93683bd7676ae6a0e600d"
+  },
+  "review": "Only real source compilation and synthetic ports. Defaults redirected to owned evidence; original assertion calls retained. Clock new external dependencies explicitly stubbed; TS imports allowlisted. Reviewed FPS placeholder contract: a selected FPS shell stays visible without renewing real zero/unknown readings; dependent statistics still hide. Clock test explicitly injects the static CPU identity label port as an empty string, preserving acquisition/timer assertions and forbidding hardware IO. Template persistence is a throwing injected port in the clock-only replay. Retained clock baseline normalizes only absent CPU/GPU identity labels to empty strings, matching the additive current snapshot shape; sensor fields remain exact. The 2000 projection pairs assert current CPU identity is empty and GPU identity exactly matches the supplied snapshot, then compare all sensor/lifetime/deadline fields against the retained baseline with those additive labels."
+}

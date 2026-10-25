@@ -1,0 +1,1075 @@
+{
+  "schemaVersion": 1,
+  "kind": "fixed-old-write-no-device-io-basis",
+  "gate": {
+    "mode": "old-write",
+    "cases": 6,
+    "goldenWrites": 9,
+    "nativeAttempts": 0,
+    "budgetMs": 45000
+  },
+  "images": {
+    "host": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+    "producer": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+    "synthetic": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+  },
+  "sources": [
+    {
+      "name": "OldWriteProbe.cs",
+      "sha256": "c035dee353b6cb938fbdcbfcaa9f1e0bc7d90a19266be147fccfe7ec105760ea"
+    },
+    {
+      "name": "OldWriteLoadContexts.cs",
+      "sha256": "1a064e01e44bf1c7e7b8b559d1bff15da869debb9d39a64d13d8c4127346ac9a"
+    },
+    {
+      "name": "Fixture.g.cs",
+      "sha256": "67d13ce16340dd086554c3e8dca8bc2122f204aedf878f9943f273a9d13cf154"
+    }
+  ],
+  "requiredNineteen": [
+    {
+      "token": 100667327,
+      "target": "System.Void YeManFanHost.RealHcBackend::EnsureHcSessionReadyForControl() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667112,
+      "target": "System.String YeManFanHost.RealHcBackend::get_EffectiveExpectedHcSha256() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667143,
+      "target": "System.Void YeManFanHost.RealHcBackend::set_HcDeviceManagerStopCompleted(System.Boolean) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669252,
+      "target": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass580_0::.ctor() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669253,
+      "target": "System.Boolean YeManFanHost.RealHcBackend/<>c__DisplayClass580_0::<TryInvokeCached>b__0(System.Reflection.MethodInfo) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669190,
+      "target": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass501_0::.ctor() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669100,
+      "target": "System.Double YeManFanHost.RealHcBackend/<>c::<BuildFanDispatchEvidence>b__501_0(System.Double) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667209,
+      "target": "System.Collections.Generic.IReadOnlyList`1<System.String> YeManFanHost.RealHcBackend::ResolveFanCommandChannels(System.Nullable`1<YeManFanHost.FanRestoreStrategy>) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669191,
+      "target": "<>f__AnonymousType86`10<System.String,System.Double[],System.Double[],System.String,System.String,System.String,System.String,System.String,System.String,System.String> YeManFanHost.RealHcBackend/<>c__DisplayClass501_0::<BuildFanDispatchEvidence>b__1(System.String) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667762,
+      "target": "System.String YeManFanHost.FanHostEngine::ReleaseActionKindName(YeManFanHost.OemReleaseAction) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669125,
+      "target": "System.Boolean YeManFanHost.RealHcBackend/<>c::<ConfirmCandidateCloseCleanup>b__688_0(System.Reflection.MethodInfo) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100669126,
+      "target": "System.Boolean YeManFanHost.RealHcBackend/<>c::<ConfirmCandidateCloseCleanup>b__688_1(System.Reflection.MethodInfo) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100668657,
+      "target": "System.Int64 YeManFanHost.RealHcBackend/ExternalProfilePendingQueue::InvalidateSession() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667137,
+      "target": "System.Boolean YeManFanHost.RealHcBackend::get_HcVirtualCloseReturned() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667368,
+      "target": "System.Boolean YeManFanHost.RealHcBackend::ShouldObserveManagerAfterClose(System.Boolean,System.Boolean) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667231,
+      "target": "System.Void YeManFanHost.RealHcBackend::ObserveManagerFactoryLifecycle() [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667369,
+      "target": "YeManFanHost.RealHcBackend/ManagerObservationOutcome YeManFanHost.RealHcBackend::DescribeManagerObservation(System.String,System.String) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667370,
+      "target": "YeManFanHost.RealHcBackend/ManagerCleanupOutcome YeManFanHost.RealHcBackend::DecideManagerCleanupAfterClose(System.Boolean,System.Boolean,YeManFanHost.RealHcBackend/ManagerObservationOutcome) [scope=YeManFanHost.dll]"
+    },
+    {
+      "token": 100667184,
+      "target": "System.Action`1<System.Exception> YeManFanHost.RealHcBackend::get_FanDispatchFailure() [scope=YeManFanHost.dll]"
+    }
+  ],
+  "reviewedBodies": [
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667124,
+      "method": "System.Void YeManFanHost.RealHcBackend::.ctor(YeManFanHost.HostOptions)",
+      "instructionListingSha256": "4ede62774a579945fc4b8f2e01222386759b2e13c81cf4396d386b58b42d9cc7"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667559,
+      "method": "System.Void YeManFanHost.RealHcBackend::.cctor()",
+      "instructionListingSha256": "2f57d0474e6cbeaa5d2f3e5d4ef92c7a6f119550f2474f3d9b09a08b6f444f84"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667259,
+      "method": "System.Void YeManFanHost.RealHcBackend::OpenHcDevice()",
+      "instructionListingSha256": "b8030f7b67c565fb601bdeea6f45879135db7159ae812baf1961f599be3b4866"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667322,
+      "method": "System.Void YeManFanHost.RealHcBackend::CaptureSessionRouteMarker()",
+      "instructionListingSha256": "fcaa493387a4cd2eb09f37a402c9f6e3db743b5d602d40ef426c3420f6030ad3"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667274,
+      "method": "System.Void YeManFanHost.RealHcBackend::OnHcCpuTemperatureChanged(YeManFanHost.HWiNFOTemperatureMonitor,System.Nullable`1<System.Single>)",
+      "instructionListingSha256": "69b07d3218419a5ab6d55b854c5f2441d3fc19fbeba5a12fef1d200c8076bc90"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667282,
+      "method": "System.Void YeManFanHost.RealHcBackend::DetachCpuTemperatureLoop()",
+      "instructionListingSha256": "d0a7341a6416469c06bbbd8b0d7d627279492d2a84b38c6fc8216d4d65c9c78a"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667174,
+      "method": "YeManFanHost.FanRoute YeManFanHost.RealHcBackend::get_Route()",
+      "instructionListingSha256": "a51489ab645d5e268c31539a4e00350d6145de2df681aae66d29600947c8b076"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667195,
+      "method": "System.Void YeManFanHost.RealHcBackend::set_Diagnostic(System.Action`2<System.String,System.Object>)",
+      "instructionListingSha256": "3e1de5e6f3e016cdde0beb778b355efbb984da8acfe505d0e4121585099dfa87"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667587,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::.ctor()",
+      "instructionListingSha256": "b10dedce5d99d96345c12acc6119e80271e0abb9bd740300144f2cac44f8e6f4"
+    },
+    {
+      "imageSha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+      "token": 100664310,
+      "method": "System.Int32 OldWriteProbe::Run(System.String[])",
+      "instructionListingSha256": "ebf13b569eface7bf699e7a417f427d46e1da2c1df528bb712f510c844617df2"
+    },
+    {
+      "imageSha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+      "token": 100664308,
+      "method": "System.Object OldWriteProbe::Backend(System.Reflection.Assembly,HandheldCompanion.Devices.IDevice,System.Collections.Generic.List`1<System.String>)",
+      "instructionListingSha256": "df129b6ca8f101a04e06bdb7021be28dcc4229c5e1fd9e1bd73e726df4098b34"
+    },
+    {
+      "imageSha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+      "token": 100664306,
+      "method": "System.Void OldWriteProbe::Set(System.Object,System.String,System.Object)",
+      "instructionListingSha256": "b7bdd28c8949a4baa36a82e53f4af162c52f025509f03cf0bd5f47645fe07b8b"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667376,
+      "method": "System.Collections.Generic.IReadOnlyDictionary`2<System.String,YeManFanHost.FanRoute> YeManFanHost.RealHcBackend::BuildFanRoutes()",
+      "instructionListingSha256": "eb06c14cd2f29a0008f5e5bff64cf9ad0bf7dc7d31b036f64b8c750072835cdc"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667258,
+      "method": "System.IDisposable YeManFanHost.RealHcBackend::BeginPowerObservation(System.String,System.String,System.Object)",
+      "instructionListingSha256": "895d798e24a53f30df0f1ca0c54f8bfe67b66d5ec45d9d72753ac6ca9b7fd714"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667175,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::get_UsesBackendFanWriter()",
+      "instructionListingSha256": "b627406f61ec7d83c0266a5a79c26aad6a2d64d120d9ab3cc5e8d68958446935"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667198,
+      "method": "System.Void YeManFanHost.RealHcBackend::EmitDiagnostic(System.String,System.Func`1<System.Object>)",
+      "instructionListingSha256": "77348945ab65299551980667d540648ac847550211501ee7d23c7d6978bc93a9"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667167,
+      "method": "System.String YeManFanHost.RealHcBackend::get_FactoryType()",
+      "instructionListingSha256": "f098f484d8a5d24645e6e4ff091f4edb53d6217c3cc34d7c8b390b67069f2e59"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667326,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::IsHcSessionReadyForControl(System.String&,System.Boolean)",
+      "instructionListingSha256": "32bfb36c4852fdf6c87357a25aef68c111178c7aacb286491731ac6b3ca29d2e"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667212,
+      "method": "YeManFanHost.FanRoute YeManFanHost.RealHcBackend::ResolveRoute(System.String)",
+      "instructionListingSha256": "87148179d4d660a8d7eb78c2ecb67128ac46551fd3d085cdd5afcb8b351c9992"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666767,
+      "method": "System.String YeManFanHost.HostOptions::get_FanProvider()",
+      "instructionListingSha256": "188da1bc265f958a35564dec10ba4f30b203b4473790cb9dfa1184bf5bf060a1"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666743,
+      "method": "System.String YeManFanHost.HostOptions::get_Confirmation()",
+      "instructionListingSha256": "cf9ba50ed1bc13085a04b1fb86657889a58027463672144921a42e86d864b3a8"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666745,
+      "method": "System.String YeManFanHost.HostOptions::get_SessionToken()",
+      "instructionListingSha256": "844ba0c31926614d26cf59edaa7e9457875a4a0ed06229e1f5f68fcc7fcd58d8"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666472,
+      "method": "System.Boolean YeManFanHost.MsiFanDeviceLifecycle::IsMsiFamily(System.Type)",
+      "instructionListingSha256": "82e5e05be00ab70155e356b220d2f463f732b91a7e9a61506398ec3e4f50b4ac"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667612,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::Dispose()",
+      "instructionListingSha256": "99a36ef7a16285bcf9b1f2e449aea7e271b7663cf56ede3347812494d240cc52"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669204,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass522_0::<CloseHcDevice>b__0()",
+      "instructionListingSha256": "b1c7859db47cc64a371cc375181775e485b8e4abe1b1ddbdea6ee043b33b6a8c"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669205,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass522_0::<CloseHcDevice>b__1()",
+      "instructionListingSha256": "63ff90b59a1a4ef11e31b3f05f31f89703a2c31d7c4866f75cb30800235475f5"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669206,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass522_0::<CloseHcDevice>b__2()",
+      "instructionListingSha256": "d44af30bd248101c971e2075a168669e477212e4ef9d7d29f9204e244bdae061"
+    },
+    {
+      "imageSha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+      "token": 100665533,
+      "method": "System.Void OldWriteProbe/<>c__DisplayClass14_0::<Backend>b__0(System.String,System.Object)",
+      "instructionListingSha256": "2005b7c943e24e49d8c657f4668a0418aca5a9cc952458ee6800fbfb3923c128"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667570,
+      "method": "System.Void YeManFanHost.RealHcBackend::<BuildFanRoutes>g__Add|533_0(YeManFanHost.FanRouteKind,System.String,YeManFanHost.FanRestoreStrategy,YeManFanHost.FanEvidenceMode,YeManFanHost.FanRoutePrecondition,System.String[],YeManFanHost.RealHcBackend/<>c__DisplayClass533_0&)",
+      "instructionListingSha256": "9c088d3db47b87b4cbbba7e93d69170d55a1b84edd3a303f0478d3b5c0086d39"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667257,
+      "method": "System.Object YeManFanHost.RealHcBackend::StaticPowerObservationRuntimeIdentity()",
+      "instructionListingSha256": "bb726f504891863044e02ee291f64a651aa1527f555c47323510a50511276872"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667196,
+      "method": "System.Action`2<System.String,System.Func`1<System.Object>> YeManFanHost.RealHcBackend::get_DiagnosticLazy()",
+      "instructionListingSha256": "d0283fff184469fc9ece01122b2832cb3af47af0225707ec50c4903efb3a6888"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667248,
+      "method": "System.Void YeManFanHost.RealHcBackend::UnsubscribeExternalProfileEvents()",
+      "instructionListingSha256": "7b1a91c24a20dd089e0b48178289142247e2a38f783939592a202cc0b8f67790"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667371,
+      "method": "System.Void YeManFanHost.RealHcBackend::ConfirmManagerCleanupAfterClose()",
+      "instructionListingSha256": "6afc0fe31d47335b94a5002f73e56b4ab3329e91ba9033f2a58b70bf6b681e66"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669158,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass390_0::<BeginPowerObservation>b__0()",
+      "instructionListingSha256": "fdb2fefa6bcd6872def01528cd78e6dc08984ef01e1d5037d25e92de29d3c844"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667592,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::InvalidateCachedMapping(System.String)",
+      "instructionListingSha256": "07e29c723ac851c73ece5f3b71cb8601641cece3a4b35ab97816b036f7961886"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667593,
+      "method": "System.Void YeManFanHost.HWiNFOTemperatureMonitor::InvalidateLabelCache()",
+      "instructionListingSha256": "5ac5441b90299db96573c6ca791d7d0cbe75b4782b7047662010dfa8e9eac624"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666521,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::CleanupTransport()",
+      "instructionListingSha256": "d2c8f8f9dcacf87b32b7d0000959db1ed550f3df94ce61f8bbd0df1627286646"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666520,
+      "method": "System.Void YeManFanHost.OneXFanDeviceLifecycle::CloseCore()",
+      "instructionListingSha256": "9b787cfdb1bd56ae201d300332dc2b66c75755d3c7273b8828008af04ba097f4"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663338,
+      "method": "HandheldCompanion.Managers.ManagerStatus HandheldCompanion.Managers.IManager::get_Status()",
+      "instructionListingSha256": "3538a86a2618605b19f1c0741470a14558b36eb2b0341141a0e10c0d5598a798"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663495,
+      "method": "System.Void HandheldCompanion.Misc.FanProfile::SetTemperature(System.Double)",
+      "instructionListingSha256": "c63d3a80e07891332c764cfb5624d2c9e2224efd07dcfe4d09b6b319f4af400d"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663496,
+      "method": "System.Double HandheldCompanion.Misc.FanProfile::GetFanSpeed()",
+      "instructionListingSha256": "2c278c3e7cb38003ef0340b761b60b3f4ac1ff94256e46b8f8034fa9178b80ce"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667327,
+      "method": "System.Void YeManFanHost.RealHcBackend::EnsureHcSessionReadyForControl()",
+      "instructionListingSha256": "e5b5b11f199be2dd7704e72e6d82c96412d769d19c101ff2d9f45614a05fbaf5"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667112,
+      "method": "System.String YeManFanHost.RealHcBackend::get_EffectiveExpectedHcSha256()",
+      "instructionListingSha256": "dc8b60e5298a2850481e52b4974f72bfcf477370bc846596edb6e724711be324"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667143,
+      "method": "System.Void YeManFanHost.RealHcBackend::set_HcDeviceManagerStopCompleted(System.Boolean)",
+      "instructionListingSha256": "36d6fb2ba47279e29f45f68113a4270e6c836bd9746fc1236d391b4c66830b60"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667209,
+      "method": "System.Collections.Generic.IReadOnlyList`1<System.String> YeManFanHost.RealHcBackend::ResolveFanCommandChannels(System.Nullable`1<YeManFanHost.FanRestoreStrategy>)",
+      "instructionListingSha256": "b38ad2acc7b445fbc9c0a56cad9803c8bc6d08bbac6d1647cb5ba4cc79ef28af"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667137,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::get_HcVirtualCloseReturned()",
+      "instructionListingSha256": "7532d8ad54b4fe81ceff0369c65db29ac4b2cc7b19565118234da01c42bdd4c2"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667368,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::ShouldObserveManagerAfterClose(System.Boolean,System.Boolean)",
+      "instructionListingSha256": "a0b40abbafe66fed9eb765f565ef85b4c0b50eba86a7ae09e458c7cb38a529fc"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667231,
+      "method": "System.Void YeManFanHost.RealHcBackend::ObserveManagerFactoryLifecycle()",
+      "instructionListingSha256": "6d3fe59cd44c035c52c1b6a4470d93e661f82516f8a731ed895f0592a406125c"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667369,
+      "method": "YeManFanHost.RealHcBackend/ManagerObservationOutcome YeManFanHost.RealHcBackend::DescribeManagerObservation(System.String,System.String)",
+      "instructionListingSha256": "3ebcb92c319f00da93580a503519f7c01c29cd6fb7d08b3a1da93efb46515aa8"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667370,
+      "method": "YeManFanHost.RealHcBackend/ManagerCleanupOutcome YeManFanHost.RealHcBackend::DecideManagerCleanupAfterClose(System.Boolean,System.Boolean,YeManFanHost.RealHcBackend/ManagerObservationOutcome)",
+      "instructionListingSha256": "a29ec61ca00c5eaf121fb7347592e75ce66589cd148aadd5201c417de0790718"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667184,
+      "method": "System.Action`1<System.Exception> YeManFanHost.RealHcBackend::get_FanDispatchFailure()",
+      "instructionListingSha256": "5d753a0372c04d6920d5f939882ae29227bf5b670acf6b3569acacc94993bfef"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669252,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass580_0::.ctor()",
+      "instructionListingSha256": "7810ca62f9bff0d22ae26ceb09db95863a2af86c231ab7b4630ed1b6ca687b3e"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669253,
+      "method": "System.Boolean YeManFanHost.RealHcBackend/<>c__DisplayClass580_0::<TryInvokeCached>b__0(System.Reflection.MethodInfo)",
+      "instructionListingSha256": "b6cba45cea406fa946e3e95751f9bdac11f8c02a2339d7bd7462ef9be469bed5"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669190,
+      "method": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass501_0::.ctor()",
+      "instructionListingSha256": "7810ca62f9bff0d22ae26ceb09db95863a2af86c231ab7b4630ed1b6ca687b3e"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669191,
+      "method": "<>f__AnonymousType86`10<System.String,System.Double[],System.Double[],System.String,System.String,System.String,System.String,System.String,System.String,System.String> YeManFanHost.RealHcBackend/<>c__DisplayClass501_0::<BuildFanDispatchEvidence>b__1(System.String)",
+      "instructionListingSha256": "35f166c6ba31d29c8413a3bae06f00fd8540c53d482432250ecc372709aceef1"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669100,
+      "method": "System.Double YeManFanHost.RealHcBackend/<>c::<BuildFanDispatchEvidence>b__501_0(System.Double)",
+      "instructionListingSha256": "ba2f9f3d990bff555fa88121690720221f7d7c5b9420a579a2a96b77d4216d8f"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669125,
+      "method": "System.Boolean YeManFanHost.RealHcBackend/<>c::<ConfirmCandidateCloseCleanup>b__688_0(System.Reflection.MethodInfo)",
+      "instructionListingSha256": "cb4f2047e03d45fab85e339744ae1a83d21a377e2f5e33a756567341bdbb1c5f"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100669126,
+      "method": "System.Boolean YeManFanHost.RealHcBackend/<>c::<ConfirmCandidateCloseCleanup>b__688_1(System.Reflection.MethodInfo)",
+      "instructionListingSha256": "87ec0ca9354de7741c8bbef410a275f63adbfa496cd591763c7599a02d0bbf0a"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667762,
+      "method": "System.String YeManFanHost.FanHostEngine::ReleaseActionKindName(YeManFanHost.OemReleaseAction)",
+      "instructionListingSha256": "3933b73aaa54cb6ce950d091925dedd674b425c9a3b65263daf5336d36ff0343"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100668657,
+      "method": "System.Int64 YeManFanHost.RealHcBackend/ExternalProfilePendingQueue::InvalidateSession()",
+      "instructionListingSha256": "0060f317dfbc610e72045f19522dbebc87e3f040662f9bd80f4bb4983d452689"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666751,
+      "method": "System.String YeManFanHost.HostOptions::get_HcExpectedSha256()",
+      "instructionListingSha256": "c7c993752905df7ecb1d7a3b5d9de1d2f8b0ca4d62e16a796ed64e415b50ceda"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667413,
+      "method": "System.Object YeManFanHost.RealHcBackend::GetStaticMember(System.Type,System.String)",
+      "instructionListingSha256": "c14ad84c3d3884dd9d938e93a76b3e830570d471749e5214aa322f71bba7bbe9"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667232,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::IsActiveManagerStatus(System.String)",
+      "instructionListingSha256": "8db1e3df9147f687f192e309a6185064a5a341ad8867e8f1c45008ef8a938303"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667233,
+      "method": "System.Boolean YeManFanHost.RealHcBackend::IsFaultedManagerStatus(System.String)",
+      "instructionListingSha256": "88807d243b87db854a3f49980823b1bd2190e56c0907cd46403346706e29b057"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100666784,
+      "method": "System.Void YeManFanHost.JsonDefaults::.cctor()",
+      "instructionListingSha256": "1c402f73ca5ee1ad80ccbe2aa0258d4b3224506abda729bd102593d4fa9af15d"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663375,
+      "method": "System.Void HandheldCompanion.Managers.ManagerFactory::.cctor()",
+      "instructionListingSha256": "0e2ab046dd03cd5c31231c16f04d4596ea556620acff45f0d7ead1209d443a86"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663374,
+      "method": "System.Object[] HandheldCompanion.Managers.ManagerFactory::get_Managers()",
+      "instructionListingSha256": "3a53177c461c8a3366e00193b0caeb2e956a8e36f2d35cae17e18e79a7bdbbb6"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667412,
+      "method": "System.Reflection.MemberInfo YeManFanHost.RealHcBackend::FindStaticMemberMetadata(System.Type,System.String)",
+      "instructionListingSha256": "9e462817585e8b0db66d36e5fa2846621b5d1c1badf465610d986fe2bb59eb21"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663352,
+      "method": "System.Void HandheldCompanion.Managers.SettingsManager::.ctor()",
+      "instructionListingSha256": "c2f6a8dc7b4e12c758588b6d7d23302463c1dd59d4ba744cd69dd06f12fd08f8"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663364,
+      "method": "System.Void HandheldCompanion.Managers.DeviceManager::.ctor()",
+      "instructionListingSha256": "98df84a668ada06da69c006f8c33da9a6e46603eb4792225c3ee120cde86c08b"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663373,
+      "method": "System.Void HandheldCompanion.Managers.PowerProfileManager::.ctor()",
+      "instructionListingSha256": "3f177091d2cea39b139775167f8750b2ea0bc83f32f1eed090fd336a9845fd4a"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663342,
+      "method": "System.Void HandheldCompanion.Managers.IManager::.ctor()",
+      "instructionListingSha256": "0442effeeba3de0a2dbe4386f68051e236b9da5f5e8f10e9efe6a075e2c9d559"
+    },
+    {
+      "imageSha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+      "token": 100663502,
+      "method": "System.Void HandheldCompanion.Misc.PowerProfile::.ctor()",
+      "instructionListingSha256": "18be5614cf40bf31cbadfe9b6c6cf5f04133941d8fa0a1ae44795ea53dfc3fbf"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667350,
+      "method": "System.Void YeManFanHost.RealHcBackend::ApplyPowerProfile(System.Object,System.String,System.Collections.Generic.IReadOnlyList`1<YeManFanHost.FanNode>,System.Nullable`1<System.Int64>)",
+      "instructionListingSha256": "6355d948a7f940ad7798af95cebb2fb1b9754a5565012d6523c09708bd8158a6"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667291,
+      "method": "System.Void YeManFanHost.RealHcBackend::BeginMsiReleaseOperation()",
+      "instructionListingSha256": "74af3c1b5a092ea1d2b9e0115cf2bc64e075e5bac93fac8aa3708cb0e89610d5"
+    },
+    {
+      "imageSha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "token": 100667356,
+      "method": "System.Void YeManFanHost.RealHcBackend::SettleMsiCloseRelease()",
+      "instructionListingSha256": "6063dc2fdb475341cc3174a67f6b8e0fd4d2e126ab167e816b90d23b88336f7e"
+    }
+  ],
+  "decision": "Static boundary review for one exact old-write invocation only; no policy/native/physical acceptance and no execution approval",
+  "normalizedDefaultContext": {
+    "id": "Default",
+    "kind": "default",
+    "registrationType": null,
+    "registrationAssembly": null,
+    "managed": [
+      {
+        "path": "$OWNED/test-build/bin/harness/release/onexfancoexistence.dll",
+        "sha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+        "identity": "OneXFanCoexistence, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "tool"
+      },
+      {
+        "path": "$OWNED/test-build/bin/mta/release/scopedloadauthority.dll",
+        "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b",
+        "identity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "infrastructure"
+      },
+      {
+        "path": "$OWNED/test-build/bin/harness/release/constructorioports.dll",
+        "sha256": "244f26c326f2ae58a99cfa056b0df792cb2eef51ad76a13b681aa92cc6cfbc85",
+        "identity": "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "infrastructure"
+      },
+      {
+        "path": "$OWNED/test-build/bin/harness/release/handheldcompanion.dll",
+        "sha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+        "identity": "HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "infrastructure"
+      },
+      {
+        "path": "$OWNED/test-build/bin/harness/release/mono.cecil.dll",
+        "sha256": "6346621d998fe428b4b97bb365e5090537be5074861d726cead5767d3b2a7cf2",
+        "identity": "Mono.Cecil, Version=0.11.5.0, Culture=neutral, PublicKeyToken=50cebf1cceb9d05e",
+        "role": "infrastructure"
+      },
+      {
+        "path": "$OWNED/test-build/bin/harness/release/newtonsoft.json.dll",
+        "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+        "identity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+        "role": "infrastructure"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.dll",
+        "sha256": "ef6d37d9334fcdf7c7e4b9590b730eb5ba623192d47f0cbe4ec478962625e586",
+        "identity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.dll",
+        "sha256": "5aea9c285f011d1e83f05834e12632ee5ebf65da1d546e696f525af47101a3b0",
+        "identity": "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.concurrent.dll",
+        "sha256": "569667e92dda0af323a9f289c6bbe7a046bab7354f9fa0d37fc97404a0499ed3",
+        "identity": "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.thread.dll",
+        "sha256": "7b451de5e88adfdb49765bc0745a12e377318534d02e6bf81660c285a7aa6664",
+        "identity": "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.dll",
+        "sha256": "cadf13029ac996abaceccfd7c242e55888b669246163342a3b335eee9851b531",
+        "identity": "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.linq.dll",
+        "sha256": "139264775432faf15a813e607e1919ea869d3321079ba134ffa36b350577c271",
+        "identity": "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.memory.dll",
+        "sha256": "58a4dc8a9efac1fe0ee67138b0dda35b2b812addc14c5d8251cc222b278a5c2d",
+        "identity": "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.loader.dll",
+        "sha256": "c858230d105ec1225cd58ec22623bf59bddee9dfc7077d7f93957d3321ec55f7",
+        "identity": "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.cryptography.dll",
+        "sha256": "bee61e6bdeff9fb0c4f3cbf9d48e9d1d97d12a8bb85d1eeab9178e818b582eee",
+        "identity": "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.componentmodel.primitives.dll",
+        "sha256": "b671ae0e9463f65d2ad08366c890043fd570f7d3149bb57bc16b8d427d9684f5",
+        "identity": "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.regularexpressions.dll",
+        "sha256": "b8494ba41da52018409cccd851753717c6bd035fccdf5e4d5ac83e420d4678f4",
+        "identity": "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.interopservices.dll",
+        "sha256": "9d0621f1e573bd20525287533bea24ec7824813eada7820a0c82252ede072ab9",
+        "identity": "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.linq.expressions.dll",
+        "sha256": "f5d05f16c2f31ae822bca8db63019067c8d83b09376b0a60c38b9c98fa0e088f",
+        "identity": "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.emit.lightweight.dll",
+        "sha256": "c15be07e2131fdc8806d47e222b58e545981c2a3e7dc9c069a6c6076271a291f",
+        "identity": "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.emit.ilgeneration.dll",
+        "sha256": "5e38d9d71ce8fbab210a590f20543b19a2bf0cf1265f3ed78d63519e3b73b979",
+        "identity": "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.primitives.dll",
+        "sha256": "d1ba728fab43e22821a1b19c508667995c0df10ee98d1f19e63aac94098ca8f5",
+        "identity": "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.encoding.extensions.dll",
+        "sha256": "2b63801416706c7817193a742fc8648c4afd6697ca342d4a2deb30450b99218d",
+        "identity": "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.windowsdesktop.app\\10.0.11\\windowsbase.dll",
+        "sha256": "42e05225d944bde54e4f2cbe0142105fce822c574267b6f8e305ee8c45c664e8",
+        "identity": "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.json.dll",
+        "sha256": "ed5f0f3773c89948471e3691f31963ea00d3577e17296ac4dfb97772e78b6fa3",
+        "identity": "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.principal.windows.dll",
+        "sha256": "ed56739aabc1fb6f81e8f71db89531beea985550f654d4d0e6c9a64c67e4e349",
+        "identity": "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.io.filesystem.accesscontrol.dll",
+        "sha256": "1d5f0b64af1920709aa26d5b38991787b458eaa6da8bb8d86b4bb46ca0434026",
+        "identity": "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.console.dll",
+        "sha256": "a50d6f54e509342c49b6b7c8d72684f68701fc97fade19956d4618a4a30e84fa",
+        "identity": "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.accesscontrol.dll",
+        "sha256": "5fda871ac0ab09ba62884ba4160b5c84f8d9513d16c773b7d01e3b82dae905b4",
+        "identity": "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.metadata.dll",
+        "sha256": "97152d5c07e1e5d7f080f871eff211ccdbecb2496e4eb1b086005cbd3656d431",
+        "identity": "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.diagnostics.process.dll",
+        "sha256": "2b4871e02b366113c6ccf3b1436fadde5e69fc0a3e3ac421e2fa0f7af8c2bc3b",
+        "identity": "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.dispatchproxy.dll",
+        "sha256": "a08a235c45e6944b3a086f3df03e55b38a5958e7126948847eb33261fe1ca10b",
+        "identity": "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.io.memorymappedfiles.dll",
+        "sha256": "21b24bb967a254328e2644e2dbfe00e1205463663504819bbfcae6f6b43d426d",
+        "identity": "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.httplistener.dll",
+        "sha256": "c3bbbb42561e9de67da6accd846fa710944d38b4bde88ee111943ea4afb5b82f",
+        "identity": "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.channels.dll",
+        "sha256": "ff8dcb281d2d35f01dbdf72e766e431c397f9db063f22f61a9a85f7bd173f5e8",
+        "identity": "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.windowsdesktop.app\\10.0.11\\microsoft.win32.systemevents.dll",
+        "sha256": "4c2b3c4a44fa0ff1dd288d2fd0b2d4c8a5f713c149a4b2d37a26e03a7da261fa",
+        "identity": "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\microsoft.win32.primitives.dll",
+        "sha256": "07ee7d2780a74c523af5ca4babdc63d006fa896b3a1463c2e638c5bb2843f9b9",
+        "identity": "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.sockets.dll",
+        "sha256": "b4bf19b0c8e412b9d0f479fc5268bf44e04ca656cd121044ca51f2652595af6c",
+        "identity": "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.encodings.web.dll",
+        "sha256": "2c459f175331339b8580dec1842879b3f0532100fa426b97a1b74e1b5dee95d7",
+        "identity": "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.nongeneric.dll",
+        "sha256": "8cf296b4868c0dea441c452c50ed5c322837bf736a7c173f46dda4ebdfeb4c0b",
+        "identity": "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.specialized.dll",
+        "sha256": "61702e1173c49f32e7b1804667a249f8709680f01859d46cf30e74197fedc1c5",
+        "identity": "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.primitives.dll",
+        "sha256": "e678e0129a87751c624cbe2e3ab83d55055a091a5b77d8138f02255deda4b6c4",
+        "identity": "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.webheadercollection.dll",
+        "sha256": "7abfc26269a95cec0d93ca2a6b8148aa45d504c8f50a62fbbbad72408966d45a",
+        "identity": "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.threadpool.dll",
+        "sha256": "9e3bf9838ff48525e4f2fd1c7646956ba00183977c7e4762d999670aa901e101",
+        "identity": "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      }
+    ],
+    "requests": [
+      {
+        "requestedIdentity": "OneXFanCoexistence, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/harness/release/onexfancoexistence.dll"
+      },
+      {
+        "requestedIdentity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/mta/release/scopedloadauthority.dll"
+      },
+      {
+        "requestedIdentity": "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/harness/release/constructorioports.dll"
+      },
+      {
+        "requestedIdentity": "HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/harness/release/handheldcompanion.dll"
+      },
+      {
+        "requestedIdentity": "Mono.Cecil, Version=0.11.5.0, Culture=neutral, PublicKeyToken=50cebf1cceb9d05e",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/harness/release/mono.cecil.dll"
+      },
+      {
+        "requestedIdentity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+        "targetContext": "Default",
+        "targetPath": "$OWNED/test-build/bin/harness/release/newtonsoft.json.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.concurrent.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.thread.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.dll"
+      },
+      {
+        "requestedIdentity": "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.linq.dll"
+      },
+      {
+        "requestedIdentity": "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.memory.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.loader.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.cryptography.dll"
+      },
+      {
+        "requestedIdentity": "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.componentmodel.primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.regularexpressions.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.runtime.interopservices.dll"
+      },
+      {
+        "requestedIdentity": "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.linq.expressions.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.emit.lightweight.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.emit.ilgeneration.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.encoding.extensions.dll"
+      },
+      {
+        "requestedIdentity": "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.windowsdesktop.app\\10.0.11\\windowsbase.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.json.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.principal.windows.dll"
+      },
+      {
+        "requestedIdentity": "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.io.filesystem.accesscontrol.dll"
+      },
+      {
+        "requestedIdentity": "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.console.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.security.accesscontrol.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.metadata.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.diagnostics.process.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.reflection.dispatchproxy.dll"
+      },
+      {
+        "requestedIdentity": "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.io.memorymappedfiles.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.httplistener.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.channels.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.windowsdesktop.app\\10.0.11\\microsoft.win32.systemevents.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\microsoft.win32.primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.sockets.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.text.encodings.web.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.nongeneric.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.collections.specialized.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.net.webheadercollection.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "c:\\program files\\dotnet\\shared\\microsoft.netcore.app\\10.0.11\\system.threading.threadpool.dll"
+      }
+    ]
+  },
+  "customTargets": [
+    {
+      "path": "g:\\yemancc-work\\mainline\\yemancc-source\\yemancc-simsnapshot-20261021-b51\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\fixtures\\host-a678-write-failure\\yemanfanhost.dll",
+      "sha256": "a6788164463da89f7e7df6a6ab1edaf7c2d5eff69c27d127b0d3ce5c47d36539",
+      "identity": "YeManFanHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "role": "target"
+    },
+    {
+      "path": "g:\\yemancc-work\\mainline\\yemancc-source\\yemancc-simsnapshot-20261021-b51\\tools\\ymcc_sim\\global\\onex-fan-coexistence\\fixtures\\host-a678-write-failure\\yemanfanbackend.dll",
+      "sha256": "6d2bcbd48498b7826db64d77b6d5d9d3f45bb91917d816b97c7a830a1eaa84db",
+      "identity": "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "role": "target"
+    }
+  ]
+}

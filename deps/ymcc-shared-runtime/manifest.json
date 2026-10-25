@@ -1,0 +1,312 @@
+{
+  "schemaVersion": 1,
+  "id": "ymcc-shared-runtime-20261018",
+  "packagedDirectory": "PowerControl/ymcc-shared-runtime",
+  "binaryDirectory": "bin",
+  "source": {
+    "runtimeId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+    "hcCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+    "manifestPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/HandheldCompanion.runtime.json",
+    "manifestSha256": "4a97af7fb2e37763f2fe896da97412c3b1a9d19c22de2b4ae83ba1a6d5e83b63"
+  },
+  "files": [
+    {
+      "path": "bin/Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+      "bytes": 723368,
+      "assemblyIdentity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+      "productVersion": "13.0.4+4e13299d4b0ec96bd4df9954ef646bd2d1b5bf2a",
+      "upstreamProject": "Newtonsoft.Json",
+      "version": "13.0.4",
+      "repository": "https://github.com/JamesNK/Newtonsoft.Json",
+      "sourceCommit": "4e13299d4b0ec96bd4df9954ef646bd2d1b5bf2a",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Newtonsoft.Json.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net6.0/Newtonsoft.Json.dll",
+      "note": "Byte-identical to the original locked HC copy and the listed NuGet binary; no SDK rewrite.",
+      "packagedPath": "Newtonsoft.Json.dll",
+      "sharedFallback": true
+    },
+    {
+      "path": "bin/Nefarius.Utilities.DeviceManagement.dll",
+      "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c",
+      "bytes": 328192,
+      "assemblyIdentity": "Nefarius.Utilities.DeviceManagement, Version=5.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "productVersion": "5.2.0+5ed0bf606ace51a3a99362ede90dadba2d92a6fb",
+      "upstreamProject": "Nefarius.Utilities.DeviceManagement",
+      "version": "5.2.0",
+      "repository": "https://github.com/nefarius/Nefarius.Utilities.DeviceManagement",
+      "sourceCommit": "5ed0bf606ace51a3a99362ede90dadba2d92a6fb",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Utilities.DeviceManagement.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net9.0/Nefarius.Utilities.DeviceManagement.dll",
+      "note": "Byte-identical to the original locked HC copy and the listed NuGet binary; no SDK rewrite.",
+      "packagedPath": "Nefarius.Utilities.DeviceManagement.dll",
+      "sharedFallback": true
+    },
+    {
+      "path": "bin/Nefarius.Drivers.HidHide.dll",
+      "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f",
+      "bytes": 223232,
+      "assemblyIdentity": "Nefarius.Drivers.HidHide, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "productVersion": "3.4.0+746e9fb396ba65944dca81e3986cf09b159fe405",
+      "upstreamProject": "Nefarius.Drivers.HidHide",
+      "version": "3.4.0",
+      "repository": "https://github.com/nefarius/Nefarius.Drivers.HidHide",
+      "sourceCommit": "746e9fb396ba65944dca81e3986cf09b159fe405",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Drivers.HidHide.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net10.0-windows7.0/Nefarius.Drivers.HidHide.dll",
+      "note": "Byte-identical to the original locked HC copy and the listed NuGet binary; no SDK rewrite.",
+      "packagedPath": "Nefarius.Drivers.HidHide.dll",
+      "sharedFallback": true
+    },
+    {
+      "path": "bin/LibreHardwareMonitorLib.dll",
+      "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+      "bytes": 1204224,
+      "assemblyIdentity": "LibreHardwareMonitorLib, Version=0.9.6.0, Culture=neutral, PublicKeyToken=null",
+      "productVersion": "0.9.6+d91ec6ea8c6b06eba338a47cad6f56e67113d6e6",
+      "upstreamProject": "LibreHardwareMonitorLib",
+      "version": "0.9.6",
+      "repository": "https://github.com/LibreHardwareMonitor/LibreHardwareMonitor",
+      "sourceCommit": "d91ec6ea8c6b06eba338a47cad6f56e67113d6e6",
+      "license": "MPL-2.0",
+      "consumers": [
+        "BatteryHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/LibreHardwareMonitorLib.dll",
+      "nugetBinaryMatch": false,
+      "nugetBinaryPath": null,
+      "note": "Pinned HC-supplied upstream build; not the cached 0.9.6 NuGet binary. Source commit is the embedded ProductVersion, not the cached package commit.",
+      "packagedPath": "LibreHardwareMonitorLib.dll",
+      "sharedFallback": false,
+      "packagedDirectory": "PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1",
+      "distributionNote": "Canonical device-runtime copy keeps the immutable public035 updater compatible. BatteryHost retains its already-required isolated local copy; this entry is not emitted in ymcc-shared-runtime."
+    },
+    {
+      "path": "bin/RAMSPDToolkit-NDD.dll",
+      "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+      "bytes": 253952,
+      "assemblyIdentity": "RAMSPDToolkit-NDD, Version=1.5.0.0, Culture=neutral, PublicKeyToken=null",
+      "productVersion": "1.5.0+713038f919d85397214e17644d78534dc15a2fd2",
+      "upstreamProject": "RAMSPDToolkit-NDD",
+      "version": "1.5.0",
+      "repository": "https://github.com/Blacktempel/RAMSPDToolkit",
+      "sourceCommit": "713038f919d85397214e17644d78534dc15a2fd2",
+      "license": "MPL-2.0",
+      "consumers": [
+        "BatteryHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/RAMSPDToolkit-NDD.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net10.0/RAMSPDToolkit-NDD.dll",
+      "note": "Byte-identical to the original locked HC copy and the listed NuGet binary; no SDK rewrite.",
+      "packagedPath": "RAMSPDToolkit-NDD.dll",
+      "sharedFallback": false
+    },
+    {
+      "path": "bin/Nefarius.Vicius.Abstractions.dll",
+      "bytes": 20992,
+      "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa",
+      "assemblyIdentity": "Nefarius.Vicius.Abstractions, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "productVersion": "1.4.1+776ef48502aa83f5a0af5236181364ac69765a69",
+      "upstreamProject": "Nefarius.Vicius.Abstractions",
+      "version": "1.4.1",
+      "repository": "https://github.com/nefarius/Nefarius.Vicius.Abstractions",
+      "sourceCommit": "776ef48502aa83f5a0af5236181364ac69765a69",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Vicius.Abstractions.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net9.0/Nefarius.Vicius.Abstractions.dll",
+      "note": "Existing HidHide support DLL already copied by the production exporter; now resolved and copied by the InputHost project from this independent snapshot.",
+      "packagedPath": "Nefarius.Vicius.Abstractions.dll",
+      "sharedFallback": false
+    },
+    {
+      "path": "bin/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "bytes": 65872,
+      "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7",
+      "assemblyIdentity": "Microsoft.Extensions.DependencyInjection.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+      "productVersion": "10.0.9+901ca941248413c79832d2fdbd709da0c4386353",
+      "upstreamProject": "Microsoft.Extensions.DependencyInjection.Abstractions",
+      "version": "10.0.9",
+      "repository": "https://github.com/dotnet/dotnet",
+      "sourceCommit": "901ca941248413c79832d2fdbd709da0c4386353",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net10.0/Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "note": "Existing HidHide support DLL already copied by the production exporter; now resolved and copied by the InputHost project from this independent snapshot.",
+      "packagedPath": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "sharedFallback": false
+    },
+    {
+      "path": "bin/Microsoft.Extensions.Logging.Abstractions.dll",
+      "bytes": 66896,
+      "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+      "assemblyIdentity": "Microsoft.Extensions.Logging.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+      "productVersion": "10.0.9+901ca941248413c79832d2fdbd709da0c4386353",
+      "upstreamProject": "Microsoft.Extensions.Logging.Abstractions",
+      "version": "10.0.9",
+      "repository": "https://github.com/dotnet/dotnet",
+      "sourceCommit": "901ca941248413c79832d2fdbd709da0c4386353",
+      "license": "MIT",
+      "consumers": [
+        "InputHost",
+        "FanHost",
+        "LightSetter"
+      ],
+      "originalPath": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Microsoft.Extensions.Logging.Abstractions.dll",
+      "nugetBinaryMatch": true,
+      "nugetBinaryPath": "lib/net10.0/Microsoft.Extensions.Logging.Abstractions.dll",
+      "note": "Existing HidHide support DLL already copied by the production exporter; now resolved and copied by the InputHost project from this independent snapshot.",
+      "packagedPath": "Microsoft.Extensions.Logging.Abstractions.dll",
+      "sharedFallback": false
+    }
+  ],
+  "licenses": [
+    {
+      "path": "licenses/Newtonsoft.Json.txt",
+      "sha256": "b98a397897ff55f76cddc380041507a95a896b2946e0188703bf0496793d6516",
+      "origin": "NuGet Newtonsoft.Json 13.0.4 LICENSE.md",
+      "license": "MIT",
+      "component": "Newtonsoft.Json"
+    },
+    {
+      "path": "licenses/Nefarius.Utilities.DeviceManagement.txt",
+      "sha256": "87784a55fc2a823955fc69fa6c03179c69c6f89af2badce4651ed24408b29b34",
+      "origin": "https://raw.githubusercontent.com/nefarius/Nefarius.Utilities.DeviceManagement/5ed0bf606ace51a3a99362ede90dadba2d92a6fb/LICENSE",
+      "license": "MIT",
+      "component": "Nefarius.Utilities.DeviceManagement"
+    },
+    {
+      "path": "licenses/Nefarius.Drivers.HidHide.txt",
+      "sha256": "b8a55b0c2e2747c73f43990bb15097c4e2005e648e4c53b2b3118f13798160f5",
+      "origin": "https://raw.githubusercontent.com/nefarius/Nefarius.Drivers.HidHide/746e9fb396ba65944dca81e3986cf09b159fe405/LICENSE",
+      "license": "MIT",
+      "component": "Nefarius.Drivers.HidHide"
+    },
+    {
+      "path": "licenses/LibreHardwareMonitorLib.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "origin": "native/BatteryHost/LICENSE.LibreHardwareMonitor.txt (MPL 2.0 text)",
+      "license": "MPL-2.0",
+      "component": "LibreHardwareMonitorLib"
+    },
+    {
+      "path": "licenses/RAMSPDToolkit-NDD.txt",
+      "sha256": "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+      "origin": "native/BatteryHost/LICENSE.LibreHardwareMonitor.txt (MPL 2.0 text)",
+      "license": "MPL-2.0",
+      "component": "RAMSPDToolkit-NDD"
+    },
+    {
+      "path": "licenses/Nefarius.Vicius.Abstractions.txt",
+      "sha256": "e8a2fca4ed262f330903cf85a6ab7d4e79dae410a6dc5dace27c49e75c43f1bd",
+      "origin": "https://raw.githubusercontent.com/nefarius/Nefarius.Vicius.Abstractions/776ef48502aa83f5a0af5236181364ac69765a69/LICENSE",
+      "license": "MIT",
+      "component": "Nefarius.Vicius.Abstractions"
+    },
+    {
+      "path": "licenses/Microsoft.Extensions.DependencyInjection.Abstractions.txt",
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+      "origin": "https://raw.githubusercontent.com/dotnet/dotnet/901ca941248413c79832d2fdbd709da0c4386353/LICENSE.TXT",
+      "license": "MIT",
+      "component": "Microsoft.Extensions.DependencyInjection.Abstractions"
+    },
+    {
+      "path": "licenses/Microsoft.Extensions.Logging.Abstractions.txt",
+      "sha256": "ae48df11a335dc1a615f4f938b69cba73bcf4485c4f97af49b38efb0f216353b",
+      "origin": "https://raw.githubusercontent.com/dotnet/dotnet/901ca941248413c79832d2fdbd709da0c4386353/LICENSE.TXT",
+      "license": "MIT",
+      "component": "Microsoft.Extensions.Logging.Abstractions"
+    },
+    {
+      "path": "licenses/Microsoft.Extensions.THIRD-PARTY-NOTICES.txt",
+      "sha256": "6d15e10a101c6bfff2ab4429ed061bf76c456fc4b23ad6b03e0d0f8377148a21",
+      "origin": "NuGet Microsoft.Extensions.Logging.Abstractions 10.0.9 THIRD-PARTY-NOTICES.TXT",
+      "license": "upstream notices",
+      "component": "Microsoft.Extensions support libraries"
+    }
+  ],
+  "provenanceFiles": [
+    {
+      "path": "provenance/Newtonsoft.Json.nuspec",
+      "sha256": "f4bc224d57a21fb481f1dc655c3fde6f2e5b8ce80a9448e74a5721a51932adf3",
+      "origin": "NuGet Newtonsoft.Json 13.0.4"
+    },
+    {
+      "path": "provenance/Nefarius.Utilities.DeviceManagement.nuspec",
+      "sha256": "8db426e41be2401a3e48ae3d4d5e564b24751e7b0b25d90d3bd9da705f856792",
+      "origin": "NuGet Nefarius.Utilities.DeviceManagement 5.2.0"
+    },
+    {
+      "path": "provenance/Nefarius.Drivers.HidHide.nuspec",
+      "sha256": "848cc0ddc9c238beb2de44d607b7cbd8cd844c1352dd36adc2cc943884b92f42",
+      "origin": "NuGet Nefarius.Drivers.HidHide 3.4.0"
+    },
+    {
+      "path": "provenance/RAMSPDToolkit-NDD.nuspec",
+      "sha256": "f7787e5c1ad8c687459c45c578eb9e119fc0b0fb3c19a393117d4b2407589326",
+      "origin": "NuGet RAMSPDToolkit-NDD 1.5.0"
+    },
+    {
+      "path": "provenance/Nefarius.Vicius.Abstractions.nuspec",
+      "sha256": "2a99ff034c4faecdaa0c3f5a6f6e7fc7ae4d5eecd372a3711b5d32322e5b7e95",
+      "origin": "NuGet Nefarius.Vicius.Abstractions 1.4.1"
+    },
+    {
+      "path": "provenance/Microsoft.Extensions.DependencyInjection.Abstractions.nuspec",
+      "sha256": "83e449cc179b02de9953997b21240306020028090e02fe37100450832faf43ef",
+      "origin": "NuGet Microsoft.Extensions.DependencyInjection.Abstractions 10.0.9"
+    },
+    {
+      "path": "provenance/Microsoft.Extensions.Logging.Abstractions.nuspec",
+      "sha256": "d4d2218a656fc99770df9bc39c81dc2026e9e219cfa12a36aeff7219c5485a75",
+      "origin": "NuGet Microsoft.Extensions.Logging.Abstractions 10.0.9"
+    }
+  ],
+  "retainedOutsideThisBundle": [
+    {
+      "path": "PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Resources/inpoutx64.dll",
+      "bytes": 98304,
+      "sha256": "5f27ed4d5cd58a1ee23deeb802e09e73f3a1d884ce2135f6e827f67b171269e7",
+      "consumer": "native/BatteryHost/Providers.cs:213",
+      "decision": "Legacy EC/Steam Deck physical-memory dependency; retained for main controller decision, not copied, deleted or replaced here."
+    }
+  ],
+  "deviceCoreConsumerMode": "Pinned fallback only when the device runtime has no local copy; actual loaded paths and hashes are recorded by the consumers."
+}

@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 2,
+  "manifest": "Testing/YMCC/Evidence/VC-HostWireComposition23/managed-current-r4/bin/Release/net10.0/fixture-manifest.json",
+  "sha256": "f486a950f521f40c73a3f99d89deb6f17ac58b018a83cde1f5f33aa9a66c57d4",
+  "meaning": "Explicit22-source current fixture with actual HostTerminalCleanup and real pipe loop. Compiled only until native actual request/parent wait evidence. SDK/USB maintenance/PnP remain named fakes.",
+  "previousContract": {
+    "schemaVersion": 1,
+    "manifest": "Build/Validation/VirtualController-Lifecycle-20261019/integration/managed/ps-owned-contract05/bin/Release/net10.0/fixture-manifest.json",
+    "sha256": "962a608bd185cd9659a2b2c42520a287d3b1c2a1566b469a5b3777976262ddcb",
+    "meaning": "Explicit precompiled source-bound managed fixture with actual PS endpoint ownership dependency. Rebuild and repin after consumed inputs change; compilation alone is not behavior acceptance."
+  }
+}

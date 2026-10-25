@@ -1,0 +1,999 @@
+{
+  "schema": 1,
+  "sourceZip": "C:\\Users\\DaVe\\Desktop\\日志-侧边栏全开后\\YeManCC-logs-20261013-014614-ROG -Steam唤醒修复.zip",
+  "zipSha256": "e2e99a85588a1dc7bac6723453641779b8f2331de5647a627316e4b393f6edad",
+  "implementation": "steam-wake-round25-original-steam-binding",
+  "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+  "facts": [
+    {
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134363003154350072",
+        "generation": 1,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-13 01:38:36.441"
+    },
+    {
+      "details": {
+        "boundary": "queued-suspend",
+        "created": "134363002659934734",
+        "generation": 2,
+        "healthVerified": false,
+        "identityAvailable": true,
+        "pid": 16704,
+        "targetSelection": {
+          "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+          "exactTrackerPath": true,
+          "jointBindingVerified": true,
+          "observedAtTick": 804156,
+          "physicalPreSleepVerified": false,
+          "postWakeRetargetAllowed": false,
+          "preferredCreated": "134363002659934734",
+          "preferredExe": "little kitty, big city",
+          "preferredPid": 16704,
+          "preferredTrackerStatus": "tracked",
+          "readOnly": true,
+          "reason": "steam-original-target-bound",
+          "selectedAppid": 3648250230,
+          "selectedCreated": "134363002659934734",
+          "selectedExe": "little kitty, big city",
+          "selectedPid": 16704,
+          "sharedCandidateMatched": true,
+          "sharedCandidateModified": false,
+          "sharedCandidateStatus": "same-original-instance",
+          "source": "ymcc-candidate-exact-steam-binding",
+          "status": "bound",
+          "trackerLog": {
+            "available": true,
+            "copiedBytes": 399133,
+            "limitBytes": 2097152,
+            "originalBytes": 399133,
+            "truncated": false
+          },
+          "ymccPidValidation": {
+            "created": "134363002659934734",
+            "customConfigured": false,
+            "exactProcessIdentity": true,
+            "pid": 16704,
+            "rulesEpoch": "1",
+            "source": "nativeScanGameOnePid",
+            "status": "accepted",
+            "whitelisted": true,
+            "workingSetBytes": 2569981952
+          },
+          "ymccRulesEpoch": "1",
+          "ymccSteamJoin": {
+            "appid": 3648250230,
+            "birthMatched": true,
+            "continueButtonVerified": false,
+            "gameInputVerified": false,
+            "pathMatched": true,
+            "preSleepOnly": true,
+            "sharedCandidateMatched": true,
+            "status": "exact-instance-matched",
+            "steamTrackedPid": 16704,
+            "windowsSessionMatched": true,
+            "ymccValidatedPid": 16704
+          }
+        }
+      },
+      "event": "sleep-steam-original-captured",
+      "time": "2026-10-13 01:38:36.491"
+    },
+    {
+      "details": {
+        "appid": 3648250230,
+        "foregroundRole": "original-game",
+        "generation": 2,
+        "healthVerified": false,
+        "inputFocus": {
+          "appid": 3648250230,
+          "available": true,
+          "overlayAppid": 3648250230,
+          "overlayPid": 0,
+          "windowID": "0"
+        },
+        "inputReturnBasis": "current-association",
+        "originalWindowFocused": true,
+        "overview": {
+          "appType": 1073741824,
+          "appid": 3648250230,
+          "canonicalInRunningList": true,
+          "gameidString": "15669115425508032512",
+          "gameidValueType": "string",
+          "inRunningList": true,
+          "localDisplayStatus": 4,
+          "localRunning": true,
+          "mostAvailableDisplayStatus": 4,
+          "name": "Little Kitty, Big City",
+          "overviewAvailable": true,
+          "overviewKey": 3648250230,
+          "overviewSource": "steam-ui-native-overview-store",
+          "runningAliasMismatch": false,
+          "selectedDisplayStatus": 4,
+          "windowIDs": [
+            "0"
+          ]
+        },
+        "pid": 16704,
+        "reason": "steam-association-current",
+        "requireOriginalWindowReturn": false,
+        "scope": "steam",
+        "status": "current"
+      },
+      "event": "sleep-steam-inspected",
+      "time": "2026-10-13 01:38:36.647"
+    },
+    {
+      "details": {
+        "code": 4,
+        "generation": 2,
+        "lifecycle": "suspended",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:38:38.484"
+    },
+    {
+      "details": {
+        "code": 18,
+        "generation": 2,
+        "lifecycle": "suspended",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:38:49.006"
+    },
+    {
+      "details": {
+        "code": 7,
+        "generation": 2,
+        "lifecycle": "resuming",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:38:49.022"
+    },
+    {
+      "details": {
+        "generation": 2,
+        "healthVerified": false,
+        "repairTriggered": false,
+        "trigger": "pbt-intermediate-resume-not-proof",
+        "wakeAdmission": {
+          "boundaryFileTime": "134363003164595825",
+          "boundaryGeneration": 2,
+          "continueButtonVerified": false,
+          "eventFileTime": null,
+          "gameInputVerified": false,
+          "kernelWakeConfirmed": false,
+          "latestEntryFileTime": "134363003154350072",
+          "modernStandby": true,
+          "proofFollowedPreparedBoundary": false,
+          "proofFresh": false,
+          "proofMaximumAgeMs": 60000,
+          "proofObservedGeneration": 0,
+          "proofOriginallyAwaitedCapture": false,
+          "source": "pbt-intermediate-resume-not-proof",
+          "status": "waiting-confirmed-kernel-wake"
+        }
+      },
+      "event": "sleep-steam-wake-await-kernel",
+      "time": "2026-10-13 01:38:49.039"
+    },
+    {
+      "details": {
+        "boundaryFileTime": "134363003164595825",
+        "candidateOnly": false,
+        "captureMatched": true,
+        "eventFileTime": "134363003298680516",
+        "generation": 2,
+        "healthVerified": false,
+        "repairTriggered": false,
+        "source": "kernel-power-507-reason-1"
+      },
+      "event": "sleep-steam-wake-proof-recorded",
+      "time": "2026-10-13 01:38:49.993"
+    },
+    {
+      "details": {
+        "entryFailure": false,
+        "generation": 2,
+        "phase": "ready",
+        "userWake": true
+      },
+      "event": "s0-wake-classified",
+      "time": "2026-10-13 01:38:49.997"
+    },
+    {
+      "details": {
+        "generation": 2,
+        "healthVerified": false,
+        "repairTriggered": true,
+        "trigger": "kernel-power-507-reason-1",
+        "wakeAdmission": {
+          "boundaryFileTime": "134363003164595825",
+          "boundaryGeneration": 2,
+          "candidateWaitMs": 968,
+          "continueButtonVerified": false,
+          "deferredCandidateObserved": true,
+          "eventFileTime": "134363003298680516",
+          "gameInputVerified": false,
+          "kernelWakeConfirmed": true,
+          "latestEntryFileTime": "134363003154350072",
+          "modernStandby": true,
+          "proofFollowedPreparedBoundary": false,
+          "proofFresh": true,
+          "proofMaximumAgeMs": 60000,
+          "proofObservedGeneration": 2,
+          "proofOriginallyAwaitedCapture": false,
+          "source": "kernel-power-507-reason-1",
+          "status": "admitted"
+        }
+      },
+      "event": "sleep-recovery-automatic-armed",
+      "time": "2026-10-13 01:38:50.003"
+    },
+    {
+      "details": {
+        "feedbackSaved": true,
+        "generation": 2,
+        "healthVerified": false,
+        "phase": "blocked",
+        "reason": "steam-power-not-ready",
+        "uploaded": false
+      },
+      "event": "sleep-recovery-automatic-result",
+      "time": "2026-10-13 01:39:20.050"
+    },
+    {
+      "details": {
+        "code": 4,
+        "generation": 2,
+        "lifecycle": "resuming",
+        "retryKind": "none",
+        "taskMode": "unknown"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:42:04.362"
+    },
+    {
+      "details": {
+        "boundary": "queued-suspend",
+        "created": "134363003670070440",
+        "generation": 3,
+        "healthVerified": false,
+        "identityAvailable": true,
+        "pid": 16980,
+        "targetSelection": {
+          "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+          "exactTrackerPath": true,
+          "jointBindingVerified": true,
+          "observedAtTick": 1012078,
+          "physicalPreSleepVerified": false,
+          "postWakeRetargetAllowed": false,
+          "preferredCreated": "134363003670070440",
+          "preferredExe": "project biscuits",
+          "preferredPid": 16980,
+          "preferredTrackerStatus": "tracked",
+          "readOnly": true,
+          "reason": "steam-original-target-bound",
+          "selectedAppid": 4222366237,
+          "selectedCreated": "134363003670070440",
+          "selectedExe": "project biscuits",
+          "selectedPid": 16980,
+          "sharedCandidateMatched": true,
+          "sharedCandidateModified": false,
+          "sharedCandidateStatus": "same-original-instance",
+          "source": "ymcc-candidate-exact-steam-binding",
+          "status": "bound",
+          "trackerLog": {
+            "available": true,
+            "copiedBytes": 400181,
+            "limitBytes": 2097152,
+            "originalBytes": 400181,
+            "truncated": false
+          },
+          "ymccPidValidation": {
+            "created": "134363003670070440",
+            "customConfigured": false,
+            "exactProcessIdentity": true,
+            "pid": 16980,
+            "rulesEpoch": "3",
+            "source": "nativeScanGameOnePid",
+            "status": "accepted",
+            "whitelisted": true,
+            "workingSetBytes": 1265332224
+          },
+          "ymccRulesEpoch": "3",
+          "ymccSteamJoin": {
+            "appid": 4222366237,
+            "birthMatched": true,
+            "continueButtonVerified": false,
+            "gameInputVerified": false,
+            "pathMatched": true,
+            "preSleepOnly": true,
+            "sharedCandidateMatched": true,
+            "status": "exact-instance-matched",
+            "steamTrackedPid": 16980,
+            "windowsSessionMatched": true,
+            "ymccValidatedPid": 16980
+          }
+        }
+      },
+      "event": "sleep-steam-original-captured",
+      "time": "2026-10-13 01:42:04.409"
+    },
+    {
+      "details": {
+        "appid": 4222366237,
+        "foregroundRole": "steam-ui",
+        "generation": 3,
+        "healthVerified": false,
+        "inputFocus": {},
+        "inputReturnBasis": "none",
+        "originalWindowFocused": false,
+        "overview": {},
+        "pid": 16980,
+        "reason": "steam-live-account-changed",
+        "requireOriginalWindowReturn": false,
+        "scope": "steam",
+        "status": "blocked"
+      },
+      "event": "sleep-steam-inspected",
+      "time": "2026-10-13 01:42:04.506"
+    },
+    {
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134363005242921655",
+        "generation": 3,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-13 01:42:05.298"
+    },
+    {
+      "details": {
+        "code": 18,
+        "generation": 3,
+        "lifecycle": "suspended",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:42:05.448"
+    },
+    {
+      "details": {
+        "code": 7,
+        "generation": 3,
+        "lifecycle": "resuming",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:42:05.499"
+    },
+    {
+      "details": {
+        "generation": 3,
+        "healthVerified": false,
+        "repairTriggered": false,
+        "trigger": "pbt-intermediate-resume-not-proof",
+        "wakeAdmission": {
+          "boundaryFileTime": "134363005243814311",
+          "boundaryGeneration": 3,
+          "continueButtonVerified": false,
+          "eventFileTime": null,
+          "gameInputVerified": false,
+          "kernelWakeConfirmed": false,
+          "latestEntryFileTime": "134363005242921655",
+          "modernStandby": true,
+          "proofFollowedPreparedBoundary": false,
+          "proofFresh": false,
+          "proofMaximumAgeMs": 60000,
+          "proofObservedGeneration": 2,
+          "proofOriginallyAwaitedCapture": false,
+          "source": "pbt-intermediate-resume-not-proof",
+          "status": "waiting-confirmed-kernel-wake"
+        }
+      },
+      "event": "sleep-steam-wake-await-kernel",
+      "time": "2026-10-13 01:42:05.511"
+    },
+    {
+      "details": {
+        "boundary": "power-suspend-notification",
+        "created": "134363003670070440",
+        "generation": 3,
+        "identityAvailable": true,
+        "physicalPreSleepVerified": false,
+        "pid": 16980,
+        "targetSelection": {
+          "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+          "exactTrackerPath": true,
+          "jointBindingVerified": true,
+          "observedAtTick": 1013390,
+          "physicalPreSleepVerified": false,
+          "postWakeRetargetAllowed": false,
+          "preferredCreated": "134363003670070440",
+          "preferredExe": "project biscuits",
+          "preferredPid": 16980,
+          "preferredTrackerStatus": "tracked",
+          "readOnly": true,
+          "reason": "steam-original-target-bound",
+          "selectedAppid": 4222366237,
+          "selectedCreated": "134363003670070440",
+          "selectedExe": "project biscuits",
+          "selectedPid": 16980,
+          "sharedCandidateMatched": true,
+          "sharedCandidateModified": false,
+          "sharedCandidateStatus": "same-original-instance",
+          "source": "ymcc-candidate-exact-steam-binding",
+          "status": "bound",
+          "trackerLog": {
+            "available": true,
+            "copiedBytes": 400181,
+            "limitBytes": 2097152,
+            "originalBytes": 400181,
+            "truncated": false
+          },
+          "ymccPidValidation": {
+            "created": "134363003670070440",
+            "customConfigured": false,
+            "exactProcessIdentity": true,
+            "pid": 16980,
+            "rulesEpoch": "3",
+            "source": "nativeScanGameOnePid",
+            "status": "accepted",
+            "whitelisted": true,
+            "workingSetBytes": 1265369088
+          },
+          "ymccRulesEpoch": "3",
+          "ymccSteamJoin": {
+            "appid": 4222366237,
+            "birthMatched": true,
+            "continueButtonVerified": false,
+            "gameInputVerified": false,
+            "pathMatched": true,
+            "preSleepOnly": true,
+            "sharedCandidateMatched": true,
+            "status": "exact-instance-matched",
+            "steamTrackedPid": 16980,
+            "windowsSessionMatched": true,
+            "ymccValidatedPid": 16980
+          }
+        }
+      },
+      "event": "sleep-steam-boundary-prepared",
+      "time": "2026-10-13 01:42:05.721"
+    },
+    {
+      "details": {
+        "code": 4,
+        "generation": 3,
+        "lifecycle": "ready",
+        "retryKind": "none",
+        "taskMode": "unknown"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:42:05.724"
+    },
+    {
+      "details": {
+        "boundary": "power-suspend-notification",
+        "created": "134363003670070440",
+        "generation": 4,
+        "healthVerified": false,
+        "identityAvailable": true,
+        "pid": 16980,
+        "targetSelection": {
+          "bindingPolicy": "ymcc-steam-exact-instance-join-v1",
+          "exactTrackerPath": true,
+          "jointBindingVerified": true,
+          "observedAtTick": 1013390,
+          "physicalPreSleepVerified": false,
+          "postWakeRetargetAllowed": false,
+          "preferredCreated": "134363003670070440",
+          "preferredExe": "project biscuits",
+          "preferredPid": 16980,
+          "preferredTrackerStatus": "tracked",
+          "readOnly": true,
+          "reason": "steam-original-target-bound",
+          "selectedAppid": 4222366237,
+          "selectedCreated": "134363003670070440",
+          "selectedExe": "project biscuits",
+          "selectedPid": 16980,
+          "sharedCandidateMatched": true,
+          "sharedCandidateModified": false,
+          "sharedCandidateStatus": "same-original-instance",
+          "source": "ymcc-candidate-exact-steam-binding",
+          "status": "bound",
+          "trackerLog": {
+            "available": true,
+            "copiedBytes": 400181,
+            "limitBytes": 2097152,
+            "originalBytes": 400181,
+            "truncated": false
+          },
+          "ymccPidValidation": {
+            "created": "134363003670070440",
+            "customConfigured": false,
+            "exactProcessIdentity": true,
+            "pid": 16980,
+            "rulesEpoch": "3",
+            "source": "nativeScanGameOnePid",
+            "status": "accepted",
+            "whitelisted": true,
+            "workingSetBytes": 1265369088
+          },
+          "ymccRulesEpoch": "3",
+          "ymccSteamJoin": {
+            "appid": 4222366237,
+            "birthMatched": true,
+            "continueButtonVerified": false,
+            "gameInputVerified": false,
+            "pathMatched": true,
+            "preSleepOnly": true,
+            "sharedCandidateMatched": true,
+            "status": "exact-instance-matched",
+            "steamTrackedPid": 16980,
+            "windowsSessionMatched": true,
+            "ymccValidatedPid": 16980
+          }
+        }
+      },
+      "event": "sleep-steam-original-captured",
+      "time": "2026-10-13 01:42:05.746"
+    },
+    {
+      "details": {
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": false,
+        "trigger": "pbt-intermediate-resume-not-proof",
+        "wakeAdmission": {
+          "boundaryFileTime": "134363005256903854",
+          "boundaryGeneration": 3,
+          "continueButtonVerified": false,
+          "eventFileTime": null,
+          "gameInputVerified": false,
+          "kernelWakeConfirmed": false,
+          "latestEntryFileTime": "134363005242921655",
+          "modernStandby": true,
+          "proofFollowedPreparedBoundary": false,
+          "proofFresh": false,
+          "proofMaximumAgeMs": 60000,
+          "proofObservedGeneration": 2,
+          "proofOriginallyAwaitedCapture": false,
+          "source": "pbt-intermediate-resume-not-proof",
+          "status": "waiting-confirmed-kernel-wake"
+        }
+      },
+      "event": "sleep-steam-wake-await-kernel",
+      "time": "2026-10-13 01:42:05.748"
+    },
+    {
+      "details": {
+        "appid": 4222366237,
+        "foregroundRole": "steam-ui",
+        "generation": 4,
+        "healthVerified": false,
+        "inputFocus": {},
+        "inputReturnBasis": "none",
+        "originalWindowFocused": false,
+        "overview": {},
+        "pid": 16980,
+        "reason": "steam-live-account-changed",
+        "requireOriginalWindowReturn": false,
+        "scope": "steam",
+        "status": "blocked"
+      },
+      "event": "sleep-steam-inspected",
+      "time": "2026-10-13 01:42:05.818"
+    },
+    {
+      "details": {
+        "candidateOnly": true,
+        "eventFileTime": "134363005254418585",
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": false
+      },
+      "event": "sleep-steam-kernel-entry-witness",
+      "time": "2026-10-13 01:42:06.397"
+    },
+    {
+      "details": {
+        "code": 18,
+        "generation": 4,
+        "lifecycle": "suspended",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:43:31.045"
+    },
+    {
+      "details": {
+        "code": 7,
+        "generation": 4,
+        "lifecycle": "suspended",
+        "retryKind": "none",
+        "taskMode": "S0/S3"
+      },
+      "event": "power-broadcast",
+      "time": "2026-10-13 01:43:31.096"
+    },
+    {
+      "details": {
+        "boundaryFileTime": "134363005256903854",
+        "candidateOnly": false,
+        "captureMatched": true,
+        "eventFileTime": "134363006120934108",
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": false,
+        "source": "kernel-power-507-reason-1"
+      },
+      "event": "sleep-steam-wake-proof-recorded",
+      "time": "2026-10-13 01:43:33.096"
+    },
+    {
+      "details": {
+        "entryFailure": false,
+        "generation": 4,
+        "phase": "ready",
+        "userWake": true
+      },
+      "event": "s0-wake-classified",
+      "time": "2026-10-13 01:43:33.099"
+    },
+    {
+      "details": {
+        "generation": 4,
+        "healthVerified": false,
+        "repairTriggered": true,
+        "trigger": "kernel-power-507-reason-1",
+        "wakeAdmission": {
+          "boundaryFileTime": "134363005256903854",
+          "boundaryGeneration": 3,
+          "candidateWaitMs": 87359,
+          "continueButtonVerified": false,
+          "deferredCandidateObserved": true,
+          "eventFileTime": "134363006120934108",
+          "gameInputVerified": false,
+          "kernelWakeConfirmed": true,
+          "latestEntryFileTime": "134363005254418585",
+          "modernStandby": true,
+          "proofFollowedPreparedBoundary": false,
+          "proofFresh": true,
+          "proofMaximumAgeMs": 60000,
+          "proofObservedGeneration": 4,
+          "proofOriginallyAwaitedCapture": false,
+          "source": "kernel-power-507-reason-1",
+          "status": "admitted"
+        }
+      },
+      "event": "sleep-recovery-automatic-armed",
+      "time": "2026-10-13 01:43:33.103"
+    },
+    {
+      "details": {
+        "feedbackSaved": true,
+        "generation": 4,
+        "healthVerified": false,
+        "phase": "blocked",
+        "reason": "steam-power-not-ready",
+        "uploaded": false
+      },
+      "event": "sleep-recovery-automatic-result",
+      "time": "2026-10-13 01:44:03.100"
+    }
+  ],
+  "tracker": [
+    "[2026-10-13 01:24:12] AppID 15669115425508032512 adding PID 6272 as a tracked process \"\"D:\\GAME\\LittleKittyBigCity\\Little Kitty, Big City.exe\"\"",
+    "[2026-10-13 01:37:45] AppID 15669115425508032512 adding PID 16704 as a tracked process \"\"D:\\GAME\\LittleKittyBigCity\\Little Kitty, Big City.exe\"\"",
+    "[2026-10-13 01:37:46] AppID 15669115425508032512 adding PID 16724 as a tracked process \"\"D:\\GAME\\LittleKittyBigCity\\UnityCrashHandler64.exe\" --attach 16704 5378048\"",
+    "[2026-10-13 01:39:18] AppID 15669115425508032512 no longer tracking PID 16724, exit code 0",
+    "[2026-10-13 01:39:18] AppID 15669115425508032512 no longer tracking PID 16704, exit code -805306369",
+    "[2026-10-13 01:39:18] Remove -646717066 from running list",
+    "[2026-10-13 01:39:26] AppID 18134924899683139584 adding PID 16980 as a tracked process \"\"D:\\GAME\\Bluey.The.Videogame\\Project biscuits.exe\"\"",
+    "[2026-10-13 01:39:27] AppID 18134924899683139584 adding PID 16932 as a tracked process \"\"D:\\GAME\\Bluey.The.Videogame\\UnityCrashHandler64.exe\" --attach 16980 12521472\""
+  ],
+  "powerObservations": [
+    {
+      "time": "2026-10-13T01:19:38.655",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:19:38.674",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:19:38.727",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:19:41.382",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:19:48.486",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:19:58.917",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:20:15.968",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:20:26.503",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:20:37.410",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:20:50.421",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:21:29.094",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:21:31.432",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:22:45.372",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:22:51.859",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:22:57.569",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:24:32.837",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:24:36.269",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:27.601",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:27.624",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:28.545",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:29.574",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:31.521",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:37.618",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:37.713",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:37:39.412",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:38:24.964",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:38:33.701",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 1,
+      "powerLifecycle": "ready"
+    },
+    {
+      "time": "2026-10-13T01:39:01.746",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:39:10.875",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:40:21.074",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:40:23.930",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:41:38.827",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:41:40.155",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:42:01.139",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:42:02.604",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 2,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:41.498",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:42.514",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:44.185",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:44.738",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:54.723",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:43:54.755",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:44:11.842",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:44:22.546",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:45:33.074",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:45:36.410",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    },
+    {
+      "time": "2026-10-13T01:46:12.755",
+      "event": "steamdeck-ui-output",
+      "powerGeneration": 4,
+      "powerLifecycle": "resuming"
+    }
+  ],
+  "automaticAttempts": {
+    "input": 0,
+    "inputDispatches": 0,
+    "list": 0,
+    "pidWindow": 0
+  },
+  "fieldInputVerified": false,
+  "fieldContinueVerified": false,
+  "notice": "Actual ROG historical evidence; the regression harness OS, CDP and game-input layers are explicitly simulated, not a new field acceptance."
+}

@@ -1,0 +1,22 @@
+{
+  "InputSha256": "c0e7201b099b66e447ddae67dc5e6e6c04e1594fbec4689cbdb2baf320ebfa15",
+  "ConstructorToken": 100673612,
+  "ConstructorSemanticSha256": "8f569c1510120d8f4cc27bb2fdf11bbbd4357ed77271ff425fc17e86a55c39a5",
+  "Sites": [
+    {
+      "Offset": 34,
+      "OriginalToken": 167776435,
+      "OriginalTarget": "System.UInt64 SDL3.SDL::GetPerformanceCounter()",
+      "Helper": "GetCounter"
+    },
+    {
+      "Offset": 45,
+      "OriginalToken": 167776436,
+      "OriginalTarget": "System.UInt64 SDL3.SDL::GetPerformanceFrequency()",
+      "Helper": "GetFrequency"
+    }
+  ],
+  "Purpose": "Approved passive headless SDLController default constructor only; keep parameterized controller constructors, devices and protocols unchanged; no new DLL",
+  "WindowsClock": "Raw QPC ticks and QPF ticks-per-second; unchecked int64-to-uint64 bit conversion, no time scaling",
+  "RemainingSdlBoundary": "Other SDL calls and SDL3-CS metadata retained pending separate full native audit"
+}

@@ -24,6 +24,7 @@ export interface GameCorePolicyCapabilities {
   smtLogical: number;
   smtPhysical: number;
   source: string;
+  groups?: { label: string; physical: number; logical: number }[];
 }
 
 export interface GameCorePolicyTarget {
@@ -58,6 +59,8 @@ export async function detectGameCorePolicy(): Promise<GameCorePolicyCapabilities
       physical: Math.max(0, Number(raw.physical) || 0),
       smtLogical: Math.max(0, Number(raw.smtLogical) || 0),
       smtPhysical: Math.max(0, Number(raw.smtPhysical) || 0),
+      groups: Array.isArray(raw.groups) ? raw.groups.filter(g => Number.isSafeInteger(g.physical) && g.physical > 0 && Number.isSafeInteger(g.logical) && g.logical >= g.physical)
+        .map((g, index, all) => ({label: all.length === 1 ? '全核心' : index === 0 ? '大核' : index === all.length - 1 && all.length > 2 ? '低功耗核' : '小核', physical:g.physical, logical:g.logical})) : [],
       source: typeof raw.source === 'string' ? raw.source : 'none',
     };
   } catch {

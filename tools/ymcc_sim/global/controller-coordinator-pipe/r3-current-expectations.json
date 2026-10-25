@@ -1,0 +1,997 @@
+{
+  "schemaVersion": 1,
+  "id": "VC-CURRENT-101-6300-880D6734-20261021",
+  "meaning": "Exact source-reviewed assertion occurrence contract; execution and current source authority must be established separately",
+  "originalSourceRecipeSha256": "880d6734d536e4c12cea53cb61572bae230aea640096236badc328076d0a1346",
+  "expectations": {
+    "positive": {
+      "mutation": null,
+      "expectedExit": 0,
+      "expectedStatus": "PASS",
+      "cases": 101,
+      "uniqueNames": 100,
+      "checks": 6300,
+      "expectedOwnedChildren": 106,
+      "traceIdentitySha256": "2dbdee6e0d87f910cd3bae41554a19b649625a919f1059f2251b2db1ffb8de62",
+      "exactFailures": [],
+      "requiredOriginalPassingInstances": [],
+      "countsOrigin": "Observed complete bound current-r48 execution; exact failure mask derived from historical exact instances plus separately reviewed current source branches"
+    },
+    "cancellation": {
+      "mutation": "rollback-cancellation-guards",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 101,
+      "uniqueNames": 100,
+      "checks": 6306,
+      "expectedOwnedChildren": 106,
+      "traceIdentitySha256": "728ba0391d1efcd9a7448cd4f54d6e851b7c13795dbd0c127f1f1ef5c8ae5cd7",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"fresh normal input after cancellation cannot reach Host frame terminal\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"normal input without capture TLS cannot bypass actual user OFF or changed persona\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"fresh normal input after cancellation cannot reach Host frame terminal\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "fresh normal input after cancellation cannot reach Host frame terminal",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"normal input without capture TLS cannot bypass actual user OFF or changed persona\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "normal input without capture TLS cannot bypass actual user OFF or changed persona",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"old Edge Host closes naturally without stale-query recreation before requested persona replacement starts\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "old Edge Host closes naturally without stale-query recreation before requested persona replacement starts",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target generation invalidates a slow observation even when instance names are reused\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target requires its own fresh ownership query and no second recreate\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target requires its own fresh ownership query and no second recreate",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        }
+      ],
+      "requiredOriginalPassingInstances": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/off-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/power-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"older endpoint query cannot clear or rebuild a newer pending PS request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "older endpoint query cannot clear or rebuild a newer pending PS request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"newer PS request requires its own fresh query before reusing existing target\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "newer PS request requires its own fresh query before reusing existing target",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/generation-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/persona-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"cancelled query cannot mark rebuilt or rearm its retired request\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancelled query cannot mark rebuilt or rearm its retired request",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/reentry-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "historical original executed-pass instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"actual RECREATE primitive refuses changed admission at send boundary\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual RECREATE primitive refuses changed admission at send boundary",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"cancellation during actual endpoint query cannot send RECREATE_TARGET\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "cancellation during actual endpoint query cannot send RECREATE_TARGET",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge\",1,\"actual coordinated target count matches single prepare or explicit in-process replacement\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/exit-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "actual coordinated target count matches single prepare or explicit in-process replacement",
+          "assertionOccurrence": 1,
+          "origin": "current retained target-return contextCurrent exit-fence blocks before actual wire"
+        }
+      ],
+      "countsOrigin": "Observed complete bound current-r48 execution; exact failure mask derived from historical exact instances plus separately reviewed current source branches"
+    },
+    "psOwnership": {
+      "mutation": "rollback-ps-endpoint-ownership",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 101,
+      "uniqueNames": 100,
+      "checks": 6300,
+      "expectedOwnedChildren": 106,
+      "traceIdentitySha256": "2dbdee6e0d87f910cd3bae41554a19b649625a919f1059f2251b2db1ffb8de62",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/none/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile peer or retired endpoint cannot prove current owned PS readiness\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge\",1,\"same-profile unowned observation defers without clearing recovery or rebuilding beside a peer\",2]",
+          "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+          "assertionOccurrence": 2,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",12]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 12,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",13]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 13,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",15]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 15,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",16]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 16,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",17]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 17,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-WAKE/read-only-endpoint-enumeration\",1,\"actual PS endpoint reader does not turn incomplete observation into present/absent authority\",18]",
+          "case": "PS-WAKE/read-only-endpoint-enumeration",
+          "nameOccurrence": 1,
+          "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+          "assertionOccurrence": 18,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"actual owned-PS reader establishes the independent old-target witness before quarantine dispatch\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"complete owned-PS absence allows the actual deferred restore and exact old tuple retirement\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"actual owned-PS reader establishes the independent old-target witness before quarantine dispatch\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"complete owned-PS absence allows the actual deferred restore and exact old tuple retirement\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0\",1,\"qualified PS quarantine return consumes its exact durable target duty before tuple clear\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "nameOccurrence": 1,
+          "assertion": "qualified PS quarantine return consumes its exact durable target duty before tuple clear",
+          "assertionOccurrence": 1,
+          "origin": "current ps_return_cases durable target-duty assertion in original expected Foreign branch"
+        },
+        {
+          "id": "[\"PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1\",1,\"qualified PS quarantine return consumes its exact durable target duty before tuple clear\",1]",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "nameOccurrence": 1,
+          "assertion": "qualified PS quarantine return consumes its exact durable target duty before tuple clear",
+          "assertionOccurrence": 1,
+          "origin": "current ps_return_cases durable target-duty assertion in original expected Foreign branch"
+        }
+      ],
+      "requiredOriginalPassingInstances": [],
+      "countsOrigin": "Observed complete bound current-r48 execution; exact failure mask derived from historical exact instances plus separately reviewed current source branches"
+    },
+    "psBinding": {
+      "mutation": "rollback-ps-binding-revision",
+      "expectedExit": 1,
+      "expectedStatus": "FAIL",
+      "cases": 101,
+      "uniqueNames": 100,
+      "checks": 6300,
+      "expectedOwnedChildren": 106,
+      "traceIdentitySha256": "2dbdee6e0d87f910cd3bae41554a19b649625a919f1059f2251b2db1ffb8de62",
+      "exactFailures": [
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target generation invalidates a slow observation even when instance names are reused\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target generation invalidates a slow observation even when instance names are reused",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        },
+        {
+          "id": "[\"ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge\",1,\"new target requires its own fresh ownership query and no second recreate\",1]",
+          "case": "ROG/full-coordinator-real-managed-pipe/target-during-ps-probe/dualsense-edge",
+          "nameOccurrence": 1,
+          "assertion": "new target requires its own fresh ownership query and no second recreate",
+          "assertionOccurrence": 1,
+          "origin": "unchanged historical exact failure instance"
+        }
+      ],
+      "requiredOriginalPassingInstances": [],
+      "countsOrigin": "Observed complete bound current-r48 execution; exact failure mask derived from historical exact instances plus separately reviewed current source branches"
+    }
+  },
+  "nativeCore": [
+    {
+      "symbol": "inputHostTargetReturnAcceptedRecreateLocked",
+      "source": "expanded-native-main",
+      "sha256": "cb900bd1884c2f160c6c42de93f87db659c1805db34d3ad1a37ca96ef0704898"
+    },
+    {
+      "symbol": "inputHostTargetReturnAfterPsQuarantineLocked",
+      "source": "expanded-native-main",
+      "sha256": "ffa1f38bdaa94797ebb1846c749002f0e6af734d40463c267390f9ae80c2ea36"
+    },
+    {
+      "symbol": "hidHideCliReapPendingLocked",
+      "source": "expanded-native-main",
+      "sha256": "78952f986d842505c32852afeda60d3bce9b731d31663f2602041e443aa05337"
+    },
+    {
+      "symbol": "inputHostTargetReturnBeforeCreateLocked",
+      "source": "expanded-native-main",
+      "sha256": "c795085349d95a71f0f71b282c95bb140dbd76ebb49d96af1fa4d7effa6a2dab"
+    },
+    {
+      "symbol": "inputHostTargetReturnAcceptPsLocked",
+      "source": "expanded-native-main",
+      "sha256": "241d40b3d0b061d6a13eeee5dd03e63858f97eba77d0e5d64e6881b2603626b3"
+    },
+    {
+      "symbol": "inputHostTargetReturnTargetExitedLocked",
+      "source": "expanded-native-main",
+      "sha256": "bcc0e1ff6be5a7467c2c240f74d863ecc026fc6a6a35885ca547d5b28c280eaf"
+    },
+    {
+      "symbol": "inputHostTargetReturnBeforeHideLocked",
+      "source": "expanded-native-main",
+      "sha256": "c35a3f969c84bc8646a0f3106e2166a88e83d87ca4941e397e2124d7024bcc0e"
+    },
+    {
+      "symbol": "inputHostTargetReturnAfterPhysicalRestoreLocked",
+      "source": "expanded-native-main",
+      "sha256": "09797d669f09558aaeb253a31f56a7dc543c6977be9191de4cd8f17707166b51"
+    },
+    {
+      "symbol": "inputHostApplyHelloCapabilities",
+      "source": "expanded-native-main",
+      "sha256": "ca402407991e6f7cd18955532ebdb4e0fa819c534a24330d76a715203e884a30"
+    },
+    {
+      "symbol": "inputHostRequestPreparedLocked",
+      "source": "expanded-native-main",
+      "sha256": "0bc03a24091f2066dd0b90f28d6872008a318e8b6ca0833d6a3d240c4174c60e"
+    },
+    {
+      "symbol": "inputHostRequestHasExecutionDeadline",
+      "source": "expanded-native-main",
+      "sha256": "eec157c0c0392f1835b217d07ba0f5d7adcc57c10d1fffae9d75e2165bcb1c26"
+    },
+    {
+      "symbol": "psWakeCaptureEndpointOwnership",
+      "source": "expanded-native-main",
+      "sha256": "5be15ec311c424e5d8f593e4fd3429574c1a3188b502fdf64765b33b02e39bca"
+    },
+    {
+      "symbol": "inputHostRefreshPersonaMatchLocked",
+      "source": "expanded-native-main",
+      "sha256": "f006ec8eb74e288000599f3fccaea1acb19b4f9db5957825972e28af1926c0ae"
+    },
+    {
+      "symbol": "inputHostSetBoundPersona",
+      "source": "expanded-native-main",
+      "sha256": "3b08db3b6a9b7a8398901b4d9a620e1d552812b3ea96ba5f7290b1502b8830c5"
+    },
+    {
+      "symbol": "inputHostClearBoundPersona",
+      "source": "expanded-native-main",
+      "sha256": "311b1feeba0a0b10b53a40c16e688ab2b23ed70ad77f47c298f6a10837d97a09"
+    },
+    {
+      "symbol": "inputHostXboxPreparedHid",
+      "source": "expanded-native-main",
+      "sha256": "89e145aa95c72d0614fed2cbc974203967303e1bb4f249b16198bd0c08b0fcce"
+    },
+    {
+      "symbol": "inputHostXboxPreparedRoot",
+      "source": "expanded-native-main",
+      "sha256": "19fa94ea798ead1d5d793d19001c74d6dd9ddc4c565e880c8b755ffe8bb86181"
+    },
+    {
+      "symbol": "inputHostXboxInterfaceIsTarget",
+      "source": "expanded-native-main",
+      "sha256": "fd60db7a8f8c9f036f8d4453a44b585c0404ed55c9cd537aca5675e071daf5bd"
+    },
+    {
+      "symbol": "inputHostXboxConfirmStartupLocked",
+      "source": "expanded-native-main",
+      "sha256": "e2935dbf288e7e036eb80515031cb67b0f4f30474ff8847ab862271c4322dc85"
+    },
+    {
+      "symbol": "inputHostRequestPsWakeRearm",
+      "source": "expanded-native-main",
+      "sha256": "9a5c6364ac866451941c8d79dd4a1b1484fd6bb37cd53bd01b55096c4340f5af"
+    },
+    {
+      "symbol": "inputHostConsumePsWakeRearm",
+      "source": "expanded-native-main",
+      "sha256": "3b5ea1bc318c2e19812cc80e5742689544e7b7f3f61b32dbacf380269155b7aa"
+    },
+    {
+      "symbol": "inputHostPerformPsWakeRearm",
+      "source": "expanded-native-main",
+      "sha256": "5217d60da5c6b9fd0c7869a124e08986f2cb0f195dd0c532d95751ef93852150"
+    },
+    {
+      "symbol": "psWakeProbeOwnEndpoint",
+      "source": "expanded-native-main",
+      "sha256": "4b2256310b92768747ad2a183f511ea2008e94d05b3e46c66a5a54757d387b6d"
+    },
+    {
+      "symbol": "psWakeDecide",
+      "source": "expanded-native-main",
+      "sha256": "ffcea87cd3daa1036d669d536660f22c07c078426d8f38be5cf6fde8bef86374"
+    },
+    {
+      "symbol": "inputHostRecreatePreparedTarget",
+      "source": "expanded-native-main",
+      "sha256": "c69aef0b6df7d2c9a2912e6e683e657ef01149200fa64ddb1a2344473cc8bfa3"
+    },
+    {
+      "symbol": "inputHostRequestWakeRescan",
+      "source": "expanded-native-main",
+      "sha256": "0f95578c30d985ad9bf017c0f7bf8049eec51255c56ddc968abed02217748e5f"
+    },
+    {
+      "symbol": "inputHostConsumeWakeRescan",
+      "source": "expanded-native-main",
+      "sha256": "ce94483dd8c9a9de6b7292d6e4164de2d01c260d95992729d48ba9c8563af48e"
+    },
+    {
+      "symbol": "inputHostPerformWakeHotReplace",
+      "source": "expanded-native-main",
+      "sha256": "ec194694c0446822bd7d5fc5e7471d43d0d8e2c83818ef29a0865ef3b50e7dd7"
+    },
+    {
+      "symbol": "inputHostWakePhysicalHandshakeReady",
+      "source": "expanded-native-main",
+      "sha256": "254c1ba8b5c0e4641d3eaad7093b17eb61cd1f14b99d8327c17b4ada4aa60b0f"
+    },
+    {
+      "symbol": "sgShouldKeepInputDuringStandby",
+      "source": "expanded-native-main",
+      "sha256": "2d00a2e973ee43521eb54c9974ad687e192dfe9afa335c32a159ae48066e86f3"
+    },
+    {
+      "symbol": "inputHostRequestPowerRelease",
+      "source": "expanded-native-main",
+      "sha256": "3fa32e206432bfb9e8c173de45ce66f4bfae8a54e5db830992615f08818e0da5"
+    },
+    {
+      "symbol": "inputHostRequestPowerRearm",
+      "source": "expanded-native-main",
+      "sha256": "ab1f11c2156e4091ec5aa74f0f88bbb204cf6a437a4fba28795c7d3b17ae7ae2"
+    },
+    {
+      "symbol": "inputHostConsumePowerRequests",
+      "source": "expanded-native-main",
+      "sha256": "05b0929b1a4833bd47954368ebb483ddf7b9956c20ef1efdfc99496f3b1f77d7"
+    },
+    {
+      "symbol": "inputCaptureSuspendSensorsForPower",
+      "source": "expanded-native-main",
+      "sha256": "8fc58fa13eec2f6736388d99ee8e30ef28789254657ca4a852bd3dd4e1563954"
+    },
+    {
+      "symbol": "inputCaptureResumeSensorsForPower",
+      "source": "expanded-native-main",
+      "sha256": "5a2bf1b57b454ddd568cc545ed8c5f73e306c1c239defca0ab0547fba46ba13e"
+    },
+    {
+      "symbol": "inputHostSubmitPad",
+      "source": "expanded-native-main",
+      "sha256": "501a868e8e4fc283b4806f30c564efd74bffd1f0a68efab523d5165d2c7cb8b1"
+    },
+    {
+      "symbol": "inputHostFrameSubmissionCurrent",
+      "source": "expanded-native-main",
+      "sha256": "077d45476284cdb36b7aa08102098c5567fe9e26e699b2a1130691e799b7c863"
+    },
+    {
+      "symbol": "inputHostPhysicalPublicationSourceAdmitted",
+      "source": "expanded-native-main",
+      "sha256": "f02dbae1e3f796335cddb305397b20e86ff966859b73eceaaa420146552f85fe"
+    },
+    {
+      "symbol": "inputHostFreshNeutralReady",
+      "source": "expanded-native-main",
+      "sha256": "f37765198aae31ecb88575f85209237f194683538ff5ee3fc54c15724666147e"
+    },
+    {
+      "symbol": "inputHostStart",
+      "source": "expanded-native-main",
+      "sha256": "7b97aa26fa79ae1208fc583a7b779b49476805ff85ae16a6bb9b95a273ff6738"
+    },
+    {
+      "symbol": "inputHostStopLocked",
+      "source": "expanded-native-main",
+      "sha256": "df4ccb390a07879c54d36aac316edd579454a49843a44c928c4635bb4ca9ab39"
+    },
+    {
+      "symbol": "inputHostStop",
+      "source": "expanded-native-main",
+      "sha256": "110ee814c03375dd664283a9facd49b1cf894e1f175e09bfdb7d313757ba27ed"
+    },
+    {
+      "symbol": "inputHostClearLocked",
+      "source": "expanded-native-main",
+      "sha256": "b95d97e5af169e454604afcfaecec9897e82f5d3b32ba4064d6c80ac23ce9671"
+    },
+    {
+      "symbol": "inputHostRunQueuedLifecycleWork",
+      "source": "expanded-native-main",
+      "sha256": "c22d23087ca67f9eb986d5612a537d6c79b260e0fbbebe14e92af03919bde363"
+    },
+    {
+      "symbol": "inputHostReconcileQuarantine",
+      "source": "expanded-native-main",
+      "sha256": "aafc3f4d42d28add19516ec62e883b8315c2e3f8303c45ba0ed29f47c7ae752c"
+    },
+    {
+      "symbol": "inputHostReconcileQuarantineOnLifecycleThread",
+      "source": "expanded-native-main",
+      "sha256": "f7c9ed20a7b0e2651ec323c4495bf0d900e08066b9ef4be6205426e1add0acc3"
+    },
+    {
+      "symbol": "msiSteamDeckRecheckOwnedRemovalDebt",
+      "source": "expanded-native-main",
+      "sha256": "91b1d34271c432725ab041ddfb4d346cb51e9f6baa6b3a8371988e7c2561fc41"
+    },
+    {
+      "symbol": "ymStartPipeSeamServe",
+      "source": "expanded-native-main",
+      "sha256": "b7a6a82509df3ec3c5297f0d8f0b36ef4f5d7bd3a79e7b1ae4ce0fbd9d0fac7b"
+    },
+    {
+      "symbol": "ymStartEnsureRoute",
+      "source": "expanded-native-main",
+      "sha256": "160ce361a48b06ae9fc4b659e1310401657ac4192327968d4b12b253370a2a32"
+    },
+    {
+      "symbol": "msiClawOpenModeCommand",
+      "source": "expanded-native-main",
+      "sha256": "d98a17bc1398afd1cf6dec194c03b930e46919691de57012606632154070c4dd"
+    },
+    {
+      "symbol": "msiDinputSubmitModeWriteIntent",
+      "source": "expanded-native-main",
+      "sha256": "8c5e331aa36880150e35b6426aeebc6e5de0d6dbed21d7ea6f04f6a263d47dfd"
+    },
+    {
+      "symbol": "msiStartOrderEntrySelfTest",
+      "source": "expanded-native-main",
+      "sha256": "9e3be470d09904d0b4154a08ea1dbd314cd8df3dc264ec8a77d9a153abb716e5"
+    },
+    {
+      "symbol": "inputHostTargetAdmission",
+      "source": "expanded-native-main",
+      "sha256": "2e576bc69f1e8b8beee50a5347f0321e3da41071fd87c332e2683144e48aed78"
+    },
+    {
+      "symbol": "inputHostStartProtectionFinish",
+      "source": "expanded-native-main",
+      "sha256": "6ddb7f4af1320ac380a13535c48d28af17041fd1c41c917a8a538a9651b9dfbe"
+    },
+    {
+      "symbol": "nativeInputShortcutToggle",
+      "source": "expanded-native-main",
+      "sha256": "17dbbe798f1294f83c2d81e4c6e0b3e90d2d03cf0698b224f4de47eeab8f2789"
+    },
+    {
+      "symbol": "clearInputShortcutRuntime",
+      "source": "expanded-native-main",
+      "sha256": "05674bac157f0464ada9c7d70071bc3d2aba7493db3d2363b6cf750b57371ec9"
+    },
+    {
+      "symbol": "inputCaptureRefreshRealStickSettings",
+      "source": "expanded-native-main",
+      "sha256": "2c5b8e381ded93aefae380fb64e4f9c3b09ba5108ca48f15355569f186ad7dc6"
+    },
+    {
+      "symbol": "inputHostTargetReturnHistorySettledLocked",
+      "source": "expanded-native-main",
+      "sha256": "d019eb3592443e0c9690bfe85a9f18ea4ce45881d6cf1691c163c073e4e60a76"
+    },
+    {
+      "symbol": "inputHostTargetReturnColdPassLocked",
+      "source": "expanded-native-main",
+      "sha256": "2d3641d730dd9a9f9be9d86003c9be4d611ad253cae92d7a5d889c0767f854c5"
+    },
+    {
+      "symbol": "inputHostTargetReturnQueueColdStartup",
+      "source": "expanded-native-main",
+      "sha256": "3bff54afb68d08161adf4f2bf6836c4ba52b31a2284984e37ca322492effd881"
+    },
+    {
+      "symbol": "logLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "12871ae7b2bca54413c9746deb83f8b5688ec4af0c4e8d24aea938f3a0d5ddb5"
+    },
+    {
+      "symbol": "currentLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "50245c9da5332ef073afdbaa1b463a7b18d96f7b7fcff5e5a178bba90100b15d"
+    },
+    {
+      "symbol": "cleanLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "da3eebc9139feb86f9d657598a5f91ab2883ff10fd554098ba4cbd129d0ac6db"
+    },
+    {
+      "symbol": "pausedLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "8b0708d00eb50329dda7824b5c3969aeebf812b9067815ba9ce12ee909f58e81"
+    },
+    {
+      "symbol": "retireLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "db39a6856e9474baf1d477f53c56f9af9cc6bfbc9b1b3d40a7dccdad9a4f0f70"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionAwaitingLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "763c046a2e361e2aa34109c773fda9bb72e25de4a937a45145781fb09b93886b"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionBeginColdLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "619eb07c536ade1f095333a4696fdd20ec7d908e143bf248de51af2180e21325"
+    },
+    {
+      "symbol": "inputHostPerformColdStartupReturn",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "0ce273c4a15daf29bc221fb3fb240f35a186d583357654471d55321e3a362330"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionBeginReturnLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "2e4f85a1ddbf67131d161eaf9509aa310b68d7825f1935812b3dbbda29687c35"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionReturnStoppedLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "ac52ba8eb1ebb162a463853782bea59d92d632cc4ca62e0a18bdbb3e575be14e"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionReturnedLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "d4a28a4fcb40ba4bacbfc2cd316af8708f5b70cc0028e53d0721ec1b57ba9f38"
+    },
+    {
+      "symbol": "inputHostSwitchExecutionReturnMaintenanceLocked",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "139d0a05a67af639db8eaa5268b83c72b63af47f7ff5826e9817eaa629421d5c"
+    },
+    {
+      "symbol": "inputHostPerformSwitchExecutionReturn",
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "df1aea9c1cd3f46b02f3aea3e56a3b64c03803488455dbd2f1c998c6cf0a4282"
+    }
+  ],
+  "nativeStructCore": [
+    {
+      "symbol": "ColdEnvironment",
+      "kind": "struct",
+      "source": "native/virtual_target_return_cold_runtime.h",
+      "sha256": "ff565a5177a55232b9d97efb23bb3a38d1fc24eafbe759f97865101cea411038"
+    }
+  ],
+  "nativeCompilerHeaders": [
+    {
+      "source": "native/virtual_target_return_cold_execution.h",
+      "sha256": "5a60d6583ac62828cefa5a1ee941179a95cad5e2494493c3daf321be9c746a7b"
+    },
+    {
+      "source": "native/virtual_target_return_pnp_absence.h",
+      "sha256": "cc0ee878c0e3768ae8cf2a1fabec2282376b20e94cc08e99db55a62e2ba90989"
+    },
+    {
+      "source": "native/virtual_target_return_record.h",
+      "sha256": "64596574db9bbff27c0dc2b8e64fd58ed9546f77a0ad572b23efdfb2b365b35e"
+    },
+    {
+      "source": "native/virtual_target_return_session.h",
+      "sha256": "e766f71be9dea41e5dd834180b68c5f77958a21521b9fec0a4155beef7b560f2"
+    },
+    {
+      "source": "native/virtual_target_return_store.h",
+      "sha256": "120fe7eaa74c66b72d43a80b7f4ccab652174aafc4896fe210d093df24a557cb"
+    },
+    {
+      "source": "native/virtual_switch_execution_return_runtime.h",
+      "sha256": "5d96ad00dc19ffab3a581033f8bcf5711c1969b056f4c2b2a6d1698c13cdf2bd"
+    }
+  ],
+  "originalSourceFixtureFiles": [
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+      "sha256": "d1c23e7c652bd6ee20e3ebca8203a25f7d70ffbdef92f2dc3273d18fda4750d1"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/target_return_cases.inc",
+      "sha256": "4b6fae563968da232a158cea64338ac7aa87ab51becd0ff55729a30fadbdcd5d"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/persona_lifecycle_cases.inc",
+      "sha256": "536d325b826bc195c5ca106498d9f8cc4bdedc39802da59685c34becd0c05503"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc",
+      "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/prepare_ack_cases.inc",
+      "sha256": "3d45b27866a12dec759ffa01d123f8b64376e9ba788ae0245772d923a377c02a"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/ps_return_cases.inc",
+      "sha256": "7958fa04f7befd3ba9357c059bf1b8a6ec14ea42c017946e2ff16b3f3fe89122"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/tuple_recovery_cases.inc",
+      "sha256": "fb47af64718a417581cfdc842244e648c205761bdd5880597a66670e76e593f5"
+    },
+    {
+      "path": "tools/fixtures/input_coordinator_lifecycle/ps_wake_cases.inc",
+      "sha256": "e3719ca4d2811fc5179935568d8e5e21e2bdcf8935a22c4435a2ddf8966471b6"
+    },
+    {
+      "path": "tools/input_coordinator_lifecycle_selftest.mjs",
+      "sha256": "880d6734d536e4c12cea53cb61572bae230aea640096236badc328076d0a1346"
+    }
+  ],
+  "managedSources": [
+    {
+      "relative": "InputHost/Program.cs",
+      "sha256": "d6ccb36b3bcd6049c854b8cfb034fd4822c464b2cf3c42468835b53684ac2504"
+    },
+    {
+      "relative": "InputHost/PsEndpointOwnership.cs",
+      "sha256": "28ddff52ffc9d25749d08d3d1044720ac694724b9687be8ccae154cd14402a89"
+    },
+    {
+      "relative": "InputHost/ParentProcessLifetime.cs",
+      "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+    },
+    {
+      "relative": "InputHost/HostControllerOutputStop.cs",
+      "sha256": "dc02273923d3c2858493e407e08e8fe82c0b4521b090148ff7ed3eb476ec3d61"
+    },
+    {
+      "relative": "InputHost/HostControllerIdleCtsRelease.cs",
+      "sha256": "f214a55f7a651a0be407a2d45337d2bcd8cb780e893616da97ad0daa90121841"
+    },
+    {
+      "relative": "InputHost/HostGameOutputObservation.cs",
+      "sha256": "3ffb11949477a64d30b33417788f69c297e56def54b84aa6922b53124d26d6de"
+    },
+    {
+      "relative": "InputHost/MsiSteamDeckReleaseFence1726.cs",
+      "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+    },
+    {
+      "relative": "InputHost/MsiVirtualReportChain1410.cs",
+      "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+    },
+    {
+      "relative": "InputHost/ScreenTouchpadReport.cs",
+      "sha256": "be9479ccd3dd43c45437ed2bbc774f6ffc033c956d75d2adf3cc41103d38794f"
+    },
+    {
+      "relative": "InputHost/ScreenButtonReport.cs",
+      "sha256": "135cfbbbdf6f0f2a00d794afb1d5046b6da5b9d8d1c4b1886cabbde072fca7f9"
+    },
+    {
+      "relative": "InputHost/CanonicalFrameFingerprintMemo.cs",
+      "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+    },
+    {
+      "relative": "InputHost/HostResponseFields.cs",
+      "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+    },
+    {
+      "relative": "tools/msi_steamdeck_release_fence_1726_selftest.mjs",
+      "sha256": "87899986c5eb3fa2c9199ab4122791296030bef9c6ece52877bf41a2ea9067ab"
+    },
+    {
+      "relative": "tools/msi_steamdeck_release_fence_1726_selftest.cs",
+      "sha256": "bd306391acb9d2e259a497814f93edb20b73a7e79861359ce1ade2486b91a5b5"
+    },
+    {
+      "relative": "tools/inputhost_lifecycle_selftest.cs",
+      "sha256": "2dd948a805f35cd90efb32c108e60de86bb0fca7d95f635e68d6e9bb79b63b4e"
+    },
+    {
+      "relative": "tools/input_lifecycle_managed_fixture.mjs",
+      "sha256": "74d8f513f68e1bc03c1fefbab586a1ad2890e3fe520f70f40c96abf44d28a501"
+    },
+    {
+      "relative": "tools/fixtures/input_lifecycle_integration/ManagedEntry.cs",
+      "sha256": "b726178f329dd998c5e326c5f0cef0b192ed0c4cdc8646420ca9440035d6fb15"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/inputhost-protocol/adapter.mjs",
+      "sha256": "338e803547c9b0d6ba17482692c63779f3221b1cb8e2845e80b79891120aff13"
+    },
+    {
+      "relative": "tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json",
+      "sha256": "92369d457043662e2dc535c597bd643ea6295e1c3dd25e1e3bc043200252f9d2"
+    },
+    {
+      "relative": "capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs",
+      "sha256": "fb26f4aa14d7bb21a34eb27a8b997421b10336017223c9782ad7cc2c59939482"
+    }
+  ]
+}

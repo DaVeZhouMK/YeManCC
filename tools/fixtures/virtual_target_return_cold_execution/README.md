@@ -1,0 +1,21 @@
+# Actual cold execution consumer (130)
+
+This entry directly invokes the production `native/virtual_target_return_cold_execution.h` `coldExecution::run(Environment&)` and `parseHidden`. It does not copy the algorithm, include main/ColdEnvironment/continuation, or run installed programs. Environment record()/consumePath()/consumeOrigin() use actual `targetReturn::Session` and actual private files, with the128 origin cliWriterProtocol field. Only current/nativeDead/hostDead/writersQuiet/targetAbsent/visibility/pathProven/unhide are controlled context/OS/driver facts. No ordinary CLI/Host/device or installed AppData is accessed.
+
+```powershell
+node tools/virtual_target_return_cold_execution_selftest.mjs --out G:/<private>/fresh130 --toolchain G:/<existing>/production-link100
+```
+
+Output must be a fresh absolute private directory outside the repo/toolchain. Release/Checked and three actual compiled mutants run from frozen copies; sourceDependencies, linker /VERBOSE:LIB inputs, static imports, tools, source and binary hashes form a closed manifest. Static imports allow only KERNEL32 private file IO; device and foreign process imports are forbidden. No toolchain installation. All open Session calls on one instance are serialized; no extra worker or recovery lifecycle.
+
+A preliminary source bug was confirmed in b148e460: expiry on the final writersQuiet return can still reach unhide before current() is checked. `--expect-context-red` is only a historical fault-capture mode: positive variants must fail exclusively the original context-expiry assertions and are explicitly marked positivePass=false. It is not an acceptance bypass. Default mode requires green Release/Checked. Preserve all first failures; production is parent-owned and must not be edited by this task.
+
+The fixture covers empty/Missing/Invalid actual sessions, weak binding, legacy protocol0, native/Host Alive/Unknown, pending/unknown CLI writer, present/unknown target, unknown visibility and ancestry, exact owned A versus foreign B, ACK loss with valid readback, still-hidden and unknown readback retaining duty, target-only obligations and complete negative census, repeated historical pin root/HID case-fold deduplication, actual store failures, and partial commit/reopen/resume. Historical IDs only reach targetAbsent as negative witnesses; Environment exposes no current admission API.
+
+Each named Environment IO-return point in a successful run is independently selected to retire the original context. Actual unhide and real Session consumption record whether the call began current; fixture leaves do not hide a bad consumer by silently refusing late calls. Empty records require zero Environment IO; Session setup/open is separate private file work. Store failure uses a real read handle on the private record denying delete/replacement, causing actual atomic store failure while preserving file and in-memory record. Partial progress is reopened through a new actual Session, not imported into fake state.
+
+Parser cases include valid empty/whitespace/full lists, stderr, malformed rows, wrong prefix, truncated quotes/prefix, embedded quotes, NUL, invalid IDs/control characters, duplicates including case variants, exact/exceeded 512-byte IDs, 1MiB bytes, and4096 rows. On all parse failures output must remain unchanged. Complete transport capture is a caller fact; a valid final line need not end in newline.
+
+Three compiled semantic negatives mutate only copied production header: bypass native-death proof, add foreign unhide, bypass still-hidden rejection before consume. Original named assertions must catch each; compile/crash/setup errors never count as semantic detection. IO matrix can include an extra boundary in the foreign-write mutant because it adds a real controlled leaf call. No main, 127/128/129/122 source or evidence is modified.
+
+These are bounded historical return-duty tests. They do not establish real hardware visibility, actual process death, real CLI protocol transport, current PS pin publication or new Start admission. The parent/integration owners validate those real boundaries separately.

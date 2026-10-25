@@ -26,10 +26,14 @@ function Remove-CSharpComments([string]$text) {
 }
 
 $classes = @{}
+$fullNames = @{}
 Get-ChildItem -LiteralPath $HcDevicesRoot -Recurse -Filter '*.cs' | ForEach-Object {
   $source = Remove-CSharpComments (Get-Content -LiteralPath $_.FullName -Raw -Encoding UTF8)
   foreach ($match in [regex]::Matches($source, '(?m)\b(?:public\s+|internal\s+|private\s+|protected\s+)?(?:abstract\s+|partial\s+)*class\s+(?<name>\w+)(?:\s*:\s*(?<base>[\w\.]+))?')) {
     $name = $match.Groups['name'].Value
+    $ns = [regex]::Match($source, '(?m)^\s*namespace\s+([\w.]+)').Groups[1].Value
+    if (!$ns) { throw "HC class namespace missing: $name" }
+    $fullNames[$name] = "$ns.$name"
     $base = if ($match.Groups['base'].Success) { ($match.Groups['base'].Value -split '\.')[-1] } else { '' }
     if (-not $classes.ContainsKey($name)) {
       $classes[$name] = [pscustomobject]@{ Name = $name; Base = $base; Source = $source; Paths = @($_.FullName) }
@@ -51,8 +55,9 @@ if ($routesStart -lt 0 -or $routesEnd -le $routesStart) { throw 'Fan Host route 
 $routeRegistry = $hostText.Substring($routesStart, $routesEnd - $routesStart)
 
 $routeClasses = @(
-  [regex]::Matches($routeRegistry, '"HandheldCompanion\.Devices\.([A-Za-z][A-Za-z0-9_]*)"') |
-    ForEach-Object { $_.Groups[1].Value }
+  foreach ($className in $classes.Keys) {
+    if ($routeRegistry.Contains('"' + $fullNames[$className] + '"')) { $className }
+  }
 )
 $routeClasses += @(
   [regex]::Matches($routeRegistry, '"([A-Za-z][A-Za-z0-9_]*)"') |

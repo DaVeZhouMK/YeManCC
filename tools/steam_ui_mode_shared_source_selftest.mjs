@@ -1,0 +1,31 @@
+// Wiring regression: one verified reader, two snapshot consumers and original safety gates.
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+const main=fs.readFileSync(new URL('../native/main.cpp',import.meta.url),'utf8');
+const observer=fs.readFileSync(new URL('../native/steam_ui_mode_observer.h',import.meta.url),'utf8');
+const decky=main.slice(main.indexOf('static void deckySidebarInitialize()'),main.indexOf('static void steamSettingsObserverStart()'));
+const css=main.slice(main.indexOf('    cssGuard.readMode ='),main.indexOf('    cssGuard.mayLaunch ='));
+const changed=main.slice(main.indexOf('    ymcc::steamui::ModeObserverConfig modeObserver;'),main.indexOf('    // Enabled CSS linkage'));
+let passed=0;function check(name,value){assert.ok(value,name);++passed;console.log('PASS '+name)}
+check('Decky uses a shared snapshot and retains its 30s recovery request',decky.includes('g_steamModeObserver.snapshot(session)')&&decky.includes('if(force)g_steamModeObserver.requestRefresh(session)')&&!decky.includes('steamui::read('));
+check('CSS consumes the same snapshot and has no direct reader',css.includes('g_steamModeObserver.snapshot(session)')&&!css.includes('steamui::read('));
+check('Shared worker alone performs the original verified UI read',changed.includes('steamui::read(g_steamSettingsObserver,true)')&&(changed.match(/steamui::read\(/g)||[]).length===1&&changed.includes('session==g_steamSettingsObserver.sessionSnapshot()'));
+check('Confirmed shared mode wakes both deferred Decky and CSS',changed.includes('g_deckySidebarRuntime.requestLaunchAdmissionRefresh()')&&changed.includes('g_steamCssGuard.observeMode(session,'));
+check('The shared worker does not launch Steam or change settings',!/ShellExecute|CreateProcess|steamui::set|TerminateProcess|WriteFile|SendInput|SetTimer|Sleep\(/.test(observer));
+check('Demand follows each actual feature enablement',main.includes('setDemand(ymcc::steamui::ModeConsumer::Decky, state.enabled)')&&main.includes('setDemand(ymcc::steamui::ModeConsumer::Css,state.linked)'));
+check('All three native shutdown paths stop the shared worker', (main.match(/g_steamModeObserver\.shutdown\(\)/g)||[]).length===3);
+check('Decky still rechecks PID birth and root after consuming the snapshot',decky.includes('current.pid!=session.pid||current.created!=session.created||current.root!=session.root'));
+check('Shared reads come from handle waits and only coalesced demand',observer.includes('WaitForMultipleObjects')&&observer.includes('if (armed_) return')&&observer.includes('if (attempts_ < 3)'));
+check('An old session or event during IO invalidates delivery',observer.includes('generation != generation_ || !(session == session_) || !demand()'));
+check('The successful explicit switch requests a read without relying on window events',main.includes('const auto result = ymcc::steamui::set')&&main.includes('g_steamModeObserver.requestRefresh(g_steamSettingsObserver.sessionSnapshot());'));
+check('Only a newly armed deadline signals the worker',observer.includes('if (newlyArmed && wake_) SetEvent(wake_)'));
+const uiRead=main.slice(main.indexOf('    ipc_on("steam.uiState",'),main.indexOf('    ipc_on("steam.uiMode.set",'));
+check('Automatic frontend consumes the shared pending/known result before any direct CDP fallback',uiRead.includes('if (!args.value("force", false))')&&uiRead.includes('g_steamModeObserver.passiveSnapshot')&&uiRead.indexOf('if (shared.is_object()) return shared')<uiRead.indexOf('return ymcc::steamui::read('));
+check('Manual refresh retains the verified direct reader',uiRead.includes('return ymcc::steamui::read(g_steamSettingsObserver, args.value("force", false))'));
+const settled=changed.slice(changed.indexOf('modeObserver.settled ='),changed.indexOf('modeObserver.stableBigPicture ='));
+check('Pending page completion only refreshes UI, never CSS/Decky startup',settled.includes('deckySidebarPost("steam.uiStateChanged"')&&!/observeMode|requestUiRefresh|requestLaunchAdmissionRefresh|confirmAndIdle|steamui::set/.test(settled));
+check('In-flight invalidation consumes attempts without spending a new lifecycle budget',observer.includes('window_.request(GetTickCount64(), inFlight_)')&&observer.includes('hints != hintGeneration_'));
+const stable=changed.slice(changed.indexOf('modeObserver.stableBigPicture ='),changed.indexOf('g_steamModeObserver.initialize('));
+check('Stable Big Picture completion wakes only the original guarded Decky admission and keeps CSS untouched',stable.includes('requestLaunchAdmissionRefresh()')&&stable.includes('session==g_steamSettingsObserver.sessionSnapshot()')&&!/observeMode|requestUiRefresh|steamui::read|steamui::set|CreateProcess|ShellExecute/.test(stable));
+check('Stable callback requires a fresh verified unchanged Big Picture result',observer.includes('stableBigPicture = !notify && result.value("mode", std::string{}) == "bigpicture"')&&observer.includes('if (stableBigPicture && config_.stableBigPicture)'));
+console.log('SHARED_STEAM_SOURCE_OK passed='+passed+' realSteamOperations=0');

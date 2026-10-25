@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <UseAppHost>false</UseAppHost>
+    <Deterministic>true</Deterministic>
+    <NuGetAudit>false</NuGetAudit>
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <AssemblyName>TargetCreationLifetimeEvidenceSelfTest</AssemblyName>
+    <RestoreSources></RestoreSources>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../target_creation_lifetime_evidence_selftest.cs" Link="SelfTest.cs" />
+    <Compile Include="../../InputHost/TargetCreationLifetimeEvidence.cs" Link="TargetCreationLifetimeEvidence.cs" />
+  </ItemGroup>
+</Project>

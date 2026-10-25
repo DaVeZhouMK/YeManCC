@@ -1,0 +1,160 @@
+{
+  "id": "decky-null-window-20261021",
+  "observedDate": "2026-10-21",
+  "source": "Installed YMCC/Steam logs and read-only CDP observations",
+  "timeline": [
+    {
+      "time": "2026-10-21T00:43:58+08:00",
+      "event": "mirror-disconnected-and-Decky-router-rerender"
+    },
+    {
+      "time": "2026-10-21T00:43:59+08:00",
+      "event": "three ResizeObserver null-window errors and one getComputedStyle null-window error; Steam initialization"
+    },
+    {
+      "time": "2026-10-21T00:44:01+08:00",
+      "event": "YMCC frontend loaded and mirror reconnected"
+    },
+    {
+      "time": "2026-10-21T02:51:03+08:00",
+      "event": "Loader started after explicit Steam link admission"
+    },
+    {
+      "time": "2026-10-21T02:51:05+08:00",
+      "event": "mirror-peer-connected"
+    }
+  ],
+  "observed": {
+    "loaderVersion": "v3.3.0",
+    "loaderSha256": "51c7f3b9cdf6d6b8132273ca4cbc145595f2e36b556332b7c911de846ef914b7",
+    "installedNativeSha256": "1eaeb3691eea5d1c03d202087b0268ce5fe696697ea7d651013887b8e90e43d6",
+    "installedNativeHasNoRepeatGuard": false,
+    "currentErrorBoundaryVisible": false,
+    "currentMirrorConnected": true,
+    "currentQamTabInReactTree": true,
+    "currentQamOpen": false
+  },
+  "failure": "Historical Steam page rebuild produced null-window frontend errors. The old installed host can start official Loader in an already loaded document.",
+  "attribution": {
+    "proven": "The locked official create_inject_script schedules RestartJSContext after 100ms if deckyHasLoaded is truthy. The production native admission and actual-target launch expression now reject that document.",
+    "unproven": "Historical errors have no stack trace; repeated Loader injection cannot be asserted as their unique cause. The regression proves prevention of the known JS-context restart trigger, not reproduction or elimination of every null-window error."
+  },
+  "expected": "Update/manual/retry grants never start a second Loader in a loaded document; last-moment actual-target guard must reject a stale fresh snapshot. No automatic Steam restart/mode change. Recovery waits for a naturally fresh context; user/safety OFF wins. Network/store/plugin errors do not globally disable Decky.",
+  "evidenceRoot": "D:/Codex/2026-10-18/d/work/decky-local-fault-20261021",
+  "sensitiveValuesOmitted": [
+    "bootstrap token",
+    "runId",
+    "account",
+    "game identity"
+  ],
+  "greyPanelFollowup": {
+    "observedAt": "2026-10-21T07:46:30+08:00",
+    "steamPid": 20456,
+    "ymccPid": 23344,
+    "reason": "decky-context-already-loaded",
+    "visibleState": "Performance and frame status waiting; controls disabled because no broker snapshot",
+    "userScreenshot": "C:/Users/DaVe/AppData/Local/Temp/codex-clipboard-1e3b2feb-c5d7-4f52-ab6c-a3870e4f18f8.png",
+    "freshSteamRecoveryVerifiedAt": "2026-10-21T07:48:37+08:00",
+    "freshSteamPid": 30232,
+    "remainingFix": "Exact same active module + official version may rebind authenticated YMCC transport only; never invoke official Loader entry, start a Loader process or replay edits. Module/version mismatch and OFF remain rejected."
+  },
+  "restartFollowup": {
+    "observedAt": "2026-10-21T08:06:27+08:00",
+    "steamPid": 30232,
+    "ymccPid": 34944,
+    "phase": "waiting-manual-steam",
+    "reason": "decky-context-already-loaded",
+    "residentFrontend": "09135801e77ba055552c1f29edf82f9860b28465f9425330e7d4b36278dbc463",
+    "installedFrontend": "efd897cd7a9a707ab4f6e5e3b758e89f9494f3fb0de2e226849c227eb10d217a",
+    "installedBuild": "fa339b49f93783466d41504ce3dc78af5dadafdd9086880127fd9cf45e85d555",
+    "source": "read-only runtime log, installed file and actual SharedJSContext inspection",
+    "classification": "owner-restart plus another exported frontend; distinguish exact retained rebind from module-update requirement"
+  },
+  "tdpUiJitter": {
+    "observedAt": "2026-10-21T09:53:00+08:00",
+    "screenshot": "C:/Users/DaVe/AppData/Local/Temp/codex-clipboard-13ada3e2-59cf-4602-9367-0cee86138537.png",
+    "notification": "Unsupported Installation! No official support will be provided.",
+    "loaderVersion": "v3.3.0",
+    "publicSupported": false,
+    "hostPid": 5232,
+    "steamPid": 34180,
+    "connectedAt": "2026-10-21T09:53:31+08:00",
+    "pluginBuild": "efd897cd7a9a707ab4f6e5e3b758e89f9494f3fb0de2e226849c227eb10d217a",
+    "sourceFindings": [
+      "pending status inserted/removed a PanelSectionRow below performance",
+      "draft cleared before native reply",
+      "unrelated toggles remounted for sourceRevision/disabled",
+      "write reply can arrive before the post-commit readback snapshot",
+      "successful reply notice inserts a row which the next snapshot immediately removes"
+    ],
+    "regression": "tools/decky_slider_stability_selftest.mjs",
+    "realTdpWriteIssuedByAgent": false,
+    "regressionCases": {
+      "queue": 37,
+      "tsx": 30,
+      "removalNegatives": 15,
+      "actualMirrorClientMessageSequence": true,
+      "contentEffectCleanupExecuted": true,
+      "sameModulePageReplacementCycles": 30,
+      "genericClient": 54
+    },
+    "bigPictureReentry": {
+      "userReportedNoFlicker": true,
+      "steamRestartedByUser": false,
+      "installedBuild": "9a3233bbcfff9465fe33986ba528907ee8440fed9b61b456963a0a586c719775",
+      "runningPlugin": "efd897cd7a9a707ab4f6e5e3b758e89f9494f3fb0de2e226849c227eb10d217a",
+      "steamPid": 34180,
+      "pageInstancesChanged": true,
+      "causalityConfirmed": false,
+      "visibleFullApplyCycleCaptured": false,
+      "fixtureProvenGap": "Stale native slider change/begin/release callbacks retained authority after hide/reentry or Content replacement",
+      "regressionFailure": "a late slider change from the previous Big Picture page cannot enqueue an edit after reentry",
+      "fix": "Invalidate the per-Content interaction token on visibility changes and unmount; guard begin/change/end independently",
+      "sourceRemovalNegatives": [
+        "reentry-old-change",
+        "reentry-old-release",
+        "unmount-keeps-authority",
+        "reentry-old-begin"
+      ]
+    },
+    "multiplePageOwnership": {
+      "observedMultipleHiddenQamPages": true,
+      "actualUserFailureCausalityConfirmed": false,
+      "fixtureReproduced": [
+        "mounting inactive Content clears another active Content snapshot",
+        "hiding or unmounting one page cancels another page shared performance draft or in-flight request"
+      ],
+      "fixes": [
+        "MirrorClient aggregates visible Content owners; only the last hidden owner pauses snapshots",
+        "Each Content owns its performance/fan drafts and cancels only its own queues",
+        "Module dismount disposes all still-active page queues and clears visibility owners"
+      ],
+      "negativeControls": [
+        "inactive-page-revokes-visibility",
+        "pages-share-intent-queue"
+      ],
+      "inactivePageReplacementCycles": 80,
+      "realSteamActions": 0
+    },
+    "reentrantTransport": {
+      "actualUserFailureCausalityConfirmed": false,
+      "faultInjection": true,
+      "observedOldSourceFailure": "a busy observer rebind cannot forward an old write into the replacement broker",
+      "boundaries": [
+        "first send after busy publication",
+        "failure after transport replacement",
+        "timeout readback after run replacement",
+        "last visible page hidden while passive HUD socket remains"
+      ],
+      "fix": "Capture socket/epoch/bootstrap and pending-request identity; fence all continuations and never replay writes",
+      "newClientCases": 5,
+      "sourceRemovalNegatives": [
+        "transport-unsent",
+        "transport-old-send-failure",
+        "transport-timeout-new-run",
+        "transport-timeout-hidden"
+      ],
+      "realSteamActions": 0
+    }
+  }
+}

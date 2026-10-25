@@ -1,0 +1,144 @@
+{
+  "schemaVersion": 1,
+  "updatedOn": "2026-10-20",
+  "authority": "direct-human-user",
+  "objective": "Complete unified library consumption for capabilities already enabled in YMCC, then close this integration batch; record inactive capability gaps without wiring them.",
+  "rule": "Product-enabled capability with an existing actual consumer is eligible. A frozen HC declaration, compiled candidate, simulated success or catalog row alone does not establish product activation.",
+  "confirmedEnabledCapabilities": [
+    {
+      "id": "fan",
+      "name": "风扇",
+      "libraryDomains": [
+        "fan"
+      ]
+    },
+    {
+      "id": "motion",
+      "name": "陀螺仪",
+      "libraryDomains": [
+        "motion"
+      ]
+    },
+    {
+      "id": "controller.input",
+      "name": "手柄输入",
+      "libraryDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "lighting",
+      "name": "机身灯光",
+      "libraryDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "oem.back-buttons",
+      "name": "背部按键",
+      "libraryDomains": [
+        "oem-input",
+        "controller"
+      ]
+    },
+    {
+      "id": "oem.dedicated-buttons",
+      "name": "专用按键",
+      "libraryDomains": [
+        "oem-input"
+      ]
+    },
+    {
+      "id": "controller.feedback",
+      "name": "震动",
+      "libraryDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "battery.charge-limit",
+      "name": "充电上限",
+      "libraryDomains": [
+        "battery"
+      ]
+    }
+  ],
+  "additionalEnabledCapabilityAdmission": {
+    "requiresExistingEnabledProductConsumer": true,
+    "requiresConcreteSourceAndActivationEvidence": true,
+    "recordBeforeWork": true,
+    "automaticAdmissionFromHcUpgrade": false
+  },
+  "necessaryDependencies": "Only ownership, initialization, failure handling, stop/release and recovery directly required by admitted existing consumers.",
+  "inactiveDisposition": {
+    "action": "record-gaps-only",
+    "newWiring": false,
+    "newTestPromotion": false,
+    "examples": [
+      "model.secondary-display",
+      "battery.SuiPlay0X1",
+      "controller.unimplemented-providers",
+      "controller.experimental-native-rear-keyboard-writer"
+    ],
+    "preservedSourceRules": [
+      "native/msi_native_rear_keyboard_runtime.h is preserved byte-for-byte; no experimental consumer wiring",
+      "secondary-display source already merged is retained without activation or D15R2 promotion"
+    ]
+  },
+  "userExcluded": [
+    "settings.wake-password-ui"
+  ],
+  "preservedBoundaries": {
+    "cpuGpuMetadataOnly": true,
+    "independentCpuTdpConsumerUnchanged": true,
+    "furtherDllTrimmingDeferred": true,
+    "thirdPartyOriginalLibrariesRetained": true,
+    "sourceMergeOwner": "existing coordinator",
+    "hardwareAndDeploymentAuthorizationUnchanged": true
+  },
+  "finiteExistingCandidates": [
+    {
+      "id": "D16",
+      "root": "D:\\Codex\\2026-10-19\\ni-s\\work\\motion-owner-16",
+      "freezeSha256": "d66d8397f54a71d276a62c417f7d332009414d269424dd5bc8b09038d337e8ea",
+      "allFrozenFilesMatched": true,
+      "files": 12,
+      "currentMainlineIntegrated": true,
+      "nextAction": "Source integration already observed; revalidate the existing consumer on the selected stable source. Do not reapply integrated source hunks.",
+      "preservedGates": [
+        "original owner priority",
+        "same current actual sensor consumers"
+      ]
+    },
+    {
+      "id": "D17-enabled-SD-only",
+      "root": "D:/Codex/2026-10-19/ni-s/work/msi-rear-enabled-closure",
+      "freezeSha256": "63757b8d3b853a52f96fccd07191bde4795a6ebba71b84477de13e68361ff47d",
+      "files": 21,
+      "allFrozenFilesMatched": true,
+      "currentMainlineIntegrated": true,
+      "activeConsumer": "msiClawEnsureM12Remap",
+      "inactiveConsumerSourceModified": false,
+      "inactiveUnifiedRouteRefused": true,
+      "software": {
+        "configuration": "DefaultRelease",
+        "cases": 78,
+        "checks": 67093,
+        "compiledSemanticFaults": 5,
+        "policyScopeFaults": 3,
+        "experimentConfigurationsExecuted": 0
+      },
+      "nextAction": "Source integration already observed; revalidate the existing consumer on the selected stable source. Do not reapply integrated source hunks."
+    }
+  ],
+  "completion": {
+    "activeScopeComplete": false,
+    "legacyAllFrozenSourceGoalIsSeparate": true,
+    "requiresAllConfirmedEnabledConsumers": true,
+    "requiresCurrentSourcePositiveNegativeAndLifecycleEvidence": true,
+    "sourceRegistrationIsNotConsumption": true,
+    "physicalAcceptanceSeparate": true,
+    "wholeProcessCpuSavingsRequireMeasurements": true
+  },
+  "stoppingRule": "No new inactive features, protocols, providers, UI or DLL replacement to improve apparent coverage. Resolve the existing enabled-consumer gaps, reconcile current receipts, and close the batch."
+}

@@ -1,0 +1,170 @@
+{
+  "schemaVersion": 1,
+  "status": "EXACT12_PASSIVE_MANAGED_PROJECTION_METHODS_METADATA_BASIS",
+  "inputReports": [
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-sdk-module-metadata-r57/RAW-RESULT.json",
+      "sha256": "cb4118e906f3ab9b020d45ca758617935f9430dffe7bf398c7955965ccd3a49e"
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-sdk-projection-metadata-r57/RAW-RESULT.json",
+      "sha256": "1300c6e712347d6a3c94f357e68c90999d2df060218713a716593735ed35877b"
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-sdk-registration-metadata-r57/RAW-RESULT.json",
+      "sha256": "e760199109a189311b8ae40e700f6f4e39edcb88cbcf93c1d73f0a88bdca078e"
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-sdk-typename-metadata-r57/RAW-RESULT.json",
+      "sha256": "fb888a89409e306313781def509b9e7074c9a14a446e1cf37026bc86fefc869f"
+    }
+  ],
+  "images": [
+    {
+      "name": "Microsoft.Windows.SDK.NET",
+      "identity": "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "pin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Windows.SDK.NET.dll",
+        "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102"
+      },
+      "methods": [
+        {
+          "signature": "System.Void <Module>::.cctor()",
+          "canonicalSha256": "d2ea2c8b318f64db3cb26b7b07cb59627520c9c20baad97ace2c8f3620aeeb1b"
+        },
+        {
+          "signature": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()",
+          "canonicalSha256": "29907147bb2bc8cf917e316e6b93b1b3c1555be1927e600eca53e8c4d0e7768a"
+        },
+        {
+          "signature": "System.Void WinRT.ProjectionTypesInitializer::InitalizeProjectionTypes()",
+          "canonicalSha256": "78ebe6d7c16a86ed99ab848334e001219b84ec3bb903a4d9d0e68b51c667d095"
+        },
+        {
+          "signature": "System.Void WinRT.ProjectionTypesInitializer::.cctor()",
+          "canonicalSha256": "bcad70eb1590596653b0f20a9f146bc8074a216347d56335488ae2787321b8f0"
+        }
+      ]
+    },
+    {
+      "name": "WinRT.Runtime",
+      "identity": "WinRT.Runtime, Version=2.2.0.0, Culture=neutral, PublicKeyToken=99ea127f02d97709",
+      "pin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WinRT.Runtime.dll",
+        "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db"
+      },
+      "methods": [
+        {
+          "signature": "System.Void <Module>::.cctor()",
+          "canonicalSha256": "07d8c06e0b01853d84541c189642d7d5fbb88face491fe7a67ee2299ce513a59"
+        },
+        {
+          "signature": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()",
+          "canonicalSha256": "c42bee11f21a676299a686bcc9a2ebc7560e12da30750b002713f8524df2fdac"
+        },
+        {
+          "signature": "System.Void WinRT.ComWrappersSupport::.cctor()",
+          "canonicalSha256": "3c4acd79bc98e6db5c8a6b0ca165ff369b2c6803a06aaab4d8d73fe43d167a02"
+        },
+        {
+          "signature": "System.Void WinRT.ComWrappersSupport::RegisterProjectionAssembly(System.Reflection.Assembly)",
+          "canonicalSha256": "b74f838795a8251c4d058c73f84216cec2f5918560c32532532489f6b4dc038f"
+        },
+        {
+          "signature": "System.Void WinRT.ComWrappersSupport::RegisterProjectionTypeBaseTypeMapping(System.Collections.Generic.IDictionary`2<System.String,System.String>)",
+          "canonicalSha256": "8a7dd3988b918b63546f41efdcddba1d278f7311b6193b839192cce35e8d6159"
+        },
+        {
+          "signature": "System.Void WinRT.TypeNameSupport::.cctor()",
+          "canonicalSha256": "bc49679cf4433f5d0ba7db2386d686cebc1d4bd1cde81c8db722e8bef79baa40"
+        },
+        {
+          "signature": "System.Void WinRT.TypeNameSupport::RegisterProjectionAssembly(System.Reflection.Assembly)",
+          "canonicalSha256": "d7be35b4ddeb15556ec3762c000b3037a389c139d1c733ab441f7599be7bb073"
+        },
+        {
+          "signature": "System.Void WinRT.TypeNameSupport::RegisterProjectionTypeBaseTypeMapping(System.Collections.Generic.IDictionary`2<System.String,System.String>)",
+          "canonicalSha256": "e7cee8ae575a7ae46b4275d2205fa05847ecfeb7253e9a2dc7355a1da6ed8bc9"
+        }
+      ]
+    }
+  ],
+  "allowedBclCalls": [
+    "System.Reflection.Assembly System.Type::get_Assembly() [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]",
+    "System.Reflection.Assembly System.Type::get_Assembly() [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.StringComparer System.StringComparer::get_Ordinal() [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]",
+    "System.StringComparer System.StringComparer::get_Ordinal() [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle) [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]",
+    "System.Type System.Type::GetTypeFromHandle(System.RuntimeTypeHandle) [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Concurrent.ConcurrentDictionary`2<System.String,System.Type>::.ctor(System.Collections.Generic.IEqualityComparer`1<!0>) [scope=System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Concurrent.ConcurrentDictionary`2<System.String,System.Type>::set_Item(!0,!1) [scope=System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Concurrent.ConcurrentDictionary`2<System.Type,System.Func`2<System.IntPtr,System.Object>>::.ctor() [scope=System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Concurrent.ConcurrentDictionary`2<System.Type,System.Func`2<WinRT.IInspectable,System.Object>>::.ctor() [scope=System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Concurrent.ConcurrentDictionary`2<System.Type,System.Runtime.InteropServices.ComWrappers/ComInterfaceEntry[]>::.ctor() [scope=System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.Dictionary`2<System.String,System.String>::.ctor(System.Int32,System.Collections.Generic.IEqualityComparer`1<!0>) [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]",
+    "System.Void System.Collections.Generic.Dictionary`2<System.String,System.String>::set_Item(!0,!1) [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]",
+    "System.Void System.Collections.Generic.List`1<System.Collections.Generic.IDictionary`2<System.String,System.String>>::.ctor() [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.List`1<System.Collections.Generic.IDictionary`2<System.String,System.String>>::Add(!0) [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.List`1<System.Func`2<System.Type,System.Runtime.InteropServices.ComWrappers/ComInterfaceEntry[]>>::.ctor() [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.List`1<System.Func`2<System.Type,System.String>>::.ctor() [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.List`1<System.Reflection.Assembly>::.ctor() [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Collections.Generic.List`1<System.Reflection.Assembly>::Add(!0) [scope=System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Object::.ctor() [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Runtime.CompilerServices.ConditionalWeakTable`2<System.Object,WinRT.IInspectable>::.ctor() [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+    "System.Void System.Runtime.CompilerServices.ConditionalWeakTable`2<System.Type,WinRT.ComWrappersSupport/InspectableInfo>::.ctor() [scope=System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]"
+  ],
+  "localCallEdges": [
+    {
+      "fromAssembly": "Microsoft.Windows.SDK.NET",
+      "from": "System.Void <Module>::.cctor()",
+      "targetAssembly": "Microsoft.Windows.SDK.NET",
+      "target": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()"
+    },
+    {
+      "fromAssembly": "Microsoft.Windows.SDK.NET",
+      "from": "System.Void <Module>::.cctor()",
+      "targetAssembly": "Microsoft.Windows.SDK.NET",
+      "target": "System.Void WinRT.ProjectionTypesInitializer::InitalizeProjectionTypes()"
+    },
+    {
+      "fromAssembly": "Microsoft.Windows.SDK.NET",
+      "from": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.ComWrappersSupport::RegisterProjectionAssembly(System.Reflection.Assembly)"
+    },
+    {
+      "fromAssembly": "Microsoft.Windows.SDK.NET",
+      "from": "System.Void WinRT.ProjectionTypesInitializer::InitalizeProjectionTypes()",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.ComWrappersSupport::RegisterProjectionTypeBaseTypeMapping(System.Collections.Generic.IDictionary`2<System.String,System.String>)"
+    },
+    {
+      "fromAssembly": "WinRT.Runtime",
+      "from": "System.Void <Module>::.cctor()",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()"
+    },
+    {
+      "fromAssembly": "WinRT.Runtime",
+      "from": "System.Void WinRT.ProjectionInitializer::InitalizeProjection()",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.ComWrappersSupport::RegisterProjectionAssembly(System.Reflection.Assembly)"
+    },
+    {
+      "fromAssembly": "WinRT.Runtime",
+      "from": "System.Void WinRT.ComWrappersSupport::RegisterProjectionAssembly(System.Reflection.Assembly)",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.TypeNameSupport::RegisterProjectionAssembly(System.Reflection.Assembly)"
+    },
+    {
+      "fromAssembly": "WinRT.Runtime",
+      "from": "System.Void WinRT.ComWrappersSupport::RegisterProjectionTypeBaseTypeMapping(System.Collections.Generic.IDictionary`2<System.String,System.String>)",
+      "targetAssembly": "WinRT.Runtime",
+      "target": "System.Void WinRT.TypeNameSupport::RegisterProjectionTypeBaseTypeMapping(System.Collections.Generic.IDictionary`2<System.String,System.String>)"
+    }
+  ],
+  "methods": 12,
+  "allowedMeaning": "Only original managed assembly/type-name registration and owned dictionaries/lists/weak tables. Does not approve any SDK feature, UISettings construction, WinRT/COM activation, device initialization or other invocation.",
+  "targetExecutions": 0,
+  "runtimeApproved": false
+}

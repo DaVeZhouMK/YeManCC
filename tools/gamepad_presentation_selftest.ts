@@ -45,9 +45,28 @@ const rand = () => { seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0; retur
 for (let n = 0; n < 2000; n++) {
   const raw = { connected: rand() > 0.2, name: n % 3 === 0 ? '' : 'pad', buttons: Array.from({ length: 16 }, () => rand() > 0.5), axes: Array.from({ length: 4 }, () => rand() * 2 - 1) };
   state = reduceGamepadPresentation(state, raw);
-  assert.deepEqual(state, { connected: Boolean(raw.connected), name: String(raw.name || '手柄'), buttons: raw.buttons.map(Boolean), axes: raw.axes.map((v) => Number.isFinite(Number(v)) ? Number(v) : 0) });
+  assert.deepEqual(state, { connected: Boolean(raw.connected), name: String(raw.name || '手柄'), buttons: raw.buttons.map(Boolean), axes: raw.axes.map((v) => Number.isFinite(Number(v)) ? Number(v) : 0), oemPressedKeys: [] });
 }
 assertions++;
+
+// OEM strings are independent of XInput/axes; high native bits are never JS numbers.
+const oem = reduceGamepadPresentation(first, { ...payload, oemPressedKeys: ['claw', 'm1', 'legionfrontr'] });
+check(oem.buttons === first.buttons && oem.axes === first.axes, 'OEM-only updates preserve standard input identities');
+check(oem.oemPressedKeys.join(',') === 'claw,m1,legionfrontr', 'canonical OEM IDs retained exactly');
+check(reduceGamepadPresentation(oem, { ...payload, oemPressedKeys: [...oem.oemPressedKeys] }) === oem, 'same OEM state allocates no reactive update');
+const legacy = reduceGamepadPresentation(oem, payload);
+check(legacy.oemPressedKeys.length === 0, 'legacy/missing OEM snapshot clears stale highlights');
+const oemWithoutXinput = reduceGamepadPresentation(oem, { ...payload, connected: false, oemPressedKeys: ['claw'] });
+check(oemWithoutXinput.oemPressedKeys[0] === 'claw', 'physical WMI/keyboard keys do not depend on XInput readiness');
+const visibleOem: string[][] = [];
+const oemPresenter = createGamepadPresenter(next => visibleOem.push([...next.oemPressedKeys]));
+oemPresenter.setVisible(true);oemPresenter.accept({ ...payload, oemPressedKeys: ['m1'] });
+oemPresenter.setVisible(false);
+for (let i=0;i<10000;i++) oemPresenter.accept({ ...payload, oemPressedKeys: i===9999?[]:['qs'] });
+check(visibleOem.length === 1, 'hidden OEM changes do not render');
+oemPresenter.setVisible(true);
+check(visibleOem.length === 2 && visibleOem[1].length === 0, 'visibility resume uses current release state');
+oemPresenter.dispose();
 
 // Load the actual IPC bridge only after installing a harmless in-memory WebView.
 const fakeWindow = new EventTarget() as EventTarget & { chrome: unknown };

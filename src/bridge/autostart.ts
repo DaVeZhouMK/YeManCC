@@ -1,4 +1,4 @@
-// autostart.ts — CPU 核心控制(CCD) / CPU 降压(Undervolt) 的「30秒自行启用」持久化与开机套用
+// Retained CCD/undervolt autostart implementation; inactive during UI retirement.
 //
 // 设计：
 //  - 开关状态 + 当前选中的档位 记录到 C:\SOFT\YeMan\PowerControl\cpu_autostart.json
@@ -7,6 +7,7 @@
 //  - 纯前端实现，读写走 native fs.* IPC，无需重编译壳。
 
 import { setCcdMode, setUndervolt, uvPresetValue } from './cpuctl';
+import { LEGACY_CCD_UNDERVOLT_ACTIVE } from './legacyCpuFeaturePolicy';
 import { readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 const FILE = 'C:\\SOFT\\YeMan\\PowerControl\\cpu_autostart.json';
@@ -25,6 +26,7 @@ function defaultConfig(): CpuAutostart {
 }
 
 export async function readCpuAutostart(): Promise<CpuAutostart> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return defaultConfig();
   try {
     const j = await readSettingsSection<any>('cpu');
     const a = j.autostart;
@@ -48,14 +50,17 @@ export async function readCpuAutostart(): Promise<CpuAutostart> {
 // Each save owns only its branch. Native merges the branch under its lock,
 // so a simultaneous CCD/UV save cannot replay a stale whole autostart object.
 export async function writeCcdAutostart(enabled: boolean, mode: number): Promise<void> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return;
   await saveSettingsSection('cpu', { autostart: { ccd: { enabled, mode } } });
 }
 export async function writeUvAutostart(enabled: boolean, preset: string, vendor: UvVendor): Promise<void> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return;
   await saveSettingsSection('cpu', { autostart: { uv: { enabled, preset, vendor } } });
 }
 
 // 由 App.vue 在启动 30 秒后调用：按记录状态自行启用 CCD / 降压（不抛错，单条失败不影响另一条）
 export async function applyCpuAutostart(): Promise<void> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return;
   const cfg = await readCpuAutostart();
   if (cfg.ccd.enabled) {
     try {

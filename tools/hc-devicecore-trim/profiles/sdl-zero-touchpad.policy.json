@@ -1,0 +1,18 @@
+{
+  "InputSha256": "110156b16a20a903029c8f4632b2f6c25de542284827bcf686518865cfbd70ac",
+  "Methods": [
+    {
+      "Token": 100673607,
+      "FullName": "System.Int32 HandheldCompanion.Controllers.SDLController::GetTouchpads()",
+      "SemanticSha256": "9d2a8e65b18f51b882ee6ce6f6f904859768f4e0b6d58e7c942d7b93e2711aa0"
+    },
+    {
+      "Token": 100673608,
+      "FullName": "System.Int32 HandheldCompanion.Controllers.SDLController::GetTouchpadFingers(System.Int32)",
+      "SemanticSha256": "63fae899ee8963c6e10cf16e2f33231b77d108621b16ecd8867526c4c2e7f332"
+    }
+  ],
+  "Purpose": "Return zero for zero gamepad before SDL wrapper access, preserve nonzero original IL; timer derivative input only",
+  "ZeroHandleOracle": "SDL 3.4.12 GetNumGamepadTouchpads(NULL) and GetNumGamepadTouchpadFingers(NULL,touchpad) return 0",
+  "SideEffect": "Intentionally omit SDL error-state side effects on zero handles in passive headless profile"
+}

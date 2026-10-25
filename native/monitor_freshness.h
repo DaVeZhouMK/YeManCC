@@ -13,6 +13,20 @@
 // 不算停更；停更时不得继续刷新数据/健康有效期；pollTime==0 不是健康。
 #pragma once
 #include <cstdint>
+#include <cmath>
+#include <limits>
+
+// The shared header stores U64 seconds, while YMCC's epoch-millisecond
+// publications use signed 64-bit time. Reject before multiplication can wrap.
+inline bool monitorProducerTimeRepresentable(unsigned long long seconds) {
+    return seconds <= static_cast<unsigned long long>((std::numeric_limits<long long>::max)()) / 1000ULL;
+}
+inline unsigned long long monitorProducerAgeMs(unsigned long long seconds, unsigned long long nowMs) {
+    if (!monitorProducerTimeRepresentable(seconds)) return (std::numeric_limits<unsigned long long>::max)();
+    const auto sourceMs = seconds * 1000ULL;
+    // Keep the existing clock-rollback contract; monotonic expiry still applies.
+    return nowMs > sourceMs ? nowMs - sourceMs : 0;
+}
 
 struct MonitorFreshnessState {
     unsigned long long lastPollTime = 0;   // 上次观察到的生产者时间
@@ -43,6 +57,10 @@ inline unsigned long long monitorFreshnessThresholdMs(unsigned long long periodM
 inline bool monitorFreshnessTick(MonitorFreshnessState& s, unsigned long long pollTime,
                                  unsigned long long periodMs, unsigned long long nowTick,
                                  unsigned long long producerAgeMs = 0) {
+    if (!monitorProducerTimeRepresentable(pollTime)) {
+        s.lastPollTime = pollTime; s.staleSinceTick = nowTick; s.stale = true;
+        return true;
+    }
     if (pollTime == 0) return s.stale;
     const unsigned long long threshold = monitorFreshnessThresholdMs(periodMs);
     if (producerAgeMs >= threshold) {
@@ -72,7 +90,7 @@ inline bool monitorFreshnessTick(MonitorFreshnessState& s, unsigned long long po
 // 可读 + 布局可读（sharedOk）+ 生产者时间存在（pollTime==0 不是健康）+ 未停更。
 inline bool monitorHwHealthyVerdict(bool readable, bool sharedOk, unsigned long long pollTime,
                                     bool fresh) {
-    return readable && sharedOk && pollTime != 0 && fresh;
+    return readable && sharedOk && pollTime != 0 && monitorProducerTimeRepresentable(pollTime) && fresh;
 }
 
 // 199：展示时间（top 载荷 ts）的**唯一入口**——输入必须是"完整有效性"的四个原始条件
@@ -91,7 +109,10 @@ inline long long monitorDisplayTimestampMs(bool readable, bool sharedOk, unsigne
 // 再加传感器存在与数值有效。不健康 ⇒ 不产出，控制端不会拿到不可靠的帧率。
 inline bool monitorFpsPayloadAllowed(bool readable, bool sharedOk, unsigned long long pollTime,
                                      bool fresh, bool fpsSensor, double fps) {
-    return monitorHwHealthyVerdict(readable, sharedOk, pollTime, fresh) && fpsSensor && fps > 0.0;
+    // An actual fresh zero is displayable. The sole publisher still requires a
+    // recognized game; absent/stale sensors are not fabricated as 0 FPS.
+    return monitorHwHealthyVerdict(readable, sharedOk, pollTime, fresh) && fpsSensor &&
+        std::isfinite(fps) && fps >= 0.0 && fps <= 1000000.0;
 }
 
 // header 前后一致性印记（无锁读取的局限如实标注：仅证明"未观察到变化"，非绝对原子）。
@@ -117,3 +138,5 @@ inline bool monitorHeaderStable(const MonitorHeaderStamp& a, const MonitorHeader
            a.readingOffset == b.readingOffset && a.readingSize == b.readingSize &&
            a.readingCount == b.readingCount;
 }
+// Source-value reuse is opt-in; freshness remains based on the producer stamp.
+#include "monitor_parse_reuse.h"

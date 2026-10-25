@@ -7,18 +7,60 @@ param(
   [ValidateSet(2, 3)][int]$Strength = 3,
   [switch]$WithSleep,
   [switch]$Quick,
-  [string]$OutDir = ''
+  [string]$OutDir = '',
+  [string]$IsolationRoot = '',
+  [string]$GyroAssetsRoot = '',
+  [string]$GyroObservationRoot = '',
+  [string]$GyroProvenancePath = ''
 )
 $ErrorActionPreference = 'Continue'
 try { [Console]::OutputEncoding = [Text.Encoding]::UTF8 } catch { }
 $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
+# Explicit isolation is opt-in; a fresh root prevents reusing settings, tokens or old observations.
+$savedEnvironment = @{}
+foreach($name in @('LOCALAPPDATA','APPDATA','TEMP','TMP','YEMAN_SIM_ISOLATION_ROOT','YEMANCC_SELFTEST_LOG_ROOT')){
+  $savedEnvironment[$name]=[Environment]::GetEnvironmentVariable($name,'Process')
+}
+try {
+if($IsolationRoot){
+  if(-not $OutDir -or -not $GyroAssetsRoot -or -not $GyroObservationRoot -or -not $GyroProvenancePath){throw 'ISOLATED_RUN_REQUIRES_EXPLICIT_OUTPUT_AND_GYRO_INPUTS'}
+  if(-not [IO.Path]::IsPathFullyQualified($IsolationRoot) -or -not [IO.Path]::IsPathFullyQualified($OutDir)){throw 'ISOLATED_RUN_REQUIRES_ABSOLUTE_PATHS'}
+  $IsolationRoot=[IO.Path]::GetFullPath($IsolationRoot).TrimEnd('\')
+  $OutDir=[IO.Path]::GetFullPath($OutDir).TrimEnd('\')
+  $driveRoot=[IO.Path]::GetPathRoot($IsolationRoot).TrimEnd('\')
+  $repoRoot=[IO.Path]::GetFullPath((Join-Path $simRoot '..\..')).TrimEnd('\')
+  if($IsolationRoot.Length -le $driveRoot.Length+1 -or $IsolationRoot.StartsWith('\\') -or
+    $IsolationRoot -ieq 'C:\SOFT\YeMan' -or $IsolationRoot.StartsWith('C:\SOFT\YeMan\',[StringComparison]::OrdinalIgnoreCase) -or
+    $IsolationRoot -ieq $repoRoot -or $IsolationRoot.StartsWith($repoRoot+'\',[StringComparison]::OrdinalIgnoreCase)){
+    throw 'ISOLATED_RUN_UNSAFE_ROOT'
+  }
+  if(-not $OutDir.StartsWith($IsolationRoot+'\',[StringComparison]::OrdinalIgnoreCase)){throw 'ISOLATED_OUTPUT_MUST_STAY_IN_FRESH_ROOT'}
+  $cursor=$IsolationRoot
+  while($cursor -and $cursor.Length -ge $driveRoot.Length){
+    if((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'ISOLATED_RUN_REPARSE_ROOT'}
+    if($cursor.TrimEnd('\') -ieq $driveRoot){break};$cursor=Split-Path -Parent $cursor
+  }
+  if(Test-Path -LiteralPath $IsolationRoot){throw 'ISOLATED_RUN_REQUIRES_FRESH_ROOT'}
+  [IO.Directory]::CreateDirectory($IsolationRoot)|Out-Null
+  $context=[ordered]@{schemaVersion=1;kind='ymcc-sim-isolated-run';root=$IsolationRoot;createdUtc=[DateTime]::UtcNow.ToString('o')}
+  [IO.File]::WriteAllText((Join-Path $IsolationRoot 'isolation-context.json'),($context|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
+  $env:YEMAN_SIM_ISOLATION_ROOT=$IsolationRoot
+  $env:LOCALAPPDATA=Join-Path $IsolationRoot 'LocalAppData'
+  $env:APPDATA=Join-Path $IsolationRoot 'AppData'
+  $env:TEMP=Join-Path $IsolationRoot 'Temp'
+  $env:TMP=$env:TEMP
+  $env:YEMANCC_SELFTEST_LOG_ROOT=Join-Path $IsolationRoot 'selftest-logs'
+  foreach($directory in @($env:LOCALAPPDATA,$env:APPDATA,$env:TEMP,$env:YEMANCC_SELFTEST_LOG_ROOT,(Join-Path $IsolationRoot 'settings'))){[IO.Directory]::CreateDirectory($directory)|Out-Null}
+  [IO.File]::WriteAllText((Join-Path $IsolationRoot 'settings\yeman-settings.json'),'{"schemaVersion":1,"simulationFixture":true}',[Text.UTF8Encoding]::new($false))
+}
 $D = Get-SimDefaults
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'run-all' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 
 $suites = New-Object System.Collections.ArrayList
+$suites.Add([ordered]@{ id = 'fan_connection'; file = (Join-Path $simRoot 'domains\fan\fan_domain.ps1'); args = @('-Mode','connect','-EvidenceDir',(Join-Path $OutDir ('fan-connection-'+[guid]::NewGuid().ToString('N')))); note = 'Real HC initialization and mock fan lifecycle; old broken DLL must fail' }) | Out-Null
 $suites.Add([ordered]@{ id = 'tool_gate';   file = (Join-Path $testsDir 'tool_gate.ps1');   args = @(); note = '工具门 16 项（SIM-1..4 负例 / 正常对照 / 同种子复跑）' }) | Out-Null
 $suites.Add([ordered]@{ id = 'invariants';  file = (Join-Path $testsDir 'invariants.ps1');  args = @(); note = '12 条机器可判定不变量' }) | Out-Null
 $suites.Add([ordered]@{ id = 'extremes';    file = (Join-Path $testsDir 'extremes.ps1');    args = @(); note = '极端场景 E1–E7（silent/drop/garbage/noop-success/无反馈）' }) | Out-Null
@@ -36,6 +78,8 @@ if ($WithSleep) {
   }
 }
 $expected = @($suites).Count
+$suiteEngine=Join-Path $PSHOME 'pwsh.exe'
+if(-not(Test-Path -LiteralPath $suiteEngine)){$suiteEngine=(Get-Command pwsh.exe -ErrorAction Stop).Source}
 
 $run = New-SimRun -Domain 'tests' -Mode 'run-all' -ModeKind 'offline-injection' -ToolPath $PSCommandPath -Seed 204 -Notes @{ strength = $Strength; withSleep = [bool]$WithSleep; quick = [bool]$Quick }
 Write-Host '=== ymcc_sim 总门 run-all（全部套件一次运行）===' -ForegroundColor White
@@ -44,9 +88,18 @@ Write-Host ("套件 {0} 个；strength={1} withSleep={2}" -f $expected, $Strengt
 foreach ($s in $suites) {
   Write-Host ("--- [{0}] {1}" -f $s.id, $s.note) -ForegroundColor White
   $childArgs = @($s.args)
+  if($s.id -ne 'fan_connection'){
+    $childOutput=Join-Path $OutDir $s.id
+    if($s.id.StartsWith('sleep-')){$childArgs+=@('-EvidenceDir',$childOutput)}else{$childArgs+=@('-OutDir',$childOutput)}
+  }
+  if($s.id -eq 'gyro_core' -and ($GyroAssetsRoot -or $GyroObservationRoot -or $GyroProvenancePath)){
+    $childArgs+=@('-AssetsRoot',$GyroAssetsRoot,'-ObservationRoot',$GyroObservationRoot,'-ProvenancePath',$GyroProvenancePath)
+  }
+  $s['args'] = $childArgs
   $sw = [Diagnostics.Stopwatch]::StartNew()
-  $out = & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File $s.file @childArgs 2>&1 | Out-String
+  $out = & $suiteEngine -NoLogo -NoProfile -NonInteractive -File $s.file @childArgs 2>&1 | Out-String
   $code = $LASTEXITCODE
+  [IO.File]::WriteAllText((Join-Path $OutDir ($s.id+'.console.log')),$out,[Text.UTF8Encoding]::new($false))
   $sw.Stop()
   $tail = (@($out -split "`r?`n") | Where-Object { "$_".Trim() -ne '' } | Select-Object -Last 3) -join ' | '
   $counts = ''
@@ -65,7 +118,12 @@ Add-SimCheck -Run $run -Form 'SELF' -Name 'no real sleep triggered (offline-inje
 
 $run.extra['suites'] = @($suites)
 $run.extra['strength'] = $Strength
+$run.extra['isolationRoot'] = $IsolationRoot
+$run.extra['gyroObservationScope'] = $(if($GyroProvenancePath){'source-derived-memory-observation-not-installed-or-physical'}else{'installed-readonly'})
 $failed = @($suites | Where-Object { $_.exitCode -ne 0 }).Count
 $agg = Save-SimEvidence -Run $run -EvidenceDir $OutDir -Prefix 'run-all'
 Write-Host ("run-all: suites={0} failed={1} -> {2}（总判来自单一判定源）" -f @($suites).Count, $failed, $run.verdict) -ForegroundColor $(if ($failed -gt 0) { 'Red' } else { 'Green' })
 exit $agg
+} finally {
+  foreach($name in $savedEnvironment.Keys){[Environment]::SetEnvironmentVariable($name,$savedEnvironment[$name],'Process')}
+}

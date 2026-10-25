@@ -1,0 +1,30 @@
+{
+  "kind": "read-only-DOM-diagnostic-of-exact-prior-served-program",
+  "originalBusinessNotReexecuted": true,
+  "sourceProgramSha256": "aabe8b1898234139ac8e6ff4455e615cd7a48e5bba9254b7cdf5f0af2d9398fa",
+  "oldSelectorCount": 0,
+  "exactSemanticSettingControlCount": 1,
+  "dom": {
+    "html": "<div data-v-dd346d2c=\"\" data-v-f546f8a4=\"\" data-v-8f0c939b-s=\"\" class=\"sleep-recovery-auto\"><div data-v-d22fbb1c=\"\" data-v-dd346d2c=\"\" class=\"toggle-row\"><div data-v-d22fbb1c=\"\" class=\"toggle-text\"><div data-v-d22fbb1c=\"\" class=\"toggle-label\">睡眠唤醒 Steam 自动修复</div><div data-v-d22fbb1c=\"\" class=\"toggle-desc muted\">唤醒后核对原游戏与 Steam 输入归属</div></div><button data-v-b7eafdd5=\"\" data-v-d22fbb1c=\"\" type=\"button\" class=\"ymcc-switch\" role=\"switch\" aria-checked=\"false\" aria-label=\"睡眠唤醒 Steam 自动修复\" style=\"--switch-color: var(--accent);\"><span data-v-b7eafdd5=\"\" class=\"ymcc-switch-track\" aria-hidden=\"true\"><span data-v-b7eafdd5=\"\" class=\"ymcc-switch-knob\"></span></span></button></div></div>",
+    "text": "睡眠唤醒 Steam 自动修复\n唤醒后核对原游戏与 Steam 输入归属",
+    "buttons": [
+      {
+        "tag": "BUTTON",
+        "className": "ymcc-switch",
+        "role": "switch",
+        "label": "睡眠唤醒 Steam 自动修复",
+        "checked": "false",
+        "disabled": false
+      }
+    ],
+    "calls": [
+      {
+        "cmd": "sleepRecovery.autoGet",
+        "args": {}
+      }
+    ]
+  },
+  "pageErrors": [],
+  "consoleMessages": [],
+  "productSourceChanges": 0
+}

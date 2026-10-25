@@ -1,0 +1,13 @@
+# Native workspace command consumer
+
+Original game-library.workspace-native-command-consumer, extended with a single nonempty VDF add and adjacent stale-plan refusal. Actual executeWorkspaceCommand, worker build/commit, BinaryVdfDocument parser/serializer, staged activation, backup/completion and readShortcuts execute only on owned files. Existing 31 host-artwork and eight command assertions are retained; two cases append.
+
+The manual explicit-selection path uses owned executable/state without identity/provider/artwork discovery. Two non-target shortcuts with nested unknown fields, wide text, uint64 values and deliberately unsorted indexes remain byte-identical and in order after removing the single newly appended item from the parsed document. The command refresh must reread the committed result.
+
+The stale port prepares a real plan, writes one owned external-edit field, then enters original commitPreparedSteamAddPlan. It must refuse without overwrite, localconfig change or a false success receipt. A single-source bypass of only that stale hash gate must compile and fail WS_STALE_PLAN_NOT_REJECTED. Original stale-token and old-array exact faults remain separate.
+
+Seven terminal adapters remain; --select-game is forwarded to original worker functions. Both translation units now include the existing original storage isolation header. No production Main, actual worker child, Steam/user library/GUI/provider/network/process enumeration/registry or machine-identity operations execute. Original clock and 240000/90000/30000/30000ms budgets and 3072 tool limit remain.
+
+Product input is an explicitly bound minimal D sourceview of current G source, not a fixed capture. Repo source hashes and owned output-evidence channels remain compatible with the unchanged public runner. Real physical acceptance, full worker discovery/CLI, actual provider assets, absent-file first import and OS activation/write-failure rollback are outside this extension.
+
+First import and real owned-file rollback extension: three cases append after the original ten. One begins with no shortcuts.vdf. Two hold an owned read handle without delete sharing, allowing the unchanged product MoveFileExW/retry/rollback code to encounter an actual replacement failure. Failure of localconfig activation follows VDF activation and must restore the original VDF; success/pending/staged receipts must stay consistent. A fourth independent semantic fault disables only the VDF rollback branch and must fail the exact restore assertion. Native30s/public240s/tool3072 limits and all prior faults remain. Installed Steam/user files and failed-rollback/manual recovery remain outside the result.

@@ -1,0 +1,186 @@
+{
+  "schema": 1,
+  "origin": "Independent expectations from the user-approved Legion families and sensor-selection contract; not generated from main.cpp.",
+  "models": [
+    {
+      "name": "HandheldCompanion.Devices.LegionGoTablet",
+      "rightAllowed": true,
+      "vendorId": 6127,
+      "productIds": [
+        24962,
+        24963,
+        24964,
+        24965,
+        25067,
+        25068,
+        25069,
+        25070
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoTablet2",
+      "rightAllowed": true,
+      "vendorId": 6127,
+      "productIds": [
+        24962,
+        24963,
+        24964,
+        24965,
+        25067,
+        25068,
+        25069,
+        25070
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoSZ1",
+      "rightAllowed": false,
+      "vendorId": 6790,
+      "productIds": [
+        58128,
+        58129
+      ]
+    },
+    {
+      "name": "HandheldCompanion.Devices.LegionGoSZ2",
+      "rightAllowed": false,
+      "vendorId": 6790,
+      "productIds": [
+        58128,
+        58129
+      ]
+    }
+  ],
+  "rejectedModels": [
+    "HandheldCompanion.Devices.SteamDeck",
+    "HandheldCompanion.Devices.LegionGoTablet-suffix",
+    "HandheldCompanion.Devices.LegionGoTablet2-suffix",
+    "HandheldCompanion.Devices.LegionGoSZ1-suffix",
+    "HandheldCompanion.Devices.LegionGoSZ2-suffix",
+    "HandheldCompanion.Devices.legiongotablet",
+    "HandheldCompanion.Devices.Unknown",
+    ""
+  ],
+  "wrongDevices": [
+    {
+      "vendorId": 4660,
+      "productId": 24962
+    },
+    {
+      "vendorId": 6127,
+      "productId": 58128
+    },
+    {
+      "vendorId": 6790,
+      "productId": 24962
+    },
+    {
+      "vendorId": 6790,
+      "productId": 0
+    },
+    {
+      "vendorId": 6127,
+      "productId": 0
+    }
+  ],
+  "invalidSettings": [
+    {
+      "name": "null",
+      "json": "null"
+    },
+    {
+      "name": "boolean-false",
+      "json": "false"
+    },
+    {
+      "name": "boolean-true",
+      "json": "true"
+    },
+    {
+      "name": "negative",
+      "json": "-1"
+    },
+    {
+      "name": "index-two",
+      "json": "2"
+    },
+    {
+      "name": "fraction",
+      "json": "1.5"
+    },
+    {
+      "name": "floating-one",
+      "json": "1.0"
+    },
+    {
+      "name": "string-one",
+      "json": "\"1\""
+    },
+    {
+      "name": "array",
+      "json": "[]"
+    },
+    {
+      "name": "object",
+      "json": "{}"
+    },
+    {
+      "name": "int64-overflow",
+      "json": "9223372036854775808"
+    },
+    {
+      "name": "uint64-max",
+      "json": "18446744073709551615"
+    },
+    {
+      "name": "large-float",
+      "json": "1e100"
+    }
+  ],
+  "rawHelperOracles": {
+    "origin": "Small independently pinned consumer-front-door packets; real protocol decoder is included read-only, never reproduced in the harness. Raw zero ReportID prefix is supplied once by the test transport boundary.",
+    "Tablet": {
+      "logicalHex": "a1000000000000000000000000000000000000000000000000000000000000000000000001fffe00030004fffb0006000007fff80009000afff5000c",
+      "minimumLogicalBytes": [
+        47,
+        60
+      ],
+      "expectedNumerators": [
+        [
+          -8000,
+          -12000,
+          10000,
+          -4,
+          -12,
+          8
+        ],
+        [
+          22000,
+          -24000,
+          20000,
+          32,
+          -36,
+          28
+        ]
+      ],
+      "denominator": 32767
+    },
+    "GoS": {
+      "logicalHex": "a1000000000000000000000000000100feff03000400fbff0600",
+      "minimumLogicalBytes": [
+        26
+      ],
+      "expectedNumerators": [
+        [
+          -8000,
+          -12000,
+          -10000,
+          -4,
+          -12,
+          8
+        ]
+      ],
+      "denominator": 32767
+    }
+  }
+}

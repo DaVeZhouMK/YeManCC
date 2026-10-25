@@ -1,0 +1,24 @@
+{
+  "id": "decky-loaded-old-module-dead-backend-20261022",
+  "scope": "installed local YMCC/Steam; explicit repair only",
+  "observedAt": "2026-10-22T08:12:56+08:00",
+  "ymccPid": 16648,
+  "steamPid": 19552,
+  "cefPid": 20344,
+  "loadedBuild": "5d1dee9214955a6b48be15ca93478de184e10e883493ad8d560112bc4b4a1f73",
+  "installedBuild": "c46f851ea6eefc2224cbc366b6a8805d65304e8460d74ed932bbac68b988a53d",
+  "priorReason": "decky-context-already-loaded",
+  "loaderProcessPresent": false,
+  "officialPortListening": false,
+  "repair": {
+    "explicitUserRequest": true,
+    "sharedJsContextReloads": 1,
+    "steamProcessRestarted": false,
+    "ymccProcessRestarted": false,
+    "restoredPeerAt": "2026-10-22T08:16:03.553+08:00",
+    "actualReadySnapshotAt": "2026-10-22T08:17:47.292+08:00"
+  },
+  "expected": "Do not bypass automatic loaded-context gate. Expose one explicit YMCC repair bound to current session and runtime revision; OFF/hash/port/version changes veto; uncertain reply never replays. Completion requires actual new peer/current build/ready snapshot.",
+  "evidence": "D:/Codex/2026-10-18/d/work/decky-live-disconnect-20261022/VERIFIED.json",
+  "containsSecrets": false
+}

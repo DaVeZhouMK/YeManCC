@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "esbuildVersion": "0.21.5",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "esbuildModule": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+  "esbuildPackageRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild",
+  "esbuildExecutable": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+  "files": [
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+      "sha256": "ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\package.json",
+      "sha256": "0f35e0d63bd60a43ed85879604a40f7e9688b321904cf28a95be5b1bc629559c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+      "sha256": "b868c8d988ffe76006c03c91f856312c312e42e2f3932a6bb56d7f4a1790c8b3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\package.json",
+      "sha256": "5fefc397d9fe3a69260545a7bfe570493b41498f3a949652e416a153dfdf695b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe",
+      "sha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+    }
+  ],
+  "powershellExecutable": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe"
+}

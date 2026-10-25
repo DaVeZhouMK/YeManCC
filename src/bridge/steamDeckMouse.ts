@@ -16,22 +16,28 @@ export interface SteamDeckMouseState {
 }
 export const STEAM_DECK_MOUSE_DEFAULT = 100;
 export function steamDeckMouseGet(): Promise<SteamDeckMouseState> {
-  return invoke<SteamDeckMouseState>('steam.settings.get',{scope:'mouse'});
+  return invoke<SteamDeckMouseState>('steam.settings.get',{scope:'mouse'},{timeoutMs:30000});
 }
 export function steamDeckMouseSet(percent: number): Promise<SteamDeckMouseState> {
   if (!Number.isInteger(percent) || percent < 1 || percent > 300) {
     return Promise.reject(new Error('灵敏度必须为 1%–300% 的整数'));
   }
-  return invoke<SteamDeckMouseState>('steam.settings.set',{mousePercent:percent});
+  return invoke<SteamDeckMouseState>('steam.settings.set',{mousePercent:percent},{timeoutMs:30000});
 }
 export function steamDeckMouseMessage(reason?: string): string {
   switch (reason) {
     case 'steam-not-found': return '未找到 Steam 安装目录。';
-    case 'steam-account-not-found': return '请先登录 Steam，再重新进入控制器页面。';
+    case 'steam-account-not-found': return '请先登录 Steam，再重新打开鼠标模式设置。';
     case 'desktop-autosave-not-selected': return '尚未确认 SteamDeck 桌面自定义布局。请在 Steam 桌面布局中调整并保存一次右摇杆灵敏度，然后刷新。';
     case 'desktop-autosave-ambiguous': return '多个 Steam 库中存在 SteamDeck 桌面布局，无法确认当前使用哪份；未覆盖任何配置。';
     case 'invalid-steam-libraries':
     case 'ambiguous-steam-libraries': return 'Steam 库路径信息未通过校验，未修改配置，请刷新后重试。';
+    case 'builtin-controller-unavailable': return '尚未找到可确认的掌机内置标准手柄；外接手柄保持原配置。';
+    case 'builtin-controller-ambiguous': return '掌机内置手柄身份不唯一，暂未套用布局。';
+    case 'steam-mouse-not-selected': return '请先选择 SteamDeck鼠标。';
+    case 'steam-not-running': return '请先启动并登录 Steam，再选择 SteamDeck鼠标。';
+    case 'live-controller-identity-changed': return '当前手柄连接暂未确认，本次切换未完成。';
+    case 'live-device-selection-unconfirmed': return '尚未确认只应用于此手柄，未继续调整灵敏度。';
     case 'steamdeck-not-enabled': return '请先开启 SteamDeck 虚拟手柄。';
     case 'live-read-unavailable':
     case 'steam-account-changed':
@@ -46,7 +52,7 @@ export function steamDeckMouseMessage(reason?: string): string {
     case 'live-debug-owner-mismatch': return '实时接口的监听进程或地址未通过校验，未修改 Steam。';
     case 'live-api-unavailable':
     case 'live-context-unavailable': return '当前 Steam 版本未提供可用的实时接口。';
-    case 'live-controller-not-connected': return 'Steam 尚未识别到 SteamDeck 手柄。';
+    case 'live-controller-not-connected': return 'Steam 尚未识别到当前手柄。';
     case 'live-editor-busy':
     case 'live-busy': return 'Steam 布局编辑器正在使用或有未保存修改，请先保存或退出编辑器。';
     case 'live-editor-changed': return '操作期间 Steam 编辑器发生其他修改，未代为保存；请在 Steam 中确认布局。';

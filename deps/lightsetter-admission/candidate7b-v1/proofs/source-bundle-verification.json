@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS",
+  "bundleManifestSha256": "c06064b4d8f2916e895e8efaee4957cfcee0fd46be468a094981a810e86a18b2",
+  "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "pdbSha256": "dcde27bdd7408c4357536f32bab4c57e06ebfacf9eab59dc7766c9e9b69bf815",
+  "pairVerified": true,
+  "members": 45,
+  "sourceDocuments": 15,
+  "manualCompileSources": 12,
+  "generatedDocuments": 3,
+  "compilerRecords": 2,
+  "originalAbsoluteSourceFilesRequired": false,
+  "runtimeAssemblyLoaded": false,
+  "hardwareIo": false
+}

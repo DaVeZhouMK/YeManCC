@@ -1,0 +1,64 @@
+{
+  "id": "decky-community-maintenance-20261023",
+  "reviewedAt": "2026-10-23",
+  "origin": "Official SteamDeckHomebrew/decky-loader GitHub issue bodies, read-only snapshots; not instructions or reproduction proof",
+  "windowsFieldReproduced": false,
+  "records": [
+    {
+      "issue": 966,
+      "title": "3.2.8 steamwebhelper restart loop and orphaned backend",
+      "url": "https://github.com/SteamDeckHomebrew/decky-loader/issues/966",
+      "platform": "SteamOS/Linux",
+      "transfer": "Do not automatically relaunch into an existing document or reset crash budgets; never kill a foreign occupied backend",
+      "consumers": [
+        "tools/decky_package_maintenance_selftest.ps1",
+        "tools/decky_sidebar_crash_breaker_selftest.cpp",
+        "tools/decky_no_repeat_context_selftest.mjs"
+      ]
+    },
+    {
+      "issue": 982,
+      "title": "File watcher re-enabled during installed-plugin update",
+      "url": "https://github.com/SteamDeckHomebrew/decky-loader/issues/982",
+      "platform": "SteamOS/prerelease",
+      "transfer": "YMCC whole-package mutation requires backend port lease and complete paired file validation; no live file merge",
+      "consumers": [
+        "tools/decky_package_maintenance_selftest.ps1"
+      ]
+    },
+    {
+      "issue": 838,
+      "title": "Steam update: Decky global rendering failure after boot",
+      "url": "https://github.com/SteamDeckHomebrew/decky-loader/issues/838",
+      "platform": "SteamOS",
+      "transfer": "Exact official global error boundary/fault identity closes safely; per-plugin/network failures must not disable all Decky",
+      "consumers": [
+        "tools/decky_sidebar_health_dom_selftest.mjs",
+        "tools/decky_sidebar_health_close_selftest.cpp"
+      ]
+    },
+    {
+      "issue": 988,
+      "title": "October Steam update: Decky initially works then errors",
+      "url": "https://github.com/SteamDeckHomebrew/decky-loader/issues/988",
+      "platform": "SteamOS/v3.2.10",
+      "transfer": "A momentary connected/started state is not persistent-health acceptance; use actual current-generation readiness and retain field uncertainty",
+      "consumers": [
+        "tools/ymcc_sim/global/decky-persistent-lifecycle/run.mjs",
+        "tools/decky_retained_session_repair_selftest.mjs"
+      ]
+    },
+    {
+      "issue": 983,
+      "title": "Plugin socket EOF can spin and exhaust resources",
+      "url": "https://github.com/SteamDeckHomebrew/decky-loader/issues/983",
+      "platform": "SteamOS/upstream Python plugin runtime",
+      "transfer": "Isolate potentially stuck resource work in the existing same-image owned Job, prove hard cancellation, reject invalid/EOF replies and retain crash limits. This does not claim to patch upstream Python plugins.",
+      "consumers": [
+        "tools/decky_resource_worker_selftest.mjs",
+        "tools/decky_resource_cache_selftest.mjs"
+      ]
+    }
+  ],
+  "policy": "Consume upstream public bytes. Fix YMCC ownership, validation, bounded recovery and update transaction; do not claim upstream third-party plugin bugs are repaired or use Linux reports as proof of Windows diagnosis"
+}

@@ -213,6 +213,13 @@ if (-not [string]::IsNullOrWhiteSpace($ExpectedOldHostDllSha256) -and
   throw "rebaseline preimage mismatch (host dll): expected $ExpectedOldHostDllSha256, actual $($pre.hostDllSha256)"
 }
 
+# The legacy entry cannot update a source-bound component archive. Refuse
+# before building or writing any payload; the supported preparation entry binds
+# actual PE/PDB documents, archived sources and all verifier consumers together.
+if ($pre.verifyText.Contains('$componentSourceBundleRelative') -and $pre.verifyText.Contains('$compiledSourcePins')) {
+  throw 'FAN_HOST_SOURCE_ARCHIVE_WORKFLOW_REQUIRED: use tools/prepare-fan-host-candidate.ps1 with the actual isolated build, then qualify and promote the source-bound component.'
+}
+
 # ---------------------------------------------------------------- step 2: HC identity source pins + build
 # The HC identity is carried by more than the payload manifest: the Host and
 # LightSetter sources pin ExpectedHcSha256, and the Host pin is COMPILED INTO
@@ -230,10 +237,18 @@ $realHostComment = Set-Pin $realHostText2 'HandheldCompanion\.dll[\s\S]{0,4}?([0
 $realHostText2 = $realHostComment.Text
 $newRealHostBytes = Get-TextBytes $realHostText2 $pre.realHostHasBom
 
-$lightSetterPin = Set-Pin $pre.lightSetterText 'ExpectedHcSha256\s*=\s*"([0-9a-f]{64})"' $newHc 1 'lightSetter.ExpectedHcSha256'
+$selectedRuntime = Get-Content -LiteralPath $hcRuntimeManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+$setterPinName = if ([string]$selectedRuntime.runtimeId -like 'YMCC-DEVICECORE-*') { 'ExpectedYmccHcCoreSha256' } else { 'ExpectedHcSha256' }
+$setterPinPattern = [regex]::Escape($setterPinName) + '\s*=\s*"([0-9a-f]{64})"'
+$lightSetterPin = Set-Pin $pre.lightSetterText $setterPinPattern $newHc 1 ('lightSetter.' + $setterPinName)
 $lightSetterText2 = $lightSetterPin.Text
-$lightSetterComment = Set-Pin $lightSetterText2 '(?m)^[ \t]*//[^\r\n]*\u83B7\u51C6\u5019\u9009[ \t]+([0-9A-Fa-f]{8})\u2026' $hcShort 1 'lightSetter.hcComment'
-$lightSetterText2 = $lightSetterComment.Text
+if ($setterPinName -eq 'ExpectedHcSha256') {
+  $lightSetterComment = Set-Pin $lightSetterText2 '(?m)^[ \t]*//[^\r\n]*\u83B7\u51C6\u5019\u9009[ \t]+([0-9A-Fa-f]{8})\u2026' $hcShort 1 'lightSetter.hcComment'
+  $lightSetterText2 = $lightSetterComment.Text
+} else {
+  # Preserve the explicit legacy adapter pin/comment when rebasing the new core profile.
+  $lightSetterComment = $lightSetterPin
+}
 $newLightSetterBytes = Get-TextBytes $lightSetterText2 $pre.lightSetterHasBom
 
 $sourceTargets = @(
@@ -396,7 +411,7 @@ $sym += [pscustomobject]@{ Sym = 'verify approvedHcSha256 marker'; File = 'tools
 $sym += [pscustomobject]@{ Sym = 'verify HC comment'; File = 'tools\verify-r5v9-fan-host-payload.ps1'; Line = $verifyHcComment.Lines[0]; Old = $verifyHcComment.Olds[0]; New = $hcShort; Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'realHost ExpectedHcSha256'; File = 'FanLab\real-host\Program.cs'; Line = $realHostPin.Lines[0]; Old = $realHostPin.Olds[0]; New = $newHc; Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'realHost HC comment'; File = 'FanLab\real-host\Program.cs'; Line = $realHostComment.Lines[0]; Old = $realHostComment.Olds[0]; New = $hcShort; Hits = 1 }
-$sym += [pscustomobject]@{ Sym = 'lightSetter ExpectedHcSha256'; File = 'FanLab\LightSetter\Program.cs'; Line = $lightSetterPin.Lines[0]; Old = $lightSetterPin.Olds[0]; New = $newHc; Hits = 1 }
+$sym += [pscustomobject]@{ Sym = ('lightSetter ' + $setterPinName); File = 'FanLab\LightSetter\Program.cs'; Line = $lightSetterPin.Lines[0]; Old = $lightSetterPin.Olds[0]; New = $newHc; Hits = 1 }
 $sym += [pscustomobject]@{ Sym = 'lightSetter HC comment'; File = 'FanLab\LightSetter\Program.cs'; Line = $lightSetterComment.Lines[0]; Old = $lightSetterComment.Olds[0]; New = $hcShort; Hits = 1 }
 $sym | ForEach-Object { Write-Output ("  {0}|{1}:{2}| {3} -> {4} | hits={5}" -f $_.Sym, $_.File, $_.Line, $_.Old, $_.New, $_.Hits) }
 Write-Output ''

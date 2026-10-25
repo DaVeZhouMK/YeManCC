@@ -282,23 +282,70 @@ export function scrollElementIntoSafeArea(el: HTMLElement): void {
   }
 }
 
+// Vue may rewrite a dynamic class after focus/selection, removing the visual
+// .focused marker. Keep the actual controller target independently of CSS.
+let rememberedGamepadFocus: HTMLElement | null = null;
 export function setGamepadFocused(el: HTMLElement | null): void {
+  rememberedGamepadFocus = el;
   document.querySelectorAll('.focused').forEach((node) => node.classList.remove('focused'));
   if (el) el.classList.add('focused');
 }
 
 /** Programmatic focus entry point for controller navigation and modal restore. */
-export function focusGamepadElement(el: HTMLElement | null): boolean {
+export function focusGamepadElement(el: HTMLElement | null, options: { scroll?: 'safe' | 'preserve' } = {}): boolean {
   if (!el || !el.isConnected || el.hasAttribute('disabled')) return false;
   // data-gp-ignore is an explicit product decision: the control may remain
   // clickable by mouse/touch, but controller focus must never land on it.
   if (el.matches('[data-gp-ignore]') || el.closest('[data-gp-ignore]')) return false;
   if (el.getAttribute('aria-hidden') === 'true' || el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+  const closedDetails = el.closest('details:not([open])');
+  if (closedDetails && !(el.tagName === 'SUMMARY' && el.parentElement === closedDetails)) return false;
   const style = getComputedStyle(el);
   if (style.display === 'none' || style.visibility === 'hidden') return false;
   el.focus({ preventScroll: true });
-  getGamepadViewportSafeArea();
-  scrollElementIntoSafeArea(el);
+  if (options.scroll !== 'preserve') {
+    getGamepadViewportSafeArea();
+    scrollElementIntoSafeArea(el);
+  }
   setGamepadFocused(el);
   return document.activeElement === el;
+}
+
+/** Recover from a temporarily disabled/replaced control in the current view.
+ * Route entry has its own initial-focus policy. Recovery must not send a
+ * scrolled page back to that initial control or select the fixed monitor.
+ * The engine supplies the current modal's admitted candidates.
+ */
+export function recoverGamepadFocus(elements: readonly HTMLElement[]): boolean {
+  if (!elements.length) return false;
+  const modals = [...document.querySelectorAll<HTMLElement>('[data-gp-modal]')].filter(el => el.getBoundingClientRect().height > 0);
+  const modal = modals[modals.length - 1];
+  const pageElements = elements.filter(el => el.closest('.app-content'));
+  const pool = !modal && pageElements.length ? pageElements : elements;
+  const visible = (el: HTMLElement) => {
+    const r = el.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0 || r.top < 2 || r.bottom > window.innerHeight - 2) return false;
+    return findScrollableAncestors(el).every(container => {
+      const viewport = getVisibleScrollRect(container);
+      return r.top >= viewport.top + 2 && r.bottom <= viewport.bottom - 2;
+    });
+  };
+  // Async commits disable the selected button for one or more render turns.
+  // Chromium then moves DOM focus to body. Wait instead of jumping to a
+  // different control while the original selected row is still on screen.
+  const pending = rememberedGamepadFocus?.isConnected && rememberedGamepadFocus.matches(':disabled, [aria-disabled="true"]') ? rememberedGamepadFocus : null;
+  if (pending && (modal ? modal.contains(pending) : !!pending.closest('.app-content')) && visible(pending)) return false;
+  const candidates = pool.filter(visible);
+  const retained = rememberedGamepadFocus && candidates.includes(rememberedGamepadFocus) ? rememberedGamepadFocus : candidates.find(el => el.classList.contains('focused'));
+  const initial = candidates.find(el => el.dataset.gpInitialFocus === 'true');
+  const target = retained || initial || candidates[0];
+  if (target) return focusGamepadElement(target, { scroll: 'preserve' });
+  // A wholly clipped/empty view still needs a reachable entry. Reveal only
+  // the closest admitted control, never bypass hidden/disabled checks.
+  const center = window.innerHeight / 2;
+  const nearest = [...pool].sort((a, b) => {
+    const ar = a.getBoundingClientRect(), br = b.getBoundingClientRect();
+    return Math.abs(ar.top + ar.height / 2 - center) - Math.abs(br.top + br.height / 2 - center);
+  })[0];
+  return focusGamepadElement(nearest);
 }

@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors><NuGetAudit>false</NuGetAudit>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="Program.cs" />
+    <Compile Include="../../InputHost/MsiCostWindowDiagnostics.cs" Link="MsiCostWindowDiagnostics.cs" />
+    <Compile Include="../../InputHost/HostCpuCostWindow.cs" Link="HostCpuCostWindow.cs" />
+    <Compile Include="../../InputHost/MsiCostWindowDispatcher.cs" Link="MsiCostWindowDispatcher.cs" />
+  </ItemGroup>
+</Project>

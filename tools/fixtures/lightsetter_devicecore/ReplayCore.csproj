@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <AssemblyName>YeManLightDeviceCore</AssemblyName>
+  </PropertyGroup>
+  <ItemGroup>
+    <!-- Production functions/API/orchestration; only the HID terminal differs. -->
+    <Compile Include="../../../FanLab/LightSetter/DeviceCore/LightingDeviceCore.cs" Link="LightingDeviceCore.cs" />
+    <Compile Include="../../../FanLab/LightSetter/DeviceCore/PinnedOneXHidV1.g.cs" Link="PinnedOneXHidV1.g.cs" />
+    <Compile Include="ReplayHidTransport.cs" />
+  </ItemGroup>
+</Project>

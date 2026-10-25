@@ -3,14 +3,20 @@
 // 直驱 HC 程序集（HandheldCompanion.dll）执行灯光设置，覆盖 HC 支持的全部
 // 机型——各机型的 EC/HID/USB 协议由 HC 内部处理（SetLedColor 等实现）。
 // 灯光是低频操作（用户改一次），故无需常驻宿主/租约/HTTP/恢复链；本进程
-// 按需启动、调用完成后退出（不 Close 设备——灯光状态为硬件侧持久）。
+// 按需启动、调用完成后退出。legacy 不调用 HC Close；独立 HID 核心释放自己的句柄。
 //
 // 用法：
 //   YeManLightSetter.exe --hc-assembly <HandheldCompanion.dll>
 //     --action color --level solid|breathing|rainbow|wave|wheel|gradient|ambilight|preset
 //     [--r 255 --g 0 --b 0] [--r2 .. --g2 .. --b2 ..] [--speed 0-100]
+//   YeManLightSetter.exe --hc-assembly <..> --action preset --preset-id <HC NameKey>
 //   YeManLightSetter.exe --hc-assembly <..> --action brightness --brightness 0-100
 //   YeManLightSetter.exe --hc-assembly <..> --action status --status on|off
+// 独立 HID 核心：--device-core-assembly <YeManLightDeviceCore.dll>
+//   --expected-device-class <精确机型类> [--device-core-sha256 <内置 pin 的一致性检查>]
+//   X1Mini color solid/rainbow、brightness 在 HC 初始化前分派。
+//   未覆盖能力可显式携带 --hc-assembly 走旧适配；传输失败绝不隐式重试。
+// HC profile：--hc-profile legacy|ymcc-device-core-v1（新 profile 等待主控 pin）
 // 可选：--hc-runtime-root <HC 运行时目录>（默认取 dll 所在目录）
 //       --timeout-ms <IsReady 等待上限，默认 15000>
 //
@@ -22,6 +28,7 @@
 //   - 依赖解析 ResolveDependency / 运行时配置 ConfigureHcRuntime
 //   - 设备激活 WaitForHcDeviceReadyBeforeOpen（IsReady 轮询）+ OpenHcDevice
 //   - LEDLevel 位值（HandheldCompanion.Utils.DeviceUtils.cs:20-31, [Flags]）
+using YeManFanBackend.Capabilities;
 using System.IO;
 using System.Linq;
 using System.Reflection;
@@ -36,6 +43,19 @@ internal static class Program
     // native 硬编码的 PowerControl\handheldcompanion-runtime\HC-CANDIDATE-… 目录将携带该 DLL）。
     private const string ExpectedHcSha256 =
         "0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49";
+
+    // Awaiting main-controller derivative identity/pin. Empty means disabled;
+    // neither a caller hash nor a runtime manifest may enable this profile.
+    private const string ExpectedYmccHcCoreSha256 = "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583";
+    private const string ExpectedYmccHcCoreAssemblyName = "HandheldCompanion";
+
+    private static string HcPinForProfile(string profile) => profile switch
+    {
+        "legacy" => ExpectedHcSha256,
+        "ymcc-device-core-v1" when ExpectedYmccHcCoreSha256.Length == 64 && ExpectedYmccHcCoreAssemblyName.Length > 0 => ExpectedYmccHcCoreSha256,
+        "ymcc-device-core-v1" => throw new InvalidOperationException("YMCC HC device-core profile has no approved pin yet"),
+        _ => throw new ArgumentException($"unknown HC runtime profile {profile}"),
+    };
 
     // LEDLevel（[Flags]）：None=0, SolidColor=1, Breathing=2, Rainbow=4,
     // Wave=8, Wheel=16, Gradient=32, Ambilight=64, LEDPreset=128。
@@ -61,16 +81,18 @@ internal static class Program
     [STAThread]
     private static int Main(string[] args)
     {
+        YeManCC.ProcessEfficiency.ApplyCurrentProcessOnce();
         try
         {
             var result = Run(args);
-            Console.WriteLine(JsonSerializer.Serialize(new { ok = true, result }));
             // 退出码必须反映设备侧真实结果：Run 把 HC 各方法返回 false 收敛为
             // note != "ok"（setLedColor-false / setLedBrightness-false /
             // off-partial 等）而不抛异常。原实现恒返回 0，上层
             // ymccLightSetterApply 以 exitCode==0 判成功时会对失败误报 ok。
             var note = result.TryGetValue("note", out var value) ? value as string : null;
-            return ExitCodeForNote(note);
+            var exitCode = ExitCodeForNote(note);
+            Console.WriteLine(JsonSerializer.Serialize(new { ok = exitCode == 0, result }));
+            return exitCode;
         }
         catch (Exception ex)
         {
@@ -78,6 +100,7 @@ internal static class Program
             {
                 ok = false,
                 error = ex.GetBaseException().Message,
+                dependencyFailures = YeMan.SharedRuntime.RuntimeDependencyContract.DescribeFailure(ex, "lighting.execute"),
             }));
             return 1;
         }
@@ -85,7 +108,9 @@ internal static class Program
 
     private static Dictionary<string, object?> Run(string[] args)
     {
-        string? hcPath = null, runtimeRootOpt = null, action = null, level = null, statusArg = null;
+        string? hcPath = null, runtimeRootOpt = null, action = null, level = null, statusArg = null, presetId = null, expectedDeviceClass = null;
+        string? corePath = null, coreCallerHash = null;
+        var hcProfile = "legacy";
         int? r = null, g = null, b = null, r2 = null, g2 = null, b2 = null;
         int? brightness = null, speed = null;
         var timeoutMs = 15_000;
@@ -101,9 +126,14 @@ internal static class Program
             switch (current)
             {
                 case "--hc-assembly": hcPath = Next(); break;
+                case "--hc-profile": hcProfile = Next(); break;
+                case "--device-core-assembly": corePath = Next(); break;
+                case "--device-core-sha256": coreCallerHash = Next(); break;
                 case "--hc-runtime-root": runtimeRootOpt = Next(); break;
                 case "--action": action = Next(); break;
                 case "--level": level = Next(); break;
+                case "--preset-id": presetId = Next(); break;
+                case "--expected-device-class": expectedDeviceClass = Next(); break;
                 case "--r": r = int.Parse(Next()); break;
                 case "--g": g = int.Parse(Next()); break;
                 case "--b": b = int.Parse(Next()); break;
@@ -118,20 +148,39 @@ internal static class Program
             }
         }
 
-        if (string.IsNullOrWhiteSpace(hcPath)) throw new ArgumentException("--hc-assembly is required");
-        if (string.IsNullOrWhiteSpace(action)) throw new ArgumentException("--action is required");
+        ValidateRequest(action, level, statusArg, presetId);
+        if (timeoutMs <= 0) throw new ArgumentOutOfRangeException(nameof(timeoutMs));
+        if (corePath is not null)
+        {
+            var coreResult = DeviceCoreConsumer.TryExecute(corePath, coreCallerHash,
+                expectedDeviceClass, action!, level, new
+                {
+                    Action = action, Level = level, R = r, G = g, B = b,
+                    R2 = r2, G2 = g2, B2 = b2, Brightness = brightness, Speed = speed, PresetId = presetId,
+                });
+            if (coreResult is not null) return coreResult;
+            if (string.IsNullOrWhiteSpace(hcPath))
+                throw new NotSupportedException("device-core capability unavailable; explicit --hc-assembly legacy adapter required");
+        }
+        else if (coreCallerHash is not null)
+            throw new ArgumentException("--device-core-sha256 requires --device-core-assembly");
+        if (string.IsNullOrWhiteSpace(hcPath)) throw new ArgumentException("--hc-assembly or --device-core-assembly is required");
+        var expectedHcHash = HcPinForProfile(hcProfile);
 
         // ---- HC 加载（FanHost LoadAssemblyAndFactory 同构）----
         var fullPath = Path.GetFullPath(hcPath);
         if (!File.Exists(fullPath))
             throw new FileNotFoundException("HandheldCompanion.dll not found", fullPath);
         var actualHash = Sha256(fullPath);
-        if (!actualHash.Equals(ExpectedHcSha256, StringComparison.OrdinalIgnoreCase))
+        if (!actualHash.Equals(expectedHcHash, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException($"HC assembly SHA-256 mismatch: {actualHash}");
         var assemblyDirectory = Path.GetDirectoryName(fullPath)!;
         runtimeRoot = Path.GetFullPath(runtimeRootOpt ?? assemblyDirectory);
         AssemblyLoadContext.Default.Resolving += ResolveDependency;
-        assembly = AssemblyLoadContext.Default.LoadFromAssemblyPath(fullPath);
+        assembly = YeMan.SharedRuntime.RuntimeDependencyContract.LoadPinned(
+            AssemblyLoadContext.Default, new AssemblyName(ExpectedYmccHcCoreAssemblyName), fullPath, expectedHcHash);
+        if (hcProfile != "legacy" && assembly.GetName().Name != ExpectedYmccHcCoreAssemblyName)
+            throw new InvalidOperationException("unexpected YMCC HC device-core assembly identity");
         ConfigureHcRuntime();
 
         // ---- 设备获取 + 激活（FanHost OpenHcDevice/WaitForHcDeviceReadyBeforeOpen 同构）----
@@ -140,27 +189,92 @@ internal static class Program
             .GetMethod("GetCurrent", BindingFlags.Public | BindingFlags.Static)?
             .Invoke(null, null)
             ?? throw new InvalidOperationException("HC IDevice.GetCurrent returned null");
+        var capability = RequireCatalogLightingOperation(device.GetType(), expectedDeviceClass, action!, level, brightness is not null, presetId);
+        ValidateAyaneoCeRequest(device.GetType(), action!, level, brightness, r, g, b);
         Invoke(device, "Initialize", false, false);
         var ready = WaitReady(device, timeoutMs);
-        if (Invoke(device, "Open") is not bool opened || !opened)
+        using var oneXLighting = OneXLightingSession.Prepare(device);
+        if (!OpenLightingDevice(device))
             throw new InvalidOperationException("HC device Open returned false");
 
         // ---- 灯光调用（IDevice.cs:1036-1041）----
         // action 本体已提为私有纯调用函数 ExecuteLedAction，使离线 fake harness
         // 能直接执行真实业务代码（而非复刻一份）。Run 只负责加载/激活与结果封装。
-        var note = ExecuteLedAction(device, deviceType, action, level, statusArg,
-            r, g, b, r2, g2, b2, brightness, speed);
+        var deviceRuntimeType = device.GetType();
+        var transaction = OneXQueuedLighting.Execute(device, () => ExecuteResolvedCatalogLedAction(device, deviceRuntimeType,
+            capability, statusArg, r, g, b, r2, g2, b2, brightness, speed, presetId), preset: action == "preset");
+        var note = transaction.Note;
 
         return new Dictionary<string, object?>
         {
             ["deviceClass"] = device.GetType().FullName,
+            ["capabilityId"] = capability.Device.DeviceId,
+            ["capabilityOperation"] = capability.OperationId,
+            ["capabilityCatalogSha256"] = HcLightingCapabilityCatalog.CatalogSha256,
             ["hcSha256"] = actualHash,
+            ["sharedDependencyBindings"] = YeMan.SharedRuntime.DeviceCoreSharedDependencies.Snapshot(),
+            ["backend"] = hcProfile == "legacy" ? "legacy-hc" : "ymcc-hc-device-core",
+            ["hcProfile"] = hcProfile,
             ["ready"] = ready,
             ["opened"] = true,
             ["action"] = action,
             ["note"] = note,
+            ["presetId"] = presetId,
+            ["queuedWriteManaged"] = transaction.Managed,
+            ["queuedWritesCompleted"] = transaction.Completed,
+            ["queuedWriteTasks"] = transaction.WriteTasks,
+            ["queuedWriteFailures"] = transaction.FailedTasks,
+            ["physicalEffectVerified"] = false,
         };
     }
+
+    // Resolve once before initialization. The immutable admitted operation flows directly to
+    // the actual action; runtime overrides are checked before any device IO.
+    private static LightingCapabilityOperation RequireCatalogLightingOperation(Type actualType, string? expectedClass,
+        string action, string? level, bool includesBrightness, string? presetId)
+    {
+        var operation = HcLightingCapabilityCatalog.Require(actualType.FullName, expectedClass, action, level, includesBrightness, presetId);
+        ValidateOperationImplementation(actualType, action, includesBrightness);
+        if (action == "off" && (HasRealLightingMethod(actualType, "SetLedBrightness") != operation.Capabilities.Brightness ||
+            HasRealLightingMethod(actualType, "SetLedStatus") != (operation.Capabilities.StatusAvailable || operation.Capabilities.StatusTransportDisabled)))
+            throw new NotSupportedException("LIGHTING_OFF_RUNTIME_CONTRACT_MISMATCH");
+        return operation;
+    }
+
+    private static string ExecuteCatalogLedAction(object device, Type actualType, string? expectedClass,
+        string action, string? level, string? statusArg, int? r, int? g, int? b, int? r2, int? g2, int? b2,
+        int? brightness, int? speed, string? presetId)
+    {
+        var operation = RequireCatalogLightingOperation(actualType, expectedClass, action, level, brightness is not null, presetId);
+        return ExecuteResolvedCatalogLedAction(device, actualType, operation, statusArg, r, g, b, r2, g2, b2, brightness, speed, presetId);
+    }
+
+    private static string ExecuteResolvedCatalogLedAction(object device, Type actualType, LightingCapabilityOperation operation,
+        string? statusArg, int? r, int? g, int? b, int? r2, int? g2, int? b2, int? brightness, int? speed, string? presetId)
+    {
+        var action = operation.Action;
+        if (action == "off")
+        {
+            OneXQueuedLighting.PrepareRequestCache(device, action, brightness, statusArg);
+            return ExecuteLightingOff(device, actualType, operation.Capabilities.StatusAvailable, operation.Capabilities.Brightness);
+        }
+        return action == "preset" ? ExecuteLedPreset(device, actualType, presetId, brightness)
+            : ExecuteLedAction(device, actualType, action, operation.Level, statusArg, r, g, b, r2, g2, b2, brightness, speed);
+    }
+
+    private static string ExecuteLightingOff(object device, Type type, bool statusWriter, bool brightnessWriter)
+    {
+        var contract = ResolveSetLedColorContract(type);
+        var statusOk = !statusWriter || type.GetMethod("SetLedStatus")!.Invoke(device, [false]) is true;
+        var brightnessOk = !brightnessWriter || type.GetMethod("SetLedBrightness")!.Invoke(device, [0]) is true;
+        var black = CreateLedColor(contract.ColorType, 0, 0, 0);
+        var colorOk = contract.SetColor.Invoke(device, [black, black, Enum.ToObject(contract.LedLevelType, LedLevels["solid"]), 0]) is true;
+        return statusOk && brightnessOk && colorOk ? "ok" : "off-partial";
+    }
+
+    private static bool HasRealLightingMethod(Type actualType, string method) =>
+        actualType.GetMethod(method, BindingFlags.Public | BindingFlags.Instance) is { } candidate &&
+        candidate.DeclaringType?.FullName != "HandheldCompanion.Devices.IDevice";
 
     // 灯光 action 真实业务体（从 Run 的 switch 原样提取，逐行不变）。传入已
     // 准备的 device/deviceType 与现有 action/数值参数，返回现有 note；由 Run 在
@@ -172,12 +286,18 @@ internal static class Program
         int? r, int? g, int? b, int? r2, int? g2, int? b2,
         int? brightness, int? speed)
     {
+        ValidateRequest(action, level, statusArg, null);
+        ValidateOperationImplementation(deviceType, action!, brightness is not null);
+        var ayaneoCe = ValidateAyaneoCeRequest(deviceType, action!, level, brightness, r, g, b);
+        OneXQueuedLighting.PrepareRequestCache(device, action!, brightness, statusArg);
         var note = "ok";
         switch (action)
         {
             case "color":
             {
                 var levelName = string.IsNullOrWhiteSpace(level) ? "solid" : level;
+                if (string.Equals(levelName, "preset", StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("preset requires --action preset and --preset-id");
                 if (!LedLevels.TryGetValue(levelName, out var levelValue))
                     throw new ArgumentException($"unknown level {levelName}");
                 // 签名驱动：level enum 与颜色类型都取自实际 SetLedColor 参数，
@@ -189,22 +309,35 @@ internal static class Program
                 var secondary = CreateLedColor(
                     contract.ColorType,
                     Clamp(r2 ?? r ?? 255), Clamp(g2 ?? g ?? 0), Clamp(b2 ?? b ?? 0));
+                // CEc/CEii apply brightness by scaling the RGB bytes. Their fresh
+                // color setter returns true without retaining either color until
+                // brightness is initialized, so prepare it before the first color.
+                if (ayaneoCe && deviceType.GetMethod("SetLedBrightness")!.Invoke(device, [Clamp(brightness!.Value)]) is not true)
+                    return "setLedBrightness-false";
                 note = contract.SetColor.Invoke(device, [main, secondary, enumValue, speed ?? 100]) is bool ok && ok
                     ? "ok"
                     : "setLedColor-false";
                 // 亮度随 color 一并设置（HC DevicePage 的亮度滑杆与效果同属一次
                 // UpdateLED；0..100 映射由 HC 内部处理）。仅显式传入时写。
-                if (brightness is not null)
+                if (brightness is not null && !ayaneoCe)
                 {
                     var setBrightness = deviceType.GetMethod("SetLedBrightness")
                         ?? throw new MissingMethodException(deviceType.FullName, "SetLedBrightness");
                     if (setBrightness.Invoke(device, [Clamp(brightness.Value)]) is not bool bOk || !bOk)
                         note = note == "ok" ? "setLedBrightness-false" : note;
                 }
+                if (ayaneoCe && note == "ok" &&
+                    deviceType.GetMethod("SetLedStatus")!.Invoke(device, [brightness!.Value > 0]) is not true)
+                    note = "setLedStatus-false";
                 break;
             }
             case "brightness":
             {
+                // A fresh CEc helper has no current colors to rescale. Only the
+                // caller's explicit color context may supply those values.
+                if (ayaneoCe)
+                    return ExecuteCatalogLedAction(device, deviceType, deviceType.FullName, "color", level, statusArg,
+                        r, g, b, r2, g2, b2, brightness ?? 50, speed, null);
                 var setBrightness = deviceType.GetMethod("SetLedBrightness")
                     ?? throw new MissingMethodException(deviceType.FullName, "SetLedBrightness");
                 note = setBrightness.Invoke(device, [Clamp(brightness ?? 50)]) is bool ok && ok
@@ -222,28 +355,117 @@ internal static class Program
                 break;
             }
             case "off":
-            {
-                // HC DynamicLightingManager.UpdateLED() turn-off branch 同构
-                // （Managers/DynamicLightingManager.cs:305-310）：SetLedStatus(false)
-                // + SetLedBrightness(0) + SetLedColor(Black, Black, SolidColor)。
-                var offContract = ResolveSetLedColorContract(deviceType);
-                var statusOk = (deviceType.GetMethod("SetLedStatus")
-                        ?? throw new MissingMethodException(deviceType.FullName, "SetLedStatus"))
-                    .Invoke(device, [false]) is bool s && s;
-                var brightnessOk = (deviceType.GetMethod("SetLedBrightness")
-                        ?? throw new MissingMethodException(deviceType.FullName, "SetLedBrightness"))
-                    .Invoke(device, [0]) is bool bo && bo;
-                var black = CreateLedColor(offContract.ColorType, 0, 0, 0);
-                var colorOk = offContract.SetColor
-                    .Invoke(device, [black, black, Enum.ToObject(offContract.LedLevelType, LedLevels["solid"]), 0]) is bool co && co;
-                note = statusOk && brightnessOk && colorOk ? "ok" : "off-partial";
+                // Only real optional methods are called. The catalog route further suppresses
+                // inherited writers whose transport is disabled for the exact model.
+                note = ExecuteLightingOff(device, deviceType, HasRealLightingMethod(deviceType, "SetLedStatus"),
+                    HasRealLightingMethod(deviceType, "SetLedBrightness"));
                 break;
-            }
             default:
                 throw new ArgumentException($"unknown action {action}");
         }
 
         return note;
+    }
+
+    // No field seeding or guessed current color/brightness: the original CEc
+    // public setters prepare and consume the explicit request in one process.
+    private static bool ValidateAyaneoCeRequest(Type deviceType, string action, string? level, int? brightness, int? r, int? g, int? b)
+    {
+        const string ownerName = "HandheldCompanion.Devices.AYANEO.AYANEODeviceCEc";
+        Type? owner = deviceType;
+        while (owner is not null && owner.FullName != ownerName) owner = owner.BaseType;
+        if (owner is null) return false;
+        foreach (var name in new[] { "SetLedColor", "SetLedBrightness", "SetLedStatus" })
+            if (deviceType.GetMethod(name, BindingFlags.Public | BindingFlags.Instance)?.DeclaringType != owner)
+                throw new InvalidOperationException("AYANEO_CE_LIGHTING_METHOD_OWNER_CHANGED");
+        if (action == "color" && brightness is null)
+            throw new InvalidOperationException("AYANEO_CE_COLOR_REQUIRES_EXPLICIT_BRIGHTNESS");
+        if (action == "brightness" && (r is null || g is null || b is null))
+            throw new InvalidOperationException("AYANEO_CE_BRIGHTNESS_REQUIRES_CURRENT_COLOR_CONTEXT");
+        if (action == "brightness")
+            _ = RequireCatalogLightingOperation(deviceType, deviceType.FullName, "color", level, true, null);
+        return true;
+    }
+
+    // MSI's general Open also changes TDP, controller mode and ROM settings.
+    // Lighting needs the HID bound by IsReady, its firmware, and open-state flags.
+    // Keep that narrow preparation separate from the general device lifecycle.
+    private static bool OpenLightingDevice(object device)
+    {
+        var type = device.GetType();
+        if (OneXLightingSession.IsFamily(type)) return OneXLightingSession.IsReady(device);
+        Type? msi = type;
+        while (msi is not null && msi.FullName != "HandheldCompanion.Devices.ClawA1M") msi = msi.BaseType;
+        if (msi is null) return Invoke(device, "Open") is true;
+        var open = type.GetMethod("Open", BindingFlags.Public | BindingFlags.Instance,
+            null, Type.EmptyTypes, null) ?? throw new MissingMethodException(type.FullName, "Open");
+        if (open.DeclaringType?.FullName is not ("HandheldCompanion.Devices.ClawA1M" or
+            "HandheldCompanion.Devices.ClawA2VM" or "HandheldCompanion.Devices.MSI.ClawCG3EM"))
+            throw new InvalidOperationException("HC MSI lighting Open owner changed");
+        var baseOpen = open.GetBaseDefinition();
+        var owner = baseOpen.DeclaringType;
+        const BindingFlags fields = BindingFlags.Instance | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+        var openLib = owner?.GetField("UseOpenLib", fields);
+        var devices = owner?.GetField("hidDevices", fields);
+        var firmware = msi.GetField("Firmware", fields);
+        var clawOpen = msi.GetField("ClawOpen", fields);
+        var isOpen = type.GetProperty("IsOpen", BindingFlags.Public | BindingFlags.Instance)?.GetMethod;
+        if (owner?.FullName != "HandheldCompanion.Devices.IDevice" || owner.Assembly != type.Assembly ||
+            baseOpen.ReturnType != typeof(bool) || baseOpen.GetParameters().Length != 0 ||
+            openLib?.FieldType != typeof(bool) || openLib.GetValue(device) is not false ||
+            firmware?.FieldType != typeof(int) || clawOpen?.FieldType != typeof(bool) ||
+            isOpen?.DeclaringType != msi || devices?.GetValue(device) is not System.Collections.IDictionary bindings)
+            throw new InvalidOperationException("HC MSI lighting base Open contract changed");
+        // Frozen HC Open and LED methods both select INPUT_HID_ID == 1.
+        if (!bindings.Contains(1) || bindings[1] is not { } hid) return false;
+        if (hid.GetType().GetProperty("IsConnected")?.GetValue(hid) is not true) return false;
+        var attributes = hid.GetType().GetProperty("Attributes")?.GetValue(hid)
+            ?? throw new InvalidOperationException("MSI lighting HID attributes missing");
+        if (attributes.GetType().GetProperty("Version")?.GetValue(attributes) is not int version)
+            throw new InvalidOperationException("MSI lighting firmware descriptor changed");
+        var call = new System.Reflection.Emit.DynamicMethod("YmccMsiLightingOpen", typeof(bool),
+            [typeof(object)], typeof(Program).Module, skipVisibility: false);
+        var il = call.GetILGenerator();
+        il.Emit(System.Reflection.Emit.OpCodes.Ldarg_0);
+        il.Emit(System.Reflection.Emit.OpCodes.Castclass, owner);
+        il.Emit(System.Reflection.Emit.OpCodes.Call, baseOpen);
+        il.Emit(System.Reflection.Emit.OpCodes.Ret);
+        if (!((Func<object, bool>)call.CreateDelegate(typeof(Func<object, bool>)))(device)) return false;
+        firmware.SetValue(device, version);
+        clawOpen.SetValue(device, true);
+        return true;
+    }
+
+    // Validate before assembly load/Initialize/Open, and before direct action dispatch.
+    // Keep the existing numeric clamping contract; reject ambiguous commands.
+    private static void ValidateRequest(string? action, string? level, string? status, string? presetId)
+    {
+        if (string.IsNullOrWhiteSpace(action)) throw new ArgumentException("--action is required");
+        if (action is not ("color" or "brightness" or "status" or "off" or "preset"))
+            throw new ArgumentException($"unknown action {action}");
+        if (action == "status" && !string.Equals(status, "on", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(status, "off", StringComparison.OrdinalIgnoreCase))
+            throw new ArgumentException("--status must be on or off");
+        if (action == "color" && !string.IsNullOrWhiteSpace(level) &&
+            (string.Equals(level, "preset", StringComparison.OrdinalIgnoreCase) || !LedLevels.ContainsKey(level)))
+            throw new ArgumentException($"unsupported color level {level}; preset requires --action preset and --preset-id");
+        if (action == "preset" && string.IsNullOrWhiteSpace(presetId))
+            throw new ArgumentException("preset-id is required");
+    }
+
+    private static void ValidateOperationImplementation(Type deviceType, string action, bool includesBrightness)
+    {
+        // HC IDevice's defaults return true without issuing any operation.
+        // Do not promote these inherited no-ops to successful lighting writes.
+        void RequireOverride(string method)
+        {
+            if (!HasRealLightingMethod(deviceType, method))
+                throw new NotSupportedException($"device lighting operation unavailable: {method}");
+        }
+        if (action is "color" or "off") RequireOverride("SetLedColor");
+        if (action == "brightness" || (action is "color" or "preset" && includesBrightness)) RequireOverride("SetLedBrightness");
+        if (action == "status") RequireOverride("SetLedStatus");
+        if (action == "preset") RequireOverride("SetLEDPreset");
     }
 
     // note→退出码映射（从 Main 提取，使离线 harness 能直接测试真实映射）：
@@ -252,6 +474,50 @@ internal static class Program
     private static int ExitCodeForNote(string? note) => note == "ok" ? 0 : 1;
 
     private static int Clamp(int value) => Math.Clamp(value, 0, 255);
+
+    private static void ValidatePresetDeviceIdentity(Type actualType, string? expectedClass, string? action)
+    {
+        // This new guard belongs to the new preset route. Existing color paths
+        // retain their model aliases (e.g. AynLoki -> LokiMax6600U/6800U).
+        if (action == "preset" && expectedClass is not null &&
+            !string.Equals(actualType.Name, expectedClass.Split('.').Last(), StringComparison.Ordinal))
+            throw new InvalidOperationException("HC factory device differs from the requested preset class");
+    }
+
+    // Use the actual device list and object. A level enum (128), array index
+    // or caller-supplied numeric value is not a named HC preset.
+    private static string ExecuteLedPreset(object device, Type deviceType, string? presetId, int? brightness)
+    {
+        if (string.IsNullOrWhiteSpace(presetId)) throw new ArgumentException("preset-id is required");
+        ValidateOperationImplementation(deviceType, "preset", brightness is not null);
+        var presets = deviceType.GetProperty("LEDPresets", BindingFlags.Public | BindingFlags.Instance)?.GetValue(device)
+            as System.Collections.IEnumerable ?? throw new MissingMemberException(deviceType.FullName, "LEDPresets");
+        var matches = new List<object>();
+        foreach (var preset in presets)
+        {
+            if (preset is not null && preset.GetType().GetProperty("NameKey")?.GetValue(preset) is string key &&
+                string.Equals(key, presetId, StringComparison.Ordinal)) matches.Add(preset);
+        }
+        if (matches.Count != 1) throw new ArgumentException("preset-id is absent or ambiguous for this HC device");
+        var setPreset = deviceType.GetMethod("SetLEDPreset", BindingFlags.Public | BindingFlags.Instance)
+            ?? throw new MissingMethodException(deviceType.FullName, "SetLEDPreset");
+        var parameters = setPreset.GetParameters();
+        if (parameters.Length != 1 || !parameters[0].ParameterType.IsInstanceOfType(matches[0]) ||
+            setPreset.ReturnType != typeof(bool)) throw new InvalidOperationException("Invalid SetLEDPreset contract");
+        // Match HC DynamicLightingManager: brightness precedes the preset.
+        OneXQueuedLighting.PrepareRequestCache(device, "preset", brightness, null);
+        var note = "ok";
+        if (brightness is not null)
+        {
+            var method = deviceType.GetMethod("SetLedBrightness", BindingFlags.Public | BindingFlags.Instance)
+                ?? throw new MissingMethodException(deviceType.FullName, "SetLedBrightness");
+            if (method.Invoke(device, [Clamp(brightness.Value)]) is not true) note = "setLedBrightness-false";
+        }
+        if (OneXQueuedLighting.UsesQueue(deviceType, preset: true))
+            OneXQueuedLighting.InvalidatePresetCache(device);
+        if (setPreset.Invoke(device, [matches[0]]) is not true) return "setLEDPreset-false";
+        return note;
+    }
 
     // 目标方法签名驱动：仅从 deviceType 的明确 public instance 方法中收集
     // 名为 SetLedColor 的候选；0 个 = 缺失，>1 个 = 歧义，二者都拒绝（不默认
@@ -320,8 +586,13 @@ internal static class Program
     // 未知色类型不做强制转换、不伪成功。
     private static object CreateLedColor(Type colorType, int r, int g, int b)
     {
-        if (colorType == typeof(System.Windows.Media.Color))
-            return System.Windows.Media.Color.FromArgb(0xFF, (byte)r, (byte)g, (byte)b);
+        if (colorType.FullName == "System.Windows.Media.Color")
+        {
+            var factory = colorType.GetMethod("FromArgb", BindingFlags.Public | BindingFlags.Static,
+                null, [typeof(byte), typeof(byte), typeof(byte), typeof(byte)], null);
+            if (factory is not null && factory.ReturnType == colorType)
+                return factory.Invoke(null, [(byte)0xFF, (byte)r, (byte)g, (byte)b])!;
+        }
         throw new NotSupportedException(
             $"unsupported SetLedColor color parameter type: {colorType.FullName}");
     }
@@ -343,7 +614,8 @@ internal static class Program
     {
         if (string.IsNullOrWhiteSpace(name.Name)) return null;
         var path = Path.Combine(runtimeRoot ?? AppContext.BaseDirectory, name.Name + ".dll");
-        return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path) : null;
+        return File.Exists(path) ? AssemblyLoadContext.Default.LoadFromAssemblyPath(path)
+            : YeMan.SharedRuntime.DeviceCoreSharedDependencies.Resolve(_, name, runtimeRoot ?? AppContext.BaseDirectory);
     }
 
     // FanHost ConfigureHcRuntime 精简版（HC 需要 SettingsPath/LogsPath 与

@@ -1,8 +1,9 @@
 import { assembleCanonicalFrame, neutralCanonicalFrame, type ControllerFrame, type MotionFrame } from '../src/bridge/virtualReportAssembler';
 import { applyHcGyroAxisModifiers, blendGyroShortIntoStick, hcShortToUnit, hcUnitToShort, HC_DEFAULT_AXIS_ANTI_DEADZONE, HC_DEFAULT_GYRO_WEIGHT, improveSquare } from '../src/bridge/hcInputUtils';
+import { VIRTUAL_OUTPUT_PERSONAS } from '../src/bridge/controllerPersona';
 
 const controller: ControllerFrame = {
-  runId: 'run-1', epoch: 3, powerGeneration: 7, targetId: 'target-1', persona: 'xbox360', configRevision: 4,
+  runId: 'run-1', epoch: 3, powerGeneration: 7, targetId: 'target-1', persona: 'elite', configRevision: 4,
   inputSequence: 12, timestamp: 100, buttons: 0x20, axes: { leftX: 0.25 }, triggers: { left: 0.7 }, rightStick: { x: 0.4, y: -0.2 },
 };
 const motion: MotionFrame = { runId: 'run-1', epoch: 3, powerGeneration: 7, targetId: 'target-1', configRevision: 4, sampleSequence: 9, timestamp: 101, valid: true, contribution: { x: 0.2, y: -0.3 } };
@@ -31,6 +32,22 @@ if (invalidSampleSequence.ok || invalidSampleSequence.reason !== 'motion-invalid
 const baseOnly = assembleCanonicalFrame(controller);
 if (!baseOnly.ok || !near(baseOnly.frame.rightStick.x, 0.4) || !near(baseOnly.frame.rightStick.y, -0.2)) throw new Error('gyro-off changed base stick');
 if (!neutralCanonicalFrame(controller).neutral) throw new Error('neutral frame missing flag');
+
+for (const persona of VIRTUAL_OUTPUT_PERSONAS) {
+  const current = assembleCanonicalFrame({ ...controller, persona }, motion, blend);
+  if (!current.ok || current.frame.persona !== persona || !near(current.frame.rightStick.x, merged.frame.rightStick.x)) throw new Error(`current persona blend failed: ${persona}`);
+  const currentNeutral = neutralCanonicalFrame({ ...controller, persona });
+  if (currentNeutral.persona !== persona || !currentNeutral.neutral || currentNeutral.buttons !== 0 || currentNeutral.rightStick.x !== 0 || currentNeutral.rightStick.y !== 0) throw new Error(`current persona neutral failed: ${persona}`);
+}
+for (const persona of ['xbox360', 'dualshock4', 'dualsense', 'disabled', 'unknown', null, undefined, 0, true, {}, ['elite']] as unknown[]) {
+  const candidate = { ...controller, persona: persona as ControllerFrame['persona'] };
+  const rejected = assembleCanonicalFrame(candidate, motion, blend);
+  const expected = persona === 'disabled' ? 'persona-disabled' : 'persona-unsupported';
+  if (rejected.ok || rejected.reason !== expected) throw new Error(`unsupported runtime persona assembled: ${String(persona)}`);
+  let neutralRejected = false;
+  try { neutralCanonicalFrame(candidate); } catch { neutralRejected = true; }
+  if (!neutralRejected) throw new Error(`unsupported runtime persona created neutral: ${String(persona)}`);
+}
 
 const inner = assembleCanonicalFrame(controller, { ...motion, contribution: { x: 0.02, y: 0 }, gyroShort: { x: 655, y: 0 } }, { gyroWeight: 1.2, innerDeadzone: 10, outerDeadzone: 0, antiDeadzone: 0, outputShape: 'default' });
 if (!inner.ok || inner.frame.gyroContribution.x !== 0 || inner.frame.gyroContribution.y !== 0) throw new Error('T5 inner deadzone did not use HC radial deadzone');

@@ -1,0 +1,198 @@
+{
+  "schemaVersion": 1,
+  "scope": "Existing manual/touch physical writers, verified Sony classic decode/receipt stage, and source-connected classic game-motor dispatch for the declared target and physical providers. Current-source software certification and physical acceptance are separate.",
+  "sourceIdentity": "Current observed physical source and existing ownership/generation checks; no host DMI provider selection",
+  "providers": [
+    {
+      "token": 1,
+      "kind": "XInput",
+      "id": "controller.feedback.xinput.physical",
+      "frozenReferences": [
+        "Controllers/IController.cs",
+        "Controllers/XInputController.cs"
+      ],
+      "writer": "g_feedbackSetState",
+      "release": "physicalFeedbackStopTarget",
+      "ready": "nativePhysicalFeedbackReady",
+      "consumer": "nativePhysicalFeedbackStart"
+    },
+    {
+      "token": 2,
+      "kind": "MsiDInput",
+      "id": "controller.feedback.msi-dinput.physical",
+      "frozenReferences": [
+        "Controllers/IController.cs",
+        "Controllers/DInputController.cs",
+        "Controllers/MSI/DClawController.cs"
+      ],
+      "writer": "msiDinputFeedbackWrite",
+      "release": "physicalFeedbackStopTarget",
+      "ready": "nativePhysicalFeedbackReady",
+      "consumer": "nativePhysicalFeedbackStart"
+    }
+  ],
+  "gameOutputCallbackBound": false,
+  "allControllerFeedbackConnected": false,
+  "physicalAcceptance": false,
+  "gameMotorReceiptProfiles": [
+    {
+      "token": 1,
+      "capabilityId": "controller.feedback.game.dualsense-edge-usb-classic",
+      "profileIdentity": "dualsense-edge",
+      "protocol": "dualsense-usb-classic-v1",
+      "hostDecodeOnly": true,
+      "nativeReceiptOnly": true,
+      "gameFeedbackForwardingProven": false,
+      "physicalAcceptance": false,
+      "frozenReferences": [
+        "Targets/VIIPERTarget.cs",
+        "Targets/DualSenseTarget.cs"
+      ],
+      "sourceTransportDelta": "Frozen VIIPER target receives normalized two-byte feedback; current locked SDK emits separate report-id plus raw USB body. Decode uses the locked current profile and reviewed protocol flags."
+    },
+    {
+      "token": 2,
+      "capabilityId": "controller.feedback.game.steam-deck-usb-classic-rumble",
+      "profileIdentity": "steam-deck-composite",
+      "protocol": "steam-deck-usb-classic-rumble-v1",
+      "hostDecodeOnly": false,
+      "nativeReceiptOnly": false,
+      "gameFeedbackForwardingProven": false,
+      "physicalAcceptance": false,
+      "frozenReferences": [
+        "Targets/VIIPERTarget.cs",
+        "Targets/SteamDeckTarget.cs"
+      ],
+      "sourceTransportDelta": "Frozen VIIPER emits full Valve feature command; current locked SDK separates first command byte into ReportId and exposes body through HidFeature source. Only type0/classic rumble is connected; haptic and timed pulse remain pending."
+    },
+    {
+      "token": 3,
+      "capabilityId": "controller.feedback.game.xbox-elite-v2-xinput-classic",
+      "profileIdentity": "xbox-elite-v2",
+      "protocol": "xbox-elite-v2-xinput-classic-v1",
+      "hostDecodeOnly": false,
+      "nativeReceiptOnly": false,
+      "gameFeedbackForwardingProven": false,
+      "physicalAcceptance": false,
+      "frozenReferences": [
+        "Targets/VIIPERTarget.cs",
+        "Targets/Xbox360Target.cs"
+      ],
+      "sourceTransportDelta": "Frozen Xbox360 VIIPER target consumes a normalized classical motor pair. Current locked Xbox Elite virtual profile exposes raw XInput companion writes; flag-bearing XUSB and raw WORD-pair layouts are decoded separately. This is classical rumble only, not impulse triggers or arbitrary HID/BT output."
+    }
+  ],
+  "hostRawOutputObservationBound": true,
+  "hostClassicMotorDecodeConnected": true,
+  "nativeMotorReceiptConnected": true,
+  "gameFeedbackForwardingProven": false,
+  "gameMotorSoftwareConsumption": {
+    "capabilityId": "controller.feedback.game.dualsense-edge-usb-classic",
+    "sourceConnected": true,
+    "supportedVirtualTargets": [
+      {
+        "profileIdentity": "dualsense-edge",
+        "protocol": "dualsense-usb-classic-v1",
+        "reportSource": 0,
+        "reportId": 2,
+        "bodyBytes": 63,
+        "motorSemantics": "independent classic left/right rumble; zero pair stops this game owner"
+      }
+    ],
+    "supportedPhysicalSources": [
+      {
+        "inputCapabilityId": "controller.input.xinput.standard",
+        "actualInputAliases": [
+          "xinput",
+          "xinput-any-connected"
+        ],
+        "writerCapabilityId": "controller.feedback.xinput.physical"
+      },
+      {
+        "inputCapabilityId": "controller.input.msi-dinput.standard",
+        "actualInputAliases": [
+          "msi-dinput"
+        ],
+        "writerCapabilityId": "controller.feedback.msi-dinput.physical"
+      }
+    ],
+    "consumers": [
+      {
+        "file": "native/main.cpp",
+        "anchor": "inputCaptureStampFeedbackSourceLocked"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "inputHostConsumeGameMotorReplyLocked"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "GameFeedbackFrameDispatchScope"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "nativeWriteBoundGameFeedbackCommand"
+      },
+      {
+        "file": "native/main.cpp",
+        "anchor": "physicalFeedbackStopTarget"
+      }
+    ],
+    "sourceRule": "The same admitted frame retains its original physical SourceToken; machine family/DMI and an arbitrary current slot never grant writing permission.",
+    "headers": [
+      "native/game_feedback_source_ticket.h",
+      "native/game_feedback_dispatch.h",
+      "native/game_feedback_diagnostics.h"
+    ],
+    "diagnostics": {
+      "existingEvent": "input-host-submit-stats",
+      "field": "gameMotorDispatch",
+      "consumer": "nativeGameFeedbackDiagnosticsSnapshot",
+      "counters": "process lifetime, game operations only",
+      "costGate": "existing tickCostEnabled",
+      "clockWhenDisabled": "no new observation clock reads",
+      "availabilityAuthority": false
+    },
+    "physicalAcceptance": false,
+    "wholeProcessCpuReduction": null,
+    "excludedFromThisSupport": [
+      "Bluetooth Sony raw output",
+      "adaptive triggers or audio haptic stream",
+      "game-controller lighting",
+      "unsupported physical input aliases or unbound sources",
+      "Steam Deck haptic and timed pulse protocols; classic rumble is declared separately",
+      "Xbox HID/BT and impulse-trigger protocols; exact source2 classical rumble is declared separately"
+    ],
+    "softwareAcceptanceEvidenceRecordedSeparately": true
+  },
+  "gameMotorReceiptStageSemantics": "hostDecodeOnly/nativeReceiptOnly describe the narrower verified receipt stage. gameMotorSoftwareConsumption describes the separately scoped source-bound writer implementation; neither grants runtime UI readiness or physical proof.",
+  "additionalGameMotorSoftwareConsumption": [
+    {
+      "capabilityId": "controller.feedback.game.steam-deck-usb-classic-rumble",
+      "profileIdentity": "steam-deck-composite",
+      "protocol": "steam-deck-usb-classic-rumble-v1",
+      "sourceConnected": true,
+      "contract": "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
+      "supportedPhysicalSources": [
+        "controller.feedback.xinput.physical",
+        "controller.feedback.msi-dinput.physical"
+      ],
+      "softwareAcceptanceEvidenceRecordedSeparately": true,
+      "physicalAcceptance": false,
+      "wholeProcessCpuReduction": null
+    },
+    {
+      "capabilityId": "controller.feedback.game.xbox-elite-v2-xinput-classic",
+      "profileIdentity": "xbox-elite-v2",
+      "protocol": "xbox-elite-v2-xinput-classic-v1",
+      "sourceConnected": true,
+      "contract": "capabilities/CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT.json",
+      "supportedPhysicalSources": [
+        "controller.feedback.xinput.physical",
+        "controller.feedback.msi-dinput.physical"
+      ],
+      "softwareAcceptanceEvidenceRecordedSeparately": true,
+      "physicalAcceptance": false,
+      "wholeProcessCpuReduction": null
+    }
+  ]
+}

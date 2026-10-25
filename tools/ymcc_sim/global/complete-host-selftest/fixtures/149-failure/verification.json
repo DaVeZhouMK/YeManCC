@@ -1,0 +1,31 @@
+{
+  "schemaVersion": 1,
+  "status": "FAIL",
+  "actualHostSelfTest": true,
+  "hostDllSha256": "149042f482b122adc85a19a905c8579c75cfbc881cd78d85c221aac1fe5cb424",
+  "backendSha256": "73c0070366a0907ac8ee908f4c2c73d1b495faab7edacab339027191f855ccb5",
+  "manifestSha256": "989c0b1ddf8f795f5a5fd10bbb053d945d272f6dac613560c023e599215fe795",
+  "apphostSha256": "675b2a3f330852cc265acf449d27e3bf39cda23c628047560843dcebfa2c74ab",
+  "pid": 43192,
+  "startedUtc": "2026-10-19T04:53:31.617987+00:00",
+  "finishedUtc": "2026-10-19T04:54:29.816552+00:00",
+  "processExitCode": 3762504530,
+  "naturalExit": true,
+  "timedOut": false,
+  "actualResult": null,
+  "stdout": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\full-host-selftest\\bd9c032b69fd4da586fc3bde45739422\\stdout.log",
+    "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "stderr": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\full-host-selftest\\bd9c032b69fd4da586fc3bde45739422\\stderr.log",
+    "sha256": "7348250680b64adf1883728466f16b17e5d4c91352cb464a7b2a4c98bb508d26"
+  },
+  "tempRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\full-host-selftest\\bd9c032b69fd4da586fc3bde45739422\\temp",
+  "payloadInputDrift": 0,
+  "realBackendRequested": false,
+  "hardwareWritesRequested": false,
+  "realTokenFileRequested": false,
+  "installedApplicationMutated": false,
+  "candidateInstalled": false
+}

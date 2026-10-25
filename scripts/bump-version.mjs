@@ -47,6 +47,17 @@ if (newVersion.split('.').map(Number).some((part) => !Number.isSafeInteger(part)
   process.exit(1);
 }
 
+// 发布前必须消费官方 Decky 最新稳定版；失败时不改版本文件、不打印 tag 步骤。
+// 若落后，先执行 tools/decky-loader-upgrade.ps1 的 Prepare / Apply 并验证提交，禁止改 Loader 内部。
+console.log('[bump] 核对官方 Decky 稳定版和发布身份…');
+try {
+  const shell = process.platform === 'win32' ? resolve(process.env.SystemRoot || 'C:/Windows', 'System32/WindowsPowerShell/v1.0/powershell.exe') : 'pwsh';
+  execFileSync(shell, ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', resolve(root, 'tools/decky-loader-upgrade.ps1'), '-Action', 'ReleaseGate', '-EvidenceDir', resolve(root, 'Build/Validation/DeckyUpdate/PreTag')], {stdio:'inherit', windowsHide:true});
+} catch (e) {
+  console.error('[bump] Decky 发布检查未通过，保留原版本；请先处理官方底座升级。');
+  process.exit(1);
+}
+
 // 更新 version.json：写入新版本与说明；sha256/publishedAt 留空，由 CI 构建后回填
 pkg.version = newVersion;
 if (notes != null) pkg.notes = notes;
@@ -69,12 +80,12 @@ try {
 // 打印发布步骤（CI 在 push tag 后自动构建发布）
 const today = new Date().toISOString().slice(0, 10);
 console.log('\n== 下一步（复制执行）==');
-console.log(`git add version.json package.json # 两个发布版本源必须保持一致`);
+console.log(`git add version.json package.json PowerControl/decky/PluginLoader_noconsole.exe PowerControl/decky/LICENSE.decky-loader decky-plugin/vendor/decky-loader.lock.json native/decky_loader_identity.h # 版本与官方依赖身份一起提交`);
 console.log(`git commit -m "chore: 发布 v${newVersion}"`);
 console.log(`git tag v${newVersion}`);
 console.log(`git push origin main v${newVersion}`);
 console.log(`\n提示：首次发布还需把本次改造一并提交 ——`);
 console.log(`  git add PowerControl .github/workflows/release.yml native/main.cpp scripts/bump-version.mjs package.json`);
-console.log(`  （可与上面的 version.json 合并在一次 commit/tag 中）`);
+console.log(`  消费接口、测试和工作流若有改动，也须一起提交后再打 tag；不要只提交新 EXE。`);
 console.log(`\nCI 会自动构建 YeManCC.zip（程序 + PowerControl）并发布到 GitHub Release v${newVersion}，`);
 console.log(`再把 sha256/publishedAt 写回 main/version.json。本机稍后打开 YeManCC 即可在「版本和更新」中检测并安装。`);

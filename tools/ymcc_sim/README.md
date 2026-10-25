@@ -1,5 +1,7 @@
 # ymcc_sim —— YMCC 全局模拟器（2026-09-22 提升到主线 tools 层）
 
+> 2026-10-18：新增 `-Domain global`。统一发现当前功能入口、运行已审查的桌面回归、睡眠日志回放与两轮结果差异。原有域继续保留。完整操作、覆盖语义与验收限制见 [GLOBAL-TESTING.md](GLOBAL-TESTING.md)。原来的 full 域只组合既有风扇/输入/睡眠片段，不代表全部YMCC功能已经验收。
+
 原先挂在风扇任务目录下的"睡眠形态模拟器"，现在提升为 YMCC 主线层的**全局模拟器**：
 一个入口、一个核心、一份证据格式，睡眠域与手柄域共用同一套 App 生命周期与反推取证。
 
@@ -169,7 +171,7 @@ tools\ymcc_sim\ymcc_sim.ps1 -Domain sleep -Mode sleeptypes
   `WM_POWERBROADCAST/PBT_APMSUSPEND`→`PBT_APMRESUMEAUTOMATIC`，不触发真实睡眠；默认演练 exit 12，
   `-Confirm` 才投递；**入睡会冻结最大工作集进程**，须在授权窗口、操作者在场时执行；无 App ⇒ exit 10）；
 - 整机虚拟测试（`-Domain full -Mode run`）**已实现**：必需段 sleep-typing + sleep-forms + sim-suites
-  （`tests\run_all.ps1`，8 套件）；窗口段 sleep-live + pad-sleep 需 `-WithApp`（非提权 ⇒ exit 6），
+  （`tests\run_all.ps1`，含真实依赖接通的9套件）；窗口段 sleep-live + pad-sleep 需 `-WithApp`（非提权 ⇒ exit 6），
   未请求时如实记 `NOT_RUN`；`gamepad -Scenario full-virtual` 委派本域并镜像退出码；
 - 断言套件：`tests\run_all.ps1` 为总门（单一判定源 + 套件数假绿防护），逐套件亦可单独运行；
 - native 层唤醒竞争/看门狗模拟（`tools\wake_race_sim_test.ps1`、`wake_watchdog_sim_test.ps1`）：
@@ -185,3 +187,17 @@ tools\ymcc_sim\ymcc_sim.ps1 -Domain sleep -Mode sleeptypes
 `domains\sleep\sleep_forms.json` 记录了形态库的全部出处：本机真实睡眠事实日志
 （`PowerControl\Sleep\sleep-facts.log[.previous]`，含 SHA256）、操作者提供的历史日志归档、
 以及源码常量（`native\main.cpp`、`FanLab\real-host\Program.cs`、`src\bridge\fanHost.ts`）。
+## 真实依赖初始化与风扇模拟接通门（2026-10-18）
+
+`pwsh -NoProfile -File tools/ymcc_sim/ymcc_sim.ps1 -Domain fan -Mode connect -EvidenceDir <全新证据目录>`
+
+复用本模拟器，不另建环境。此门四阶段依次执行精确运行库正反校验、8 库原件 COM ABI 检查（12 种破坏反例、真实坏库及伪造成功候选拒绝）、真实 HC 13 管理器构造（独立 STA 子进程、隔离设置）、旧坏 NAudio 必须复现 callback 注册失败的反例，以及公开模拟 API 的开启、预设切换、关闭和归还。只跑 null backend 的开关不构成依赖兼容通过。此项已加入 `tests/run_all.ps1`，Quick 同样必须执行。非零退出、缺少或陈旧回执一律失败。
+
+可用 `-RuntimeRoot`、`-SharedRuntimeRoot`、`-HostPayloadRoot` 指向待交付的真实载荷，证据绑定其哈希；主机仍使用显式 mock 参数。管理器构造会枚举桌面音频/显示并注册子进程内通知，不启动 manager、不构造或 Open 掌机设备、不写 EC/风扇，不把软件结果宣称为固件或真实转速验收。`-Mode plan` 仅列计划，不能冒充实际执行。
+默认安装位已跟随生产迁移为 `PowerControl/fan-host-v2`；v2 不存在时才使用旧 `fan-host`，显式 `YEMAN_SIM_PAYLOAD_ROOT` 仍优先。模拟开关始终通过启动参数传入，无需创建新环境或向安装位写 flag。
+
+2026-10-19：`invariants` 的 I13 已改为真实供测 Host 的恢复预算/父退出回归，不再检查历史源码变量名。全局适配器 `fan.parent-exit-contract` 复用相同入口，要求真实恢复自测、忙 gate 反例、诚实失败终态，以及独立父进程退出的自然 exit0 三份新回执。
+
+HC精简缺口与后续版本维护采用 [源码与模拟环境双向回归合同](HC-UPGRADE-REGRESSION.md)，保留相同信号场景、实际产品消费者和兼容差异证据。
+
+2026-10-19：fan接通门现为五阶段，新增SharpDX真实托管枚举回调、反射摇杆格式、完整Include shadow初始化/委托绑定；当前11个ABI库均用冻结原件。9种ABI/属性/回调破坏和历史trim3缺失shadow反例必须拒绝。目标native库禁止加载，Include Open/Close仅绑定不执行，不能据此声称物理输入或GPU通过。

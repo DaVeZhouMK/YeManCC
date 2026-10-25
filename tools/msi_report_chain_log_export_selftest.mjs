@@ -1,0 +1,23 @@
+// Read-only source contract for a dormant MSI diagnostic log. No product/SDK/device APIs.
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+import { fileURLToPath } from 'node:url';
+const root = new URL('../', import.meta.url);
+const read = p => fs.readFileSync(new URL(p, root), 'utf8');
+const main = read('native/main.cpp');
+const host = read('InputHost/MsiVirtualReportChain1410.cs');
+const program = read('InputHost/Program.cs');
+let checks = 0;
+const check = (name, ok) => { assert.ok(ok, name); checks++; };
+check('one exact rotated diagnostic export', (main.match(/addRotated\(dataDir \+ L"\\\\input-host-report-chain\.log"\)/g) ?? []).length === 1);
+check('timestamp map labels real uptime fields, not UTC fiction', main.includes('BeginTick/EndTick=uptime-ms'));
+check('export does not create/arm diagnostics', main.includes('export does not arm diagnostics'));
+check('host diagnostic writer uses matching exact leaf', host.includes('Path.Combine(dir, "input-host-report-chain.log")'));
+check('host bounded log rotates to exported prev suffix', host.includes('file + ".prev"'));
+check('begin/end fields are real monotonic call boundary', host.includes('long BeginTick, long EndTick'));
+check('host diagnostics need explicit prepare request', program.includes('envelope.ReportChainPrepare1410 is null'));
+check('native pairing is behind a default-OFF build flag', main.includes('#ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC'));
+const runtime = read('native/msi_virtual_report_diagnostic_runtime.h');
+check('ordinary log/persona never requests a session', runtime.includes('YMCC_MSI_REPORT_CHAIN_SESSION') && runtime.includes('g_msiVirtualReportDiagnostic.Request(id,10000,128)'));
+check('no withdrawn reservation in native', !/reservedSummon|legacyShoulderChordReserved|msi_reserved_summon_chord/.test(main));
+console.log(JSON.stringify({result:'PASS',checks,sourceOnly:true,productExecuted:false,SDKLoaded:false,hardwareObserved:false,defaultActivationAdded:false}));

@@ -1,3 +1,5 @@
+import type { ControllerPersona } from './controllerPersona';
+export type { ControllerPersona } from './controllerPersona';
 /**
  * Controller feedback presentation gate.
  *
@@ -10,7 +12,6 @@
  * feedback receipt, every feedback capability remains UNENCLOSED.
  */
 
-export type ControllerPersona = 'disabled' | 'xbox360' | 'dualshock4' | 'steamdeck' | 'dualsense' | 'elite' | 'dualsense-edge';
 export type FeedbackCapabilityId = 'rumble' | 'haptic' | 'light';
 export type FeedbackAvailability = 'available' | 'unavailable' | 'not-applicable';
 
@@ -32,10 +33,7 @@ export interface ControllerFeedbackView {
 }
 
 function personaLabel(persona: ControllerPersona): string {
-  if (persona === 'dualshock4') return 'DualShock 4';
-  if (persona === 'xbox360') return 'Xbox 360';
   if (persona === 'steamdeck') return 'Steam Deck';
-  if (persona === 'dualsense') return 'DualSense (PS5)';
   if (persona === 'elite') return 'Xbox';                 // 2026-09-27 与控制器页显示名同步
   if (persona === 'dualsense-edge') return 'PS5';         // 2026-09-27 与控制器页显示名同步
   return '未选择';
@@ -113,25 +111,10 @@ export function evaluateControllerFeedback(
     capabilityView(proof, 'haptic', '按键与触摸触觉', '按键或触摸操作时提供短促的触觉反馈。'),
   ];
 
-  if (persona === 'xbox360') {
-    capabilities.push({
-      id: 'light',
-      title: '灯光、亮度与效果',
-      subtitle: '此模式不支持通用灯条或颜色控制。',
-      availability: 'not-applicable',
-      closure: 'NOT-APPLICABLE',
-      detail: '玩家编号提示不等同于可设置的灯光颜色。',
-    });
-  } else {
-    capabilities.push(capabilityView(
-      proof,
-      'light',
-      '灯光、亮度与效果',
-      persona === 'dualshock4'
-        ? '灯条颜色和效果会在兼容的实体手柄上显示。'
-        : '颜色、亮度和效果只会在兼容的手柄上提供。',
-    ));
-  }
+  capabilities.push(capabilityView(
+    proof, 'light', '灯光、亮度与效果',
+    '颜色、亮度和效果只会在兼容的手柄上提供。',
+  ));
 
   const allClosed = capabilities.length > 0 && capabilities.every((entry) => entry.closure === 'CLOSED' || entry.closure === 'NOT-APPLICABLE');
   return {

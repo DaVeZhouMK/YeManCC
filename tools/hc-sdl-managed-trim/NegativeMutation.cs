@@ -1,0 +1,10 @@
+using Mono.Cecil;
+using System.Security.Cryptography;
+using System.Text.Json;
+if(args.Length!=3||args[1]!="event-layout")throw new ArgumentException("candidate-sdl event-layout new-output-directory");
+string output=Path.GetFullPath(args[2]);if(Directory.Exists(output)&&Directory.EnumerateFileSystemEntries(output).Any())throw new IOException("Negative fixture output must be empty");Directory.CreateDirectory(output);
+using var assembly=AssemblyDefinition.ReadAssembly(Path.GetFullPath(args[0]));
+var t=assembly.MainModule.Types.Single(t=>t.FullName=="SDL3.SDL").NestedTypes.Single(t=>t.Name=="Event");
+var field=t.Fields.Single(f=>f.Name=="GDevice");int original=field.Offset;field.Offset=original+4;
+string file=Path.Combine(output,"SDL3-CS.dll");assembly.Write(file,new WriterParameters{Timestamp=0});
+var record=new{Status="INTENTIONALLY-INVALID-NEGATIVE-FIXTURE",Input=Path.GetFullPath(args[0]),Output=file,Field=field.FullName,OriginalOffset=original,MutatedOffset=field.Offset,Sha256=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(file))).ToLowerInvariant(),NeverShip=true,NativeExecuted=false};File.WriteAllText(Path.Combine(output,"mutation.json"),JsonSerializer.Serialize(record,new JsonSerializerOptions{WriteIndented=true}));Console.WriteLine(JsonSerializer.Serialize(record));

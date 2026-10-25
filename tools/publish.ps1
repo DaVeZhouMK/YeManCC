@@ -15,19 +15,35 @@
 [CmdletBinding()]
 param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
-  [switch]$DeployInstalled
+  [switch]$DeployInstalled,
+  [switch]$TestExport,
+  [switch]$FullAcceptance
 )
 
 $ErrorActionPreference = 'Stop'
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 $previousWorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT
+$previousTestExport = $env:YEMAN_TEST_EXPORT
+$previousFullAcceptance = $env:YEMAN_FULL_ACCEPTANCE
 
 Push-Location $ProjectRoot
 try {
   if (-not [string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
     $env:YEMAN_WORKSPACE_ROOT = [IO.Path]::GetFullPath($WorkspaceRoot)
   }
-  & pnpm run release
+  # Explicit test export is local-only; ordinary export defaults to no fixtures; FullAcceptance is explicit.
+  if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+  $TestExport = -not [bool]$FullAcceptance
+  $env:YEMAN_FULL_ACCEPTANCE = if ($FullAcceptance) { '1' } else { '0' }
+  $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
+  if ($TestExport) { Write-Output 'YMCC_TEST_EXPORT: complete local test package; formal release gates are not accepted.' }
+  if ($FullAcceptance) {
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-workspace.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
+    if ($LASTEXITCODE -ne 0) { throw "Full acceptance build failed: exit=$LASTEXITCODE" }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\package-release.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
+  } else {
+    & pnpm run release
+  }
   if ($LASTEXITCODE -ne 0) {
     throw "Release build failed: exit=$LASTEXITCODE"
   }
@@ -39,6 +55,8 @@ try {
   }
 } finally {
   $env:YEMAN_WORKSPACE_ROOT = $previousWorkspaceRoot
+  $env:YEMAN_TEST_EXPORT = $previousTestExport
+  $env:YEMAN_FULL_ACCEPTANCE = $previousFullAcceptance
   Pop-Location
 }
 

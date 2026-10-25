@@ -43,6 +43,13 @@ $hcXInput = Join-Path $HcRoot 'Controllers\XInputController.cs'
 $hcVirtual = Join-Path $HcRoot 'Managers\VirtualManager.cs'
 $native = Get-Content -LiteralPath $NativeSource -Raw -Encoding UTF8
 $ih = Get-Content -LiteralPath $InputHostSource -Raw -Encoding UTF8
+$screenPadsPath = Join-Path (Split-Path -Parent $InputHostSource) 'ScreenTouchpadReport.cs'
+$screenPads = Get-Content -LiteralPath $screenPadsPath -Raw -Encoding UTF8
+# Current production moved touch serialization and frame assembly into helpers.
+# These are source path checks; the executable wire tests separately verify bytes.
+$ihCompact = [regex]::Replace($ih, '\s+', '')
+$padsCompact = [regex]::Replace($screenPads, '\s+', '')
+$nativeCompact = [regex]::Replace($native, '\s+', '')
 $hcDs = Get-Content -LiteralPath $hcDualShock -Raw -Encoding UTF8
 $hcXb = Get-Content -LiteralPath $hcXbox -Raw -Encoding UTF8
 $hcXi = Get-Content -LiteralPath $hcXInput -Raw -Encoding UTF8
@@ -68,7 +75,7 @@ Assert 'G4 DS4 accel 8192/g' ($ds4Fn -match 'envelope\.ImuAccelX, 8192\.0, 4\.0'
 Assert 'G4 DS4 gyro 16/dps' ($ds4Fn -match 'envelope\.ImuGyroX, 16\.0, 2048\.0') 'DS4 gyro = dps x 16 (SDL fallback 1/16)'
 Assert 'G4 DS4 wire7 counter' ($ds4Fn -match 'counter & 0x3F\) << 2') 'DS4 wire 7 bits2-7 = 6-bit per-frame counter'
 Assert 'G4 DS4 battery wire30' ($ds4Fn -match 'data\[Ds4WireBatteryLevelIndex\] = Ds4WireBatteryFull') 'DS4 battery at wire 30'
-Assert 'G4 DS4 touch ids wire35/39' ($ds4Fn -match 'data\[34\] = TouchpadFinger0DisabledId' -and $ds4Fn -match 'data\[38\] = TouchpadFinger1DisabledId') 'DS4 touch contact ids at wire 35/39'
+Assert 'G4 DS4 touch ids wire35/39' ($ihCompact.Contains('WriteDs4ScreenPads(data,envelope,counter)') -and $padsCompact.Contains('WriteSonyContact(data,34,e.ScreenPadsPresent?e.ScreenPadLeft:default,1,Ds4TouchHeight)') -and $padsCompact.Contains('WriteSonyContact(data,38,e.ScreenPadsPresent?e.ScreenPadRight:default,2,Ds4TouchHeight)') -and $padsCompact.Contains('id|(p.Active?0:0x80)')) 'DS4 uses the shared contact writer at wire 35/39 with inactive-bit handling'
 # wire 9-10 timestamp（2026-09-16 真机 A/B 实测补上）：真机每帧递增（单位速率
 # 187,500/s，DS4 v1 直读 ~750 @250Hz），本产品 8ms 节拍折算 1500/帧。
 Assert 'G4 DS4 wire9-10 timestamp' ($ds4Fn -match 'data\[9\] = \(byte\)\(wireTimestamp & 0xFF\)' -and $ds4Fn -match 'data\[10\] = \(byte\)\(\(wireTimestamp >> 8\) & 0xFF\)' -and $ds4Fn -match 'Ds4WireTimestampUnitsPerFrame = 1500|counter \* Ds4WireTimestampUnitsPerFrame') 'DS4 wire 9-10 must advance (real-pad measured unit rate)'
@@ -78,11 +85,11 @@ Assert 'G4 DS4 wire9-10 timestamp' ($ds4Fn -match 'data\[9\] = \(byte\)\(wireTim
 $dsFn = [regex]::Match($ih, 'static byte\[\] BuildDualSenseDataOnlyReport[\s\S]*?\n    }').Value
 Assert 'G4 DualSense builder present' ([bool]$dsFn) 'InputHost must implement BuildDualSenseDataOnlyReport'
 Assert 'G4 DualSense IMU offsets' ($dsFn -match 'data, 15, envelope\.ImuGyroX' -and $dsFn -match 'data, 25, envelope\.ImuAccelZ') 'DualSense gyro data[15/17/19], accel data[21/23/25]'
-Assert 'G4 DualSense seq + PS byte' ($dsFn -match 'data\[6\] = \(byte\)\(frameIndex & 0xFF\)' -and $dsFn -match 'data\[9\] = \(byte\)\(\(\(envelope\.Buttons & 0x0400\)') 'DualSense seq wire 7 / PS at buttons[2] bit0'
+Assert 'G4 DualSense seq + PS byte' ($dsFn -match 'data\[6\] = \(byte\)\(frameIndex & 0xFF\)' -and $ihCompact.Contains('data[9]=(byte)((((envelope.Buttons&0x0400)!=0||(envelope.ScreenButtons&1)!=0)?0x01:0x00)|(edgePaddles&0xF0))')) 'DualSense sequence / PS bit preserve screen buttons and Edge paddles'
 # DualSense sensor_timestamp 必须按"单位速率×本产品节拍"推进（8ms → 24024/帧），
 # 而不是按真机 4ms 的 12012（否则时间推进只有实际的一半）。
 Assert 'G4 DualSense timestamp 8ms-scaled' ($dsFn -match '\* 24024L') 'DualSense sensor_timestamp must scale to the 8ms product tick'
-Assert 'G4 DualSense touch + status' ($dsFn -match 'data\[32\] = TouchpadFinger0DisabledId' -and $dsFn -match 'data\[52\] = Ds4WireBatteryFull') 'DualSense touch wire 33/37, status wire 53'
+Assert 'G4 DualSense touch + status' ($ihCompact.Contains('WriteDualSenseScreenPads(data,envelope)') -and $padsCompact.Contains('WriteDualSenseContact(data,32,e.ScreenPadsPresent?e.ScreenPadLeft:default,1)') -and $padsCompact.Contains('WriteDualSenseContact(data,36,e.ScreenPadsPresent?e.ScreenPadRight:default,2)') -and $dsFn -match 'data\[52\] = Ds4WireBatteryFull') 'DualSense uses shared touch writer at wire 33/37 and status at 53'
 Assert 'G4 DualSense persona wiring' ($ih -match '"dualsense" => "dualsense"' -and $native -match '"dualsense"') 'persona dualsense must be wired in InputHost + native'
 # 前端 persona 枚举不得漏项（2026-09-16 实测缺陷回归锁）：ButtonMappingView 的
 # 设置载入路径必须接受 dualsense，否则已保存的 DualSense 会在页面重载后被显示成
@@ -109,7 +116,7 @@ Assert 'G1 native frame imu' ($native -match '"imu", \{' -or $native -match 'imu
 # calibrated output. native must send mgx/mgy/mgz (matrixed input) and maxa/.. for
 # the wire, while the motion->stick blend keeps the calibrated cgx plane.
 Assert 'G1 native SD gyroDps = raw matrixed input' ($native -match 'mgx, mgy, mgz,\r?\n\s+maxa, may, maz,') 'SD wire must feed mgx (HC GetRawGyro parity), not calibrated cgx'
-Assert 'G1 native SD accelG = input accel' ($native -match '"accelG", \{\{"x", imuAdmitted \? maxa') 'SD wire must feed maxa (HC GetRawAcceleration parity)'
+Assert 'G1 native SD accelG = input accel' ($nativeCompact.Contains('frameContent.accelX=maxa;frameContent.accelY=may;frameContent.accelZ=maz;') -and $nativeCompact.Contains('"accelG",{{"x",c.imuAdmitted?c.accelX:0.0},{"y",c.imuAdmitted?c.accelY:0.0},{"z",c.imuAdmitted?c.accelZ:0.0}}')) 'matrixed acceleration is copied into and serialized from the admitted frame'
 Assert 'G2 usbip backend ensure' ($ih -match 'InstallUsbipBackend') 'usbip backend install path must exist (D3)'
 Assert 'G2 usbip PnP root' ($ih -match 'IsSteamDeckUsbRoot') 'usbip VID_28DE PnP root recognition must exist'
 
@@ -152,11 +159,11 @@ Assert 'S58 native family gate' ($native -match 'g_machineIdentity\.family == Ym
 # zeroing remains only for gate/merge/score semantics.
 Assert 'G8 canonical trigger zeroing (gate side)' ($native -match 'bLeftTrigger <= XINPUT_GAMEPAD_TRIGGER_THRESHOLD') 'inputCanonicalizeGamepad keeps the <30 gate'
 Assert 'G8 HC raw AxisState store' ($hcXi -match 'AxisState\[AxisFlags.L2\] = .*LeftTrigger') 'HC stores raw trigger'
-Assert 'G8 native frame carries ltRaw/rtRaw' ($native -match '"ltRaw", ltRaw' -and $native -match '"rtRaw", rtRaw') 'SUBMIT_FRAME must ship raw pre-canonical triggers'
+Assert 'G8 native frame carries ltRaw/rtRaw' ($nativeCompact.Contains('frameContent.ltRaw=ltRaw;') -and $nativeCompact.Contains('frameContent.rtRaw=rtRaw;') -and $nativeCompact.Contains('"ltRaw",c.ltRaw') -and $nativeCompact.Contains('"rtRaw",c.rtRaw')) 'raw triggers survive frame assembly'
 Assert 'G8 raw values derive from raw pad' ($native -match 'float ltRaw, float rtRaw' -and $native -match 'static_cast<float>\(pad\.bLeftTrigger / 255\.0\)') 'ltRaw travels from the raw pre-canonical pad (inputHostSubmitPad caller)'
 Assert 'G8 IH DS4 digital bit on raw>0' ($ih -match 'envelope\.LtRaw > 0f' -and $ih -match 'envelope\.RtRaw > 0f') 'DS4 L2/R2 press asserted on raw >0 (HC DualShock4Target.cs:40)'
 Assert 'G8 IH DS4 analog passes raw' ($ih -match 'data\[7\] = TriggerToByte\(envelope\.LtRaw\)' -and $ih -match 'data\[8\] = TriggerToByte\(envelope\.RtRaw\)') 'DS4 data[7]/[8] write raw analog (no canonical zero)'
-Assert 'G8 IH X360 consumes raw trigger' ($ih -match '\[HMAxis\.Vx\] = envelope\.LtRaw' -and $ih -match '\[HMAxis\.Vy\] = envelope\.RtRaw') 'Xbox360 AxisState consumes LtRaw/RtRaw'
+Assert 'G8 IH X360 consumes raw trigger' ($ihCompact.Contains('[separateTriggers?HMAxis.Z:HMAxis.Vx]=envelope.LtRaw') -and $ihCompact.Contains('[separateTriggers?HMAxis.Rz:HMAxis.Vy]=envelope.RtRaw') -and $ih -match 'separateTriggers = .*separate') 'combined Xbox360 Vx/Vy and separate Elite Z/Rz both consume raw triggers'
 
 # ── 5B: Xbox360 report per-bit parity markers ─────────────────────────────
 # HC Xbox360Target.cs:39 maps Special -> 0x0400 (Guide); YMCC 0x0400 ->
@@ -170,14 +177,14 @@ Assert '5B HC x360 direct int16 sticks' ($hcXb -match '\(short\)inputs\.AxisStat
 # 2026-09-16: packer signatures gained the per-frame wire counter arg
 # (DS4 wire7 6-bit counter / DualSense seq). Both persona paths must keep
 # publishing every frame, unconditionally.
-Assert '5G unconditional SubmitRawReport' ($ih -match '_controller\.SubmitRawReport\(BuildDs4V2DataOnlyReport\(profile, envelope, _ds4FrameCounter\+\+\)\)' -and $ih -match '_controller\.SubmitRawReport\(BuildDualSenseDataOnlyReport\(profile, envelope, _dualSenseFrameCounter\+\+\)\)') 'TrySubmitFrame must publish every frame (DS4 + DualSense counter paths)'
+Assert '5G unconditional SubmitRawReport' ($ihCompact.Contains('_controller.SubmitRawReport(BuildDs4V2DataOnlyReport(profile,envelope,_ds4FrameCounter++))') -and $ihCompact.Contains('varframeIndex=_dualSenseFrameCounter++;varreport=BuildDualSenseDataOnlyReport(profile,envelope,frameIndex);SubmitSonyReportChain1410(_controller,envelope,report,frameIndex,"live-frame")') -and $ihCompact.Contains('submit=bytes=>controller.SubmitRawReport(bytes)') -and $ihCompact.Contains('tracker.InvokeRaw(frame,report,submit);elsecontroller.SubmitRawReport(report)')) 'current DS4 direct and DualSense tracked/fallback submit paths are present'
 
 # ── 5I: Xbox360 0.5-center contract ───────────────────────────────────────
 Assert '5I Xbox360StickAxis 0.5 center' ($ih -match '\(value \+ 1f\) \* 0\.5f') 'Xbox360StickAxis maps signed to 0..1'
 
 # ── 5F: motion->stick weighted blend present (HC LayoutManager parity) ────
-Assert '5F axis modifiers applied' ($native -match 'inputHostApplyAxisModifiers\(contributionX, contributionY') 'pre-blend modifiers on motion contribution'
-Assert '5F gyroWeight factor' ($native -match 'g_realStickTest\.gyroWeight - stickNorm') 'HC weightFactor = gyroWeight - stickNorm'
+Assert '5F axis modifiers applied' ($nativeCompact.Contains('inputHostApplyAxisModifiers(b.contributionX,b.contributionY,b.contributionX,b.contributionY)')) 'production blend helper applies axis modifiers before weighting'
+Assert '5F gyroWeight factor' ($nativeCompact.Contains('b.weightFactor=gyroWeight-b.stickNorm;') -and $nativeCompact.Contains('outputPad,analogAdmitted,motionContribution,targetStick,g_realStickTest.gyroWeight)')) 'production blend receives configured gyroWeight and subtracts current stick magnitude'
 Assert '5F short clamp to int16' ($native -match 'outputShortX = inputHostClampShort') 'motion contribution clamps to int16'
 
 # ── 5H: DS4 dpad independent-byte layout (VIIPER) parity marker ───────────

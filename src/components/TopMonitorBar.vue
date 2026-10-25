@@ -11,6 +11,7 @@ import GameRecognitionControl from '@/components/GameRecognitionControl.vue';
 import { computed, onMounted, onUnmounted, ref } from 'vue';
 import { registerScheduledTask } from '@/scheduler';
 import { startTopMonitor, stopTopMonitor, readTopMonitor, setTopMonitorData, topMonitorData } from '@/bridge/topmon';
+import { monitorCpuTemperature } from '@/bridge/monitorSnapshotSignals';
 import InlineIcon from '@/components/InlineIcon.vue';
 import { chooseFolder, currentName, hasFolder, initMusic, playing, togglePlay } from '@/bridge/music';
 
@@ -18,31 +19,34 @@ const POLL_MS = 1000; // 前台每 1 秒读取一次；后台由 pauseWhenHidden
 let stopTask: (() => void) | null = null;
 
 const data = topMonitorData;
-const showBattery = computed(() => Boolean(data.value && (data.value.hasBattery || data.value.ac === 0)));
+const showBattery = computed(() => data.value?.hasBattery === true);
 
 // ── 格式化 ──
-const tdpText = computed(() => (data.value ? data.value.tdpW.toFixed(1) + 'W' : '--'));
+const tdpText = computed(() => (data.value && !data.value.hwDown && data.value.cpuPowerValid !== false && Number.isFinite(data.value.tdpW) && data.value.tdpW >= 0 ? data.value.tdpW.toFixed(1) + 'W' : '--'));
 const cpuText = computed(() => {
-  const m = data.value?.freqMhz ?? 0;
-  return m > 0 ? (m / 1000).toFixed(1) + 'G' : '--';
+  const m = data.value?.cpuClockValid === false ? 0 : data.value?.freqMhz ?? 0;
+  return Number.isFinite(m) && m > 0 ? (m / 1000).toFixed(1) + 'G' : '--';
 });
-const tempText = computed(() => (data.value && data.value.tempC > 0 ? Math.round(data.value.tempC) + '°' : '--'));
+const temperature = computed(() => monitorCpuTemperature(data.value));
+const tempText = computed(() => (temperature.value !== null && temperature.value > 0 ? Math.round(temperature.value) + '°' : '--'));
 const tempClass = computed(() => {
-  const t = data.value?.tempC ?? 0;
+  const t = temperature.value;
+  if (t === null) return '';
   if (t >= 85) return 't-hot';
   if (t >= 75) return 't-warm';
   return '';
 });
 const batteryText = computed(() => {
   const d = data.value;
-  if (!d) return '--';
+  if (!d || d.batteryPowerValid === false || !Number.isFinite(d.chargeW)) return '--';
   const watts = Math.round(Math.abs(d.chargeW));
-  if (watts === 0) return '0W';
-  return `${d.chargeW > 0 ? '+' : '-'}${watts}W`;
+  const prefix = d.batteryPowerEstimated === true ? '≈' : '';
+  if (watts === 0) return prefix + '0W';
+  return `${prefix}${d.chargeW > 0 ? '+' : '-'}${watts}W`;
 });
 const batteryClass = computed(() => {
   const d = data.value;
-  if (!d) return '';
+  if (!d || d.batteryPowerValid === false || !Number.isFinite(d.chargeW)) return '';
   if (d.chargeW > 0.5) return 'p-charge';
   if (d.chargeW < -0.5) return 'p-discharge';
   return 'p-zero';

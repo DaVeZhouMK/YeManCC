@@ -1,15 +1,15 @@
 <script setup lang="ts">
 import { ROUTES } from '@/router';
+import { radialTestingEnabled } from '@/radial/testingState';
 import { useRouter, useRoute } from 'vue-router';
-import { computed, onMounted, onUnmounted, ref } from 'vue';
+import { computed } from 'vue';
+import {mouseModeState} from '@/bridge/mouseModeState';
+import {manualSidebarMouse} from '@/bridge/mouseModePresentation';
+const manualMouse = computed(()=>manualSidebarMouse(mouseModeState.value));
 import { app, shell, windowApi } from '@/bridge/api';
 import AppIcon from '@/components/AppIcon.vue';
 import { fanHostLifecycle } from '@/bridge/fanHost';
 import { residentNavigationRoutes } from '@/bridge/residentNavigation';
-import {
-  loadPerformanceSchedule,
-  onPerformanceScheduleChanged,
-} from '@/bridge/performanceSchedule';
 import {
   fanNavigationMotion,
   fanNavigationSpinDuration,
@@ -17,31 +17,8 @@ import {
 
 const router = useRouter();
 const route = useRoute();
-const quickModeEnabled = ref(false);
-let stopScheduleWatch: (() => void) | null = null;
-
-// Entry visibility is not hardware readiness; inner-page actions retain native admission.
-const visibleRoutes = computed(() => residentNavigationRoutes(ROUTES, quickModeEnabled.value));
-
-onMounted(async () => {
-  const config = await loadPerformanceSchedule().catch(() => null);
-  quickModeEnabled.value = config?.enabled === true;
-  window.dispatchEvent(new CustomEvent('performance-schedule:visibility', { detail: { enabled: quickModeEnabled.value } }));
-  if (quickModeEnabled.value && (route.path === '/tdp' || route.path === '/cpu')) {
-    void router.replace('/schedule');
-  }
-  stopScheduleWatch = onPerformanceScheduleChanged((next) => {
-    quickModeEnabled.value = next.enabled;
-    window.dispatchEvent(new CustomEvent('performance-schedule:visibility', { detail: { enabled: next.enabled } }));
-    if (next.enabled && (route.path === '/tdp' || route.path === '/cpu')) {
-      void router.replace('/schedule');
-    }
-  });
-});
-
-onUnmounted(() => {
-  stopScheduleWatch?.();
-});
+// Retired pages stay absent in every performance mode and device state.
+const visibleRoutes = computed(() => residentNavigationRoutes(ROUTES, false, radialTestingEnabled.value));
 
 function go(path: string) {
   router.push(path);
@@ -83,14 +60,14 @@ async function quit() {
     <div class="nav-items">
       <button
         v-for="r in visibleRoutes"
-        :key="`${route.fullPath}:${r.path}`"
+        :key="r.path"
         class="nav-item"
         data-gp-ignore
         :class="{ active: route.path === r.path }"
         @click="go(r.path)"
       >
-        <span class="nav-icon"><AppIcon :name="r.icon" :stroke-width="['gauge', 'gamepad', 'rotate'].includes(r.icon) ? 1.2 : undefined" :class="{ spinning: r.path === '/fan' && fanNavigationMotion }" :style="r.path === '/fan' ? { '--fan-spin-duration': fanNavigationSpinDuration } : undefined" /></span>
-        <span class="nav-label">{{ r.title }}</span>
+        <span class="nav-icon"><AppIcon :key="r.path + (r.path === '/button-mapping' && manualMouse ? ':mouse' : ':default')" :name="r.path === '/button-mapping' && manualMouse ? 'mouse' : r.icon" :stroke-width="['gauge', 'gamepad', 'rotate'].includes(r.icon) ? 1.2 : undefined" :class="{ spinning: r.path === '/fan' && fanNavigationMotion }" :style="r.path === '/fan' ? { '--fan-spin-duration': fanNavigationSpinDuration } : undefined" /></span>
+        <span class="nav-label">{{ r.path === '/button-mapping' && manualMouse ? '模拟鼠标' : r.title }}</span>
       </button>
     </div>
     <div class="nav-foot app-region-no-drag">
@@ -105,6 +82,7 @@ async function quit() {
 
 <style scoped>
 .nav-brand {
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   gap: 4px;
@@ -174,12 +152,12 @@ async function quit() {
   white-space: nowrap;
 }
 .nav-item:hover {
-  background: #131c28;
+  background: color-mix(in srgb, var(--text) 6%, var(--bg-input));
   color: var(--text);
 }
 .nav-item.active {
-  background: #162434;
-  border-color: rgba(46, 166, 255, 0.35);
+  background: var(--accent-surface);
+  border-color: var(--accent-border);
   color: var(--accent);
 }
 .nav-item:focus-visible {
@@ -212,7 +190,7 @@ async function quit() {
   width: 100%;
 }
 .nav-foot-btn:hover {
-  background: #131c28;
+  background: color-mix(in srgb, var(--text) 6%, var(--bg-input));
   color: var(--text);
 }
 .nav-quit {
@@ -231,4 +209,14 @@ async function quit() {
 .nav-quit:focus-visible {
   box-shadow: var(--focus-ring);
 }
+
+/* Keep navigation ownership unchanged; only the selected item emits light. */
+.nav-items>.nav-item{position:relative;isolation:isolate;border-radius:0}
+.nav-items>.nav-item.active{border-color:transparent;border-radius:0;background-color:color-mix(in srgb,var(--accent) 22%,var(--bg-panel));background-image:linear-gradient(100deg,color-mix(in srgb,var(--accent) 32%,transparent),color-mix(in srgb,var(--accent) 8%,transparent) 65%,transparent);color:var(--text);box-shadow:inset 3px 0 var(--accent),inset 0 1px 0 #b9e8ff1f,0 0 14px color-mix(in srgb,var(--accent) 10%,transparent)}
+.nav-items>.nav-item.active::before{content:"";position:absolute;left:0;top:2px;bottom:2px;width:3px;border-radius:2px;background:linear-gradient(180deg,color-mix(in srgb,var(--accent) 35%,transparent),color-mix(in srgb,var(--accent) 45%,white) 42%,var(--accent) 78%,color-mix(in srgb,var(--accent) 40%,transparent));box-shadow:0 0 7px color-mix(in srgb,var(--accent) 60%,transparent),0 0 2px #d2f3ff80;pointer-events:none;opacity:.82}
+.nav-items>.nav-item.active .nav-icon,.nav-items>.nav-item.active .nav-label{color:var(--text)}
+.nav-items>.nav-item.active:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+
+
+
 </style>

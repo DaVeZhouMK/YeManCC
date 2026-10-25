@@ -1,0 +1,290 @@
+{
+  "schemaVersion": 1,
+  "sourceProfile": "B51_IMMUTABLE_LEASE_PHASE_COMPACT_SOURCE_V1",
+  "kind": "EXACT_POST_HARDENED_SOURCE_TRANSFORM_ONLY",
+  "stageAfter": "--prepare-hardened-source",
+  "inputFiles": [
+    {
+      "path": "positive/source/native/private_runtime_guard.h",
+      "sha256": "c2538c66e5773a30baabbdb12085c1890ad7f2ad6fa1525328b11547ac23b4e8"
+    },
+    {
+      "path": "positive/fixture.cpp",
+      "sha256": "df374ac7441699eb3ab828dfa094b6c28236acffd1b9f715894a0a7dd52fbc61"
+    },
+    {
+      "path": "positive/source/native/private_terminal_observer.h",
+      "sha256": "734de5489fd81f7c6b7cbc45b1c64a7cfde76bd17a6bbbde39b312ef39027373"
+    },
+    {
+      "path": "positive/pipe_cases.inc",
+      "sha256": "b84e7fb5e0d602e7e669f656ec34edf1a43c41f2d01fca889bbbd65e8d421cdf"
+    },
+    {
+      "path": "managed/PrivateRuntimeGuard.cs",
+      "sha256": "9551f5f3ca6e32caff3eb015feed9e7139131f0965b1db254997ab79075f12da"
+    },
+    {
+      "path": "managed/ManagedEntry.cs",
+      "sha256": "f66ca0511a573084b343f785173b7bc13eee8b53502d80f81e337d0d7d3bbcce"
+    },
+    {
+      "path": "managed/ProductionPipe.cs",
+      "sha256": "0da330ed91a0b93ebbe2a4828a474c97ba75c2d3ad13fd3342b06d61c1aba6dc"
+    },
+    {
+      "path": "managed/Fixture.csproj",
+      "sha256": "476455f48193d7ebf984e39041831d437fa1174ff1ca39b11922a455940a2a0b"
+    }
+  ],
+  "files": [
+    {
+      "path": "positive/source/native/private_binding_lease.h",
+      "beforeSha256": null,
+      "afterSha256": "399ed481e96cc99861e972bc2f7dc6f7d0bfb24476e9bfd7a1bdcff4f74a7141",
+      "source": "#pragma once\n#include <windows.h>\n#include <bcrypt.h>\n#include <map>\n#include <memory>\n#include <vector>\n#include <string>\n#include <fstream>\n#include <stdexcept>\n#include <filesystem>\n#include <cwctype>\n#include <algorithm>\n#include <set>\n#pragma comment(lib,\"bcrypt.lib\")\nnamespace ymccPrivateBinding {\nusing Json=nlohmann::json;\nstruct Handle {HANDLE h=INVALID_HANDLE_VALUE;Handle()=default;explicit Handle(HANDLE v):h(v){}~Handle(){if(h!=INVALID_HANDLE_VALUE)CloseHandle(h);}Handle(const Handle&)=delete;Handle& operator=(const Handle&)=delete;};\ninline std::string utf8(const std::wstring& w){const auto n=WideCharToMultiByte(CP_UTF8,0,w.c_str(),int(w.size()),nullptr,0,nullptr,nullptr);std::string out(n,'\\0');if(n)WideCharToMultiByte(CP_UTF8,0,w.c_str(),int(w.size()),out.data(),n,nullptr,nullptr);return out;}\ninline std::wstring wide(const std::string& s){const auto n=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),int(s.size()),nullptr,0);if(!n)throw std::runtime_error(\"lease-path-encoding\");std::wstring out(n,L'\\0');MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,s.data(),int(s.size()),out.data(),n);return out;}\ninline std::string digest(HANDLE file){BCRYPT_ALG_HANDLE alg=nullptr;BCRYPT_HASH_HANDLE hash=nullptr;auto cleanup=[&](){if(hash)BCryptDestroyHash(hash);if(alg)BCryptCloseAlgorithmProvider(alg,0);};\n if(BCryptOpenAlgorithmProvider(&alg,BCRYPT_SHA256_ALGORITHM,nullptr,0)<0||BCryptCreateHash(alg,&hash,nullptr,0,nullptr,0,0)<0){cleanup();throw std::runtime_error(\"lease-sha-init\");}\n LARGE_INTEGER zero{};if(!SetFilePointerEx(file,zero,nullptr,FILE_BEGIN)){cleanup();throw std::runtime_error(\"lease-seek\");}BYTE block[65536],out[32];DWORD n=0;\n for(;;){if(!ReadFile(file,block,sizeof(block),&n,nullptr)){cleanup();throw std::runtime_error(\"lease-read\");}if(!n)break;if(BCryptHashData(hash,block,n,0)<0){cleanup();throw std::runtime_error(\"lease-sha-data\");}}\n if(BCryptFinishHash(hash,out,32,0)<0){cleanup();throw std::runtime_error(\"lease-sha-finish\");}cleanup();static const char hex[]=\"0123456789abcdef\";std::string result;for(const auto b:out){result+=hex[b>>4];result+=hex[b&15];}return result;}\ninline std::string readText(HANDLE h){LARGE_INTEGER zero{},size{};if(!GetFileSizeEx(h,&size)||size.QuadPart<0||size.QuadPart>16*1024*1024||!SetFilePointerEx(h,zero,nullptr,FILE_BEGIN))throw std::runtime_error(\"lease-text-size\");std::string text(size_t(size.QuadPart),'\\0');DWORD got=0;if(!ReadFile(h,text.data(),DWORD(text.size()),&got,nullptr)||got!=text.size())throw std::runtime_error(\"lease-text-read\");return text;}\nstruct Lease {\n std::set<std::wstring> directories;std::vector<std::unique_ptr<Handle>> held;std::map<std::wstring,std::string> known;Json rows=Json::array();std::wstring ticket;std::string ticketHash;unsigned long long readBytes=0;Json timing=Json::array();\n static std::wstring key(std::wstring value){for(auto& c:value)c=wchar_t(towlower(c));return value;}\n void lockParents(const std::wstring& p){for(auto dir=std::filesystem::path(p).parent_path();!dir.empty();){const auto k=key(dir.wstring());if(directories.insert(k).second){auto h=std::make_unique<Handle>(CreateFileW(dir.c_str(),FILE_READ_ATTRIBUTES,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_FLAG_BACKUP_SEMANTICS|FILE_FLAG_OPEN_REPARSE_POINT,nullptr));BY_HANDLE_FILE_INFORMATION info{};if(h->h==INVALID_HANDLE_VALUE||!GetFileInformationByHandle(h->h,&info)||!(info.dwFileAttributes&FILE_ATTRIBUTE_DIRECTORY)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT))throw std::runtime_error(\"lease-directory-lock\");held.push_back(std::move(h));}const auto next=dir.parent_path();if(next==dir)break;dir=next;}}\n HANDLE pin(const std::wstring& p,const std::string& expected){auto k=key(p);const auto found=known.find(k);if(found!=known.end()){if(found->second!=expected)throw std::runtime_error(\"lease-pin-conflict\");return INVALID_HANDLE_VALUE;}\n  lockParents(p);if(!ymccPrivateRun::plainPath(p,false))throw std::runtime_error(\"lease-reparse-or-nondisk-path\");auto handle=std::make_unique<Handle>(CreateFileW(p.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_SEQUENTIAL_SCAN,nullptr));\n  if(handle->h==INVALID_HANDLE_VALUE||GetFileType(handle->h)!=FILE_TYPE_DISK)throw std::runtime_error(\"lease-readonly-lock\");BY_HANDLE_FILE_INFORMATION before{},after{};if(!GetFileInformationByHandle(handle->h,&before)||before.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)throw std::runtime_error(\"lease-file-info\");\n  const auto actual=digest(handle->h);if(actual!=expected)throw std::runtime_error(\"lease-content-pin\");if(!GetFileInformationByHandle(handle->h,&after)||before.dwVolumeSerialNumber!=after.dwVolumeSerialNumber||before.nFileIndexHigh!=after.nFileIndexHigh||before.nFileIndexLow!=after.nFileIndexLow||before.nFileSizeHigh!=after.nFileSizeHigh||before.nFileSizeLow!=after.nFileSizeLow||CompareFileTime(&before.ftLastWriteTime,&after.ftLastWriteTime))throw std::runtime_error(\"lease-content-drift\");\n  const auto bytes=(static_cast<unsigned long long>(after.nFileSizeHigh)<<32)|after.nFileSizeLow;readBytes+=bytes;rows.push_back(Json{{\"path\",utf8(p)},{\"sha256\",actual},{\"bytes\",bytes},{\"volume\",after.dwVolumeSerialNumber},{\"fileIndexHigh\",after.nFileIndexHigh},{\"fileIndexLow\",after.nFileIndexLow}});known.emplace(k,actual);const auto result=handle->h;held.push_back(std::move(handle));return result;\n }\n void checkpoint(const char* stage){timing.push_back(Json{{\"stage\",stage},{\"realTickMs\",::GetTickCount64()},{\"leaseFiles\",rows.size()},{\"leaseReadBytes\",readBytes}});std::ofstream out(std::filesystem::path(ymccPrivateRun::bound.root)/L\"timing-checkpoints.json\",std::ios::binary|std::ios::trunc);out<<timing.dump();if(!out)throw std::runtime_error(\"timing-checkpoint-write\");}\n explicit Lease(const std::wstring& dll){checkpoint(\"before-binding-lease\");const auto manifest=std::filesystem::path(dll).parent_path()/L\"fixture-manifest.json\";const auto expected=utf8(ymccPrivateRun::env(L\"YMCC_PRIVATE_MANIFEST_SHA256\"));if(expected.size()!=64)throw std::runtime_error(\"lease-manifest-pin-env\");const auto m=pin(manifest.wstring(),expected);const auto data=Json::parse(readText(m));if(data.value(\"status\",\"\")!=\"BUILT\")throw std::runtime_error(\"lease-manifest-status\");const auto& inputs=data.at(\"inputBindings\");\n  for(const auto& row:inputs.at(\"sources\")){const auto hash=row.at(\"sha256\").get<std::string>();pin(wide(row.at(\"path\").get<std::string>()),hash);pin(wide(row.at(\"snapshot\").get<std::string>()),hash);}\n  for(const auto& row:inputs.at(\"generatedInputs\"))pin(wide(row.at(\"path\").get<std::string>()),row.at(\"sha256\").get<std::string>());\n  for(const auto& row:data.at(\"runtimeArtifacts\"))pin(wide(row.at(\"path\").get<std::string>()),row.at(\"sha256\").get<std::string>());\n  // Exact existing framework allowlist members only; no runtime directory wildcard/inventory.\n  for(const auto& row:inputs.at(\"toolchainAllowlist\")){const auto p=wide(row.at(\"path\").get<std::string>());if(key(p).find(L\"\\\\dotnet\\\\shared\\\\microsoft.netcore.app\\\\\")!=std::wstring::npos)pin(p,row.at(\"sha256\").get<std::string>());}\n  ticket=ymccPrivateRun::bound.root+L\"\\\\managed-bindings-lease.json\";const Json proof{{\"kind\",\"NATIVE_OWNED_READONLY_BINDING_LEASE_V1\"},{\"parentPid\",GetCurrentProcessId()},{\"manifestSha256\",expected},{\"inputManifestSha256\",data.at(\"inputManifestSha256\")},{\"files\",rows},{\"byteReads\",readBytes},{\"immutability\",\"Native parent holds GENERIC_READ / FILE_SHARE_READ without write/delete sharing through child lifetime\"}};const auto text=proof.dump();\n  auto output=std::make_unique<Handle>(CreateFileW(ticket.c_str(),GENERIC_READ|GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_FLAG_OPEN_REPARSE_POINT|FILE_FLAG_WRITE_THROUGH,nullptr));DWORD wrote=0;if(output->h==INVALID_HANDLE_VALUE||!WriteFile(output->h,text.data(),DWORD(text.size()),&wrote,nullptr)||wrote!=text.size()||!FlushFileBuffers(output->h))throw std::runtime_error(\"lease-proof-create\");ticketHash=digest(output->h);output.reset();pin(ticket,ticketHash);checkpoint(\"after-binding-lease\");\n }\n};\nstatic std::unique_ptr<Lease> invocation;\ninline void initialize(const std::wstring& dll){if(invocation)throw std::runtime_error(\"lease-invocation-reentry\");invocation=std::make_unique<Lease>(dll);}\ninline void checkpoint(const char* stage){if(!invocation)throw std::runtime_error(\"lease-not-ready\");invocation->checkpoint(stage);}\ninline std::vector<wchar_t> environment(std::vector<wchar_t> old){if(!invocation)throw std::runtime_error(\"lease-not-ready\");std::vector<std::wstring> vars;for(size_t i=0;i<old.size()&&old[i];){vars.emplace_back(old.data()+i);i+=vars.back().size()+1;}vars.push_back(L\"YMCC_PRIVATE_BINDING_LEASE=\"+invocation->ticket);vars.push_back(L\"YMCC_PRIVATE_BINDING_LEASE_SHA256=\"+wide(invocation->ticketHash));vars.push_back(L\"YMCC_PRIVATE_MANIFEST_SHA256=\"+ymccPrivateRun::env(L\"YMCC_PRIVATE_MANIFEST_SHA256\"));std::sort(vars.begin(),vars.end(),[](const auto&a,const auto&b){return _wcsicmp(a.c_str(),b.c_str())<0;});std::vector<wchar_t> block;for(const auto&v:vars){block.insert(block.end(),v.begin(),v.end());block.push_back(0);}block.push_back(0);return block;}\n}\n"
+    },
+    {
+      "path": "positive/fixture.cpp",
+      "beforeSha256": "df374ac7441699eb3ab828dfa094b6c28236acffd1b9f715894a0a7dd52fbc61",
+      "hunks": [
+        {
+          "label": "include exact invocation lease helper",
+          "before": "#include \"source/native/private_runtime_guard.h\"",
+          "after": "#include \"source/native/private_runtime_guard.h\"\n#include \"source/native/private_binding_lease.h\""
+        },
+        {
+          "label": "lease once before source cases",
+          "before": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureB51OrderedReturn[\"actualOriginalRegionBoundary\"]=fixtureB51OrderedBoundary();fixtureTargetReturnFullPipeCases();fixtureB51OrderedReturn[\"postTargetReturnTail\"]=fixtureB51OrderedBoundary();ok=failures.empty();}",
+          "after": "else if(mode==L\"full-pipe\"){ymccPrivateBinding::initialize(fixtureManagedDll);ymccPrivateBinding::checkpoint(\"before-original-region\");fullPipeCases();fixtureB51OrderedReturn[\"actualOriginalRegionBoundary\"]=fixtureB51OrderedBoundary();ymccPrivateBinding::checkpoint(\"original-region-boundary\");fixtureTargetReturnFullPipeCases();fixtureB51OrderedReturn[\"postTargetReturnTail\"]=fixtureB51OrderedBoundary();ymccPrivateBinding::checkpoint(\"post-target-return-tail\");ok=failures.empty();}"
+        }
+      ],
+      "afterSha256": "facc2c7f8227366552de937c69b87fea2733c5ff2b55bd3936e72e745dd3104f"
+    },
+    {
+      "path": "positive/pipe_cases.inc",
+      "beforeSha256": "b84e7fb5e0d602e7e669f656ec34edf1a43c41f2d01fca889bbbd65e8d421cdf",
+      "hunks": [
+        {
+          "label": "extend clean child environment with exact parent-owned locked proof",
+          "before": "auto environment=ymccPrivateRun::childEnvironment(GetCurrentProcessId(),g_inputHostPipeName,U2W(g_inputHostStartupNonce));",
+          "after": "auto environment=ymccPrivateBinding::environment(ymccPrivateRun::childEnvironment(GetCurrentProcessId(),g_inputHostPipeName,U2W(g_inputHostStartupNonce)));"
+        }
+      ],
+      "afterSha256": "e9684a71d98c179712a5f875c792871a1ab57580a5c1480349c4dc1009bea36a"
+    },
+    {
+      "path": "managed/PrivateBindingLease.cs",
+      "beforeSha256": null,
+      "afterSha256": "5dd38dbd7b64831052050f4a5fb4e4e6aa80f2cf093c3d2dff1659fa097b36ef",
+      "source": "using System.IO;using System.Security.Cryptography;using System.Text.Json;\ninternal static class PrivateBindingLease {\n private sealed record OwnedHash(FileStream Stream,string Hash);\n private static readonly Dictionary<string,OwnedHash> Local=new(StringComparer.OrdinalIgnoreCase);\n private static readonly Dictionary<string,string> Leased=new(StringComparer.OrdinalIgnoreCase);\n private static FileStream? Ticket;private static ParentProcessLifetime? Parent;private static string TicketHash=\"\";private static long LocalBytes,LocalHashes,LeaseHits;\n internal static string Hash(string path){\n  if(Volatile.Read(ref DisposalStarted)!=0)throw new ObjectDisposedException(nameof(PrivateBindingLease));var hashStarted=System.Diagnostics.Stopwatch.GetTimestamp();try{\n  path=Path.GetFullPath(path);\n  if(Parent is { IsAlive:true }&&Ticket is not null&&Leased.TryGetValue(path,out var protectedHash)){++LeaseHits;return protectedHash;}\n  if(Local.TryGetValue(path,out var cached))return cached.Hash;\n  // A fallback path is hashed for real and held without write/delete sharing until this child exits.\n  var stream=new FileStream(path,FileMode.Open,FileAccess.Read,FileShare.Read,65536,FileOptions.SequentialScan);try{var bytes=stream.Length;var hash=Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();Local.Add(path,new(stream,hash));LocalBytes+=bytes;++LocalHashes;return hash;}catch{stream.Dispose();throw;}\n  }finally{PrivateRuntimeTiming.RecordHash(hashStarted);}\n }\n internal static void Initialize(int parentPid){\n  if(Volatile.Read(ref DisposalStarted)!=0)throw new ObjectDisposedException(nameof(PrivateBindingLease));\n  if(Ticket is not null)throw new InvalidDataException(\"binding-lease-reentry\");var root=Environment.GetEnvironmentVariable(\"YMCC_PRIVATE_RUN_ROOT\")??\"\";var supplied=Environment.GetEnvironmentVariable(\"YMCC_PRIVATE_BINDING_LEASE\")??\"\";var expected=Environment.GetEnvironmentVariable(\"YMCC_PRIVATE_BINDING_LEASE_SHA256\")??\"\";var manifest=Environment.GetEnvironmentVariable(\"YMCC_PRIVATE_MANIFEST_SHA256\")??\"\";\n  if(expected.Length!=64||manifest.Length!=64||!string.Equals(Path.GetFullPath(supplied),Path.Combine(root,\"managed-bindings-lease.json\"),StringComparison.OrdinalIgnoreCase))throw new InvalidDataException(\"binding-lease-path-pin\");\n  PrivateRuntimeTiming.Mark(\"lease-proof-open-begin\");var file=new FileStream(supplied,FileMode.Open,FileAccess.Read,FileShare.Read);PrivateRuntimeTiming.Mark(\"lease-proof-open-end\");try{PrivateRuntimeTiming.Mark(\"lease-proof-sha-begin\");TicketHash=Convert.ToHexString(SHA256.HashData(file)).ToLowerInvariant();PrivateRuntimeTiming.Mark(\"lease-proof-sha-end\");if(TicketHash!=expected)throw new InvalidDataException(\"binding-lease-proof-changed\");file.Position=0;PrivateRuntimeTiming.Mark(\"lease-proof-json-begin\");using var proof=JsonDocument.Parse(file);var p=proof.RootElement;PrivateRuntimeTiming.Mark(\"lease-proof-json-end\");\n   if(p.GetProperty(\"kind\").GetString()!=\"NATIVE_OWNED_READONLY_BINDING_LEASE_V1\"||p.GetProperty(\"parentPid\").GetInt32()!=parentPid||p.GetProperty(\"manifestSha256\").GetString()!=manifest||p.GetProperty(\"inputManifestSha256\").GetString()!=ManagedFixtureIdentity.InputManifestSha256)throw new InvalidDataException(\"binding-lease-parent-manifest\");\n   PrivateRuntimeTiming.Mark(\"lease-parent-open-begin\");Parent=ParentProcessLifetime.TryOpen(parentPid);PrivateRuntimeTiming.Mark(\"lease-parent-open-end\");if(Parent is null||!Parent.IsAlive)throw new InvalidDataException(\"binding-lease-parent-not-live\");\n   PrivateRuntimeTiming.Mark(\"lease-proof-rows-begin\");foreach(var row in p.GetProperty(\"files\").EnumerateArray()){var path=Path.GetFullPath(row.GetProperty(\"path\").GetString()!);var hash=row.GetProperty(\"sha256\").GetString()!;if(hash.Length!=64||!Leased.TryAdd(path,hash))throw new InvalidDataException(\"binding-lease-duplicate-row\");}\n   Ticket=file;PrivateRuntimeTiming.Mark(\"lease-proof-rows-end\");\n  }catch{file.Dispose();Parent?.Dispose();Parent=null;Leased.Clear();throw;}\n }\n private static int DisposalStarted;private static bool ParentWasOwned,ParentDisposeReturned,TicketWasOwned,TicketDisposeReturned;private static int LocalDisposed;\n internal static void Dispose(){if(Interlocked.Exchange(ref DisposalStarted,1)!=0)return;var errors=new List<Exception>();\n  bool Release(IDisposable? value){if(value is null)return false;try{value.Dispose();return true;}catch(Exception ex){errors.Add(ex);return false;}}\n  var parent=Parent;Parent=null;ParentWasOwned=parent is not null;ParentDisposeReturned=Release(parent);\n  var ticket=Ticket;Ticket=null;TicketWasOwned=ticket is not null;TicketDisposeReturned=Release(ticket);\n  foreach(var value in Local.Values)if(Release(value.Stream))++LocalDisposed;Local.Clear();Leased.Clear();\n  if(errors.Count!=0)throw new AggregateException(\"binding-lease-disposal-failed\",errors);\n }\n internal static object CleanupSnapshot()=>new{disposalStarted=Volatile.Read(ref DisposalStarted)!=0,parentWasOwned=ParentWasOwned,parentDisposeReturned=ParentDisposeReturned,ticketWasOwned=TicketWasOwned,ticketDisposeReturned=TicketDisposeReturned,localStreamsDisposed=LocalDisposed,remainingLocalStreams=Local.Count,parentFieldCleared=Parent is null,ticketFieldCleared=Ticket is null,meaning=\"Existing original ParentProcessLifetime.Dispose requests unregister and closes its owned wait handle. Unregister return is not exposed; this is disposal-call evidence, not proof of OS exit.\"};\n internal static object Snapshot()=>new{kind=\"INHERITED_NATIVE_READONLY_CONTENT_LEASE\",ticketSha256=TicketHash,leasedPaths=Leased.Count,leaseHits=LeaseHits,localActualHashes=LocalHashes,localActualHashBytes=LocalBytes,parentAlive=Parent?.IsAlive??false,meaning=\"Hashes are actual native once-per-invocation content reads protected by held no-write/no-delete-share handles; unknown paths or dead parent fall back to real child hash+lock. Not per-child byte hashing.\"};\n}\n"
+    },
+    {
+      "path": "managed/ManagedEntry.cs",
+      "beforeSha256": "f66ca0511a573084b343f785173b7bc13eee8b53502d80f81e337d0d7d3bbcce",
+      "hunks": [
+        {
+          "label": "use actual protected content hashes instead of repeated per-child disk hashing",
+          "before": "        using var stream = File.OpenRead(file);\n        return Convert.ToHexString(SHA256.HashData(stream)).ToLowerInvariant();",
+          "after": "        return PrivateBindingLease.Hash(file);"
+        },
+        {
+          "label": "accept only factory-bound protected proof before fixture creation",
+          "before": "        PrivateRuntimeGuard.ValidateLaunch(options.Pipe, options.ParentPid, options.Receipt, options.Nonce);",
+          "after": "        PrivateRuntimeGuard.ValidateLaunch(options.Pipe, options.ParentPid, options.Receipt, options.Nonce);\n        PrivateBindingLease.Initialize(options.ParentPid);"
+        },
+        {
+          "label": "explicit changed hash evidence meaning in existing child receipt",
+          "before": "                inputManifestSha256 = ManagedFixtureIdentity.InputManifestSha256,",
+          "after": "                inputManifestSha256 = ManagedFixtureIdentity.InputManifestSha256,\n                immutableBindingLease = PrivateBindingLease.Snapshot(),"
+        },
+        {
+          "label": "timing exact child after existing launch guard and finally covers initialization failure",
+          "before": "        PrivateBindingLease.Initialize(options.ParentPid);",
+          "after": "        PrivateRuntimeTiming.Initialize(options.Receipt);\n        try\n        {\n        PrivateRuntimeTiming.Mark(\"lease-initialize-begin\");\n        PrivateBindingLease.Initialize(options.ParentPid);\n        PrivateRuntimeTiming.Mark(\"lease-initialize-end\");"
+        },
+        {
+          "label": "actual Host fixture construction interval",
+          "before": "        _managedSession = new HostSession(options.Nonce, options.ParentPid);",
+          "after": "        PrivateRuntimeTiming.Mark(\"host-fixture-create-begin\");\n        _managedSession = new HostSession(options.Nonce, options.ParentPid);\n        PrivateRuntimeTiming.Mark(\"host-fixture-create-end\");"
+        },
+        {
+          "label": "manifest hash and separate real read/JSON parse",
+          "before": "            buildReceiptHash = ManagedHash(inputPath);\n            using var build = JsonDocument.Parse(File.ReadAllBytes(inputPath));",
+          "after": "            PrivateRuntimeTiming.Mark(\"manifest-hash-begin\");\n            buildReceiptHash = ManagedHash(inputPath);\n            PrivateRuntimeTiming.Mark(\"manifest-hash-end\");\n            PrivateRuntimeTiming.Mark(\"manifest-read-begin\");\n            var manifestBytes = File.ReadAllBytes(inputPath);\n            PrivateRuntimeTiming.Mark(\"manifest-read-end\");\n            PrivateRuntimeTiming.Mark(\"manifest-json-begin\");\n            using var build = JsonDocument.Parse(manifestBytes);\n            PrivateRuntimeTiming.Mark(\"manifest-json-end\");"
+        },
+        {
+          "label": "binding JSON SHA actual interval",
+          "before": "            var bindingText = build.RootElement.GetProperty(\"inputBindings\").GetRawText();",
+          "after": "            PrivateRuntimeTiming.Mark(\"manifest-bindings-sha-begin\");\n            var bindingText = build.RootElement.GetProperty(\"inputBindings\").GetRawText();"
+        },
+        {
+          "label": "manifest bound before real runtime verification",
+          "before": "            var outputChecks = new List<object>();",
+          "after": "            PrivateRuntimeTiming.Mark(\"manifest-bindings-sha-end\");\n            PrivateRuntimeTiming.Mark(\"startup-bindings-begin\");\n            var outputChecks = new List<object>();"
+        },
+        {
+          "label": "real Fixture.Reset interval",
+          "before": "            Fixture.Reset();",
+          "after": "            PrivateRuntimeTiming.Mark(\"startup-bindings-end\");\n            PrivateRuntimeTiming.Mark(\"fixture-reset-begin\");\n            Fixture.Reset();\n            PrivateRuntimeTiming.Mark(\"fixture-reset-end\");"
+        },
+        {
+          "label": "actual real loop wait interval",
+          "before": "            pipeLoopExitCode = await RunPipeClientAsync(options.Pipe, options.ParentPid, session).ConfigureAwait(false);",
+          "after": "            PrivateRuntimeTiming.Mark(\"pipe-loop-begin\");\n            pipeLoopExitCode = await RunPipeClientAsync(options.Pipe, options.ParentPid, session).ConfigureAwait(false);\n            PrivateRuntimeTiming.Mark(\"pipe-loop-end\");"
+        },
+        {
+          "label": "real managed final release before original business disposal",
+          "before": "            stateAfterLoop ??= session.ManagedSnapshot();",
+          "after": "            PrivateRuntimeTiming.Mark(\"final-release-begin\");\n            stateAfterLoop ??= session.ManagedSnapshot();"
+        },
+        {
+          "label": "final binding checks stay before original final receipt",
+          "before": "            stateAfterFinalCleanup = session.ManagedSnapshot();",
+          "after": "            PrivateRuntimeTiming.Mark(\"final-release-end\");\n            stateAfterFinalCleanup = session.ManagedSnapshot();\n            PrivateRuntimeTiming.Mark(\"final-bindings-begin\");"
+        },
+        {
+          "label": "end final binding assertions",
+          "before": "            // A child can record that it is returning, but cannot observe its",
+          "after": "            PrivateRuntimeTiming.Mark(\"final-bindings-end\");\n            // A child can record that it is returning, but cannot observe its"
+        },
+        {
+          "label": "receipt open interval",
+          "before": "                using var stream = new FileStream(options.Receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None);",
+          "after": "                PrivateRuntimeTiming.Mark(\"receipt-open-begin\");\n                using var stream = new FileStream(options.Receipt, FileMode.CreateNew, FileAccess.Write, FileShare.None);\n                PrivateRuntimeTiming.Mark(\"receipt-open-end\");\n                PrivateRuntimeTiming.Mark(\"receipt-serialize-begin\");"
+        },
+        {
+          "label": "receipt serialization and flush are separately actual",
+          "before": "                await JsonSerializer.SerializeAsync(stream, receipt, new JsonSerializerOptions { WriteIndented = true }).ConfigureAwait(false);\n                await stream.FlushAsync().ConfigureAwait(false);",
+          "after": "                await JsonSerializer.SerializeAsync(stream, receipt, new JsonSerializerOptions { WriteIndented = true }).ConfigureAwait(false);\n                PrivateRuntimeTiming.Mark(\"receipt-serialize-end\");\n                PrivateRuntimeTiming.Mark(\"receipt-flush-begin\");\n                await stream.FlushAsync().ConfigureAwait(false);\n                PrivateRuntimeTiming.Mark(\"receipt-flush-end\");"
+        },
+        {
+          "label": "after receipt stream close, finally releases before async Main exits",
+          "before": "        Console.WriteLine(JsonSerializer.Serialize(new { receipt = options.Receipt, requestedExitCode, pipeLoopReturned }));\n        return requestedExitCode;\n    }",
+          "after": "        PrivateRuntimeTiming.Mark(\"receipt-closed\");\n        Console.WriteLine(JsonSerializer.Serialize(new { receipt = options.Receipt, requestedExitCode, pipeLoopReturned }));\n        return requestedExitCode;\n        }\n        finally\n        {\n            PrivateRuntimeTiming.Mark(\"lease-dispose-begin\");\n            try { PrivateBindingLease.Dispose(); }\n            finally\n            {\n                PrivateRuntimeTiming.Mark(\"lease-dispose-end\");\n                PrivateRuntimeTiming.WriteFinal(PrivateBindingLease.CleanupSnapshot());\n            }\n        }\n    }"
+        },
+        {
+          "label": "selective managed HELLO/release observation only",
+          "before": "    private static void ManagedObserve(string kind, object? data = null)\n    {",
+          "after": "    private static void ManagedObserve(string kind, object? data = null)\n    {\n        PrivateRuntimeTiming.ProtocolMark(kind, _managedLastCommand);"
+        },
+        {
+          "label": "Final receipt compact formatting only; hold receipt unchanged",
+          "before": "                await JsonSerializer.SerializeAsync(stream, receipt, new JsonSerializerOptions { WriteIndented = true }).ConfigureAwait(false);",
+          "after": "                await JsonSerializer.SerializeAsync(stream, receipt, new JsonSerializerOptions { WriteIndented = false }).ConfigureAwait(false);"
+        }
+      ],
+      "afterSha256": "31b0e1865283f6dc673c0fbdd7ea52c661e750107ec69d2de0bdcfd62e7b5ef5"
+    },
+    {
+      "path": "managed/Fixture.csproj",
+      "beforeSha256": "476455f48193d7ebf984e39041831d437fa1174ff1ca39b11922a455940a2a0b",
+      "hunks": [
+        {
+          "label": "compile exact new lease consumer with existing fixture guard",
+          "before": "<Compile Include=\"PrivateRuntimeGuard.cs\"/>",
+          "after": "<Compile Include=\"PrivateRuntimeGuard.cs\"/><Compile Include=\"PrivateBindingLease.cs\"/>"
+        },
+        {
+          "label": "compile single private observer module",
+          "before": "<Compile Include=\"PrivateBindingLease.cs\"/>",
+          "after": "<Compile Include=\"PrivateBindingLease.cs\"/><Compile Include=\"PrivateRuntimeTiming.cs\"/>"
+        }
+      ],
+      "afterSha256": "6221bd14506e72365ec45b067ea4255f60f5084a8c590f5b1a973e87f6f6cdc5"
+    },
+    {
+      "path": "managed/PrivateRuntimeTiming.cs",
+      "beforeSha256": null,
+      "afterSha256": "b35a673930e78be4dc49243188ab202197e1502eb97dcd835f04ae8169a776aa",
+      "source": "using System.Diagnostics;\nusing System.Text.Json;\ninternal static class PrivateRuntimeTiming {\n private sealed record Point(string stage,long monotonicTicks,long elapsedTicks,long utcTicks,int managedThreadId);\n private static readonly List<Point> Points=new();\n private static string? Receipt;private static long Started,HashTicks,HashCalls;private static int Dropped;\n private static DateTime? SelfCreatedUtc;private static string? SelfCreatedFailure;\n internal static void Initialize(string receipt){if(Receipt is not null)throw new InvalidOperationException(\"timing-reentry\");Receipt=receipt;Started=Stopwatch.GetTimestamp();Mark(\"entry-after-launch-guard\");try{using var self=Process.GetCurrentProcess();SelfCreatedUtc=self.StartTime.ToUniversalTime();}catch(Exception ex){SelfCreatedFailure=ex.GetType().Name;}Mark(\"self-creation-time-read-end\");}\n internal static void Mark(string stage){if(Receipt is null)return;var at=Stopwatch.GetTimestamp();if(Points.Count>=80){++Dropped;return;}Points.Add(new(stage,at,at-Started,DateTime.UtcNow.Ticks,Environment.CurrentManagedThreadId));}\n internal static void RecordHash(long start){if(Receipt is null)return;Interlocked.Add(ref HashTicks,Stopwatch.GetTimestamp()-start);Interlocked.Increment(ref HashCalls);}\n internal static void ProtocolMark(string kind,string? command){if((command==\"HELLO\"||command==\"RELEASE_TARGET\")&&(kind==\"handle-begin\"||kind==\"handle-end\"||kind==\"pipe-write-end\"))Mark(\"managed-\"+command+\"-\"+kind);}\n internal static void WriteFinal(object cleanup){if(Receipt is null)return;Mark(\"diagnostic-write-begin\");var report=new{schemaVersion=1,status=\"MANAGED_PHASE_TIMING_OBSERVATION\",behaviorPass=(bool?)null,naturalExitObserved=(bool?)null,processId=Environment.ProcessId,selfCreatedUtc=SelfCreatedUtc,selfCreatedFailure=SelfCreatedFailure,stopwatchFrequency=Stopwatch.Frequency,startedAtTick=Started,hashCalls=HashCalls,hashElapsedTicks=HashTicks,droppedMarks=Dropped,points=Points.ToArray(),leaseCleanup=cleanup,source=\"Actual child monotonic/UTC observations. Self OS creation time is not CreateProcessW return duration. Protocol markers are managed handling, not native send/receive. Diagnostic sidecar write occurs after original receipt and is excluded from these phase durations.\"};using var stream=new FileStream(Receipt+\".timing.json\",FileMode.CreateNew,FileAccess.Write,FileShare.None);JsonSerializer.Serialize(stream,report);stream.Flush();}\n}\n"
+    }
+  ],
+  "outputFiles": [
+    {
+      "path": "positive/source/native/private_runtime_guard.h",
+      "sha256": "c2538c66e5773a30baabbdb12085c1890ad7f2ad6fa1525328b11547ac23b4e8"
+    },
+    {
+      "path": "positive/fixture.cpp",
+      "sha256": "facc2c7f8227366552de937c69b87fea2733c5ff2b55bd3936e72e745dd3104f"
+    },
+    {
+      "path": "positive/source/native/private_terminal_observer.h",
+      "sha256": "734de5489fd81f7c6b7cbc45b1c64a7cfde76bd17a6bbbde39b312ef39027373"
+    },
+    {
+      "path": "positive/pipe_cases.inc",
+      "sha256": "e9684a71d98c179712a5f875c792871a1ab57580a5c1480349c4dc1009bea36a"
+    },
+    {
+      "path": "managed/PrivateRuntimeGuard.cs",
+      "sha256": "9551f5f3ca6e32caff3eb015feed9e7139131f0965b1db254997ab79075f12da"
+    },
+    {
+      "path": "managed/ManagedEntry.cs",
+      "sha256": "31b0e1865283f6dc673c0fbdd7ea52c661e750107ec69d2de0bdcfd62e7b5ef5"
+    },
+    {
+      "path": "managed/ProductionPipe.cs",
+      "sha256": "0da330ed91a0b93ebbe2a4828a474c97ba75c2d3ad13fd3342b06d61c1aba6dc"
+    },
+    {
+      "path": "managed/Fixture.csproj",
+      "sha256": "6221bd14506e72365ec45b067ea4255f60f5084a8c590f5b1a973e87f6f6cdc5"
+    },
+    {
+      "path": "positive/source/native/private_binding_lease.h",
+      "sha256": "399ed481e96cc99861e972bc2f7dc6f7d0bfb24476e9bfd7a1bdcff4f74a7141"
+    },
+    {
+      "path": "managed/PrivateBindingLease.cs",
+      "sha256": "5dd38dbd7b64831052050f4a5fb4e4e6aa80f2cf093c3d2dff1659fa097b36ef"
+    },
+    {
+      "path": "managed/PrivateRuntimeTiming.cs",
+      "sha256": "b35a673930e78be4dc49243188ab202197e1502eb97dcd835f04ae8169a776aa"
+    }
+  ],
+  "budgets": {
+    "native": 60000,
+    "prepare": 90000,
+    "leaf": 120000,
+    "global": 3072
+  },
+  "heldGateMaxMs": 20000,
+  "sourceOnly": true,
+  "compilerExecutionAllowed": false,
+  "targetExecutionAllowed": false,
+  "historicalFixedReference": {
+    "nativeSHA256": "a9322e95ce00e7bd9f910be47bafc97d9c68b10daad8dec94b6e97cad33bab62",
+    "managedSHA256": "5afc18649be3995df3349893d39132d61f55a15509f2be4dc6baf7077bf8d358",
+    "sourceMainSHA256": "bd33888ac15c18eca5dac5bd94caa8387ec4bf8d6a2f4384b4f47cd90d528d3f",
+    "sourceManifestSHA256": "b14e8584736ab9639bcc3bd7b4b7494f6a481c902828b89acca1a2a494170417",
+    "actualCalls": 101,
+    "uniqueNames": 100,
+    "checks": 6301,
+    "originalBoundary": {
+      "ordinal": 96,
+      "checks": 6198
+    },
+    "referenceOnly": true,
+    "currentPrimaryAccepted": false
+  },
+  "requiredLaunchBindings": [
+    "YMCC_PRIVATE_RUN_ROOT",
+    "YEMAN_POWER_CONTROL_DIR",
+    "YMCC_PRIVATE_EXE",
+    "YMCC_PRIVATE_MANAGED_DLL",
+    "YMCC_PRIVATE_MANIFEST_SHA256",
+    "owned original native parent/pipe/nonce factory"
+  ],
+  "invariants": {
+    "fiveActualDecisionHooksUnchanged": true,
+    "original21AndPrivate3Unchanged": true,
+    "assertionsOrderMutationsUnchanged": true,
+    "managedObserverFinallyAndHoldReceiptPreserved": true,
+    "unknownOwnerDoesNotClearDebt": true,
+    "defaultProfilesUnchanged": true
+  }
+}

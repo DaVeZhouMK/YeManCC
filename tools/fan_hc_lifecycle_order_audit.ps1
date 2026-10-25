@@ -102,7 +102,7 @@ if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open 
 # §2（FAN-926R 裁决）：旧要求（独立 `private void OpenEventsCore()`）已被**现行合同取代** ——
 # HC OpenEvents 的生产入口现为 `private HcDeviceOpenNeed OpenEventsBeginCore()`，由
 # `RealHcBackend.OpenEvents()` 经 `OnStaBounded` 调用。断言内容不变，只重定位入口。
-$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore()'
+$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore(OpenEventsAdmission admission)'
 # 旧要求（`Invoke` 之后再轮询 `EnsureHcDeviceOpenForRestore()`）已被 920-v1.14 §25 **正式取代**：
 # 现合同 = **调用前**确证 HC 会话/路由就绪（`EnsureHcSessionReadyForOpenEvents()`）+ **调用后**
 # 以正式收据开始设备打开（`BeginHcDeviceOpenForRestore()`）。`tools\fan_host_lifecycle_selftest.ts`
@@ -119,10 +119,29 @@ Require-Order 'YeMan Close' $hostClose @(
 )
 $hostCloseBoundary = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan CloseHcDevice' $hostCloseBoundary @(
-  'Invoke(device!, "Close");',
+  'CloseObservedInheritedEcFanDevice();',
   'HcVirtualCloseReturned = true;',
   'UnsubscribeExternalProfileEvents();',
-  'confirmManagerCleanup: ConfirmManagerCleanupAfterClose'
+  'confirmManagerCleanup: () =>',
+  'try { ConfirmManagerCleanupAfterClose(); }'
+)
+
+# The actual virtual call moved into the identity-bound helper. Preserve
+# both the generic fallback and observed-resource checks around that call.
+$inheritedClose = Slice $hostText 'private void CloseObservedInheritedEcFanDevice()' 'private sealed class InheritedEcFanWriter'
+if (-not $inheritedClose.Contains('if (observation is null) { Invoke(device!, "Close"); return; }')) { throw 'Generic virtual Close fallback is missing' }
+$observedClose = $inheritedClose.Substring($inheritedClose.IndexOf('lock (observation.Gate)', [StringComparison]::Ordinal))
+Require-Order 'YeMan observed virtual Close' $observedClose @(
+  'observation.RequireCurrent(device);',
+  'inheritedEcFanWriter?.RequireMetadataCurrent();',
+  'try { Invoke(device!, "Close"); }',
+  'finally { observation.ObserveCloseExit(); }',
+  'observation.CompleteClose();'
+)
+$postVirtualClose = $observedClose.Substring($observedClose.IndexOf('finally { observation.ObserveCloseExit(); }', [StringComparison]::Ordinal))
+Require-Order 'YeMan observed Close retirement' $postVirtualClose @(
+  'observation.RequireCurrent(device);',
+  'observation.CompleteClose();'
 )
 
 $fullGraph = $hostText.IndexOf('foreach (IManager manager in ManagerFactory.Managers)', [StringComparison]::Ordinal) -ge 0

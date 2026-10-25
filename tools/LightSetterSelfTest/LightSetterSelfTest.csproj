@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><StartupObject Condition="'$(StartupObject)' == ''">LightSetterSelfTest</StartupObject><EnableDefaultCompileItems>false</EnableDefaultCompileItems></PropertyGroup>
+ <ItemGroup>
+  <Compile Include="Program.cs" /><Compile Include="ArtifactProbe.cs" /><Compile Include="FakeOneXDevice.cs" />
+  <Compile Include="FakeAyaneoDevice.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEc.cs" Link="PinnedHCAyaneoCEc.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEODeviceCEii.cs" Link="PinnedHCAyaneoCEii.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEO2.cs" Link="PinnedHCAYANEO2.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlus.cs" Link="PinnedHCAYANEOAIRPlus.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Devices/AYANEO/AYANEOAIRPlusAMD.cs" Link="PinnedHCAYANEOAIRPlusAMD.cs" />
+  <Compile Include="../../FanLab/LightSetter/Program.cs" Link="Production.cs" />
+  <Compile Include="../../FanLab/LightSetter/OneXQueuedLighting.cs" Link="OneXQueuedLighting.cs" />
+  <Compile Include="../../FanLab/LightSetter/OneXLightingSession.cs" Link="OneXLightingSession.cs" />
+  <Compile Include="../../FanLab/LightSetter/DeviceCoreConsumer.cs" Link="DeviceCoreConsumer.cs" />
+  <Compile Include="../../FanLab/LightSetter/LightingAssemblyPins.cs" Link="LightingAssemblyPins.cs" />
+  <Compile Include="../../FanLab/RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+  <Compile Include="../../FanLab/DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+  <Compile Include="../../native/ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+  <Compile Include="../../deps/handheldcompanion-runtime/source/Misc/SerialQueueTasks.cs" Link="PinnedHCSerialQueue.cs" />
+ </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
+    <Compile Include="../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
+</Project>

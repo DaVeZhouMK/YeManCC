@@ -31,6 +31,19 @@ rejectNative('SG_EXTERNAL_SUSPEND_CONFIRM_TIMEOUT_MS');
 rejectNative('SG_MAX_EXTERNAL_WAKE_CYCLES');
 rejectNative('completedSleepCycles');
 rejectNative('awaitingSuspendConfirmation');
+// A successful suspend cannot refill the automatic repair budget.
+requireNative('SG_MAX_AUTOMATIC_SLEEP_REQUESTS = 3;');
+requireNative('static ymcc::sleeprepair::Budget g_sgAutomaticSleepBudget');
+requireNative('if (!g_sgAutomaticSleepBudget.consume())');
+requireNative('sgFinishSleepRetryFailure("automatic-sleep-chain-limit")');
+const interactive = section('else if (w == PBT_APMRESUMESUSPEND) {', 'else if (w == PBT_APMRESUMECRITICAL) {');
+assert.ok(interactive.indexOf('!sgModernStandbyRepairSupported()') < interactive.indexOf('sgObserveNonUserWake('));
+assert.ok(interactive.indexOf('confirmedUserWake()') < interactive.indexOf('sgObserveNonUserWake('));
+assert.equal((native.match(/g_sgAutomaticSleepBudget\.confirmedUserWake\(\)/g) || []).length, 2,
+  'only confirmed S0 button wake and S3 interactive wake can replenish the budget');
+const capability = section('static bool sgModernStandbyRepairSupported()', 'static bool sgNonUserWakeGuardEnabled()');
+assert.ok(capability.includes('static const bool supported = sgPlatformIsAlwaysOnAlwaysConnected()'));
+
 rejectNative('SgRetryKind::NonUserWake');
 rejectNative('WM_SG_S0_REENTER');
 rejectNative('sgResumeGlobalSuspendedLargeProcesses');
@@ -50,7 +63,7 @@ assert.ok(markerWriter.includes('|generation='),
 // by structure rather than a newline-specific literal so this guard remains
 // valid after Git/editor line-ending normalization.
 const resumeDefinitionMatch = native.match(
-  /static SgResumeResult sgResumeSleepTarget\(\s*unsigned long long expectedGeneration,\s*bool focusResumedGame\)\s*\{/,
+  /static SgResumeResult sgResumeSleepTargetUnlocked\(\s*unsigned long long expectedGeneration,\s*bool focusResumedGame\)\s*\{/,
 );
 const resumeDefinition = resumeDefinitionMatch?.index ?? -1;
 assert.ok(resumeDefinition >= 0, 'missing sgResumeSleepTarget definition');
@@ -59,7 +72,20 @@ const resumeSleepTarget = native.slice(
   native.indexOf('// Capture and freeze the current valve lease synchronously.', resumeDefinition),
 );
 requireNative('target.powerGeneration != expectedGeneration');
-requireNative('sgMarkerGeneration(SG_SLEEP_LEASE_DIR, target.pid) != expectedGeneration');
+// The resume path reads one checked marker snapshot and compares that snapshot's generation.
+// Require its actual worker and refusal before NT resume; a similarly named token elsewhere is insufficient.
+const markerRead = resumeSleepTarget.indexOf('if (!sgReadResumeMarkerChecked(marker, markerText)) return rr;');
+const markerGenerationCheck = resumeSleepTarget.indexOf('const bool generationMismatch = markerGeneration != expectedGeneration;');
+const markerOwnerGuard = resumeSleepTarget.indexOf('if (generationMismatch || !nativeValveValidateOwnedSuspendedTarget(');
+const nativeResumeStart = resumeSleepTarget.indexOf('sgInitNt();');
+assert.ok(markerRead >= 0 && markerGenerationCheck > markerRead && markerOwnerGuard > markerGenerationCheck && nativeResumeStart > markerOwnerGuard,
+  'checked marker generation and process ownership must refuse inside the actual resume worker before NT resume');
+assert.match(resumeSleepTarget.slice(markerOwnerGuard, nativeResumeStart), /SG_SLEEP_LEASE_DIR, target\.pid, target\.processCreated\)\)[\s\S]*return rr;/,
+  'generation and exact PID birth guard must return before the native resume loop');
+const lockedResumeWrapper = native.match(/static SgResumeResult sgResumeSleepTarget\(\s*unsigned long long expectedGeneration,\s*bool focusResumedGame\)\s*\{([\s\S]*?)\n\}/)?.[1];
+assert.ok(lockedResumeWrapper?.includes('std::lock_guard<std::mutex> opLock(g_sgOpMtx);') &&
+  lockedResumeWrapper.includes('return sgResumeSleepTargetUnlocked(expectedGeneration, focusResumedGame);'),
+  'locked public sleep resume wrapper must delegate to the guarded actual worker');
 requireNative('actualCreated != target.processCreated');
 requireNative('SG_SLEEP_RESUME_RETRY_DELAYS_MS[] = {0ULL, 100ULL, 300ULL, 600ULL}');
 assert.ok(!resumeSleepTarget.includes('SG_MANUAL_DIR'));
@@ -69,7 +95,8 @@ assert.ok(!resumeSleepTarget.includes('nativeValveAcquire'));
 requireNative('SG_ENTRY_RETRY_DELAYS_MS[] = {500ULL, 1000ULL, 2000ULL}');
 requireNative('SG_PAUSE_READY_WAIT_MAX_MS = 2000ULL');
 requireNative('SG_PAUSE_READY_POLL_MS = 50U');
-requireNative('SetSuspendState(FALSE, FALSE, FALSE)');
+requireNative('SetSuspendState(mode==Mode::Hibernate ? TRUE : FALSE,FALSE,FALSE)');
+requireNative('SendMessageTimeoutW(g_hwnd,WM_SYSCOMMAND,SC_MONITORPOWER,2,');
 requireNative('SE_SHUTDOWN_NAME');
 const retryDispatch = section(
   'static void sgDispatchSameModeRetry() {',

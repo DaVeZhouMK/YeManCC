@@ -1,8 +1,23 @@
 import assert from 'node:assert/strict';
 import { createGyroPresentationGate } from '../src/bridge/gyroPresentation';
 import { normalizeGyroTelemetry } from '../src/bridge/inputContracts';
+import { formatGyroAxis } from '../src/bridge/gyroAxisFormat';
 let checks = 0;
 function check(value: unknown, name: string) { assert.ok(value, name); checks++; }
+for (const [value, expected] of [
+  [-999.9, '-999.9'], [-0.1, '  -0.1'], [0, '   0.0'], [9.9, '   9.9'],
+  [99.9, '  99.9'], [999.9, ' 999.9'], [-0, '   0.0'], [-0.01, '   0.0'],
+  [-1234.5, '-1234.5'], [1234.5, '1234.5'], [-999999.9, '-999999.9'],
+  [999999.99, '1000000.0'], [-999999.99, '-1.0e+6'],
+  [Number.MAX_VALUE, '1.8e+308'], [-Number.MAX_VALUE, '-1.8e+308'],
+  [NaN, '     —'], [Infinity, '     —'], [-Infinity, '     —'],
+] as const) {
+  check(formatGyroAxis(value) === expected, 'XYZ format ' + String(value));
+}
+for (const value of [1e21, -1e21, 1e100, -1e100, Number.MIN_VALUE, -Number.MIN_VALUE]) {
+  const text = formatGyroAxis(value);
+  check(text.length <= 9 && /^ *-?\d+\.\d(?:e[+-]\d+)?$/.test(text), 'finite one-decimal XYZ ' + value);
+}
 const frame = (sequence: number) => normalizeGyroTelemetry({
   sequence, timestampUtc: '2026-10-03T00:00:00Z', sensorPresent: true,
   gyro: { x: sequence / 10, y: 0, z: 0 }, accel: { x: 0, y: 0, z: 1 },

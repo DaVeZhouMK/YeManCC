@@ -1,0 +1,134 @@
+{
+  "schemaVersion": 1,
+  "cases": {
+    "account": {
+      "id": "game-library.account-discovery-consumer",
+      "title": "Actual library account discovery preserves current results across stale snapshots and concurrent refresh",
+      "producer": "tools/custom_steam_library_account_status_selftest.mjs",
+      "producerSha256": "6e93da44d19f671be7ac86058d2734f2a97dcf967966f376abc5b652fe99ceb4",
+      "productSources": [
+        "CustomSteamLibrary/workspace-ui/app.js"
+      ],
+      "caseNames": [
+        "startup-does-not-publish-cached-installed-no-account",
+        "startup-does-not-publish-cached-not-installed",
+        "startup-does-not-publish-cached-error",
+        "cached-ready-is-not-presented-as-live-login-proof",
+        "initial-open-detects-without-click-or-game-scan-completion",
+        "real-startup-chain-autodetects-stale-negative-cache",
+        "concurrent-and-forced-queries-coalesce",
+        "older-game-snapshot-cannot-restore-false-negative",
+        "no-account-directory-is-not-a-login-or-install-warning",
+        "confirmed-not-installed-retains-install-help",
+        "scheduled-install-prompt-is-discarded-after-fresh-ready",
+        "focus-before-startup-does-not-start-a-second-command",
+        "focus-refresh-is-rate-limited-and-recovers-after-login",
+        "manual-retry-bypasses-focus-rate-limit",
+        "multiple-account-targets-retain-all-users",
+        "worker-error-is-displayed-as-error-not-signed-out",
+        "rejected-query-is-contained-and-can-be-retried",
+        "malformed-detection-0-is-not-login-warning",
+        "malformed-detection-1-is-not-login-warning",
+        "malformed-detection-2-is-not-login-warning",
+        "malformed-detection-3-is-not-login-warning",
+        "malformed-detection-4-is-not-login-warning",
+        "malformed-detection-5-is-not-login-warning",
+        "malformed-detection-6-is-not-login-warning",
+        "malformed-detection-7-is-not-login-warning",
+        "malformed-detection-8-is-not-login-warning",
+        "manual-scan-has-forced-account-recheck-hook"
+      ],
+      "fault": {
+        "functionBegin": "function steamAccounts()",
+        "functionEnd": "function ensureSteamTarget()",
+        "before": "function steamAccounts() { return (steamAccountDiscovery || snapshot.steamAccounts)?.accounts || []; }",
+        "after": "function steamAccounts() { return (snapshot.steamAccounts || steamAccountDiscovery)?.accounts || []; }",
+        "expectedFailedNames": [
+          "older-game-snapshot-cannot-restore-false-negative"
+        ],
+        "expectedFailureErrors": [
+          {
+            "name": "older-game-snapshot-cannot-restore-false-negative",
+            "message": "AssertionError [ERR_ASSERTION]: The input did not match the regular expression /已发现 1 个/. Input:\n\n'正在检测 Steam 账户'\n",
+            "producerFrame": {
+              "line": 142,
+              "column": 10
+            }
+          }
+        ]
+      }
+    },
+    "snapshot": {
+      "id": "game-library.snapshot-consumer",
+      "title": "Actual library snapshot and artwork consumers preserve good state when incoming rows are malformed",
+      "producer": "tools/custom_steam_library_ui_datachain_selftest.mjs",
+      "producerSha256": "3eaf6d2cbea922ca9f8a397838e6806cb7c459c7987873696b606a85af56ff41",
+      "productSources": [
+        "CustomSteamLibrary/workspace-ui/app.js",
+        "CustomSteamLibrary/workspace-ui/index.html"
+      ],
+      "caseNames": [
+        "reject-non-object-snapshot-0",
+        "reject-non-object-snapshot-1",
+        "reject-non-object-snapshot-2",
+        "reject-non-object-snapshot-3",
+        "reject-non-object-snapshot-4",
+        "reject-non-object-snapshot-5",
+        "null-library-preserves-current-games",
+        "malformed-games-array-preserves-current-games",
+        "all-malformed-rows-are-not-authoritative-empty",
+        "intentional-empty-library-remains-empty",
+        "mixed-valid-and-malformed-games-preserve-previous-complete-set",
+        "non-string-primary-is-not-rendered-or-imported",
+        "invalid-plan-fields-cannot-be-import-ready",
+        "invalid-root-field-keeps-user-settings",
+        "invalid-overrides-and-accounts-are-safe",
+        "different-steam-roots-same-account-are-retained",
+        "snapshot-normalization-does-not-mutate-prior-or-input",
+        "raw-download-result-is-not-treated-as-snapshot",
+        "state-response-without-snapshot-is-rejected",
+        "steam-write-error-refreshes-durable-state",
+        "steam-open-does-not-relabel-join-button",
+        "malformed-bridge-message-does-not-access-array-shape",
+        "deterministic-snapshot-field-fuzz-1000-combinations",
+        "no-steamid-igdb-and-baidu-artwork-is-visible",
+        "manual-file-cover-wins-grid-and-editor",
+        "manual-cover-does-not-hide-automatic-background",
+        "manual-wallpaper-does-not-hide-automatic-cover",
+        "manual-deletion-wins-over-stale-manual-and-auto-assets",
+        "missing-manual-file-falls-back-to-automatic-preview",
+        "automatic-preview-wins-over-initials",
+        "no-image-uses-initials-without-throwing",
+        "portable-local-copy-wins-over-dead-download-url",
+        "legacy-manual-artwork-uses-the-same-priority",
+        "artwork-source-priority-1000-slot-combinations",
+        "duplicate-exe-old-snapshot-is-one-card",
+        "duplicate-exe-keeps-owned-plan-not-pending-plan",
+        "same-filename-distinct-exes-remain-separate-cards",
+        "builtin-steam-tool-all-snapshot-boundaries",
+        "builtin-steam-tool-non-authoritative-fallback-still-filters",
+        "builtin-steam-tool-strict-id-and-exact-name"
+      ],
+      "fault": {
+        "functionBegin": "function normalizeWorkspaceSnapshot(",
+        "functionEnd": "function workspaceBridgeResult(",
+        "before": "return valid.length !== input.length && Array.isArray(fallback) ? fallback.map(row => ({ ...row })) : valid;",
+        "after": "return valid;",
+        "expectedFailedNames": [
+          "all-malformed-rows-are-not-authoritative-empty",
+          "mixed-valid-and-malformed-games-preserve-previous-complete-set"
+        ],
+        "expectedFailureErrors": [
+          {
+            "name": "all-malformed-rows-are-not-authoritative-empty",
+            "message": "Expected values to be strictly equal:\n\n0 !== 1\n"
+          },
+          {
+            "name": "mixed-valid-and-malformed-games-preserve-previous-complete-set",
+            "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'G:\\\\Games\\\\New'\n- 'G:\\\\Games\\\\Good'\n              ^\n"
+          }
+        ]
+      }
+    }
+  }
+}

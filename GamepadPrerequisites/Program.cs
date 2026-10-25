@@ -7,21 +7,22 @@ using System.Text;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Win32;
+using Driver = HidMaestroPackagePreparation.Driver;
+using PackagePreparation = HidMaestroPackagePreparation;
 
 // GP-PREREQ-2: locked HIDMaestro first-install engine; AutoSetup owns startup integration.
 // Never constructs controllers, changes persona, or performs a global device sweep.
 internal static partial class Program
 {
-    const string CoreSha = "BD42A99BCB260435CE25796C54A4B792F8A2CED6AB78659C0CF926011663938E";
-    const string CoreMvid = "c61e2715-47ae-4cf3-87f7-244c330ef80e";
+    const string CoreSha = "8FE7BDB21EC497591F527B7B87C4BC7B41B45C35A06CC211A7A0DCE48838ED2C";
+    const string CoreMvid = "86aed9a3-c024-4596-b02c-650082ffb852";
     static readonly string[] Infs = ["hidmaestro.inf", "hidmaestro_xusb.inf"];
     static readonly JsonSerializerOptions Json = new() { WriteIndented = true };
-    sealed record Driver(string Published, string Original, string Provider);
     sealed record Command(int? Exit, bool TimedOut, string Output, string Error);
-    sealed record Facts(bool Hash, bool Admin, bool ClientsRunning,
+    internal sealed record Facts(bool Hash, bool Admin, bool ClientsRunning,
         bool EnumValid, int OwnedPackages, bool RepositoryRemnants, bool OwnDevices,
         bool SdkReady, bool CompletePackages);
-    // This predicate is also used by the selftest. No dependency mutates state until it says INSTALL_FRESH.
+    // Original clean first-install policy; established packages use the exact current-package review below.
     static string Decide(Facts f, bool prepare)
     {
         if (!f.Hash) return "SDK_IDENTITY_MISMATCH";
@@ -34,22 +35,25 @@ internal static partial class Program
         if (f.ClientsRunning) return "CLOSE_CONTROLLER_APPS_FIRST";
         return "INSTALL_FRESH";
     }
+    internal static string DecideForPreparation(Facts facts, PackagePreparation.Review review, bool prepare)
+    {
+        if (!facts.Hash || !facts.EnumValid) return Decide(facts, prepare);
+        if (!prepare) return review.Inventory.Packages.Count!=0 ? review.Status : Decide(facts,false);
+        if (review.Inventory.Packages.Count!=0 && !review.Inventory.PreparationKnown) return review.Status;
+        var guard=review.Maintenance.Observed;
+        if (!guard.StartupOwnerValid) return "INVALID_STARTUP_OWNER";
+        if (!facts.Admin) return "ADMIN_REQUIRED";
+        if (facts.ClientsRunning) return "CLOSE_CONTROLLER_APPS_FIRST";
+        if (!guard.InstallMutexHeld) return "SETUP_ALREADY_RUNNING";
+        return review.Inventory.PreparationKnown ? "PREPARE_OFFICIAL" : Decide(facts,true);
+    }
     static string Reg(string key, string name) => Convert.ToString(Registry.GetValue(key, name, "")) ?? "";
     static string FileSha(string p) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(p)));
-    static List<Driver> ParseDrivers(string text)
-    {
-        var doc = XDocument.Parse(text);
-        if (doc.Root is null) throw new InvalidDataException("missing XML root");
-        var all = doc.Root.Elements().Where(e => e.Name.LocalName == "Driver").ToList();
-        // An empty/changed schema must not authorize installation by masquerading as an empty store.
-        if (all.Count == 0) throw new InvalidDataException("No Driver records; enumeration cannot prove a fresh store.");
-        return all.Select(e => new Driver(e.Attribute("DriverName")?.Value ?? "",
-            e.Elements().FirstOrDefault(x => x.Name.LocalName == "OriginalName")?.Value ?? "",
-            e.Elements().FirstOrDefault(x => x.Name.LocalName == "ProviderName")?.Value ?? "")).ToList();
-    }
-    static bool Owned(Driver d) => d.Provider.Equals("HIDMaestro", StringComparison.OrdinalIgnoreCase) &&
-        Infs.Contains(d.Original, StringComparer.OrdinalIgnoreCase);
-    static bool Complete(List<Driver> ds) => Infs.All(i => ds.Any(d => Owned(d) && d.Original.Equals(i, StringComparison.OrdinalIgnoreCase)));
+    static List<Driver> ParseDrivers(string text) => PackagePreparation.ParseDrivers(text);
+    static bool Owned(Driver d) => PackagePreparation.Owned(d);
+    internal static PackagePreparation.Review InspectCurrentPackage(bool prepare, PackagePreparation.SdkContract sdk,
+        IReadOnlyList<Driver> drivers, PackagePreparation.MaintenanceFacts maintenance) =>
+        PackagePreparation.Inspect(prepare, sdk, drivers, maintenance);
     static Command Pnp(params string[] args)
     {
         var si = new ProcessStartInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System), "pnputil.exe"))
@@ -91,7 +95,10 @@ internal static partial class Program
         catch (TargetInvocationException e) { throw new InvalidOperationException(e.InnerException?.ToString() ?? e.ToString(), e.InnerException); }
     }
     static int ExitFor(string s) => s switch
-    { "DRIVER_STORE_READY" or "DRIVER_PREPARED_DEVICE_UNVERIFIED" => 0, "MISSING_DRIVER" => 10,
+    { "DRIVER_STORE_READY" or "DRIVER_PREPARED_DEVICE_UNVERIFIED" or
+        "DRIVER_NEWER_PRESERVED_DEVICE_UNVERIFIED" or "DRIVER_PACKAGES_PREPARED_BINDING_UNPROVEN" => 0, "MISSING_DRIVER" => 10,
+      "DRIVER_INVENTORY_UNRECOGNIZED" => PackagePreparation.InventoryUnrecognizedExit,
+      "DRIVER_MAINTENANCE_DEFERRED" => PackagePreparation.MaintenanceDeferredExit,
       "SDK_IDENTITY_MISMATCH" => 14, "ADMIN_REQUIRED" => 15,
       "CLOSE_CONTROLLER_APPS_FIRST" => 13, _ => 11 };
     static int HidMaestroMain(string[] args)
@@ -99,14 +106,14 @@ internal static partial class Program
         if (args.Length == 1 && args[0] == "--selftest") return SelfTest();
         if (args.Length == 2 && args[0] == "--selftest-sdk-contract") {
             var sdk = Path.GetFullPath(args[1]);
-            if (new FileInfo(sdk).Length != 40755712 || FileSha(sdk) != CoreSha) return 14;
+            if (new FileInfo(sdk).Length != 63076352 || FileSha(sdk) != CoreSha) return 14;
             var a = AssemblyLoadContext.Default.LoadFromAssemblyPath(sdk);
             if (a.ManifestModule.ModuleVersionId.ToString() != CoreMvid) return 14;
-            var t = a.GetType("HIDMaestro.Internal.DriverBuilder", true)!;
-            if (Method(t, "IsDriverInstalled").ReturnType != typeof(bool) || Method(t, "IsDriverInstalled").GetParameters().Length != 0) return 3;
-            var deploy = Method(t, "FullDeploy");
-            if (deploy.ReturnType != typeof(bool) || deploy.GetParameters().Length != 1 || deploy.GetParameters()[0].ParameterType != typeof(bool)) return 3;
-            Console.WriteLine("SDK_CONTRACT_PASS metadataOnly=true sdkMethodsInvoked=0"); return 0;
+            var expectedStage = PackagePreparation.DefaultRawStage();
+            var metadata = PackagePreparation.ReadSdkMetadata(a, expectedStage);
+            Console.WriteLine(JsonSerializer.Serialize(new { status="SDK_CONTRACT_PASS", metadataOnly=true,
+                sdkMethodsInvoked=0, metadata.Manifest, metadata.Infs, metadata.StageSource }));
+            return 0;
         }
         bool prepare = false; bool modeSet = false; string root = @"C:\SOFT\YeMan";
         string report = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.DesktopDirectory),
@@ -138,7 +145,7 @@ internal static partial class Program
             string sdkPath = Path.Combine(root, "PowerControl", "feature-assets", "virtual-gamepad", "HIDMaestro.Core.dll");
             string marker = Path.Combine(Path.GetDirectoryName(sdkPath)!, "test-auto-install.flag");
             log["autoInstallMarkerExists"] = File.Exists(marker);
-            bool hash = File.Exists(sdkPath) && new FileInfo(sdkPath).Length == 40755712 && FileSha(sdkPath) == CoreSha;
+            bool hash = File.Exists(sdkPath) && new FileInfo(sdkPath).Length == 63076352 && FileSha(sdkPath) == CoreSha;
             log["sdk"] = new { path = sdkPath, expectedSha256 = CoreSha, hashMatches = hash };
             if (!hash) { status = "SDK_IDENTITY_MISMATCH"; return ExitFor(status); }
             // No HMContext construction: its constructor prewarms GameInputSvc. Check mode stays read-only.
@@ -150,45 +157,60 @@ internal static partial class Program
                 catch (AbandonedMutexException) { mutexHeld = true; status = "PREVIOUS_INSTALL_INTERRUPTED"; return 11; }
                 if (!mutexHeld) { status = "SETUP_ALREADY_RUNNING"; return 11; }
             }
-            var builder = asm.GetType("HIDMaestro.Internal.DriverBuilder", throwOnError: true)!;
-            var probe = Method(builder, "IsDriverInstalled");
-            bool sdkReady = (bool)Invoke(probe)!;
-            try {
-                var contextType = asm.GetType("HIDMaestro.HMContext", throwOnError: true)!;
-                log["usbipAvailable"] = contextType.GetProperty("IsUsbipBackendAvailable", BindingFlags.Public | BindingFlags.Static)!.GetValue(null);
-            } catch (Exception ex) { log["usbipProbeError"] = ex.GetType().Name + ": " + ex.Message; }
-            var cmd = Pnp("/enum-drivers", "/format", "xml");
-            File.WriteAllText(report + ".drivers.xml", cmd.Output, new UTF8Encoding(false));
-            log["driverEnumeration"] = new { cmd.Exit, cmd.TimedOut, cmd.Error };
-            if (cmd.Exit != 0 || cmd.TimedOut) { status = "ENUMERATION_UNPROVEN"; return ExitFor(status); }
-            var drivers = ParseDrivers(cmd.Output);
-            var owned = drivers.Where(Owned).ToList();
-            var devices = Pnp("/enum-devices", "/connected", "/format", "xml");
-            log["deviceEnumeration"] = new { devices.Exit, devices.TimedOut, devices.Error };
-            if (devices.Exit != 0 || devices.TimedOut) { status = "ENUMERATION_UNPROVEN"; return ExitFor(status); }
-            var deviceDoc = XDocument.Parse(devices.Output);
-            if (deviceDoc.Root is null || !deviceDoc.Root.Elements().Any()) { status = "ENUMERATION_UNPROVEN"; return ExitFor(status); }
-            bool ownDevices = devices.Output.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
-            bool remnants = RepoHasRemnants(); bool admin = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
-            var clients = BlockingClients();
-            var facts = new Facts(hash, admin, clients.Length != 0, true, owned.Count, remnants, ownDevices, sdkReady, Complete(drivers));
-            log["before"] = new { sdkReady, owned, remnants, ownDevices, admin, clients, complete = facts.CompletePackages };
-            status = Decide(facts, prepare); log["decision"] = status; Save();
-            if (status != "INSTALL_FRESH") return ExitFor(status);
-            // Explicit prepare + locked SDK + valid empty store + no own nodes/clients, on any machine.
-            // This existing SDK pipeline installs its two embedded INFs and signing certificate.
-            // It does not create controllers. No call to HMContext.InstallDriver's global device sweep.
-            // Recheck cheap mutable facts immediately before the sole installation call.
-            if (BlockingClients().Length != 0 || RepoHasRemnants()) { status = "STATE_CHANGED_BEFORE_INSTALL"; return ExitFor(status); }
-            log["installAttempted"] = true; log["installStartedAt"] = DateTimeOffset.Now; Save();
-            bool installed = (bool)Invoke(Method(builder, "FullDeploy"), false)!;
-            var post = Pnp("/enum-drivers", "/format", "xml");
-            File.WriteAllText(report + ".after-drivers.xml", post.Output, new UTF8Encoding(false));
-            bool afterSdk = (bool)Invoke(probe)!;
-            bool afterComplete = post.Exit == 0 && !post.TimedOut && Complete(ParseDrivers(post.Output));
-            log["after"] = new { sdkReady = afterSdk, completePackages = afterComplete, installerReturned = installed, post.Exit, post.TimedOut, post.Error };
-            status = installed && afterSdk && afterComplete ? "DRIVER_PREPARED_DEVICE_UNVERIFIED" : "INSTALL_POSTCONDITION_UNPROVEN";
-            return ExitFor(status);
+            var expectedStage = PackagePreparation.DefaultRawStage();
+            var metadata = PackagePreparation.ReadSdkMetadata(asm, expectedStage);
+            log["sdkMetadata"] = metadata;
+            log["sdkMethodsInvoked"] = Array.Empty<string>();
+            log["usbipProbe"] = "not-invoked;UMDF-preparation-only;composite-target-availability-remains-backend-owned";
+            void Evidence(string phase, object evidence) {
+                log["preparationPhase"] = phase;
+                if(!log.TryGetValue("preparationEvidence",out var trail)) {
+                    trail=new List<object>();log["preparationEvidence"]=trail;
+                }
+                ((List<object>)trail!).Add(new {phase,at=DateTimeOffset.Now,evidence});Save();
+            }
+            PackagePreparation.Observation Observe(string phase) {
+                var inventory=Pnp("/enum-drivers","/format","xml");
+                string suffix=phase=="initial" ? ".drivers.xml" : phase=="after-official" ? ".after-drivers.xml" : ".before-drivers.xml";
+                log["driverInventoryEvidence"]=PackagePreparation.CaptureInventory(report,inventory.Output,inventory.Exit,inventory.TimedOut,suffix);
+                Save();
+                if(inventory.Exit!=0 || inventory.TimedOut)throw new InvalidDataException("driver enumeration unproven: "+phase);
+                var drivers=ParseDrivers(inventory.Output);
+                var devices=Pnp("/enum-devices","/connected","/format","xml");
+                if(devices.Exit!=0 || devices.TimedOut)throw new InvalidDataException("device enumeration unproven: "+phase);
+                var deviceDoc=XDocument.Parse(devices.Output);
+                if(deviceDoc.Root is null || !deviceDoc.Root.Elements().Any())throw new InvalidDataException("device schema unproven");
+                bool own=devices.Output.Contains("HIDMAESTRO",StringComparison.OrdinalIgnoreCase);
+                var clients=BlockingClients();
+                bool admin=new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
+                bool owner=StartupOwnerPid==0 || ValidStartupOwner();
+                bool stillPinned=File.Exists(sdkPath) && new FileInfo(sdkPath).Length==PackagePreparation.CoreBytes && FileSha(sdkPath)==CoreSha;
+                var facts=new PackagePreparation.MaintenanceFacts(admin,mutexHeld,owner,own,clients.Length!=0);
+                var observation=new PackagePreparation.Observation(drivers,facts,RepoHasRemnants(),true,stillPinned);
+                Evidence("observe-"+phase,new {facts,clients,observation.RepositoryRemnants,observation.SdkIdentity,
+                    owned=drivers.Where(Owned).ToArray(),catalogScope="driver-raw-and-package-independent;not-binding-proof"});
+                return observation;
+            }
+            var initial=Observe("initial");
+            var runtime=new PackagePreparation.PreparationRuntime(Observe,contract=> {
+                // Exactly one official terminal, the body of FullDeploy. Its enum
+                // is preserved rather than lost by that public bool forwarding shim.
+                if(FileSha(sdkPath)!=CoreSha || asm.ManifestModule.ModuleVersionId.ToString()!=CoreMvid)
+                    throw new InvalidDataException("SDK changed before official preparation");
+                log["installAttempted"]=true;
+                log["sdkMethodsInvoked"]=new[] {"HIDMaestro.Internal.DriverDeploy.Run(null)"};Save();
+                return PackagePreparation.InvokeOfficialPreparation(asm);
+            },Evidence);
+            var result=PackagePreparation.Execute(prepare,metadata,initial,runtime);
+            log["packagePreparation"]=result;
+            log["installAttempted"]=result.SdkCallAttempted;
+            status=result.Status;log["decision"]=result.Decision;
+            log["officialPolicyScope"]="original-2.0-Deploy-gate+owner-census;startup-only;no-Everything-cleanup;device-binding-not-inferred";
+            Save();return ExitFor(status);
+        }
+        catch (PackagePreparation.InventorySchemaUnrecognizedException e) {
+            log["error"] = e.ToString(); log["inventoryRoot"] = e.ObservedRoot;
+            status = "DRIVER_INVENTORY_UNRECOGNIZED"; return PackagePreparation.InventoryUnrecognizedExit;
         }
         catch (Exception e) { log["error"] = e.ToString(); status = "ERROR_UNPROVEN"; return 11; }
         finally { if (mutexHeld) installMutex!.ReleaseMutex(); installMutex?.Dispose(); log["status"] = status; log["finishedAt"] = DateTimeOffset.Now; Save(); Console.WriteLine(status); Console.WriteLine(report); }
@@ -206,12 +228,26 @@ internal static partial class Program
         foreach (var g in new[] {f with {OwnedPackages=1}, f with {RepositoryRemnants=true}, f with {OwnDevices=true}, f with {SdkReady=true}})
             Check(Decide(g,true)=="PARTIAL_OR_CONFLICTING_STATE", "do not repair partial installation");
         Check(Decide(f with {SdkReady=true,CompletePackages=true},true)=="DRIVER_STORE_READY", "already ready no install");
-        var xml = "<Drivers><Driver DriverName='oem1.inf'><OriginalName>hidmaestro.inf</OriginalName><ProviderName>HIDMaestro</ProviderName></Driver><Driver DriverName='oem2.inf'><OriginalName>hidmaestro_xusb.inf</OriginalName><ProviderName>HIDMaestro</ProviderName></Driver></Drivers>";
-        Check(Complete(ParseDrivers(xml)), "two exact packages");
-        Check(!Complete(ParseDrivers(xml.Replace("HIDMaestro", "OtherVendor"))), "provider strict");
-        Check(!Complete(ParseDrivers(xml.Replace("hidmaestro_xusb.inf", "unrelated.inf"))), "both packages required");
-        foreach (var bad in new[] {"not xml", "<OtherSchema />"})
-        { bool threw=false; try { ParseDrivers(bad); } catch { threw=true; } Check(threw,"unknown is not absent"); }
-        Console.WriteLine($"GAMEPAD_PREREQUISITES_SELFTEST_PASS checks={count} deviceOperations=0"); return 0;
+        Driver Row(string name, string version, string published) => new(published,name,"HIDMaestro",version);
+        var current = new List<Driver> { Row("hidmaestro.inf","10/19/2026 2.0.0.2201","oem1.inf"),
+            Row("hidmaestro_xusb.inf","10/19/2026 2.0.0.2201","oem2.inf") };
+        var old = current.Select(d => d with { RawVersion="08/21/2026 1.4.7.12" }).ToList();
+        Check(PackagePreparation.InspectInventory(current).CurrentComplete,"exact current pair");
+        Check(PackagePreparation.HistoricalPairPresent(old),"old pair still has historical presence");
+        Check(PackagePreparation.InspectInventory(old).Status=="DRIVER_PACKAGE_VERSION_MISMATCH","old pair is not current readiness");
+        Check(!PackagePreparation.InspectInventory([current[0]]).CurrentComplete,"both current packages required");
+        Check(!PackagePreparation.InspectInventory(current.Select(d=>d with {RawVersion=""}).ToList()).CurrentComplete,"missing versions unknown");
+        Check(!PackagePreparation.InspectInventory(current.Select(d=>d with {Provider="OtherVendor"}).ToList()).CurrentComplete,"strict provider");
+        Check(!PackagePreparation.InspectInventory(current.Select(d=>d with {Published="../oem1.inf"}).ToList()).CurrentComplete,"strict published name");
+        Check(!PackagePreparation.InspectInventory(current.Select(d=>d with {RawVersion="08/21/2026 2.0.0.2201"}).ToList()).CurrentComplete,"date and version both exact");
+        Check(ExitFor("DRIVER_PACKAGE_VERSION_MISMATCH")!=0,"old package version is not ready exit");
+        Check(ExitFor("DRIVER_STORE_READY")==0,"current store version scope retains success exit");
+        Check(ExitFor("DRIVER_INVENTORY_UNRECOGNIZED")==18,"unknown inventory has advisory exit without claiming ready");
+        var xml="<Drivers><Driver DriverName='oem1.inf'><OriginalName>hidmaestro.inf</OriginalName><ProviderName>HIDMaestro</ProviderName><DriverVersion>10/19/2026 2.0.0.2201</DriverVersion></Driver></Drivers>";
+        Check(ParseDrivers(xml).Single().RawVersion=="10/19/2026 2.0.0.2201","version kept from XML");
+        foreach(var bad in new[]{"not xml","<OtherSchema />","<Drivers />","<Drivers><Other /></Drivers>"}) {
+            bool threw=false;try{ParseDrivers(bad);}catch{threw=true;}Check(threw,"unknown is not absent");
+        }
+        Console.WriteLine($"GAMEPAD_PREREQUISITES_SELFTEST_PASS checks={count} deviceOperations=0 sdkMethodsInvoked=0");return 0;
     }
 }

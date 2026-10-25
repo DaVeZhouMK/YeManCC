@@ -1,0 +1,63 @@
+{
+  "date": "2026-10-22",
+  "archive": "G:/YeManCC-Work/日志/微星G3E/YeManCC-logs-20261022-204536-退出Xbox全屏YMCC无法呼出卡后台了.zip",
+  "archiveSha256": "bce46e7180f8431050c49e9c55ae4fba555efd6966387c5b70c2dc85a217675d",
+  "facts": [
+    {
+      "at": "20:19:56.038",
+      "event": "boot-context",
+      "administrator": false,
+      "session": 1,
+      "batPid": 5852
+    },
+    {
+      "at": "20:19:56.404",
+      "event": "ymcc-start-failed",
+      "error": "请求的操作需要提升",
+      "meaning": "Old BAT directly attempted to create a requireAdministrator program from a medium token."
+    },
+    {
+      "at": "20:19:58.288",
+      "event": "boot-single-instance-acquired",
+      "ymccPid": 10568,
+      "meaning": "A YMCC instance started later; its origin is not proven by this archive."
+    },
+    {
+      "at": "20:20:56.313",
+      "event": "boot-deadline",
+      "elapsedMs": 60073,
+      "meaning": "BAT observer ended; no archived focusMax/steam-focus records establish the new three-round version."
+    },
+    {
+      "at": "20:21:23.816",
+      "event": "focus-foreground-changed",
+      "ymccPid": 10568,
+      "fgIsSelf": true
+    },
+    {
+      "at": "20:44:07.440",
+      "event": "focus-foreground-changed",
+      "ymccPid": 6300,
+      "fgIsSelf": true
+    },
+    {
+      "at": "20:45:31.848",
+      "event": "focus-foreground-changed",
+      "ymccPid": 6300,
+      "fgIsSelf": true
+    }
+  ],
+  "runtimeTaskReadOnly": {
+    "command": "C:/SOFT/YeMan/YeManCC/YeManCC.exe",
+    "arguments": "--minimized",
+    "runLevel": "HighestAvailable",
+    "multipleInstancesPolicy": "StopExisting",
+    "changed": false
+  },
+  "limits": [
+    "The failed direct launch is proven. The later intermittent cannot-summon symptom is not proven caused by that attempt.",
+    "Observed foreground successes do not exclude an earlier temporary problem.",
+    "Archive startup does not include the three-round focus telemetry; installed files later matching a newer hash do not establish earlier execution version.",
+    "No real Steam/Xbox/YMCC/input action was executed by the assistant."
+  ]
+}

@@ -1,0 +1,24 @@
+using System.Text.Json;
+string repo=Path.GetFullPath(args[0]),fixture=Path.GetFullPath(args[1]);
+string power=Path.Combine(fixture,"PowerControl"),runtime=Path.Combine(power,"handheldcompanion-runtime","YMCC-DEVICECORE-20261018-v1"),host=Path.Combine(power,"fan-host-v2"),shared=Path.Combine(power,"ymcc-shared-runtime");
+void Copy(string from,string to){foreach(string file in Directory.EnumerateFiles(from,"*",SearchOption.AllDirectories)){string dest=Path.Combine(to,Path.GetRelativePath(from,file));Directory.CreateDirectory(Path.GetDirectoryName(dest)!);File.Copy(file,dest);}}
+Copy(Path.Combine(repo,"PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1"),runtime);
+Copy(Path.Combine(repo,"PowerControl/fan-host"),host);Copy(Path.Combine(repo,"PowerControl/ymcc-shared-runtime"),shared);
+var checks=new List<string>();
+void Accept(string name){ActualSplitGate.ValidateSplitPayloadManifestAt(host,runtime);checks.Add(name);}
+void Reject(string name,Action mutate,Action restore,string text){Exception? failure=null;try{mutate();try{ActualSplitGate.ValidateSplitPayloadManifestAt(host,runtime);}catch(Exception e){failure=e;}}finally{restore();}if(failure==null||!failure.Message.Contains(text,StringComparison.Ordinal))throw new InvalidDataException("Missing rejection: "+name+" ("+failure?.Message+")");Accept(name);}
+Accept("Actual Host split validator accepts current shared layout");
+string lib=Path.Combine(shared,"LibreHardwareMonitorLib.dll");byte[] bytes=File.ReadAllBytes(lib);
+Reject("Missing required shared LHM rejected",()=>File.Delete(lib),()=>File.WriteAllBytes(lib,bytes),"is missing");
+Reject("Changed required shared LHM rejected",()=>{var b=(byte[])bytes.Clone();b[^1]^=1;File.WriteAllBytes(lib,b);},()=>File.WriteAllBytes(lib,bytes),"SHA256 mismatch");
+string manifest=Path.Combine(runtime,"HandheldCompanion.runtime.json");byte[] original=File.ReadAllBytes(manifest);
+void Change(Action<System.Text.Json.Nodes.JsonObject> action){var node=System.Text.Json.Nodes.JsonNode.Parse(original)!.AsObject();action(node);File.WriteAllText(manifest,node.ToJsonString());}
+Reject("Missing shared contract rejected",()=>Change(n=>n.Remove("sharedDependencies")),()=>File.WriteAllBytes(manifest,original),"omits required file: LibreHardwareMonitorLib.dll");
+Reject("Wrong shared path rejected",()=>Change(n=>n["sharedDependencies"]!["directory"]="PowerControl/other"),()=>File.WriteAllBytes(manifest,original),"contract is invalid");
+Reject("Shared manifest cannot substitute different hash",()=>Change(n=>n["sharedDependencies"]!["files"]![0]!["sha256"]=new string('0',64)),()=>File.WriteAllBytes(manifest,original),"Invalid, duplicated");
+Reject("Shared manifest wrong byte size rejected",()=>Change(n=>n["sharedDependencies"]!["files"]![0]!["bytes"]=1),()=>File.WriteAllBytes(manifest,original),"byte size mismatch");
+string core=Path.Combine(runtime,"HandheldCompanion.dll");byte[] coreBytes=File.ReadAllBytes(core);
+Reject("Missing actual HC still rejected",()=>File.Delete(core),()=>File.WriteAllBytes(core,coreBytes),"payload hash/missing mismatch");
+string extra=Path.Combine(runtime,"LibreHardwareMonitorLib.dll");Reject("Returning local duplicate rejected",()=>File.WriteAllBytes(extra,bytes),()=>File.Delete(extra),"Invalid, duplicated or local");
+File.WriteAllText(args[2],JsonSerializer.Serialize(new{status="passed",checks=checks.Count,details=checks,hostStarted=false,hardwareExecuted=false},new JsonSerializerOptions{WriteIndented=true}));
+Console.WriteLine("ACTUAL_HOST_SPLIT_GATE_OK checks="+checks.Count);

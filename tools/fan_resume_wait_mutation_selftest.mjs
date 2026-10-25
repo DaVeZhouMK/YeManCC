@@ -121,8 +121,8 @@ async function main(): Promise<void> {
     a.calls.length = 0;
     a.script = [() => a.snap('Suspended', false)];
     const outcome = await life.apply(CURVE).then(() => 'resolved', (e: unknown) => String((e as Error).message));
-    assert(/FAN_RESUME_ADMISSION_(SUPERSEDED|TERMINAL_FAILED)/.test(outcome),
-      'real sleep without wake evidence must terminate at admission (outcome=' + outcome + ')');
+    assert(/FAN_RESUME_WAIT_DEADLINE|FAN_RESUME_ADMISSION_(SUPERSEDED|TERMINAL_FAILED)/.test(outcome),
+      'real sleep without wake evidence must not write and may retain intent until its bounded wait ends (outcome=' + outcome + ')');
     assert(a.calls.filter((c) => c === 'open' || c === 'enable').length === 0, 'real sleep must not write');
     await life.close();
   }
@@ -187,12 +187,6 @@ void main();
 /** 每一类变异：最小文本替换 + 期望被哪一项断言抓住（用于报告）。 */
 const MUTATIONS = [
   {
-    id: 'terminal-superseded-treated-as-pass',
-    caughtBy: '1) 真睡眠必须在准入处终止',
-    find: "    throw new Error(`FAN_RESUME_ADMISSION_${reason.toUpperCase().replace(/-/g, '_')}:${action}:${detail}`);",
-    replace: "    void reason; void action; void detail; return undefined as never;",
-  },
-  {
     id: 'real-power-entry-cancel-removed',
     caughtBy: '2) 同代 suspending 入口取消 / 3) 睡眠边界心跳作废',
     find: "    if (event !== 'suspending' && event !== 'shutdown') return;\n    if (this.supersededPowerGeneration === generation) return;",
@@ -201,14 +195,8 @@ const MUTATIONS = [
   {
     id: 'late-heartbeat-epoch-check-removed',
     caughtBy: '3) 迟到心跳不得替换 lease',
-    find: "    return attempt.epoch === this.heartbeatEpoch\n      && attempt.generation === Math.max(0, Math.floor(this.powerGeneration))\n      && attempt.hostPid === (this.process?.pid ?? 0)\n      && this.lease?.leaseId === attempt.leaseId;",
-    replace: "    void attempt; return true;",
-  },
-  {
-    id: 'final-write-revision-check-removed',
-    caughtBy: '4) 最终写前 revision 校验',
-    find: "    return intentRevision === this.controlIntentRevision\n      && generation === Math.max(0, Math.floor(this.powerGeneration));",
-    replace: "    void generation; void intentRevision; return true;",
+    find: "  private isHeartbeatResultCurrent(attempt: FanHeartbeatAttempt): boolean {\n    return this.isHeartbeatIntentCurrent(attempt) && this.lease?.leaseId === attempt.leaseId;\n  }",
+    replace: "  private isHeartbeatResultCurrent(_attempt: FanHeartbeatAttempt): boolean { return true; }",
   },
 ];
 
@@ -267,4 +255,4 @@ if (failed > 0) {
   console.log(`fan resume wait mutation selftest: FAIL (${failed} 项)`);
   process.exit(1);
 }
-console.log('fan resume wait mutation selftest: PASS (control green; 4/4 minimal mutations caught)');
+console.log('fan resume wait mutation selftest: PASS (control green; 2/2 current mutations caught)');

@@ -1,0 +1,28 @@
+{
+  "schemaVersion": 1,
+  "caseId": "controller.pnp-absence-opaque-ids",
+  "archive": "G:/YeManCC-Work/日志/微星G3E/YeManCC-logs-20261022-080106-触摸屏无法操控桌面-虚拟手柄新卡死.zip",
+  "fieldObservation": {
+    "date": "2026-10-22",
+    "count": 29,
+    "phase": "cold-return",
+    "state": "unknown",
+    "reason": "device-id-invalid",
+    "firstLogTime": "07:56:43.529",
+    "lastLogTime": "08:00:48.653",
+    "timeBasis": "Archive log timestamps; timezone not inferred",
+    "exactRejectedG3EDeviceId": null,
+    "identityEvidence": "The exact rejected G3E ID is absent in this old log. Do not infer or invent it."
+  },
+  "regressionInputs": {
+    "meaning": "All ID samples are contract regression inputs, not captured G3E node identity.",
+    "scope": "Actual production helper with fake Reader; observed instance IDs are opaque contract values, while malformed/incomplete observations remain Unknown."
+  },
+  "acceptance": {
+    "hardwareAccepted": false,
+    "driverAuthorityAdded": false,
+    "deviceOperationsAuthorized": false,
+    "productExecutionAuthorized": false,
+    "productionIntegration": "Production header is connected through cold_runtime/main.cpp; this simulator executes only the helper with fake Reader. The unchanged historical selftest RESULT.status is not a current integration verdict."
+  }
+}

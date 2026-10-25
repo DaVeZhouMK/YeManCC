@@ -12,6 +12,7 @@ function assert(condition: boolean, message: string): void {
 
 const root = process.cwd();
 const native = fs.readFileSync(path.join(root, 'native', 'main.cpp'), 'utf8');
+const controllerUiOutput = fs.readFileSync(path.join(root, 'native', 'virtual_controller_ui_output_runtime.h'), 'utf8');
 const bridge = fs.readFileSync(path.join(root, 'src', 'bridge', 'customSteamLibrary.ts'), 'utf8');
 const engine = fs.readFileSync(path.join(root, 'src', 'gamepad', 'engine.ts'), 'utf8');
 const customLibraryUi = fs.readFileSync(path.join(root, 'CustomSteamLibrary', 'workspace-ui', 'app.js'), 'utf8');
@@ -47,8 +48,9 @@ assert(!engine.includes('customSteamLibrarySessionActive'), 'gamepad engine stil
 assert(engine.includes('nativeChildInputOwned'), 'renderer does not honor native ownership notification');
 // The child receives the parent's physical sample. Keep Steam's virtual Deck
 // desktop mapping quiet through the same native admission boundary as YMCC.
+assert(native.includes('#include "virtual_controller_ui_output_runtime.h"'), 'main native consumer must include controller UI output runtime');
 for (const gate of ['steamDeckUiOwnsInput', 'ps5UiOwnsInput']) {
-  const body = native.match(new RegExp('static bool ' + gate + '\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}'))?.[1] || '';
+  const body = controllerUiOutput.match(new RegExp('static bool ' + gate + '\\([^)]*\\)\\s*\\{([\\s\\S]*?)\\n\\}'))?.[1] || '';
   assert(body.includes('return gamepadUiInputEligible();'), gate + ' must reuse main native UI admission');
   assert(!body.includes('CustomSteamLibraryInputPhase'), gate + ' must not bypass child foreground ownership');
 }

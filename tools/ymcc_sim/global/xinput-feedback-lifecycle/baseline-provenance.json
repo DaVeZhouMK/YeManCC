@@ -1,0 +1,92 @@
+{
+  "generatedAt": "2026-10-19T08:27:21.796Z",
+  "status": "READ_ONLY_PREPARATION_BASELINE_LINEAGE_NOT_FULLY_PROVEN",
+  "executedTests": 0,
+  "sharedFilesWritten": false,
+  "producer": "tools/xinput_identity_feedback_lifecycle_selftest.mjs",
+  "requiredCurrentMode": "--current",
+  "currentHeader": {
+    "path": "native/xinput_identity_refresh_policy.h",
+    "sha256": "0d10809acadaa96c1f5a9634d6ae6b5c7a933acd3a25860488933c2237aa8fe1"
+  },
+  "historicalFixture": {
+    "file": "G:/YeManCC-Work/Build/Validation/VirtualInput-IdentityFeedback-R104-20261016/baseline-fragments.json",
+    "sha256": "91a4cd8d7e3fd9f3cb8f564eeaa10fab94142beaf49fd06184dcd5e4501b89ab",
+    "secondOriginal": "G:/YeManCC-Work/Build/Validation/MSI-LateReturnEvents-R112-20261016/common-fix/feedback-regression/baseline-fragments.json",
+    "secondOriginalSameBytes": true,
+    "declaredWholeSourceSha256": [
+      "1b404f5ab8ea6abe9db4e9ad2a1dfc9997baadfae720a3894b7aff9735fe718b"
+    ],
+    "disconnectSourceSha256": "066810045f17ea7aa852479a711e2b797e1eb64f42fb755a050a8dd6dd71d55a",
+    "parts": [
+      {
+        "name": "CLASSIFICATION",
+        "sha256": "44aa649f4dbb2febc4dce790565e407244f37e493a552918174eabaa99b609a3",
+        "exactOccurrencesInAdjacentPreimage": 0
+      },
+      {
+        "name": "IDENTITY_ENUM",
+        "sha256": "8a32543e8bd73153d27fdfbbd91dafbccf3d9c65d662b4307f06c433ffdbe1d0",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "TARGET",
+        "sha256": "f2d4f9d0a296741af35c17e5d3775d5a2f8bf87993fc1d415e429c1b72545b14",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "CURRENT",
+        "sha256": "d937ca3127b0308fc0d69cccc1838164a33aa3a692cd0bec297a05b6fcc7e244",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "STOP",
+        "sha256": "266517d55c7e40dfc70ddfbcc2542758cda580926a06b02d08b91f843e7c36ee",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "FINISH",
+        "sha256": "3472be07892c530eabad10f4629fc6cbae0ca8df20553a6db6c0d0818c902f6c",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "READY",
+        "sha256": "3c5a818fbd1882409e88b1d18cd88f190c4322ce4edce958439622bb6153bc58",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "START",
+        "sha256": "1742fea42ca74c211ec895b0f13000e53568685c31fc52c21d5c790ae60584d8",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "SCHEDULE",
+        "sha256": "b8bb1b4746955572ab7a83d863e7cd9d32fd8230808d8fcfa75b9163f94a6edd",
+        "exactOccurrencesInAdjacentPreimage": 1
+      },
+      {
+        "name": "DISCONNECT",
+        "sha256": "77e4d8da5c0937ce9c27855959400e791f33852b866c029465c424c0afcdce1b",
+        "exactOccurrencesInAdjacentPreimage": 1
+      }
+    ]
+  },
+  "adjacentSourcePreimage": {
+    "file": "G:/YeManCC-Work/Build/Validation/VirtualInput-IdentityFeedback-R104-20261016/main.cpp.before-adoption",
+    "sha256": "0c6e09acaaf048a792651355cad1e480173282c10292c0c1cbcc18fc4ff8a64f",
+    "matchesAdoptionDeclaredBefore": true
+  },
+  "classificationDifference": {
+    "expectedFixtureContainsR103Discovery": true,
+    "adjacentPreimageContainsSameClassifier": false,
+    "differenceFile": "D:/Codex/2026-10-19/wo-z/work/xinput-feedback-provenance-review/classification-lineage-difference.patch",
+    "meaning": "The fixed fixture includes dirtyDiscovery/boundaryFullScan revalidation absent from adjacent before-adoption classifier; it cannot be labeled a byte-exact extraction from that adjacent preimage."
+  },
+  "requirementsBeforeAcceptance": [
+    "Use only original current mode; do not execute candidate patch mode or edit native main.",
+    "Preserve exact baseline bytes and provenance, never generate an old baseline from current source.",
+    "If original whole-source lineage cannot be proven, keep the old chain labeled historical source-derived fixture and require separate current-production semantic mutations caught by original assertions.",
+    "Snapshot all actual compiler/source/artifact inputs and observe actual consumer termination in owned processes/case.",
+    "This does not close the game feedback callback/physical forwarding gap."
+  ]
+}

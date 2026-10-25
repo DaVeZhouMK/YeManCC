@@ -1,0 +1,58 @@
+{
+  "schemaVersion": 1,
+  "consumer": "inputHostFrameSubmissionSample",
+  "sourceIdentity": "observed physical input provider label and live read context; never chassis DMI",
+  "providers": [
+    {
+      "id": "controller.input.xinput.standard",
+      "kind": "XInput",
+      "sourceAliases": [
+        "xinput",
+        "xinput-any-connected"
+      ],
+      "requiresConnectedMask": true,
+      "frozenReferences": [
+        "Controllers/IController.cs",
+        "Controllers/XInputController.cs"
+      ],
+      "origin": "existing-native-canonical-XInput-consumer"
+    },
+    {
+      "id": "controller.input.msi-dinput.standard",
+      "kind": "MsiDInput",
+      "sourceAliases": [
+        "msi-dinput"
+      ],
+      "requiresConnectedMask": false,
+      "frozenReferences": [
+        "Controllers/IController.cs",
+        "Controllers/DInputController.cs",
+        "Controllers/MSI/DClawController.cs"
+      ],
+      "origin": "existing-reviewed-native-MSI-DInput-consumer"
+    }
+  ],
+  "scope": [
+    "standard buttons",
+    "sticks",
+    "triggers",
+    "existing canonical Special-button semantics"
+  ],
+  "excludedFromAvailability": [
+    "vendor/back buttons",
+    "controller motion and calibration",
+    "touch contacts",
+    "game feedback or physical actuators",
+    "physical hiding or driver readiness"
+  ],
+  "requiredLiveChecks": [
+    "sample live",
+    "actual physical source admission",
+    "read power/topology/identity/currentness",
+    "MSI source/mode generations",
+    "target/Host/intent/final pipe fences",
+    "source loss cannot block same-target full-neutral cleanup"
+  ],
+  "unknownInputSource": "unbound; do not guess or reclassify a virtual source",
+  "furtherDllTrim": "deferred"
+}

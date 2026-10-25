@@ -8,6 +8,8 @@ $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
 $D = Get-SimDefaults
+$testPowerShell = Join-Path $PSHOME 'pwsh.exe'
+if(-not (Test-Path -LiteralPath $testPowerShell -PathType Leaf)){throw 'This test suite requires the current PowerShell 7 runtime'}
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'regressions' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -20,7 +22,7 @@ function Check-R([string]$id, [string]$name, [bool]$ok, [string]$actual) {
 function Stub([int]$Port, [string]$State) {
   $log = Join-Path $OutDir "stub-$State-$stamp.jsonl"
   if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
+  $p = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoLogo', '-NoProfile', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
   Start-Sleep -Milliseconds 1500
   return [ordered]@{ proc = $p; log = $log; port = $Port; alive = (-not $p.HasExited) }
 }
@@ -70,26 +72,50 @@ if ($ready.ready -and $tok) {
 Check-R 'R5' '代次语义：边沿内重复 suspend=去重(200+deduplicated)；恢复后复用旧代次=拒绝' $r5ok $r5d
 
 # R6/R7 证据必须带 64 位 SHA256（禁 mtime 判据 / 禁截断哈希）
-$ev = Get-ChildItem $D.evidenceDir -Filter 'sleep-sim-*.json' -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+# Serialize this run's exact Host identity through the production evidence writer.
+# A clean evidence directory must not depend on an unrelated previous sleep run.
+$hashEvidenceDir = Join-Path $OutDir ('identity-' + [guid]::NewGuid().ToString('N'))
+$hashRun = New-SimRun -Domain 'tests' -Mode 'regression-identity' -ModeKind 'offline-injection' -ToolPath $PSCommandPath -Seed 204
+$hashRun.identity['hostExe'] = Get-SimFileIdentity $D.hostExe 'FanHost'
+Add-SimCheck -Run $hashRun -Form 'R6-R7' -Name 'current Host identity exists' -Ok $hashRun.identity['hostExe'].exists -Detail $D.hostExe | Out-Null
+$hashCode = Save-SimEvidence -Run $hashRun -EvidenceDir $hashEvidenceDir -Prefix 'regression-identity'
+$ev = Get-ChildItem -LiteralPath $hashEvidenceDir -Filter 'regression-identity-*.json' | Select-Object -First 1
 $hashOk = $false; $lenOk = $false; $r67 = 'no-evidence'
 if ($ev) {
   $js = Get-Content -LiteralPath $ev.FullName -Raw -Encoding UTF8
-  $hashOk = $js -match '"sha256"\s*:\s*"[0-9A-Fa-f]{64}"'
-  $lenOk = -not ($js -match '"sha256"\s*:\s*"[0-9A-Fa-f]{2,63}"')
+  $stored = $js | ConvertFrom-Json
+  $expectedHostHash = (Get-FileHash -LiteralPath $D.hostExe -Algorithm SHA256).Hash
+  $hashOk = $hashCode -eq 0 -and $stored.identity.hostExe.sha256 -eq $expectedHostHash -and $stored.identity.hostExe.sha256 -match '^[0-9A-Fa-f]{64}$'
+  $shortHashPattern = '"sha256"\s*:\s*"[0-9A-Fa-f]{2,63}"'
+  $negative = $js.Replace($expectedHostHash, $expectedHostHash.Substring(0, 16))
+  $lenOk = -not ($js -match $shortHashPattern) -and ($negative -match $shortHashPattern)
   $r67 = ("file=" + $ev.Name + " has64=" + $hashOk + " noShort=" + $lenOk)
 }
 Check-R 'R6' '证据含 64 位 SHA256（不得以 mtime 为判据）' $hashOk $r67
 Check-R 'R7' '证据中无截断哈希（位宽门）' $lenOk $r67
 
-# R8 工具树编码纪律：.ps1 带 BOM、.json 无 BOM
-$bomBad = @(); $jsonBad = @()
-foreach ($f in Get-ChildItem $simRoot -Recurse -File -Include '*.ps1', '*.json') {
-  $bytes = [IO.File]::ReadAllBytes($f.FullName)
-  $hasBom = ($bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF)
-  if ($f.Extension -eq '.ps1' -and -not $hasBom) { $bomBad += $f.Name }
-  if ($f.Extension -eq '.json' -and $hasBom) { $jsonBad += $f.Name }
+# R8: Windows PowerShell 5.1 decodes plain ASCII unambiguously; non-ASCII
+# UTF-8 scripts require a BOM. Reject invalid UTF-8 and BOM-bearing JSON.
+function Test-CyclePsEncoding([byte[]]$Bytes) {
+  $bom=$Bytes.Length -ge 3 -and $Bytes[0] -eq 0xEF -and $Bytes[1] -eq 0xBB -and $Bytes[2] -eq 0xBF
+  if(-not $bom -and @($Bytes|Where-Object {$_ -ge 128}).Count -gt 0){return $false}
+  try{$null=[Text.UTF8Encoding]::new($false,$true).GetString($Bytes);return $true}catch{return $false}
 }
-Check-R 'R8' '编码纪律：.ps1 带 BOM / .json 无 BOM' ((@($bomBad).Count + @($jsonBad).Count) -eq 0) ("ps1MissingBom=" + @($bomBad).Count + " jsonWithBom=" + @($jsonBad).Count)
+$asciiControl=[Text.Encoding]::ASCII.GetBytes('Write-Output 1')
+$unicodeControl=[Text.UTF8Encoding]::new($false).GetBytes('Write-Output "编码"')
+$bomControl=[byte[]](@(0xEF,0xBB,0xBF)+@($unicodeControl))
+$encodingControls=(Test-CyclePsEncoding $asciiControl) -and -not (Test-CyclePsEncoding $unicodeControl) -and (Test-CyclePsEncoding $bomControl)
+$bomBad=@();$jsonBad=@()
+foreach($f in Get-ChildItem $simRoot -Recurse -File -Include '*.ps1','*.json'){
+ $bytes=[IO.File]::ReadAllBytes($f.FullName)
+ $hasBom=$bytes.Length -ge 3 -and $bytes[0] -eq 0xEF -and $bytes[1] -eq 0xBB -and $bytes[2] -eq 0xBF
+ if($f.Extension -eq '.ps1' -and -not (Test-CyclePsEncoding $bytes)){$bomBad+=$f.Name}
+ if($f.Extension -eq '.json'){
+  $validUtf8=$true;try{$null=[Text.UTF8Encoding]::new($false,$true).GetString($bytes)}catch{$validUtf8=$false}
+  if($hasBom -or -not $validUtf8){$jsonBad+=$f.Name}
+ }
+}
+Check-R 'R8' 'encoding: ASCII or UTF8-BOM PowerShell; UTF8-no-BOM JSON' ($encodingControls -and @($bomBad).Count -eq 0 -and @($jsonBad).Count -eq 0) ('unsafePs1='+@($bomBad).Count+' badJson='+@($jsonBad).Count+' positiveNegativeControls='+$encodingControls)
 
 # R9 未证不得升格：证据里出现 unproven 时不得同文件写"完全释放/已恢复"
 $bad = 0; $scanned = 0
@@ -101,7 +127,7 @@ foreach ($f in Get-ChildItem $D.evidenceDir -Recurse -Filter '*.json' -ErrorActi
 Check-R 'R9' '未证不升格（unproven 与"完全释放/已恢复"不得同件出现）' ($bad -eq 0) ("scanned=$scanned violations=$bad")
 
 # R10 假绿防护：缺摘要 ⇒ exit 9（复用 provoke）
-$po = & powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -File (Join-Path $testsDir 'provoke-missing.ps1') -SimRoot $simRoot -EvidenceDir $OutDir 2>&1 | Out-String
+$po = & $testPowerShell -NoLogo -NoProfile -File (Join-Path $testsDir 'provoke-missing.ps1') -SimRoot $simRoot -EvidenceDir $OutDir 2>&1 | Out-String
 $pc = $LASTEXITCODE
 Check-R 'R10' '假绿防护：必需摘要缺失 ⇒ exit 9' ($pc -eq 9) ("exit=" + $pc)
 

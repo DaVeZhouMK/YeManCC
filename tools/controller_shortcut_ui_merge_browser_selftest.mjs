@@ -5,6 +5,7 @@ import path from 'node:path';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:http';
 import { createHash } from 'node:crypto';
+const featureStatusOnly=process.argv.includes('--feature-status-only');
 const root=process.cwd(),req=createRequire(path.join(root,'package.json'));
 const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compiler-sfc');
 const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR || 'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules';
@@ -14,29 +15,31 @@ fs.mkdirSync(out,{recursive:true});
 const styles=[];
 const mocks={
   '@/bridge/steamDeckMouse':`export const STEAM_DECK_MOUSE_DEFAULT=100;const get=()=>window.__fixture.mouseState??={ok:true,available:true,percent:100,pending:false,steamRunning:true};export async function steamDeckMouseGet(){return structuredClone(get())};export async function steamDeckMouseSet(percent){const f=window.__fixture;f.mouseWrites=(f.mouseWrites||0)+1;(f.mouseTargets??=[]).push(percent);if(f.mouseDelay)await new Promise(r=>setTimeout(r,f.mouseDelay));f.mouseState=f.mouseLive?{...get(),percent,pending:false,liveAvailable:true,appliedLive:true}:{...get(),pending:true,desiredPercent:percent};return structuredClone(f.mouseState)};export function steamDeckMouseMessage(){return '布局不可用'}`,
-  '@/bridge/yeman':`export async function summonGet(){return structuredClone(window.__fixture.gamepad)}; export async function summonSet(p){window.__fixture.nativeWrites++;Object.assign(window.__fixture.gamepad,p);return summonGet()}`,
+  '@/bridge/yeman':`export async function oemKeysGet(){return {familyId:'unknown',supported:false,keys:[]}};export async function summonGet(){return structuredClone(window.__fixture.gamepad)}; export async function summonSet(p){window.__fixture.nativeWrites++;Object.assign(window.__fixture.gamepad,p);return summonGet()}`,
   '@/bridge/gameproc':`export async function closeJoyxoffIfRunning(){}; export async function getGameInputRedistState(){return {mouseInterfaceAvailable:true}};export async function installGameInputRedist(){};export async function setMouseBackend(backend){return {ok:true,backend,on:true}}`,
-  '@/bridge/settingsRepository':`import {evaluateInputCasWrite} from ${JSON.stringify(path.join(root,'src/bridge/settingsRepository.ts'))};export async function loadSettings(){return structuredClone(window.__fixture.settings)};export async function compareAndSwapInputSettings(revision,patch){const f=window.__fixture;f.writes++;const r=evaluateInputCasWrite(f.settings.input,revision,patch,true);if(r.ok)f.settings.input=r.value;return r}`,
+  '@/bridge/settingsRepository':`import {evaluateInputCasWrite} from ${JSON.stringify(path.join(root,'src/bridge/settingsRepository.ts'))};export function onInputSettingsChanged(){return ()=>{}};export class VirtualStartProtectionActive extends Error{};export async function mergeSettings(){throw new Error('Unexpected settings merge in this fixture')};export async function loadSettings(){return structuredClone(window.__fixture.settings)};export async function compareAndSwapInputSettings(revision,patch){const f=window.__fixture;f.writes++;const r=evaluateInputCasWrite(f.settings.input,revision,patch,true);if(r.ok)f.settings.input=r.value;return r}`,
   '@/bridge/gameInputOverride':`export function getGameInputOverrideState(){return {locked:false,identity:''}};export function subscribeGameInputOverrideState(cb){cb(getGameInputOverrideState());return ()=>{}}`,
-  '@/bridge/ipc':`export function on(name,cb){const events=window.__fixture.events??={};events[name]=cb;return ()=>{if(events[name]===cb)delete events[name]}};export async function invoke(){return {}}`,
+  '@/bridge/ipc':`export function on(name,cb){const events=window.__fixture.events??={};events[name]=cb;return ()=>{if(events[name]===cb)delete events[name]}};export function isNativeRuntime(){return false};export async function invoke(name){if(name==='oem.keys.status')return window.__fixture.oemUsage||{};return {}}`,
   '@/bridge/api':`export const fs={},settingsStore={},shell={open:async()=>{}}`,
   '@/gamepad/focus':`export function focusGamepadElement(node){node?.focus()};export function getGamepadPopupPlacement(){return {style:{},above:false}}`,
   '@/components/ControllerFeedbackCapabilitiesCard.vue':`export default {render(){return null}}`,
   '@/views/ControllerShortcutEditorView.vue':`import {h} from 'vue';export default {emits:['close'],setup(_,ctx){return ()=>h('section',{role:'dialog','aria-label':'editor fixture','data-editor-fixture':true},[h('button',{onClick:()=>ctx.emit('close')},'关闭编辑器')])}}`,
 };
-const result=await build({stdin:{resolveDir:root,loader:'ts',contents:`
+const result=await build({loader:{'.png':'dataurl'},stdin:{resolveDir:root,loader:'ts',contents:`
 import {createApp} from 'vue';import Page from './src/views/ButtonMappingView.vue';
 import {normalizeSettings} from './src/bridge/settingsRepository.ts';
+import {normalizeOemInputUsage} from './src/bridge/controllerFeatureStatus.ts';
 import {NATIVE_DEFAULT_SHORTCUTS,nativeDefaultRule,newControllerShortcutRule} from './src/bridge/controllerShortcutRules.ts';
 const gamepad={enabled:true,mouseBackend:'joyxoff',...Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(d=>[d.defaultKey,true]))};
 const custom={...newControllerShortcutRule('custom-oem','keyboard.numeric'),inputs:[{source:'oem',code:'m1'}],params:{key:'F8'}};
 window.__fixture={gamepad,writes:0,nativeWrites:0,settings:normalizeSettings({input:{outputTarget:{persona:'steamdeck',buttonMappingEnabled:true,oemRearMap:{m1:'left',m2:'right',unknown:'both'}},buttonMapping:{rules:{schemaVersion:2,shortcutRules:[...NATIVE_DEFAULT_SHORTCUTS.map(d=>nativeDefaultRule(d.defaultKey)),custom]}}}})};
-createApp(Page).mount('#app');`},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'controller-ui-fixture',setup(b){
+const instance=createApp(Page).mount('#app');window.__featureTest={instance,setUsage(raw){instance.oemUsage=normalizeOemInputUsage(raw)}};`},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'controller-ui-fixture',setup(b){
   b.onResolve({filter:/.*/},args=>{if(args.path in mocks)return {path:args.path,namespace:'fixture'};
     if(args.path==='./api'&&args.importer.endsWith('settingsRepository.ts'))return {path:'@/bridge/api',namespace:'fixture'};});
   b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));
   b.onLoad({filter:/\.vue$/},args=>{
-    const {descriptor,errors}=parse(fs.readFileSync(args.path,'utf8'),{filename:args.path});assert.equal(errors.length,0);
+    let source=fs.readFileSync(args.path,'utf8');if(featureStatusOnly&&args.path.endsWith('ButtonMappingView.vue'))source=source.replace('</script>','defineExpose({applyInputSnapshot,oemUsage,observedOemKeys,physicalGyroSupported});\n</script>');
+    const {descriptor,errors}=parse(source,{filename:args.path});assert.equal(errors.length,0);
     const id='data-v-'+createHash('sha256').update(args.path).digest('hex').slice(0,8);
     const compiled=compileScript(descriptor,{id,inlineTemplate:true});
     for(const style of descriptor.styles){const css=compileStyle({source:style.content,filename:args.path,id,scoped:style.scoped});assert.equal(css.errors.length,0);styles.push(css.code);}
@@ -62,6 +65,23 @@ try{
     assert(layout.button.right<=layout.head.right+1);cases.push(`header inline/right/no overflow ${width}x${height}`);
     if(width===1280&&height===720){const p=path.join(out,'controller-shortcuts-1280x720.png');await page.screenshot({path:p,fullPage:true});screenshots.push(p);}
   }
+  if(featureStatusOnly){
+    const raw={schemaVersion:1,familyId:'msi-claw',deviceClass:'HandheldCompanion.Devices.ClawCG3EM',supported:true,keys:[{keyId:'m1',label:'M1',backIndex:1,captureImplemented:true,physicalForm:'keyboard-vk'},{keyId:'m2',label:'M2',backIndex:2,captureImplemented:true,physicalForm:'keyboard-vk'},{keyId:'claw',label:'CLAW',backIndex:0,captureImplemented:true,triggerCapability:'click-only'}],runtime:{keyboardActive:true,rawKeyboardActive:false,msiWmiState:2,msiWmiCurrent:true,nativeRearAutomaticMapping:'held'}};
+    const scenarios=[['MSI-native',raw,false,'disabled'],['ROG-native',{...raw,familyId:'asus-rog-ally-x',deviceClass:'HandheldCompanion.Devices.XboxROGAllyX',runtime:{rawKeyboardActive:true}},false,'disabled'],['SteamDeck',raw,true,'steamdeck'],['PS5',raw,true,'dualsense-edge'],['Xbox',raw,true,'elite']];
+    let revision=100;
+    for(const [width,height]of [[1280,720],[1280,800],[420,800]])for(const [name,usage,enabled,persona]of scenarios){
+      await page.setViewportSize({width,height});await page.evaluate(({usage,enabled,persona,revision})=>{const t=window.__featureTest;t.setUsage(usage);t.instance.applyInputSnapshot({revision,outputTarget:{buttonMappingEnabled:enabled,persona,gyroEnabled:enabled}});},{usage,enabled,persona,revision:++revision});
+      await page.waitForFunction(()=>document.querySelectorAll('.controller-channel').length===3);
+      const layout=await page.locator('.controller-channel-list').evaluate(el=>({width:el.clientWidth,scroll:el.scrollWidth,buttons:[...el.querySelectorAll('button')].map(n=>({width:n.getBoundingClientRect().width,scroll:n.scrollWidth,client:n.clientWidth})),pageOverflow:document.documentElement.scrollWidth>innerWidth}));
+      assert(!layout.pageOverflow&&layout.scroll<=layout.width+1);assert.equal(layout.buttons.length,3);assert(Math.max(...layout.buttons.map(x=>x.width))-Math.min(...layout.buttons.map(x=>x.width))<=1);assert(layout.buttons.every(x=>x.scroll<=x.client+1));
+      const gyro=await page.locator('[data-feature=gyro] strong').innerText();assert.equal(gyro,enabled?'等待输入':'需虚拟手柄');
+      const rear=await page.locator('[data-feature=back] strong').innerText();assert.equal(rear,'待按键确认');
+      assert.equal(await page.locator('.controller-channel-detail').count(),0);
+      const screenshot=path.join(out,'features-'+name+'-'+width+'x'+height+'.png');await page.screenshot({path:screenshot,fullPage:true});screenshots.push(screenshot);cases.push('three equal compact feature controls '+name+' '+width+'x'+height);
+    }
+    await page.locator('[data-feature=back]').focus();await page.locator('[data-feature=back]').press('Enter');assert.equal(await page.locator('.controller-channel-detail').count(),1);assert.match(await page.locator('.controller-channel-detail').innerText(),/Xbox.*没有独立背键通道/);await page.locator('[data-feature=back]').press('Enter');assert.equal(await page.locator('.controller-channel-detail').count(),0);
+    assert.equal(await page.evaluate(()=>window.__fixture.writes),0);assert.equal(await page.evaluate(()=>window.__fixture.nativeWrites),0);cases.push('keyboard expandable detail, no actual settings or native writes');
+  }else{
   const range=page.getByRole('slider',{name:'SteamDeck鼠标灵敏度'});
   assert.equal(await range.count(),1);assert.equal(await range.getAttribute('min'),'1');assert.equal(await range.getAttribute('max'),'300');assert.equal(await range.inputValue(),'100');
   assert.equal(await range.getAttribute('step'),'any');assert.equal(await page.locator('.sensitivity-footer').count(),0);
@@ -112,7 +132,8 @@ try{
   assert.equal(await page.locator('.mouse-backend-buttons button').nth(1).isDisabled(),false);
   assert.equal(await page.locator('.mouse-backend-buttons button').nth(2).isDisabled(),true);
   cases.push('switching away hides SteamDeck slider and restores non-Steam backend selection');
+  }
   assert.deepEqual(errors,[]);
-  const report={suite:'Controller shortcut UI browser',passed:cases.length,cases,screenshots,pageErrors:errors,scope:'real Vue DOM and CSS, mocked native/storage and editor body; no hardware'};
+  const report={suite:'Controller shortcut UI browser',passed:cases.length,cases,screenshots,pageErrors:errors,scope:featureStatusOnly?'actual full controller page and three production status controls; existing memory IPC/storage boundaries; current-source UI-only input state; legacy mouse suite not selected; no hardware':'real Vue DOM and CSS, mocked native/storage and editor body; no hardware'};
   fs.writeFileSync(path.join(out,'browser-results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
 }finally{if(browser)await browser.close();await new Promise(resolve=>server.close(resolve));}

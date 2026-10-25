@@ -1,0 +1,52 @@
+{
+  "schemaVersion": 1,
+  "normalization": "CRLF-to-LF-only; comments, whitespace, literals and all code stay pinned",
+  "historicalBaselineSha256": "1d0ec7bdd5fe4a2b0ac478663158caccb4c0311714c45d06981c2ee5dd8a5f45",
+  "dependencyHashes": {
+    "native/input_startup_policy.h": "c76afb7e64e7f4021d22acc846b0e40524ee738c713023b3388651f33b0c2f64",
+    "native/controller_persona_settings.h": "5d1a40cfef3cce191877f188eb105a2b6f2cfe1c3d0e04e96d07560d16feb856",
+    "native/controller_persona.h": "9eee4ad364023d635c60c31c3464c980b6082b1099d958ef84a0fe9875eec457",
+    "deps/json/json.hpp": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+  },
+  "dependencyReview": {
+    "native/input_startup_policy.h": "Pure JSON preparation; settings writes belong to caller; no fence, queue, Host, timer or device owner. Same session is idempotent; same/unknown boot and migration preserve live input. Current v2 adds startupObservedBoot publication; full native policy selftest Release/Checked 37 each executes known/unknown/later-boot observations. Original fence routes and negatives remain required.",
+    "native/controller_persona_settings.h": "Saved-field migration only, invalidates stale receipts; no control IO.",
+    "native/controller_persona.h": "Pure persona vocabulary and saved-value conversion.",
+    "deps/json/json.hpp": "Exact existing JSON implementation, no substitute."
+  },
+  "reviewedFunctionBundles": [
+    {
+      "id": "monotonic-current-20261023",
+      "functionHashesLf": {
+        "inputHostLifecycleWorkIsCleanup": "991ddc83fd80caa39ffc23e54b5952417569c1a9cdbd66005ad49a414f336df7",
+        "inputHostExitFenceBlocks": "f69b6d3277b61060a00500f7943756de5b6983043987215d76459599d4aaa7d7",
+        "inputHostExitFenceRaised": "cdb50cbf6c7e90b207c2d3794a5a34bcc2552a52e198671cb79e6580b61ce050",
+        "inputHostRaiseExitFence": "5cb7803bf8a6c25d0fb14e975a524ee4f96b6a0fa16fa948a1e3e17ba0615fa0",
+        "inputHostResetExitFence": "801ab0760659b00bc630991427ea163d5460a826ea5c4d37b3e8a698fdeee54f"
+      },
+      "review": "All five whole functions equal the preserved monotonic candidate after line-ending normalization only. Reset loads the terminal fence and refuses before counter writes; no startup-policy call exists in this observed bundle."
+    },
+    {
+      "id": "monotonic-owner-noop-reviewed-control",
+      "functionHashesLf": {
+        "inputHostLifecycleWorkIsCleanup": "991ddc83fd80caa39ffc23e54b5952417569c1a9cdbd66005ad49a414f336df7",
+        "inputHostExitFenceBlocks": "f69b6d3277b61060a00500f7943756de5b6983043987215d76459599d4aaa7d7",
+        "inputHostExitFenceRaised": "cdb50cbf6c7e90b207c2d3794a5a34bcc2552a52e198671cb79e6580b61ce050",
+        "inputHostRaiseExitFence": "5cb7803bf8a6c25d0fb14e975a524ee4f96b6a0fa16fa948a1e3e17ba0615fa0",
+        "inputHostResetExitFence": "87e70365e88ad3572d046862db30b3d710fe8bc53ca6570ade223c43fa00cd3c"
+      },
+      "review": "Explicit harmless source-extension control: one (void)owner; immediately before the existing reset load. No new call or side effect. Its entire five-function identity is pinned and compiled as a control; adjacent unknown code is rejected."
+    }
+  ],
+  "extensionPolicy": "Review all changed complete functions and actual dependencies, then add an exact bundle or update reviewed dependency pins with new evidence. No runtime learning, arbitrary caller SHA, wildcard call acceptance or gate bypass.",
+  "contractVersion": 2,
+  "contractId": "exit-fence-current-startup-observed-boot-v2",
+  "previousContract": {
+    "path": "tools/fixtures/input_capture_timer_retirement/exit_fence_source_contract.json",
+    "sha256": "e1827f0e0d4354019b86e70820cc7f7582f363e1476a8165e3965933f6244c7f"
+  },
+  "currentDependencyReview": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\STARTUP-POLICY-REVIEW.json",
+    "sha256": "2317bc4971b476573e402c0e0a638ca4778d82c50b3ef9cd2f004484a7361a88"
+  }
+}

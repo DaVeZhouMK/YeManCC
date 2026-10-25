@@ -1,0 +1,17 @@
+{
+  "sourcePackage": "YeManCC-logs-20261014-080143-G3E-虚拟手柄睡眠成功失败并存-Steam恢复也是.zip",
+  "actualImplementation": "steam-wake-round31-native-predispatch-wait",
+  "appid": 2399932135,
+  "gameid": "10307630032478011392",
+  "sharedPreferredPid": 11168,
+  "sharedPreferredCreated": "134364093864440221",
+  "nativePrimaryPid": 14672,
+  "nativePrimaryChangedAt": "2026-10-14 07:58:59",
+  "nativePrimaryOsBirthVerified": false,
+  "simulatedNewBirthOffset100ns": 1530000000,
+  "simulationScope": "Only a deterministic fresh OS identity seam for regression; the archive does not verify new PID birth or actual input/Continue.",
+  "captureBoundary": "134364096226862572",
+  "path": "E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe",
+  "gameprocessLog": "[2026-10-14 07:56:26] AppID 10307630032478011392 adding PID 11168 as a tracked process \"\"E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe\"\"\n[2026-10-14 07:58:59] AppID 10307630032478011392 adding PID 14672 as a tracked process \"\"E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe\"\"\n",
+  "consoleLog": "[2026-10-14 07:56:26] Game process added : AppID 2399932135 \"\"E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe\"\", ProcID 11168, IP 0.0.0.0:0\n[2026-10-14 07:58:59] Game process updated : AppID 2399932135 \"\"E:\\GAME\\Teenage Mutant Ninja Turtles Shredders Revenge Radical Reptiles\\TMNT.exe\"\", ProcID 14672, IP 0.0.0.0:0\n"
+}

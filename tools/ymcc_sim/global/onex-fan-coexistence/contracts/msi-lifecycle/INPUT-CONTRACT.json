@@ -1,0 +1,207 @@
+{
+  "schemaVersion": 1,
+  "status": "SOURCE_CONTRACT_PENDING_PARENT_DERIVATIVE_QUALIFICATION_NOT_RUNTIME_PERMISSION",
+  "profile": "msi-original-lifecycle23-from-accepted-onex92",
+  "api": {
+    "inspect": "inspectMsiLifecycleInputs({inputsPin})",
+    "prepare": "prepareMsiLifecycle({inputsPin})",
+    "model": "projectMsiLifecycleMODEL_ONLY(bundle)"
+  },
+  "input": {
+    "schemaVersion": 1,
+    "profile": "msi-original-lifecycle23-from-accepted-onex92",
+    "evidenceKind": "EXACT_MSI_LIFECYCLE_PREPARE",
+    "role": "positive",
+    "ownedParent": "D:/Codex/2026-10-18/kai-s/work",
+    "stageRoot": "NEW_FRESH_DIRECT_CHILD",
+    "acceptedOneX92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/SUMMARY.json",
+        "sha256": "bc53dc914731a6ae380a2da7c8949aaa3cac698455afe65c9309864372a26c7f"
+      },
+      "preparedPin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+        "sha256": "e7fea6722ce27167b57333817265cd42a98a5aad5326f04cbd3a36249cc82260"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/LOADED-GRAPH.json",
+        "sha256": "a7377291a21860b089ce8bd27136c20267c7707536aa44c49e7ec6713ec3bae9"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-seven-independent-joint/SUMMARY.json",
+        "sha256": "db5fc82bebb2a3c2314c77220dd39f024b43d53e7126b1b994294a2824b813fb"
+      }
+    },
+    "derivativeQualificationPin": {
+      "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+      "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+    }
+  },
+  "qualification": {
+    "schemaVersion": 1,
+    "kind": "msi-lifecycle-derivative-qualification",
+    "status": "PARENT_QUALIFIED_MSI_LIFECYCLE_DERIVATIVES",
+    "hcGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-lifecycle-hc-ten-leaf-generation/SUMMARY.json",
+      "sha256": "8cc3a28680126ed4af8f00a0495963181fd4106e9307125db049bb52f8b2dd9a"
+    },
+    "hostGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-lifecycle-host-three-leaf-generation/SUMMARY.json",
+      "sha256": "5d0fe20925887548fba93127ea6d3d2bdff475a2acf3e8a9fd9edd91d19c5c8d"
+    },
+    "reviewPin": {
+      "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+      "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+    },
+    "inventory": {
+      "resultPin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-original-hc-hid-inventory-generation\\msi-original-metadata-inventory\\owned-stage\\msi-original-hc-hid-inventory.json",
+        "sha256": "070ccd7ecc4294684d28e51d7729e1d7d00175e9a265e7d09bb89694ec4a0927"
+      },
+      "processPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-original-hc-hid-inventory-generation/msi-original-metadata-inventory/GENERATION-PROCESS.json",
+        "sha256": "531c0d450985246fef58b4161095033d61dd3d36854fded0b033cc3e7b8fde90"
+      },
+      "originalHcPin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.dll",
+        "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583"
+      },
+      "hidLibraryPin": {
+        "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+        "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+        "identity": "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+        "role": "target"
+      }
+    },
+    "faultGenerationPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/SUMMARY.json",
+      "sha256": "537c13f8b38877fcb73f9a58309ac56b2f45d332703b7eaa572481ebada95d7c"
+    },
+    "faultRawReviewPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-lifecycle-fault-raw-review-r2/SUMMARY.json",
+      "sha256": "a4d64dccfe8aceb588ce429bfccd98bc07707225cb202c357e49de057c83451b"
+    },
+    "reviewEvidencePins": [
+      {
+        "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+        "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+      }
+    ],
+    "nativeDevicePermissionAdded": false
+  },
+  "reviewBinding": {
+    "schemaVersion": 1,
+    "kind": "msi-lifecycle-derivative-review-binding",
+    "status": "REVIEWED_EXACT_MSI_LIFECYCLE_DERIVATIVES",
+    "evidenceKind": "ACTUAL_METADATA_RAW_REVIEW",
+    "derivedFrom": [
+      {
+        "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+        "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+      },
+      {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-lifecycle-fault-raw-review-r2/SUMMARY.json",
+        "sha256": "a4d64dccfe8aceb588ce429bfccd98bc07707225cb202c357e49de057c83451b"
+      }
+    ],
+    "hcSourcePin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-onex-lifecycle-hc-ten-leaf-generation-r2\\onex-lifecycle-hc\\owned-stage\\lifecycle-hc\\HandheldCompanion.dll",
+      "sha256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd"
+    },
+    "hcTargetPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-hc-ten-leaf-generation\\msi-lifecycle-hc\\owned-stage\\lifecycle-hc\\HandheldCompanion.dll",
+      "sha256": "1827c3e763c0b74fddb2bae6d8b42778d4917d03bfe8a35536c78c23f95d50e1"
+    },
+    "hostSourcePin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-host-five-leaf-generation\\public-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+      "sha256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c"
+    },
+    "hostTargetPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-host-three-leaf-generation\\msi-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+      "sha256": "4a461bee291d72b083d93736301ffddfb71846068bbc086ee0163e53696f97d5"
+    },
+    "portsSHA256": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+    "hcChangedMethods": [
+      "HandheldCompanion.WMI/WmiIoResult HandheldCompanion.WMI::GetStructured(System.String,System.String,System.String,System.Byte,System.Int32,System.Int32)",
+      "HandheldCompanion.WMI/WmiIoResult HandheldCompanion.WMI::SetStructured(System.String,System.String,System.String,System.Byte[])",
+      "System.Boolean HandheldCompanion.Devices.ClawA1M::CheckAndFixRegistry()",
+      "System.Boolean HandheldCompanion.Devices.ClawA1M::IsReady()",
+      "System.Boolean HandheldCompanion.Devices.ClawA1M::Open()",
+      "System.Boolean HandheldCompanion.PnPUtil::RestartDevice(System.String)",
+      "System.Byte[] HandheldCompanion.WMI::Get(System.String,System.String,System.String,System.Byte,System.Int32,System.Boolean&)",
+      "System.Collections.Generic.IEnumerable`1<HidLibrary.HidDevice> HandheldCompanion.Devices.IDevice::GetHidDevices(System.Int32,System.Int32[],System.Int32)",
+      "System.Management.ManagementBaseObject HandheldCompanion.WMI::Set(System.String,System.String,System.String,System.Byte[])",
+      "System.Void HandheldCompanion.Devices.ClawA1M::Close()"
+    ],
+    "hostChangedMethods": [
+      "System.Collections.Generic.IReadOnlyList`1<System.String> YeManFanHost.RealHcBackend::EnumerateMsiPnpDeviceIds()",
+      "System.Void YeManFanHost.RealHcBackend::PrepareMsiWmiPayloadBeforeOpen()",
+      "YeManFanHost.MsiWmiMetadataProbe YeManFanHost.RealHcBackend::ProbeMsiWmiInstance(System.String)"
+    ],
+    "wholeMethodSetsVerified": true,
+    "originalBaseOpenAndStructuredReleasePreserved": true,
+    "readinessOnlyTwoConnectionIo": true,
+    "originalReadinessAlgorithmPreserved": true,
+    "hidLibraryUnmodified": true,
+    "hostOnlyThreePrerequisiteLeaves": true,
+    "noRealRegistryPnpOrGeneralOpen": true,
+    "inventoryResultPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-original-hc-hid-inventory-generation\\msi-original-metadata-inventory\\owned-stage\\msi-original-hc-hid-inventory.json",
+      "sha256": "070ccd7ecc4294684d28e51d7729e1d7d00175e9a265e7d09bb89694ec4a0927"
+    },
+    "targetCodeExecuted": false,
+    "nativeDevicePermissionAdded": false,
+    "variants": [
+      {
+        "role": "narrow-open",
+        "sourcePin": {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-host-three-leaf-generation\\msi-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+          "sha256": "4a461bee291d72b083d93736301ffddfb71846068bbc086ee0163e53696f97d5"
+        },
+        "targetPin": {
+          "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+          "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+        },
+        "proofPin": {
+          "path": "PARENT_PROVIDES_ACTUAL_ABSOLUTE_PATH",
+          "sha256": "PARENT_PROVIDES_ACTUAL_SHA256"
+        },
+        "changedMethods": [
+          "ACTUAL_FULL_METHOD_SIGNATURE_FROM_ORIGINAL_PROOF"
+        ],
+        "wholeMethodSetVerified": true,
+        "typedReviewVerified": true
+      }
+    ]
+  },
+  "note": "One normalized review binding can reference the real typed reports without editing them. Positive does not require variants; each negative requires exact own generated row, original one-method proof, and raw-review pin present in review.derivedFrom. No unknown checksum is treated as known.",
+  "guards": {
+    "beforeFirstWrite": [
+      "Actual accepted OneX92 summary/plan/graph",
+      "Reviewed MSI HC10 and Host3 full methodsets",
+      "Exact original08A/Hid metadata inventory; no assembly execution",
+      "Original negative CLI/one-method proof and typed binding for negative",
+      "Fresh owned root and complete pin recheck"
+    ],
+    "managedContext": "Exact original Default92, alias6 and guard116; no inventory or AssemblyRef auto-admission",
+    "masks": {
+      "narrow-open": 23,
+      "usable": 2,
+      "firmware": 5,
+      "release-dispatch": 17,
+      "settlement": 5,
+      "binding": 2
+    },
+    "budget": {
+      "business": 60000,
+      "parent": 360000,
+      "generation": 30000,
+      "compile": 120000
+    }
+  },
+  "reportScopeErratum": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-generation-template-scope-erratum.json",
+    "sha256": "78fd56f2159fc35de4d827e67900204bb899583f2f9942e3ad3ab4631c41ae73"
+  },
+  "obsoleteReportFlags": "publicFactoryStillUnaccepted in three generation aggregates is not an admission guard; independent exact accepted OneX92 receipts qualify the parent."
+}

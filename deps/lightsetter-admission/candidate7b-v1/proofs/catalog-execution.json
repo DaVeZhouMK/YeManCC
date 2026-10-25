@@ -1,0 +1,140 @@
+{
+  "schemaVersion": 1,
+  "status": "PASS",
+  "finishedUtc": "2026-10-19T06:08:48.990815+00:00",
+  "originalHarness": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+    "sha256": "1e57df06a6243746fdfcacd546ad3f76a2e36bbd70d44b43ebca77f4d50dd3ee"
+  },
+  "adaptedHarness": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\Program.cs",
+    "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd"
+  },
+  "harness": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+    "sha256": "1d7ac9338ba91dc7bd707d336412995d5850a7f363357223c7090d67d9af0b0c"
+  },
+  "sourceInputs": [
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\tools\\HcLightingCapabilitySelfTest\\Program.cs",
+      "sha256": "1e57df06a6243746fdfcacd546ad3f76a2e36bbd70d44b43ebca77f4d50dd3ee"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\ActualLightingCatalog.csproj",
+      "sha256": "27a01bea2c5e7ab1d4c6ceeed3b8a8ad1b9cb66cfb53a268eff7c1b1b064eaec"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\Program.cs",
+      "sha256": "e31e5e2f0ce22f15173eefd72db8de2cc33eea1df3fca1e85859fd3dcb1ea9cd"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.cs",
+      "sha256": "215d28d4f73036df64e42bc0a184af2c78425e4bceb0ad9ed7fc765bb75694fa"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.cs",
+      "sha256": "276dc59457b5296b87b04d23a0ac17922a79e4981345b32076dac8d4a7876eb2"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\HcLightingCapabilityCatalog.generated.cs",
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+      "sha256": "2517bdb4144b2e6db8a9104950d326c34994c19d0f4a3e623e084511086ca5f6"
+    }
+  ],
+  "actualHelperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "oldHelperSha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+  "steps": [
+    {
+      "id": "candidate-full",
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "pid": 31220,
+      "naturalExit": true,
+      "arguments": [
+        "C:\\Program Files\\dotnet\\dotnet.exe",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-full-result.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+        "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe"
+      ],
+      "result": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-full-result.json",
+        "sha256": "65bc755b252becb5661a7bed009540b37e965bf9726081b4e686c5aff0c6f6f3"
+      }
+    },
+    {
+      "id": "old-loki-control",
+      "exitCode": 1,
+      "expectedExitCode": 1,
+      "pid": 24304,
+      "naturalExit": true,
+      "arguments": [
+        "C:\\Program Files\\dotnet\\dotnet.exe",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\old-loki-control-result.json",
+        "C:\\SOFT\\YeMan\\PowerControl\\light-setter\\YeManLightSetter.dll",
+        "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+        "--loki-only"
+      ],
+      "result": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\old-loki-control-result.json",
+        "sha256": "7b886c786805dcf19d6717713f144f139bedb9b1cc68a4a91257a9de47b6c5a5"
+      }
+    },
+    {
+      "id": "candidate-loki-control",
+      "exitCode": 0,
+      "expectedExitCode": 0,
+      "pid": 15988,
+      "naturalExit": true,
+      "arguments": [
+        "C:\\Program Files\\dotnet\\dotnet.exe",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-loki-control-result.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+        "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+        "--loki-only"
+      ],
+      "result": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\candidate-loki-control-result.json",
+        "sha256": "23f20adfc5f26526d9def401f4bee74c3524ee43f16076574b95c42362f01e71"
+      }
+    },
+    {
+      "id": "wrong-sha-refused",
+      "exitCode": 3762504530,
+      "expectedExitCode": "nonzero",
+      "pid": 21412,
+      "naturalExit": true,
+      "arguments": [
+        "C:\\Program Files\\dotnet\\dotnet.exe",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\artifacts\\bin\\ActualLightingCatalog\\release\\ActualLightingCatalog.dll",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\capabilities\\hc-device-catalog.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\actual-artifact-catalog\\wrong-sha-refused-result.json",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\candidate-payload\\YeManLightSetter.dll",
+        "0000000000000000000000000000000000000000000000000000000000000000"
+      ],
+      "result": null
+    }
+  ],
+  "existingAssertions": 549,
+  "models": 47,
+  "targetCalls": 552,
+  "assertionsCallingActualTarget": 548,
+  "remainingFixtureOnlyAssertions": [
+    "HC-not-loaded process observation"
+  ],
+  "realDeviceIo": false,
+  "mainEntryInvoked": false,
+  "actualCWritten": false
+}

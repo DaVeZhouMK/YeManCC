@@ -1,0 +1,718 @@
+{
+  "schemaVersion": 1,
+  "runtimeId": "YMCC-DEVICECORE-20261018-v1",
+  "assemblyName": "HandheldCompanion",
+  "sourceRuntimeId": "HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "sourceDirectory": "deps/hc-runtime-upstream/HC-CANDIDATE-0.32.4.0-06c0b954-20260902",
+  "sourceManifestSha256": "4a97af7fb2e37763f2fe896da97412c3b1a9d19c22de2b4ae83ba1a6d5e83b63",
+  "replacements": [
+    {
+      "path": "HandheldCompanion.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.dll",
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+      "bytes": 2774016,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Windows.SDK.NET.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Windows.SDK.NET.dll",
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+      "bytes": 1074688,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "iNKORE.UI.WPF.Modern.Controls.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/iNKORE.UI.WPF.Modern.Controls.dll",
+      "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+      "bytes": 547328,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "iNKORE.UI.WPF.Modern.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/iNKORE.UI.WPF.Modern.dll",
+      "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+      "bytes": 272896,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SDL3-CS.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SDL3-CS.dll",
+      "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+      "bytes": 47616,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "HandheldCompanion.deps.json",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.deps.json",
+      "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+      "bytes": 59901,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "HandheldCompanion.json",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/HandheldCompanion.json",
+      "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+      "bytes": 379,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "NAudio.Core.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/NAudio.Core.dll",
+      "sha256": "f35c84aeab3497f106428f080673f2e807c881a9d6aa63b1b7f3c9f3a6073ecb",
+      "bytes": 57856,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "NAudio.Vorbis.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/NAudio.Vorbis.dll",
+      "sha256": "fbb2c625876e95d149822e175fec3b4baa3f6bf13cf4a1055d3954d9f2519cce",
+      "bytes": 10240,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "NAudio.Wasapi.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/NAudio.Wasapi.dll",
+      "sha256": "9342d5753f662eb5b4117ab5f938085bafb7f7d036f8c0779657c24b171ed156",
+      "bytes": 100352,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "NAudio.WinMM.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/NAudio.WinMM.dll",
+      "sha256": "972c605d23690174fed2cbb1bd3a285c5f7d053f93623e19e8217ebbb8dfda5b",
+      "bytes": 29184,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "WpfScreenHelper.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/WpfScreenHelper.dll",
+      "sha256": "0fa07a605282baceb8dfe11f578ec305cc34c37e1cb886304ee75ddced116343",
+      "bytes": 13312,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Interop.IWshRuntimeLibrary.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Interop.IWshRuntimeLibrary.dll",
+      "sha256": "6b9e06fdb4fd1d259cb7018c35a722a04ae11b9948ae097378c8d73c13143e8a",
+      "bytes": 36352,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Shell.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.WindowsAPICodePack.Shell.dll",
+      "sha256": "cd0e0857a83190850780eb8059c09c856dcaed6fe32f3caac27967a9b10ffc32",
+      "bytes": 227328,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Core.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.WindowsAPICodePack.Core.dll",
+      "sha256": "91b3f5ba77b7de556fb7952b0f593c41c73c37ddfd474c21e0b117b0b80253f8",
+      "bytes": 52736,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SharpDX.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SharpDX.dll",
+      "sha256": "83b1096413d768b9218a7b70636883c735bb475ca058277869d5df0d23ae8fc1",
+      "bytes": 246784,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SharpDX.DirectInput.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SharpDX.DirectInput.dll",
+      "sha256": "c0db07b561c2082293e0c338c3efbf1895b29a96a89abbe29a2aa4f56146566f",
+      "bytes": 98304,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SharpDX.Direct3D9.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SharpDX.Direct3D9.dll",
+      "sha256": "7123c60e074711b6ea7b59dc4a28d8fa43d36b577c9100983c263cfb460ce62a",
+      "bytes": 165376,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "BlackSharp.Core.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/BlackSharp.Core.dll",
+      "sha256": "008204da34bbf51e1654b98603b44c8707e816fd00c637f2ad4233929a77e1d7",
+      "bytes": 18944,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "GameLib.Core.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/GameLib.Core.dll",
+      "sha256": "85895ee11a1e626b4eef7a826a1a3f0e9776759638798b7373fbb785bdadaabb",
+      "bytes": 6656,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Gma.System.MouseKeyHook.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Gma.System.MouseKeyHook.dll",
+      "sha256": "1e01b3ec82d1473b97655c3426cc957d62e6055ec469db067f789b4f315f9d7e",
+      "bytes": 26624,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "GongSolutions.WPF.DragDrop.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/GongSolutions.WPF.DragDrop.dll",
+      "sha256": "64a20dc29177570bfa8c4a9ee64cc3607b5be00215f59bd8662bbf778c5149c0",
+      "bytes": 15872,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "GregsStack.InputSimulatorStandard.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/GregsStack.InputSimulatorStandard.dll",
+      "sha256": "34150acd65c5787c3a7db7b570e334f99bef58adf2829b861778d4696385d54d",
+      "bytes": 22016,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.DependencyInjection.dll",
+      "sha256": "99d453a66c475492b5f7be4a0033efb2dd807f46f14fce1fd9b1263137b1c5ca",
+      "bytes": 76800,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "sha256": "2e4f53cf9da474021cc798749103d90363e16e46661b9d8ef57ab6235edc53c2",
+      "bytes": 11776,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.Diagnostics.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.Diagnostics.dll",
+      "sha256": "0883d2404bdca3d84349d4176c6f5e171d7dafdc4fb9f4d0e1e8de4efce091de",
+      "bytes": 17408,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "sha256": "fbdd1901a24db5140ddd17d5e70bd1b5141d929234467e51293264ae40a1299e",
+      "bytes": 9728,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.FileProviders.Physical.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.FileProviders.Physical.dll",
+      "sha256": "b94c9413a0e39a61cb39223c1f335c9eeab665451a297180301f2ee744dfd0cb",
+      "bytes": 29184,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.FileSystemGlobbing.dll",
+      "sha256": "9555305fb892d2ad029432cfef9b15af925d6f290d8e95b000cc44c70e26ed26",
+      "bytes": 33792,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.Http.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.Http.dll",
+      "sha256": "14f9eb1eee87fb14e3760d4b9c95a98db6c3f796b2568501ec96750bf4c99220",
+      "bytes": 59904,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.Http.Polly.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.Http.Polly.dll",
+      "sha256": "b2fc863055bad9247578a4856737f9b764bdeb1206e02a6db15320a43014078a",
+      "bytes": 13824,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Microsoft.Extensions.Primitives.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Microsoft.Extensions.Primitives.dll",
+      "sha256": "e71a85527aca9d8abcd5437a522787090313e51e390b881ca5e7f92c6545f125",
+      "bytes": 30208,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "NVorbis.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/NVorbis.dll",
+      "sha256": "a770007c6563f04b87b06214718876c93a7c50f2fa0672ad9f93b3ebcbb1f8eb",
+      "bytes": 65536,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Polly.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Polly.dll",
+      "sha256": "c8110688dd4171099c628ca03dd0558ad51016acec80803c629dcd3229df4685",
+      "bytes": 79360,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "PrecisionTimer.NET.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/PrecisionTimer.NET.dll",
+      "sha256": "44c8fddff6e5d41c8ade356bd528ff7c43d37af763c04cf9638d612a5220e473",
+      "bytes": 10240,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "SharpDX.XInput.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/SharpDX.XInput.dll",
+      "sha256": "9dc5071976fea81882775ce58085d9e3bbdad27e5c185d07c87c897d1ddfd274",
+      "bytes": 13312,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "WindowsInput.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/WindowsInput.dll",
+      "sha256": "70ba34a92bf3a071fb72d28db60dc515ce032a0ce20d0b7b44b694e8cf322ad5",
+      "bytes": 35840,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "hidapi.net.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/hidapi.net.dll",
+      "sha256": "329fb6b0feb827f892727669fe93dcabf0091009d677579ccb88940150840c74",
+      "bytes": 11264,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Nefarius.Utilities.Bluetooth.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Nefarius.Utilities.Bluetooth.dll",
+      "sha256": "074b36140e3d235e2c35baca1c20372b82078a5a8e06a5ead30b941b7c97921d",
+      "bytes": 193024,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "Nefarius.ViGEm.Client.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/Nefarius.ViGEm.Client.dll",
+      "sha256": "d2e580e325c8a8c77a6fe3511b0b6beed39c5d17e12ee689e5658ef4ec09f4fa",
+      "bytes": 195584,
+      "modifiedByYmcc": true
+    },
+    {
+      "path": "PInvoke.Windows.Core.dll",
+      "generatedSource": "deps/ymcc-device-core-runtime/bin/PInvoke.Windows.Core.dll",
+      "sha256": "5714085930b396c27db302983b5ee951438e75fae7d9437583cbefefe4b60400",
+      "bytes": 257536,
+      "modifiedByYmcc": true
+    }
+  ],
+  "exclusions": [
+    {
+      "path": "PresentationCore.dll",
+      "reason": "Private WPF framework duplicate; Host and LightSetter require Microsoft.WindowsDesktop.App and resolve its PresentationCore. Candidate full metadata load plus actual path callback pass without the private copy."
+    },
+    {
+      "path": "XInputPlus/Loader/XInputPlusInjector.dll",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/Loader/XInputPlusInjector64.dll",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/Dinput.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/Dinput8.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x64/XInput1_3.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/Dinput.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/Dinput8.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "XInputPlus/x86/XInput1_3.dl_",
+      "reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "path": "libVIIPER.dll",
+      "reason": "No reachable VIIPER native/service start from current approved headless device lifecycle. Keep HC VirtualManager/ViiperServerManager/service/Target startup forbidden; stock HIDMaestro has independent output closure."
+    },
+    {
+      "path": "ucrtbased.dll",
+      "reason": "No normal or delay PE import and no dynamic loader name reference in the approved retained native closure; re-audit when adding native payloads."
+    },
+    {
+      "path": "SDL3.dll",
+      "reason": "Approved headless device/Host receiver closure is native-SDL-free after BCL passive timers and zero-handle touchpad guards. Fresh-process exact IL/actual getter+InitializeInputOutput probes have zero SDL imports; nonzero query tails remain original. Passive finalizers/exit hooks absent and current Host does not dispose controllers or start SDL services."
+    },
+    {
+      "path": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Microsoft.Extensions.Logging.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Drivers.HidHide.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Utilities.DeviceManagement.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Nefarius.Vicius.Abstractions.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Newtonsoft.Json.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "RAMSPDToolkit-NDD.dll",
+      "reason": "Byte-identical original third-party library is supplied once by the explicitly pinned independent shared runtime. Both device consumers use the verified shared resolver; missing or changed copies fail closed."
+    },
+    {
+      "path": "Resources/Intel/KX/KX.exe",
+      "reason": "HC Intel processor helper is outside current FanHost/LightSetter device lifecycle; KX constructor and launch are not device/factory reachable. ProcessManager only contains a filter-name literal. Native YMCC power paths do not consume this HC copy."
+    },
+    {
+      "path": "JoyShockLibrary.dll",
+      "reason": "Legacy JSL active-service/disconnect imports have no current approved device/factory/passive lifecycle callers. InputHost uses independent HIDMaestro; retain full HC imports as inactive declarations without supplying the unused native payload."
+    },
+    {
+      "path": "IGCL_Wrapper.dll",
+      "reason": "HC IGCL dynamic-loader static initializer is outside current device/factory lifecycle. HC GPUManager startup and full GPU service use remain outside the headless consumer contract."
+    },
+    {
+      "path": "Resources/AMD/ADLX_Wrapper.dll",
+      "reason": "HC ADLX imports are outside current device/factory lifecycle. HC GPUManager startup/shutdown and full GPU service use remain outside the headless consumer contract."
+    },
+    {
+      "path": "Resources/XInputPlus.ini",
+      "reason": "Original Hook/XInputPlus injection workflow and payloads were already excluded. This configuration is consumed only by that same forbidden workflow."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ExtendedLinguisticServices.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.Sensors.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Microsoft.WindowsAPICodePack.ShellExtensions.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.Asio.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.Midi.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "NAudio.WinForms.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "Reloaded.Memory.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    },
+    {
+      "path": "YamlDotNet.dll",
+      "reason": "No TypeRef/MemberRef/ExportedType consumer remains in the audited complete retained managed closure. Headless device, log initialization and actual callback checks pass without this application companion library. HC desktop UI/service startup remains excluded."
+    }
+  ],
+  "retainedHardwarePolicy": {
+    "ecAndFirmware": "Keep existing EC register methods, firmware gates, OpenLib/InpOut/MSI/UEFI/PawnIO transports; do not rewrite or activate untestable hardware here.",
+    "inputSdk": "External HIDMaestro/output SDKs are independent third parties; preserve their active dependency closure.",
+    "modernUiLibrary": "Headless UI leaf: type/resource closure reduced, neutral strings retained, current HC cross-library references preserved. Exact SettingsCard arrow glyph F2AF folding plus unused immutable theme/icon initializer subsets; all retained field values verified. Current development binding identity retained. HC App/UI startup, windows, templates and rendering remain outside this device profile.",
+    "sdl": "Native SDL remains absent. SDL3-CS retains the exact current consumer ABI: 92 CLR types, preserved structure/enum/marshalling layouts, 33 real native entry points and required private delegates. Only unreferenced APIs/delegate initializer groups are trimmed; HC and nonzero native branches remain unchanged.",
+    "applicationLibraries": "Actual leaf slicing applied to non-reflection companion libraries; all 26 strong reflection/serialization/logging families keep their original binary bytes. Rewritten DLLs are explicitly YMCC derivatives bound by exact hashes, not original publisher-signed files. All preserved leaf IL and native layouts are compared; no ReadyToRun payload was present in the inspected original leaf files.",
+    "transportLeaves": "Managed wrappers keep audited native ABI/layout/PInvoke and lifecycle entries. SharpDX core/DirectInput/Direct3D9 now retain exact originals, including unmanaged delegate, reflection and shadow contracts. No native hardware library changed; no Bluetooth/ViGEm omission activated."
+  },
+  "physicalDeviceVerified": false,
+  "forbiddenEntryPoints": [
+    "HC ordinary App/UI entry point",
+    "ProfileManager.Start",
+    "UpdateProfileWrapper",
+    "HC XInputPlus/Hook/profile injection workflow",
+    "HC VIIPER/SDL controller service startup outside the approved YMCC host profile",
+    "App.StartNonUIInit",
+    "ControllerManager.Start",
+    "VirtualManager.Start/QuerySettings/SetVIIPERStatus/SetControllerModeCore",
+    "ViiperServerManager.Start/RestartInternal/SetPort",
+    "ViiperService.Initialize and HC Target Connect/Attach",
+    "Diagnostic construction outside the fixed HC IDevice class set",
+    "Direct HC SDLController active Tick/IsConnected/IsWireless/UserIndex/ToString/vibration/light/Dispose calls or HC controller shutdown/service startup outside the approved Host device lifecycle",
+    "HC GPUManager.Start/Stop and full IGCL/ADLX GPU services",
+    "HC Processors.Intel.KX construction/launch outside approved device lifecycle",
+    "HC legacy JSL active-controller services and SafeJslDisconnect wrappers"
+  ],
+  "softwareValidation": [
+    "path-based-load-all-types",
+    "actual-HC-software-callback-parity",
+    "rooted-WinRT-member-and-interface-preservation",
+    "BCL-passive-timer-prefix-zero-SDL-native-load",
+    "actual-passive-zero-handle-query-and-input-output-dispatch-with-zero-SDL-imports",
+    "independent-passive-receiver-and-lifetime-native-SDL-closure",
+    "full-consumer-UI-reference-and-retained-method-audit",
+    "actual-retained-UI-static-field-values-parity",
+    "shared-device-resolver-positive-negative-real-loads",
+    "all-retained-cross-library-TypeRef-MemberRef-ExportedType-closure",
+    "retained-leaf-IL-EH-locals-and-native-layout-parity",
+    "both-production-log-configurations-initialize-and-write-real-files",
+    "C++-emitted-installer-validator-split-shared-runtime-positive-negative",
+    "transport-native-ABI-layout-PInvoke-lifecycle-positive-negative-and-retained-IL-parity",
+    "lossless-complete-JSON-value-equality-and-duplicate-key-rejection",
+    "sdk-unreferenced-compiler-RVA-only-preserving-all-types-methods-ABI-and-dynamic-marshalling",
+    "ui-second-pass-complete-call-closure-DP-interface-map-and-retained-IL"
+  ],
+  "sourceBindingActivated": true,
+  "installedDeploymentPerformed": false,
+  "modifiedStrongNameIdentity": {
+    "assemblies": [
+      "iNKORE.UI.WPF.Modern",
+      "iNKORE.UI.WPF.Modern.Controls"
+    ],
+    "publicKeyToken": "538ea1f68f629a04",
+    "purpose": "Development binding identity only; no publisher authentication or release signature",
+    "authenticode": "NotSigned"
+  },
+  "passiveControllerTimer": {
+    "implementation": "Internal BCL Stopwatch/QPC helper",
+    "changedOriginalMethod": "SDLController default constructor; two timer call tokens only",
+    "counterUnit": "raw QPC ticks",
+    "frequencyUnit": "QPC ticks per second",
+    "extraDlls": 0,
+    "deviceProtocolChanged": false,
+    "softwareValidation": "Actual 57-byte field-initializer prefix in a fresh physically no-SDL process; all non-framework native imports blocked; original baseline fails on SDL timer, candidate has zero attempts."
+  },
+  "passiveControllerQueries": {
+    "changedOriginalMethods": [
+      "SDLController.GetTouchpads",
+      "SDLController.GetTouchpadFingers"
+    ],
+    "zeroHandle": "Return zero before native SDL query; native NULL oracle returns zero",
+    "nonzeroHandle": "Preserve original query instructions; denied-call probes verify the original call is retained",
+    "actualInitializeInputOutputReceivers": 2,
+    "deviceConstructorsExecuted": false,
+    "fullDummyConstructorsExecuted": false,
+    "extraDlls": 0
+  },
+  "sharedDependencies": {
+    "directory": "PowerControl/ymcc-shared-runtime",
+    "manifestSha256": "54df4aa15c1b826e4d901e4e55c4943366ea50492b85319c5f18f4e2c035fcd2",
+    "files": [
+      {
+        "path": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7",
+        "bytes": 65872
+      },
+      {
+        "path": "Microsoft.Extensions.Logging.Abstractions.dll",
+        "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+        "bytes": 66896
+      },
+      {
+        "path": "Nefarius.Drivers.HidHide.dll",
+        "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f",
+        "bytes": 223232
+      },
+      {
+        "path": "Nefarius.Utilities.DeviceManagement.dll",
+        "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c",
+        "bytes": 328192
+      },
+      {
+        "path": "Nefarius.Vicius.Abstractions.dll",
+        "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa",
+        "bytes": 20992
+      },
+      {
+        "path": "Newtonsoft.Json.dll",
+        "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+        "bytes": 723368
+      },
+      {
+        "path": "RAMSPDToolkit-NDD.dll",
+        "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+        "bytes": 253952
+      }
+    ]
+  },
+  "interopAbiRepair": {
+    "date": "2026-10-19",
+    "scope": "Exact original small third-party dependencies; COM, native callbacks, reflection, input/transport and common runtime API compatibility",
+    "policy": "Historical restoration retained as provenance; the candidate selects individually pinned smaller derivatives after actual ABI, retained IL and consumer checks. No upstream-original-only policy.",
+    "restoredFiles": [
+      "NAudio.Core.dll",
+      "NAudio.Vorbis.dll",
+      "NAudio.Wasapi.dll",
+      "NAudio.WinMM.dll",
+      "WpfScreenHelper.dll",
+      "Interop.IWshRuntimeLibrary.dll",
+      "Microsoft.WindowsAPICodePack.Shell.dll",
+      "Microsoft.WindowsAPICodePack.Core.dll",
+      "SharpDX.dll",
+      "SharpDX.DirectInput.dll",
+      "SharpDX.Direct3D9.dll",
+      "BlackSharp.Core.dll",
+      "GameLib.Core.dll",
+      "Gma.System.MouseKeyHook.dll",
+      "GongSolutions.WPF.DragDrop.dll",
+      "GregsStack.InputSimulatorStandard.dll",
+      "Microsoft.Extensions.DependencyInjection.dll",
+      "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+      "Microsoft.Extensions.Diagnostics.dll",
+      "Microsoft.Extensions.FileProviders.Abstractions.dll",
+      "Microsoft.Extensions.FileProviders.Physical.dll",
+      "Microsoft.Extensions.FileSystemGlobbing.dll",
+      "Microsoft.Extensions.Http.dll",
+      "Microsoft.Extensions.Http.Polly.dll",
+      "Microsoft.Extensions.Primitives.dll",
+      "NVorbis.dll",
+      "Polly.dll",
+      "PrecisionTimer.NET.dll",
+      "SharpDX.XInput.dll",
+      "WindowsInput.dll",
+      "hidapi.net.dll",
+      "Nefarius.Utilities.Bluetooth.dll",
+      "Nefarius.ViGEm.Client.dll",
+      "PInvoke.Windows.Core.dll"
+    ],
+    "reason": "Actual old-runtime ManagerFactory failure reproduced; retained Shell/shortcut/DPI interfaces also show method-order removal. Exact upstream libraries replace these shortened contracts. Remaining ordinary third-party slices are now original copies: eleven additional native/callback owners failed the whole-assembly ABI policy; restoring the other small leaves avoids retaining an unproven truncated API surface.",
+    "physicalDeviceVerified": false,
+    "compatibilityReserveRestores": {
+      "files": [
+        "SharpDX.dll",
+        "SharpDX.DirectInput.dll",
+        "SharpDX.Direct3D9.dll"
+      ],
+      "reason": "Current HC enum callback and reflected joystick format already pass. Full upstream Include shadow surface is absent from trimmed core/D3D and restored by originals; preserve the complete small ABI family per compatibility-first objective. This is not a claim that current fan consumers failed on these three DLLs.",
+      "additionalBinaryBytes": 625152,
+      "currentConsumerRegression": "Actual pure-managed callback delegate and joystick format parity with native imports denied; malformed ABI/attribute/delegate fixtures rejected",
+      "hardwareAccessPerformed": false
+    },
+    "remainingSmallThirdPartyOriginals": {
+      "files": [
+        "BlackSharp.Core.dll",
+        "GameLib.Core.dll",
+        "Gma.System.MouseKeyHook.dll",
+        "GongSolutions.WPF.DragDrop.dll",
+        "GregsStack.InputSimulatorStandard.dll",
+        "Microsoft.Extensions.DependencyInjection.dll",
+        "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+        "Microsoft.Extensions.Diagnostics.dll",
+        "Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "Microsoft.Extensions.FileProviders.Physical.dll",
+        "Microsoft.Extensions.FileSystemGlobbing.dll",
+        "Microsoft.Extensions.Http.dll",
+        "Microsoft.Extensions.Http.Polly.dll",
+        "Microsoft.Extensions.Primitives.dll",
+        "NVorbis.dll",
+        "Polly.dll",
+        "PrecisionTimer.NET.dll",
+        "SharpDX.XInput.dll",
+        "WindowsInput.dll",
+        "hidapi.net.dll",
+        "Nefarius.Utilities.Bluetooth.dll",
+        "Nefarius.ViGEm.Client.dll",
+        "PInvoke.Windows.Core.dll"
+      ],
+      "additionalBinaryBytes": 914872,
+      "observedHardwareFailureClaimed": false,
+      "evidence": "Whole supplied upstream COM inventory plus per-library shape diagnostics; actual native callbacks not invoked",
+      "retainedSpecialDerivatives": [
+        "HandheldCompanion.dll",
+        "Microsoft.Windows.SDK.NET.dll",
+        "SDL3-CS.dll",
+        "iNKORE.UI.WPF.Modern.Controls.dll",
+        "iNKORE.UI.WPF.Modern.dll"
+      ],
+      "consumerConfigurationsPreserved": [
+        "HandheldCompanion.deps.json",
+        "HandheldCompanion.json"
+      ]
+    }
+  },
+  "candidateProvenance": {
+    "status": "ABI_AND_REAL_CONSUMERS_VERIFIED_RELEASE_PENDING",
+    "targetCount": 34,
+    "previousExpandedProfileSha256": "401506c4abb68c0106b8f6c567355c8e31576a716914d5d37b9dccbdeb43392c",
+    "construction": {
+      "inputRoot": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\input-r2",
+      "actualAbiInventory": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\ABI-AUDIT-R2.json",
+        "sha256": "d219c41f29ac9be5fba2cac5fd98886a1edccf464886eb37f2f73e72eb896a39",
+        "bytes": 387438
+      },
+      "rootDescriptor": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\abi-layout-and-shadow-roots-r4.xml",
+        "sha256": "394ecc8301a8e9d65e4e46564db0d1f03bb62dab02ad4ea545dfd1e6c1a02eaf",
+        "bytes": 126823
+      },
+      "linkerArguments": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\LINKER-ARGUMENTS-R4.json",
+        "sha256": "4252decd76850bf441b9f3b36d3a3cf880f42abc805f8830f88a1f2e97bb3031",
+        "bytes": 26521
+      },
+      "metadataToolSource": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\tool\\Program.cs",
+        "sha256": "af3872b67a7dba65f9d14a0b50396b11f3e304ec8efdd2d42fb742a658872a28",
+        "bytes": 8603
+      },
+      "methodIlOptimizations": "disabled; same seven opts as established experiment",
+      "immutableConsumers": "all current non-target managed assemblies rooted all/copy",
+      "roots": "all actual ABI boundary types, every struct/enum/delegate, and complete SharpDX shadow reflection roots",
+      "rescope": "Original source TypeReference spellings restored where unambiguous; CLI primitive forwarder semantics verified separately"
+    },
+    "independentRetainedIlAndAbi": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\HCPolicy\\CompactIntegration/retained-il-and-abi.json",
+      "bytes": 30113,
+      "sha256": "55bb768d73ad8c2fca0ccc88427fdc66cf94380b514a28ad51347b166e9a89d5"
+    },
+    "syntheticRegression": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\U36P\\HCPolicy\\CompactIntegration/after-synthetic/result.json",
+      "bytes": 2293,
+      "sha256": "cf406c6bf72af2380429cd328ff5799eeff1cf23d8fff62fa84418391b1750d0"
+    },
+    "consumerEvidence": {
+      "retainedILAndAbi": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\LEAF-AND-ABI-FRAMEWORK-PROOF-R4.json",
+        "sha256": "55bb768d73ad8c2fca0ccc88427fdc66cf94380b514a28ad51347b166e9a89d5",
+        "bytes": 30113
+      },
+      "manager": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\manager-r4\\result.json",
+        "sha256": "6835661b84532916e116370b1a2dcffbdc6cb150480375292ad4b3c78858b340",
+        "bytes": 9673
+      },
+      "sharpdx": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\sharpdx-r4\\result.json",
+        "sha256": "db910d7d0eccdca1852a31c93eeef851cd9bd35dd7f238f3835a3e425dfd032b",
+        "bytes": 6911
+      },
+      "allCurrentConsumers": {
+        "path": "G:\\YeManCC-Work\\Build\\Exports\\20261023-1908-hc34-candidates\\CURRENT-CONSUMER-CONTRACTS-R4.json",
+        "sha256": "936247fd78cf9d63811751c8cbaf31ee83d6f86e4c8df8bad0ec3f20d3c0200c",
+        "bytes": 363
+      },
+      "callbackScope": "full",
+      "targetNativeAttempts": 0,
+      "physicalAcceptance": false
+    },
+    "preservation": "All actual ABI boundaries, structs/enums/delegates and SharpDX shadow roots; immutable consumer graph rooted, method IL optimizations disabled",
+    "releaseAcceptance": "Full official Build/Package/Verify pending; source integration does not authorize installation or publication",
+    "historicalNegativeFixtures": "deps/ymcc-device-core-runtime/regression-fixtures/pre-abi-repair/manifest.json"
+  }
+}

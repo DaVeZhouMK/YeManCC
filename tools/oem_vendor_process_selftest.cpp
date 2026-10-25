@@ -64,5 +64,33 @@ int main(){
  reset();processes={process(L"MSI Center M.exe")};processes[0].waitTimeout=true;check(!oemVendorProcessesStop(names,1),"timeout after terminate does not claim terminal process state");
  reset();processes={process(L"MSI Center M.exe")};current=false;check(!oemVendorProcessesStop(names,1)&&killed.empty()&&openHandles==closedHandles,"revoked ownership refuses process termination");
  reset();for(int i=0;i<33;++i)processes.push_back(process(L"MSI Center M.exe"));check(!oemVendorProcessesStop(names,1)&&killed.size()==32&&openHandles==closedHandles,"process stop work has a bounded instance budget");
+
+ reset(); oemVendorProcessesStop(names, 23);
+ check(logs.back()["matchedInSnapshot"] == 0 && logs.back()["terminationAttempts"] == 0 &&
+       logs.back()["enumerationComplete"] == true && logs.back()["requestedEpoch"] == 23,
+       "empty snapshot explicitly records no running-to-stopped evidence");
+ reset(); processes = {process(L"MSI Center M.exe")}; oemVendorProcessesStop(names, 24);
+ check(logs.front()["runningBeforeKnown"] == true && logs.front()["runningBefore"] == true &&
+       logs.front()["terminationAttempted"] == true && logs.front()["terminationAccepted"] == true &&
+       logs.front()["exitVerified"] == true && logs.front()["runningToStoppedVerified"] == true &&
+       logs.front()["targetPid"] == 10 && logs.front()["requestedEpoch"] == 24 &&
+       logs.back()["terminatedAndExited"] == 1, "live process exit proof is tied to the same handle and operation");
+ reset(); processes = {process(L"MSI Center M.exe")}; processes[0].exited = true; oemVendorProcessesStop(names, 25);
+ check(logs.front()["runningToStoppedVerified"] == false && logs.front()["terminationAttempted"] == false &&
+       logs.back()["alreadyExited"] == 1 && logs.back()["terminatedAndExited"] == 0,
+       "already exited is not reported as stopped by this request");
+ reset(); processes = {process(L"MSI Center M.exe")}; processes[0].waitTimeout = true; oemVendorProcessesStop(names, 26);
+ check(logs.front()["terminationAccepted"] == true && logs.front()["exitVerified"] == false &&
+       logs.front()["runningToStoppedVerified"] == false && logs.back()["operationOk"] == false,
+       "accepted terminate without exit confirmation cannot satisfy proof");
+ reset(); processes = {process(L"MSI Center M.exe")}; processes[0].deny = true; oemVendorProcessesStop(names, 27);
+ check(logs.front()["runningBeforeKnown"] == false && logs.front()["runningToStoppedVerified"] == false,
+       "access denial remains unknown rather than already closed");
+ reset(); snapshotFail = true; oemVendorProcessesStop(names, 28);
+ check(logs.back()["snapshotRead"] == false && logs.back()["enumerationComplete"] == false &&
+       logs.back()["operationOk"] == false, "failed snapshot cannot report empty process set");
+ reset(); enumError = ERROR_ACCESS_DENIED; oemVendorProcessesStop(names, 29);
+ check(logs.back()["enumerationComplete"] == false && logs.back()["operationOk"] == false,
+       "incomplete enumeration is not absence evidence");
  std::cout<<"cases="<<cases<<" failures="<<failed<<" hardwareCalls=0 RESULT="<<(failed?"FAIL":"PASS")<<"\n";return failed?1:0;
 }

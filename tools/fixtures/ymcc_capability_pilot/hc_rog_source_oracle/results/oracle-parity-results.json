@@ -1,0 +1,4139 @@
+{
+  "schemaVersion": 1,
+  "completedUtc": "2026-10-18T07:40:10.0186065+00:00",
+  "label": "HC source reference oracle, not a real HC binary",
+  "captureBoundary": "AsusACPI.SetFanCurve/SetFanCurveObserved arguments before downstream ACPI clamping and wire packing",
+  "passed": true,
+  "total": 70,
+  "failed": 0,
+  "categories": {
+    "provenance": 2,
+    "normal11": 2,
+    "invalidLength": 7,
+    "boundary": 8,
+    "sampled11": 32,
+    "restore": 3,
+    "sourceGuard": 2,
+    "profileSource": 10,
+    "aliasing": 2,
+    "recording": 1,
+    "isolation": 1
+  },
+  "referenceSourcePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\deps/handheldcompanion-runtime/source/Devices/ASUS/ROGAlly.cs",
+  "referenceSourceSha256": "04097428F3D62DE75F8160EB47398E1C61606F9D6681EB605D100B384814AA00",
+  "generatedSourcePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\ymcc_capability_pilot\\hc_rog_source_oracle\\Generated/HcRogSourceOracle.g.cs",
+  "generatedSourceSha256": "7105DB427328251FD89A52C08356C3434057C7D34FA6F090D958E8303550844C",
+  "actualWriterPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\FanLab/fan-backend/Asus/AsusFanCurveWriter.cs",
+  "actualWriterSha256": "14B09F20EE7EA896AD825AB9FA3C06B135CD24673C07AE15608A50FB4BB03F56",
+  "provenancePath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\fixtures\\ymcc_capability_pilot\\hc_rog_source_oracle\\HcRogSourceOracle.provenance.json",
+  "runtime": ".NET 10.0.11",
+  "processArchitecture": "X64",
+  "hardwareAccess": false,
+  "productStarted": false,
+  "syntheticReturnValues": "1001/1002/1003 identify call order only; no firmware success is implied",
+  "limitations": [
+    "Only the linked actual AsusFanCurveWriter.cs leaf is covered; no provider/capability/session/product chain is executed.",
+    "No AsusACPI post-processing, 100-to-99 clamp, driver IOCTL payload, hardware response, or real HC binary is tested.",
+    "NaN is compared on this unchecked .NET runtime; this is not a cross-runtime numeric portability claim."
+  ],
+  "cases": [
+    {
+      "Name": "source-and-compiled-input-bindings",
+      "Category": "provenance",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "normal-11-points",
+      "Category": "normal11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        0,
+        10,
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+        100
+      ],
+      "OracleCurveHex": "141E28323C46505A141E28323C46505A",
+      "ActualCurveHex": "141E28323C46505A141E28323C46505A",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "mapped-source-indices-2-through-9",
+      "Category": "normal11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        333,
+        -333,
+        1,
+        2,
+        4,
+        8,
+        16,
+        32,
+        64,
+        100,
+        -999
+      ],
+      "OracleCurveHex": "141E28323C46505A0102040810204064",
+      "ActualCurveHex": "141E28323C46505A0102040810204064",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0102040810204064",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "null-default-cpu",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-0",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-1",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100
+      ],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-8",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-10",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-12",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-length-16",
+      "Category": "invalidLength",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "OracleCurveHex": "3A3D4044484D51620811161A22293045",
+      "ActualCurveHex": "3A3D4044484D51620811161A22293045",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "all-zero",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "OracleCurveHex": "141E28323C46505A0000000000000000",
+      "ActualCurveHex": "141E28323C46505A0000000000000000",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "all-100-before-acpi",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100,
+        100
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "negative-clamp-and-over-100",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -5000,
+        4000,
+        -1,
+        0,
+        0.49,
+        0.5,
+        1.5,
+        99.5,
+        100.5,
+        999,
+        -999
+      ],
+      "OracleCurveHex": "141E28323C46505A0000000002646464",
+      "ActualCurveHex": "141E28323C46505A0000000002646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000002646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "midpoint-to-even-rounding",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        555,
+        -555,
+        0.5,
+        1.5,
+        2.5,
+        3.5,
+        98.5,
+        99.5,
+        100.5,
+        -0.5,
+        999
+      ],
+      "OracleCurveHex": "141E28323C46505A0002020462646464",
+      "ActualCurveHex": "141E28323C46505A0002020462646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0002020462646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "descending-duties-become-monotonic",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        0,
+        0,
+        90,
+        80,
+        70,
+        60,
+        50,
+        40,
+        30,
+        20,
+        0
+      ],
+      "OracleCurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+      "ActualCurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A5A5A5A5A5A5A5A5A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "finite-extremes-and-infinities",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        0,
+        0,
+        "-Infinity",
+        -1.7976931348623157E+308,
+        -0.5,
+        0.5,
+        99.5,
+        "Infinity",
+        1.7976931348623157E+308,
+        100,
+        0
+      ],
+      "OracleCurveHex": "141E28323C46505A0000000064646464",
+      "ActualCurveHex": "141E28323C46505A0000000064646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000064646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "nan-runtime-parity",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        0,
+        0,
+        "NaN",
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0,
+        0
+      ],
+      "OracleCurveHex": "141E28323C46505A0000000000000000",
+      "ActualCurveHex": "141E28323C46505A0000000000000000",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000000000000",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "ignored-endpoints-and-index-1",
+      "Category": "boundary",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        "NaN",
+        "-Infinity",
+        20,
+        30,
+        40,
+        50,
+        60,
+        70,
+        80,
+        90,
+        "Infinity"
+      ],
+      "OracleCurveHex": "141E28323C46505A141E28323C46505A",
+      "ActualCurveHex": "141E28323C46505A141E28323C46505A",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A141E28323C46505A",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-00",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        26.5,
+        113.5,
+        -92.5,
+        85.5,
+        172.5,
+        125.5,
+        116.5,
+        -52.5,
+        -18.5,
+        171.5,
+        134.5
+      ],
+      "OracleCurveHex": "141E28323C46505A0056646464646464",
+      "ActualCurveHex": "141E28323C46505A0056646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0056646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-01",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        168.18794760303012,
+        173.06061432373735,
+        153.37102294590838,
+        65.91693245150006,
+        -54.53649165785708,
+        64.69960350762102,
+        56.23431967396024,
+        -21.327375490836502,
+        21.996886619365256,
+        -44.951467004116374,
+        -72.04136847147782
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-02",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        65.5,
+        -45.5,
+        -32.5,
+        -76.5,
+        2.5,
+        114.5,
+        -90.5,
+        -26.5,
+        -83.5,
+        146.5,
+        -33.5
+      ],
+      "OracleCurveHex": "141E28323C46505A0000026464646464",
+      "ActualCurveHex": "141E28323C46505A0000026464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000026464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-03",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        2.8032032785952055,
+        -93.97653806674133,
+        -70.62144697207094,
+        -30.113304979220644,
+        -40.4523427320888,
+        5.908580080563482,
+        5.999941428191931,
+        163.11224045376866,
+        47.14498191473305,
+        103.58214005994711,
+        -61.23265272995115
+      ],
+      "OracleCurveHex": "141E28323C46505A0000000606646464",
+      "ActualCurveHex": "141E28323C46505A0000000606646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000000606646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-04",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        62.5,
+        18.5,
+        176.5,
+        30.5,
+        -55.5,
+        -31.5,
+        95.5,
+        120.5,
+        197.5,
+        -64.5,
+        -99.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-05",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -1.7531473197756071,
+        -51.687150565761684,
+        152.89767047059615,
+        17.589522673557283,
+        148.2715065815819,
+        22.738419344061256,
+        -97.32826878192289,
+        -61.805727641007735,
+        -92.0131772719385,
+        153.4819396927403,
+        188.64738828905269
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-06",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        103.5,
+        70.5,
+        148.5,
+        36.5,
+        176.5,
+        5.5,
+        -49.5,
+        173.5,
+        59.5,
+        108.5,
+        24.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-07",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        25.875606725865794,
+        92.73157780651542,
+        149.01181289414492,
+        -51.692881831756274,
+        171.92562807906683,
+        69.149055922939,
+        140.92107803603685,
+        78.77495897876796,
+        -3.2255794867992336,
+        148.73437022265716,
+        -69.95683846527564
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-08",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        2.5,
+        108.5,
+        182.5,
+        17.5,
+        142.5,
+        58.5,
+        184.5,
+        161.5,
+        9.5,
+        96.5,
+        -14.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-09",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        73.1852081479436,
+        116.07104838642806,
+        5.013235660741685,
+        83.0606897748358,
+        107.90693723033507,
+        -7.313102440588679,
+        -10.451816166961478,
+        69.58396200536936,
+        -76.1510211863327,
+        76.91482886528357,
+        -7.397615913021198
+      ],
+      "OracleCurveHex": "141E28323C46505A0553646464646464",
+      "ActualCurveHex": "141E28323C46505A0553646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0553646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-10",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        174.5,
+        123.5,
+        -39.5,
+        69.5,
+        100.5,
+        51.5,
+        33.5,
+        -2.5,
+        29.5,
+        57.5,
+        -59.5
+      ],
+      "OracleCurveHex": "141E28323C46505A0046646464646464",
+      "ActualCurveHex": "141E28323C46505A0046646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0046646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-11",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        72.30214950270121,
+        -32.03985706532367,
+        -60.429048240384574,
+        55.472675829880274,
+        58.58778877118033,
+        63.193811645355936,
+        92.6886660944152,
+        189.41116099684086,
+        98.44413692990511,
+        -1.0471584745902334,
+        128.7811741366895
+      ],
+      "OracleCurveHex": "141E28323C46505A00373B3F5D646464",
+      "ActualCurveHex": "141E28323C46505A00373B3F5D646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A00373B3F5D646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-12",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -59.5,
+        -80.5,
+        -66.5,
+        144.5,
+        -10.5,
+        162.5,
+        48.5,
+        -10.5,
+        127.5,
+        125.5,
+        53.5
+      ],
+      "OracleCurveHex": "141E28323C46505A0064646464646464",
+      "ActualCurveHex": "141E28323C46505A0064646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-13",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -90.30511597651295,
+        133.90624804138497,
+        -41.37153911468179,
+        -43.17706811389749,
+        -26.619575185058437,
+        157.67268508564337,
+        32.448730819136244,
+        26.917833940553408,
+        -88.32248476721462,
+        -33.616546417407946,
+        128.57788839776904
+      ],
+      "OracleCurveHex": "141E28323C46505A0000006464646464",
+      "ActualCurveHex": "141E28323C46505A0000006464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0000006464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-14",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        33.5,
+        -56.5,
+        -62.5,
+        43.5,
+        -47.5,
+        134.5,
+        127.5,
+        177.5,
+        -65.5,
+        179.5,
+        194.5
+      ],
+      "OracleCurveHex": "141E28323C46505A002C2C6464646464",
+      "ActualCurveHex": "141E28323C46505A002C2C6464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A002C2C6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-15",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -54.91081292504017,
+        81.84704355981529,
+        -59.38027699449112,
+        35.63694527169548,
+        156.67050590583614,
+        -38.05214703923657,
+        72.28055660253418,
+        149.03901384632988,
+        -60.01491139643589,
+        129.5170606717081,
+        15.027626657405705
+      ],
+      "OracleCurveHex": "141E28323C46505A0024646464646464",
+      "ActualCurveHex": "141E28323C46505A0024646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0024646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-16",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -80.5,
+        -41.5,
+        6.5,
+        -2.5,
+        2.5,
+        -9.5,
+        135.5,
+        57.5,
+        -28.5,
+        -12.5,
+        62.5
+      ],
+      "OracleCurveHex": "141E28323C46505A0606060664646464",
+      "ActualCurveHex": "141E28323C46505A0606060664646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0606060664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-17",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        12.012310750788217,
+        86.2741795770238,
+        189.17186562399002,
+        106.24078978143669,
+        145.37520028901062,
+        108.80785729214912,
+        114.13507168839456,
+        62.87240295804682,
+        150.29516259687728,
+        90.44757359216342,
+        74.65764073406237
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-18",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -83.5,
+        89.5,
+        77.5,
+        -83.5,
+        138.5,
+        -98.5,
+        -29.5,
+        155.5,
+        -37.5,
+        -73.5,
+        200.5
+      ],
+      "OracleCurveHex": "141E28323C46505A4E4E646464646464",
+      "ActualCurveHex": "141E28323C46505A4E4E646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A4E4E646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-19",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -81.75543657585766,
+        -75.40491794953351,
+        178.78783381487608,
+        -62.17496570301008,
+        155.59004645589278,
+        32.33425190315313,
+        36.540985357268255,
+        -58.12068509781765,
+        77.4753876391218,
+        106.94438894602675,
+        106.37421626894468
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-20",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        83.5,
+        -29.5,
+        54.5,
+        46.5,
+        -49.5,
+        16.5,
+        164.5,
+        -64.5,
+        77.5,
+        180.5,
+        125.5
+      ],
+      "OracleCurveHex": "141E28323C46505A3636363664646464",
+      "ActualCurveHex": "141E28323C46505A3636363664646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A3636363664646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-21",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        44.51617609919802,
+        -57.78008255072873,
+        116.84764275180532,
+        120.06279761905913,
+        -14.438351995515802,
+        52.06990728716826,
+        134.01380182896452,
+        -13.538447680668185,
+        16.889025651332474,
+        -75.3631750938311,
+        35.9993555750695
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-22",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        13.5,
+        68.5,
+        165.5,
+        128.5,
+        108.5,
+        154.5,
+        -17.5,
+        -73.5,
+        109.5,
+        -86.5,
+        168.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-23",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        9.671125192973363,
+        -93.87440555443726,
+        6.946684516475855,
+        61.85766545210856,
+        -8.72160010445937,
+        150.57246305540784,
+        153.92822518662,
+        191.1645780276342,
+        -72.26544077147983,
+        49.28567933351064,
+        -80.16107034876993
+      ],
+      "OracleCurveHex": "141E28323C46505A073E3E6464646464",
+      "ActualCurveHex": "141E28323C46505A073E3E6464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A073E3E6464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-24",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -6.5,
+        80.5,
+        137.5,
+        21.5,
+        -64.5,
+        -53.5,
+        185.5,
+        8.5,
+        -8.5,
+        -9.5,
+        82.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-25",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -53.30788905420708,
+        156.88324978429978,
+        186.3159272756036,
+        81.88829607418194,
+        22.97676015783881,
+        109.02248667973208,
+        -89.74511152587138,
+        153.1031223726939,
+        50.78126804473868,
+        -29.1939496198641,
+        111.60786711220064
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-26",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        77.5,
+        133.5,
+        111.5,
+        13.5,
+        124.5,
+        -39.5,
+        184.5,
+        32.5,
+        26.5,
+        197.5,
+        187.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-27",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -6.887446626502765,
+        -25.6348942060186,
+        -15.502122377744925,
+        190.8850396009558,
+        -13.427225553163908,
+        117.69056199942278,
+        -64.97178411342753,
+        -58.13966046932138,
+        0.5503346214770914,
+        121.95835063325165,
+        77.65788849334132
+      ],
+      "OracleCurveHex": "141E28323C46505A0064646464646464",
+      "ActualCurveHex": "141E28323C46505A0064646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-28",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        128.5,
+        160.5,
+        50.5,
+        76.5,
+        110.5,
+        28.5,
+        -54.5,
+        181.5,
+        -25.5,
+        199.5,
+        149.5
+      ],
+      "OracleCurveHex": "141E28323C46505A324C646464646464",
+      "ActualCurveHex": "141E28323C46505A324C646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A324C646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-29",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        82.05664324669942,
+        -96.72401835989395,
+        -95.9808758906931,
+        110.25534323894203,
+        122.41113573425037,
+        23.0686213462933,
+        123.67957067847232,
+        24.424174299661146,
+        158.48050818707816,
+        164.33091567099603,
+        84.83512568512703
+      ],
+      "OracleCurveHex": "141E28323C46505A0064646464646464",
+      "ActualCurveHex": "141E28323C46505A0064646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A0064646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-30",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        -39.5,
+        64.5,
+        112.5,
+        -2.5,
+        32.5,
+        22.5,
+        -7.5,
+        118.5,
+        9.5,
+        171.5,
+        190.5
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "deterministic-vector-31",
+      "Category": "sampled11",
+      "Passed": true,
+      "Error": null,
+      "Input": [
+        199.14503581782105,
+        -95.38494157389968,
+        151.28856480647278,
+        163.0526783704072,
+        -51.83775562412932,
+        51.40140357026897,
+        55.845635875987654,
+        -12.37241137417611,
+        44.81475807019265,
+        122.27082882182245,
+        188.2092649527869
+      ],
+      "OracleCurveHex": "141E28323C46505A6464646464646464",
+      "ActualCurveHex": "141E28323C46505A6464646464646464",
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A6464646464646464",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "default-tables-and-restore",
+      "Category": "restore",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "hardware-profile-restores-defaults",
+      "Category": "restore",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "unknown-fanmode-takes-original-else",
+      "Category": "restore",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "3A3D4044484D51620C161D1F262D344A",
+          "BufferIdentity": 2,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "3A3D4044484D51620811161A22293045",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "closed-restore-and-enable-noop",
+      "Category": "sourceGuard",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "software-source-does-not-check-isopen",
+      "Category": "sourceGuard",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A3232323232323232",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-0",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-1",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-2",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-4",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-8",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-16",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-32",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-64",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-128",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "software-update-source-129",
+      "Category": "profileSource",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ],
+      "ActualWrites": [
+        {
+          "Ordinal": 1,
+          "Fan": "CPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1001
+        },
+        {
+          "Ordinal": 2,
+          "Fan": "GPU",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1002
+        },
+        {
+          "Ordinal": 3,
+          "Fan": "Mid",
+          "CurveHex": "141E28323C46505A2626262626262626",
+          "BufferIdentity": 1,
+          "SyntheticReturnValue": 1003
+        }
+      ]
+    },
+    {
+      "Name": "invalid-input-default-array-aliasing",
+      "Category": "aliasing",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "default-accessors-return-defensive-copies",
+      "Category": "aliasing",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "recorder-snapshots-input-and-fails-closed",
+      "Category": "recording",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "pure-reference-assembly-boundary",
+      "Category": "isolation",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    },
+    {
+      "Name": "source-inputs-unchanged-after-verification",
+      "Category": "provenance",
+      "Passed": true,
+      "Error": null,
+      "Input": null,
+      "OracleCurveHex": null,
+      "ActualCurveHex": null,
+      "OracleWrites": [],
+      "ActualWrites": []
+    }
+  ]
+}

@@ -1,0 +1,1 @@
+if (!top) { batteryFallback.stop(); batteryModel.reset(); fpsLimitReader.reset(); } // No demand => no independent collection.

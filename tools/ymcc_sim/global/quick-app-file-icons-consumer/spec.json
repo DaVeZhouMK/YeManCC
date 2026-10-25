@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "id": "game-library.quick-app-file-icons-consumer",
+  "timeoutMs": 45000,
+  "productSource": "src/bridge/quickAppFileIcons.ts",
+  "sourceInputs": [
+    "src/bridge/quickAppFileIcons.ts",
+    "src/bridge/api.ts",
+    "src/views/QuickAppView.vue",
+    "src/components/QuickAppIcon.vue"
+  ],
+  "caseNames": [
+    "blank-path-does-not-call-port",
+    "two-concurrent-reads-and-ordered-drain",
+    "normalized-pending-promise-shared",
+    "successful-icon-cache-reused",
+    "missing-icon-retried-after-remount",
+    "rejected-ipc-retried",
+    "only-bounded-png-data-accepted",
+    "encoded-size-boundary",
+    "bounded-lru-cache-recency",
+    "original-untrimmed-path-forwarded",
+    "synchronous-port-throw-retried",
+    "late-failure-cannot-evict-new-promise",
+    "duplicate-queued-key-does-not-use-slot",
+    "out-of-order-port-completion-preserves-results"
+  ],
+  "faults": [
+    {
+      "id": "fault-third-concurrent-read",
+      "before": "while (activeReads < 2 && queue.length)",
+      "after": "while (activeReads < 3 && queue.length)",
+      "case": "two-concurrent-reads-and-ordered-drain",
+      "expected": "QUICK_ICON_CONCURRENCY_EXCEEDED"
+    },
+    {
+      "id": "fault-negative-cache-retained",
+      "before": "if (!icon && cache.get(key) === result) cache.delete(key);",
+      "after": "if (false && cache.get(key) === result) cache.delete(key);",
+      "case": "missing-icon-retried-after-remount",
+      "expected": "QUICK_ICON_FAILED_RESULT_MUST_RETRY"
+    }
+  ]
+}

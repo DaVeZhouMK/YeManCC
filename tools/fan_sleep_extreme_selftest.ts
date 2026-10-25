@@ -176,8 +176,9 @@ function sourceChecks(): number {
     'bare suspend must queue fan cleanup');
   assert(native.includes('fanHostScheduleEmergencySuspend("kernel-power-506", generation)'),
     'Kernel-Power 506 must queue fan cleanup');
-  assert(native.includes('std::thread([reasonText = std::string(reason ? reason : "unknown"), generation]') && native.includes('}).detach();'),
+  assert(native.includes('std::thread([reasonText=std::string(reason?reason:"unknown"),generation]') && native.includes('}).detach();'),
     'native cleanup must be detached');
+  assert(native.includes('g_fanPhysicalWake.beginClose(generation)') && native.includes('next=g_fanPhysicalWake.completeClose(current)'), 'newest sleep must retain one serialized Close owner');
   // The Host is not a second Windows power owner. Native YMCC is the only
   // power-event ingress; the Host only serializes authenticated commands.
   // Keep checking the ordered queue, but do not require a Host-side

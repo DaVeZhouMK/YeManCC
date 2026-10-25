@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Frozen historical production Stop for negative tests only; current route must be extracted from actual main.cpp",
+  "mainBeforeSha256": "7dbc2cc39aa087f37cc7644156c06aaa71b7d1005cb10dcf0a47ac68159412a6",
+  "functionSha256": "abb99773f49f3dabde96c5bbbfcf0c0917430579d6f2c501f1244c4b702e4812",
+  "function": "static void inputCaptureStop() {\r\n    g_inputCaptureStop.store(true, std::memory_order_release);\r\n    if (g_machineIdentity.family == YmccFamily::LenovoLegionGo) legionMotionRevoke();\r\n    if (g_inputCaptureThread) {\r\n        WaitForSingleObject(g_inputCaptureThread, 2000);\r\n        CloseHandle(g_inputCaptureThread);\r\n        g_inputCaptureThread = nullptr;\r\n    }\r\n    // 7.50 i2：DSU (ShockEmu) UDP 服务随 capture 停止（HC DSUServer 同生命周期）。\r\n    dsu_stop();\r\n    inputHostStop();\r\n}"
+}

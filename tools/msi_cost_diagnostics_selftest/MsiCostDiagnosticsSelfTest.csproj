@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><NuGetAudit>false</NuGetAudit><NoWarn>CS0649;CS0414</NoWarn></PropertyGroup>
+ <ItemGroup>
+  <Compile Include="Program.cs" />
+  <Compile Include="../../InputHost/MsiCostWindowDispatcher.cs" Link="MsiCostWindowDispatcher.cs" />
+  <Compile Include="../../InputHost/MsiCostWindowDiagnostics.cs" Link="MsiCostWindowDiagnostics.cs" />
+  <Compile Include="$(ExtractedDir)/CurrentCostHost.cs" />
+  <Compile Include="$(ExtractedDir)/LegacyCostHost.cs" />
+ </ItemGroup>
+</Project>

@@ -1,0 +1,146 @@
+#include <json.hpp>
+#include <type_traits>
+#include "input_capture_completion.h"
+#include <algorithm>
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <condition_variable>
+#include <cstdint>
+#include <iostream>
+#include <iterator>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <vector>
+using json=nlohmann::json;
+using HANDLE=void*;using DWORD=unsigned long;
+constexpr DWORD WAIT_OBJECT_0=0,WAIT_TIMEOUT=258,WAIT_FAILED=0xffffffff,WAIT_ABANDONED=128;
+constexpr DWORD ERROR_SUCCESS=0;
+constexpr bool FALSE=false;
+enum class YmccFamily {Generic,LenovoLegionGo};
+static struct {YmccFamily family=YmccFamily::Generic;} g_machineIdentity;
+static std::atomic<bool> g_inputCaptureStop{false};
+// Explicit atomic-only fake stop-request leaf. No StartupWait mutex, CV
+// or notification runs here; this fixture does not prove startup synchronization.
+static void inputCaptureRequestStop() noexcept {
+    g_inputCaptureStop.store(true, std::memory_order_release);
+}
+static HANDLE g_inputCaptureThread=nullptr;
+@CAPTURE_SUPPORT@
+struct Case {
+    DWORD wait=WAIT_OBJECT_0,error=0;bool closeSucceeds=true,loggerThrows=false;
+    std::mutex mutex;std::condition_variable cv;bool release=false,entered=false;
+    std::atomic<bool> done{false},handleClosed{false};
+    unsigned waits=0,closes=0,liveHandleCloses=0,hostWhileLive=0,host=0,dsu=0,revokes=0;
+    DWORD waitBudget=0,lastError=0;std::vector<json> logs;
+};
+static Case* current=nullptr;
+static DWORD GetLastError(){return current->lastError;}
+static DWORD WaitForSingleObject(HANDLE,DWORD budget){++current->waits;current->waitBudget=budget;current->lastError=current->error;return current->wait;}
+static bool CloseHandle(HANDLE){
+    ++current->closes;
+    if(!current->done.load())++current->liveHandleCloses;
+    if(!current->closeSucceeds){current->lastError=current->error;return false;}
+    current->handleClosed=true;return true;
+}
+static void legionMotionRevoke(){++current->revokes;}
+static void dsu_stop(){++current->dsu;}
+static void inputHostStop(){++current->host;if(!current->done.load())++current->hostWhileLive;}
+@BASE_CLASSIFIER@
+static void appendNativeLifecycleLog(const char*event,json detail){
+    if(current->loggerThrows)throw std::runtime_error("owned logger leaf unavailable");
+    detail["event"]=event;detail["baseLane"]=nativeLifecycleEventIsBase(event);current->logs.push_back(detail);
+}
+static void gamebarTraceRequestStop(){}
+static void inputCaptureShutdown(){g_captureShutdownAttempted.store(true);}
+static std::uint64_t inputCaptureRetireResources(bool){dsu_stop();inputHostStop();return 0;}
+@STOP_FUNCTION@
+static unsigned checks=0,failures=0;
+static void check(bool condition,const char*name){++checks;if(!condition){++failures;std::cerr<<"CHECK_FAILED "<<name<<'\n';}}
+static json run(DWORD wait,bool closeOk,bool hasHandle,bool lenovo,bool loggerThrows,bool expectLegacy){
+    resetCaptureFixture();Case state;current=&state;state.wait=wait;state.closeSucceeds=closeOk;state.error=wait==WAIT_FAILED?6u:!closeOk?123u:0u;state.loggerThrows=loggerThrows;
+    g_machineIdentity.family=lenovo?YmccFamily::LenovoLegionGo:YmccFamily::Generic;g_inputCaptureStop=false;g_inputCaptureThread=hasHandle?&state:nullptr;
+    std::thread worker;
+    if(hasHandle){
+        worker=std::thread([&]{std::unique_lock<std::mutex> lock(state.mutex);state.entered=true;state.cv.notify_all();state.cv.wait(lock,[&]{return state.release;});state.done=true;});
+        {std::unique_lock<std::mutex> lock(state.mutex);check(state.cv.wait_for(lock,std::chrono::seconds(2),[&]{return state.entered;}),"owned worker entered fixture gate");}
+    }else state.done=true;
+    if(hasHandle&&wait==WAIT_OBJECT_0){ {std::lock_guard<std::mutex> lock(state.mutex);state.release=true;state.cv.notify_all();}worker.join(); }
+    ymcc::captureLifecycle::StopReceipt receipt;bool threw=false;try{receipt=observeCaptureStop([]{return inputCaptureStop();});}catch(...){threw=true;}
+    const bool retained=g_inputCaptureThread!=nullptr;
+    const bool shouldRetain=hasHandle&&(wait!=WAIT_OBJECT_0||!closeOk);
+    check(!threw,"stop evidence must not abort independent existing cleanup");
+    check(g_inputCaptureStop.load(),"capture stop remains published");
+    const bool typed=!std::is_void_v<decltype(inputCaptureStop())>;
+    check(state.dsu==(typed&&shouldRetain?0u:1u)&&state.host==state.dsu,"retirement leaves run only after worker exit and handle closure");
+    if(typed){
+        using namespace ymcc::captureLifecycle;
+        check(receipt.settled()==!shouldRetain,"typed receipt cannot settle retained ownership");
+        check(!state.hostWhileLive,"actual Stop held worker forbids Host cleanup");
+        check(receipt.generation==7,"typed receipt preserves actual production generation");
+        check(receipt.waitPerformed==hasHandle,"typed receipt distinguishes absent worker from a performed wait");
+        check(receipt.workerExited==(!hasHandle||wait==WAIT_OBJECT_0),"typed worker exit proof follows wait result");
+        check(receipt.workerHandleClosed==!shouldRetain,"typed handle proof requires successful close");
+        const auto expectedDebts=hasHandle?std::uint64_t((wait!=WAIT_OBJECT_0?Debt::Worker:0)|(shouldRetain?Debt::WorkerHandle:0)):0;
+        check(receipt.debts==expectedDebts,"typed debt mask preserves distinct worker and handle owners");
+        check(receipt.waitWin32==(hasHandle&&wait==WAIT_FAILED?6u:0u),"typed wait failure preserves immediate Win32 error");
+        check(receipt.closeWin32==(hasHandle&&wait==WAIT_OBJECT_0&&!closeOk?123u:0u),"typed close failure preserves immediate Win32 error");
+        check(receipt.completion==(!shouldRetain?Completion::Settled:(receipt.waitWin32||receipt.closeWin32?Completion::RetainedFault:Completion::Pending)),"typed completion retains fault separately from pending work");
+    }
+    check(state.revokes==(lenovo?1u:0u),"existing family branch retained");
+    if(hasHandle){
+        check(state.waits==1&&state.waitBudget==2000,"actual Stop uses original bounded wait argument");
+        if(expectLegacy){check(!retained,"legacy discarded worker handle");check(state.closes==1,"legacy closed handle regardless of wait result");}
+        else{
+            check(retained==shouldRetain,"unproven or unclosed worker handle remains owned");
+            check(state.liveHandleCloses==0,"no live-worker handle retirement after unproven wait");
+            check(state.closes==(wait==WAIT_OBJECT_0?1u:0u),"only signaled worker handle may close");
+            if(!loggerThrows){
+                check(state.logs.size()==1,"one ordinary stop receipt");
+                if(state.logs.size()==1){const auto& log=state.logs[0];
+                    check(log.value("event","")=="input-capture-worker-stop"&&log.value("baseLane",false),"stop receipt survives disabled detail logging");
+                    check(log.value("threadExitVerified",false)==(wait==WAIT_OBJECT_0),"wait result controls exit proof");
+                    check(log.value("ownerRetained",false)==shouldRetain,"receipt states actual retained ownership");
+                    check(log.value("handleClosed",false)==(wait==WAIT_OBJECT_0&&closeOk),"handle closure distinct from thread exit");
+                    check(log.value("waitWin32",999u)==(wait==WAIT_FAILED?6u:0u),"wait failure captures immediate Win32 result");
+                    check(log.value("closeWin32",999u)==(wait==WAIT_OBJECT_0&&!closeOk?123u:0u),"close failure captures immediate Win32 result");
+                }
+            }
+        }
+    }else check(state.waits==0&&state.closes==0,"no invented worker receipt from absence");
+    const bool lostUnverifiedOwner=shouldRetain&&!retained;
+    // No helper process exit can stand in for owner destruction: release and join
+    // the real owned fixture thread explicitly on every observed branch.
+    {std::lock_guard<std::mutex> lock(state.mutex);state.release=true;state.cv.notify_all();}
+    if(worker.joinable())worker.join();
+    check(state.done.load(),"owned fixture worker positively joined");
+    // Preserved candidate handle is reclaimed by an actual second Stop only
+    // after the fixture thread signals; success is not inferred at timeout.
+    bool lateReclaimed=false;
+    if(!expectLegacy&&retained){
+        state.wait=WAIT_OBJECT_0;state.closeSucceeds=true;state.loggerThrows=false;state.lastError=0;
+        const auto late=observeCaptureStop([]{return inputCaptureStop();});if(typed)check(late.settled(),"late typed receipt settles after signal and close");lateReclaimed=g_inputCaptureThread==nullptr&&state.handleClosed.load();
+        check(lateReclaimed,"retained owner can settle after later real completion");
+    }
+    json result={{"typedReceiptExecuted",typed},{"receiptDebts",receipt.debts},{"receiptSettled",receipt.settled()},{"retirementDeferredAtFirstReturn",typed&&shouldRetain},{"wait",wait},{"closeSuccess",closeOk},{"hasHandle",hasHandle},{"lenovo",lenovo},{"loggerThrows",loggerThrows},
+        {"lostUnverifiedOwner",lostUnverifiedOwner},{"retainedAtFirstReturn",retained},{"shouldRetain",shouldRetain},
+        {"liveHandleCloses",state.liveHandleCloses},{"hostCleanupWhileWorkerLive",state.hostWhileLive},
+        {"ownedFixtureThreadJoined",state.done.load()},{"lateReclaimedAfterSignal",lateReclaimed},
+        {"actualStopFunctionExecuted",true},{"realThreadWaitOrCloseApi",false},
+        {"independentHostCleanupProven",false},{"boundedStalledProductionDestructionProven",false}};
+    g_inputCaptureThread=nullptr;return result;
+}
+int main(int argc,char**argv){
+    const bool legacy=argc==2&&std::string(argv[1])=="legacy";json cases=json::array();
+    for(bool lenovo:{false,true})for(bool loggerThrows:{false,true}){
+        for(DWORD wait:{WAIT_OBJECT_0,WAIT_TIMEOUT,WAIT_FAILED,WAIT_ABANDONED})cases.push_back(run(wait,true,true,lenovo,loggerThrows,legacy));
+        cases.push_back(run(WAIT_OBJECT_0,false,true,lenovo,loggerThrows,legacy));
+        cases.push_back(run(WAIT_OBJECT_0,true,false,lenovo,loggerThrows,legacy));
+    }
+    std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"expectedLegacy",legacy},{"cases",cases},
+        {"productionStopExecuted",true},{"realOwnedFixtureThreads",true},{"noRealWinmmDeviceHostOrService",true},
+        {"wholeLifecycleAcceptance",false}}).dump()<<'\n';return failures?1:0;
+}

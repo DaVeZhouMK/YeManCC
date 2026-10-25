@@ -1,0 +1,55 @@
+{
+  "date": "2026-10-22",
+  "timezone": "Asia/Hong_Kong",
+  "reference": "Local logs read only; no Steam/CSS/YMCC lifecycle operation by this task",
+  "ymccPid": 38264,
+  "steamPid": 19552,
+  "steamBirth": "134370323368181064",
+  "identity": {
+    "file": "C:/SOFT/YeMan/YeManCC/YeManCC.exe",
+    "sha256": "b78eecb82a18965b5b056f23c7a05a496928529469022fe894d152c01952cbf1",
+    "bytes": 13579776,
+    "automaticOperationEmbedded": true,
+    "restartContextEmbedded": true
+  },
+  "records": {
+    "decky-sidebar.log": 34,
+    "native-lifecycle.log": 82,
+    "frontend-trace.log": 12,
+    "webhelper.txt": 141,
+    "console_log.txt": 8
+  },
+  "timeline": [
+    [
+      "20:16:53.668",
+      "YMCC boot-single-instance-acquired"
+    ],
+    [
+      "20:16:55.312",
+      "connection-recovery recovering attempted:true"
+    ],
+    [
+      "20:16:55.443",
+      "connection-recovery recovering acknowledged"
+    ],
+    [
+      "20:16:55",
+      "Steam webhelper starts renderer and reloads shared library route"
+    ],
+    [
+      "20:16:57",
+      "Steam loads bigpicture_startup.webm, creates SP BPM_uid0 popup"
+    ],
+    [
+      "20:16:57.780",
+      "native foreground becomes steamwebhelper SDL_app"
+    ],
+    [
+      "20:17:00.467",
+      "later Decky bootstrap starts"
+    ]
+  ],
+  "privacy": "Only timing, process identity and product build; no bridge credentials or user settings",
+  "expected": "Normal YMCC boot/restore/wake must not issue RestartJSContext, launch/mode URI or bring Steam to front. Automatic transport rebind and CSS-only application remain allowed. Explicit user repair/start and saved OS-logon opt-in remain separate authorizations.",
+  "sourceEvidence": "Build/V/SteamNoAutoFront22/REPORT.md"
+}

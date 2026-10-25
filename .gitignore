@@ -91,3 +91,16 @@ Desktop.ini
 # Locked compile-time Decky SDK modules are source inputs, not disposable outputs.
 !decky-plugin/vendor/decky-api-1.1.3/dist/
 !decky-plugin/vendor/decky-api-1.1.3/dist/*
+
+# Local investigation and simulation outputs are not publishable source.
+/work/
+/_scratch/
+/hud-output.html
+/notice-output.html
+/radial-output.html
+/tools/ymcc_sim/global/lighting-component-continuity/v4/fixture.zip
+/tools/ymcc_sim/global/radial-native-consumer/maintenance-evidence/
+
+# Approved shared runtime binaries are frozen source assets, not local build output.
+!/deps/ymcc-shared-runtime/bin/
+!/deps/ymcc-shared-runtime/bin/*.dll

@@ -5,7 +5,7 @@ import { loadGlobalFrameRates, onFrameRatesChanged, dedicatedFrameRatePair, appl
 import { setFloatRtssLinked } from './autofloat';
 import { subscribePolicyGameStatus, getPolicyGame, gamePolicyKey, isPolicyGameInitialized } from './gamePolicyTarget';
 import { loadGameCustomConfig, loadPerformanceSchedule, restorePerformanceScheduleIfConfigured,
-  resolveGameCustomProfiles, onGameCustomConfigChanged, onPerformanceScheduleChanged } from './performanceSchedule';
+  onGameCustomConfigChanged, onPerformanceScheduleChanged, isPerformanceScheduleBusy } from './performanceSchedule';
 import { applyGameCorePolicy, clearGameCorePolicy, detectGameCorePolicy } from './gameCorePolicy';
 import { registerScheduledTask } from '@/scheduler';
 import { powerLifecycle } from './api';
@@ -22,10 +22,10 @@ let appliedFrames = '';
 let observedSchedule = '';
 let stops: (() => void)[] = [];
 function scheduleSignature(config: Awaited<ReturnType<typeof loadPerformanceSchedule>>): string {
-  return JSON.stringify([config.configured, config.enabled, config.active, config.profiles],(key,value)=>key==='fpsTarget'?undefined:value);
+  return JSON.stringify([config.configured, config.enabled, config.active, config.profiles, config.controls],(key,value)=>key==='fpsTarget'?undefined:value);
 }
 async function reconcile(): Promise<void> {
-  if (!active || running || !dirty || !isPolicyGameInitialized() || isQuickActionBusy()) return;
+  if (!active || running || !dirty || !isPolicyGameInitialized() || isQuickActionBusy() || isPerformanceScheduleBusy()) return;
   running = true;
   const generation = epoch;
   try {
@@ -37,28 +37,41 @@ async function reconcile(): Promise<void> {
     observedSchedule = scheduleSignature(schedule);
     const entry = game ? config.entries[gamePolicyKey(game)] : undefined;
     const enabledEntry = entry?.enabled !== false ? entry : undefined;
-    const identity = game ? game.pid + ':' + game.processCreated : '';
+    const identity = game ? game.pid + ':' + game.processCreated + ':' + (game.identityGeneration ?? 0) : '';
     // Input-only/display-name edits must not replay CPU/TDP/FPS or process affinity.
-    const performanceSignature = JSON.stringify([identity, schedule.configured, schedule.enabled,
-      enabledEntry ? resolveGameCustomProfiles(enabledEntry, schedule) : [schedule.active, schedule.profiles]],(key,value)=>key==='fpsTarget'?undefined:value);
-    const coreSignature = JSON.stringify([identity, enabledEntry?.corePolicyEnabled,
-      enabledEntry?.corePolicyMode, enabledEntry?.hyperThreadPolicyEnabled, enabledEntry?.hyperThreadPolicy]);
+    const side = powerSourceMode.value;
+    if (!side) return;
+    const globalFrames = await loadGlobalFrameRates();
+    const frameOwner = enabledEntry ? config.rtss?.[gamePolicyKey(game)] : undefined;
+    const frames = dedicatedFrameRatePair(frameOwner, globalFrames);
+    // Ownership is part of the lease even when both banks contain identical values.
+    // Legacy dedicated entries depend on their own side, not an unrelated global edit.
+    const globalBank = schedule.controls?.[side] ?? schedule.profiles[side][schedule.active[side]];
+    const controls = enabledEntry ? enabledEntry.controls : schedule.controls;
+    const performanceOwner = enabledEntry ? ['dedicated', gamePolicyKey(game!)] : ['global', schedule.configured, schedule.enabled];
+    const performanceBank = enabledEntry ? controls?.[side] ?? enabledEntry[side] : globalBank;
+    // Positive legacy FPS changes use the independent target-update path; zero crossings
+    // must still start/stop the automatic float owner.
+    const frameDemand = controls ? frames[side].fps : frames[side].fps > 0;
+    const performanceSignature = JSON.stringify([performanceOwner, identity, side, frameDemand, performanceBank],
+      (key,value)=>key==='fpsTarget'?undefined:value);
+    // Core selection is owned by ContinuousPerformancePanel/powercfg. This
+    // resident watcher retains only the EXE-scoped SMT preference, which is
+    // intentionally independent from the global AC/DC core split.
+    const smtEntry = entry?.smtIndependent ? entry : enabledEntry;
+    const coreSignature = JSON.stringify([identity, smtEntry?.smtIndependent,
+      smtEntry?.hyperThreadPolicyEnabled, smtEntry?.hyperThreadPolicy]);
     if (!active || generation !== epoch) return;
     if (performanceSignature !== appliedPerformance) {
-      // A game-exclusive profile is an independent owner. It must be restored
-      // even when the global performance scheduler is currently in manual mode;
-      // otherwise an AC/DC event or a resident retry silently skips the game's
-      // dedicated profile.
+      // An automatic dedicated bank is independent of the global scheduler.
+      // Passive AC/DC or resident refreshes may restore that automatic owner,
+      // but must leave a manual bank unchanged until the user adjusts it.
       if (enabledEntry || (schedule.configured && schedule.enabled)) {
-        await restorePerformanceScheduleIfConfigured();
+        await restorePerformanceScheduleIfConfigured(undefined, { automaticOnly: true });
       }
       if (!active || generation !== epoch) return;
       appliedPerformance = performanceSignature;
     }
-    const side=await detectPowerMode();
-    const globalFrames=await loadGlobalFrameRates();
-    const frameOwner=enabledEntry?config.rtss?.[gamePolicyKey(game)]:undefined;
-    const frames=dedicatedFrameRatePair(frameOwner,globalFrames);
     const frameSignature=JSON.stringify([identity,side,!!enabledEntry,frameOwner?.enabled,frames[side].fps,frames[side].lastFps]);
     if(frameSignature!==appliedFrames){
       if(!await applyIndependentFrameRates(()=>active && generation===epoch))return;
@@ -68,10 +81,9 @@ async function reconcile(): Promise<void> {
     if (coreSignature !== appliedCore) {
       const capabilities = await detectGameCorePolicy();
       if (!capabilities) return; // failed probe is not permission to drop a lease.
-      const mode = enabledEntry && capabilities.heterogeneous && enabledEntry.corePolicyEnabled !== false
-        ? enabledEntry.corePolicyMode || 'default' : 'default';
-      const hyper = enabledEntry && capabilities.smtAvailable && enabledEntry.hyperThreadPolicyEnabled !== false
-        ? enabledEntry.hyperThreadPolicy || 'default' : 'default';
+      const mode = 'default';
+      const hyper = smtEntry && capabilities.smtAvailable && smtEntry.hyperThreadPolicyEnabled !== false
+        ? smtEntry.hyperThreadPolicy || 'default' : 'default';
       if (!active || generation !== epoch) return;
       if (game && (mode !== 'default' || hyper !== 'default')) {
         const result = await applyGameCorePolicy(game, mode, hyper);

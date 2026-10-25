@@ -1,0 +1,4 @@
+$ErrorActionPreference='Stop'
+Add-Type -TypeDefinition 'using System;using System.Runtime.InteropServices;public static class InertConsoleCheck{[DllImport("kernel32.dll")]public static extern IntPtr GetConsoleWindow();[DllImport("user32.dll")]public static extern bool IsWindowVisible(IntPtr h);}'
+$h=[InertConsoleCheck]::GetConsoleWindow()
+[ordered]@{pass=$true;consoleVisible=($h -ne [IntPtr]::Zero -and [InertConsoleCheck]::IsWindowVisible($h));source=$env:YEMAN_STARTUP_SOURCE;productActions=0}|ConvertTo-Json|Set-Content -LiteralPath $env:YEMAN_TEST_RECEIPT -Encoding UTF8

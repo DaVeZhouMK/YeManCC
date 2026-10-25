@@ -7,4 +7,9 @@
     <PlatformTarget>x64</PlatformTarget>
     <AssemblyName>HIDMaestroSetup</AssemblyName>
   </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\native\UsbipMaintenanceState.cs" Link="UsbipMaintenanceState.cs" />
+    <Compile Include="..\native\ModuleMaintenanceGate.cs" Link="ModuleMaintenanceGate.cs" />
+  </ItemGroup>
 </Project>

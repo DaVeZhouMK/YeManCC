@@ -30,22 +30,44 @@ static json steamMonitorStateLocked() {
     }catch(const std::exception& error){result["reason"]=error.what();}
     return result;
 }
-static json steamMonitorGet(){
-    std::lock_guard<std::mutex> lock(g_steamSettingsMx);
+static void steamClientSettingsAttemptLocked(json* monitorAck=nullptr);
+static json steamMonitorGetLocked(){
     auto state=steamMonitorStateLocked();
-    if(state.value("available",false) && !state.value("pending",false) && sofSteamRunning()){
+    // Pending is saved intent, NOT evidence of what Steam currently renders.
+    // A user read must still query the live store; never apply/replay pending SET
+    // from GET, and never sign a disk/cache fallback as live confirmation.
+    state["liveConfirmed"]=false;
+    if(g_aiFanMockSession.isolated)return state;
+    if(sofSteamRunning()){
+        state["ok"]=false;state["available"]=false;state["via"]="unconfirmed";
         std::wstring path;std::string account;
         if(sofFindLocalConfig(&path,&account)){
             json keys=json::array();for(const auto& f:ymcc::steamsettings::fields)keys.push_back(f.client);
+            DWORD beforePid=0;sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"pid",&beforePid);
             const auto live=steamLiveRequest(static_cast<DWORD>(std::stoul(account)),{{"operation","settings.get"},{"keys",keys}});
-            if(live.value("ok",false) && live.contains("values")){
-                json values=json::object();for(const auto& f:ymcc::steamsettings::fields)if(live["values"].contains(f.client))values[f.name]=live["values"][f.client];
-                if(values.size()==5){state.update(values);state["ok"]=true;state["via"]="live";state["reason"]="";}
-            }
-        }
+            DWORD afterPid=0;std::wstring afterPath;std::string afterAccount;
+            sofRegDWORD(HKEY_CURRENT_USER,L"Software\\Valve\\Steam\\ActiveProcess",L"pid",&afterPid);
+            if(!sofFindLocalConfig(&afterPath,&afterAccount)||afterPath!=path||afterAccount!=account){state["reason"]="steam-account-changed";return state;}
+            if(!sofSteamRunning()||beforePid==0||beforePid!=afterPid){state["reason"]="steam-session-changed";return state;}
+            if(live.value("ok",false) && live.contains("values") && live["values"].is_object()){
+                json values=json::object();bool valid=true;
+                for(const auto& f:ymcc::steamsettings::fields){
+                    if(!live["values"].contains(f.client)||!live["values"][f.client].is_number()){valid=false;break;}
+                    const double v=live["values"][f.client].get<double>();
+                    if(!std::isfinite(v)||v<f.min-1e-6||v>f.max+1e-6||(f.integer&&v!=std::round(v))){valid=false;break;}
+                    values[f.name]=live["values"][f.client];
+                }
+                if(valid&&values.size()==5){state.update(values);state["ok"]=true;state["available"]=true;state["via"]="live";state["liveConfirmed"]=true;state["reason"]="";}
+                else state["reason"]="live-readback-failed";
+            }else state["reason"]=live.value("reason",std::string("live-readback-failed"));
+        }else state["reason"]="localconfig-not-found";
     }return state;
 }
-static json steamMonitorSet(const json& patch){
+static json steamMonitorGet(){
+    std::lock_guard<std::mutex> lock(g_steamSettingsMx);
+    return steamMonitorGetLocked();
+}
+static json steamMonitorSet(const json& patch,bool awaitApplied=false){
     if(!ymcc::steamsettings::valid(patch))return {{"ok",false},{"reason","invalid-monitor-settings"}};
     {
         std::lock_guard<std::mutex> lock(g_steamSettingsMx);
@@ -60,11 +82,35 @@ static json steamMonitorSet(const json& patch){
         saved={{"pending",true},{"account",account},{"path",W2U(path)},{"desired",desired},{"reason",""},{"restartRequired",false}};
         if(!ymSettingsWriteSection("steamMonitor",saved))return {{"ok",false},{"reason","settings-write-failed"}};
         g_steamClientPending.store(true,std::memory_order_release);
+        if(awaitApplied){
+            // One lock covers this request's intent, write receipt and fresh GET.
+            // A GET can confirm current state, never whether THIS SET succeeded.
+            json receipt={{"ok",false},{"reason","no-application-receipt"}};
+            steamClientSettingsAttemptLocked(&receipt);
+            auto state=steamMonitorGetLocked();
+            std::wstring currentPath;std::string currentAccount;
+            const bool same=sofFindLocalConfig(&currentPath,&currentAccount)&&currentPath==path&&currentAccount==account;
+            const bool applied=same && receipt.value("ok",false) && receipt.value("persisted",false) &&
+                !receipt.value("pending",true) && receipt.value("via",std::string())=="live" &&
+                state.value("liveConfirmed",false) && !state.value("pending",true) && ymcc::steamsettings::matches(state,desired);
+            state["applicationConfirmed"]=applied;
+            if(!applied){
+                state["ok"]=false;
+                auto reason=receipt.value("reason",std::string());
+                if(!same)reason="steam-account-changed";
+                if(reason.empty())reason=state.value("reason",std::string());
+                state["reason"]=reason.empty()?"live-application-unconfirmed":reason;
+            }
+            return state;
+        }
     }
     steamSettingsQueue("monitor-user");
-    return steamMonitorGet();
+    return steamMonitorGet(); // ordinary sliders retain coalescing / queue ACK
 }
-static void steamClientSettingsAttemptLocked(){
+static void steamClientSettingsAttemptLocked(json* monitorAck){
+    // Abandoned sleep overlay requests never enter the shared monitor write lane.
+    g_sofEnabled.store(false,std::memory_order_release);
+    g_sofPending.store(false,std::memory_order_release);
     std::lock_guard<std::mutex> overlayLock(g_sofMx);
     const auto overlaySerial=g_sofRequestSerial.load(std::memory_order_acquire);
     const bool overlayPending=g_sofPending.load(std::memory_order_acquire);
@@ -75,13 +121,18 @@ static void steamClientSettingsAttemptLocked(){
     json monitor=monitorPending?saved.value("desired",json::object()):json::object();
     auto finish=[&](bool ok,bool pending,const std::string& via,const std::string& reason){
         if(monitorPending){
+            if(monitorAck)*monitorAck={{"ok",ok},{"pending",pending},{"via",via},{"reason",reason},{"persisted",false}};
             saved["pending"]=pending;saved["reason"]=reason;saved["via"]=via;
             saved["restartRequired"]=pending && via=="deferred";
             if(!ymSettingsWriteSection("steamMonitor",saved)){
                 saved["pending"]=false;saved["reason"]="settings-write-failed";
+                if(monitorAck){(*monitorAck)["ok"]=false;(*monitorAck)["reason"]="settings-write-failed";}
                 // Do not silently sign failed durable acknowledgement as success.
                 ipc_emit("steam.settings.updated",{{"monitor",{{"ok",false},{"available",true},{"pending",false},{"reason","settings-write-failed"}}}});
-            }else ipc_emit("steam.settings.updated",{{"monitor",steamMonitorStateLocked()}});
+            }else{
+                if(monitorAck)(*monitorAck)["persisted"]=true;
+                ipc_emit("steam.settings.updated",{{"monitor",steamMonitorStateLocked()}});
+            }
         }
         if(overlayPending && overlaySerial==g_sofRequestSerial.load(std::memory_order_acquire)){
             g_sofPending.store(pending,std::memory_order_release);
@@ -173,16 +224,11 @@ static json steamSettingsGet(const json& args){
     return {{"ok",false},{"reason","invalid-steam-scope"}};
 }
 static json steamSettingsSet(const json& args){
-    if(args.size()!=1)return {{"ok",false},{"reason","invalid-steam-settings"}};
-    if(args.contains("overlayOffFix")){
-        if(!args["overlayOffFix"].is_boolean())return {{"ok",false},{"reason","invalid-overlay-value"}};
-        if(g_aiFanMockSession.isolated)return {{"ok",false},{"reason","isolated-session"}};
-        const bool enabled=args["overlayOffFix"].get<bool>();
-        if(!ymSettingsPatchSection("sleep",{{"steamOverlayOffFix",enabled}}))return {{"ok",false},{"reason","settings-write-failed"}};
-        g_sofEnabled.store(enabled,std::memory_order_release);steamOverlayFixKick("setting");
-        return {{"ok",true},{"accepted",true},{"pending",true}}; // queue ACK, not application ACK
-    }
-    if(args.contains("monitor"))return steamMonitorSet(args["monitor"]);
+    const bool awaited=args.contains("awaitApplied");
+    if(awaited&&(!args.contains("monitor")||args.size()!=2||!args["awaitApplied"].is_boolean()))return {{"ok",false},{"reason","invalid-steam-settings"}};
+    if(!awaited&&args.size()!=1)return {{"ok",false},{"reason","invalid-steam-settings"}};
+    if(args.contains("overlayOffFix"))return ymcc::sleepprefs::retiredOverlayReply();
+    if(args.contains("monitor"))return steamMonitorSet(args["monitor"],awaited&&args["awaitApplied"].get<bool>());
     if(args.contains("mousePercent"))return steamDeckMouseSet({{"percent",args["mousePercent"]}});
     return {{"ok",false},{"reason","invalid-steam-settings"}};
 }

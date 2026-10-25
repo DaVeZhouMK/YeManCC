@@ -31,10 +31,29 @@ int main() {
             cases.emplace_back(std::string("persona/preset matrix: ") + pad + "/" + gyro);
         }
     }
-    check("invalid and legacy personas fail closed", [&] {
-        for (const json& raw : {json(nullptr), json::array(), json{{"virtualGamepadPersona", "xbox360"}, {"gyroPreset", "fps"}}, json{{"virtualGamepadPersona", true}, {"gyroPreset", 123}}})
+    check("invalid saved personas fail closed", [&] {
+        for (const json& raw : {json(nullptr), json::array(), json{{"virtualGamepadPersona", "unknown"}, {"gyroPreset", "fps"}}, json{{"virtualGamepadPersona", true}, {"gyroPreset", 123}}})
             expect(ymcc::normalizeInputStartupPreferences(raw) == json({{"virtualGamepadPersona", "disabled"}, {"gyroPreset", "off"}}));
         expect(ymcc::normalizeInputStartupPreferences({{"virtualGamepadPersona", "elite"}, {"gyroPreset", "invalid"}})["gyroPreset"] == "off");
+    });
+    check("saved legacy personas migrate once without admitting legacy runtime identities", [&] {
+        for (const auto& row : std::vector<std::pair<std::string, std::string>>{{"xbox360", "elite"}, {"dualshock4", "dualsense-edge"}, {"dualsense", "dualsense-edge"}}) {
+            const auto prefs = ymcc::normalizeInputStartupPreferences({{"virtualGamepadPersona", row.first}, {"gyroPreset", "off"}});
+            expect(prefs["virtualGamepadPersona"] == row.second && prefs["gyroPreset"] == "off");
+            expect(!ymcc::controllerPersona::currentOutput(row.first) && ymcc::controllerPersona::currentOutput(row.second));
+            for (bool buttons : {false, true}) for (bool gyro : {false, true}) {
+                auto legacy = saved; legacy["startupAppliedSession"] = "already-applied";
+                legacy["outputTarget"].update(json{{"persona", row.first}, {"buttonMappingEnabled", buttons}, {"gyroEnabled", gyro},
+                    {"descriptorHash", "old-identity"}, {"closure", "CLOSED"}});
+                const auto next = ymcc::initializeInputStartup(legacy, {}, "already-applied");
+                expect(next["outputTarget"]["persona"] == row.second && next["outputTarget"]["descriptorHash"].is_null() && next["outputTarget"]["closure"] == "UNENCLOSED");
+                expect(next["outputTarget"]["buttonMappingEnabled"] == buttons && next["outputTarget"]["gyroEnabled"] == gyro);
+                expect(next["revision"] == legacy["revision"] && next["applyStatus"] == "saved-pending");
+                for (const char* field : {"appliedRevision", "appliedConfigHash", "pendingConfigHash", "hostAcknowledgedRevision", "hostAcknowledgedConfigHash"}) expect(next[field].is_null());
+                expect(ymcc::initializeInputStartup(next, {}, "already-applied") == next);
+                expect(next["unknownRoot"] == legacy["unknownRoot"] && next["gyroMotion"] == legacy["gyroMotion"]);
+            }
+        }
     });
     const json on = {{"virtualGamepadPersona", "steamdeck"}, {"gyroPreset", "fps"}};
     check("stored preset tuning and suppress encoding retained", [&] {
@@ -77,6 +96,115 @@ int main() {
             try { ymcc::initializeInputStartup(bad, on, "bad"); } catch (...) { rejected = true; } expect(rejected);
         }
         bool rejected = false; try { ymcc::initializeInputStartup(saved, on, ""); } catch (...) { rejected = true; } expect(rejected);
+    });
+    const auto bootDocument = [&] {
+        auto input = saved;
+        input["startupAppliedSession"] = "old-process";
+        input["startupAppliedBoot"] = "windows-boot-1";
+        return json{{"input", input}, {"startupDesired", on},
+            {"extensions", {{"bootModes", {{"schema", 1}, {"current", "global"}, {"boot", "steam"}}}}},
+            {"gameProfiles", {{"fixture-game", {{"dedicated", true}}}}}};
+    };
+    check("same Windows boot retires dead owners without consuming next-boot input or tuning", [&] {
+        const auto doc = bootDocument();
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "new-process", "windows-boot-1");
+        expect(next["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+        expect(next["input"]["gyroMotion"] == doc["input"]["gyroMotion"]);
+        expect(next["input"]["buttonMapping"] == doc["input"]["buttonMapping"]);
+        expect(next["input"]["gameOverride"].is_null());
+        expect(next["input"]["startupAppliedSession"] == "new-process");
+        expect(next["input"]["revision"] == 16 && next["input"]["applyStatus"] == "unknown");
+        expect(next["input"]["appliedRevision"].is_null() && next["input"]["pendingConfigHash"].is_null());
+        expect(next["startupDesired"] == doc["startupDesired"] && next["gameProfiles"] == doc["gameProfiles"]);
+        expect(ymcc::initializeBootModeInputStartup(next, "new-process", "windows-boot-1") == next);
+    });
+    check("confirmed next Windows boot consumes the selected input once", [&] {
+        const auto doc = bootDocument();
+        auto next = ymcc::initializeBootModeInputStartup(doc, "new-boot-process", "windows-boot-2");
+        expect(next["input"]["outputTarget"]["persona"] == "steamdeck");
+        expect(next["input"]["gyroMotion"]["preset"] == "fps" && next["input"]["gyroMotion"]["enabled"] == true);
+        expect(next["input"]["startupAppliedBoot"] == "windows-boot-2");
+        next["input"]["gyroMotion"]["gyroMultiplier"] = 7.25;
+        const auto restart = ymcc::initializeBootModeInputStartup(next, "second-process", "windows-boot-2");
+        expect(restart["input"]["gyroMotion"]["gyroMultiplier"] == 7.25);
+        expect(restart["gameProfiles"] == doc["gameProfiles"]);
+    });
+    check("first upgraded launch anchors the observed boot and retains current input", [&] {
+        auto doc = bootDocument(); doc["input"].erase("startupAppliedBoot");
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "upgraded-process", "windows-boot-1");
+        expect(next["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+        expect(next["input"]["gyroMotion"] == doc["input"]["gyroMotion"]);
+        expect(next["extensions"]["bootModesAppliedBoot"] == "windows-boot-1");
+        const auto reboot = ymcc::initializeBootModeInputStartup(next, "reboot-process", "windows-boot-2");
+        expect(reboot["input"]["outputTarget"]["persona"] == "steamdeck");
+    });
+    check("first selected scene consumes input on the very next boot even when legacy input has no boot marker", [&] {
+        auto doc = bootDocument(); doc["input"].erase("startupAppliedBoot");
+        doc["extensions"]["bootModes"]["boot"] = "xbox-steam";
+        doc["extensions"]["bootModesAppliedBoot"] = "windows-boot-1";
+        const auto sameBoot = ymcc::initializeBootModeInputStartup(doc, "same-boot-process", "windows-boot-1");
+        expect(sameBoot["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+        const auto reboot = ymcc::initializeBootModeInputStartup(doc, "first-reboot-process", "windows-boot-2");
+        expect(reboot["input"]["outputTarget"]["persona"] == "steamdeck");
+        expect(reboot["input"]["startupAppliedBoot"] == "windows-boot-2");
+        expect(reboot["extensions"]["bootModesAppliedBoot"] == "windows-boot-1");
+        expect(reboot["gameProfiles"] == doc["gameProfiles"]);
+    });
+    check("unknown boot identity cannot consume a selected scene or fabricate a boot claim", [&] {
+        const auto doc = bootDocument();
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "unknown-boot-process", "");
+        expect(next["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+        expect(next["input"]["gyroMotion"] == doc["input"]["gyroMotion"]);
+        expect(next["input"]["gameOverride"].is_null());
+        expect(next["input"]["startupAppliedBoot"] == "windows-boot-1");
+        expect(!next["extensions"].contains("bootModesAppliedBoot"));
+    });
+    check("a scene selection claim suppresses premature preferences before the initial restore", [&] {
+        auto doc = bootDocument();
+        doc["extensions"]["bootModesAppliedBoot"] = "windows-boot-2";
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "selection-process", "windows-boot-2");
+        expect(next["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+        expect(next["input"]["gyroMotion"] == doc["input"]["gyroMotion"]);
+    });
+    check("applications without a boot-mode document retain the existing process startup policy", [&] {
+        auto doc = bootDocument();doc["extensions"].erase("bootModes");
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "legacy-process", "windows-boot-1");
+        expect(next["input"]["outputTarget"]["persona"] == "steamdeck");
+        expect(next["input"]["gyroMotion"]["preset"] == "fps");
+        expect(next["input"]["startupAppliedBoot"] == "windows-boot-1");
+    });
+    check("startup result observations are current only for the boot actually read", [&] {
+        auto doc = bootDocument();
+        doc["extensions"]["bootModesStartupResult"] = {{"boot", "windows-boot-1"}, {"status", "failed"}};
+        const auto known = ymcc::initializeBootModeInputStartup(doc, "new-process", "windows-boot-1");
+        expect(known["input"]["startupObservedBoot"] == "windows-boot-1");
+        const auto unknown = ymcc::initializeBootModeInputStartup(known, "unknown-process", "");
+        expect(unknown["input"]["startupObservedBoot"].is_null());
+        expect(unknown["input"]["startupAppliedBoot"] == "windows-boot-1");
+        expect(unknown["extensions"]["bootModesStartupResult"] == doc["extensions"]["bootModesStartupResult"]);
+        const auto changed = ymcc::initializeBootModeInputStartup(unknown, "later-process", "windows-boot-2");
+        expect(changed["input"]["startupObservedBoot"] == "windows-boot-2");
+    });
+    check("v1 to kernel volatile identity anchors live state once without hot-applying an old draft", [&] {
+        auto doc = bootDocument();doc["extensions"]["bootModesAppliedBoot"]="windows-loader-v1|repeated|1";
+        const auto anchor=ymcc::initializeBootModeInputStartup(doc,"upgrade-process","windows-volatile-v2|session-1");
+        expect(anchor["input"]["outputTarget"]==doc["input"]["outputTarget"]);
+        expect(anchor["extensions"]["bootModesAppliedBoot"]=="windows-volatile-v2|session-1");
+        expect(anchor["extensions"]["bootModesIdentityMigration"]["policy"]=="preserve-current-until-next-boot");
+        const auto reopened=ymcc::initializeBootModeInputStartup(anchor,"same-boot-process","windows-volatile-v2|session-1");
+        expect(reopened["input"]["outputTarget"]==doc["input"]["outputTarget"]);
+        const auto reboot=ymcc::initializeBootModeInputStartup(anchor,"next-boot-process","windows-volatile-v2|session-2");
+        expect(reboot["input"]["outputTarget"]["persona"]=="steamdeck");
+    });
+    check("repeated G3E loader tuple fails old boundary while distinct kernel session consumes the selected SD", [&] {
+        auto doc=bootDocument();doc["input"]["startupAppliedBoot"]="windows-loader-v1|{1E8F80C1-C49D-11F1-8755-801316155698}|1";
+        doc["extensions"]["bootModesAppliedBoot"]=doc["input"]["startupAppliedBoot"];
+        const auto old=ymcc::initializeBootModeInputStartup(doc,"actual-next-boot",doc["input"]["startupAppliedBoot"]);
+        expect(old["input"]["outputTarget"]["persona"]==doc["input"]["outputTarget"]["persona"]);
+        doc["input"]["startupAppliedBoot"]="windows-volatile-v2|before";
+        doc["extensions"]["bootModesAppliedBoot"]="windows-volatile-v2|before";
+        const auto next=ymcc::initializeBootModeInputStartup(doc,"actual-next-boot","windows-volatile-v2|after");
+        expect(next["input"]["outputTarget"]["persona"]=="steamdeck");
     });
     std::cout << json{{"suite", "Input startup native JSON policy"}, {"passed", cases.size()}, {"cases", cases}, {"hardwareOperations", 0}}.dump(2) << std::endl;
 }

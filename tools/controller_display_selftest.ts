@@ -39,8 +39,9 @@ check(page.includes("const outputStick = ref<'left' | 'right'>('right');"), 'ini
 check(page.includes('v-model="outputStick" :options="stickOptions"'), 'UI retains original data model binding');
 const native = fs.readFileSync(path.join(root, 'native/main.cpp'), 'utf8').replace(/\r\n/g, '\n');
 check(native.includes('{"axes", {normalizeAxis(pad.sThumbLX), normalizeAxis(pad.sThumbLY),\n                   normalizeAxis(pad.sThumbRX), normalizeAxis(pad.sThumbRY)}}'), 'native input axes retain original signs');
-const snapshot = native.match(/static json virtualOutputRuntimeSnapshot\(bool sourceLive\) \{[\s\S]*?(?=\nstatic void gamepadReadStateUnlocked)/)?.[0];
+const snapshot = native.match(/static json virtualOutputRuntimeSnapshot\(bool sourceLive,\s*const ymcc::VirtualOutputSourceWindow& sourceWindow\) \{[\s\S]*?(?=\nstatic void gamepadReadStateUnlocked)/)?.[0];
 assert(snapshot, 'virtual runtime publisher exists');
+check(native.includes('virtualOutputRuntimeSnapshot(live, statusSourceWindow)'), 'publisher consumes the current captured source window');
 check(snapshot.includes('g_steamSettingsObserver.steamPresence()') && snapshot.includes('{"steamRunning", steamPresence < 0 ? json(nullptr) : json(steamPresence == 1)}'), 'runtime publishes cached tri-state Steam presence');
 check(!/probeSteamPresence|sofSteamRunning|CreateToolhelp32Snapshot/.test(snapshot), 'no process enumeration on gamepad state path');
 console.log(`CONTROLLER_DISPLAY_PASS checks=${checks} hardwareOperations=0 settingsWrites=0`);

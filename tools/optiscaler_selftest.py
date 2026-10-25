@@ -235,6 +235,76 @@ class OptiScalerTests(unittest.TestCase):
         template, _ = ctl._optiscaler_template("xess", {"api": "dx12"}, self.cfg())
         self.assertEqual(template["FrameGen"]["Enabled"], "false")
 
+    def test_anticheat_analysis_reports_warning_not_safety(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        result = ctl._optiscaler_analyze(str(self.game), self.cfg())
+        self.assertTrue(result["ok"])
+        self.assertTrue(result["anti_cheat"])
+        self.assertTrue(result["requires_anti_cheat_confirmation"])
+        self.assertTrue(result["scan_complete"])
+
+    def test_anticheat_explicit_ack_deploys_without_bypass_and_restores(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        (self.game / "Game.exe").write_bytes(b"original-game")
+        (self.game / "steam_appid.txt").write_bytes(b"existing-id\r\n")
+        before = self.snapshot()
+        cfg = self.cfg()
+        result = ctl._optiscaler_install(str(self.game), cfg, False, "fsr", acknowledge_anticheat=True)
+        self.assertTrue(result["ok"], result)
+        self.assertTrue(result["anti_cheat"])
+        self.assertTrue(any("未执行绕过" in warning for warning in result["warnings"]))
+        manifest = json.loads((Path(result["backup"]) / "manifest.json").read_text(encoding="utf-8"))
+        self.assertTrue(manifest["anti_cheat_risk_acknowledged"])
+        self.assertTrue(manifest["analysis"]["anti_cheat"])
+        for rel, content in before.items():
+            self.assertEqual((self.game / rel).read_bytes(), content)
+        self.assertTrue(ctl._optiscaler_uninstall(str(self.game), cfg, False)["ok"])
+        self.assertEqual(self.snapshot(), before)
+
+    def test_anticheat_ack_requires_boolean_true(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        before = self.snapshot()
+        for value in (False, 1, "true", None):
+            result = ctl._optiscaler_install(str(self.game), self.cfg(), False, "fsr", acknowledge_anticheat=value)
+            self.assertFalse(result["ok"])
+            self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.backup.exists())
+
+    def test_anticheat_ack_does_not_override_incomplete_scan(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        before = self.snapshot()
+        features = ctl._optiscaler_game_features(str(self.game))
+        features["scan_complete"] = False
+        with patch.object(ctl, "_optiscaler_game_features", return_value=features):
+            result = ctl._optiscaler_install(str(self.game), self.cfg(), False, "fsr", acknowledge_anticheat=True)
+        self.assertFalse(result["ok"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.backup.exists())
+
+    def test_anticheat_ack_dry_run_never_writes(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        before = self.snapshot()
+        result = ctl._optiscaler_install(str(self.game), self.cfg(), True, "xess", acknowledge_anticheat=True)
+        self.assertTrue(result["ok"], result)
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse(self.backup.exists())
+
+    def test_anticheat_cli_ack_is_install_only_and_never_creates_appid(self):
+        (self.game / "start_protected_game.exe").write_bytes(b"protected")
+        before = self.snapshot()
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            rc = ctl.optiscaler_cmd(["install", str(self.game), "--backend", "fsr", "--acknowledge-anticheat-risk", "--dry-run"])
+        self.assertEqual(rc, 0, output.getvalue())
+        self.assertTrue(json.loads(output.getvalue())["ok"])
+        self.assertEqual(self.snapshot(), before)
+        self.assertFalse((self.game / "steam_appid.txt").exists())
+        for sub in ("analyze", "status", "uninstall"):
+            output = io.StringIO()
+            with contextlib.redirect_stdout(output):
+                self.assertEqual(ctl.optiscaler_cmd([sub, str(self.game), "--acknowledge-anticheat-risk"]), 7)
+            self.assertFalse(json.loads(output.getvalue())["ok"])
+
     def test_anticheat_never_writes(self):
         (self.game / "start_protected_game.exe").write_bytes(b"protected")
         before = self.snapshot()

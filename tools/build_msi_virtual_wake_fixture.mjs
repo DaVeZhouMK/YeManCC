@@ -1,0 +1,16 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';
+const [root,steamPath,out]=process.argv.slice(2);if(!out)throw Error('usage: root Steam-controller.txt output.json');
+const rows=file=>fs.readFileSync(path.join(root,file),'utf8').split(/\r?\n/).filter(Boolean).map(JSON.parse);
+const nat=rows('native-lifecycle.log'),idle=rows('virtual-gamepad.log').filter(r=>r.event==='input-idle-window');
+const wake=nat.find(r=>r.event==='input-host-wake-rescan'&&r.action==='armed'&&r.time.startsWith('2026-10-11T14:12'));if(!wake)throw Error('missing current export wake');
+const generation=wake.generation;const after=nat.filter(r=>r.time>=wake.time&&r.powerGeneration===generation);
+const blocked=after.filter(r=>r.event==='input-host-start-blocked'&&r.reason==='explicit-rearm-required');
+const ready=after.find(r=>r.event==='msi-main-source-record'&&r.phase==='published');
+const expired=after.find(r=>r.event==='input-host-wake-rescan'&&r.reason==='armed-too-long');
+const cleared=nat.filter(r=>r.event==='input-host-quarantine-cleared'&&r.time<wake.time).at(-1);
+const modeRefused=after.filter(r=>r.event==='msi-claw-gamepad-mode'&&r.action==='mode-write-intent-refused');
+const post=idle.filter(r=>r.time>=wake.time);const steam=fs.readFileSync(steamPath,'utf8');
+const steamRows=steam.split(/\r?\n/).filter(l=>/2026-10-11 14:1[23]/.test(l)&&(/type: 0db0|type: 28de|device opened|Adding.*0db0/i.test(l)));
+const hashes=['native-lifecycle.log','virtual-gamepad.log','YeManCC-export-manifest.txt'].map(f=>({file:path.join(root,f),sha256:crypto.createHash('sha256').update(fs.readFileSync(path.join(root,f))).digest('hex')}));hashes.push({file:steamPath,sha256:crypto.createHash('sha256').update(fs.readFileSync(steamPath)).digest('hex')});
+const data={source:'actual 2026-10-11 14:14:16 G3E export and paired Steam controller.txt',hashes,wake,quarantineClearedBeforeWake:cleared,sourceReturned:ready,sourceReturnAfterWakeMs:Date.parse(ready.time)-Date.parse(wake.time),blockedStarts:blocked,expiredWake:expired,expiredAfterMs:Date.parse(expired.time)-Date.parse(wake.time),modeIntentsRefused:modeRefused,postWakeIdleWindows:post.length,postWakePreparedWindows:post.filter(r=>r.hostPrepared).length,postWakeSubmitAttempts:post.reduce((n,r)=>n+r.actualSubmitAttempts.samples,0),postWakeHostAcks:post.reduce((n,r)=>n+r.hostAcceptedContent.samples,0),steamRows,limitations:['Original deployed nativeSha256 is not the previous isolated candidate SHA; log markers prove a merged binary, not byte-identical candidate installation.','Replay exercises production gates; not a repaired target-machine timing or external HidHide/Steam acceptance.','Only MSI evidence is provided; global 20s and ROG behavior are not changed.']};
+if(blocked.length!==10||!cleared||!ready||!expired||modeRefused.length<2)throw Error('new evidence shape changed; inspect before replay');fs.writeFileSync(out,JSON.stringify(data,null,2));console.log(JSON.stringify({sourceReturnAfterWakeMs:data.sourceReturnAfterWakeMs,blockedStarts:blocked.length,expiredAfterMs:data.expiredAfterMs,postWakePrepared:data.postWakePreparedWindows,postWakeAck:data.postWakeHostAcks,steamRows:steamRows.length}));

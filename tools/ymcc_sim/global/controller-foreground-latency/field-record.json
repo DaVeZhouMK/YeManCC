@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "archive": "YeManCC-logs-20261021-143027-G3E-总库导入精简后首次测试.zip",
+  "archiveSha256": "1bedc84c307cf13b7acca3acdf438ed1050c375315282b4b739d61b06c5cd156",
+  "pid": 7964,
+  "nativeHelperDllSha256": "ade7beb585ae70dd467717eb42ed23450a7ccb52331c97f5d3e39de2913cdb93",
+  "literalObservations": [
+    {"file":"native-lifecycle.log","time":"2026-10-21T14:27:12.580","event":"msi-native-foreground-isolation","phase":"config-cycle-accepted","helperExitCode":0},
+    {"file":"native-lifecycle.log","time":"2026-10-21T14:27:18.342","event":"msi-native-foreground-isolation","phase":"game-source-refresh-wait","helperExitCode":259},
+    {"file":"native-lifecycle.log","time":"2026-10-21T14:27:19.486","event":"msi-native-foreground-isolation","phase":"restore-wait","reason":"same-cycle-helper-still-live"},
+    {"file":"native-lifecycle.log","time":"2026-10-21T14:29:20.265","event":"power-device-wake","powerGeneration":2},
+    {"file":"virtual-gamepad.log","time":"2026-10-21T14:29:20.547","event":"input-host-wake-execution","reason":"player-intent-off","stage":"retired"},
+    {"file":"virtual-gamepad.log","time":"2026-10-21T14:29:24.851","event":"input-idle-window","connectedMask":1,"sourceAbsentObservations":0,"physicalContentChanges":2,"physicalMeaningfulFrames":17,"virtualTargetEnabled":false}
+  ],
+  "sourceDerivedBaseline": {
+    "snapshotCliLaunches":4,
+    "helperWaitMs":5000,
+    "cliGrammar":"HidHide v1.5.230.0 CommandInterpreter.cpp/Commands.cpp: multiple commands; --cancel skips ApplyConfigurationChanges",
+    "shippedCliSha256":"9dd283fedfbd301e1a574a3d4b8663f6274ccb5c896f468ed55a6239f9ade270",
+    "fixtureOrigin":"CLI reply text and Win32 outcomes are source-derived inert fixtures, not captured CLI stdout or hardware receipts"
+  },
+  "physicalContinuityVerified":false,
+  "steamOrGameInputDeliveryVerified":false
+}

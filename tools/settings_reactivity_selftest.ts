@@ -9,11 +9,24 @@ async function main(): Promise<void> {
   const files = new Map<string, string>();
   const commits: any[] = [];
   let failNextWrite = false;
+  let deferNextRead = false;
+  let deferredReadStarted: (() => void) | null = null;
+  let releaseDeferredRead: (() => void) | null = null;
   (globalThis as any).__mockShellDryRun = true;
   (globalThis as any).__mockIpcResponder = (cmd: string, args: any) => {
     if (cmd === 'settings.read') {
       const content = files.get(args.path) || '';
       const stamp = content || 'missing';
+      if (deferNextRead) {
+        deferNextRead = false;
+        // A changed native stamp may carry a document captured before a newer
+        // queued commit. Hold that exact receipt rather than mirroring cache.
+        const captured = { stamp, unchanged: false, content };
+        return new Promise(resolve => {
+          releaseDeferredRead = () => resolve(captured);
+          deferredReadStarted?.();
+        });
+      }
       return { stamp, unchanged: !!content && stamp === args.stamp, content };
     }
     if (cmd === 'fs.exists') return files.has(args.path);
@@ -32,6 +45,12 @@ async function main(): Promise<void> {
   };
   const repo = await import('../src/bridge/settingsRepository');
   repo.setSettingsDirectory('Q:\\YMCC-MEMORY-ONLY');
+  assert.equal(repo.normalizeSettings({}).sleep.autoWakeRecovery, true);
+  const oldSleep = repo.normalizeSettings({ sleep: { autoWakeRecovery: false, steamOverlayOffFix: true } });
+  assert.equal(oldSleep.sleep.autoWakeRecovery, false);
+  assert.equal(oldSleep.sleep.steamOverlayOffFix, false);
+  assert.equal(repo.normalizeSettings({ sleep: { autoWakeRecovery: 'true' } }).sleep.autoWakeRecovery, false);
+  console.log('PASS Steam sleep defaults on, explicit off preserved, legacy overlay true normalized off');
   const initial = repo.normalizeSettings({ tdp: { tdpMax: 37, fpsLimit: 75 } });
   files.set(repo.SETTINGS_FILE, JSON.stringify(initial));
   await repo.loadSettings();
@@ -204,10 +223,58 @@ async function main(): Promise<void> {
   check('disk reload retains all user TDP values and remains cloneable', () => {
     assert.deepEqual(loaded.tdp, initial.tdp); assertDetached(loaded); structuredClone(loaded);
   });
+  async function deferredRead() {
+    const started = new Promise<void>(resolve => { deferredReadStarted = resolve; });
+    deferNextRead = true;
+    const reading = repo.loadSettings();
+    await started;
+    return { reading, release() { assert(releaseDeferredRead); releaseDeferredRead(); releaseDeferredRead = null; } };
+  }
+  const oldInputRead = await deferredRead();
+  const diskInput = JSON.parse(files.get(repo.SETTINGS_FILE)!).input;
+  const inputCommit = await repo.compareAndSwapInputSettings(diskInput.revision, {
+    ownership: { externalControllerPriority: true },
+  });
+  assert.equal(inputCommit.ok, true);
+  oldInputRead.release();
+  const inputAfterLateRead = await oldInputRead.reading;
+  check('a late native read cannot replace a newer committed input CAS cache', () => {
+    assert.equal(inputAfterLateRead.input.revision, inputCommit.ok ? inputCommit.revision : -1);
+    assert.equal(inputAfterLateRead.input.ownership.externalControllerPriority, true);
+    assert.equal(JSON.parse(files.get(repo.SETTINGS_FILE)!).input.ownership.externalControllerPriority, true);
+  });
+  const tdpBeforeQueuedWrite = JSON.parse(files.get(repo.SETTINGS_FILE)!).tdp.tdpMax;
+  const oldSectionRead = await deferredRead();
+  const commitsBeforeQueuedWrite = commits.length;
+  const queuedSectionWrite = repo.saveSettingsSection('tdp', { tdpMax: 39 });
+  await Promise.resolve();
+  assert.equal(commits.length, commitsBeforeQueuedWrite);
+  oldSectionRead.release();
+  const sectionBeforeQueuedCommit = await oldSectionRead.reading;
+  await queuedSectionWrite;
+  const sectionAfterQueuedCommit = await repo.loadSettings();
+  check('ordinary section writes wait for outstanding reads and preserve committed input', () => {
+    assert.equal(sectionBeforeQueuedCommit.tdp.tdpMax, tdpBeforeQueuedWrite);
+    assert.equal(sectionAfterQueuedCommit.tdp.tdpMax, 39);
+    assert.equal(sectionAfterQueuedCommit.input.ownership.externalControllerPriority, true);
+    assert.equal(JSON.parse(files.get(repo.SETTINGS_FILE)!).tdp.tdpMax, 39);
+  });
+  const canceledRead = await deferredRead();
+  const canceledCheck = assert.rejects(canceledRead.reading, /配置缓存已失效|目录已切换/);
+  repo.setSettingsDirectory('Q:\\YMCC-MEMORY-ONLY-NEXT');
+  canceledRead.release();
+  await canceledCheck;
+  check('newer-cache protection still cancels reads from a retired settings generation', () => {
+    assert.equal((globalThis as any).__mockShellCalls.length, 0);
+  });
   check('regression suite never issues shell or hardware writes', () => {
     assert.equal((globalThis as any).__mockShellCalls.length, 0);
     assert.equal((globalThis as any).__mockRegistryWrites.length, 0);
   });
   console.log('settings_reactivity_selftest: ' + passed + ' cases passed');
 }
-main().catch(error => { console.error(error); process.exitCode = 1; });
+let suiteCompleted = false;
+process.once('beforeExit', () => {
+  if (!suiteCompleted) { console.error('SETTINGS_REACTIVITY_INCOMPLETE: asynchronous test body did not reach its terminal summary'); process.exitCode = 1; }
+});
+main().then(() => { suiteCompleted = true; }, error => { suiteCompleted = true; console.error(error); process.exitCode = 1; });

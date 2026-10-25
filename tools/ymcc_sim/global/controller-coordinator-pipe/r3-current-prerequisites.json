@@ -1,0 +1,9 @@
+{
+  "schemaVersion": 1,
+  "kind": "VC-CURRENT-105-6457-38835033-20261021",
+  "status": "EXTERNAL",
+  "workspaceRoot": "D:/HC61-current-public-20261021",
+  "authorizedBuildRoot": "D:/HC61-current-public-20261021/Build/Validation/CurrentCoordinator",
+  "profilePath": "D:/HC61-current-public-20261021/Build/Validation/CurrentCoordinator/prepared-profile-latest-r63ag.json",
+  "meaning": "Explicit105 current source: all original101/6300 retained, exact fault masks preserved. Derived qualification/native/source profile missing means blocked; no old-source runtime fallback."
+}

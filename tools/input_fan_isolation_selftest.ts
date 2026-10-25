@@ -2,7 +2,7 @@ import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const sourceRoot = resolve(process.cwd(), 'src/bridge');
-const files = ['inputContracts.ts', 'inputCoordinatorMock.ts', 'inputLifecycleMock.ts', 'physicalInputOwnership.ts', 'virtualReportAssembler.ts', 'buttonMappingMock.ts', 'hcInputUtils.ts', 'gyroMotionMapperMock.ts', 'personaReportMock.ts', 'externalInputAdapterMock.ts', 'inputRuntimeAdmission.ts', 'inputCapabilityGate.ts', 'inputDiagnostics.ts', 'gyroVirtualFeature.ts', 'feedbackParticipantMock.ts'];
+const files = ['controllerPersona.ts', 'gamepadControlContract.ts', 'motionSample.ts', 'inputContracts.ts', 'inputCoordinatorMock.ts', 'inputLifecycleMock.ts', 'physicalInputOwnership.ts', 'virtualReportAssembler.ts', 'buttonMappingMock.ts', 'hcInputUtils.ts', 'gyroMotionMapperMock.ts', 'personaReportMock.ts', 'externalInputAdapterMock.ts', 'inputRuntimeAdmission.ts', 'inputCapabilityGate.ts', 'inputDiagnostics.ts', 'gyroVirtualFeature.ts', 'feedbackParticipantMock.ts'];
 const forbidden = ['FanHost', 'YeManFanHost', 'fan-host', 'fanPayload', 'SetFanDuty', 'SetFanControl', 'ECRam', 'ACPI', 'WMI'];
 const findings = files.map((name) => {
   const path = resolve(sourceRoot, name);
@@ -12,7 +12,7 @@ const findings = files.map((name) => {
 });
 const violations = findings.filter((item) => item.forbiddenTokens.length > 0);
 if (violations.length) throw new Error(`input/fan isolation violation: ${JSON.stringify(violations)}`);
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/HC-Parity/S-11-input-fan-isolation-mock-trace.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/HC-Parity'), 'S-11-input-fan-isolation-mock-trace.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify({
   evidenceId: 'S-11-INPUT-FAN-ISOLATION-MOCK-20260903',

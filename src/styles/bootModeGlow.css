@@ -1,0 +1,8 @@
+/* Static three-edge light, shared by pointer hover and controller focus. */
+.boot-mode-cards button:is([aria-pressed=true],:hover,:focus-visible,.focused),
+.preview-editor-modes button:is([aria-pressed=true],:hover,:focus-visible,.focused){
+    background:linear-gradient(160deg,color-mix(in srgb,var(--accent) 14%,var(--bg-input)),color-mix(in srgb,var(--accent) 22%,var(--bg-input)))!important;
+    color:var(--text);box-shadow:inset 2px 0 5px color-mix(in srgb,var(--accent) 26%,transparent),inset -2px 0 5px color-mix(in srgb,var(--accent) 26%,transparent),inset 0 -3px 6px color-mix(in srgb,var(--accent) 30%,transparent)!important;
+}
+.boot-mode-cards button::after,.preview-editor-modes button::after{content:"";position:absolute;inset:2px!important;width:auto!important;height:auto!important;border:0!important;border-left:2px solid color-mix(in srgb,var(--accent) 78%,white)!important;border-bottom:3px solid color-mix(in srgb,var(--accent) 78%,white)!important;border-right:2px solid color-mix(in srgb,var(--accent) 78%,white)!important;border-radius:0 0 5px 5px!important;background:none!important;box-shadow:inset 2px 0 6px color-mix(in srgb,var(--accent) 30%,transparent),inset -2px 0 6px color-mix(in srgb,var(--accent) 30%,transparent),inset 0 -3px 7px color-mix(in srgb,var(--accent) 35%,transparent)!important;opacity:0;pointer-events:none;animation:none!important;transition:none!important;}
+.boot-mode-cards button:is([aria-pressed=true],:hover,:focus-visible,.focused)::after,.preview-editor-modes button:is([aria-pressed=true],:hover,:focus-visible,.focused)::after{opacity:1;}

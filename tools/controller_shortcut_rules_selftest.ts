@@ -18,35 +18,19 @@ import {
   validateControllerShortcutRules,
 } from '../src/bridge/controllerShortcutRules';
 
-const keyboardActionExpectations: Array<{ id: string; count: number; required: string[] }> = [
-  { id: 'keyboard.numeric', count: 22, required: ['Digit0', 'Digit9', 'F1', 'F12'] },
-  { id: 'keyboard.symbol', count: 13, required: ['Backquote', 'Equal'] },
-  { id: 'keyboard.letter', count: 26, required: ['KeyA', 'KeyZ'] },
-  { id: 'keyboard.leftFunction', count: 8, required: ['ShiftLeft', 'AltLeft', 'Enter', 'MetaLeft', 'CapsLock', 'Escape', 'ControlLeft', 'Backspace'] },
-  { id: 'keyboard.rightFunction', count: 9, required: ['PrintScreen', 'Insert', 'End'] },
-];
-for (const expectation of keyboardActionExpectations) {
-  const action = actionById(expectation.id);
-  const parameter = action?.parameters?.[0];
-  const values = parameter?.options?.map((option) => option.value) || [];
-  if (!action || !action.available || !parameter || parameter.presentation !== 'key-grid' || values.length !== expectation.count) {
-    throw new Error(`${expectation.id} key-grid definition failed`);
-  }
-  if (expectation.required.some((value) => !values.includes(value))) throw new Error(`${expectation.id} key boundary missing`);
-  const created = newControllerShortcutRule(`keyboard-${expectation.id}`, expectation.id);
-  if (created.trigger !== 'press' || created.params.key !== parameter.default || defaultParameters(expectation.id).key !== parameter.default) {
-    throw new Error(`${expectation.id} default rule failed`);
-  }
-}
-if (CONTROLLER_SHORTCUT_ACTIONS.filter((action) => action.id.startsWith('keyboard.')).length !== 5) throw new Error('keyboard action count changed');
+import { assertKeyboardActionContract } from './ymcc_sim/global/input-signals/keyboard-contract';
+
+// Check every admitted code, default, invalid code, validator and reload identity.
+const keyboardContract = assertKeyboardActionContract();
+console.log('keyboard identity contract:', keyboardContract.validMappings, 'mappings PASS');
 
 const baseline = newControllerShortcutRule('baseline');
 if (validateControllerShortcutRules([baseline]).length !== 0) throw new Error('baseline rule rejected');
 const oneButton = { ...baseline, id: 'one-button', inputs: [baseline.inputs[0]] };
-// 单手柄键允许（对齐原生双击 B 单键 double）；仅"按下/弹起"单键被拒，见下方断言
+// 单手柄键的长按、按下、松开和双击均由正式规则与原生消费者支持。
 if (validateControllerShortcutRules([oneButton]).length !== 0) throw new Error('single-button hold was rejected');
 const tooShort = { ...baseline, id: 'too-short', inputs: [] };
-if (!validateControllerShortcutRules([tooShort]).some((problem) => problem.includes(`至少 ${CONTROLLER_SHORTCUT_MIN_INPUTS}`))) throw new Error('empty shortcut was accepted');
+if (validateControllerShortcutRules([tooShort]).length === 0) throw new Error('empty shortcut was accepted');
 const fourInputs = { ...baseline, id: 'four-inputs', inputs: [
   { source: 'controller' as const, code: 'lb' },
   { source: 'controller' as const, code: 'rb' },
@@ -55,7 +39,7 @@ const fourInputs = { ...baseline, id: 'four-inputs', inputs: [
 ] };
 if (validateControllerShortcutRules([fourInputs]).length !== 0 || fourInputs.inputs.length !== CONTROLLER_SHORTCUT_MAX_INPUTS) throw new Error('four-button shortcut rejected');
 const fiveInputs = { ...fourInputs, id: 'five-inputs', inputs: [...fourInputs.inputs, { source: 'controller' as const, code: 'x' }] };
-if (!validateControllerShortcutRules([fiveInputs]).some((problem) => problem.includes(`最多 ${CONTROLLER_SHORTCUT_MAX_INPUTS}`))) throw new Error('five-button shortcut was accepted');
+if (validateControllerShortcutRules([fiveInputs]).length === 0) throw new Error('five-button shortcut was accepted');
 const loaded = readControllerShortcutRules({ shortcutRules: [{ ...baseline, inputs: ['lb', 'rb', 'lb', 'invalid'] }] });
 if (loaded.length !== 1 || formatControllerShortcutInputs(loaded[0].inputs) !== 'LB + RB') throw new Error('legacy controller normalization failed');
 if (highlightedGamepadButtons(loaded[0]).join(',') !== '4,5') throw new Error('gamepad highlight mapping failed');
@@ -67,10 +51,12 @@ if (validateControllerShortcutRules([baseline, sameActionDifferentInput]).length
 const desktop = readControllerShortcutRules({ shortcutRules: [{ ...baseline, id: 'desktop', inputs: [{ source: 'keyboard', code: 'ControlLeft' }, { source: 'keyboard', code: 'KeyK' }, { source: 'keyboard', code: 'CapsLock' }, { source: 'mouse', code: 'MouseRight' }] }] });
 if (desktop.length !== 1 || shortcutRecordMode(desktop[0].inputs) !== 'keyboard-mouse') throw new Error('desktop recording normalization failed');
 if (formatControllerShortcutInputs(desktop[0].inputs) !== 'Ctrl + K + Caps + 鼠标右键') throw new Error('desktop labels failed');
-if (validateControllerShortcutRules([{ ...baseline, inputs: [baseline.inputs[0], desktop[0].inputs[0]] }]).length === 0) throw new Error('mixed source shortcut accepted');
+const mixedDesktop = { ...baseline, inputs: [baseline.inputs[0], desktop[0].inputs[0]] };
+if (validateControllerShortcutRules([mixedDesktop]).length !== 0) throw new Error('valid controller/keyboard chord rejected');
+if (JSON.stringify(readControllerShortcutRules({shortcutRules:[mixedDesktop]})[0].inputs) !== JSON.stringify(mixedDesktop.inputs)) throw new Error('mixed source identities lost on reload');
 const disabledConflict = { ...baseline, id: 'disabled-conflict', enabled: false };
 if (validateControllerShortcutRules([baseline, disabledConflict]).length !== 0) throw new Error('disabled shortcut blocked an enabled rule');
-// 2026-09-28 用户裁决（默认模板化）：默认 9 条退居隐藏模板——
+// 2026-09-28 用户裁决（默认模板化）：默认项退居隐藏模板——
 //   空配置 → 自动生成全部默认项；已有配置 → 只补“原生开关仍为开”的缺失项，
 //   停用过的默认项不复活；自定义规则一律保留；输出“默认在前，自定义在后”。
 const seededFromEmpty = reconcileControllerShortcutRules([], {});
@@ -98,11 +84,14 @@ if (validateControllerShortcutRules([singleDouble]).length !== 0) throw new Erro
 // 专用/背部键（oem）单键任意触发方式允许（不受单键限制）
 const oemPress = { ...baseline, id: 'oem-press', inputs: [{ source: 'oem' as const, code: 'm1' }], trigger: 'press' as const };
 if (validateControllerShortcutRules([oemPress]).length !== 0) throw new Error('oem single-key press was rejected');
-// 专属键：单键允许（无机型库上下文时不做存在性校验），且不参与组合
+// 专属键：单键及混合组合均保留真实source/code；未知设备能力仍由runtime检查
 const oemRule = { ...baseline, id: 'oem-rule', inputs: [{ source: 'oem' as const, code: 'm1' }] };
 if (validateControllerShortcutRules([oemRule]).length !== 0) throw new Error('oem single-key rule rejected');
-if (validateControllerShortcutRules([{ ...baseline, id: 'oem-mix', inputs: [{ source: 'oem' as const, code: 'm1' }, { source: 'controller' as const, code: 'a' }] }]).length === 0) throw new Error('oem/controller mixed accepted');
-if (shortcutRecordMode(oemRule.inputs) !== 'oem') throw new Error('oem record mode detection failed');
+const mixedOem = { ...baseline, id: 'oem-mix', inputs: [{ source: 'oem' as const, code: 'm1' }, { source: 'controller' as const, code: 'a' }] };
+if (validateControllerShortcutRules([mixedOem]).length !== 0) throw new Error('valid oem/controller chord rejected');
+if (JSON.stringify(readControllerShortcutRules({shortcutRules:[mixedOem]})[0].inputs) !== JSON.stringify(mixedOem.inputs)) throw new Error('oem/controller identities lost on reload');
+if (validateControllerShortcutRules([{...mixedOem,inputs:[mixedOem.inputs[0],mixedOem.inputs[0]]}]).length === 0) throw new Error('duplicate physical key accepted');
+if (shortcutRecordMode(oemRule.inputs) !== 'controller') throw new Error('OEM keys must use the handheld recording presentation without changing physical source');
 // 机型库规范化（native oem.keys.get JSON → 快照）：正反推演
 const rogNative = {
   familyId: 'asus-rog-ally-x',
@@ -142,12 +131,26 @@ const empty = normalizeOemKeysSnapshot(null);
 if (empty.supported || empty.keys.length !== 0) throw new Error('null catalog was not fail-closed');
 const unsupportedButKeys = normalizeOemKeysSnapshot({ familyId: 'x', supported: false, keys: [{ keyId: 'a', label: 'A', backIndex: 0 }] });
 if (unsupportedButKeys.supported) throw new Error('supported=false with keys was not respected');
-// 新增默认快捷键：双击 Start → 发送 F7（keyboard.numeric，单键 double，与双击 B 同类）
-if (!NATIVE_DEFAULT_SHORTCUTS.some((d) => d.defaultKey === 'startDoubleF7')) throw new Error('startDoubleF7 missing from native defaults');
-const f7 = nativeDefaultRule('startDoubleF7', true);
-if (f7.actionId !== 'keyboard.numeric' || f7.trigger !== 'double' || f7.params.key !== 'F7' ||
-    f7.inputs.length !== 1 || f7.inputs[0].source !== 'controller' || f7.inputs[0].code !== 'start') throw new Error('startDoubleF7 default rule failed');
-if (validateControllerShortcutRules([f7]).length !== 0) throw new Error('startDoubleF7 default rule was rejected');
+// Start → F7 is no longer a default; imported enabled legacy flags cannot seed it.
+if (NATIVE_DEFAULT_SHORTCUTS.some((d) => String(d.defaultKey) === 'startDoubleF7')) throw new Error('retired Start/F7 remains a default');
+const legacyF7 = {
+  ...newControllerShortcutRule('legacy-start-f7', 'keyboard.numeric'),
+  id: 'native-startDoubleF7', origin: 'native-default' as const, defaultKey: 'startDoubleF7',
+  inputs: [{ source: 'controller' as const, code: 'start' }], trigger: 'double' as const,
+  params: { key: 'F7' },
+};
+const customF7 = { ...legacyF7, id: 'custom-start-f7', origin: 'custom' as const };
+const legacyFlags = { enabled: true, startDoubleF7: true };
+for (const saved of [[], [legacyF7], [legacyF7, customF7]]) {
+  const result = reconcileControllerShortcutRules(saved, legacyFlags);
+  if (result.rules.some(rule => rule.origin === 'native-default' && rule.defaultKey === 'startDoubleF7')) throw new Error('retired default was seeded or restored');
+  if (saved.includes(customF7) && !result.rules.some(rule => rule.id === customF7.id && rule.params.key === 'F7')) throw new Error('user-created Start/F7 was removed');
+  if (!result.rules.some(rule => rule.defaultKey === 'enabled') || !result.rules.some(rule => rule.defaultKey === 'bDoubleMinimize')) throw new Error('other defaults changed');
+  const reloaded = reconcileControllerShortcutRules(readControllerShortcutRules({ shortcutRules: result.rules }), legacyFlags);
+  if (reloaded.seeded !== 0 || JSON.stringify(reloaded.rules) !== JSON.stringify(result.rules)) throw new Error('default retirement did not stay stable across reload');
+}
+if (validateControllerShortcutRules([customF7]).length !== 0) throw new Error('user-created Start/F7 was rejected');
+console.log('Start/F7 default retirement: empty config, legacy true, persisted default, custom preservation and reload PASS');
 // New switches store only a rule parameter, never global/game/startup intent.
 for (const [id, label, presets] of [
   ['input.gyroToggle', '陀螺仪开关', ['fps', 'racing', 'custom', 'steam']],
@@ -193,8 +196,8 @@ console.log(`shortcut draft merge: ${mergeCases} cases PASS`);
 const frontend = actionById('input.frontendButton');
 if (!frontend?.available || frontend.scope !== 'native-global') throw new Error('frontend action is not native/global');
 if (defaultParameters('input.frontendButton').button !== 'steam') throw new Error('frontend button default is wrong');
-if (frontend.parameters?.[0].options?.map(option => option.value).join(',') !== 'steam,ps,xbox,gamebar') throw new Error('frontend options changed');
-for (const button of ['steam','ps','xbox','gamebar']) {
+if (frontend.parameters?.[0].options?.map(option => option.value).join(',') !== 'steam,steamQuickAccess,ps,xbox,gamebar') throw new Error('frontend options changed');
+for (const button of ['steam','steamQuickAccess','ps','xbox','gamebar']) {
   const rule = { ...newControllerShortcutRule('frontend-' + button, 'input.frontendButton'), params: { button } };
   if (validateControllerShortcutRules([rule]).length) throw new Error('valid frontend button rejected: ' + button);
   const read = readControllerShortcutRules({ shortcutRules: [rule] });
@@ -203,7 +206,8 @@ for (const button of ['steam','ps','xbox','gamebar']) {
 const badFrontend = { ...newControllerShortcutRule('bad-frontend','input.frontendButton'), params: {button: 'invalid'} };
 if (!validateControllerShortcutRules([badFrontend]).length) throw new Error('invalid frontend button accepted');
 const hiddenIds = CONTROLLER_SHORTCUT_ACTIONS.filter(action => !action.available).map(action => action.id);
-if (hiddenIds.join(',') !== 'app.exit,performance.autoAdjust,performance.editMode,performance.switchMode') throw new Error('hidden schema unexpectedly removed/changed');
+// Radial testing admission starts closed; its retained schema stays available for saved-rule round trips.
+if (hiddenIds.join(',') !== 'radial.summon,app.exit,performance.autoAdjust,performance.editMode,performance.switchMode') throw new Error('hidden schema unexpectedly removed/changed');
 for (const id of hiddenIds) {
   if (isControllerShortcutActionVisible(id)) throw new Error('pending action visible: ' + id);
   const rule = newControllerShortcutRule('hidden-' + id, id);

@@ -1,0 +1,11 @@
+[
+  {"name":"default-reset", "expression":"new()", "reject":false},
+  {"name":"unit-axis-only-reset", "expression":"new() { Axis = new Vector3(1.0f, -1.0f, 1.0f) }", "reject":false},
+  {"name":"non-unit-sign", "expression":"new() { Axis = new Vector3(2, 1, 1) }", "reject":true},
+  {"name":"unknown-sign-expression", "expression":"new() { Axis = new Vector3(Math.Sign(x), 1, 1) }", "reject":true},
+  {"name":"non-permutation", "expression":"new() { AxisSwap = new SortedDictionary<char,char> { {'X','Y'}, {'Y','Y'}, {'Z','X'} } }", "reject":true},
+  {"name":"partial-swap", "expression":"new() { AxisSwap = new SortedDictionary<char,char> { {'X','Y'} } }", "reject":true},
+  {"name":"duplicate-swap-key", "expression":"new() { AxisSwap = new SortedDictionary<char,char> { {'X','Y'}, {'X','Z'}, {'Z','X'} } }", "reject":true},
+  {"name":"unknown-matrix-call", "expression":"MakeMatrix()", "reject":true},
+  {"name":"unknown-member", "expression":"new() { Other = 1 }", "reject":true}
+]

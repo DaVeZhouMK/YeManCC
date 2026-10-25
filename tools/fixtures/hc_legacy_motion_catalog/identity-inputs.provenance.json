@@ -1,0 +1,6 @@
+{
+  "source": "Build/Validation/HC-ModelCapabilities-20261017/pc80-identity/inputs.json",
+  "sourceSha256": "42f079196c189e8554555501eabd2c759e2688302a718df6e8dc3fdf39f64192",
+  "cases": 215,
+  "note": "DMI inputs only. Historical hcClass and expected labels were removed; each run executes the current pinned HC factory control flow using inert stubs and the current native resolver."
+}

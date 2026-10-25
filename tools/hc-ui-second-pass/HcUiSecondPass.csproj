@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><OutputType>Exe</OutputType><TargetFramework>net10.0</TargetFramework><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><TreatWarningsAsErrors>true</TreatWarningsAsErrors><CecilPath>$(UserProfile)/.nuget/packages/microsoft.net.illink.tasks/10.0.11/tools/net/Mono.Cecil.dll</CecilPath></PropertyGroup>
+  <ItemGroup><Compile Remove="probes/**/*.cs" />
+    <Compile Include="../hc-devicecore-trim/Common.cs" Link="Shared/Common.cs" />
+    <Compile Include="../hc-devicecore-trim/PeCompactor.cs" Link="Shared/PeCompactor.cs" /><Compile Include="../hc-devicecore-trim/DevelopmentSigning.cs" Link="Shared/DevelopmentSigning.cs" />
+    <Reference Include="Mono.Cecil"><HintPath>$(CecilPath)</HintPath></Reference>
+  </ItemGroup>
+</Project>
+
+

@@ -1,0 +1,4002 @@
+{
+  "pairs": [
+    {
+      "version": "candidate98",
+      "module": "YeManFanHost",
+      "dllPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\bin\\YeManFanHost\\release_win-x64\\YeManFanHost.dll",
+      "dllSha256": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+      "pdbPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\bin\\YeManFanHost\\release_win-x64\\YeManFanHost.pdb",
+      "pdbSha256": "a4aac3ca6ae8e0cdca94d3c2abd1e20fa04b66b5438eb84c71e2f1d4a3e077c3",
+      "codeViewGuid": "ab633cb4-a24b-4c76-a1ab-c6a869d7c896",
+      "stamp": 2288100846,
+      "pairVerified": true,
+      "documents": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\DeferredHostSuccessor.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "70caf39e6c44d6c557c8d26d58638760b3a139fe3887855908d861a4dcd7a29f"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\FanCapabilityPolicy.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\G1FanContractAdapter.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\HostProcessLifetime.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\MsiFamilyFanCurve.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "b5021e27129957de14798cd934205c208a58d9c791ed996601cc845ad1c27d83"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\MsiFamilyFanCurveSelfTest.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "f697aa7385ae763b03938e69b03021c34d448627c337d5b6f334a79258fc7392"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\MsiFanDeviceLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\MsiWmiClassRegistration.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "a0eebef2e4df02a723e142bcb4a0707e6e013d4606ec20907c43b47d17e6c605"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\MsiWmiPayloadResource.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "39f025987159eb5ac4a236d343d13f56e844e13fc0e320af5a0f9d87f035f883"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\OneXFanDeviceLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "94f7be466347b24ab8099c42aa1c7ddb2d92fcce84fee1c8e655e550d55010cd"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Program.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "b66eb309092c1f3b9b6081b19ab55b2be93ec565bdff2d0fedf6fd68e43ddd8f"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section18CandidateFakes.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "ef35d49c85f1ff17a3be2452e7227fa5c4a13096d0afc2ff7463d313647bd7c6"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section18CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "70201596d0c0f569aeae8979e8851c708da2c3eb53e5595fe36a038d83fc7033"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section19CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "4715f9d7722d8b73c9f95cd7a5ee46c136e5d3265e5e4ba5d05efab99e453272"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section20CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "0f58e93da6e3fa2ef14916219cf0fe71b7defa0e18bf5727fe52369f80a404fa"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section21CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "5ba1da1fddcbb07b70ae57229c27561c7af8cb2f26249a12d72f5b50bc28b278"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section22CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "3ee412a754824439899c95da855ff66980416534cb29c6023257097891032dca"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\real-host\\Section23CandidateLifecycle.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "5e0b4ffa33aeece951d79e07d1339786ca1233991caf99e5773f164a97ac3891"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\native\\ProcessEfficiency.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "4d59a116497f00a161e61790eba9c48ceb6e196c512f5e97e8f7ec255187d60c"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\DeviceCoreSharedDependencies.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "9ba5524cea21d2a7552a4a9025539c93d1c52072a882c351f61086f850cfd9e7"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\RuntimeDependencyContract.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "4f0fa4d26102fba1a2ed8cd013eb029457ab2049dad649809c1a17e2f1cf71c1"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\obj\\YeManFanHost\\release_win-x64\\YeManFanHost.GlobalUsings.g.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "fe45ea572aadfd1a9b54cf7251405cfa11b748ca88b034f06a724d49758ced2d"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\obj\\YeManFanHost\\release_win-x64\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\obj\\YeManFanHost\\release_win-x64\\YeManFanHost.AssemblyInfo.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "dd38ccec034081316bb508ba946ddb0557ede693b10d1cdf2cf1104a7ba989ce"
+        }
+      ],
+      "compilationOptions": {
+        "version": "2",
+        "compiler-version": "5.9.0-1.26379.115+14fbf8d5271c98133561eb55185fdb05b286f578",
+        "language": "C#",
+        "source-file-count": "24",
+        "output-kind": "ConsoleApplication",
+        "optimization": "release",
+        "platform": "X64",
+        "runtime-version": "10.0.11-servicing.26373.116+e2f47b0110ed922f21a1522da67279133ce28f32",
+        "language-version": "14.0",
+        "nullable": "Enable",
+        "define": "TRACE,RELEASE,NET,NET10_0,NETCOREAPP,WINDOWS,WINDOWS10_0_19041_0,NET5_0_OR_GREATER,NET6_0_OR_GREATER,NET7_0_OR_GREATER,NET8_0_OR_GREATER,NET9_0_OR_GREATER,NET10_0_OR_GREATER,NETCOREAPP1_0_OR_GREATER,NETCOREAPP1_1_OR_GREATER,NETCOREAPP2_0_OR_GREATER,NETCOREAPP2_1_OR_GREATER,NETCOREAPP2_2_OR_GREATER,NETCOREAPP3_0_OR_GREATER,NETCOREAPP3_1_OR_GREATER,WINDOWS10_0_19041_0_OR_GREATER,WINDOWS10_0_18362_0_OR_GREATER,WINDOWS10_0_17763_0_OR_GREATER,WINDOWS8_0_OR_GREATER,WINDOWS7_0_OR_GREATER"
+      },
+      "references": [
+        {
+          "fileName": "Accessibility.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 1784910427,
+          "sizeOfImage": 32768,
+          "mvid": "f730f134-c7b9-4f32-8974-61411c2b4281"
+        },
+        {
+          "fileName": "Microsoft.CSharp.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4210238791,
+          "sizeOfImage": 32768,
+          "mvid": "93c81622-5663-4202-afa7-e64abbdec360"
+        },
+        {
+          "fileName": "Microsoft.VisualBasic.Core.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2979986420,
+          "sizeOfImage": 73728,
+          "mvid": "09922e26-9ae6-4bcf-971f-d2f2e2b655f4"
+        },
+        {
+          "fileName": "Microsoft.VisualBasic.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2466525635,
+          "sizeOfImage": 32768,
+          "mvid": "6b2be6d1-a944-43e3-900d-36d449e19417"
+        },
+        {
+          "fileName": "Microsoft.Win32.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3128668287,
+          "sizeOfImage": 32768,
+          "mvid": "a01981be-c1b3-43c8-8c42-46156db4a1a0"
+        },
+        {
+          "fileName": "Microsoft.Win32.Registry.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3819116961,
+          "sizeOfImage": 32768,
+          "mvid": "c27b3de9-2548-46c5-bf60-a906f8076f5b"
+        },
+        {
+          "fileName": "Microsoft.Win32.Registry.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4283490744,
+          "sizeOfImage": 40960,
+          "mvid": "d4992af0-826a-4dc8-b833-91379c91555b"
+        },
+        {
+          "fileName": "Microsoft.Win32.SystemEvents.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2845662161,
+          "sizeOfImage": 32768,
+          "mvid": "b6e9f8cc-3ed6-4bfd-ad9a-b22dc0a0ea4d"
+        },
+        {
+          "fileName": "Microsoft.Windows.SDK.NET.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2962862674,
+          "sizeOfImage": 24895488,
+          "mvid": "7654be7f-ea77-42d7-a23a-3da30ca23007"
+        },
+        {
+          "fileName": "mscorlib.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3874008643,
+          "sizeOfImage": 73728,
+          "mvid": "eb9cfee1-179f-4223-baea-cf81832fcbc2"
+        },
+        {
+          "fileName": "netstandard.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2302909570,
+          "sizeOfImage": 114688,
+          "mvid": "9b152b6b-21e9-49b8-817e-a51db91b6132"
+        },
+        {
+          "fileName": "PresentationCore.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3152806889,
+          "sizeOfImage": 565248,
+          "mvid": "bdfcdd61-8567-4b55-9d8d-92a5e9af6e74"
+        },
+        {
+          "fileName": "PresentationFramework.Aero.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3466811965,
+          "sizeOfImage": 49152,
+          "mvid": "bb774ad2-2605-4da4-b537-265b5342b134"
+        },
+        {
+          "fileName": "PresentationFramework.Aero2.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2687788047,
+          "sizeOfImage": 49152,
+          "mvid": "51e9079f-8e98-4e2f-85bf-4f014ded3f75"
+        },
+        {
+          "fileName": "PresentationFramework.AeroLite.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4239097168,
+          "sizeOfImage": 49152,
+          "mvid": "58f5322b-76ba-4171-ba69-cb6d97cad296"
+        },
+        {
+          "fileName": "PresentationFramework.Classic.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3754670507,
+          "sizeOfImage": 49152,
+          "mvid": "43f65d00-b697-4aaf-a5eb-bf2e9426b0cc"
+        },
+        {
+          "fileName": "PresentationFramework.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3396211853,
+          "sizeOfImage": 548864,
+          "mvid": "1e404283-1be9-4219-a261-e50b83496585"
+        },
+        {
+          "fileName": "PresentationFramework.Luna.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4228223547,
+          "sizeOfImage": 49152,
+          "mvid": "02b54b9e-f9d9-42a0-ac07-b497330f0328"
+        },
+        {
+          "fileName": "PresentationFramework.Royale.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4076563081,
+          "sizeOfImage": 49152,
+          "mvid": "e97fb193-a2ae-4399-8986-5967759a4cc8"
+        },
+        {
+          "fileName": "PresentationUI.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2516250110,
+          "sizeOfImage": 49152,
+          "mvid": "35b029dd-7d8d-4eb6-aa5b-97a10daef7e9"
+        },
+        {
+          "fileName": "ReachFramework.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3252114540,
+          "sizeOfImage": 65536,
+          "mvid": "a61fe9d2-1a2a-46ff-911f-eb1d368e6eba"
+        },
+        {
+          "fileName": "System.AppContext.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3468727931,
+          "sizeOfImage": 32768,
+          "mvid": "67af1e2d-c41d-474c-baab-348f837aedfb"
+        },
+        {
+          "fileName": "System.Buffers.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2958999245,
+          "sizeOfImage": 32768,
+          "mvid": "2a8c66d0-d885-4a65-b66b-720090626a46"
+        },
+        {
+          "fileName": "System.CodeDom.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3089250190,
+          "sizeOfImage": 81920,
+          "mvid": "d6d9e193-d1e7-4ae5-9956-64d1bf5e45f5"
+        },
+        {
+          "fileName": "System.Collections.Concurrent.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2578243511,
+          "sizeOfImage": 40960,
+          "mvid": "c9887048-96a9-4715-a596-94c0e1a5d5ab"
+        },
+        {
+          "fileName": "System.Collections.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3816570260,
+          "sizeOfImage": 73728,
+          "mvid": "e6f67cc5-ec6b-407a-ae54-e4685e923394"
+        },
+        {
+          "fileName": "System.Collections.Immutable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2308329071,
+          "sizeOfImage": 90112,
+          "mvid": "e1f8cdd3-70c3-4ccc-a77a-b6063c81effa"
+        },
+        {
+          "fileName": "System.Collections.NonGeneric.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4169588462,
+          "sizeOfImage": 40960,
+          "mvid": "dec88385-cf17-4bc3-8873-fe5329699e52"
+        },
+        {
+          "fileName": "System.Collections.Specialized.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3864390321,
+          "sizeOfImage": 40960,
+          "mvid": "51f123c8-f259-43bf-8891-3004ef3304e1"
+        },
+        {
+          "fileName": "System.ComponentModel.Annotations.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3947763815,
+          "sizeOfImage": 49152,
+          "mvid": "dc90d704-5d86-4887-bb53-e97facfc3e0f"
+        },
+        {
+          "fileName": "System.ComponentModel.DataAnnotations.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2741408179,
+          "sizeOfImage": 32768,
+          "mvid": "67247809-55d6-49fb-b156-56e39bfe4c3d"
+        },
+        {
+          "fileName": "System.ComponentModel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4086483135,
+          "sizeOfImage": 32768,
+          "mvid": "8409520f-d862-4019-b67e-19c884a5ce93"
+        },
+        {
+          "fileName": "System.ComponentModel.EventBasedAsync.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2801036163,
+          "sizeOfImage": 32768,
+          "mvid": "2b16078e-c184-42f9-8a00-8d2a5cee34f9"
+        },
+        {
+          "fileName": "System.ComponentModel.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4189319707,
+          "sizeOfImage": 40960,
+          "mvid": "ec8f7421-b4a5-4941-838b-ef79674206c4"
+        },
+        {
+          "fileName": "System.ComponentModel.TypeConverter.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3553044993,
+          "sizeOfImage": 122880,
+          "mvid": "b5c42454-8685-4c75-ad5f-fa92be2e2c92"
+        },
+        {
+          "fileName": "System.Configuration.ConfigurationManager.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4148729407,
+          "sizeOfImage": 106496,
+          "mvid": "3ca076d3-964f-4855-a8bd-21c29c0c737d"
+        },
+        {
+          "fileName": "System.Configuration.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3775402313,
+          "sizeOfImage": 32768,
+          "mvid": "7876281c-e77b-495a-9f1c-1a4fb5f2e7f9"
+        },
+        {
+          "fileName": "System.Console.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3478878338,
+          "sizeOfImage": 40960,
+          "mvid": "23dd6bab-95f9-4dc4-9dfc-c8793504e052"
+        },
+        {
+          "fileName": "System.Core.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2218684822,
+          "sizeOfImage": 40960,
+          "mvid": "77fe8ae9-dc51-457c-b630-8dd512696c63"
+        },
+        {
+          "fileName": "System.Data.Common.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2220262275,
+          "sizeOfImage": 172032,
+          "mvid": "ccabc500-2f7a-4a3e-9d91-b2dacf49af1f"
+        },
+        {
+          "fileName": "System.Data.DataSetExtensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3062374327,
+          "sizeOfImage": 32768,
+          "mvid": "f3bf9cc0-6fc2-45c7-83e7-7e7bddfed621"
+        },
+        {
+          "fileName": "System.Data.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3950194154,
+          "sizeOfImage": 40960,
+          "mvid": "d7f88646-9311-44e3-b971-34abd78d20bd"
+        },
+        {
+          "fileName": "System.Diagnostics.Contracts.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3310679350,
+          "sizeOfImage": 32768,
+          "mvid": "7182ff06-b118-471d-a5b5-4daeec32fca4"
+        },
+        {
+          "fileName": "System.Diagnostics.Debug.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3792005548,
+          "sizeOfImage": 32768,
+          "mvid": "bf773efe-92c1-48b0-8392-036063ae3c72"
+        },
+        {
+          "fileName": "System.Diagnostics.DiagnosticSource.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2977795089,
+          "sizeOfImage": 57344,
+          "mvid": "43e353e6-b140-405f-a749-b78d9fe86513"
+        },
+        {
+          "fileName": "System.Diagnostics.EventLog.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3063398980,
+          "sizeOfImage": 49152,
+          "mvid": "9adee97b-7e65-48b5-8580-47b6a5bfe1dc"
+        },
+        {
+          "fileName": "System.Diagnostics.FileVersionInfo.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4281717213,
+          "sizeOfImage": 32768,
+          "mvid": "cda7e720-e777-44bc-b319-5e0834590831"
+        },
+        {
+          "fileName": "System.Diagnostics.PerformanceCounter.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3046509152,
+          "sizeOfImage": 40960,
+          "mvid": "d52cc7a9-569d-43fa-a9e7-09e56b9053e1"
+        },
+        {
+          "fileName": "System.Diagnostics.Process.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4172258465,
+          "sizeOfImage": 49152,
+          "mvid": "0b19f100-8cdb-40c7-96ad-06bb1ed2e8f3"
+        },
+        {
+          "fileName": "System.Diagnostics.StackTrace.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3899963554,
+          "sizeOfImage": 40960,
+          "mvid": "e825d5a8-7e16-4443-a056-8305bfba1b8e"
+        },
+        {
+          "fileName": "System.Diagnostics.TextWriterTraceListener.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3521176856,
+          "sizeOfImage": 32768,
+          "mvid": "491e2436-2969-443b-a8fa-a5e5eb2f98ff"
+        },
+        {
+          "fileName": "System.Diagnostics.Tools.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3041003261,
+          "sizeOfImage": 32768,
+          "mvid": "e7cdb2ed-fd96-4094-a358-1117d8e263fc"
+        },
+        {
+          "fileName": "System.Diagnostics.TraceSource.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3224132914,
+          "sizeOfImage": 40960,
+          "mvid": "405abc89-88b9-4334-bbee-8707af84416a"
+        },
+        {
+          "fileName": "System.Diagnostics.Tracing.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2515518024,
+          "sizeOfImage": 40960,
+          "mvid": "eb3cd0f3-e67d-438c-bff0-17b1ff2a7e35"
+        },
+        {
+          "fileName": "System.DirectoryServices.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3683362753,
+          "sizeOfImage": 98304,
+          "mvid": "80db1b3d-0ad0-415f-8155-86a8abb81c27"
+        },
+        {
+          "fileName": "System.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3398454260,
+          "sizeOfImage": 65536,
+          "mvid": "ffeedb34-7d54-4ad2-a5a8-f2ebf66db207"
+        },
+        {
+          "fileName": "System.Drawing.Common.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3872457751,
+          "sizeOfImage": 204800,
+          "mvid": "44194bff-f237-461f-805e-0a88e6d2a3fd"
+        },
+        {
+          "fileName": "System.Drawing.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2493434214,
+          "sizeOfImage": 32768,
+          "mvid": "f84ac37c-9d19-4470-a121-a2e369329fc9"
+        },
+        {
+          "fileName": "System.Drawing.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2464497791,
+          "sizeOfImage": 49152,
+          "mvid": "239af802-ea3f-4942-a842-47202b7cf774"
+        },
+        {
+          "fileName": "System.Dynamic.Runtime.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2165681934,
+          "sizeOfImage": 32768,
+          "mvid": "5bdfd9e0-4d93-4267-aed0-76ec9e45614b"
+        },
+        {
+          "fileName": "System.Formats.Asn1.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2698346343,
+          "sizeOfImage": 40960,
+          "mvid": "2021bf38-df7b-45cc-863f-974cff7b6b7e"
+        },
+        {
+          "fileName": "System.Formats.Nrbf.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3724391812,
+          "sizeOfImage": 32768,
+          "mvid": "1655a96e-62e2-4e38-a0d0-9aa614aae603"
+        },
+        {
+          "fileName": "System.Formats.Tar.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3293791887,
+          "sizeOfImage": 32768,
+          "mvid": "3e007e8d-12b0-4ffc-ab73-81911c2e31cf"
+        },
+        {
+          "fileName": "System.Globalization.Calendars.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3527722985,
+          "sizeOfImage": 32768,
+          "mvid": "4fc23d96-66e4-4459-8910-7b2db466c838"
+        },
+        {
+          "fileName": "System.Globalization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2782521414,
+          "sizeOfImage": 32768,
+          "mvid": "452c64bd-c8a7-43a2-987e-5cf2c92a3d4f"
+        },
+        {
+          "fileName": "System.Globalization.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4293335747,
+          "sizeOfImage": 32768,
+          "mvid": "18eac32e-c7d1-4904-82a2-fff3eb611faf"
+        },
+        {
+          "fileName": "System.IO.Compression.Brotli.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3646280392,
+          "sizeOfImage": 32768,
+          "mvid": "93957590-5cee-493f-963a-05c740a1ef9b"
+        },
+        {
+          "fileName": "System.IO.Compression.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3203597735,
+          "sizeOfImage": 40960,
+          "mvid": "23380654-8c18-4a72-9ee2-df8241fd9cdf"
+        },
+        {
+          "fileName": "System.IO.Compression.FileSystem.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4143992225,
+          "sizeOfImage": 32768,
+          "mvid": "1ef6d222-5f8f-483f-bd39-77e14a5ef0cd"
+        },
+        {
+          "fileName": "System.IO.Compression.ZipFile.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3684402638,
+          "sizeOfImage": 32768,
+          "mvid": "e1441732-9f57-477e-ba74-65d213d7b6ab"
+        },
+        {
+          "fileName": "System.IO.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3933822860,
+          "sizeOfImage": 32768,
+          "mvid": "1cd92bfe-d408-4cba-b743-74b5776e8f96"
+        },
+        {
+          "fileName": "System.IO.FileSystem.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3782793552,
+          "sizeOfImage": 32768,
+          "mvid": "7e6ac8e9-bf4a-4cde-b482-26b42bcaef0c"
+        },
+        {
+          "fileName": "System.IO.FileSystem.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2543241466,
+          "sizeOfImage": 32768,
+          "mvid": "97d34fcd-203e-4b8a-acff-0b8cc5de6100"
+        },
+        {
+          "fileName": "System.IO.FileSystem.DriveInfo.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3590207325,
+          "sizeOfImage": 32768,
+          "mvid": "95ed199e-f47d-4694-a39b-0782ecd6897e"
+        },
+        {
+          "fileName": "System.IO.FileSystem.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3639033737,
+          "sizeOfImage": 32768,
+          "mvid": "78878e67-d29e-4d50-9569-b48396efd2df"
+        },
+        {
+          "fileName": "System.IO.FileSystem.Watcher.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3379382257,
+          "sizeOfImage": 32768,
+          "mvid": "ac6f11de-32a2-4908-9cad-aa3bce563d4c"
+        },
+        {
+          "fileName": "System.IO.IsolatedStorage.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2361521362,
+          "sizeOfImage": 40960,
+          "mvid": "258f633a-9b95-44a2-84c6-f064835291a5"
+        },
+        {
+          "fileName": "System.IO.MemoryMappedFiles.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3552312838,
+          "sizeOfImage": 32768,
+          "mvid": "53230d8e-3037-46a1-9b8d-4cd38423bcf3"
+        },
+        {
+          "fileName": "System.IO.Packaging.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3735906061,
+          "sizeOfImage": 40960,
+          "mvid": "80d9ebae-3085-423b-aed9-d5818af5fd26"
+        },
+        {
+          "fileName": "System.IO.Pipelines.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3587419002,
+          "sizeOfImage": 32768,
+          "mvid": "1db4dadc-45fa-46f6-8abc-bf78f2a66687"
+        },
+        {
+          "fileName": "System.IO.Pipes.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2470175913,
+          "sizeOfImage": 32768,
+          "mvid": "464c98c1-fd23-4349-bdeb-0e0f78d51b7b"
+        },
+        {
+          "fileName": "System.IO.Pipes.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3797118908,
+          "sizeOfImage": 40960,
+          "mvid": "e52360b1-a015-47a7-b8f6-761d7d8feccd"
+        },
+        {
+          "fileName": "System.IO.UnmanagedMemoryStream.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4252630986,
+          "sizeOfImage": 32768,
+          "mvid": "8956a7cf-d95b-48b7-b3d9-56b55d368ab2"
+        },
+        {
+          "fileName": "System.Linq.AsyncEnumerable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2549708916,
+          "sizeOfImage": 49152,
+          "mvid": "3f259bbc-1b1d-459a-9a41-63d42a006196"
+        },
+        {
+          "fileName": "System.Linq.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3777263924,
+          "sizeOfImage": 49152,
+          "mvid": "0eccabf1-cb79-4fd8-83f6-c9ee38bba6ce"
+        },
+        {
+          "fileName": "System.Linq.Expressions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3059931455,
+          "sizeOfImage": 81920,
+          "mvid": "90f96e65-70f4-4003-8ad8-b616015d2284"
+        },
+        {
+          "fileName": "System.Linq.Parallel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3621988676,
+          "sizeOfImage": 49152,
+          "mvid": "a96dc180-9e00-4216-98a9-11878e9f3429"
+        },
+        {
+          "fileName": "System.Linq.Queryable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4242882041,
+          "sizeOfImage": 49152,
+          "mvid": "ab76b03c-c00e-4060-84af-ae24667e6e52"
+        },
+        {
+          "fileName": "System.Memory.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3143385226,
+          "sizeOfImage": 73728,
+          "mvid": "4c07ed71-7c39-4ebd-8b71-aebebe042150"
+        },
+        {
+          "fileName": "System.Net.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4020082964,
+          "sizeOfImage": 32768,
+          "mvid": "ac3facd8-ec3c-4a81-8314-6390cb5e10b9"
+        },
+        {
+          "fileName": "System.Net.Http.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4017510063,
+          "sizeOfImage": 73728,
+          "mvid": "56a523a3-68b3-4438-bb90-9814e12d1a9b"
+        },
+        {
+          "fileName": "System.Net.Http.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3908668925,
+          "sizeOfImage": 40960,
+          "mvid": "d1d5f025-d78c-49b7-9055-7c2723bf0b07"
+        },
+        {
+          "fileName": "System.Net.HttpListener.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3613986318,
+          "sizeOfImage": 40960,
+          "mvid": "3e41302e-9119-4b32-9d9a-2dfc314affa5"
+        },
+        {
+          "fileName": "System.Net.Mail.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2226849740,
+          "sizeOfImage": 49152,
+          "mvid": "b757f5bf-bb54-451a-b987-d1b96e7a5471"
+        },
+        {
+          "fileName": "System.Net.NameResolution.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4109238271,
+          "sizeOfImage": 32768,
+          "mvid": "cf695b6c-f056-4264-a990-e63e1576bad4"
+        },
+        {
+          "fileName": "System.Net.NetworkInformation.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4009795198,
+          "sizeOfImage": 49152,
+          "mvid": "fda08119-34c5-45bc-89fc-7e6a0c367472"
+        },
+        {
+          "fileName": "System.Net.Ping.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3569865729,
+          "sizeOfImage": 32768,
+          "mvid": "7a320c70-c7da-4548-97bd-f2454c7d11d5"
+        },
+        {
+          "fileName": "System.Net.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3498377240,
+          "sizeOfImage": 49152,
+          "mvid": "850c9631-d99a-47eb-8f78-80abb1a042d1"
+        },
+        {
+          "fileName": "System.Net.Quic.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3254033579,
+          "sizeOfImage": 40960,
+          "mvid": "996ff5f1-3119-4193-a0c6-ae62aabc1174"
+        },
+        {
+          "fileName": "System.Net.Requests.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4276594498,
+          "sizeOfImage": 57344,
+          "mvid": "36c3cf18-1c20-4749-8114-bbaea5e09ee7"
+        },
+        {
+          "fileName": "System.Net.Security.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3907462580,
+          "sizeOfImage": 65536,
+          "mvid": "f816f570-d1ac-4da0-915c-315978f76f4a"
+        },
+        {
+          "fileName": "System.Net.ServerSentEvents.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3054713196,
+          "sizeOfImage": 32768,
+          "mvid": "a965e9ab-8113-488e-80e0-0cc4fdbfab5e"
+        },
+        {
+          "fileName": "System.Net.ServicePoint.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4054278152,
+          "sizeOfImage": 32768,
+          "mvid": "d5751882-8a07-4fe1-bdda-453467bb6a3f"
+        },
+        {
+          "fileName": "System.Net.Sockets.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4173620815,
+          "sizeOfImage": 65536,
+          "mvid": "e1189cfa-e1cd-4723-9df9-23352bfd47a4"
+        },
+        {
+          "fileName": "System.Net.WebClient.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3286052098,
+          "sizeOfImage": 40960,
+          "mvid": "691da5c7-3730-420a-a59a-e8e072457f7b"
+        },
+        {
+          "fileName": "System.Net.WebHeaderCollection.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3551686754,
+          "sizeOfImage": 32768,
+          "mvid": "cab63fff-0a21-4879-9718-29d7efdf725b"
+        },
+        {
+          "fileName": "System.Net.WebProxy.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3011331914,
+          "sizeOfImage": 32768,
+          "mvid": "8eed575b-1ab9-4d59-b6a8-f0fc26234ec0"
+        },
+        {
+          "fileName": "System.Net.WebSockets.Client.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2413393818,
+          "sizeOfImage": 32768,
+          "mvid": "77be2a72-3252-49a7-8312-87b6b38dc9a0"
+        },
+        {
+          "fileName": "System.Net.WebSockets.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2831794425,
+          "sizeOfImage": 40960,
+          "mvid": "a9e50901-50e0-4fba-9362-5aa28b6f7390"
+        },
+        {
+          "fileName": "System.Numerics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3893724069,
+          "sizeOfImage": 32768,
+          "mvid": "efee03bb-1079-4924-9942-0148091d8e29"
+        },
+        {
+          "fileName": "System.Numerics.Vectors.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2845117954,
+          "sizeOfImage": 73728,
+          "mvid": "4cfd003e-1dd9-4bfe-8fd2-277ab68adb32"
+        },
+        {
+          "fileName": "System.ObjectModel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3432661829,
+          "sizeOfImage": 40960,
+          "mvid": "a76d0c83-fdca-4bdf-87b5-b9fd1b753d04"
+        },
+        {
+          "fileName": "System.Printing.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3865905084,
+          "sizeOfImage": 73728,
+          "mvid": "230126ec-2a35-45c3-bc20-6683422f8bd0"
+        },
+        {
+          "fileName": "System.Private.Windows.Core.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3477807631,
+          "sizeOfImage": 974848,
+          "mvid": "56bb0016-16ad-4557-88e1-bfb6c520bd6c"
+        },
+        {
+          "fileName": "System.Private.Windows.GdiPlus.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3713318477,
+          "sizeOfImage": 163840,
+          "mvid": "ea8ffff1-c524-4d5c-9f85-15f5ef0b8e1c"
+        },
+        {
+          "fileName": "System.Reflection.DispatchProxy.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2522055608,
+          "sizeOfImage": 32768,
+          "mvid": "8a0201c9-6413-4281-9734-80378fd2c60a"
+        },
+        {
+          "fileName": "System.Reflection.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4111571932,
+          "sizeOfImage": 32768,
+          "mvid": "7700e268-cee1-4ebe-aa86-fdd0cd7172ba"
+        },
+        {
+          "fileName": "System.Reflection.Emit.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4134589120,
+          "sizeOfImage": 57344,
+          "mvid": "f15018b7-3ce0-415c-a2df-486b15461444"
+        },
+        {
+          "fileName": "System.Reflection.Emit.ILGeneration.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3009270105,
+          "sizeOfImage": 32768,
+          "mvid": "f348471f-533a-453d-a6c2-f785073adf78"
+        },
+        {
+          "fileName": "System.Reflection.Emit.Lightweight.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3601764109,
+          "sizeOfImage": 32768,
+          "mvid": "5489483d-e253-4178-a6ce-5b004701e40a"
+        },
+        {
+          "fileName": "System.Reflection.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2890855212,
+          "sizeOfImage": 32768,
+          "mvid": "949c39b8-fde5-4542-804d-109053414d9a"
+        },
+        {
+          "fileName": "System.Reflection.Metadata.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3140250474,
+          "sizeOfImage": 139264,
+          "mvid": "bc759ae2-cb41-4123-84c6-92dc135c0d14"
+        },
+        {
+          "fileName": "System.Reflection.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2395262883,
+          "sizeOfImage": 40960,
+          "mvid": "bceb659e-4b63-40f2-86ab-74a9760e4294"
+        },
+        {
+          "fileName": "System.Reflection.TypeExtensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3094237999,
+          "sizeOfImage": 32768,
+          "mvid": "a33024c3-ef8f-461c-9fa4-dcf8ccfba475"
+        },
+        {
+          "fileName": "System.Resources.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2152668927,
+          "sizeOfImage": 32768,
+          "mvid": "92189918-f162-4f7f-ad49-a6d2e5ece06f"
+        },
+        {
+          "fileName": "System.Resources.Reader.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3467225949,
+          "sizeOfImage": 32768,
+          "mvid": "050b08cf-0a2f-4d2f-8ca1-11db92cb212f"
+        },
+        {
+          "fileName": "System.Resources.ResourceManager.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3515945378,
+          "sizeOfImage": 32768,
+          "mvid": "f13230c8-bfc6-4d47-bb58-1b2cf042b568"
+        },
+        {
+          "fileName": "System.Resources.Writer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2744680360,
+          "sizeOfImage": 32768,
+          "mvid": "e84e6eb7-b1ba-4374-8352-6e748839b009"
+        },
+        {
+          "fileName": "System.Runtime.CompilerServices.Unsafe.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3624611807,
+          "sizeOfImage": 32768,
+          "mvid": "1feba919-cee9-4fa1-9b57-815d1dae94bd"
+        },
+        {
+          "fileName": "System.Runtime.CompilerServices.VisualC.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2149654608,
+          "sizeOfImage": 32768,
+          "mvid": "e49b69e0-bbe5-4981-ac1d-b3f5647a82b5"
+        },
+        {
+          "fileName": "System.Runtime.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2665900664,
+          "sizeOfImage": 876544,
+          "mvid": "327ec015-a94d-416b-b6c6-d8e40902a854"
+        },
+        {
+          "fileName": "System.Runtime.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4203222461,
+          "sizeOfImage": 32768,
+          "mvid": "5cdb415d-799b-4e94-a45f-92af0ea79d52"
+        },
+        {
+          "fileName": "System.Runtime.Handles.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3202512183,
+          "sizeOfImage": 32768,
+          "mvid": "3369745a-d243-43db-81f2-dcba2542f4a0"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3301882118,
+          "sizeOfImage": 114688,
+          "mvid": "8d744be1-f2cd-4777-87e7-b033763eceb6"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.JavaScript.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4002252427,
+          "sizeOfImage": 40960,
+          "mvid": "a961c534-28ea-48db-9a6f-284a76834896"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.RuntimeInformation.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3621600745,
+          "sizeOfImage": 32768,
+          "mvid": "c4455559-dcb9-4157-8787-b17bf5360eed"
+        },
+        {
+          "fileName": "System.Runtime.Intrinsics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2991795000,
+          "sizeOfImage": 483328,
+          "mvid": "daf06479-2b9a-454d-8df6-ccb212415a71"
+        },
+        {
+          "fileName": "System.Runtime.Loader.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3067589644,
+          "sizeOfImage": 32768,
+          "mvid": "6b89ba6f-a78f-4c57-838d-6d962c42b2c4"
+        },
+        {
+          "fileName": "System.Runtime.Numerics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3286262683,
+          "sizeOfImage": 49152,
+          "mvid": "cdacaf54-69f9-4a64-8c32-6571047dc539"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2891685066,
+          "sizeOfImage": 32768,
+          "mvid": "cecbd82a-2929-43c9-8c05-fea8a3c48c70"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Formatters.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3324979297,
+          "sizeOfImage": 40960,
+          "mvid": "f55a8366-a119-4294-be0d-479d674394d0"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2411588198,
+          "sizeOfImage": 32768,
+          "mvid": "e8a1a70f-fe01-439d-a85c-64e772151b73"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2889564116,
+          "sizeOfImage": 32768,
+          "mvid": "2688df45-3fa5-4ab6-a0ac-db83206c16a5"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Xml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2616190864,
+          "sizeOfImage": 57344,
+          "mvid": "aaab62ca-c634-4097-a772-3222dc6a5ce8"
+        },
+        {
+          "fileName": "System.Security.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2980314766,
+          "sizeOfImage": 49152,
+          "mvid": "7ea45b0f-056c-49fe-8495-e0993db8e9f3"
+        },
+        {
+          "fileName": "System.Security.Claims.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4086188276,
+          "sizeOfImage": 49152,
+          "mvid": "d70a9d27-9481-41b6-9040-8de9c67e2245"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Algorithms.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2780149568,
+          "sizeOfImage": 32768,
+          "mvid": "717bc0c6-3eb9-4ab6-b6c0-c9dc2f6fe202"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Cng.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3700997495,
+          "sizeOfImage": 32768,
+          "mvid": "1142c577-0cb5-4f54-b47f-258160220669"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Csp.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2194790697,
+          "sizeOfImage": 32768,
+          "mvid": "e1093922-6a1b-40e2-898f-484a010338c5"
+        },
+        {
+          "fileName": "System.Security.Cryptography.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2615421632,
+          "sizeOfImage": 180224,
+          "mvid": "ddf9c551-14f4-48b7-83d0-296d90ba4605"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Encoding.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3844718123,
+          "sizeOfImage": 32768,
+          "mvid": "5a3b6665-ac3c-4953-9ef7-1b9eeed12634"
+        },
+        {
+          "fileName": "System.Security.Cryptography.OpenSsl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3165653899,
+          "sizeOfImage": 32768,
+          "mvid": "e57b49ce-6e76-4b1e-a3a6-7cd79dffd5a8"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Pkcs.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2996683118,
+          "sizeOfImage": 49152,
+          "mvid": "7bbf895d-7aa3-4163-a1c3-18fd041bdb83"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2829631817,
+          "sizeOfImage": 32768,
+          "mvid": "5651a72a-6523-4631-bd4d-5da2934e0933"
+        },
+        {
+          "fileName": "System.Security.Cryptography.ProtectedData.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3926252065,
+          "sizeOfImage": 32768,
+          "mvid": "dc07a125-18ac-4984-8db4-db7a1a0b9c1c"
+        },
+        {
+          "fileName": "System.Security.Cryptography.X509Certificates.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2283841279,
+          "sizeOfImage": 32768,
+          "mvid": "9c10d24c-1c18-42f2-ac29-b39e550d4b7d"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Xml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2569051806,
+          "sizeOfImage": 57344,
+          "mvid": "13e0f273-7059-4734-b0d1-980d29d2c698"
+        },
+        {
+          "fileName": "System.Security.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3133597695,
+          "sizeOfImage": 32768,
+          "mvid": "538f6e59-0a79-43f6-b5d4-cc40906944d6"
+        },
+        {
+          "fileName": "System.Security.Permissions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4275466587,
+          "sizeOfImage": 90112,
+          "mvid": "71bb45de-9b40-4f80-9b4c-282685db8e86"
+        },
+        {
+          "fileName": "System.Security.Principal.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3196369945,
+          "sizeOfImage": 32768,
+          "mvid": "0fc9a9c7-18ca-4467-b27c-6dac3a747066"
+        },
+        {
+          "fileName": "System.Security.Principal.Windows.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2239519897,
+          "sizeOfImage": 40960,
+          "mvid": "a001c7b9-4c8c-4ecc-8c6b-411ccd80a022"
+        },
+        {
+          "fileName": "System.Security.SecureString.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3503435030,
+          "sizeOfImage": 32768,
+          "mvid": "2ceb62f7-f5a1-4265-b2b8-8586cbe5a1d6"
+        },
+        {
+          "fileName": "System.ServiceModel.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3273291195,
+          "sizeOfImage": 32768,
+          "mvid": "2e2b9952-901b-49fa-ae75-f661a47af6ac"
+        },
+        {
+          "fileName": "System.ServiceProcess.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3891775304,
+          "sizeOfImage": 32768,
+          "mvid": "4029e2a4-579e-4437-a0a2-14e20535a581"
+        },
+        {
+          "fileName": "System.Text.Encoding.CodePages.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3704893455,
+          "sizeOfImage": 32768,
+          "mvid": "7888a78d-cd73-4cb3-b1e2-7326b5f3d7b8"
+        },
+        {
+          "fileName": "System.Text.Encoding.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3505548325,
+          "sizeOfImage": 32768,
+          "mvid": "60bf859d-5832-4c2c-9ab9-cf5e24064eb6"
+        },
+        {
+          "fileName": "System.Text.Encoding.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3821294168,
+          "sizeOfImage": 32768,
+          "mvid": "2ae185e1-23fc-4d7f-85be-718dbd4764d9"
+        },
+        {
+          "fileName": "System.Text.Encodings.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3932318979,
+          "sizeOfImage": 40960,
+          "mvid": "c0112b88-aa50-4864-9e76-3c508c9241f6"
+        },
+        {
+          "fileName": "System.Text.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2802409268,
+          "sizeOfImage": 98304,
+          "mvid": "bc56a2bc-305a-42bf-aa98-3dbc4948d82e"
+        },
+        {
+          "fileName": "System.Text.RegularExpressions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3004540941,
+          "sizeOfImage": 49152,
+          "mvid": "2b8638bf-c437-4e84-9c86-ccae039cdb7d"
+        },
+        {
+          "fileName": "System.Threading.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3763699567,
+          "sizeOfImage": 32768,
+          "mvid": "40217e03-5341-4e39-b3f5-31c142299a1a"
+        },
+        {
+          "fileName": "System.Threading.Channels.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3700667845,
+          "sizeOfImage": 32768,
+          "mvid": "1ce2009e-b10c-4664-aa9d-e7a71d950c33"
+        },
+        {
+          "fileName": "System.Threading.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2746077318,
+          "sizeOfImage": 49152,
+          "mvid": "849f3947-71cb-4fbd-80dc-f263af153d80"
+        },
+        {
+          "fileName": "System.Threading.Overlapped.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3247498641,
+          "sizeOfImage": 32768,
+          "mvid": "6cf02e5d-eb23-4ab1-b945-f34d9cdd7c91"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Dataflow.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2573864560,
+          "sizeOfImage": 49152,
+          "mvid": "60c2c013-1a91-443b-bd1b-4309268ead8a"
+        },
+        {
+          "fileName": "System.Threading.Tasks.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2779649935,
+          "sizeOfImage": 32768,
+          "mvid": "b08337b9-51e3-4b04-b22b-370b2c26882f"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3014839612,
+          "sizeOfImage": 32768,
+          "mvid": "dc570003-f4ba-46c6-a444-b478260d784d"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Parallel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4102353172,
+          "sizeOfImage": 32768,
+          "mvid": "79aeef63-37d4-423b-a2fe-1c106aa22d02"
+        },
+        {
+          "fileName": "System.Threading.Thread.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4289286477,
+          "sizeOfImage": 40960,
+          "mvid": "e3a8fa87-aaa3-4860-a358-67bfbade0d40"
+        },
+        {
+          "fileName": "System.Threading.ThreadPool.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2422747750,
+          "sizeOfImage": 32768,
+          "mvid": "a97ac91c-8528-42c0-b660-4edde038ebb9"
+        },
+        {
+          "fileName": "System.Threading.Timer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3960765671,
+          "sizeOfImage": 32768,
+          "mvid": "ed3f4a1c-a1dd-486d-877e-9a04ecce2db5"
+        },
+        {
+          "fileName": "System.Transactions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3174415027,
+          "sizeOfImage": 32768,
+          "mvid": "2a71091d-5655-4452-bdda-d569efe2ff71"
+        },
+        {
+          "fileName": "System.Transactions.Local.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2625090922,
+          "sizeOfImage": 40960,
+          "mvid": "94db7f16-7927-452a-b359-5569bedd4e3b"
+        },
+        {
+          "fileName": "System.ValueTuple.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3770552724,
+          "sizeOfImage": 32768,
+          "mvid": "dda4fb01-120a-44cf-a494-621575806e7f"
+        },
+        {
+          "fileName": "System.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2727751574,
+          "sizeOfImage": 32768,
+          "mvid": "87b38ab7-3e9d-4895-a4ae-02017afcbfa1"
+        },
+        {
+          "fileName": "System.Web.HttpUtility.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2612768084,
+          "sizeOfImage": 32768,
+          "mvid": "0a71c368-36c4-4f1d-a85f-802a6df8b1bb"
+        },
+        {
+          "fileName": "System.Windows.Controls.Ribbon.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4146959679,
+          "sizeOfImage": 131072,
+          "mvid": "d1edf71c-589f-43a7-b03d-33935212667b"
+        },
+        {
+          "fileName": "System.Windows.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2819760609,
+          "sizeOfImage": 32768,
+          "mvid": "cf217246-e802-4a3e-9913-6f740182f1c3"
+        },
+        {
+          "fileName": "System.Windows.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2401238905,
+          "sizeOfImage": 32768,
+          "mvid": "5b997f0c-664a-413d-a803-ef124d3f97b1"
+        },
+        {
+          "fileName": "System.Windows.Input.Manipulations.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4288212647,
+          "sizeOfImage": 40960,
+          "mvid": "7adb568e-d3bc-4b1c-9c21-25608a2a4971"
+        },
+        {
+          "fileName": "System.Windows.Presentation.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3943469383,
+          "sizeOfImage": 49152,
+          "mvid": "0f534e29-db0c-449b-b5f1-491703805bf3"
+        },
+        {
+          "fileName": "System.Windows.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3399812876,
+          "sizeOfImage": 49152,
+          "mvid": "eb5790a5-dd87-4795-b8f5-29ffcf94ceac"
+        },
+        {
+          "fileName": "System.Xaml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2976032521,
+          "sizeOfImage": 81920,
+          "mvid": "e1816e12-e378-4dba-925c-f5c90ebb5526"
+        },
+        {
+          "fileName": "System.Xml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3803626190,
+          "sizeOfImage": 40960,
+          "mvid": "684096c3-4ea0-4ca4-af07-d0385eeab49a"
+        },
+        {
+          "fileName": "System.Xml.Linq.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4058939378,
+          "sizeOfImage": 32768,
+          "mvid": "92c5a319-41e3-4e68-a9d3-74ffee15d57c"
+        },
+        {
+          "fileName": "System.Xml.ReaderWriter.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3025408205,
+          "sizeOfImage": 131072,
+          "mvid": "2c3e4068-a465-4d62-bf71-58a08a7311c5"
+        },
+        {
+          "fileName": "System.Xml.Serialization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2521028026,
+          "sizeOfImage": 32768,
+          "mvid": "e82e9f26-7f3d-4c34-9ddf-22ec2f8a570d"
+        },
+        {
+          "fileName": "System.Xml.XDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4282147489,
+          "sizeOfImage": 49152,
+          "mvid": "f82ea2ff-c5e1-437d-9d7e-b801208cb93d"
+        },
+        {
+          "fileName": "System.Xml.XmlDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4052945437,
+          "sizeOfImage": 32768,
+          "mvid": "ce4f3ab8-8e23-4206-bf09-1306d2a73809"
+        },
+        {
+          "fileName": "System.Xml.XmlSerializer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2950451002,
+          "sizeOfImage": 65536,
+          "mvid": "bfd0500f-f75d-4283-9798-034329457568"
+        },
+        {
+          "fileName": "System.Xml.XPath.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2964590326,
+          "sizeOfImage": 32768,
+          "mvid": "d52d25bb-c747-4ed4-b518-4098dd9b9814"
+        },
+        {
+          "fileName": "System.Xml.XPath.XDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3752329691,
+          "sizeOfImage": 32768,
+          "mvid": "b98415b8-cf95-47d7-976f-7fef563febc7"
+        },
+        {
+          "fileName": "UIAutomationClient.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3652953634,
+          "sizeOfImage": 49152,
+          "mvid": "9b629983-4170-4ec6-be62-012d65c2dc1c"
+        },
+        {
+          "fileName": "UIAutomationClientSideProviders.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3512626107,
+          "sizeOfImage": 32768,
+          "mvid": "8ca8c70a-3b48-40ea-a2f8-cfbb07db3478"
+        },
+        {
+          "fileName": "UIAutomationProvider.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3368259219,
+          "sizeOfImage": 40960,
+          "mvid": "60c07515-b7bb-4d72-8b9b-8a9cdbc5fff6"
+        },
+        {
+          "fileName": "UIAutomationTypes.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2666554262,
+          "sizeOfImage": 49152,
+          "mvid": "62b78523-3417-4a30-a96b-748087182f9f"
+        },
+        {
+          "fileName": "WindowsBase.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2210267398,
+          "sizeOfImage": 122880,
+          "mvid": "043b4801-28a7-47b1-aace-3a7abac6c99a"
+        },
+        {
+          "fileName": "WinRT.Runtime.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3176765627,
+          "sizeOfImage": 540672,
+          "mvid": "e7036237-10cc-408e-aac0-f2c6feb0a00c"
+        },
+        {
+          "fileName": "YeManFanBackend.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3525317225,
+          "sizeOfImage": 49152,
+          "mvid": "1f7e0d47-3752-44a2-a385-2f09ce9cfbaf"
+        }
+      ],
+      "rawRecordSha256": {
+        "b5feec05-8cd0-4a83-96da-466284bb4bd8": "2862c27ec558ff45ba4f41fb7b3496daa8ac3c48837f311a8b3820e609cfe165",
+        "7e4d4708-096e-4c5c-aeda-cb10ba6a740d": "3c401a9cbb26695dead49cd0772be7db29e399cdf3220c270c39b391ea5299c7"
+      },
+      "optionDecodeConsumedBytes": 800,
+      "referenceDecodeConsumedBytes": 11634
+    },
+    {
+      "version": "candidate98",
+      "module": "YeManFanBackend",
+      "dllPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\bin\\YeManFanHost\\release_win-x64\\YeManFanBackend.dll",
+      "dllSha256": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a",
+      "pdbPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\bin\\YeManFanHost\\release_win-x64\\YeManFanBackend.pdb",
+      "pdbSha256": "ab47898999f66e9cc13060231d62e7033693eb2a708f9fad637a227bde739bbe",
+      "codeViewGuid": "b27e0988-ac1d-43fb-bb3a-1ff96908d7ec",
+      "stamp": 4194333629,
+      "pairVerified": true,
+      "documents": [
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\fan-backend\\Asus\\AsusFanBackendController.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "8cae7c7611fb46686d3b5a4d2c7be6ead9ee4c3b17955e9ec0c00afdd222d303"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\fan-backend\\Asus\\AsusFanBackendReceipts.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "2f00a3f2178d5713b73696595533bbb5df89bce41e2f7693bb1b12454af5afe2"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\fan-backend\\Asus\\AsusFanBackendTransport.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "cbf4100fbbc5fe412874366540d81bd07106eea8b65342d2c04146d136d851de"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\FanLab\\fan-backend\\Asus\\AsusFanCurveWriter.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "14b09f20ee7ea896ad825ab9fa3c06b135cd24673c07ae15608a50fb4bb03f56"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\capabilities\\HcDeviceCapabilityCatalog.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "302c74563432feae0be5189295b879dccb02094cd61fbfc80f17166717c810d6"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\capabilities\\HcDeviceCapabilityCatalog.generated.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\capabilities\\FanCapabilityCatalog.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "46453519448799a09196fd376cd9a9c42b4545bde5be5951d92a51c0274af370"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\source\\capabilities\\AsusFanCapabilitySession.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "995faafbcf97d6c1ff7d9abb5c19513fc8ea7bcb003cba2474f63f7c3f26c059"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\obj\\YeManFanBackend\\release\\.NETCoreApp,Version=v10.0.AssemblyAttributes.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "93d67476196ebfc80d1d7d8844b91146cfd678d105f5ce635eb900ca40610c9b"
+        },
+        {
+          "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build\\obj\\YeManFanBackend\\release\\YeManFanBackend.AssemblyInfo.cs",
+          "algorithm": "8829d00f-11b8-4213-878b-770e8597ac16",
+          "checksum": "cb535e9f99b477888b7ae877c223a651d00ad813fac91d1a968b086aceed2064"
+        }
+      ],
+      "compilationOptions": {
+        "version": "2",
+        "compiler-version": "5.9.0-1.26379.115+14fbf8d5271c98133561eb55185fdb05b286f578",
+        "language": "C#",
+        "source-file-count": "10",
+        "output-kind": "DynamicallyLinkedLibrary",
+        "optimization": "release",
+        "platform": "AnyCpu",
+        "runtime-version": "10.0.11-servicing.26373.116+e2f47b0110ed922f21a1522da67279133ce28f32",
+        "language-version": "14.0",
+        "nullable": "Enable",
+        "define": "TRACE,RELEASE,NET,NET10_0,NETCOREAPP,NET5_0_OR_GREATER,NET6_0_OR_GREATER,NET7_0_OR_GREATER,NET8_0_OR_GREATER,NET9_0_OR_GREATER,NET10_0_OR_GREATER,NETCOREAPP1_0_OR_GREATER,NETCOREAPP1_1_OR_GREATER,NETCOREAPP2_0_OR_GREATER,NETCOREAPP2_1_OR_GREATER,NETCOREAPP2_2_OR_GREATER,NETCOREAPP3_0_OR_GREATER,NETCOREAPP3_1_OR_GREATER"
+      },
+      "references": [
+        {
+          "fileName": "Microsoft.CSharp.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4210238791,
+          "sizeOfImage": 32768,
+          "mvid": "93c81622-5663-4202-afa7-e64abbdec360"
+        },
+        {
+          "fileName": "Microsoft.VisualBasic.Core.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2979986420,
+          "sizeOfImage": 73728,
+          "mvid": "09922e26-9ae6-4bcf-971f-d2f2e2b655f4"
+        },
+        {
+          "fileName": "Microsoft.VisualBasic.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2466525635,
+          "sizeOfImage": 32768,
+          "mvid": "6b2be6d1-a944-43e3-900d-36d449e19417"
+        },
+        {
+          "fileName": "Microsoft.Win32.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3128668287,
+          "sizeOfImage": 32768,
+          "mvid": "a01981be-c1b3-43c8-8c42-46156db4a1a0"
+        },
+        {
+          "fileName": "Microsoft.Win32.Registry.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4283490744,
+          "sizeOfImage": 40960,
+          "mvid": "d4992af0-826a-4dc8-b833-91379c91555b"
+        },
+        {
+          "fileName": "mscorlib.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3874008643,
+          "sizeOfImage": 73728,
+          "mvid": "eb9cfee1-179f-4223-baea-cf81832fcbc2"
+        },
+        {
+          "fileName": "netstandard.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2302909570,
+          "sizeOfImage": 114688,
+          "mvid": "9b152b6b-21e9-49b8-817e-a51db91b6132"
+        },
+        {
+          "fileName": "System.AppContext.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3468727931,
+          "sizeOfImage": 32768,
+          "mvid": "67af1e2d-c41d-474c-baab-348f837aedfb"
+        },
+        {
+          "fileName": "System.Buffers.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2958999245,
+          "sizeOfImage": 32768,
+          "mvid": "2a8c66d0-d885-4a65-b66b-720090626a46"
+        },
+        {
+          "fileName": "System.Collections.Concurrent.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2578243511,
+          "sizeOfImage": 40960,
+          "mvid": "c9887048-96a9-4715-a596-94c0e1a5d5ab"
+        },
+        {
+          "fileName": "System.Collections.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3816570260,
+          "sizeOfImage": 73728,
+          "mvid": "e6f67cc5-ec6b-407a-ae54-e4685e923394"
+        },
+        {
+          "fileName": "System.Collections.Immutable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2308329071,
+          "sizeOfImage": 90112,
+          "mvid": "e1f8cdd3-70c3-4ccc-a77a-b6063c81effa"
+        },
+        {
+          "fileName": "System.Collections.NonGeneric.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4169588462,
+          "sizeOfImage": 40960,
+          "mvid": "dec88385-cf17-4bc3-8873-fe5329699e52"
+        },
+        {
+          "fileName": "System.Collections.Specialized.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3864390321,
+          "sizeOfImage": 40960,
+          "mvid": "51f123c8-f259-43bf-8891-3004ef3304e1"
+        },
+        {
+          "fileName": "System.ComponentModel.Annotations.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3947763815,
+          "sizeOfImage": 49152,
+          "mvid": "dc90d704-5d86-4887-bb53-e97facfc3e0f"
+        },
+        {
+          "fileName": "System.ComponentModel.DataAnnotations.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2741408179,
+          "sizeOfImage": 32768,
+          "mvid": "67247809-55d6-49fb-b156-56e39bfe4c3d"
+        },
+        {
+          "fileName": "System.ComponentModel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4086483135,
+          "sizeOfImage": 32768,
+          "mvid": "8409520f-d862-4019-b67e-19c884a5ce93"
+        },
+        {
+          "fileName": "System.ComponentModel.EventBasedAsync.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2801036163,
+          "sizeOfImage": 32768,
+          "mvid": "2b16078e-c184-42f9-8a00-8d2a5cee34f9"
+        },
+        {
+          "fileName": "System.ComponentModel.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4189319707,
+          "sizeOfImage": 40960,
+          "mvid": "ec8f7421-b4a5-4941-838b-ef79674206c4"
+        },
+        {
+          "fileName": "System.ComponentModel.TypeConverter.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3553044993,
+          "sizeOfImage": 122880,
+          "mvid": "b5c42454-8685-4c75-ad5f-fa92be2e2c92"
+        },
+        {
+          "fileName": "System.Configuration.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3775402313,
+          "sizeOfImage": 32768,
+          "mvid": "7876281c-e77b-495a-9f1c-1a4fb5f2e7f9"
+        },
+        {
+          "fileName": "System.Console.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3478878338,
+          "sizeOfImage": 40960,
+          "mvid": "23dd6bab-95f9-4dc4-9dfc-c8793504e052"
+        },
+        {
+          "fileName": "System.Core.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2218684822,
+          "sizeOfImage": 40960,
+          "mvid": "77fe8ae9-dc51-457c-b630-8dd512696c63"
+        },
+        {
+          "fileName": "System.Data.Common.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2220262275,
+          "sizeOfImage": 172032,
+          "mvid": "ccabc500-2f7a-4a3e-9d91-b2dacf49af1f"
+        },
+        {
+          "fileName": "System.Data.DataSetExtensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3062374327,
+          "sizeOfImage": 32768,
+          "mvid": "f3bf9cc0-6fc2-45c7-83e7-7e7bddfed621"
+        },
+        {
+          "fileName": "System.Data.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3950194154,
+          "sizeOfImage": 40960,
+          "mvid": "d7f88646-9311-44e3-b971-34abd78d20bd"
+        },
+        {
+          "fileName": "System.Diagnostics.Contracts.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3310679350,
+          "sizeOfImage": 32768,
+          "mvid": "7182ff06-b118-471d-a5b5-4daeec32fca4"
+        },
+        {
+          "fileName": "System.Diagnostics.Debug.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3792005548,
+          "sizeOfImage": 32768,
+          "mvid": "bf773efe-92c1-48b0-8392-036063ae3c72"
+        },
+        {
+          "fileName": "System.Diagnostics.DiagnosticSource.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2977795089,
+          "sizeOfImage": 57344,
+          "mvid": "43e353e6-b140-405f-a749-b78d9fe86513"
+        },
+        {
+          "fileName": "System.Diagnostics.FileVersionInfo.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4281717213,
+          "sizeOfImage": 32768,
+          "mvid": "cda7e720-e777-44bc-b319-5e0834590831"
+        },
+        {
+          "fileName": "System.Diagnostics.Process.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4172258465,
+          "sizeOfImage": 49152,
+          "mvid": "0b19f100-8cdb-40c7-96ad-06bb1ed2e8f3"
+        },
+        {
+          "fileName": "System.Diagnostics.StackTrace.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3899963554,
+          "sizeOfImage": 40960,
+          "mvid": "e825d5a8-7e16-4443-a056-8305bfba1b8e"
+        },
+        {
+          "fileName": "System.Diagnostics.TextWriterTraceListener.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3521176856,
+          "sizeOfImage": 32768,
+          "mvid": "491e2436-2969-443b-a8fa-a5e5eb2f98ff"
+        },
+        {
+          "fileName": "System.Diagnostics.Tools.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3041003261,
+          "sizeOfImage": 32768,
+          "mvid": "e7cdb2ed-fd96-4094-a358-1117d8e263fc"
+        },
+        {
+          "fileName": "System.Diagnostics.TraceSource.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3224132914,
+          "sizeOfImage": 40960,
+          "mvid": "405abc89-88b9-4334-bbee-8707af84416a"
+        },
+        {
+          "fileName": "System.Diagnostics.Tracing.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2515518024,
+          "sizeOfImage": 40960,
+          "mvid": "eb3cd0f3-e67d-438c-bff0-17b1ff2a7e35"
+        },
+        {
+          "fileName": "System.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3398454260,
+          "sizeOfImage": 65536,
+          "mvid": "ffeedb34-7d54-4ad2-a5a8-f2ebf66db207"
+        },
+        {
+          "fileName": "System.Drawing.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2493434214,
+          "sizeOfImage": 32768,
+          "mvid": "f84ac37c-9d19-4470-a121-a2e369329fc9"
+        },
+        {
+          "fileName": "System.Drawing.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2464497791,
+          "sizeOfImage": 49152,
+          "mvid": "239af802-ea3f-4942-a842-47202b7cf774"
+        },
+        {
+          "fileName": "System.Dynamic.Runtime.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2165681934,
+          "sizeOfImage": 32768,
+          "mvid": "5bdfd9e0-4d93-4267-aed0-76ec9e45614b"
+        },
+        {
+          "fileName": "System.Formats.Asn1.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2698346343,
+          "sizeOfImage": 40960,
+          "mvid": "2021bf38-df7b-45cc-863f-974cff7b6b7e"
+        },
+        {
+          "fileName": "System.Formats.Tar.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3293791887,
+          "sizeOfImage": 32768,
+          "mvid": "3e007e8d-12b0-4ffc-ab73-81911c2e31cf"
+        },
+        {
+          "fileName": "System.Globalization.Calendars.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3527722985,
+          "sizeOfImage": 32768,
+          "mvid": "4fc23d96-66e4-4459-8910-7b2db466c838"
+        },
+        {
+          "fileName": "System.Globalization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2782521414,
+          "sizeOfImage": 32768,
+          "mvid": "452c64bd-c8a7-43a2-987e-5cf2c92a3d4f"
+        },
+        {
+          "fileName": "System.Globalization.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4293335747,
+          "sizeOfImage": 32768,
+          "mvid": "18eac32e-c7d1-4904-82a2-fff3eb611faf"
+        },
+        {
+          "fileName": "System.IO.Compression.Brotli.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3646280392,
+          "sizeOfImage": 32768,
+          "mvid": "93957590-5cee-493f-963a-05c740a1ef9b"
+        },
+        {
+          "fileName": "System.IO.Compression.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3203597735,
+          "sizeOfImage": 40960,
+          "mvid": "23380654-8c18-4a72-9ee2-df8241fd9cdf"
+        },
+        {
+          "fileName": "System.IO.Compression.FileSystem.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4143992225,
+          "sizeOfImage": 32768,
+          "mvid": "1ef6d222-5f8f-483f-bd39-77e14a5ef0cd"
+        },
+        {
+          "fileName": "System.IO.Compression.ZipFile.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3684402638,
+          "sizeOfImage": 32768,
+          "mvid": "e1441732-9f57-477e-ba74-65d213d7b6ab"
+        },
+        {
+          "fileName": "System.IO.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3933822860,
+          "sizeOfImage": 32768,
+          "mvid": "1cd92bfe-d408-4cba-b743-74b5776e8f96"
+        },
+        {
+          "fileName": "System.IO.FileSystem.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3782793552,
+          "sizeOfImage": 32768,
+          "mvid": "7e6ac8e9-bf4a-4cde-b482-26b42bcaef0c"
+        },
+        {
+          "fileName": "System.IO.FileSystem.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2543241466,
+          "sizeOfImage": 32768,
+          "mvid": "97d34fcd-203e-4b8a-acff-0b8cc5de6100"
+        },
+        {
+          "fileName": "System.IO.FileSystem.DriveInfo.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3590207325,
+          "sizeOfImage": 32768,
+          "mvid": "95ed199e-f47d-4694-a39b-0782ecd6897e"
+        },
+        {
+          "fileName": "System.IO.FileSystem.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3639033737,
+          "sizeOfImage": 32768,
+          "mvid": "78878e67-d29e-4d50-9569-b48396efd2df"
+        },
+        {
+          "fileName": "System.IO.FileSystem.Watcher.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3379382257,
+          "sizeOfImage": 32768,
+          "mvid": "ac6f11de-32a2-4908-9cad-aa3bce563d4c"
+        },
+        {
+          "fileName": "System.IO.IsolatedStorage.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2361521362,
+          "sizeOfImage": 40960,
+          "mvid": "258f633a-9b95-44a2-84c6-f064835291a5"
+        },
+        {
+          "fileName": "System.IO.MemoryMappedFiles.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3552312838,
+          "sizeOfImage": 32768,
+          "mvid": "53230d8e-3037-46a1-9b8d-4cd38423bcf3"
+        },
+        {
+          "fileName": "System.IO.Pipelines.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3587419002,
+          "sizeOfImage": 32768,
+          "mvid": "1db4dadc-45fa-46f6-8abc-bf78f2a66687"
+        },
+        {
+          "fileName": "System.IO.Pipes.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2470175913,
+          "sizeOfImage": 32768,
+          "mvid": "464c98c1-fd23-4349-bdeb-0e0f78d51b7b"
+        },
+        {
+          "fileName": "System.IO.Pipes.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3797118908,
+          "sizeOfImage": 40960,
+          "mvid": "e52360b1-a015-47a7-b8f6-761d7d8feccd"
+        },
+        {
+          "fileName": "System.IO.UnmanagedMemoryStream.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4252630986,
+          "sizeOfImage": 32768,
+          "mvid": "8956a7cf-d95b-48b7-b3d9-56b55d368ab2"
+        },
+        {
+          "fileName": "System.Linq.AsyncEnumerable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2549708916,
+          "sizeOfImage": 49152,
+          "mvid": "3f259bbc-1b1d-459a-9a41-63d42a006196"
+        },
+        {
+          "fileName": "System.Linq.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3777263924,
+          "sizeOfImage": 49152,
+          "mvid": "0eccabf1-cb79-4fd8-83f6-c9ee38bba6ce"
+        },
+        {
+          "fileName": "System.Linq.Expressions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3059931455,
+          "sizeOfImage": 81920,
+          "mvid": "90f96e65-70f4-4003-8ad8-b616015d2284"
+        },
+        {
+          "fileName": "System.Linq.Parallel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3621988676,
+          "sizeOfImage": 49152,
+          "mvid": "a96dc180-9e00-4216-98a9-11878e9f3429"
+        },
+        {
+          "fileName": "System.Linq.Queryable.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4242882041,
+          "sizeOfImage": 49152,
+          "mvid": "ab76b03c-c00e-4060-84af-ae24667e6e52"
+        },
+        {
+          "fileName": "System.Memory.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3143385226,
+          "sizeOfImage": 73728,
+          "mvid": "4c07ed71-7c39-4ebd-8b71-aebebe042150"
+        },
+        {
+          "fileName": "System.Net.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4020082964,
+          "sizeOfImage": 32768,
+          "mvid": "ac3facd8-ec3c-4a81-8314-6390cb5e10b9"
+        },
+        {
+          "fileName": "System.Net.Http.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4017510063,
+          "sizeOfImage": 73728,
+          "mvid": "56a523a3-68b3-4438-bb90-9814e12d1a9b"
+        },
+        {
+          "fileName": "System.Net.Http.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3908668925,
+          "sizeOfImage": 40960,
+          "mvid": "d1d5f025-d78c-49b7-9055-7c2723bf0b07"
+        },
+        {
+          "fileName": "System.Net.HttpListener.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3613986318,
+          "sizeOfImage": 40960,
+          "mvid": "3e41302e-9119-4b32-9d9a-2dfc314affa5"
+        },
+        {
+          "fileName": "System.Net.Mail.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2226849740,
+          "sizeOfImage": 49152,
+          "mvid": "b757f5bf-bb54-451a-b987-d1b96e7a5471"
+        },
+        {
+          "fileName": "System.Net.NameResolution.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4109238271,
+          "sizeOfImage": 32768,
+          "mvid": "cf695b6c-f056-4264-a990-e63e1576bad4"
+        },
+        {
+          "fileName": "System.Net.NetworkInformation.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4009795198,
+          "sizeOfImage": 49152,
+          "mvid": "fda08119-34c5-45bc-89fc-7e6a0c367472"
+        },
+        {
+          "fileName": "System.Net.Ping.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3569865729,
+          "sizeOfImage": 32768,
+          "mvid": "7a320c70-c7da-4548-97bd-f2454c7d11d5"
+        },
+        {
+          "fileName": "System.Net.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3498377240,
+          "sizeOfImage": 49152,
+          "mvid": "850c9631-d99a-47eb-8f78-80abb1a042d1"
+        },
+        {
+          "fileName": "System.Net.Quic.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3254033579,
+          "sizeOfImage": 40960,
+          "mvid": "996ff5f1-3119-4193-a0c6-ae62aabc1174"
+        },
+        {
+          "fileName": "System.Net.Requests.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4276594498,
+          "sizeOfImage": 57344,
+          "mvid": "36c3cf18-1c20-4749-8114-bbaea5e09ee7"
+        },
+        {
+          "fileName": "System.Net.Security.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3907462580,
+          "sizeOfImage": 65536,
+          "mvid": "f816f570-d1ac-4da0-915c-315978f76f4a"
+        },
+        {
+          "fileName": "System.Net.ServerSentEvents.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3054713196,
+          "sizeOfImage": 32768,
+          "mvid": "a965e9ab-8113-488e-80e0-0cc4fdbfab5e"
+        },
+        {
+          "fileName": "System.Net.ServicePoint.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4054278152,
+          "sizeOfImage": 32768,
+          "mvid": "d5751882-8a07-4fe1-bdda-453467bb6a3f"
+        },
+        {
+          "fileName": "System.Net.Sockets.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4173620815,
+          "sizeOfImage": 65536,
+          "mvid": "e1189cfa-e1cd-4723-9df9-23352bfd47a4"
+        },
+        {
+          "fileName": "System.Net.WebClient.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3286052098,
+          "sizeOfImage": 40960,
+          "mvid": "691da5c7-3730-420a-a59a-e8e072457f7b"
+        },
+        {
+          "fileName": "System.Net.WebHeaderCollection.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3551686754,
+          "sizeOfImage": 32768,
+          "mvid": "cab63fff-0a21-4879-9718-29d7efdf725b"
+        },
+        {
+          "fileName": "System.Net.WebProxy.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3011331914,
+          "sizeOfImage": 32768,
+          "mvid": "8eed575b-1ab9-4d59-b6a8-f0fc26234ec0"
+        },
+        {
+          "fileName": "System.Net.WebSockets.Client.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2413393818,
+          "sizeOfImage": 32768,
+          "mvid": "77be2a72-3252-49a7-8312-87b6b38dc9a0"
+        },
+        {
+          "fileName": "System.Net.WebSockets.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2831794425,
+          "sizeOfImage": 40960,
+          "mvid": "a9e50901-50e0-4fba-9362-5aa28b6f7390"
+        },
+        {
+          "fileName": "System.Numerics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3893724069,
+          "sizeOfImage": 32768,
+          "mvid": "efee03bb-1079-4924-9942-0148091d8e29"
+        },
+        {
+          "fileName": "System.Numerics.Vectors.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2845117954,
+          "sizeOfImage": 73728,
+          "mvid": "4cfd003e-1dd9-4bfe-8fd2-277ab68adb32"
+        },
+        {
+          "fileName": "System.ObjectModel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3432661829,
+          "sizeOfImage": 40960,
+          "mvid": "a76d0c83-fdca-4bdf-87b5-b9fd1b753d04"
+        },
+        {
+          "fileName": "System.Reflection.DispatchProxy.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2522055608,
+          "sizeOfImage": 32768,
+          "mvid": "8a0201c9-6413-4281-9734-80378fd2c60a"
+        },
+        {
+          "fileName": "System.Reflection.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4111571932,
+          "sizeOfImage": 32768,
+          "mvid": "7700e268-cee1-4ebe-aa86-fdd0cd7172ba"
+        },
+        {
+          "fileName": "System.Reflection.Emit.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4134589120,
+          "sizeOfImage": 57344,
+          "mvid": "f15018b7-3ce0-415c-a2df-486b15461444"
+        },
+        {
+          "fileName": "System.Reflection.Emit.ILGeneration.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3009270105,
+          "sizeOfImage": 32768,
+          "mvid": "f348471f-533a-453d-a6c2-f785073adf78"
+        },
+        {
+          "fileName": "System.Reflection.Emit.Lightweight.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3601764109,
+          "sizeOfImage": 32768,
+          "mvid": "5489483d-e253-4178-a6ce-5b004701e40a"
+        },
+        {
+          "fileName": "System.Reflection.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2890855212,
+          "sizeOfImage": 32768,
+          "mvid": "949c39b8-fde5-4542-804d-109053414d9a"
+        },
+        {
+          "fileName": "System.Reflection.Metadata.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3140250474,
+          "sizeOfImage": 139264,
+          "mvid": "bc759ae2-cb41-4123-84c6-92dc135c0d14"
+        },
+        {
+          "fileName": "System.Reflection.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2395262883,
+          "sizeOfImage": 40960,
+          "mvid": "bceb659e-4b63-40f2-86ab-74a9760e4294"
+        },
+        {
+          "fileName": "System.Reflection.TypeExtensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3094237999,
+          "sizeOfImage": 32768,
+          "mvid": "a33024c3-ef8f-461c-9fa4-dcf8ccfba475"
+        },
+        {
+          "fileName": "System.Resources.Reader.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3467225949,
+          "sizeOfImage": 32768,
+          "mvid": "050b08cf-0a2f-4d2f-8ca1-11db92cb212f"
+        },
+        {
+          "fileName": "System.Resources.ResourceManager.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3515945378,
+          "sizeOfImage": 32768,
+          "mvid": "f13230c8-bfc6-4d47-bb58-1b2cf042b568"
+        },
+        {
+          "fileName": "System.Resources.Writer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2744680360,
+          "sizeOfImage": 32768,
+          "mvid": "e84e6eb7-b1ba-4374-8352-6e748839b009"
+        },
+        {
+          "fileName": "System.Runtime.CompilerServices.Unsafe.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3624611807,
+          "sizeOfImage": 32768,
+          "mvid": "1feba919-cee9-4fa1-9b57-815d1dae94bd"
+        },
+        {
+          "fileName": "System.Runtime.CompilerServices.VisualC.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2149654608,
+          "sizeOfImage": 32768,
+          "mvid": "e49b69e0-bbe5-4981-ac1d-b3f5647a82b5"
+        },
+        {
+          "fileName": "System.Runtime.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2665900664,
+          "sizeOfImage": 876544,
+          "mvid": "327ec015-a94d-416b-b6c6-d8e40902a854"
+        },
+        {
+          "fileName": "System.Runtime.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4203222461,
+          "sizeOfImage": 32768,
+          "mvid": "5cdb415d-799b-4e94-a45f-92af0ea79d52"
+        },
+        {
+          "fileName": "System.Runtime.Handles.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3202512183,
+          "sizeOfImage": 32768,
+          "mvid": "3369745a-d243-43db-81f2-dcba2542f4a0"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3301882118,
+          "sizeOfImage": 114688,
+          "mvid": "8d744be1-f2cd-4777-87e7-b033763eceb6"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.JavaScript.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4002252427,
+          "sizeOfImage": 40960,
+          "mvid": "a961c534-28ea-48db-9a6f-284a76834896"
+        },
+        {
+          "fileName": "System.Runtime.InteropServices.RuntimeInformation.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3621600745,
+          "sizeOfImage": 32768,
+          "mvid": "c4455559-dcb9-4157-8787-b17bf5360eed"
+        },
+        {
+          "fileName": "System.Runtime.Intrinsics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2991795000,
+          "sizeOfImage": 483328,
+          "mvid": "daf06479-2b9a-454d-8df6-ccb212415a71"
+        },
+        {
+          "fileName": "System.Runtime.Loader.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3067589644,
+          "sizeOfImage": 32768,
+          "mvid": "6b89ba6f-a78f-4c57-838d-6d962c42b2c4"
+        },
+        {
+          "fileName": "System.Runtime.Numerics.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3286262683,
+          "sizeOfImage": 49152,
+          "mvid": "cdacaf54-69f9-4a64-8c32-6571047dc539"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2891685066,
+          "sizeOfImage": 32768,
+          "mvid": "cecbd82a-2929-43c9-8c05-fea8a3c48c70"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Formatters.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3324979297,
+          "sizeOfImage": 40960,
+          "mvid": "f55a8366-a119-4294-be0d-479d674394d0"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2411588198,
+          "sizeOfImage": 32768,
+          "mvid": "e8a1a70f-fe01-439d-a85c-64e772151b73"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2889564116,
+          "sizeOfImage": 32768,
+          "mvid": "2688df45-3fa5-4ab6-a0ac-db83206c16a5"
+        },
+        {
+          "fileName": "System.Runtime.Serialization.Xml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2616190864,
+          "sizeOfImage": 57344,
+          "mvid": "aaab62ca-c634-4097-a772-3222dc6a5ce8"
+        },
+        {
+          "fileName": "System.Security.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2980314766,
+          "sizeOfImage": 49152,
+          "mvid": "7ea45b0f-056c-49fe-8495-e0993db8e9f3"
+        },
+        {
+          "fileName": "System.Security.Claims.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4086188276,
+          "sizeOfImage": 49152,
+          "mvid": "d70a9d27-9481-41b6-9040-8de9c67e2245"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Algorithms.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2780149568,
+          "sizeOfImage": 32768,
+          "mvid": "717bc0c6-3eb9-4ab6-b6c0-c9dc2f6fe202"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Cng.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3700997495,
+          "sizeOfImage": 32768,
+          "mvid": "1142c577-0cb5-4f54-b47f-258160220669"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Csp.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2194790697,
+          "sizeOfImage": 32768,
+          "mvid": "e1093922-6a1b-40e2-898f-484a010338c5"
+        },
+        {
+          "fileName": "System.Security.Cryptography.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2615421632,
+          "sizeOfImage": 180224,
+          "mvid": "ddf9c551-14f4-48b7-83d0-296d90ba4605"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Encoding.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3844718123,
+          "sizeOfImage": 32768,
+          "mvid": "5a3b6665-ac3c-4953-9ef7-1b9eeed12634"
+        },
+        {
+          "fileName": "System.Security.Cryptography.OpenSsl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3165653899,
+          "sizeOfImage": 32768,
+          "mvid": "e57b49ce-6e76-4b1e-a3a6-7cd79dffd5a8"
+        },
+        {
+          "fileName": "System.Security.Cryptography.Primitives.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2829631817,
+          "sizeOfImage": 32768,
+          "mvid": "5651a72a-6523-4631-bd4d-5da2934e0933"
+        },
+        {
+          "fileName": "System.Security.Cryptography.X509Certificates.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2283841279,
+          "sizeOfImage": 32768,
+          "mvid": "9c10d24c-1c18-42f2-ac29-b39e550d4b7d"
+        },
+        {
+          "fileName": "System.Security.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3133597695,
+          "sizeOfImage": 32768,
+          "mvid": "538f6e59-0a79-43f6-b5d4-cc40906944d6"
+        },
+        {
+          "fileName": "System.Security.Principal.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3196369945,
+          "sizeOfImage": 32768,
+          "mvid": "0fc9a9c7-18ca-4467-b27c-6dac3a747066"
+        },
+        {
+          "fileName": "System.Security.Principal.Windows.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2239519897,
+          "sizeOfImage": 40960,
+          "mvid": "a001c7b9-4c8c-4ecc-8c6b-411ccd80a022"
+        },
+        {
+          "fileName": "System.Security.SecureString.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3503435030,
+          "sizeOfImage": 32768,
+          "mvid": "2ceb62f7-f5a1-4265-b2b8-8586cbe5a1d6"
+        },
+        {
+          "fileName": "System.ServiceModel.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3273291195,
+          "sizeOfImage": 32768,
+          "mvid": "2e2b9952-901b-49fa-ae75-f661a47af6ac"
+        },
+        {
+          "fileName": "System.ServiceProcess.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3891775304,
+          "sizeOfImage": 32768,
+          "mvid": "4029e2a4-579e-4437-a0a2-14e20535a581"
+        },
+        {
+          "fileName": "System.Text.Encoding.CodePages.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3704893455,
+          "sizeOfImage": 32768,
+          "mvid": "7888a78d-cd73-4cb3-b1e2-7326b5f3d7b8"
+        },
+        {
+          "fileName": "System.Text.Encoding.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3505548325,
+          "sizeOfImage": 32768,
+          "mvid": "60bf859d-5832-4c2c-9ab9-cf5e24064eb6"
+        },
+        {
+          "fileName": "System.Text.Encoding.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3821294168,
+          "sizeOfImage": 32768,
+          "mvid": "2ae185e1-23fc-4d7f-85be-718dbd4764d9"
+        },
+        {
+          "fileName": "System.Text.Encodings.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3932318979,
+          "sizeOfImage": 40960,
+          "mvid": "c0112b88-aa50-4864-9e76-3c508c9241f6"
+        },
+        {
+          "fileName": "System.Text.Json.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2802409268,
+          "sizeOfImage": 98304,
+          "mvid": "bc56a2bc-305a-42bf-aa98-3dbc4948d82e"
+        },
+        {
+          "fileName": "System.Text.RegularExpressions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3004540941,
+          "sizeOfImage": 49152,
+          "mvid": "2b8638bf-c437-4e84-9c86-ccae039cdb7d"
+        },
+        {
+          "fileName": "System.Threading.AccessControl.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3763699567,
+          "sizeOfImage": 32768,
+          "mvid": "40217e03-5341-4e39-b3f5-31c142299a1a"
+        },
+        {
+          "fileName": "System.Threading.Channels.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3700667845,
+          "sizeOfImage": 32768,
+          "mvid": "1ce2009e-b10c-4664-aa9d-e7a71d950c33"
+        },
+        {
+          "fileName": "System.Threading.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2746077318,
+          "sizeOfImage": 49152,
+          "mvid": "849f3947-71cb-4fbd-80dc-f263af153d80"
+        },
+        {
+          "fileName": "System.Threading.Overlapped.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3247498641,
+          "sizeOfImage": 32768,
+          "mvid": "6cf02e5d-eb23-4ab1-b945-f34d9cdd7c91"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Dataflow.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2573864560,
+          "sizeOfImage": 49152,
+          "mvid": "60c2c013-1a91-443b-bd1b-4309268ead8a"
+        },
+        {
+          "fileName": "System.Threading.Tasks.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2779649935,
+          "sizeOfImage": 32768,
+          "mvid": "b08337b9-51e3-4b04-b22b-370b2c26882f"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Extensions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3014839612,
+          "sizeOfImage": 32768,
+          "mvid": "dc570003-f4ba-46c6-a444-b478260d784d"
+        },
+        {
+          "fileName": "System.Threading.Tasks.Parallel.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4102353172,
+          "sizeOfImage": 32768,
+          "mvid": "79aeef63-37d4-423b-a2fe-1c106aa22d02"
+        },
+        {
+          "fileName": "System.Threading.Thread.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4289286477,
+          "sizeOfImage": 40960,
+          "mvid": "e3a8fa87-aaa3-4860-a358-67bfbade0d40"
+        },
+        {
+          "fileName": "System.Threading.ThreadPool.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2422747750,
+          "sizeOfImage": 32768,
+          "mvid": "a97ac91c-8528-42c0-b660-4edde038ebb9"
+        },
+        {
+          "fileName": "System.Threading.Timer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3960765671,
+          "sizeOfImage": 32768,
+          "mvid": "ed3f4a1c-a1dd-486d-877e-9a04ecce2db5"
+        },
+        {
+          "fileName": "System.Transactions.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3174415027,
+          "sizeOfImage": 32768,
+          "mvid": "2a71091d-5655-4452-bdda-d569efe2ff71"
+        },
+        {
+          "fileName": "System.Transactions.Local.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2625090922,
+          "sizeOfImage": 40960,
+          "mvid": "94db7f16-7927-452a-b359-5569bedd4e3b"
+        },
+        {
+          "fileName": "System.ValueTuple.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3770552724,
+          "sizeOfImage": 32768,
+          "mvid": "dda4fb01-120a-44cf-a494-621575806e7f"
+        },
+        {
+          "fileName": "System.Web.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2727751574,
+          "sizeOfImage": 32768,
+          "mvid": "87b38ab7-3e9d-4895-a4ae-02017afcbfa1"
+        },
+        {
+          "fileName": "System.Web.HttpUtility.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2612768084,
+          "sizeOfImage": 32768,
+          "mvid": "0a71c368-36c4-4f1d-a85f-802a6df8b1bb"
+        },
+        {
+          "fileName": "System.Windows.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2819760609,
+          "sizeOfImage": 32768,
+          "mvid": "cf217246-e802-4a3e-9913-6f740182f1c3"
+        },
+        {
+          "fileName": "System.Xml.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3803626190,
+          "sizeOfImage": 40960,
+          "mvid": "684096c3-4ea0-4ca4-af07-d0385eeab49a"
+        },
+        {
+          "fileName": "System.Xml.Linq.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4058939378,
+          "sizeOfImage": 32768,
+          "mvid": "92c5a319-41e3-4e68-a9d3-74ffee15d57c"
+        },
+        {
+          "fileName": "System.Xml.ReaderWriter.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3025408205,
+          "sizeOfImage": 131072,
+          "mvid": "2c3e4068-a465-4d62-bf71-58a08a7311c5"
+        },
+        {
+          "fileName": "System.Xml.Serialization.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2521028026,
+          "sizeOfImage": 32768,
+          "mvid": "e82e9f26-7f3d-4c34-9ddf-22ec2f8a570d"
+        },
+        {
+          "fileName": "System.Xml.XDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4282147489,
+          "sizeOfImage": 49152,
+          "mvid": "f82ea2ff-c5e1-437d-9d7e-b801208cb93d"
+        },
+        {
+          "fileName": "System.Xml.XmlDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 4052945437,
+          "sizeOfImage": 32768,
+          "mvid": "ce4f3ab8-8e23-4206-bf09-1306d2a73809"
+        },
+        {
+          "fileName": "System.Xml.XmlSerializer.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2950451002,
+          "sizeOfImage": 65536,
+          "mvid": "bfd0500f-f75d-4283-9798-034329457568"
+        },
+        {
+          "fileName": "System.Xml.XPath.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2964590326,
+          "sizeOfImage": 32768,
+          "mvid": "d52d25bb-c747-4ed4-b518-4098dd9b9814"
+        },
+        {
+          "fileName": "System.Xml.XPath.XDocument.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 3752329691,
+          "sizeOfImage": 32768,
+          "mvid": "b98415b8-cf95-47d7-976f-7fef563febc7"
+        },
+        {
+          "fileName": "WindowsBase.dll",
+          "aliases": [],
+          "flags": 1,
+          "assembly": true,
+          "embedInteropTypes": false,
+          "coffTimestamp": 2200082367,
+          "sizeOfImage": 32768,
+          "mvid": "292ecf38-f900-4311-bf14-ccd231c7a143"
+        }
+      ],
+      "rawRecordSha256": {
+        "b5feec05-8cd0-4a83-96da-466284bb4bd8": "f0d04a1e37d24d83d5c265e76ee222aa946d0e520101402c82947a9f2d63fbfd",
+        "7e4d4708-096e-4c5c-aeda-cb10ba6a740d": "ef304d6c73a4b542ad4d617a8c6a58d9c7d58c0ef018a49015bed3a16c00fbd2"
+      },
+      "optionDecodeConsumedBytes": 644,
+      "referenceDecodeConsumedBytes": 9296
+    }
+  ]
+}

@@ -1,0 +1,183 @@
+#include "actual_pipe_leaves.hpp"
+#include "input_host_exit_retirement.h"
+#include "environment.hpp"
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef TerminateProcess
+#include <map>
+#include <objbase.h>
+#include "input_capture_completion.h"
+// OS windows/message/COM leaves are explicit in-memory ports, no User32/COM IO.
+static DWORD memoryMessageWait(DWORD count,const HANDLE* handles,DWORD,DWORD,DWORD){
+    if(count==1)return ::WaitForSingleObject(*handles,12000);
+    throw std::runtime_error("ensure needed a new wait cycle; stop diagnostic without inventing exit policy");
+}
+#define MsgWaitForMultipleObjectsEx memoryMessageWait
+#include "exit_cleanup_wait.h"
+#undef MsgWaitForMultipleObjectsEx
+@@EXIT_GLOBALS@@
+static std::vector<std::string> memoryLeaves;
+static std::atomic<unsigned> readyPosts{0};static unsigned captureStopCalls=0;
+static BOOL memoryIsWindow(HWND){return TRUE;}
+static BOOL memoryPostMessage(HWND,UINT,WPARAM,LPARAM){++readyPosts;return TRUE;}
+static BOOL memoryPeekMessage(MSG*,HWND,UINT,UINT,UINT){return FALSE;}
+static BOOL memoryTranslate(const MSG*){return FALSE;}
+static LRESULT memoryDispatch(const MSG*){return 0;}
+static HRESULT memoryCoInitialize(LPVOID,DWORD){return S_OK;}
+static void memoryCoUninitialize(){}
+static void leaf(const char* name){memoryLeaves.emplace_back(name);}
+struct NamedOwner {const char* name;void stop(){leaf(name);}void shutdown(){leaf(name);}};
+static NamedOwner g_optiCatalogStartup{"opti-catalog"},g_deckySidebarRuntime{"decky"},g_steamSettingsObserver{"steam-settings"},g_steamModeObserver{"steam-mode"},g_steamCssGuard{"steam-css-guard"},g_steamCssUse{"steam-css-use"};
+struct Watcher{};static std::map<int,Watcher*> g_watchers;
+static bool stopWatcher(Watcher*,DWORD){leaf("watcher");return true;}
+static void recoverySnapSetFanHandoffPending(bool){leaf("fan-handoff-snapshot");}
+static void fanLeaseKeepaliveShutdown(){leaf("fan-keepalive");}
+static int fanHostCleanupForAppExit(){leaf("fan-exit-handoff");return 0;}
+static const char* fanExitHandoffName(int){return "explicit-memory-noncontroller-handoff";}
+static void appendFanLifecycleLog(const char*,const json&){}
+static void oemVendorStackRestore(const char*){leaf("OEM-memory-not-physical-proof");}
+static void msiNativeForegroundExitCleanup(){leaf("MSI-foreground");}
+static void externalControllerPriorityShutdown(){leaf("external-priority");}
+static void oemBackMappingSetEnabled(bool){leaf("back-mapping");}
+static void msiWmiSetEnabled(bool){leaf("MSI-WMI");}
+static void msiDinputSetEnabled(bool){leaf("MSI-DInput-unarmed-memory-port");}
+static void hidHideSweepAllHiddenDevices(const char*){leaf("sweep-refused-unproven-controller-return");}
+static void sgStopWorkThread(DWORD){leaf("sleep-worker");}
+static void steamOriginalRecoveryShutdown(){leaf("steam-original-recovery");}
+static bool steamOriginalRecoveryStopped(){return true;}
+static void steamOriginalRecoveryRequestStop(){leaf("steam-recovery-request");}
+static void steamGameLinkShutdown(){leaf("steam-game-link");}
+static void poolStop(DWORD){leaf("worker-pool");}
+static void stopTdpDaemonForExit(){leaf("TDP");}
+static void stopTopMonitorForExit(DWORD){leaf("top-monitor");}
+static bool sgCleanupBeforeExit(bool){leaf("sleep-cleanup");return true;}
+static void inputHostRaiseExitFence(const char*){leaf("exit-fence-already-raised-before-fixture");}
+static void recoverySnapSetExitIntent(){leaf("exit-intent-already-raised");}
+struct RecoveryStateBusyGuard {explicit RecoveryStateBusyGuard(const char*){leaf("controller-recovery-busy-scope");}};
+struct InputHostVirtualIntentMutation{~InputHostVirtualIntentMutation(){leaf("virtual-intent-mutation-scope");}};
+static bool g_realStickTestAdmissionLogged=false;
+// Premise: capture's owned resources were already retired, independently of Host.
+// Actual receipt type/classifier, actual AwaitStop/ExitOwnershipReleased consume it.
+static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool){
+    ++captureStopCalls;ymcc::captureLifecycle::StopReceipt receipt;
+    receipt.generation=7;receipt.workerExited=true;receipt.workerHandleClosed=true;receipt.classify();return receipt;
+}
+constexpr UINT WM_APP_EXIT_READY=WM_USER+7;
+#define IsWindow memoryIsWindow
+#define PostMessageW memoryPostMessage
+#define PeekMessageW memoryPeekMessage
+#define TranslateMessage memoryTranslate
+#define DispatchMessageW memoryDispatch
+#define CoInitializeEx memoryCoInitialize
+#define CoUninitialize memoryCoUninitialize
+#define WaitForSingleObject osWait
+#define CloseHandle osClose
+#define TerminateProcess noKill
+@@PRODUCTION@@
+#undef IsWindow
+#undef PostMessageW
+#undef PeekMessageW
+#undef TranslateMessage
+#undef DispatchMessageW
+#undef CoInitializeEx
+#undef CoUninitialize
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef TerminateProcess
+@@PRIVATE_CHILD@@
+static bool open(HANDLE value){DWORD flags=0;return value&&GetHandleInformation(value,&flags)!=FALSE;}
+static json logData(const char* event){for(auto it=ports.logs.rbegin();it!=ports.logs.rend();++it)if(it->at("event")==event)return it->at("data");throw std::runtime_error("missing actual production log");}
+static json pipeSnapshot(){
+    auto* owner=ymcc::inputHost::pipeTransport::existingProcessRuntime();
+    if(!owner)return {{"ownerExists",false}};
+    const auto state=owner->snapshot();return {{"available",state.available},{"stopped",state.stopped},{"pending",state.pending},{"failedCloseDebt",state.failedCloseDebt},{"ownedOriginals",state.ownedOriginals},{"ownedDuplicates",state.ownedDuplicates},{"ownedEvents",state.ownedEvents}};
+}
+int wmain(int argc,wchar_t** argv){
+    if(argc==3&&std::wstring(argv[1])==L"--private-child"){
+        HANDLE event=reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(std::stoull(argv[2])));
+        const auto state=::WaitForSingleObject(event,30000);::CloseHandle(event);return state==WAIT_OBJECT_0?0:9;
+    }
+    json result;
+    try{
+        need(argc==2,"explicit current scenario required");const std::wstring scenario=argv[1];
+        const bool protectedDebt=scenario==L"protected-primary-pipe",healthy=scenario==L"healthy-ordinary";
+        need(healthy||protectedDebt||scenario==L"unprotected-uncooperative","unknown scenario");
+        Child child;const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release;
+        HANDLE processOracle=nullptr,primaryOracle=nullptr;
+        need(DuplicateHandle(GetCurrentProcess(),originalProcess,GetCurrentProcess(),&processOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"process oracle duplicate");
+        need(DuplicateHandle(GetCurrentProcess(),originalPrimary,GetCurrentProcess(),&primaryOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"primary oracle duplicate");
+        if(protectedDebt)need(SetHandleInformation(originalPrimary,HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE)!=FALSE,"fixture protect real primary");
+        auto& runtime=ymcc::inputHost::pipeTransport::processRuntime();
+        HANDLE pipe=memoryApi::source();DWORD error=0;bool taken=false;
+        need(runtime.adopt(pipe,L"exit-owned-private-pipe",error,&taken)&&taken,"real Runtime private handle admission");
+        if(protectedDebt)memoryApi::failRoles=memoryApi::Original;
+        ports=Ports{};ports.ack=healthy;ports.shutdownExits=healthy;ports.endpointAbsent=healthy;ports.childRelease=releaseEvent;
+        g_inputHostProcess=originalProcess;g_inputHostPrimaryThread=originalPrimary;g_inputHostServerPipe=pipe;
+        g_inputHostCreatedIdentity=ymcc::inputHost::exitRetirement::identity(originalProcess);need(g_inputHostCreatedIdentity.valid,"real creation identity");
+        g_inputHostExitForceSpent=false;g_inputHostExitOrdinaryStopAttempted=false;g_inputHostExitLocalReturned=false;
+        g_inputHostRunId="exit-owned-private-run";g_inputHostEpoch=801;g_inputHostEpochMirror=801;
+        g_inputHostStartupNonce="exit-owned-nonce";g_inputHostHostInstanceId="private-child-no-Host";g_inputHostPipeName=L"exit-owned-private-pipe";
+        g_inputHostBoundPersona="steamdeck";g_inputHostHello=true;g_inputHostPrepared=true;g_inputHostPrepareMayHaveReachedHost=true;
+        g_inputHostActive=true;g_inputHostNeutralized=true;g_hidHideVisibilityJournal.active=true;g_realStickTest.virtualTargetEnabled=true;
+        g_inputHostTransportFault=false;g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;
+        g_exitSessionId="native-exit-owned-current";g_exitRequested=true;g_inputHostExitFence=true;g_captureExitReleased=false;
+        g_hwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
+        need(tryStartExitCleanupWorker(g_hwnd),"actual cleanup worker creation");
+        HANDLE cleanupOracle=nullptr;need(DuplicateHandle(GetCurrentProcess(),g_exitCleanupThread,GetCurrentProcess(),&cleanupOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"cleanup observation duplicate");
+        json beforeRelief=nullptr;
+        if(protectedDebt){
+            const auto began=GetTickCount64();bool observed=false;
+            while(GetTickCount64()-began<12000){
+                if(std::strcmp(g_exitCleanupStage.load(std::memory_order_acquire),"input-local-return")==0){
+                    std::unique_lock<InputHostMutex> lock(g_inputHostMx);
+                    const auto state=runtime.snapshot();
+                    if(!g_inputHostProcess&&g_inputHostPrimaryThread==originalPrimary&&g_inputHostExitForceSpent&&state.available&&!state.stopped){
+                        beforeRelief={{"stage",g_exitCleanupStage.load()},{"cleanupWorkerStillRunning",::WaitForSingleObject(cleanupOracle,0)==WAIT_TIMEOUT},
+                          {"readyPosts",readyPosts.load()},{"cleanupCompleted",g_exitCleanupCompleted},{"localReturnedFlag",g_inputHostExitLocalReturned.load()},
+                          {"processOwnerClosed",g_inputHostProcess==nullptr},{"primarySameOwner",g_inputHostPrimaryThread==originalPrimary},{"pipeState",pipeSnapshot()},
+                          {"forceSpent",g_inputHostExitForceSpent},{"sameTuple",g_inputHostRunId=="exit-owned-private-run"&&g_inputHostEpoch==801},
+                          {"processExited",::WaitForSingleObject(processOracle,0)==WAIT_OBJECT_0},{"primaryThreadExited",::WaitForSingleObject(primaryOracle,0)==WAIT_OBJECT_0}};
+                        observed=true;
+                    }
+                }
+                if(observed)break;Sleep(10);
+            }
+            need(observed,"protected debt observation deadline; no synthetic completion");
+            need(beforeRelief.at("cleanupWorkerStillRunning")==true&&beforeRelief.at("readyPosts")==0&&beforeRelief.at("cleanupCompleted")==false&&beforeRelief.at("localReturnedFlag")==false&&beforeRelief.at("sameTuple")==true,"protected primary/pipe reported READY too soon");
+            need(!inputHostExitLocalOwnershipReleased(),"actual getter accepted protected debt");
+            // Relief removes only faults created by this fixture. The existing
+            // same worker/Runtime must close both owners; fixture closes neither.
+            {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+                need(SetHandleInformation(originalPrimary,HANDLE_FLAG_PROTECT_FROM_CLOSE,0)!=FALSE,"fixture remove primary protection");
+                memoryApi::failRoles=0;
+            }
+        }
+        inputCaptureEnsureExitOwner(0);
+        need(::WaitForSingleObject(cleanupOracle,0)==WAIT_OBJECT_0,"cleanup thread kernel exit");
+        need(::WaitForSingleObject(processOracle,0)==WAIT_OBJECT_0&&::WaitForSingleObject(primaryOracle,0)==WAIT_OBJECT_0,"production force process+primary kernel exit");
+        DWORD processCode=0,workerCode=99;need(GetExitCodeProcess(processOracle,&processCode)&&processCode==(healthy?0u:ERROR_PROCESS_ABORTED),"actual process termination code");
+        need(GetExitCodeThread(cleanupOracle,&workerCode)&&workerCode==0,"cleanup return code");
+        need(g_inputHostProcess==nullptr&&g_inputHostPrimaryThread==nullptr&&g_inputHostServerPipe==nullptr&&g_inputHostUnadoptedPipe==nullptr,"product left local handle owner");
+        const auto state=runtime.snapshot();need(state.available&&state.stopped&&memoryApi::live.empty(),"actual Runtime retained handle after ready");
+        need(inputHostExitLocalOwnershipReleased()&&g_exitCleanupCompleted&&g_exitCleanupThread==nullptr&&readyPosts.load()==1&&std::strcmp(g_exitCleanupStage.load(),"finished")==0,"actual parent did not consume local returned getter");
+        need(::WaitForSingleObject(releaseEvent,0)==(healthy?WAIT_OBJECT_0:WAIT_TIMEOUT),"private child protocol release premise");
+        unsigned forceReceipts=0;for(const auto& item:ports.logs)if(item.at("event")=="input-host-exit-ownership"&&item.at("data").at("forceAttempted")==true)++forceReceipts;
+        need(forceReceipts==(healthy?0u:1u),"force budget not expected zero/once");
+        const auto lastOwned=logData("input-host-exit-ownership");
+        result={{"scopedLocalOwnerPass",true},{"scenario",healthy?"healthy-ordinary":protectedDebt?"protected-primary-pipe":"unprotected-uncooperative"},
+          {"beforeFixtureFaultRelief",beforeRelief},{"actualExitCleanup",{{"stage",g_exitCleanupStage.load()},{"readyPosts",readyPosts.load()},{"cleanupCode",workerCode},{"cleanupCompleted",g_exitCleanupCompleted}}},
+          {"actualEnsure",{{"returned",true},{"actualLocalGetter",inputHostExitLocalOwnershipReleased()},{"wholeMainAndWmAppReadyExecuted",false}}},
+          {"productionResourceProof",{{"processExitedAndJoined",true},{"primaryExitedAndJoined",true},{"processExitCode",processCode},{"allFourLocalOwnersNull",true},{"pipeRuntime",pipeSnapshot()},{"pipeLiveHandleOracle",memoryApi::live.size()},{"forceAttempts",forceReceipts},{"forceBudgetSpent",g_inputHostExitForceSpent},{"childReleaseEventUnsignaled",!healthy},{"healthyExitUsesExplicitShutdownProtocolLeaf",healthy}}},
+          {"businessOwned",inputHostOwnedCleanupProvenLocked()},{"businessDutyRetained",g_inputHostReleaseQuarantined||g_hidHideVisibilityJournal.active},{"endpointAndPhysicalReleaseProven",false},
+          {"lastExitOwnershipReceipt",lastOwned},{"actualLogs",ports.logs},{"noncontrollerMemoryLeaves",memoryLeaves},
+          {"permanentOsBlockStatus","UNKNOWN; fixture fault relief is conditional progress, not permanent fault destruction"}};
+        // Product already closed originals. Fixture releases only independent
+        // observation duplicates and its unsignaled test event, after joining.
+        child.process=nullptr;child.primary=nullptr;
+        need(CloseHandle(processOracle)&&CloseHandle(primaryOracle)&&CloseHandle(cleanupOracle)&&CloseHandle(releaseEvent),"fixture observation handle close");child.release=nullptr;
+        const bool privateClosed=!open(processOracle)&&!open(primaryOracle)&&!open(cleanupOracle)&&!open(releaseEvent)&&!open(originalProcess)&&!open(originalPrimary)&&!open(pipe);
+        need(privateClosed,"scoped private HANDLE oracle open");
+        result["fixtureCleanup"]={{"privateHandlesClosed",privateClosed},{"childKillOrEventBackstop",false},{"productClosedOriginalOwners",true},{"faultReliefWasConditional",protectedDebt},{"permanentFaultDestructionAccepted",false}};
+        std::cout<<result.dump()<<"\n";return 0;
+    }catch(const std::exception& error){result["fixtureError"]=error.what();std::cout<<result.dump()<<"\n";return 3;}
+}

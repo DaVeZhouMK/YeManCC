@@ -1,0 +1,1524 @@
+{
+  "schemaVersion": 1,
+  "caseId": "sleep.directory-resume-consumer",
+  "fixture": {
+    "path": "tools/ymcc_sim/global/sleep-directory-resume-consumer/fixture.cpp.in",
+    "sha256": "f953c7de36b60aa5871e780a34d11b941c37529b66f158f648303dab2c32f5d5",
+    "nativeGroups": 70,
+    "liveGroups": 26,
+    "liveMain": {
+      "path": "tools/ymcc_sim/global/sleep-directory-resume-consumer/live-rpc-main.cpp.in",
+      "sha256": "8a677f59bc137f1be6ff3db9569af397bbad85633fe73df85f20fee74e979948"
+    },
+    "liveDriver": {
+      "path": "tools/ymcc_sim/global/sleep-directory-resume-consumer/live-bridge-driver.mjs",
+      "sha256": "139d2b70e4825ddc04ed95476299ac6164fc76139097a1e4a0616fb62cd61cbc"
+    }
+  },
+  "productSources": [
+    "native/main.cpp",
+    "deps/json/json.hpp",
+    "src/bridge/gameproc.ts",
+    "src/components/GameQuickActions.vue"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+    "tools/sleep_game_pause_selftest.py",
+    "tools/sleep_non_user_wake_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    }
+  ],
+  "nativeReviewedFunctions": [
+    {
+      "name": "sgAppendJsonResumedPids",
+      "sha256": "09e303b6c84d821b5e5dd67a6fb5eea0056eb03e0e8f3932adf59b64ab281a72"
+    },
+    {
+      "name": "sgMarkerCreated",
+      "sha256": "dcdff96f5c687b8a4cffe5e39569f5f16697f2acfdd65f6158188952f5e83cb9"
+    },
+    {
+      "name": "sgMarkerIsSuspended",
+      "sha256": "bdb68c36b3da240f81c9dfd75e8b0444685f73e6b71008531d75ce6740ebb8d1"
+    },
+    {
+      "name": "sgReadResumeMarkerChecked",
+      "sha256": "36e675d81e7d1eb3910fca31e591f814cd580a9308fc6f71b8ca78814c8ff2e3"
+    },
+    {
+      "name": "sgResumeMarkerDefinitelyStale",
+      "sha256": "66ac85a13fee6d7acb71f2e81f09855d2859e8d3516d858d18ef592c28df82a9"
+    },
+    {
+      "name": "sgMarkerGeneration",
+      "sha256": "3ae66df4f84d86af09bf15a51dbb2ca18ebc2835e6233602476b0d0de6a21837"
+    },
+    {
+      "name": "nativeValveValidateOwnedSuspendedTarget",
+      "sha256": "f2ce2d07c40efba7fe6ef91e1881634b1aca4c6bf7e9b023ab569ad2217e97f1"
+    },
+    {
+      "name": "sgDrainProcessSuspendCount",
+      "sha256": "32884d89ddaea916b04c836121d95824e11614f3dcd5c597b28314e776d1c880"
+    },
+    {
+      "name": "sgResumeMarkedDirectoryUnlocked",
+      "sha256": "d0a625a00c7a20a0eabb211676fa71539fcbb7476ff398fc2248f24c9808053f"
+    },
+    {
+      "name": "sgResumeGameByPids",
+      "sha256": "c817c554245db12a884ac1100a87297f2f0910a5636b9d71dec726223623f82e"
+    },
+    {
+      "name": "sgHasPauseMarkerForOtherPid",
+      "sha256": "57d77a735df3bd7e81220ba02d15582962591265260fbe58d3bfa980b370d15c"
+    },
+    {
+      "name": "sgReleaseConflictingPauseLeaseUnlocked",
+      "sha256": "5e148ded64041c844d5465c92962429d0c68f91f02abc23bff9491a95d21fd11"
+    },
+    {
+      "name": "sgResumeTrackedAllUnlocked",
+      "sha256": "1b6a9be8665f0c88b193da2cd6c6a05d92f6031ef9b655a0683192fc6e3e5ec0"
+    },
+    {
+      "name": "sgResumeSleepTargetUnlocked",
+      "sha256": "c5bdfbd39bdffc335b09446cf8552ebb03ca9c23e4b35355a10492612e890a25"
+    }
+  ],
+  "bridgeReviewedFunctions": [
+    {
+      "name": "resumeGame",
+      "sha256": "283fab0ca733838c56aca426b488c1b0af6d877ed4325a6fe39b08ba9bb2e485"
+    },
+    {
+      "name": "hasSuspendedState",
+      "sha256": "9693dda5eb72afddecd6a824af23c57522aaa3c81c9add3ad968b0a8fa9c181b"
+    }
+  ],
+  "uiReviewedFunction": {
+    "name": "togglePause",
+    "sha256": "865ade5751046309e431b2b3489adec52321d5ae78531c42878de0959c5fdb13"
+  },
+  "nativeTargets": 8,
+  "markerParsers": 3,
+  "jsonResultParser": 1,
+  "localHelpers": 2,
+  "bridgeTargets": 2,
+  "uiFunctionBodies": 1,
+  "nativeFaults": [
+    {
+      "label": "fault-directory-opened-birth-gate",
+      "targetFunction": "sgResumeMarkedDirectoryUnlocked",
+      "before": "if (fnNtResume && nativeProcessCreatedFromHandle(h) == expectedCreated)",
+      "after": "if (fnNtResume)",
+      "expectedFailedCases": [
+        "directory-opened-handle-pid-reused"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-list-opened-birth-gate",
+      "targetFunction": "sgResumeGameByPids",
+      "before": "const bool resumed = h && nativeProcessCreatedFromHandle(h) == expectedCreated &&\n                sgDrainProcessSuspendCount(h);",
+      "after": "const bool resumed = h && sgDrainProcessSuspendCount(h);",
+      "expectedFailedCases": [
+        "list-opened-handle-pid-reused"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-unknown-classified-stale",
+      "targetFunction": "sgResumeMarkerDefinitelyStale",
+      "before": "return exited || (openedCreated != 0 && openedCreated != markerCreated);",
+      "after": "return exited || openedCreated == 0 || (openedCreated != 0 && openedCreated != markerCreated);",
+      "expectedFailedCases": [
+        "directory-live-identity-unknown-retains-lease",
+        "list-live-identity-unknown-retains-lease",
+        "exact-sleep-initial-query-unknown-retains-lease",
+        "directory-query-recovers-then-actual-retry-resumes",
+        "exact-sleep-unknown-retains-owner-then-real-retry-resumes",
+        "directory-zero-query-identity-remains-retryable",
+        "list-zero-query-identity-remains-retryable",
+        "exact-sleep-zero-query-identity-remains-retryable",
+        "ipc-empty-list-unknown-reports-retryable-failure"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-directory-denied-handle-discard",
+      "targetFunction": "sgResumeMarkedDirectoryUnlocked",
+      "before": "if (!h) {\n                if (sgResumeMarkerDefinitelyStale(dir, pid)) fspath::remove(e.path());\n                continue;\n            }",
+      "after": "if (!h) { fspath::remove(e.path()); continue; }",
+      "expectedFailedCases": [
+        "directory-live-open-denied-retains-lease",
+        "manual-live-denial-blocks-new-pause",
+        "manual-denial-blocks-then-confirmed-release-admits",
+        "ipc-empty-list-denied-reports-retryable-failure"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-known-matching-marker-discard",
+      "targetFunction": "sgResumeMarkerDefinitelyStale",
+      "before": "focusQueryProcessIdentity(pid, nullptr, &actualCreated) && actualCreated != 0 &&\n        actualCreated != markerCreated",
+      "after": "focusQueryProcessIdentity(pid, nullptr, &actualCreated) && actualCreated != 0",
+      "expectedFailedCases": [
+        "directory-live-open-denied-retains-lease",
+        "list-live-open-denied-retains-lease",
+        "directory-native-failure-retains-lease",
+        "list-native-failure-retains-lease",
+        "manual-native-failure-blocks-new-pause",
+        "manual-live-denial-blocks-new-pause",
+        "exact-sleep-retry-query-unknown-retains-lease",
+        "stale-list-request-cannot-delete-current-valid-lease",
+        "list-denial-recovers-then-actual-retry-resumes",
+        "manual-denial-blocks-then-confirmed-release-admits",
+        "exact-sleep-comparator-retains-live-open-denial",
+        "ipc-empty-list-denied-reports-retryable-failure",
+        "ipc-empty-list-native-fail-reports-retryable-failure"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-zero-query-classified-stale",
+      "targetFunction": "sgResumeMarkerDefinitelyStale",
+      "before": "focusQueryProcessIdentity(pid, nullptr, &actualCreated) && actualCreated != 0",
+      "after": "focusQueryProcessIdentity(pid, nullptr, &actualCreated)",
+      "expectedFailedCases": [
+        "directory-zero-query-identity-remains-retryable",
+        "list-zero-query-identity-remains-retryable",
+        "exact-sleep-zero-query-identity-remains-retryable"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-marker-open-error-is-empty",
+      "targetFunction": "sgReadResumeMarkerChecked",
+      "before": "if (file == INVALID_HANDLE_VALUE) return false;",
+      "after": "if (file == INVALID_HANDLE_VALUE) return true;",
+      "expectedFailedCases": [
+        "directory-marker-open-denied-retains-retry",
+        "list-marker-open-denied-retains-retry",
+        "exact-sleep-marker-open-denied-retains-retry",
+        "manual-marker-open-denied-retains-retry",
+        "ipc-empty-list-marker-open-denied-reports-pending"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-marker-partial-read-is-empty",
+      "targetFunction": "sgReadResumeMarkerChecked",
+      "before": "if (!ok) { markerText.clear(); return false; }",
+      "after": "if (!ok) { markerText.clear(); return true; }",
+      "expectedFailedCases": [
+        "directory-partial-marker-read-failure-retains-retry",
+        "list-partial-marker-read-failure-retains-retry",
+        "exact-sleep-partial-marker-read-failure-retains-retry",
+        "manual-partial-marker-read-failure-retains-retry",
+        "ipc-empty-list-partial-marker-read-reports-pending"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-directory-query-error-releases",
+      "targetFunction": "sgHasPauseMarkerForOtherPid",
+      "before": "if (ec) return true;",
+      "after": "if (ec) return false;",
+      "expectedFailedCases": [
+        "sleep-dir-exists-error-false-blocks-release",
+        "manual-dir-exists-error-false-blocks-release",
+        "sleep-dir-exists-error-true-blocks-release",
+        "manual-dir-exists-error-true-blocks-release"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-exact-marker-query-error-clears-owner",
+      "targetFunction": "sgResumeSleepTargetUnlocked",
+      "before": "if (ec) return rr;",
+      "after": "if (ec) { sgClearSleepTargetIfMatches(target); return rr; }",
+      "expectedFailedCases": [
+        "exact-sleep-exists-error-false-blocks-release",
+        "exact-sleep-exists-error-true-blocks-release"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-directory-iterator-error-releases",
+      "targetFunction": "sgHasPauseMarkerForOtherPid",
+      "before": "return static_cast<bool>(ec);",
+      "after": "return false;",
+      "expectedFailedCases": [
+        "sleep-dir-iterator-error-blocks-release",
+        "manual-dir-iterator-error-blocks-release"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-empty-fallback-pid-feedback-removed",
+      "targetFunction": "sgResumeGameByPids",
+      "before": "if (pid && pid != 4 && pid != GetCurrentProcessId())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
+      "after": "if (pid && pid != 4 && pid != GetCurrentProcessId()) (void)pid;",
+      "expectedFailedCases": [
+        "ipc-empty-list-unknown-reports-retryable-failure",
+        "ipc-empty-list-denied-reports-retryable-failure",
+        "ipc-empty-list-native-fail-reports-retryable-failure",
+        "ipc-empty-list-marker-open-denied-reports-pending",
+        "ipc-empty-list-partial-marker-read-reports-pending"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-empty-fallback-directory-unknown-discarded",
+      "targetFunction": "sgResumeGameByPids",
+      "before": "out[\"recoveryPending\"] = static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
+      "after": "out[\"recoveryPending\"] = !out[\"failedPids\"].empty();",
+      "expectedFailedCases": [
+        "ipc-empty-list-exists-error-false-reports-unknown-pending",
+        "ipc-empty-list-exists-error-true-reports-unknown-pending",
+        "ipc-empty-list-iterator-error-reports-unknown-pending"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    }
+  ],
+  "liveFaults": [
+    {
+      "label": "fault-native-pid-feedback-removed",
+      "nativeFault": {
+        "label": "fault-empty-fallback-pid-feedback-removed",
+        "targetFunction": "sgResumeGameByPids",
+        "before": "if (pid && pid != 4 && pid != GetCurrentProcessId())\n                        out[\"failedPids\"].push_back(static_cast<int>(pid));",
+        "after": "if (pid && pid != 4 && pid != GetCurrentProcessId()) (void)pid;",
+        "expectedFailedCases": [
+          "ipc-empty-list-unknown-reports-retryable-failure",
+          "ipc-empty-list-denied-reports-retryable-failure",
+          "ipc-empty-list-native-fail-reports-retryable-failure",
+          "ipc-empty-list-marker-open-denied-reports-pending",
+          "ipc-empty-list-partial-marker-read-reports-pending"
+        ]
+      },
+      "expectedFailedCases": [
+        "missing-unknown-pending-and-real-retry",
+        "corrupt-unknown-pending-and-real-retry",
+        "missing-denied-pending-and-real-retry",
+        "corrupt-denied-pending-and-real-retry",
+        "missing-native-fail-pending-and-real-retry",
+        "corrupt-native-fail-pending-and-real-retry",
+        "missing-read-open-pending-and-real-retry",
+        "corrupt-read-open-pending-and-real-retry",
+        "missing-read-partial-pending-and-real-retry",
+        "corrupt-read-partial-pending-and-real-retry",
+        "missing-atomic-write-failure-preserves-retry",
+        "corrupt-atomic-write-failure-preserves-retry"
+      ]
+    },
+    {
+      "label": "fault-native-directory-unknown-discarded",
+      "nativeFault": {
+        "label": "fault-empty-fallback-directory-unknown-discarded",
+        "targetFunction": "sgResumeGameByPids",
+        "before": "out[\"recoveryPending\"] = static_cast<bool>(ec) || !out[\"failedPids\"].empty();",
+        "after": "out[\"recoveryPending\"] = !out[\"failedPids\"].empty();",
+        "expectedFailedCases": [
+          "ipc-empty-list-exists-error-false-reports-unknown-pending",
+          "ipc-empty-list-exists-error-true-reports-unknown-pending",
+          "ipc-empty-list-iterator-error-reports-unknown-pending"
+        ]
+      },
+      "expectedFailedCases": [
+        "missing-exists-false-pending-and-real-retry",
+        "corrupt-exists-false-pending-and-real-retry",
+        "missing-exists-true-pending-and-real-retry",
+        "corrupt-exists-true-pending-and-real-retry",
+        "missing-iterator-pending-and-real-retry",
+        "corrupt-iterator-pending-and-real-retry"
+      ]
+    },
+    {
+      "label": "fault-bridge-pending-ignored",
+      "bridgeFault": {
+        "before": "const pending = fallback.recoveryPending === true || failedPids.length > 0;",
+        "after": "const pending = false;",
+        "targetFunction": "resumeGame"
+      },
+      "expectedFailedCases": [
+        "missing-unknown-pending-and-real-retry",
+        "corrupt-unknown-pending-and-real-retry",
+        "missing-denied-pending-and-real-retry",
+        "corrupt-denied-pending-and-real-retry",
+        "missing-native-fail-pending-and-real-retry",
+        "corrupt-native-fail-pending-and-real-retry",
+        "missing-exists-false-pending-and-real-retry",
+        "corrupt-exists-false-pending-and-real-retry",
+        "missing-exists-true-pending-and-real-retry",
+        "corrupt-exists-true-pending-and-real-retry",
+        "missing-iterator-pending-and-real-retry",
+        "corrupt-iterator-pending-and-real-retry",
+        "missing-read-open-pending-and-real-retry",
+        "corrupt-read-open-pending-and-real-retry",
+        "missing-read-partial-pending-and-real-retry",
+        "corrupt-read-partial-pending-and-real-retry",
+        "missing-transport-failure-preserves-retry",
+        "corrupt-transport-failure-preserves-retry",
+        "missing-atomic-write-failure-preserves-retry",
+        "corrupt-atomic-write-failure-preserves-retry"
+      ]
+    },
+    {
+      "label": "fault-bridge-rootless-pending-ignored",
+      "bridgeFault": {
+        "before": "state.recoveryPending === true &&",
+        "after": "false &&",
+        "targetFunction": "hasSuspendedState"
+      },
+      "expectedFailedCases": [
+        "missing-exists-false-pending-and-real-retry",
+        "corrupt-exists-false-pending-and-real-retry",
+        "missing-exists-true-pending-and-real-retry",
+        "corrupt-exists-true-pending-and-real-retry",
+        "missing-iterator-pending-and-real-retry",
+        "corrupt-iterator-pending-and-real-retry",
+        "missing-transport-failure-preserves-retry",
+        "corrupt-transport-failure-preserves-retry"
+      ]
+    },
+    {
+      "label": "fault-bridge-corrupt-original-lost",
+      "bridgeFault": {
+        "before": "...(corruptRaw !== undefined ? { recoveryOriginalRaw: corruptRaw } : {}),",
+        "after": "...(corruptRaw !== undefined ? {} : {}),",
+        "targetFunction": "resumeGame"
+      },
+      "expectedFailedCases": [
+        "corrupt-unknown-pending-and-real-retry",
+        "corrupt-denied-pending-and-real-retry",
+        "corrupt-native-fail-pending-and-real-retry",
+        "corrupt-exists-false-pending-and-real-retry",
+        "corrupt-exists-true-pending-and-real-retry",
+        "corrupt-iterator-pending-and-real-retry",
+        "corrupt-read-open-pending-and-real-retry",
+        "corrupt-read-partial-pending-and-real-retry",
+        "corrupt-transport-failure-preserves-retry"
+      ]
+    }
+  ],
+  "nativeFixedAssertions": [
+    {
+      "case": "missing-directory-no-action",
+      "expected": {
+        "ntAttempts": 0,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "non-regular-entry-ignored",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0
+      }
+    },
+    {
+      "case": "nonnumeric-zero-filenames-cleaned",
+      "expected": {
+        "filesRemaining": 0,
+        "ntAttempts": 0
+      }
+    },
+    {
+      "case": "malformed-created-marker-cleaned",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0
+      }
+    },
+    {
+      "case": "active-sleep-owner-skipped",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0
+      }
+    },
+    {
+      "case": "directory-exact-owner-resumes",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 2,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 1
+      }
+    },
+    {
+      "case": "list-exact-owner-resumes",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 2,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 1,
+        "retryableFailureReported": false,
+        "staleReported": false
+      }
+    },
+    {
+      "case": "cross-session-refused",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "directory-opened-handle-pid-reused",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "list-opened-handle-pid-reused",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0,
+        "retryableFailureReported": false,
+        "staleReported": true
+      }
+    },
+    {
+      "case": "directory-live-identity-unknown-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "list-live-identity-unknown-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0,
+        "retryableFailureReported": true,
+        "staleReported": false
+      }
+    },
+    {
+      "case": "directory-live-open-denied-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "list-live-open-denied-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0,
+        "retryableFailureReported": true,
+        "staleReported": false
+      }
+    },
+    {
+      "case": "directory-definitely-gone-cleans-marker",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "list-definitely-gone-cleans-marker",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0,
+        "retryableFailureReported": false,
+        "staleReported": true
+      }
+    },
+    {
+      "case": "directory-native-failure-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 1,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "list-native-failure-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 1,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0,
+        "retryableFailureReported": true,
+        "staleReported": false
+      }
+    },
+    {
+      "case": "actual-eight-loop-drains-depth2",
+      "expected": {
+        "attempts": 3,
+        "depth": 0,
+        "successes": 2
+      }
+    },
+    {
+      "case": "empty-list-follows-real-directory-path",
+      "expected": {
+        "ntSuccesses": 1,
+        "resumed": 1
+      }
+    },
+    {
+      "case": "legacy-pid-list-uses-marker-birth",
+      "expected": {
+        "resumed": 1
+      }
+    },
+    {
+      "case": "manual-switch-cannot-release-active-sleep-owner",
+      "expected": {
+        "ntAttempts": 0,
+        "released": false
+      }
+    },
+    {
+      "case": "manual-native-failure-blocks-new-pause",
+      "expected": {
+        "markerRetained": true,
+        "released": false
+      }
+    },
+    {
+      "case": "manual-live-denial-blocks-new-pause",
+      "expected": {
+        "markerRetained": true,
+        "released": false
+      }
+    },
+    {
+      "case": "startup-sleep-and-manual-remain-distinct",
+      "expected": {
+        "filesRemaining": 0,
+        "resumed": 2
+      }
+    },
+    {
+      "case": "definite-old-birth-marker-discarded",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "invalid-system-own-list-pids-no-action",
+      "expected": {
+        "ntAttempts": 0,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "exact-sleep-comparator-rejects-opened-birth-race",
+      "expected": {
+        "ntAttempts": 0,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "exact-sleep-comparator-retains-live-open-denial",
+      "expected": {
+        "markerRetained": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "exact-sleep-initial-query-unknown-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "exact-sleep-retry-query-unknown-retains-lease",
+      "expected": {
+        "markerRetained": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "stale-list-request-cannot-delete-current-valid-lease",
+      "expected": {
+        "markerRetained": true,
+        "ntAttempts": 0,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "exited-object-query-handle-confirms-gone",
+      "expected": {
+        "markerRetained": false,
+        "ntAttempts": 0,
+        "onlyAdmittedBirthResumed": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "directory-query-recovers-then-actual-retry-resumes",
+      "expected": {
+        "depth": 0,
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "ntSuccesses": 1,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "list-denial-recovers-then-actual-retry-resumes",
+      "expected": {
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "ntSuccesses": 1,
+        "retryableFailureReported": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "manual-denial-blocks-then-confirmed-release-admits",
+      "expected": {
+        "firstReleased": false,
+        "keptForRetry": true,
+        "ntSuccesses": 1,
+        "secondReleased": true
+      }
+    },
+    {
+      "case": "exact-sleep-unknown-retains-owner-then-real-retry-resumes",
+      "expected": {
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "ownerClearedAfterSuccess": true,
+        "ownerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "directory-zero-query-identity-remains-retryable",
+      "expected": {
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "list-zero-query-identity-remains-retryable",
+      "expected": {
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "retryableFailureReported": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "exact-sleep-zero-query-identity-remains-retryable",
+      "expected": {
+        "firstResumed": 0,
+        "keptForRetry": true,
+        "ownerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "exact-sleep-known-exited-query-object-cleans-owner",
+      "expected": {
+        "markerRetained": false,
+        "ownerRetained": false,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "directory-marker-open-denied-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "list-marker-open-denied-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "exact-sleep-marker-open-denied-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "manual-marker-open-denied-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "directory-partial-marker-read-failure-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "list-partial-marker-read-failure-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "exact-sleep-partial-marker-read-failure-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "manual-partial-marker-read-failure-retains-retry",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "sleep-dir-exists-error-false-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "manual-dir-exists-error-false-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "exact-sleep-exists-error-false-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "sleep-dir-exists-error-true-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "manual-dir-exists-error-true-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "exact-sleep-exists-error-true-blocks-release",
+      "expected": {
+        "first": 0,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "ownerKept": true,
+        "second": 1
+      }
+    },
+    {
+      "case": "sleep-dir-iterator-error-blocks-release",
+      "expected": {
+        "first": false,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "second": true
+      }
+    },
+    {
+      "case": "manual-dir-iterator-error-blocks-release",
+      "expected": {
+        "first": false,
+        "kept": true,
+        "ntBeforeRetry": 0,
+        "second": true
+      }
+    },
+    {
+      "case": "missing-marker-with-successful-exists-clears-owner",
+      "expected": {
+        "cleared": true
+      }
+    },
+    {
+      "case": "readable-empty-marker-is-malformed",
+      "expected": {
+        "removed": true
+      }
+    },
+    {
+      "case": "readable-bom-owner-still-resumes",
+      "expected": {
+        "resumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-unknown-reports-retryable-failure",
+      "expected": {
+        "failedPids": [
+          100
+        ],
+        "firstResumed": 0,
+        "manualOwnerKept": true,
+        "markerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-denied-reports-retryable-failure",
+      "expected": {
+        "failedPids": [
+          100
+        ],
+        "firstResumed": 0,
+        "manualOwnerKept": true,
+        "markerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-native-fail-reports-retryable-failure",
+      "expected": {
+        "failedPids": [
+          100
+        ],
+        "firstResumed": 0,
+        "manualOwnerKept": true,
+        "markerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-gone-clears-owner",
+      "expected": {
+        "manualOwnerCleared": true,
+        "markerRemoved": true,
+        "resumed": 0
+      }
+    },
+    {
+      "case": "ipc-malformed-pids-follows-existing-marker-fallback",
+      "expected": {
+        "focusCalls": 1,
+        "resumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-exists-error-false-reports-unknown-pending",
+      "expected": {
+        "firstResumed": 0,
+        "markerKept": true,
+        "recoveryPending": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-exists-error-true-reports-unknown-pending",
+      "expected": {
+        "firstResumed": 0,
+        "markerKept": true,
+        "recoveryPending": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-iterator-error-reports-unknown-pending",
+      "expected": {
+        "firstResumed": 0,
+        "markerKept": true,
+        "recoveryPending": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-marker-open-denied-reports-pending",
+      "expected": {
+        "failedPids": [
+          100
+        ],
+        "firstResumed": 0,
+        "markerKept": true,
+        "recoveryPending": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "ipc-empty-list-partial-marker-read-reports-pending",
+      "expected": {
+        "failedPids": [
+          100
+        ],
+        "firstResumed": 0,
+        "markerKept": true,
+        "recoveryPending": true,
+        "secondResumed": 1
+      }
+    }
+  ],
+  "positiveSourcePolicy": "Positive captures repaired current G source and never applies a private repair. Private faults mutate only specified scoped source copies. All native70 and live26 expectations are fixed.",
+  "boundary": {
+    "nativeBusinessPortsMemory": true,
+    "actualFullBridgeModule": true,
+    "actualUiToggleBody": true,
+    "liveOwnedBidirectionalTransport": true,
+    "nativeResponseReplay": false,
+    "productionWebViewTransportAccepted": false,
+    "mountedVueComponentRenderAccepted": false,
+    "realNT": false,
+    "realUserProcesses": false,
+    "realMarkerPersistence": false,
+    "realSleep": false,
+    "realHost": false,
+    "realSteam": false,
+    "physicalDeviceAcceptance": false
+  },
+  "historicalFailures": {
+    "nativeOriginal60": {
+      "path": "D:/Codex/2026-10-19/mo/work/all-simulation-tests/sleep-directory-resume-consumer/complete-faithful-v3-r1/execution/original-complete/observed-results.json",
+      "sha256": "22be41c230e6145179a30fb9a674c4e2b08cc4c15743a208493f2af717808937",
+      "failed": 34
+    },
+    "nativeV3Feedback70": {
+      "path": "D:/Codex/2026-10-19/mo/work/all-simulation-tests/sleep-directory-resume-consumer/private-feedback-v4-r2/execution/current-g-v3-feedback-failure/observed-results.json",
+      "sha256": "e77b8772174c0b42da3f402160e630be41374703401dccd28ff761160929e002",
+      "failed": 8
+    },
+    "liveOriginal26": {
+      "path": "D:/Codex/2026-10-19/mo/work/all-simulation-tests/sleep-directory-resume-consumer/live-feedback-v4-r2/execution/current-g-native-original-bridge/live-observed-results.json",
+      "sha256": "a41ef543bb98ea7f035424f7a6480c81d882fd8f2adc2e29690841d34eccacc2",
+      "failed": 21
+    },
+    "liveNativeOnlyFix26": {
+      "path": "D:/Codex/2026-10-19/mo/work/all-simulation-tests/sleep-directory-resume-consumer/live-feedback-v4-r2/execution/private-v4-native-original-bridge/live-observed-results.json",
+      "sha256": "0296d89c13fcfade1582920499ae661400d53380e2f89de42dbd424eaae72176",
+      "failed": 21
+    }
+  },
+  "wholeGoalComplete": false,
+  "liveFixedAssertions": [
+    {
+      "case": "missing-unknown-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-unknown-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-denied-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-denied-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-native-fail-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-native-fail-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-exists-false-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-exists-false-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-exists-true-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-exists-true-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-iterator-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-iterator-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-read-open-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-read-open-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-read-partial-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-read-partial-pending-and-real-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-transport-failure-preserves-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-transport-failure-preserves-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-atomic-write-failure-preserves-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-atomic-write-failure-preserves-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": true,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-success-clears-actual-pause",
+      "expected": {
+        "firstState": "completed or conclusive gone",
+        "realRetryRequired": false,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-success-clears-actual-pause",
+      "expected": {
+        "firstState": "completed or conclusive gone",
+        "realRetryRequired": false,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "missing-gone-clears-record",
+      "expected": {
+        "firstState": "completed or conclusive gone",
+        "realRetryRequired": false,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "corrupt-gone-clears-record",
+      "expected": {
+        "firstState": "completed or conclusive gone",
+        "realRetryRequired": false,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "recorded-identity-preserved-across-real-explicit-retry",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": true,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    },
+    {
+      "case": "unreadable-state-preserves-ui-and-record-without-native-resume",
+      "expected": {
+        "firstState": "recoverable pause remains",
+        "realRetryRequired": false,
+        "preserveOriginalCorruptBytes": false,
+        "noRealBusinessIO": true
+      }
+    }
+  ],
+  "faultExpectationProvenance": "Original60 fault cases plus source-reviewed IPC effects; exact failure sets are verified by actual execution receipts, never inferred from this spec.",
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 2,
+    "kind": "exact-current-source-reverse-deltas",
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "compilerAndEnvironmentTextUnchanged": true,
+    "oldIdentities": "priorReviewedSharedLeafIdentities",
+    "sourceApproval": false
+  },
+  "sourceCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "oldIdentitiesRetained": true,
+    "fullReverseDeltaRequired": true,
+    "sourceApproval": false
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "013ff6b883408d4ccad959f6db91b8c021a51b59444a6e2e957e7a5c8430f3fa"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    }
+  ],
+  "priorReviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  }
+}

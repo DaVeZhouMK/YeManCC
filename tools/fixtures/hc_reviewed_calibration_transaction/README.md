@@ -1,0 +1,7 @@
+# Reviewed Windows calibration transaction fixture
+
+Run `node tools/hc_reviewed_calibration_transaction_selftest.mjs` from the repository root. The fixture extracts the actual native calibration state machine and BUS call, checks the frozen consumer selector bindings and catalog hashes, and uses the pinned existing GamepadMotion.dll. It never constructs HIDMaestro or starts App/Host/device code. Only the child process receives an evidence-local LOCALAPPDATA; the executable checks the exact expected calibration path before writing.
+
+Confidence is controlled. Real GamepadMotion reset/mode/offset/process exports and real Windows file operations are used. Wrappers inject flush failure or source retirement around the real operations. Coverage includes save/apply separation, same-owner rollback, new-owner preservation, original sample generation, duplicate requests, invalid confidence, family changes, lock contention, corrupt JSON and owned temporary cleanup. Calibration convergence, physical sensor identity/axes and game consumption remain unverified.
+
+Negative controls `--source-guard-removed` and `--save-receipt-spoofed` must compile and yield transaction assertion failures in both Release and Checked. Compilation errors and failures outside the transaction group are rejected by the runner. Evidence and snapshots stay outside the repository. No new production HC DLL is added.

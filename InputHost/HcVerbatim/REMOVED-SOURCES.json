@@ -1,0 +1,70 @@
+{
+  "removedAt": "2026-10-18",
+  "reason": "No current product consumer; validated by build, metadata, protocol and negative tests",
+  "files": [
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\AxisFlags.cs",
+      "relative": "InputHost/HcVerbatim/AxisFlags.cs",
+      "bytes": 706,
+      "sha256": "ce19b93ed529ae619e0a35f10ce3608cddb200ef958c9d16aad814fa8fbb8396",
+      "originalHeader": "// ── HcVerbatim: AxisFlags ───────────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/AxisFlags.cs\n// 逐行提取（改 namespace，禁改枚举值/序）。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\AxisFlags.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\AxisLayoutFlags.cs",
+      "relative": "InputHost/HcVerbatim/AxisLayoutFlags.cs",
+      "bytes": 598,
+      "sha256": "1bb890a3bf01f942d5d0c673a35bc8cab5d3a24f6783e22245884d209d2be7cb",
+      "originalHeader": "// ── HcVerbatim: AxisLayoutFlags ─────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/AxisLayout.cs\n// （AxisLayoutFlags 枚举，:59-70）。仅取枚举，AxisLayout 类非 BuildReport 依赖。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\AxisLayoutFlags.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\AxisState.cs",
+      "relative": "InputHost/HcVerbatim/AxisState.cs",
+      "bytes": 5407,
+      "sha256": "b685a81c0b0e42aeff4ae861593f646a31e63a405888de63da6b92e367cda461",
+      "originalHeader": "// ── HcVerbatim: AxisState ───────────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/AxisState.cs\n// 逐行提取（改 namespace）。剥离 Newtonsoft.Json JSON glue（[JsonIgnore]/\n// [OnSerializing]/[OnDeserialized]/State 字典）——仅 HC 本地 JSON 兼容，\n// InputHost 不序列化；核心语义（short[] 存储/索引器/Clone/Equals/Contains/\n// AddRange/EqualsWithValues）逐行保留。AxisLayoutFlags 来自同名的 verbatim 枚举。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\AxisState.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\ButtonFlags.cs",
+      "relative": "InputHost/HcVerbatim/ButtonFlags.cs",
+      "bytes": 5180,
+      "sha256": "3b1619307883307ce55f4d5bd50b56406b0f2df8ed3f68b5fc962a02c6468a04",
+      "originalHeader": "// ── HcVerbatim: ButtonFlags ─────────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/ButtonFlags.cs\n// 逐行提取（改 namespace 为 YeManInputHost.HcVerbatim，禁改枚举值/序）。\n// 通过 00-CONSTITUTION 原则 2 的 HC 锚点 hash 核验（执行项 0，2026-09-11 零漂移）。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\ButtonFlags.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\ButtonState.cs",
+      "relative": "InputHost/HcVerbatim/ButtonState.cs",
+      "bytes": 6513,
+      "sha256": "d31fe4aaec4709cd8e7e33d0476a0d0fed37286107426d8683547b3268b8caea",
+      "originalHeader": "// ── HcVerbatim: ButtonState ─────────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/ButtonState.cs\n// 逐行提取（改 namespace）。剥离 Newtonsoft.Json JSON glue（[JsonIgnore]/\n// [OnSerializing]/[OnDeserialized]/State 字典）——仅用于 HC 本地 JSON 兼容，\n// InputHost 不序列化该状态；核心语义（pressed 数组/索引器/Clone/Equals/\n// Contains/AddRange/Overwrite/Inject）逐行保留。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\ButtonState.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\ControllerState.cs",
+      "relative": "InputHost/HcVerbatim/ControllerState.cs",
+      "bytes": 2060,
+      "sha256": "f5385204523accbbc5c49f1972fa15dfb2b02539905cc88e5879c8f2a124a9d9",
+      "originalHeader": "// ── HcVerbatim: ControllerState ─────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Controllers/ControllerState.cs\n// 逐行提取（改 namespace；[JsonIgnore] 为 System.Text.Json 属性，保留）。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\ControllerState.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\GyroState.cs",
+      "relative": "InputHost/HcVerbatim/GyroState.cs",
+      "bytes": 3049,
+      "sha256": "64b5604177ae8be7a5689140caded5ee07dbcd6522efaee60b7606dbe661c8a9",
+      "originalHeader": "// ── HcVerbatim: GyroState ───────────────────────────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Inputs/GyroState.cs\n// 逐行提取（改 namespace）。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\GyroState.cs"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\InputHost\\HcVerbatim\\InputUtils.cs",
+      "relative": "InputHost/HcVerbatim/InputUtils.cs",
+      "bytes": 3057,
+      "sha256": "0b1836a12dcdf6474422f41fc266e84b0fbc98ed46fb53dfad76ada4979bb689",
+      "originalHeader": "// ── HcVerbatim: InputUtils（BuildReport 依赖子集）────────────────────────\n// HC verbatim 06c0b954: deps/handheldcompanion-runtime/source/Utils/InputUtils.cs\n// 仅提取 Targets BuildReport 消费的静态 helpers（Clamp/RoundClampToShort/\n// ClampToUShort/ClampToByte/NegateClampToShort/RoundToInt/deg2rad/\n// NormalizeXboxInput），逐行保留常量与方法体。MotionInput/MotionOutput 等\n// 非 BuildReport 依赖，不提取。",
+      "archivedSource": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-followup-trim\\verbatim\\attempt-01\\frozen\\InputHost\\HcVerbatim\\InputUtils.cs"
+    }
+  ]
+}

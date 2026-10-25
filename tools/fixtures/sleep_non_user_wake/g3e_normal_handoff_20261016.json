@@ -1,0 +1,108 @@
+{
+  "schemaVersion": 1,
+  "source": "Literal ordinary YMCC export; original application and Windows event clocks retained",
+  "archive": "YeManCC-logs-20261016-184736-G3E-手柄+睡眠正常.zip",
+  "archiveSha256": "9aadb4f2aedfbd259c3fb5e9e6870e5c4e1bc4abc68cab85b5932afa54003071",
+  "sourceMember": "sleep-facts.log",
+  "expectedWakeCycles": 0,
+  "scope": "User-labelled normal control: a 94 ms 1->16777220 transition is followed by a new 506 one millisecond later; do not classify every short session as failed sleep.",
+  "physicalSleepVerified": false,
+  "expectedExistingPolicy": "No automatic re-sleep for these short or user-ended sessions; PASS does not mean effective low-power entry was detected",
+  "clockNormalization": {
+    "origin": "2026-10-16T18:44:00.230",
+    "atMs": "application record time minus origin",
+    "eventAtMs": "Windows event fileTime minus origin"
+  },
+  "events": [
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 1,
+      "time": "2026-10-16 18:44:11.238",
+      "eventTime": "2026-10-16 18:44:10.230",
+      "sourceLine": 28,
+      "atMs": 11008,
+      "eventAtMs": 10000
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 16777220,
+      "time": "2026-10-16 18:44:11.238",
+      "eventTime": "2026-10-16 18:44:10.324",
+      "sourceLine": 31,
+      "atMs": 11008,
+      "eventAtMs": 10094
+    },
+    {
+      "kind": "kernel",
+      "id": 506,
+      "reason": 16777220,
+      "time": "2026-10-16 18:44:11.240",
+      "eventTime": "2026-10-16 18:44:10.325",
+      "sourceLine": 34,
+      "atMs": 11010,
+      "eventAtMs": 10095
+    },
+    {
+      "kind": "kernel",
+      "id": 507,
+      "reason": 1,
+      "time": "2026-10-16 18:44:34.818",
+      "eventTime": "2026-10-16 18:44:33.584",
+      "sourceLine": 42,
+      "atMs": 34588,
+      "eventAtMs": 33354
+    }
+  ],
+  "literalSourceRecords": [
+    {
+      "line": 28,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-16 18:44:10.230",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-16 18:44:11.238"
+    },
+    {
+      "line": 31,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-16 18:44:10.324",
+        "reason": 16777220,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-16 18:44:11.238"
+    },
+    {
+      "line": 34,
+      "details": {
+        "eventId": 506,
+        "fileTime": "2026-10-16 18:44:10.325",
+        "reason": 16777220,
+        "reason1Accepted": false,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-16 18:44:11.240"
+    },
+    {
+      "line": 42,
+      "details": {
+        "eventId": 507,
+        "fileTime": "2026-10-16 18:44:33.584",
+        "reason": 1,
+        "reason1Accepted": true,
+        "targetState": -1
+      },
+      "event": "kernel-power",
+      "time": "2026-10-16 18:44:34.818"
+    }
+  ]
+}

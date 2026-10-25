@@ -91,7 +91,7 @@ if ($manifest.schemaVersion -ne 2 -or $null -eq $manifest.files -or $manifest.fi
 $runtimeManifestRelative = [string]$manifest.runtimeManifest
 $manifestRuntimeId = [string]$manifest.runtimeId
 if ([string]::IsNullOrWhiteSpace($runtimeManifestRelative) -or
-    $manifestRuntimeId -notmatch '^HC-CANDIDATE-0\.32\.4\.0-[0-9a-f]{8}-[0-9]{8}$' -or
+    $manifestRuntimeId -notmatch '^(?:HC-CANDIDATE-0\.32\.4\.0-[0-9a-f]{8}-[0-9]{8}|YMCC-DEVICECORE-20261018-v1)$' -or
     [IO.Path]::IsPathRooted($runtimeManifestRelative) -or
     $runtimeManifestRelative -notmatch '(?i)^\.\.[\\/][^\\/]+(?:[\\/][^\\/]+)*[\\/]HandheldCompanion\.runtime\.json$' -or
     $runtimeManifestRelative.Substring(3) -match '(^|[\\/])\.\.([\\/]|$)') {
@@ -149,7 +149,7 @@ if ($configuredFanLogPaths -notcontains $expectedFanLogPath) {
 }
 
 foreach ($required in @(
-  'YeManFanHost.exe', 'YeManFanHost.dll', 'YeManFanHost.deps.json',
+  'YeManFanHost.exe', 'YeManFanHost.dll', 'YeManFanBackend.dll', 'YeManFanHost.deps.json',
   'YeManFanHost.runtimeconfig.json', 'YeManFanHost.authorization.md',
   'install-fan-host-payload.ps1'
 )) {
@@ -173,6 +173,22 @@ foreach ($entry in $runtimeManifest.files) {
       -not (Test-Path -LiteralPath $path -PathType Leaf) -or
       (Get-Sha256 $path) -ne ([string]$entry.sha256).ToLowerInvariant()) { throw "HC 公共 runtime 文件缺失或哈希不匹配: $relative" }
   }
+
+function Assert-DeviceSharedFiles([string]$DeviceRuntimeRoot, $RuntimeManifest) {
+  if (-not $RuntimeManifest.PSObject.Properties['sharedDependencies']) { return }
+  if ([string]$RuntimeManifest.sharedDependencies.directory -cne 'PowerControl/ymcc-shared-runtime' -or @($RuntimeManifest.sharedDependencies.files).Count -ne 7) { throw 'Device shared dependency contract is invalid.' }
+  $sharedRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $DeviceRuntimeRoot)) 'ymcc-shared-runtime'
+  $seen = @{}
+  foreach ($entry in @($RuntimeManifest.sharedDependencies.files)) {
+    $name = [string]$entry.path
+    if ($name -notmatch '^[^/\\:]+\.dll$' -or $seen.ContainsKey($name) -or [string]$entry.sha256 -notmatch '^[0-9a-fA-F]{64}$') { throw 'Device shared dependency path/hash is invalid.' }
+    $path = Join-Path $sharedRoot $name
+    if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -ne [int64]$entry.bytes -or
+        (Get-Sha256 $path) -cne ([string]$entry.sha256).ToLowerInvariant()) { throw ('Device shared dependency missing or changed: ' + $name) }
+    $seen[$name] = $true
+  }
+}
+Assert-DeviceSharedFiles $runtimeFull $runtimeManifest
 
 # 方案 A（2026-09-12 用户裁决）：阀门=防逃逸 + 存在 + 哈希两层。ACL 不可变、
 # quarantine 扫描、交互 ShouldProcess 已整段删除（run-emergency-fan-restore.ps1

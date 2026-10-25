@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "sources": [
+    "deps/json/json.hpp",
+    "deps/webview2/build/native/include/WebView2.h",
+    "deps/webview2/build/native/x64/WebView2LoaderStatic.lib",
+    "native/custom-steam-library/custom_steam_library_exclusions.h",
+    "native/custom-steam-library/custom_steam_library_identity_cache.h",
+    "native/custom-steam-library/custom_steam_library_inventory.h",
+    "native/custom-steam-library/custom_steam_library_paths.h",
+    "native/custom-steam-library/custom_steam_library_video_catalog.h",
+    "native/custom-steam-library/steam_artwork_lab.cpp",
+    "native/custom-steam-library/workspace_host.cpp",
+    "native/game_detection_blacklist_entries.h",
+    "native/process_efficiency.h",
+    "native/shared_game_media.h",
+    "native/shared_game_media_capacity.h",
+    "native/shared_game_media_download_queue.h",
+    "native/shared_game_media_download_worker.h",
+    "native/shared_game_media_identity_worker.h",
+    "native/shared_game_media_shortcut.h",
+    "native/webview_process_efficiency.h",
+    "tools/custom_steam_library_host_artwork_selftest.cpp",
+    "tools/custom_steam_library_storage_isolation.h",
+    "tools/ymcc_sim/global/cli.mjs",
+    "tools/ymcc_sim/global/extra-adapters.mjs",
+    "tools/ymcc_sim/global/receipt-audit.mjs",
+    "tools/ymcc_sim/global/runner.mjs"
+  ],
+  "expectedCases": [
+    "native-plan-uses-explicit-owned-target-and-real-worker-plan",
+    "native-prepare-completes-owned-empty-library-and-preserves-shortcuts",
+    "native-commit-running-steam-rejected-by-original-worker-gate",
+    "native-commit-closed-empty-plan-has-no-false-success",
+    "native-stale-video-token-refused-before-binding-or-queue-write",
+    "native-current-video-token-updates-real-store-and-queue",
+    "native-identity-cancel-and-reentry-suppress-old-completion",
+    "native-artwork-cancel-clears-busy-and-rejects-late-success",
+    "native-nonempty-commit-preserves-original-vdf-and-roundtrips",
+    "native-stale-nonempty-plan-refused-without-success-or-overwrite",
+    "native-first-import-creates-missing-vdf-through-original-transaction",
+    "native-vdf-activation-sharing-failure-keeps-original-files",
+    "native-localconfig-activation-failure-restores-prior-vdf"
+  ],
+  "fault": {
+    "path": "native/custom-steam-library/custom_steam_library_video_catalog.h",
+    "expectedCase": "native-stale-video-token-refused-before-binding-or-queue-write",
+    "expectedError": "WS_STALE_VIDEO_TOKEN_NOT_REJECTED"
+  },
+  "remainingGaps": [
+    "Steam/account discovery and full worker CLI are not executed; actual worker plan/commit functions run through a declared memory adapter.",
+    "Prepare only executes the original empty-library queue; no actual metadata/artwork download or provider protocol is accepted.",
+    "Task scheduling uses real owned threads with controlled memory completions; real child process cancellation/Job, GUI/WebView transport and installed runtime are not accepted.",
+    "Nonempty and absent-file first import, real owned target-sharing refusal and VDF rollback after localconfig activation failure are exercised. Physical Steam/user library, artwork/provider multi-resource rollback, failed rollback recovery and other transaction variants remain untested."
+  ],
+  "cancelFault": {
+    "path": "native/custom-steam-library/workspace_host.cpp",
+    "expectedCase": "native-artwork-cancel-clears-busy-and-rejects-late-success",
+    "expectedError": "WS_CANCEL_ARTWORK_RESPONSE_NOT_OBJECT"
+  },
+  "transactionFault": {
+    "path": "native/custom-steam-library/steam_artwork_lab.cpp",
+    "expectedCase": "native-stale-nonempty-plan-refused-without-success-or-overwrite",
+    "expectedError": "WS_STALE_PLAN_NOT_REJECTED"
+  },
+  "activationRollbackFault": {
+    "path": "native/custom-steam-library/steam_artwork_lab.cpp",
+    "expectedCase": "native-localconfig-activation-failure-restores-prior-vdf",
+    "expectedError": "WS_ACTIVATION_FAILURE_DID_NOT_RESTORE_VDF"
+  }
+}

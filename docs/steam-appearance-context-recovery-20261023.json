@@ -1,0 +1,29 @@
+{
+  "reviewedAt": "2026-10-23",
+  "status": "installed-local-candidate-visual-acceptance-open",
+  "renderProtocol": 4,
+  "contextProtocol": 1,
+  "source": "PowerControl/steam-appearance/idle.ps1",
+  "contexts": [
+    "SP",
+    "MainMenu",
+    "QuickAccess"
+  ],
+  "maxMainPages": 4,
+  "maxContextPages": 8,
+  "cdpBudgetMs": 4000,
+  "perPageBudgetMs": 1000,
+  "validation": {
+    "powerShell51": 99,
+    "powerShell7Context": 17,
+    "renderPlan": 364,
+    "exportGate": 23
+  },
+  "evidence": "G:/YeManCC-Work/Build/Tasks/CssContexts-20261023-1823/deployment.json",
+  "guide": "docs/steam-appearance-context-recovery-20261023.md",
+  "noNewPolling": true,
+  "limits": [
+    "Existing event boundaries only; arbitrary later popup creation does not gain an additional wake source",
+    "Physical Steam/GPU twitch remains unverified"
+  ]
+}

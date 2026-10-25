@@ -14,10 +14,10 @@ PS 独立模式不是原生 DualSense HID 报告，亦不是 PS Remote Play 输�
 透明按钮窗口 → buttonEvent → 有效 UP 点击 → standaloneDispatch → 已有 gamepadSerialSubmit 执行队列 → 独立功能动作。
 
 - 独立按键不写 screenButtonMask，BUS / InputHost / HID 始终没有这次按键。
-- Steam 菜单优先使用已有、经进程及端口身份校验的本地 Steam CDP 通路，调用 Steam 自身 MenuStore；不依赖 Decky 插件、控制器连接或虚拟设备。
-- 不替用户开启 Steam 调试，不修改 Steam 配置。CDP 不可用且 Steam 位于前台时，发送完整、带标记的 Ctrl+1 / Ctrl+2 DOWN/UP 批次；不向任意游戏或其他程序发送这些快捷键。
-- 菜单功能需要 Steam 大屏幕模式。CDP 未开启且 Steam 不在前台时，报告不可用，而不是宣称成功。
-- 已送出而结果不确定的菜单切换不重发、不改走键盘，避免一次点击切换两次。
+- Steam 专用键使用既有、经进程及端口身份校验的本地 Steam CDP 通路，直接调用 Steam 自身 OnHomeButtonPressed／OnQuickAccessButtonPressed 接收方法；不依赖 Decky 插件、控制器连接或虚拟设备。
+- 触发是全局功能键语义，不读取当前前台 HWND／PID 作为许可，不强行聚焦 Steam，不自动切模式。Steam 自行路由并处理防抖、抑制及导航。
+- 2026-10-11 已移除依赖 Steam 前台的 Ctrl+1／Ctrl+2 回退；原生入口不可用时报告失败，不向其他应用补发快捷键，也不修改 Steam 配置／开启调试。
+- 按键送达与菜单响应分别记录；可能已送达的调用不自动重发、不改走键盘。完整边界及本轮验证见 `G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/docs/screen-standalone-steam-global-keys-20261011.md`。
 - 麦克风切换使用 Core Audio API 并读回确认；无可用录音设备或拒绝写入时报告失败。
 
 ## 取消与错误

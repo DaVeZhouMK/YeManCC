@@ -1,0 +1,1879 @@
+{
+  "schemaVersion": 1,
+  "status": "VERIFIED_ORIGINAL_SINGLE_METHOD_FAULT_ADDS_EXACT4_IN_NEW_RETURN_COVERAGE",
+  "sourceVersion": "VC-R3-B46-368BADC1-20261020",
+  "positiveRaw": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/positive/full-pipe/fixture-result.json",
+    "sha256": "c3afb14dd85f188fb4c9900697f74ee0e0103f58bda822197bddc762403d609d",
+    "bytes": 48996174
+  },
+  "negativeRaw": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/psOwnership/full-pipe/fixture-result.json",
+    "sha256": "55b84522cb1d066d2f0f3a208c3f3eaa96e93969570be847b451ac07eff7ec66",
+    "bytes": 49002599
+  },
+  "oldRaw": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-ps-ownership/full-pipe/fixture-result.json",
+    "sha256": "2bde6b4a92d6986e6f50fd0bf4806e08e75d5fde8783d5dc9e8a7b96a97e3801",
+    "bytes": 15895970
+  },
+  "actualFault": {
+    "symbol": "psWakeProbeOwnEndpoint",
+    "oldAndNewRecipeLFByteIdentical": true,
+    "recipeLfSha256": "6fe12d619286107c8d18c6322ee687a0f1c839645c8cd7b26c1cc05ae3427f86",
+    "actualPositiveFunctionSha256": "51418ab05a58175aa7bd5f844c321552db16128e688e3990370ab08a05b1d3eb",
+    "actualNegativeFunctionSha256": "d08caf7f29d800f3123d64909fe959b4c8f8fe17ca10bf9cdce7b8bd46227cbf",
+    "appliedOriginalRecipeByteMatchesActualMutatedFunction": true,
+    "wholeActualInertDiffersOnlyInThatOneMethod": true,
+    "positiveSourceManifest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/positive/source-manifest.json",
+      "sha256": "16680f6aefde213d838da3d1baf56ee30e1f4cacd4cb4683b3909338012ae693",
+      "bytes": 657738
+    },
+    "negativeSourceManifest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/psOwnership/source-manifest.json",
+      "sha256": "82453551929ee26e88a4482e5e28dfc1b9e0be0b8843bb3f5035d0fb72ec7158",
+      "bytes": 661723
+    },
+    "core": {
+      "symbol": "psWakeProbeOwnEndpoint",
+      "sha256": "4b2256310b92768747ad2a183f511ea2008e94d05b3e46c66a5a54757d387b6d",
+      "executedSha256": "d08caf7f29d800f3123d64909fe959b4c8f8fe17ca10bf9cdce7b8bd46227cbf",
+      "unchanged": false,
+      "fixtureEndpointAdapter": true,
+      "expectedSemanticNegative": true
+    },
+    "negativeControl": [
+      {
+        "symbol": "psWakeProbeOwnEndpoint",
+        "negativeControl": true,
+        "scope": "Only replace SDK-root CM ancestry verdict with original profile-marker matching; completeness, session, request, target generation and managed pipe remain unchanged."
+      }
+    ]
+  },
+  "legacyFailures": {
+    "exact14": [
+      {
+        "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+        "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+        "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+        "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+        "case": "ROG/full-coordinator-real-managed-pipe/none/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+        "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+        "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile peer or retired endpoint cannot prove current owned PS readiness",
+        "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge"
+      },
+      {
+        "assertion": "same-profile unowned observation defers without clearing recovery or rebuilding beside a peer",
+        "case": "ROG/full-coordinator-real-managed-pipe/ps-late-ownership-read/dualsense-edge"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      },
+      {
+        "assertion": "actual PS endpoint reader does not turn incomplete observation into present/absent authority",
+        "case": "PS-WAKE/read-only-endpoint-enumeration"
+      }
+    ],
+    "allRetained": true
+  },
+  "exactNew4": [
+    {
+      "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0"
+    },
+    {
+      "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0"
+    },
+    {
+      "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1"
+    },
+    {
+      "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1"
+    }
+  ],
+  "caseEvidence": [
+    {
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+      "positive": {
+        "witness": {
+          "connectedMask": 0,
+          "oldGeneration": 1,
+          "oldRoot": "SWD\\HIDMAESTRO_VID_054C_PID_0DF2&IG_00\\OFFLINE_PS_1",
+          "ownedMatches": 0,
+          "psQueriesDuringConsumer": 1,
+          "queryComplete": true,
+          "queryError": 0,
+          "restoreCallsAfter": 1,
+          "restoreCallsBefore": 0,
+          "sourceMask": 1,
+          "stateAfter": {
+            "active": false,
+            "creationPossible": false,
+            "epoch": 0,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": false,
+            "quarantined": false,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "",
+            "startBlocked": true,
+            "transportFault": false
+          },
+          "stateBefore": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 95,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "1196B298-6ED9-4B5B-B8B4-C005B258B0F1",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "verdict": "foreign-peer"
+        },
+        "managedChild": {
+          "exitCode": 5,
+          "nativeObservedProcessExit": true,
+          "finalCleanupOk": true,
+          "hasController": false,
+          "hasContext": false
+        },
+        "ownershipVerdicts": [
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 95,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "1196B298-6ED9-4B5B-B8B4-C005B258B0F1",
+            "verdict": "unknown",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": true,
+            "hostEpoch": 95,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "1196B298-6ED9-4B5B-B8B4-C005B258B0F1",
+            "verdict": "absent",
+            "xinputPlaneSubstituted": false
+          }
+        ],
+        "currentFinalOff": [
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 0,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "original-admission-deadline-expired",
+            "gameInputVerified": false,
+            "healthyChecks": 0,
+            "hostEpoch": 0,
+            "inspectionChecks": 0,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "unobserved",
+            "lastInspectionState": "unobserved",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "failure",
+            "persona": "dualsense-edge",
+            "powerGeneration": 52,
+            "requestId": 1,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          },
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 10000,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "disabled-local-cleanup-verified",
+            "gameInputVerified": false,
+            "healthyChecks": 1,
+            "hostEpoch": 0,
+            "inspectionChecks": 1,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "disabled-cleanup-proven",
+            "lastInspectionState": "current-local-chain-healthy",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "success",
+            "persona": "disabled",
+            "powerGeneration": 52,
+            "requestId": 2,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          }
+        ]
+      },
+      "fault": {
+        "witness": {
+          "connectedMask": 0,
+          "oldGeneration": 1,
+          "oldRoot": "SWD\\HIDMAESTRO_VID_054C_PID_0DF2&IG_00\\OFFLINE_PS_1",
+          "ownedMatches": 1,
+          "psQueriesDuringConsumer": 1,
+          "queryComplete": true,
+          "queryError": 0,
+          "restoreCallsAfter": 0,
+          "restoreCallsBefore": 0,
+          "sourceMask": 1,
+          "stateAfter": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 95,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "17858DCA-CF19-482B-AAB3-E3C8DA08A589",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "stateBefore": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 95,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "17858DCA-CF19-482B-AAB3-E3C8DA08A589",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "verdict": "foreign-peer"
+        },
+        "managedChild": {
+          "exitCode": 5,
+          "nativeObservedProcessExit": true,
+          "finalCleanupOk": true,
+          "hasController": false,
+          "hasContext": false
+        },
+        "ownershipVerdicts": [
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 95,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "17858DCA-CF19-482B-AAB3-E3C8DA08A589",
+            "verdict": "unknown",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 95,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "17858DCA-CF19-482B-AAB3-E3C8DA08A589",
+            "verdict": "present",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": true,
+            "hostEpoch": 95,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "17858DCA-CF19-482B-AAB3-E3C8DA08A589",
+            "verdict": "absent",
+            "xinputPlaneSubstituted": false
+          }
+        ],
+        "currentFinalOff": [
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 0,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "original-admission-deadline-expired",
+            "gameInputVerified": false,
+            "healthyChecks": 0,
+            "hostEpoch": 0,
+            "inspectionChecks": 0,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "unobserved",
+            "lastInspectionState": "unobserved",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "failure",
+            "persona": "dualsense-edge",
+            "powerGeneration": 52,
+            "requestId": 1,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          },
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 10000,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "disabled-local-cleanup-verified",
+            "gameInputVerified": false,
+            "healthyChecks": 1,
+            "hostEpoch": 0,
+            "inspectionChecks": 1,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "disabled-cleanup-proven",
+            "lastInspectionState": "current-local-chain-healthy",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "success",
+            "persona": "disabled",
+            "powerGeneration": 52,
+            "requestId": 2,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          }
+        ]
+      },
+      "positiveCaseChecks": [
+        {
+          "assertion": "PS return witness starts with a private real settings request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5519,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness creates exactly one actual managed target",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5520,
+          "passed": true
+        },
+        {
+          "assertion": "actual accepted managed PREPARE supplies the exact old PS ownership witness",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5521,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5522,
+          "passed": true
+        },
+        {
+          "assertion": "owned managed Host fixture exits naturally after real coordinator Stop",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5523,
+          "passed": true
+        },
+        {
+          "assertion": "managed final receipt binds actual loop/session execution and source identities",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5524,
+          "passed": true
+        },
+        {
+          "assertion": "actual old child naturally exits and disposes SDK resources before delayed-PnP evidence is supplied",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5525,
+          "passed": true
+        },
+        {
+          "assertion": "real failed release retains quarantine while runtime PS binding is revoked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5526,
+          "passed": true
+        },
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5527,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5528,
+          "passed": true
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5529,
+          "passed": true
+        },
+        {
+          "assertion": "later complete owned-PS absence is independently observed before final cleanup",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5530,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5531,
+          "passed": true
+        },
+        {
+          "assertion": "one actual restore settles the exact retired PS session after qualified absence",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5532,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5533,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5534,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5535,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5536,
+          "passed": true
+        },
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5537,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5538,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5539,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5540,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5541,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5542,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5543,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5544,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5545,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5546,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness closes through an actual admitted player OFF",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5547,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5548,
+          "passed": true
+        },
+        {
+          "assertion": "actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5549,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5550,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5551,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5552,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5553,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5554,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5555,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5556,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5557,
+          "passed": true
+        },
+        {
+          "assertion": "ten-second candidate countdown alone never unlocks a player request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5558,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5559,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5560,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5561,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5562,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5563,
+          "passed": true
+        },
+        {
+          "assertion": "owned-PS return witness leaves no new target or retained local resources",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5564,
+          "passed": true
+        }
+      ],
+      "faultCaseChecks": [
+        {
+          "assertion": "PS return witness starts with a private real settings request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5519,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness creates exactly one actual managed target",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5520,
+          "passed": true
+        },
+        {
+          "assertion": "actual accepted managed PREPARE supplies the exact old PS ownership witness",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5521,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5522,
+          "passed": true
+        },
+        {
+          "assertion": "owned managed Host fixture exits naturally after real coordinator Stop",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5523,
+          "passed": true
+        },
+        {
+          "assertion": "managed final receipt binds actual loop/session execution and source identities",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5524,
+          "passed": true
+        },
+        {
+          "assertion": "actual old child naturally exits and disposes SDK resources before delayed-PnP evidence is supplied",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5525,
+          "passed": true
+        },
+        {
+          "assertion": "real failed release retains quarantine while runtime PS binding is revoked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5526,
+          "passed": true
+        },
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5527,
+          "passed": false
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5528,
+          "passed": true
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5529,
+          "passed": false
+        },
+        {
+          "assertion": "later complete owned-PS absence is independently observed before final cleanup",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5530,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5531,
+          "passed": true
+        },
+        {
+          "assertion": "one actual restore settles the exact retired PS session after qualified absence",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5532,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5533,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5534,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5535,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5536,
+          "passed": true
+        },
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5537,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5538,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5539,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5540,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5541,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5542,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5543,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5544,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5545,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5546,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness closes through an actual admitted player OFF",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5547,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5548,
+          "passed": true
+        },
+        {
+          "assertion": "actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5549,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5550,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5551,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5552,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5553,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5554,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5555,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5556,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5557,
+          "passed": true
+        },
+        {
+          "assertion": "ten-second candidate countdown alone never unlocks a player request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5558,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5559,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5560,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5561,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5562,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5563,
+          "passed": true
+        },
+        {
+          "assertion": "owned-PS return witness leaves no new target or retained local resources",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5564,
+          "passed": true
+        }
+      ],
+      "exactNewFailedChecks": [
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5527,
+          "passed": false
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-0",
+          "checkIndex": 5529,
+          "passed": false
+        }
+      ],
+      "afterExplicitControlledAbsenceAllRemainingChecksPass": true
+    },
+    {
+      "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+      "positive": {
+        "witness": {
+          "connectedMask": 1,
+          "oldGeneration": 1,
+          "oldRoot": "SWD\\HIDMAESTRO_VID_054C_PID_0DF2&IG_00\\OFFLINE_PS_1",
+          "ownedMatches": 0,
+          "psQueriesDuringConsumer": 1,
+          "queryComplete": true,
+          "queryError": 0,
+          "restoreCallsAfter": 1,
+          "restoreCallsBefore": 0,
+          "sourceMask": 1,
+          "stateAfter": {
+            "active": false,
+            "creationPossible": false,
+            "epoch": 0,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": false,
+            "quarantined": false,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "",
+            "startBlocked": true,
+            "transportFault": false
+          },
+          "stateBefore": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 99,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "9E220BCC-1CFC-4873-8B08-EAE6E600A5DC",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "verdict": "foreign-peer"
+        },
+        "managedChild": {
+          "exitCode": 5,
+          "nativeObservedProcessExit": true,
+          "finalCleanupOk": true,
+          "hasController": false,
+          "hasContext": false
+        },
+        "ownershipVerdicts": [
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 99,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "9E220BCC-1CFC-4873-8B08-EAE6E600A5DC",
+            "verdict": "unknown",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": true,
+            "hostEpoch": 99,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "9E220BCC-1CFC-4873-8B08-EAE6E600A5DC",
+            "verdict": "absent",
+            "xinputPlaneSubstituted": false
+          }
+        ],
+        "currentFinalOff": [
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 0,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "original-admission-deadline-expired",
+            "gameInputVerified": false,
+            "healthyChecks": 0,
+            "hostEpoch": 0,
+            "inspectionChecks": 0,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "unobserved",
+            "lastInspectionState": "unobserved",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "failure",
+            "persona": "dualsense-edge",
+            "powerGeneration": 52,
+            "requestId": 1,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          },
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 10000,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "disabled-local-cleanup-verified",
+            "gameInputVerified": false,
+            "healthyChecks": 1,
+            "hostEpoch": 0,
+            "inspectionChecks": 1,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "disabled-cleanup-proven",
+            "lastInspectionState": "current-local-chain-healthy",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "success",
+            "persona": "disabled",
+            "powerGeneration": 52,
+            "requestId": 2,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          }
+        ]
+      },
+      "fault": {
+        "witness": {
+          "connectedMask": 1,
+          "oldGeneration": 1,
+          "oldRoot": "SWD\\HIDMAESTRO_VID_054C_PID_0DF2&IG_00\\OFFLINE_PS_1",
+          "ownedMatches": 1,
+          "psQueriesDuringConsumer": 1,
+          "queryComplete": true,
+          "queryError": 0,
+          "restoreCallsAfter": 0,
+          "restoreCallsBefore": 0,
+          "sourceMask": 1,
+          "stateAfter": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 99,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "70608BDA-38CC-4F0F-B77B-6C7458D29B2C",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "stateBefore": {
+            "active": false,
+            "creationPossible": true,
+            "epoch": 99,
+            "hostHandle": false,
+            "journalActive": false,
+            "neutralized": false,
+            "personaHandoffActive": false,
+            "prepared": true,
+            "quarantined": true,
+            "readPaused": false,
+            "routeArmed": false,
+            "runId": "70608BDA-38CC-4F0F-B77B-6C7458D29B2C",
+            "startBlocked": true,
+            "transportFault": true
+          },
+          "verdict": "foreign-peer"
+        },
+        "managedChild": {
+          "exitCode": 5,
+          "nativeObservedProcessExit": true,
+          "finalCleanupOk": true,
+          "hasController": false,
+          "hasContext": false
+        },
+        "ownershipVerdicts": [
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 99,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "70608BDA-38CC-4F0F-B77B-6C7458D29B2C",
+            "verdict": "unknown",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": false,
+            "hostEpoch": 99,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "70608BDA-38CC-4F0F-B77B-6C7458D29B2C",
+            "verdict": "present",
+            "xinputPlaneSubstituted": false
+          },
+          {
+            "basis": "exact-retired-SDK-root",
+            "bindingGeneration": 1,
+            "checksSincePreviousVerdict": 1,
+            "completeAbsence": true,
+            "hostEpoch": 99,
+            "ownedRootAvailable": true,
+            "provesGameInput": false,
+            "runId": "70608BDA-38CC-4F0F-B77B-6C7458D29B2C",
+            "verdict": "absent",
+            "xinputPlaneSubstituted": false
+          }
+        ],
+        "currentFinalOff": [
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 0,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "original-admission-deadline-expired",
+            "gameInputVerified": false,
+            "healthyChecks": 0,
+            "hostEpoch": 0,
+            "inspectionChecks": 0,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "unobserved",
+            "lastInspectionState": "unobserved",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "failure",
+            "persona": "dualsense-edge",
+            "powerGeneration": 52,
+            "requestId": 1,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          },
+          {
+            "acceptedSourceContinuity": 0,
+            "acceptedSourceHostEpoch": 0,
+            "acceptedSourceMsiModeGeneration": 0,
+            "acceptedSourceRequestId": 0,
+            "acceptedSourceSequence": 0,
+            "candidateIsFinal": false,
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "excludedChecks": 0,
+            "executionInspectionDeadlineElapsedMs": 10000,
+            "executionInspectionStartedElapsedMs": 0,
+            "fallbackAttempts": 0,
+            "finalReason": "disabled-local-cleanup-verified",
+            "gameInputVerified": false,
+            "healthyChecks": 1,
+            "hostEpoch": 0,
+            "inspectionChecks": 1,
+            "inspectionFactsAvailable": true,
+            "knownFaultChecks": 0,
+            "lastInspectionEvidence": "disabled-cleanup-proven",
+            "lastInspectionState": "current-local-chain-healthy",
+            "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+            "outcome": "success",
+            "persona": "disabled",
+            "powerGeneration": 52,
+            "requestId": 2,
+            "resultScope": "local-switch-verification",
+            "stage": "final"
+          }
+        ]
+      },
+      "positiveCaseChecks": [
+        {
+          "assertion": "PS return witness starts with a private real settings request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5705,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness creates exactly one actual managed target",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5706,
+          "passed": true
+        },
+        {
+          "assertion": "actual accepted managed PREPARE supplies the exact old PS ownership witness",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5707,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5708,
+          "passed": true
+        },
+        {
+          "assertion": "owned managed Host fixture exits naturally after real coordinator Stop",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5709,
+          "passed": true
+        },
+        {
+          "assertion": "managed final receipt binds actual loop/session execution and source identities",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5710,
+          "passed": true
+        },
+        {
+          "assertion": "actual old child naturally exits and disposes SDK resources before delayed-PnP evidence is supplied",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5711,
+          "passed": true
+        },
+        {
+          "assertion": "real failed release retains quarantine while runtime PS binding is revoked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5712,
+          "passed": true
+        },
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5713,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5714,
+          "passed": true
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5715,
+          "passed": true
+        },
+        {
+          "assertion": "later complete owned-PS absence is independently observed before final cleanup",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5716,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5717,
+          "passed": true
+        },
+        {
+          "assertion": "one actual restore settles the exact retired PS session after qualified absence",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5718,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5719,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5720,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5721,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5722,
+          "passed": true
+        },
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5723,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5724,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5725,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5726,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5727,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5728,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5729,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5730,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5731,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5732,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness closes through an actual admitted player OFF",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5733,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5734,
+          "passed": true
+        },
+        {
+          "assertion": "actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5735,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5736,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5737,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5738,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5739,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5740,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5741,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5742,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5743,
+          "passed": true
+        },
+        {
+          "assertion": "ten-second candidate countdown alone never unlocks a player request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5744,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5745,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5746,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5747,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5748,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5749,
+          "passed": true
+        },
+        {
+          "assertion": "owned-PS return witness leaves no new target or retained local resources",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5750,
+          "passed": true
+        }
+      ],
+      "faultCaseChecks": [
+        {
+          "assertion": "PS return witness starts with a private real settings request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5705,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness creates exactly one actual managed target",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5706,
+          "passed": true
+        },
+        {
+          "assertion": "actual accepted managed PREPARE supplies the exact old PS ownership witness",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5707,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5708,
+          "passed": true
+        },
+        {
+          "assertion": "owned managed Host fixture exits naturally after real coordinator Stop",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5709,
+          "passed": true
+        },
+        {
+          "assertion": "managed final receipt binds actual loop/session execution and source identities",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5710,
+          "passed": true
+        },
+        {
+          "assertion": "actual old child naturally exits and disposes SDK resources before delayed-PnP evidence is supplied",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5711,
+          "passed": true
+        },
+        {
+          "assertion": "real failed release retains quarantine while runtime PS binding is revoked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5712,
+          "passed": true
+        },
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5713,
+          "passed": false
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5714,
+          "passed": true
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5715,
+          "passed": false
+        },
+        {
+          "assertion": "later complete owned-PS absence is independently observed before final cleanup",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5716,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5717,
+          "passed": true
+        },
+        {
+          "assertion": "one actual restore settles the exact retired PS session after qualified absence",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5718,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5719,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5720,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5721,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5722,
+          "passed": true
+        },
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5723,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5724,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5725,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5726,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5727,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5728,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5729,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5730,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5731,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5732,
+          "passed": true
+        },
+        {
+          "assertion": "PS return witness closes through an actual admitted player OFF",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5733,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5734,
+          "passed": true
+        },
+        {
+          "assertion": "actual stop reports only a candidate with its first ten-second verification inside the original thirty-second cap",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5735,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5736,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5737,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5738,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5739,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5740,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5741,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5742,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5743,
+          "passed": true
+        },
+        {
+          "assertion": "ten-second candidate countdown alone never unlocks a player request",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5744,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5745,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5746,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5747,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5748,
+          "passed": true
+        },
+        {
+          "assertion": "player admission opens only after actual verification final or original thirty-second expiry",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5749,
+          "passed": true
+        },
+        {
+          "assertion": "owned-PS return witness leaves no new target or retained local resources",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5750,
+          "passed": true
+        }
+      ],
+      "exactNewFailedChecks": [
+        {
+          "assertion": "actual owned-PS reader establishes the independent old-target witness before quarantine dispatch",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5713,
+          "passed": false
+        },
+        {
+          "assertion": "complete owned-PS absence allows the actual deferred restore and exact old tuple retirement",
+          "case": "PS-RETURN/ROG/owned-HID-foreign-peer/xinput-mask-1",
+          "checkIndex": 5715,
+          "passed": false
+        }
+      ],
+      "afterExplicitControlledAbsenceAllRemainingChecksPass": true
+    }
+  ],
+  "NoIoSoftwareOnly": true,
+  "physicalHardwareAccepted": false,
+  "causalScope": "Controlled new PS-RETURN topology contains a foreign same-profile peer. The original profile-marker rollback mistakes it for current old-target ownership, prevents qualified absence from restoring/retiring, and yields exactly witness+restore refusal per mask0/1. Queries/child cleanup/source binding succeed; later controlled complete absence independently settles quarantine. These four are direct named semantic failures in the original single-reader fault, not compile/precondition/cascade errors.",
+  "priorPublicFAILUnchanged": true
+}

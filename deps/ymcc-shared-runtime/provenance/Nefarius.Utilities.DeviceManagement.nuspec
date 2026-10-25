@@ -1,0 +1,36 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<package xmlns="http://schemas.microsoft.com/packaging/2013/05/nuspec.xsd">
+  <metadata>
+    <id>Nefarius.Utilities.DeviceManagement</id>
+    <version>5.2.0</version>
+    <authors>Benjamin Höglinger-Stelzer</authors>
+    <license type="expression">MIT</license>
+    <licenseUrl>https://licenses.nuget.org/MIT</licenseUrl>
+    <icon>NSS-128x128.png</icon>
+    <readme>README.md</readme>
+    <projectUrl>https://github.com/nefarius/Nefarius.Utilities.DeviceManagement</projectUrl>
+    <description>Managed wrappers around SetupAPI, Cfgmgr32, NewDev and DrvStore native APIs on Windows.</description>
+    <copyright>Copyright © Benjamin Höglinger-Stelzer 2022-2025</copyright>
+    <repository type="git" url="https://github.com/nefarius/Nefarius.Utilities.DeviceManagement" commit="5ed0bf606ace51a3a99362ede90dadba2d92a6fb" />
+    <dependencies>
+      <group targetFramework=".NETFramework4.6.2">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETFramework4.8">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net8.0">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework="net9.0">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.0">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+      <group targetFramework=".NETStandard2.1">
+        <dependency id="System.Memory" version="4.6.3" exclude="Build,Analyzers" />
+      </group>
+    </dependencies>
+  </metadata>
+</package>

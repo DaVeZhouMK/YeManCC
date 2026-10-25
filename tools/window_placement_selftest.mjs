@@ -17,6 +17,7 @@ function evaluate(source,globals={},imports={}){
 }
 const read=file=>fs.readFileSync(path.join(root,file),'utf8').replaceAll('\r\n','\n');
 const app=read('src/App.vue'),uiSource=read('src/bridge/uiSettings.ts'),native=read('native/main.cpp');
+const monitorLayout=evaluate(read('src/bridge/monitorLayout.ts'));
 function block(source,anchor){
  const start=source.indexOf(anchor);assert(start>=0,`Missing anchor: ${anchor}`);
  const open=source.indexOf('{',start);assert(open>=0);
@@ -87,11 +88,6 @@ await check('settings handler rejects invalid choices and rapid writes retain th
  const handler=evaluate(block(read('src/views/SettingsView.vue'),'async function onWindowPlacementChange(')+'\nexport {onWindowPlacementChange};',{getUiSetting:f.ui.getUiSetting,setUiSettings:f.ui.setUiSettings,errMsg,windowPlacement});
  await handler.onWindowPlacementChange('center');assert.equal(f.placements.length,0);await Promise.all([handler.onWindowPlacementChange('left'),handler.onWindowPlacementChange('right')]);await f.settle();assert.equal(windowPlacement.value,'right');assert.equal(f.disk.windowPlacement,'right');assert.deepEqual(f.placements,['left','right']);f.dispose();
 });
-await check('display changes invalidate the monitor-scoped summon latch before scheduling reflow',()=>{
- const start=native.indexOf('    case WM_DISPLAYCHANGE:');assert(start>=0);
- const displayChange=native.slice(start,native.indexOf('    case WM_MOVE:',start));
- assert.match(displayChange,/focusInvalidateFullHeightLatch\(\);[\s\S]*focusScheduleDisplayReflow\(\);/);
-});
 await check('native lifecycle reflows all share the saved-side default policy',()=>{
  assert.match(native,/static bool applyFullHeightLayout\(HMONITOR preferredMonitor = nullptr, bool dockLeft = windowPlacementIsLeft\(\)\)/);
  for(const anchor of ['static void focusReflowMainWindow()', 'case WM_DPICHANGED:']){
@@ -107,10 +103,11 @@ function scaleFixture(standalone = false, dpr = 1) {
  Object.assign(vv, { width: 640, height: 720 });
  const root = { clientWidth: 640, clientHeight: 720, style: { setProperty(_, value) { this.scale = value; } } };
  const isStandaloneEditor = { value: standalone }, mounted = [], unmounted = []; let frameId = 0;
- const start = app.indexOf('const BASE_W ='), end = app.indexOf('// M8: Start button', start);
+ const start = app.indexOf('const layoutBaseWidth ='), end = app.indexOf('// M8: Start button', start);
  const lifecycle = app.slice(app.indexOf('let stageResizeObserver:'), app.indexOf('</script>'));
  const exports = evaluate(app.slice(start, end) + lifecycle + '\nexport { nativeViewport, viewportSize, scalerStyle, uiScale, settleScale };', {
   window: target, document: { documentElement: root }, isStandaloneEditor,
+  router: { currentRoute: { value: { path: '/' } } }, ...monitorLayout, watch() {},
   ref: value => ({ value }), computed: get => ({ get value() { return get(); } }),
   requestAnimationFrame(fn) { const id = ++frameId; frames.set(id, fn); return id; },
   cancelAnimationFrame(id) { frames.delete(id); },
@@ -151,6 +148,22 @@ await check('scale unmount cancels settling and removes resize listeners', () =>
  const before = f.uiScale.value; f.resizeNative(1600, 2160); f.resizeDom(480, 540); assert.equal(f.uiScale.value, before); assert.equal(f.frames.size, 0);
 });
 
+await check('native summon/maximize paths resample and cancel bounded taskbar checks', () => {
+ const show = block(native, 'static void showWindowAnimated(HWND hwnd, int showCmd, bool activate) {');
+ const showing = show.indexOf('if (showCmd == SW_MINIMIZE || showCmd == SW_MAXIMIZE');
+ assert(show.indexOf('focusReflowMainWindow();') < showing, 'missing pre-show sample');
+ assert(show.indexOf('focusReflowMainWindow();', showing) > showing, 'missing post-show sample');
+ assert(show.includes('scheduleTaskbarLayoutRecheck();'));
+ assert(block(native, 'static void bringToFront(HWND hwnd, bool maximizeWindow = false) {').includes('showWindowAnimated(hwnd,'));
+ assert(block(native, 'static void hideWindowAnimated(HWND hwnd) {').includes('cancelTaskbarLayoutRecheck();'));
+ const wnd = block(native, 'static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {');
+ assert(wnd.includes('if (w == TASKBAR_LAYOUT_RECHECK_TIMER_ID)'));
+ assert(wnd.includes('case WM_SYSCOMMAND:') && wnd.includes('scheduleTaskbarLayoutRecheck();'));
+ assert(wnd.slice(wnd.indexOf('case WM_DESTROY:')).includes('cancelTaskbarLayoutRecheck();'));
+ assert(!block(native, 'static bool applyFullHeightLayout(').includes('ABS_AUTOHIDE'));
+ assert(wnd.slice(wnd.indexOf('case WM_NCCALCSIZE:')).includes('safeMonitorArea(mon, area)'));
+});
+
 const outputArg=process.argv.indexOf('--output-root');
 const configured=outputArg>=0?process.argv[outputArg+1]:path.join(root,'Build','Validation','WindowPlacement');
 const output=path.resolve(configured),run=path.join(output,`${Date.now()}-${process.pid}`);
@@ -160,41 +173,50 @@ if(process.argv.includes('--native')){
  assert.equal(process.platform,'win32','Native regression requires Windows/MSVC');
  const vcvars='C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat';assert(fs.existsSync(vcvars),'MSVC x64 tools missing');
  const helper=block(native,'static bool windowPlacementIsLeft() {');
- const focusSession=block(native,'struct FocusSessionState {')+';';
- const invalidateLatch=block(native,'static void focusInvalidateFullHeightLatch() {');
  const layout=block(native,'static bool applyFullHeightLayout(');
  const covers=block(native,'static bool focusWindowCoversMonitor(HWND hwnd, RECT monitorRect) {');
  const looksFullscreen=block(native,'static bool focusWindowLooksFullscreen(HWND hwnd, RECT monitorRect) {');
  const ipc=block(native,'ipc_on("window.place",')+');';
+ const reflow=block(native,'static void focusReflowMainWindow() {');
+ const cancel=block(native,'static void cancelTaskbarLayoutRecheck() {');
+ const schedule=block(native,'static void scheduleTaskbarLayoutRecheck() {');
+ const tick=block(native,'static void taskbarLayoutRecheckTick() {');
  const cpp=`#include <algorithm>
 #include <cmath>
+#include <cwchar>
 #include <functional>
 #include <iostream>
 #include <stdexcept>
 #include "json.hpp"
 using json=nlohmann::json;
 using HWND=void*; using HMONITOR=void*; using BOOL=int;
+#define CALLBACK
+constexpr int TRUE=1;using LONG=long;using UINT_PTR=unsigned long long;
 constexpr int FALSE=0,MONITOR_DEFAULTTONEAREST=2,SWP_NOSIZE=1,SWP_NOZORDER=4,SWP_NOACTIVATE=16;
 struct RECT{long left=0,top=0,right=0,bottom=0;};
 struct MONITORINFO{size_t size;RECT rcMonitor,rcWork;};
 using DWORD=unsigned long;using UINT=unsigned int;using LPARAM=long long;
 constexpr DWORD ABM_GETSTATE=4,ABS_AUTOHIDE=1;
 struct APPBARDATA{DWORD cbSize;HWND hWnd;UINT uCallbackMessage;UINT uEdge;RECT rc;LPARAM lParam;};
-HWND g_hwnd=reinterpret_cast<HWND>(1);bool g_fullHeight=true,zoomed=false,iconic=false,monitorOk=true,rectOk=true,posOk=true,settingsOk=true;
-bool trayExists=true,trayVisible=true;DWORD appbarState=0;RECT monitor{0,0,1920,1080};
+HWND g_hwnd=reinterpret_cast<HWND>(1);bool g_frameless=true,mainVisible=true,g_fullHeight=true,zoomed=false,iconic=false,monitorOk=true,rectOk=true,posOk=true,settingsOk=true;
+bool trayExists=false,trayVisible=true,trayGeometryOk=true,enumOk=true,secondaryExists=false,secondaryVisible=true;
+RECT trayRect{0,1040,1920,1080},secondaryRect{0,1040,1920,1080};
+HMONITOR trayMonitor=reinterpret_cast<HMONITOR>(1),secondaryMonitor=reinterpret_cast<HMONITOR>(2);
+DWORD appbarState=0;RECT monitor{0,0,1920,1080};
 int g_baseW=580,g_baseH=780,moves=0,lastFlags=0;HMONITOR currentMonitor=reinterpret_cast<HMONITOR>(1),targetMonitor=currentMonitor;
 RECT work{0,0,1920,1080},windowRect{0,0,580,780};json settings=json::object();
 json ymSettingsSection(const char*){if(!settingsOk)throw std::runtime_error("settings unavailable");return settings;}
 BOOL IsWindow(HWND h){return h!=nullptr;}BOOL IsZoomed(HWND){return zoomed;}BOOL IsIconic(HWND){return iconic;}
 HWND FindWindowW(const wchar_t*,const wchar_t*){return trayExists?reinterpret_cast<HWND>(2):nullptr;}
-BOOL IsWindowVisible(HWND){return trayVisible;}
+BOOL IsWindowVisible(HWND h){return h==g_hwnd?mainVisible:h==reinterpret_cast<HWND>(5)?secondaryVisible:trayVisible;}
+BOOL EnumWindows(BOOL(CALLBACK* cb)(HWND,LPARAM),LPARAM value){if(!enumOk)return FALSE;if(trayExists)cb(reinterpret_cast<HWND>(2),value);if(secondaryExists)cb(reinterpret_cast<HWND>(5),value);return TRUE;}
+int GetClassNameW(HWND h,wchar_t* name,int){wcscpy_s(name,64,h==reinterpret_cast<HWND>(5)?L"Shell_SecondaryTrayWnd":L"Shell_TrayWnd");return 1;}
 DWORD SHAppBarMessage(DWORD,APPBARDATA*){return appbarState;}
 using QUERY_USER_NOTIFICATION_STATE=int;constexpr int QUNS_NOT_PRESENT=1,QUNS_BUSY=2,QUNS_RUNNING_D3D_FULL_SCREEN=3;int qunsState=QUNS_NOT_PRESENT;
 bool SUCCEEDED(long value){return value>=0;}
 long SHQueryUserNotificationState(QUERY_USER_NOTIFICATION_STATE* state){*state=qunsState;return 0;}
 struct FocusTargetSnapshot{HWND hwnd=nullptr;bool valid=false,fullscreen=false;};
-using ULONGLONG=unsigned long long;
-${focusSession}
+struct FocusSessionState{FocusTargetSnapshot target;};
 FocusSessionState g_focusSession;
 HWND g_foregroundWindow=nullptr;RECT gameRect{0,0,1920,1080};bool frameOk=true,gameRectOk=true;
 using LONG_PTR=long long;constexpr int GWL_STYLE=-16,DWMWA_EXTENDED_FRAME_BOUNDS=9;
@@ -206,21 +228,30 @@ int MulDiv(int a,int b,int c){return a*b/c;}
 LONG_PTR GetWindowLongPtrW(HWND,int){return gameStyle;}
 HWND GetForegroundWindow(){return g_foregroundWindow;}
 HMONITOR focusResolveMonitor(const FocusTargetSnapshot&){return targetMonitor;}
-HMONITOR MonitorFromWindow(HWND,int){return currentMonitor;}HMONITOR focusCurrentTargetMonitor(){return targetMonitor;}
+HMONITOR MonitorFromWindow(HWND h,int){return h==reinterpret_cast<HWND>(2)?trayMonitor:h==reinterpret_cast<HWND>(5)?secondaryMonitor:currentMonitor;}HMONITOR focusCurrentTargetMonitor(){return targetMonitor;}
 BOOL GetMonitorInfoW(HMONITOR,MONITORINFO* mi){mi->rcWork=work;mi->rcMonitor=monitor;return monitorOk;}
-BOOL GetWindowRect(HWND hwnd,RECT* rect){if(hwnd!=g_hwnd){*rect=gameRect;return gameRectOk;}*rect=windowRect;return rectOk;}
+BOOL GetWindowRect(HWND hwnd,RECT* rect){if(hwnd==reinterpret_cast<HWND>(2)){*rect=trayRect;return trayGeometryOk;}if(hwnd==reinterpret_cast<HWND>(5)){*rect=secondaryRect;return true;}if(hwnd!=g_hwnd){*rect=gameRect;return gameRectOk;}*rect=windowRect;return rectOk;}
 BOOL SetWindowPos(HWND,void*,int x,int y,int w,int h,int flags){++moves;lastFlags=flags;if(!posOk)return FALSE;int width=windowRect.right-windowRect.left,height=windowRect.bottom-windowRect.top;if(!(flags&SWP_NOSIZE)){width=w;height=h;}windowRect={x,y,x+width,y+height};return 1;}
 std::function<json(const json&)> place;
 template<class F> void ipc_on(const char*,F fn){place=fn;}
 ${helper}
-${invalidateLatch}
+#include "${path.join(root,'native/window_taskbar_layout.h').replaceAll('\\','/')}"
+constexpr UINT_PTR TASKBAR_LAYOUT_RECHECK_TIMER_ID=0x5A36;
+ymcc::windowlayout::TaskbarRecheck g_taskbarLayoutRecheck;
+bool timerOk=true;int timerArms=0,timerKills=0;UINT timerInterval=0;
+UINT_PTR SetTimer(HWND,UINT_PTR id,UINT delay,void*){++timerArms;timerInterval=delay;return timerOk?id:0;}
+BOOL KillTimer(HWND,UINT_PTR){++timerKills;return TRUE;}
 ${covers}
 ${looksFullscreen}
 ${layout}
+${reflow}
+${cancel}
+${schedule}
+${tick}
 void registerPlace(){${ipc}}
 void expect(bool condition,const char* name){if(!condition)throw std::runtime_error(name);}
 int main(){try{registerPlace();int tests=0;
- auto run=[&](const char* name,auto fn){fn();++tests;std::cout<<"PASS "<<name<<"\\n";};
+ auto run=[&](const char* name,auto fn){trayExists=false;trayVisible=true;trayGeometryOk=true;enumOk=true;secondaryExists=false;trayMonitor=currentMonitor;trayRect={0,1040,1920,1080};fn();++tests;std::cout<<"PASS "<<name<<"\\n";};
  run("default right startup",[&]{expect(applyFullHeightLayout(),"layout result");expect(windowRect.left==1117,"default right coordinate");});
  run("saved left startup",[&]{settings["windowPlacement"]="left";expect(applyFullHeightLayout(),"left layout");expect(windowRect.left==0,"left coordinate");});
  run("repeated DPI/display/wake reflow retains left",[&]{for(int i=0;i<5;++i)expect(applyFullHeightLayout(targetMonitor),"reflow");expect(windowRect.left==0,"left reflow");});
@@ -228,61 +259,44 @@ int main(){try{registerPlace();int tests=0;
  run("negative-origin secondary monitor",[&]{work={-1920,-200,0,880};expect(applyFullHeightLayout(reinterpret_cast<HMONITOR>(2)),"secondary");expect(windowRect.left==-1920&&windowRect.top==-200,"secondary coordinates");});
  run("physical DPI-sized work area",[&]{work={0,0,2560,1440};expect(applyFullHeightLayout(),"dpi area");expect(windowRect.left==0&&windowRect.right==1071&&windowRect.bottom==1440,"physical dimensions");});
  run("portrait narrow-screen protection",[&]{work={0,0,900,1600};expect(applyFullHeightLayout(),"portrait");expect(windowRect.left==0&&windowRect.right==900&&windowRect.top==195,"portrait dimensions");});
- run("hidden taskbar extends the window to the monitor bottom",[&]{settings["windowPlacement"]="left";trayVisible=false;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"hidden tray");expect(windowRect.top==0&&windowRect.bottom==1080,"screen bottom");trayVisible=true;});
- run("auto-hidden taskbar also fills the screen",[&]{settings["windowPlacement"]="left";appbarState=ABS_AUTOHIDE;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"autohide tray");expect(windowRect.top==0&&windowRect.bottom==1080,"autohide bottom");appbarState=0;work={0,0,1920,1080};});
- run("fullscreen game occluding the taskbar fills to the monitor bottom",[&]{settings["windowPlacement"]="left";trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;expect(applyFullHeightLayout(),"windowed");expect(windowRect.top==0&&windowRect.bottom==1040,"windowed respects taskbar");qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;g_foregroundWindow=reinterpret_cast<HWND>(4);gameRect=monitor;expect(applyFullHeightLayout(),"fullscreen");expect(windowRect.top==0&&windowRect.bottom==1080,"fullscreen bottom");g_foregroundWindow=nullptr;qunsState=QUNS_NOT_PRESENT;work={0,0,1920,1080};});
- run("fullscreen game snapshots fill to the monitor bottom",[&]{settings["windowPlacement"]="right";trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;g_focusSession.target.valid=true;g_focusSession.target.fullscreen=true;g_focusSession.target.hwnd=reinterpret_cast<HWND>(3);expect(applyFullHeightLayout(),"summon snapshot");expect(windowRect.top==0&&windowRect.bottom==1080,"snapshot bottom");g_focusSession={};g_foregroundWindow=reinterpret_cast<HWND>(4);gameRect=monitor;expect(applyFullHeightLayout(),"live foreground");expect(windowRect.top==0&&windowRect.bottom==1080,"foreground bottom");g_foregroundWindow=nullptr;gameRect={0,0,1920,1080};work={0,0,1920,1080};});
+ run("hidden taskbar extends the window to the monitor bottom",[&]{settings["windowPlacement"]="left";trayExists=true;trayVisible=false;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"hidden tray");expect(windowRect.top==0&&windowRect.bottom==1080,"screen bottom");trayVisible=true;});
+ run("auto-hidden taskbar also fills the screen",[&]{settings["windowPlacement"]="left";trayExists=true;trayRect={0,1078,1920,1120};appbarState=ABS_AUTOHIDE;work={0,0,1920,1040};monitor={0,0,1920,1080};expect(applyFullHeightLayout(),"autohide tray");expect(windowRect.top==0&&windowRect.bottom==1080,"autohide bottom");appbarState=0;work={0,0,1920,1080};});
+ run("fullscreen notification never overrides a visible taskbar",[&]{settings["windowPlacement"]="left";trayExists=true;trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;expect(applyFullHeightLayout(),"windowed");expect(windowRect.top==0&&windowRect.bottom==1040,"windowed respects taskbar");qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;g_foregroundWindow=reinterpret_cast<HWND>(4);gameRect=monitor;expect(applyFullHeightLayout(),"fullscreen");expect(windowRect.top==0&&windowRect.bottom==1040,"visible taskbar wins");g_foregroundWindow=nullptr;qunsState=QUNS_NOT_PRESENT;work={0,0,1920,1080};});
+ run("pre-summon fullscreen snapshots cannot override the live taskbar",[&]{settings["windowPlacement"]="right";trayExists=true;trayVisible=true;appbarState=0;work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_NOT_PRESENT;g_focusSession.target.valid=true;g_focusSession.target.fullscreen=true;g_focusSession.target.hwnd=reinterpret_cast<HWND>(3);expect(applyFullHeightLayout(),"summon snapshot");expect(windowRect.top==0&&windowRect.bottom==1040,"snapshot cannot hide taskbar");g_focusSession={};g_foregroundWindow=reinterpret_cast<HWND>(4);gameRect=monitor;expect(applyFullHeightLayout(),"live foreground");expect(windowRect.top==0&&windowRect.bottom==1040,"foreground cannot hide taskbar");g_foregroundWindow=nullptr;gameRect={0,0,1920,1080};work={0,0,1920,1080};});
 
  run("busy notifications without local fullscreen respect the taskbar",[&]{work={0,0,1920,1040};monitor={0,0,1920,1080};qunsState=QUNS_BUSY;expect(applyFullHeightLayout(),"busy layout");expect(windowRect.bottom==1040,"busy is not fullscreen");qunsState=QUNS_NOT_PRESENT;work=monitor;});
  run("global D3D notification state alone does not hide the local taskbar",[&]{work={0,0,1920,1040};qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;expect(applyFullHeightLayout(),"global D3D");expect(windowRect.bottom==1040,"global state is not monitor-bound");qunsState=QUNS_NOT_PRESENT;work=monitor;});
  run("fullscreen foreground on another monitor preserves the local work area",[&]{work={0,0,1920,1040};g_foregroundWindow=reinterpret_cast<HWND>(4);gameRect={1920,0,3840,1080};qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;expect(applyFullHeightLayout(),"other foreground monitor");expect(windowRect.bottom==1040,"other monitor foreground");g_foregroundWindow=nullptr;gameRect=monitor;qunsState=QUNS_NOT_PRESENT;work=monitor;});
  run("fullscreen snapshot is scoped to its resolved monitor",[&]{work={0,0,1920,1040};g_focusSession.target={reinterpret_cast<HWND>(3),true,true};targetMonitor=reinterpret_cast<HMONITOR>(2);expect(applyFullHeightLayout(currentMonitor),"other snapshot monitor");expect(windowRect.bottom==1040,"other monitor snapshot");g_focusSession={};targetMonitor=currentMonitor;work=monitor;});
  run("maximized desktop app on a high-resolution monitor is not fullscreen",[&]{monitor={0,0,3840,2560};work={0,0,3840,2512};gameRect=work;gameStyle=WS_CAPTION;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(!focusWindowCoversMonitor(g_foregroundWindow,monitor),"98 percent is not full coverage");expect(!focusWindowLooksFullscreen(g_foregroundWindow,monitor),"maximized classification");expect(applyFullHeightLayout(),"maximized foreground");expect(windowRect.bottom==2512,"visible taskbar remains excluded");qunsState=QUNS_RUNNING_D3D_FULL_SCREEN;expect(!focusWindowLooksFullscreen(g_foregroundWindow,monitor),"global D3D cannot override incomplete edges");qunsState=QUNS_NOT_PRESENT;g_foregroundWindow=nullptr;gameStyle=WS_POPUP;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;});
- run("borderless fullscreen fills the monitor without notification hints",[&]{work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(focusWindowLooksFullscreen(g_foregroundWindow,monitor),"borderless fullscreen");expect(applyFullHeightLayout(),"borderless layout");expect(windowRect.bottom==1080,"borderless bottom");g_foregroundWindow=nullptr;work=monitor;});
- run("summon session holds full height across the second reflow",[&]{settings["windowPlacement"]="left";trayVisible=true;appbarState=0;qunsState=QUNS_NOT_PRESENT;work={0,0,1920,1040};monitor={0,0,1920,1080};gameRect=monitor;g_focusSession={};g_focusSession.active=true;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(applyFullHeightLayout(),"summon first reflow");expect(windowRect.bottom==1080,"first reflow uses monitor bottom");g_foregroundWindow=nullptr;gameRect={0,0,1920,1080};expect(applyFullHeightLayout(),"summon second reflow after focus handoff");expect(windowRect.bottom==1080,"second reflow stays full height");g_focusSession={};expect(applyFullHeightLayout(),"session ended reflow");expect(windowRect.bottom==1040,"session end restores work area");work={0,0,1920,1080};gameRect=monitor;});
-
- run("full-height latch never crosses monitors or revives after switching back",[&]{
-  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;g_foregroundWindow=reinterpret_cast<HWND>(4);
-  monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;const HMONITOR first=currentMonitor;
-  expect(applyFullHeightLayout(first),"first monitor layout");expect(windowRect.bottom==1080,"first monitor full height");
-  g_foregroundWindow=g_hwnd;const HMONITOR second=reinterpret_cast<HMONITOR>(2);monitor={1920,0,3840,1080};work={1920,0,3840,1040};
-  expect(applyFullHeightLayout(second),"second monitor layout");expect(windowRect.bottom==1040,"second monitor respects visible taskbar");
-  monitor={0,0,1920,1080};work={0,0,1920,1040};expect(applyFullHeightLayout(first),"return to first monitor");expect(windowRect.bottom==1040,"first monitor stale latch not revived");
-  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
- });
- run("new monitor can establish its own full-height latch",[&]{
-  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;g_foregroundWindow=reinterpret_cast<HWND>(4);
-  monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;expect(applyFullHeightLayout(currentMonitor),"first monitor fullscreen");
-  const HMONITOR second=reinterpret_cast<HMONITOR>(2);monitor={1920,0,3840,1080};work={1920,0,3840,1040};gameRect=monitor;
-  expect(applyFullHeightLayout(second),"second monitor fullscreen");expect(windowRect.bottom==1080,"second fullscreen fills monitor");
-  g_foregroundWindow=g_hwnd;expect(applyFullHeightLayout(second),"second monitor focus handoff");expect(windowRect.bottom==1080,"second monitor keeps its own latch");
-  g_focusSession={};g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;
- });
- run("monitor origin and resolution changes invalidate a reused monitor handle",[&]{
-  for(const RECT changed:{RECT{1920,0,3840,1080},RECT{0,-200,1920,880},RECT{0,0,2560,1080},RECT{0,0,1920,1440}}){
-   g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
-   expect(applyFullHeightLayout(currentMonitor),"latch before geometry change");g_foregroundWindow=g_hwnd;monitor=changed;work=changed;work.bottom-=40;
-   expect(applyFullHeightLayout(currentMonitor),"changed geometry reflow");expect(windowRect.bottom==work.bottom,"changed geometry respects work area");expect(!g_focusSession.fullHeightLatched,"geometry change drops latch");
-  }
-  g_focusSession={};g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;
- });
- run("display topology invalidation clears the latch even if handle and bounds repeat",[&]{
-  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
-  expect(applyFullHeightLayout(currentMonitor),"latch before display change");focusInvalidateFullHeightLatch();
-  expect(!g_focusSession.fullHeightLatched&&!g_focusSession.fullHeightMonitor,"topology invalidation clears latch identity");g_foregroundWindow=g_hwnd;
-  expect(applyFullHeightLayout(currentMonitor),"display replacement reflow");expect(windowRect.bottom==1040,"display replacement respects visible taskbar");
-  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
- });
- run("failed monitor lookup discards the previous full-height latch",[&]{
-  g_focusSession={};g_focusSession.active=true;trayVisible=true;appbarState=0;monitor={0,0,1920,1080};work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);
-  expect(applyFullHeightLayout(currentMonitor),"latch before monitor lookup failure");monitorOk=false;expect(!applyFullHeightLayout(currentMonitor),"invalid monitor rejected");monitorOk=true;g_foregroundWindow=g_hwnd;
-  expect(applyFullHeightLayout(currentMonitor),"recovered monitor layout");expect(windowRect.bottom==1040,"monitor recovery does not reuse stale latch");
-  g_focusSession={};g_foregroundWindow=nullptr;work=monitor;gameRect=monitor;
- });
- run("fullscreen on a negative-origin monitor uses that monitor edges",[&]{monitor={-1920,-200,0,880};work={-1920,-200,0,840};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(applyFullHeightLayout(),"negative-origin fullscreen");expect(windowRect.top==-200&&windowRect.bottom==880,"negative-origin monitor bounds");g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;});
+ run("borderless fullscreen without a taskbar observation keeps the work area",[&]{work={0,0,1920,1040};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(focusWindowLooksFullscreen(g_foregroundWindow,monitor),"borderless fullscreen");expect(applyFullHeightLayout(),"borderless layout");expect(windowRect.bottom==1040,"unknown taskbar stays conservative");g_foregroundWindow=nullptr;work=monitor;});
+ run("fullscreen on a negative-origin monitor uses that monitor edges",[&]{monitor={-1920,-200,0,880};work={-1920,-200,0,840};gameRect=monitor;g_foregroundWindow=reinterpret_cast<HWND>(4);expect(applyFullHeightLayout(),"negative-origin fullscreen");expect(windowRect.top==-200&&windowRect.bottom==840,"negative-origin work-area bounds");g_foregroundWindow=nullptr;monitor={0,0,1920,1080};work=monitor;gameRect=monitor;});
  run("fullscreen frame rounding and spanning-monitor windows are accepted",[&]{HWND game=reinterpret_cast<HWND>(4);gameRect={2,2,1918,1078};expect(focusWindowCoversMonitor(game,monitor),"frame rounding");gameRect={-1920,0,1920,1080};expect(focusWindowCoversMonitor(game,monitor),"spanning monitor");gameRect={0,0,1920,1040};expect(!focusWindowCoversMonitor(game,monitor),"missing taskbar edge");expect(!focusWindowCoversMonitor(game,RECT{}),"empty monitor");gameRect=monitor;});
  run("fullscreen geometry failure falls back safely",[&]{HWND game=reinterpret_cast<HWND>(4);gameRect=monitor;frameOk=false;expect(focusWindowCoversMonitor(game,monitor),"window rect fallback");gameRectOk=false;expect(!focusWindowCoversMonitor(game,monitor),"both geometry calls failed");frameOk=true;gameRectOk=true;});
 
+ run("Windows 11 transparent taskbar padding does not shrink the reserved bottom work area",[&]{trayExists=true;monitor={0,0,3840,2160};work={0,0,3840,2064};trayRect={0,2016,3840,2160};for(const char* side:{"left","right"}){settings["windowPlacement"]=side;expect(applyFullHeightLayout(),"padded bottom taskbar");expect(windowRect.top==0&&windowRect.bottom==2064,"transparent 48-pixel gap");expect(windowRect.right-windowRect.left==1535,"work-area aspect ratio");expect(side==std::string("left")?windowRect.left==0:windowRect.right==3840,"saved side");}int before=moves;for(int i=0;i<6;++i)focusReflowMainWindow();expect(moves==before,"padded taskbar resize storm");monitor={0,0,1920,1080};work=monitor;});
+ run("transparent taskbar padding respects reserved work-area edges on all four sides",[&]{trayExists=true;monitor={0,0,1920,1080};const RECT workAreas[]={{0,0,1920,1040},{0,40,1920,1080},{40,0,1920,1080},{0,0,1880,1080}};const RECT trays[]={{0,1020,1920,1080},{0,0,1920,60},{0,0,60,1080},{1860,0,1920,1080}};for(int i=0;i<4;++i){work=workAreas[i];trayRect=trays[i];RECT area{};expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area),"padded edge");expect(ymcc::windowlayout::sameRect(area,work),"transparent padding changed work-area edge");}work=monitor;});
+ run("secondary monitor transparent taskbar padding keeps negative physical work-area coordinates",[&]{monitor={-3840,-200,0,1960};work={-3840,-200,0,1864};secondaryExists=true;secondaryVisible=true;secondaryMonitor=currentMonitor;secondaryRect={-3840,1816,0,1960};expect(applyFullHeightLayout(),"secondary padded bar");expect(windowRect.top==-200&&windowRect.bottom==1864,"secondary transparent gap");monitor={0,0,1920,1080};work=monitor;secondaryMonitor=reinterpret_cast<HMONITOR>(2);secondaryRect={0,1040,1920,1080};});
+ run("maximized frameless windows also ignore transparent taskbar padding",[&]{trayExists=true;work={0,0,1920,1040};trayRect={0,1020,1920,1080};g_fullHeight=false;zoomed=true;focusReflowMainWindow();expect(ymcc::windowlayout::sameRect(windowRect,work),"maximized transparent gap");zoomed=false;g_fullHeight=true;work=monitor;});
+ run("auto-hide activation-only work-area reservations still avoid an expanded taskbar",[&]{trayExists=true;const RECT workAreas[]={{0,0,1920,1078},{0,2,1920,1080},{2,0,1920,1080},{0,0,1918,1080}};const RECT trays[]={{0,1040,1920,1080},{0,0,1920,40},{0,0,40,1080},{1880,0,1920,1080}};const RECT expected[]={{0,0,1920,1040},{0,40,1920,1080},{40,0,1920,1080},{0,0,1880,1080}};for(int i=0;i<4;++i){work=workAreas[i];trayRect=trays[i];RECT area{};expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area),"activation strip");expect(ymcc::windowlayout::sameRect(area,expected[i]),"expanded taskbar covered");}work=monitor;});
+ run("a reservation on another edge does not suppress live taskbar clipping",[&]{trayExists=true;work={48,0,1920,1080};trayRect={0,1040,1920,1080};RECT area{};expect(ymcc::windowlayout::safeMonitorArea(currentMonitor,area),"different edge");expect(area.left==48&&area.bottom==1040,"different-edge reservation");work=monitor;});
+ run("visible auto-hide taskbar reserves actual area even when work area is full-screen",[&]{trayExists=true;appbarState=ABS_AUTOHIDE;work=monitor;expect(applyFullHeightLayout(),"open auto-hide");expect(windowRect.bottom==1040,"open auto-hide reserved");appbarState=0;});
+ run("stale work area is clipped by live taskbar bounds",[&]{trayExists=true;work=monitor;trayRect={0,1020,1920,1080};expect(applyFullHeightLayout(),"stale work");expect(windowRect.bottom==1020,"actual bar geometry");});
+ run("hidden primary taskbar cannot hide a visible secondary taskbar",[&]{trayExists=true;trayVisible=false;secondaryExists=true;targetMonitor=secondaryMonitor;work=monitor;expect(applyFullHeightLayout(targetMonitor),"secondary layout");expect(windowRect.bottom==1040,"secondary taskbar reserved");targetMonitor=currentMonitor;});
+ run("primary taskbar on another monitor does not change local work area",[&]{trayExists=true;trayVisible=false;trayMonitor=secondaryMonitor;work={0,0,1920,1040};expect(applyFullHeightLayout(),"other primary");expect(windowRect.bottom==1040,"other primary ignored");});
+ run("offscreen taskbar retains visible style but is actually hidden",[&]{trayExists=true;trayRect={0,1080,1920,1120};work={0,0,1920,1040};expect(applyFullHeightLayout(),"offscreen");expect(windowRect.bottom==1080,"offscreen reclaim");});
+ run("top taskbar is avoided with stale work area",[&]{trayExists=true;trayRect={0,0,1920,48};work=monitor;expect(applyFullHeightLayout(),"top bar");expect(windowRect.top==48&&windowRect.bottom==1080,"top bar reserved");});
+ run("left taskbar is avoided with stale work area",[&]{trayExists=true;trayRect={0,0,48,1080};work=monitor;settings["windowPlacement"]="left";expect(applyFullHeightLayout(),"left bar");expect(windowRect.left==48,"left bar reserved");});
+ run("right taskbar is avoided with stale work area",[&]{trayExists=true;trayRect={1872,0,1920,1080};work=monitor;settings["windowPlacement"]="right";expect(applyFullHeightLayout(),"right bar");expect(windowRect.right==1872,"right bar reserved");});
+ run("live taskbar bounds on a negative-origin screen stay in physical coordinates",[&]{trayExists=true;monitor={-1920,-200,0,880};work=monitor;trayRect={-1920,840,0,880};expect(applyFullHeightLayout(),"negative tray");expect(windowRect.top==-200&&windowRect.bottom==840,"negative visible bar");monitor={0,0,1920,1080};work=monitor;});
+ run("unknown taskbar and enumeration failure keep conservative work area",[&]{work={0,0,1920,1040};expect(applyFullHeightLayout(),"missing bar");expect(windowRect.bottom==1040,"missing bar fallback");trayExists=true;trayVisible=false;enumOk=false;expect(applyFullHeightLayout(),"failed enum");expect(windowRect.bottom==1040,"failed enum fallback");});
+ run("failed taskbar geometry does not reclaim reserved space",[&]{trayExists=true;trayGeometryOk=false;work={0,0,1920,1040};expect(applyFullHeightLayout(),"failed rect");expect(windowRect.bottom==1040,"failed rect fallback");});
+ run("rechecking unchanged bounds does not generate resize storms",[&]{work=monitor;expect(applyFullHeightLayout(),"initial layout");int before=moves;for(int i=0;i<6;++i)expect(applyFullHeightLayout(),"no-op layout");expect(moves==before,"unchanged layout resized");});
+ run("bounded post-summon recheck catches a taskbar that appears later",[&]{trayExists=true;trayVisible=false;work={0,0,1920,1040};mainVisible=true;g_fullHeight=true;scheduleTaskbarLayoutRecheck();taskbarLayoutRecheckTick();expect(windowRect.bottom==1080,"initial hidden");trayVisible=true;taskbarLayoutRecheckTick();expect(windowRect.bottom==1040,"late visible correction");for(int i=0;i<4;++i)taskbarLayoutRecheckTick();expect(!g_taskbarLayoutRecheck.active(),"recheck ends after six passes");expect(timerInterval==200,"bounded interval");int before=moves;taskbarLayoutRecheckTick();expect(moves==before,"stale timer moved window");});
+ run("hide/minimize/restore cancel stale taskbar corrections",[&]{for(int kind=0;kind<3;++kind){mainVisible=true;iconic=false;g_fullHeight=true;scheduleTaskbarLayoutRecheck();if(kind==0)mainVisible=false;if(kind==1)iconic=true;if(kind==2){g_fullHeight=false;zoomed=false;}int before=moves;taskbarLayoutRecheckTick();expect(!g_taskbarLayoutRecheck.active()&&moves==before,"inactive window corrected");}mainVisible=true;iconic=false;g_fullHeight=true;});
+ run("ordinary frameless maximize also corrects live taskbar bounds",[&]{trayExists=true;work=monitor;mainVisible=true;g_fullHeight=false;zoomed=true;scheduleTaskbarLayoutRecheck();taskbarLayoutRecheckTick();expect(windowRect.left==0&&windowRect.right==1920&&windowRect.bottom==1040,"maximized work area");cancelTaskbarLayoutRecheck();zoomed=false;g_fullHeight=true;});
+ run("a new summon resets the finite recheck budget",[&]{scheduleTaskbarLayoutRecheck();taskbarLayoutRecheckTick();expect(g_taskbarLayoutRecheck.remaining==5,"first pass");scheduleTaskbarLayoutRecheck();expect(g_taskbarLayoutRecheck.remaining==6,"new summon restart");cancelTaskbarLayoutRecheck();});
+ run("timer creation failure does not leave a pending recheck",[&]{timerOk=false;scheduleTaskbarLayoutRecheck();expect(!g_taskbarLayoutRecheck.active(),"failed timer pending");timerOk=true;});
  run("explicit IPC right uses full-height layout",[&]{work={0,0,1920,1080};settings["windowPlacement"]="right";expect(place({{"side","right"}})==true,"IPC result");expect(windowRect.left==1117&&windowRect.bottom==1080,"IPC full height");});
  run("invalid IPC side rejected",[&]{bool rejected=false;try{place({{"side","center"}});}catch(...){rejected=true;}expect(rejected,"invalid side");});
  run("maximized/minimized window is not moved",[&]{int before=moves;zoomed=true;expect(place({{"side","left"}})==true,"max result");zoomed=false;iconic=true;expect(place({{"side","left"}})==true,"min result");iconic=false;expect(moves==before,"max/min moved");});

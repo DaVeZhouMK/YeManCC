@@ -1,0 +1,15 @@
+{
+  "run": "G:/YeManCC-Work/Build/Validation/HC-ModelCapabilities-20261017/ControllerMotion/BinarySession/2026-10-17T09-21-34-901Z-90660e",
+  "classification": "fixture callback address identity precondition failure (identical forwarding bodies under Release optimization)",
+  "checks": 404,
+  "failures": 7,
+  "cases": 9,
+  "failedCase": "callback-replacement",
+  "otherCaseFailures": 0,
+  "created": 16,
+  "deleted": 16,
+  "cleanupComplete": true,
+  "moduleUnloaded": true,
+  "productionEdited": false,
+  "correction": "Make alternate observer callbacks observably distinct through bank counters; assert differing addresses before testing replacement. Preserve existing behavior expectations."
+}

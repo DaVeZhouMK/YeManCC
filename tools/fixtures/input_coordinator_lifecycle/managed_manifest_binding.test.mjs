@@ -1,0 +1,7 @@
+import test from 'node:test';import assert from 'node:assert/strict';import {createHash} from 'node:crypto';import {assertManagedManifestBinding,serializeManagedManifest} from './managed_manifest_binding.mjs';
+const body={sources:[{path:'G:/owned/quoted"value',sha256:'a'.repeat(64)}],generatedInputs:[],nested:{value:'}\\"['}},manifest=()=>({inputManifestSha256:createHash('sha256').update(JSON.stringify(body)).digest('hex'),inputBindings:structuredClone(body)});
+test('canonical serialization matches the raw bytes the child hashes',()=>{const m=manifest(),text=serializeManagedManifest(m);assert.equal(assertManagedManifestBinding(text).inputManifestSha256,m.inputManifestSha256);assert.deepEqual(JSON.parse(text),m);});
+test('pretty reserialization is rejected before spawning a child',()=>assert.throws(()=>assertManagedManifestBinding(JSON.stringify(manifest(),null,2)),/RAW_HASH_MISMATCH/));
+test('changed binding content is rejected',()=>{const m=manifest();m.inputBindings.sources[0].path+='changed';assert.throws(()=>serializeManagedManifest(m),/COMPACT_BINDING_HASH_MISMATCH/);});
+test('duplicate binding members refuse ambiguous input',()=>{const text=serializeManagedManifest(manifest()).trim();assert.throws(()=>assertManagedManifestBinding(text.slice(0,-1)+',"inputBindings":{}}'),/EXACT_ONE/);});
+test('missing expected hash is refused',()=>assert.throws(()=>assertManagedManifestBinding('{"inputBindings":{}}'),/HASH_REQUIRED/));

@@ -1,0 +1,480 @@
+// Local fake controller/context/clock around actual BCL Thread/CTS/events.
+// Exact 2.0 release method bodies and extracted Host consumers are inserted.
+using System;
+using System.Buffers.Binary;
+using System.Collections.Generic;
+using System.Linq;
+using System.Reflection;
+using System.Text.Json;
+using System.Threading;
+using HIDMaestro;
+using HIDMaestro.Internal;
+using Guard = YeManInputHost.Diagnostics.HostControllerOutputStop;
+using IdleGuard = YeManInputHost.Diagnostics.HostControllerIdleCtsRelease;
+#pragma warning disable CS0169, CS0414, CS0649
+internal static class World
+{
+    internal static readonly List<string> Trace = new();
+    internal static int UnsafeFakeUnmaps, ContextCalls;
+    internal static bool ThrowContextDispose;
+    internal static Action? AfterContextDispose;
+    internal static void Reset() { Trace.Clear(); UnsafeFakeUnmaps = ContextCalls = 0; ThrowContextDispose = false; AfterContextDispose = null; }
+}
+namespace HIDMaestro.Internal
+{
+    internal interface IDeviceClock { void Stop(int joinMs); Thread Thread { get; } }
+    internal readonly struct StreamTick { }
+    internal sealed partial class DeviceClock<TTick>
+    {
+        private readonly Thread _thread;
+        private readonly object _lifetime = new();
+        private readonly AutoResetEvent _wake = new(false);
+        private readonly nint _timer = 0;
+        private volatile bool _stop;
+        private bool _closed;
+        internal readonly ManualResetEventSlim Entered = new();
+        internal readonly ManualResetEventSlim ExternalGate = new();
+        internal bool WakeClosed => _wake.SafeWaitHandle.IsClosed;
+        internal bool Closed => _closed;
+        public Thread Thread => _thread;
+        internal DeviceClock(bool blocked = false, bool start = true, Action? onWorker = null)
+        {
+            _thread = new Thread(() =>
+            {
+                Entered.Set();
+                try { onWorker?.Invoke(); if (blocked) ExternalGate.Wait(); else while (!_stop) _wake.WaitOne(); }
+                finally { Close(); }
+            }) { IsBackground = true, Name = "host-sdk-stop200-owned-clock" };
+            if (start) { _thread.Start(); if (!Entered.Wait(2000)) throw new Exception("fixture clock startup"); }
+        }
+        internal void Finish()
+        {
+            ExternalGate.Set();
+            if ((_thread.ThreadState & ThreadState.Unstarted) != 0) Stop(0);
+            else { Stop(500); if (!_thread.Join(2000)) throw new Exception("fixture clock leaked"); }
+            Entered.Dispose(); ExternalGate.Dispose();
+        }
+        @@EXACT_CLOCK_STOP@@
+    }
+    internal sealed partial class DeviceClock<TTick> : IDeviceClock { }
+    internal static class ClockNative { internal static void CloseHandle(nint value) => throw new Exception("native timer forbidden"); }
+}
+namespace HIDMaestro
+{
+    internal sealed partial class HMController
+    {
+        private readonly CancellationTokenSource _outputCts;
+        private readonly Thread? _outputThread;
+        private readonly nint _outputView;
+        private readonly object _outputCtsLock = new();
+        private bool _outputCtsClosed;
+        private IDeviceClock? _idleClock;
+        private Thread? _idleThread;
+        private byte[]? _extendedReportBuffer;
+        private bool _disposed;
+        private readonly object _submitLock = new(), _pidStateLock = new();
+        private readonly FakeContext _context = new();
+        private readonly IDisposable? _host = null;
+        private readonly Action _poll;
+        internal HMController(CancellationTokenSource output, Thread? reader = null, nint view = 0,
+            IDeviceClock? clock = null, byte[]? prior = null, Action? poll = null)
+        {
+            _outputCts = output; _outputThread = reader; _outputView = view;
+            _idleClock = clock; _idleThread = clock?.Thread; _extendedReportBuffer = prior;
+            _poll = poll ?? (() => { });
+        }
+        internal int Index => 0;
+        internal Thread? Reader => _outputThread;
+        internal Thread? Idle => _idleThread;
+        internal bool Disposed => _disposed;
+        internal bool OutputClosed => _outputCtsClosed;
+        internal object OutputLock => _outputCtsLock;
+        internal void RunOutput() => OutputPollLoop();
+        internal void CloseOutputForTest() => CloseOutputCts();
+        internal void ReplaceIdleForTest(IDeviceClock? clock, Thread? worker) { _idleClock = clock; _idleThread = worker; }
+        private void OutputPoll() => _poll();
+        private void SendReleaseFrames() => World.Trace.Add("release.fake");
+#nullable disable warnings
+        @@EXACT_CONTROLLER_STOP@@
+#nullable restore warnings
+    }
+    internal sealed class FakeContext
+    {
+        internal void OnControllerDisposing(HMController controller)
+        {
+            World.ContextCalls++;
+            if (controller.Reader?.IsAlive == true || controller.Idle?.IsAlive == true) World.UnsafeFakeUnmaps++;
+            if (World.ThrowContextDispose) throw new InvalidOperationException("injected-context-dispose-failure");
+            World.AfterContextDispose?.Invoke();
+        }
+    }
+    internal static class SharedMemoryIO { internal static void UnregisterOutputPump(int index) { } }
+    internal static class TimeoutScale { internal static int Apply(int ms) => ms; }
+}
+internal static partial class Program
+{
+    private static bool _screenPadOwnsReport;
+    private static uint _screenPadPacketCounter;
+    @@IDLE_FIELDS@@
+    @@IDLE_TAKEOVER@@
+    @@IDLE_RELEASE@@
+    private enum Phase { Active, Quiesced }
+    private sealed class HostReleaseTimingEvidence
+    {
+        internal enum Stage { SteamDeckIdleStop }
+        internal void Begin(Stage stage) { }
+        internal void End(Stage stage) { }
+    }
+    private sealed record Tuple(string Persona);
+    private readonly record struct VirtualEndpointObservation;
+    private sealed class MsiSteamDeckReleaseFence1726
+    {
+        internal bool HasReleaseReceipt => false;
+        internal static VirtualEndpointObservation Read(Func<VirtualEndpointObservation> read) => read();
+        internal void ConfirmUnresolvedRelease(VirtualEndpointObservation value) { }
+        internal void CompleteRelease(VirtualEndpointObservation before, VirtualEndpointObservation after, List<string> errors, out string detail) => detail = string.Join(";", errors);
+    }
+    private sealed class Session
+    {
+        private readonly Tuple _tuple = new("steamdeck");
+        private HMController? _controller;
+        private bool _steamDeckReleasePending, _idleCtsReleasePending;
+        private Phase _phase = Phase.Active;
+        private IdleGuard.Captured? _idleCtsRelease;
+        private string _sdkDisposeFailure = "";
+        private readonly MsiSteamDeckReleaseFence1726? _msiSteamDeckReleaseFence1726 = null;
+        internal readonly IdleRuntime IdleRuntime = new();
+        internal Session(HMController controller) => _controller = controller;
+        internal HMController? Controller => _controller;
+        internal bool Pending => _steamDeckReleasePending || _idleCtsReleasePending;
+        internal string PhaseName => _phase.ToString();
+        internal bool Stop(out string detail) => TryStopSteamDeckIdleForRelease(out detail);
+        internal bool Complete(out string detail) => TryCompleteIdleCtsRelease(out detail);
+        internal bool Prepare(out string detail)
+        {
+            @@PREPARE_GUARDS@@
+            detail = "fake-prepare-allowed"; return true;
+        }
+        internal bool Release(out string detail)
+        {
+            @@RELEASE_FAILURE_GUARD@@
+            if (!TryCompleteIdleCtsRelease(out detail) || !TryStopSteamDeckIdleForRelease(out detail)) return false;
+            if (_controller is null) { detail = "already-released"; return true; }
+            var controller = _controller;
+            if (!Guard.TryStopAgainstRuntime(controller, new Runtime(), out detail)) return false;
+            if (!IdleGuard.TryCaptureAgainstRuntime(controller, IdleRuntime, out var captured, out detail) || captured is null) return false;
+            try
+            {
+                controller.Dispose(); captured.MarkControllerDisposeReturned(); _idleCtsRelease = captured;
+                _idleCtsReleasePending = true; _controller = null;
+            }
+            catch (Exception ex)
+            {
+                _idleCtsRelease = captured; _idleCtsReleasePending = true;
+                return RetainSdkDisposeFailure(new List<string> { "controller-dispose:" + ex.GetType().Name }, null, out detail);
+            }
+            return TryCompleteIdleCtsRelease(out detail);
+        }
+        private VirtualEndpointObservation ObserveVirtualEndpoint(string persona, bool requireInstanceIds) => default;
+        private void CompleteMsiNonSdReleaseDiagnostic(bool completed) { }
+        @@ACTUAL_IDLE_WRAPPER@@
+        @@ACTUAL_COMPLETE_RECEIPT@@
+        @@ACTUAL_RETAIN_FAILURE@@
+    }
+    private sealed class Runtime : Guard.IRuntime
+    {
+        internal int Budget = 500, Cancels, Joins, LastJoin;
+        internal bool ReadStateThrows;
+        internal ThreadState? ReportedState;
+        public Type ControllerType => typeof(HMController);
+        public Type CancellationSourceType => typeof(CancellationTokenSource);
+        public Type ReaderType => typeof(Thread);
+        public bool IsPinnedCore(Type type) => true;
+        public int ReadJoinBudgetMilliseconds(Type type) => Budget;
+        public bool IsCurrentReader(object reader) => ReferenceEquals(reader, Thread.CurrentThread);
+        public ThreadState ReadThreadState(object reader) => ReadStateThrows ? throw new Exception("state read") : ReportedState ?? ((Thread)reader).ThreadState;
+        public bool TryEnterCancellationLock(object gate, int ms) { Check(ms <= 500); return Monitor.TryEnter(gate, ms); }
+        public void ExitCancellationLock(object gate) => Monitor.Exit(gate);
+        public void Cancel(object source) { Cancels++; ((CancellationTokenSource)source).Cancel(); }
+        public bool Join(object reader, int ms) { Joins++; LastJoin = ms; Check(ms <= 500); return ((Thread)reader).Join(ms); }
+    }
+    private sealed class IdleRuntime : IdleGuard.IRuntime
+    {
+        internal int Budget = 500, Stops, LastStop;
+        internal bool Identity = true, ClockIdentity = true, StopThrows, TerminationThrows;
+        public Type ControllerType => typeof(HMController);
+        public Type ClockInterfaceType => typeof(IDeviceClock);
+        public Type ReaderType => typeof(Thread);
+        public bool IsPinnedCore(Type type) => Identity;
+        public bool IsPinnedClock(Type type) => ClockIdentity && type == typeof(DeviceClock<StreamTick>);
+        public int ReadJoinBudgetMilliseconds(Type type) => Budget;
+        public bool IsCurrentReader(object reader) => ReferenceEquals(reader, Thread.CurrentThread);
+        public ThreadState ReadThreadState(object reader) => ((Thread)reader).ThreadState;
+        public bool HasTerminated(object reader) => TerminationThrows ? throw new Exception("termination proof") : ((Thread)reader).Join(0);
+        public object ReadClockThread(object clock) => ((IDeviceClock)clock).Thread;
+        public void StopClock(object clock, int ms)
+        {
+            Stops++; LastStop = ms; Check(ms <= 500);
+            if (StopThrows) throw new Exception("injected-stop");
+            ((IDeviceClock)clock).Stop(ms);
+        }
+    }
+    // The sole extracted-consumer binding substitution: fake controller metadata
+    // uses the actual helper's reviewed IRuntime seam. Helpers remain unmodified.
+    private static class BclClockAdmission
+    {
+        internal static readonly IdleRuntime Runtime = new();
+        internal static bool TryStopInputClock(HMController controller, out string detail) =>
+            IdleGuard.TryStopInputClockAgainstRuntime(controller, Runtime, out detail);
+    }
+    private sealed class OutputWorker : IDisposable
+    {
+        internal readonly CancellationTokenSource Cts = new();
+        internal readonly ManualResetEventSlim Gate = new(), Entered = new();
+        internal readonly HMController Controller;
+        internal readonly Thread Thread;
+        internal OutputWorker(bool blocked = false, nint view = 1)
+        {
+            HMController? c = null;
+            Thread = new Thread(() => c!.RunOutput()) { IsBackground = true, Name = "host-sdk-stop200-owned-output" };
+            c = Controller = new HMController(Cts, Thread, view, poll: () => { Entered.Set(); if (blocked) Gate.Wait(); else Cts.Token.WaitHandle.WaitOne(); });
+            Thread.Start(); Check(Entered.Wait(2000), "fixture output startup");
+        }
+        public void Dispose()
+        {
+            Gate.Set(); if (!Controller.OutputClosed) try { Cts.Cancel(); } catch (ObjectDisposedException) { }
+            Check(Thread.Join(2000), "fixture output leaked"); Cts.Dispose(); Gate.Dispose(); Entered.Dispose();
+        }
+    }
+    private static HMController IdleController(DeviceClock<StreamTick>? clock = null, byte[]? prior = null)
+    {
+        prior ??= new byte[64]; if (prior.Length == 64) BinaryPrimitives.WriteUInt32LittleEndian(prior.AsSpan(4), 123);
+        return new HMController(new(), clock: clock, prior: prior);
+    }
+    private static readonly List<object> Rows = new(), Observations = new();
+    private static int Failures;
+    private static void Check(bool ok, string message = "assertion failed") { if (!ok) throw new Exception(message); }
+    private static void Test(string name, Action body)
+    {
+        World.Reset(); _screenPadOwnsReport = false; _screenPadPacketCounter = 0;
+        try { body(); Rows.Add(new { name, pass = true }); }
+        catch (Exception ex) { Failures++; Rows.Add(new { name, pass = false, error = ex.ToString() }); }
+    }
+    private static int Main(string[] args)
+    {
+        Test("2.0 PE IL proves clock output ownership and unchanged 500ms budgets", () => Observations.Add(PinnedSdkProof.Validate(args.Single())));
+        Test("production metadata admission rejects fake controller without mutation", () =>
+        {
+            using var cts = new CancellationTokenSource(); var c = new HMController(cts);
+            Check(!Guard.TryStop(c, out _) && !IdleGuard.TryStopInputClock(c, out _) && !cts.IsCancellationRequested);
+        });
+        Test("real cooperative output cancellation joins and reader closes CTS", () =>
+        {
+            using var worker = new OutputWorker(); var handle = worker.Cts.Token.WaitHandle.SafeWaitHandle;
+            Check(Guard.TryStopAgainstRuntime(worker.Controller, new Runtime(), out _) && worker.Thread.Join(0));
+            Check(handle.IsClosed && worker.Controller.OutputClosed && !worker.Controller.Disposed);
+            worker.Controller.Dispose(); Check(World.UnsafeFakeUnmaps == 0);
+        });
+        Test("real output timeout retains controller then exact Dispose retry is safe", () =>
+        {
+            using var worker = new OutputWorker(blocked: true); var rt = new Runtime { Budget = 50 };
+            try { Check(!Guard.TryStopAgainstRuntime(worker.Controller, rt, out var d) && d == "sdk-output-stop-timeout"); Check(!worker.Controller.Disposed && worker.Thread.IsAlive && rt.LastJoin <= 50 && World.ContextCalls == 0); }
+            finally { worker.Gate.Set(); Check(worker.Thread.Join(2000)); }
+            Check(Guard.TryStopAgainstRuntime(worker.Controller, rt, out _)); worker.Controller.Dispose(); Check(World.UnsafeFakeUnmaps == 0);
+        });
+        Test("zero output view never skips a live real reader", () =>
+        {
+            using var worker = new OutputWorker(blocked: true, view: 0);
+            Check(!Guard.TryStopAgainstRuntime(worker.Controller, new Runtime { Budget = 25 }, out _)); Check(worker.Thread.IsAlive && !worker.Controller.Disposed);
+        });
+        Test("no output reader allows exact SDK to own CTS cleanup", () =>
+        {
+            using var cts = new CancellationTokenSource(); var handle = cts.Token.WaitHandle.SafeWaitHandle; var c = new HMController(cts);
+            Check(Guard.TryStopAgainstRuntime(c, new Runtime(), out _) && !handle.IsClosed); c.Dispose(); Check(handle.IsClosed);
+        });
+        Test("unstarted real output thread with zero view proves no writer", () =>
+        {
+            using var cts = new CancellationTokenSource(); var t = new Thread(() => { }); var c = new HMController(cts, t);
+            Check(Guard.TryStopAgainstRuntime(c, new Runtime(), out var d) && d == "sdk-output-reader-never-started" && (t.ThreadState & ThreadState.Unstarted) != 0);
+        });
+        Test("unstarted reader with nonzero view remains rejected", () =>
+        {
+            using var cts = new CancellationTokenSource(); var c = new HMController(cts, new Thread(() => { }), 1);
+            Check(!Guard.TryStopAgainstRuntime(c, new Runtime(), out var d) && d == "sdk-output-stop-unstarted-with-mapping" && !cts.IsCancellationRequested);
+        });
+        Test("state read failure and contradictory state cannot cancel", () =>
+        {
+            using var cts = new CancellationTokenSource(); var c = new HMController(cts, new Thread(() => { }));
+            Check(!Guard.TryStopAgainstRuntime(c, new Runtime { ReadStateThrows = true }, out _));
+            Check(!Guard.TryStopAgainstRuntime(c, new Runtime { ReportedState = ThreadState.Unstarted | ThreadState.Stopped }, out _) && !cts.IsCancellationRequested);
+        });
+        Test("closed output CTS still requires real reader termination", () =>
+        {
+            using var worker = new OutputWorker(blocked: true); worker.Controller.CloseOutputForTest(); var rt = new Runtime { Budget = 25 };
+            Check(!Guard.TryStopAgainstRuntime(worker.Controller, rt, out var d) && d == "sdk-output-stop-timeout" && rt.Cancels == 0);
+        });
+        Test("output cancellation callback throw retains and remains retryable", () =>
+        {
+            using var worker = new OutputWorker(blocked: true); using var callback = worker.Cts.Token.Register(() => throw new Exception("callback"));
+            Check(!Guard.TryStopAgainstRuntime(worker.Controller, new Runtime(), out var d) && d == "sdk-output-stop-cancel-failed" && !worker.Controller.Disposed);
+        });
+        Test("actual 2.0 Dispose ignores output Join false and reaches fake unmap", () =>
+        {
+            using var worker = new OutputWorker(blocked: true); worker.Controller.Dispose();
+            Check(worker.Thread.IsAlive && worker.Controller.Disposed && World.UnsafeFakeUnmaps == 1);
+            Observations.Add(new { kind = "2.0-unchecked-output-Join", joinBudget = 500, workerAliveAtFakeUnmap = true });
+        });
+        Test("actual ScreenPad handoff uses Stop clock then reads counter", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(); var c = IdleController(clock);
+            try { var session = new Session(c); Check(session.Stop(out _) && _screenPadOwnsReport && _screenPadPacketCounter == 123 && clock.Thread.Join(0) && clock.WakeClosed); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("actual idle wrapper timeout preserves target phase and retry", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(blocked: true); var c = IdleController(clock); var session = new Session(c);
+            try { Check(!session.Stop(out var d) && d.Contains("sdk-idle-clock-timeout") && session.Pending && session.PhaseName == "Quiesced" && ReferenceEquals(c, session.Controller) && !_screenPadOwnsReport && !c.Disposed); }
+            finally { clock.ExternalGate.Set(); Check(clock.Thread.Join(2000)); }
+            try { Check(session.Stop(out _) && !session.Pending && _screenPadOwnsReport); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("actual raw handoff rejects bad report after safely stopping clock", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(); var c = IdleController(clock, new byte[63]);
+            try { bool threw = false; try { TakeScreenPadReportOwnership(c); } catch (InvalidOperationException e) { threw = e.Message == "locked-steamdeck-report-contract-missing"; } Check(threw && clock.Thread.Join(0) && !_screenPadOwnsReport); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("partial prepare release accepts missing report after same clock barrier", () =>
+        {
+            var c = new HMController(new()); var session = new Session(c); Check(session.Stop(out _) && _screenPadOwnsReport && _screenPadPacketCounter == 0); c.Dispose();
+        });
+        Test("unstarted real input clock Stop closes event without thread Start", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(start: false); var c = IdleController(clock);
+            try { Check(IdleGuard.TryStopInputClockAgainstRuntime(c, new IdleRuntime(), out var d) && d == "sdk-idle-clock-never-started" && clock.WakeClosed); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("clock identity thread mismatch and invalid budget stay inert", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(blocked: true); var c = IdleController(clock);
+            try
+            {
+                Check(!IdleGuard.TryStopInputClockAgainstRuntime(c, new IdleRuntime { ClockIdentity = false }, out _));
+                Check(!IdleGuard.TryStopInputClockAgainstRuntime(c, new IdleRuntime { Budget = 501 }, out _));
+                c.ReplaceIdleForTest(clock, new Thread(() => { })); Check(!IdleGuard.TryStopInputClockAgainstRuntime(c, new IdleRuntime(), out _));
+            }
+            finally { c.ReplaceIdleForTest(clock, clock.Thread); clock.Finish(); c.Dispose(); }
+        });
+        Test("input clock timeout cannot become raw ownership success", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(blocked: true); var c = IdleController(clock); var rt = new IdleRuntime { Budget = 25 };
+            try { Check(!IdleGuard.TryStopInputClockAgainstRuntime(c, rt, out _) && !clock.Closed && rt.LastStop == 25 && !c.Disposed); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("SDK Dispose clock Join timeout also reaches fake unmap without guard", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(blocked: true); var c = IdleController(clock);
+            try { c.Dispose(); Check(c.Disposed && clock.Thread.IsAlive && World.UnsafeFakeUnmaps == 1); }
+            finally { clock.Finish(); }
+        });
+        Test("clock receipt requires actual normal Dispose return", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(); var c = IdleController(clock);
+            try
+            {
+                Check(IdleGuard.TryCaptureAgainstRuntime(c, new IdleRuntime(), out var receipt, out _) && receipt is not null);
+                Check(!receipt!.TryRelease(out var d) && d == "sdk-idle-clock-dispose-not-returned");
+                c.Dispose(); Check(!receipt.TryRelease(out _)); receipt.MarkControllerDisposeReturned(); Check(receipt.TryRelease(out _) && receipt.TryRelease(out _) && clock.WakeClosed);
+            }
+            finally { clock.Finish(); }
+        });
+        Test("SDK Dispose throw after disposed flag never authorizes receipt", () =>
+        {
+            var c = IdleController(); Check(IdleGuard.TryCaptureAgainstRuntime(c, new IdleRuntime(), out var receipt, out _) && receipt is not null);
+            World.ThrowContextDispose = true; bool threw = false; try { c.Dispose(); } catch (InvalidOperationException) { threw = true; }
+            Check(threw && c.Disposed && !receipt!.TryRelease(out _));
+        });
+        Test("SDK Dispose throw remains poisoned for retry and prepare", () =>
+        {
+            var c = IdleController(); var session = new Session(c); World.ThrowContextDispose = true;
+            Check(!session.Release(out var first) && c.Disposed && ReferenceEquals(c, session.Controller) && session.Pending);
+            int calls = World.ContextCalls; World.ThrowContextDispose = false;
+            Check(!session.Release(out var again) && again == first && World.ContextCalls == calls && session.PhaseName == "Quiesced");
+            Check(!session.Prepare(out var d) && d.StartsWith("prior-sdk-dispose-unconfirmed:", StringComparison.Ordinal));
+        });
+        Test("normal Dispose pending receipt blocks prepare then exact retry completes", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(); var c = IdleController(clock); var session = new Session(c);
+            try
+            {
+                World.AfterContextDispose = () => session.IdleRuntime.TerminationThrows = true;
+                Check(!session.Release(out _) && session.Pending && session.Controller is null && c.Disposed && clock.WakeClosed);
+                Check(!session.Prepare(out var detail) && detail == "prior-idle-cts-release-pending");
+                session.IdleRuntime.TerminationThrows = false;
+                Check(session.Complete(out _) && !session.Pending && session.Prepare(out _));
+            }
+            finally { clock.Finish(); }
+        });
+        Test("changed clock identity cannot complete a successful Dispose receipt", () =>
+        {
+            var clock = new DeviceClock<StreamTick>(); var c = IdleController(clock);
+            try
+            {
+                Check(IdleGuard.TryCaptureAgainstRuntime(c, new IdleRuntime(), out var receipt, out _) && receipt is not null); c.Dispose(); receipt!.MarkControllerDisposeReturned();
+                c.ReplaceIdleForTest(null, null); Check(!receipt.TryRelease(out _)); c.ReplaceIdleForTest(clock, clock.Thread); Check(receipt.TryRelease(out _));
+            }
+            finally { clock.Finish(); }
+        });
+        Test("maximum production budgets remain 500 and scaled small budgets remain small", () =>
+        {
+            Check(Guard.MaximumJoinMilliseconds == 500 && Guard.BoundJoinBudget(.1) == 50 && Guard.BoundJoinBudget(1) == 500 && Guard.BoundJoinBudget(100) == 500);
+            Observations.Add(new { kind = "production-budget-contract", maximum = Guard.MaximumJoinMilliseconds, runtimeClockMaximum = 500, fixtureCleanupOnly = 2000 });
+        });
+        Test("real output self join is rejected before cancellation", () =>
+        {
+            using var cts = new CancellationTokenSource(); bool stopped = true; string detail = ""; HMController? c = null;
+            var thread = new Thread(() => { c = new HMController(cts, Thread.CurrentThread, 1); stopped = Guard.TryStopAgainstRuntime(c, new Runtime(), out detail); });
+            thread.Start(); Check(thread.Join(2000)); Check(!stopped && detail == "sdk-output-stop-self-join" && !cts.IsCancellationRequested && !c!.Disposed);
+        });
+        Test("real SDK CTS lock timeout consumes only the existing budget", () =>
+        {
+            using var cts = new CancellationTokenSource(); using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+            var c = new HMController(cts); var runtime = new Runtime { Budget = 25 };
+            var holder = new Thread(() => { lock (c.OutputLock) { entered.Set(); release.Wait(); } }); holder.Start(); Check(entered.Wait(2000));
+            try { Check(!Guard.TryStopAgainstRuntime(c, runtime, out var d) && d == "sdk-output-stop-lock-timeout" && runtime.Cancels == 0 && runtime.Joins == 0 && !c.Disposed); }
+            finally { release.Set(); Check(holder.Join(2000)); } c.Dispose();
+        });
+        Test("cancel callback starting readonly reader invalidates no writer proof", () =>
+        {
+            using var cts = new CancellationTokenSource(); using var release = new ManualResetEventSlim(); var thread = new Thread(() => release.Wait());
+            var c = new HMController(cts, thread); using var registration = cts.Token.Register(() => thread.Start());
+            try { Check(!Guard.TryStopAgainstRuntime(c, new Runtime(), out var d) && d == "sdk-output-stop-thread-state-changed" && !c.Disposed); }
+            finally { release.Set(); Check(thread.Join(2000)); }
+        });
+        Test("real input clock self join is rejected before Stop", () =>
+        {
+            using var invoke = new ManualResetEventSlim(); using var complete = new ManualResetEventSlim(); bool stopped = true; string detail = "";
+            HMController? c = null; var runtime = new IdleRuntime();
+            var clock = new DeviceClock<StreamTick>(onWorker: () => { invoke.Wait(); stopped = IdleGuard.TryStopInputClockAgainstRuntime(c!, runtime, out detail); complete.Set(); });
+            c = IdleController(clock); invoke.Set();
+            try { Check(complete.Wait(2000) && !stopped && detail == "sdk-idle-clock-self-join" && runtime.Stops == 0 && !c.Disposed); }
+            finally { clock.Finish(); c.Dispose(); }
+        });
+        Test("controller B Dispose never completes controller A receipt", () =>
+        {
+            var a = IdleController(); var b = IdleController();
+            Check(IdleGuard.TryCaptureAgainstRuntime(a, new IdleRuntime(), out var receipt, out _) && receipt is not null);
+            b.Dispose(); receipt!.MarkControllerDisposeReturned(); Check(!receipt.TryRelease(out _) && !a.Disposed);
+            a.Dispose(); Check(receipt.TryRelease(out _));
+        });
+        Test("fixture has no SDK assembly references or PInvoke", () =>
+        {
+            var a = Assembly.GetExecutingAssembly(); Check(!a.GetReferencedAssemblies().Any(n => n.Name == "HIDMaestro.Core"));
+            Check(a.GetTypes().SelectMany(t => t.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)).All(m => (m.Attributes & MethodAttributes.PinvokeImpl) == 0));
+        });
+        Console.WriteLine(JsonSerializer.Serialize(new { schemaVersion = 2, generation = "2.0.0-current", passed = Rows.Count - Failures, failed = Failures, cases = Rows, observations = Observations,
+            realBclThreads = true, realSdkLoaded = false, realSdkControllerConstructed = false, deviceDriverOrRealMappingAccess = false, exactSdkDisposeBody = true,
+            rawOwnershipAdmissionSeam = "only extracted call target uses actual helper IRuntime; production admission separately rejects fake metadata" }));
+        return Failures == 0 ? 0 : 1;
+    }
+}

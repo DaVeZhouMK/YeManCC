@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "host7f-light-e546",
+  "scope": "fixed exact pre-fix product binaries; methods invoked only with in-memory device/serial/OLS terminals; Main never started",
+  "files": [
+    {
+      "path": "YeManFanHost.dll",
+      "sha256": "7f4136c87fe97b10c375b1e2e53d2074f6fc1899e34a4b2a37203ea633adcc5f",
+      "bytes": 1660928
+    },
+    {
+      "path": "YeManFanBackend.dll",
+      "sha256": "f8fdbd516d2a002fa65e1cad5bc02405f16ec7b04208d4f6a8c2d26f330dea09",
+      "bytes": 30720
+    },
+    {
+      "path": "YeManLightSetter.dll",
+      "sha256": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+      "bytes": 71680
+    }
+  ]
+}

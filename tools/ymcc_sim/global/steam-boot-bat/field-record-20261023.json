@@ -1,0 +1,38 @@
+{
+  "date": "2026-10-23",
+  "field": "Testing/YMCC/Evidence/XboxSteamInput-20261023-083438/diagnosis.json",
+  "archive": "日志/ROG-Xbox-2025/YeManCC-logs-20261023-083438-ROGX.zip",
+  "observed": {
+    "distinctXboxFtTerminationsPerBoot": 81,
+    "targetReadinessAfterSteamForegroundMs": 13830,
+    "guideConsumptionBySteam": true,
+    "touchpadReport": true,
+    "ordinaryReportFirstObservedAt": "08:27:57.442"
+  },
+  "rootCauseConfirmed": false,
+  "fix": {
+    "coldSteamWaitForLocalTargetMaxMs": 25000,
+    "existingSteamWarmupSkipped": true,
+    "originalYmccBackgroundAndPrivilegePolicy": true,
+    "originalCssLifecycle": true,
+    "steamFocusMaximumRounds": 3,
+    "ymccForegroundYield": true,
+    "cleanupObserverMs": 60000,
+    "perPidAttemptsMaximum": 3,
+    "pidAndBirthRecheckedOnOwnedHandle": true,
+    "package": "verified Microsoft.GamingApp only, same caller SID; refuse other/unknown interactive sessions",
+    "packageAttemptsMaximum": 2,
+    "packageAttemptsGapMs": 10000,
+    "packageHelperTimeoutMs": 3000,
+    "helperRetirementWaitMs": 500,
+    "parentAncestryMaxDepth": 4,
+    "parentTermination": false,
+    "logCheckpointMs": 5000,
+    "postBootReadOnlyChecks": 6,
+    "postBootReadOnlyGapMs": 10000,
+    "fseStateWrites": false,
+    "logRotationBytes": 4194304
+  },
+  "evidence": "Testing/YMCC/Evidence/XboxBootCleanup-20261023/REPORT.md",
+  "fieldAcceptance": false
+}

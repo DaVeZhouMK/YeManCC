@@ -1,0 +1,13 @@
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';import {spawnSync} from 'node:child_process';
+const self=fileURLToPath(import.meta.url),repo=path.resolve(path.dirname(self),'..');
+let text=fs.readFileSync(path.join(repo,'tools/windows_source_transport_selftest.mjs'),'utf8');
+const once=(from,to)=>{if(text.split(from).length!==2)throw Error('Private native fixture seam: '+from.slice(0,90));text=text.replace(from,()=>to);};
+once("import fs from 'node:fs';","import {typedNativeFixture} from './fixtures/sensorapi_private_reader/native_fixture.mjs';\nimport fs from 'node:fs';");
+once('ControllerMotion/WindowsSourceTransport-20261018/NativePreparation','ControllerMotion/SensorApiPrivateLease-20261018/TypedRegression');
+once("fs.writeFileSync(path.join(out,'transport.cpp'),fixture);","fixture=typedNativeFixture(fixture);fs.writeFileSync(path.join(out,'transport.cpp'),fixture);");
+once("freeze(path.join(repo,'deps/json/json.hpp')));","freeze(path.join(repo,'deps/json/json.hpp')));const pending=['sensorapi_private_reader.h'],copied=new Set();while(pending.length){const n=pending.pop();if(copied.has(n))continue;copied.add(n);const data=freeze(path.join(repo,'native',n));fs.writeFileSync(path.join(out,n),data);for(const m of data.toString('utf8').matchAll(/#include\\s+\"([^\"/]+\\.h)\"/g))if(fs.existsSync(path.join(repo,'native',m[1])))pending.push(m[1]);}freeze("+JSON.stringify(self)+");freeze(path.join(repo,'tools/fixtures/sensorapi_private_reader/native_fixture.mjs'));freeze(path.join(repo,'tools/windows_source_transport_selftest.mjs'));");
+const compileEnd=' /Fe"${exe}"\\r\\nexit /b';
+if(!text.includes(compileEnd))throw Error('Actual MSVC link seam missing');
+text=text.replace(compileEnd,' /Fe"${exe}" /link ole32.lib oleaut32.lib\\r\\nexit /b');
+const generated=path.join(repo,'tools','.sensorapi-private-native-'+process.pid+'.mjs');fs.writeFileSync(generated,text);
+const run=spawnSync('node',[generated,...process.argv.slice(2)],{cwd:repo,windowsHide:true,encoding:'utf8',timeout:180000,maxBuffer:8e6});console.log(run.stdout||'');if(run.stderr)console.error(run.stderr);if(run.error)console.error(run.error);process.exitCode=run.status??1;

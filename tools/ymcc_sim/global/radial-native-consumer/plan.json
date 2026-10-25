@@ -1,0 +1,72 @@
+{
+  "schemaVersion": 1,
+  "positiveCases": [
+    {
+      "id": "ready-ack-frame",
+      "expected": "PASS"
+    },
+    {
+      "id": "foreign-origin-denied",
+      "expected": "PASS"
+    },
+    {
+      "id": "wrong-nonce-denied",
+      "expected": "PASS"
+    },
+    {
+      "id": "wrong-wheel-id-denied",
+      "expected": "PASS"
+    },
+    {
+      "id": "malformed-json-error",
+      "expected": "PASS"
+    },
+    {
+      "id": "overlong-payload-silent",
+      "expected": "PASS"
+    },
+    {
+      "id": "invalid-region-cleanup",
+      "expected": "PASS"
+    },
+    {
+      "id": "valid-region-port-roundtrip",
+      "expected": "PASS"
+    },
+    {
+      "id": "intent-forward-ack",
+      "expected": "PASS"
+    },
+    {
+      "id": "overlong-intent-denied",
+      "expected": "PASS"
+    },
+    {
+      "id": "retired-generation-denied",
+      "expected": "PASS"
+    },
+    {
+      "id": "close-reply-return",
+      "expected": "PASS"
+    }
+  ],
+  "positiveNaturalExit": 0,
+  "sourceFaults": [
+    {
+      "id": "owner-or-to-and",
+      "case": "wrong-nonce-denied",
+      "expectedNaturalExit": 23,
+      "expectedAssertion": "wrong-nonce-must-return-native-owner-error"
+    },
+    {
+      "id": "generation-gate-removed",
+      "case": "retired-generation-denied",
+      "expectedNaturalExit": 23,
+      "expectedAssertion": "retired-generation-must-not-reenter-ready-or-visibility"
+    }
+  ],
+  "noActualWindowsOrOverlay": true,
+  "fixtureStateIsActualExtractedNativeState": true,
+  "noIndependentWheelStateOrGeometryModel": true,
+  "postCreateSeedOnly": "create/real COM/Surface implementation/main global return gate and host actions are outside this selected chain"
+}

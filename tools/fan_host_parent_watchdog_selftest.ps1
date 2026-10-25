@@ -1,8 +1,18 @@
 param(
-    [string]$HostRoot
+    [string]$HostRoot,
+    [string]$EvidenceDir = ''
 )
 
 $ErrorActionPreference = 'Stop'
+if ($EvidenceDir) {
+    $EvidenceDir = [IO.Path]::GetFullPath($EvidenceDir)
+    if (Test-Path -LiteralPath $EvidenceDir) { throw 'Fresh parent-watchdog evidence directory required' }
+    New-Item -ItemType Directory -Path $EvidenceDir | Out-Null
+}
+$passed = $false
+$failure = $null
+$forcedCleanup = $false
+$hostExitCode = $null
 $repoRoot = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($HostRoot)) {
     # The executable under the currently verified payload is the deployable
@@ -11,6 +21,7 @@ if ([string]::IsNullOrWhiteSpace($HostRoot)) {
 }
 $hostRoot = $HostRoot
 $hostExe = Join-Path $hostRoot 'YeManFanHost.exe'
+$hostHash = (Get-FileHash -LiteralPath (Join-Path $hostRoot 'YeManFanHost.dll') -Algorithm SHA256).Hash.ToLowerInvariant()
 $portProbe = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
 $portProbe.Start()
 $port = ([System.Net.IPEndPoint]$portProbe.LocalEndpoint).Port
@@ -32,14 +43,24 @@ Set-Content -LiteralPath (Join-Path $isolatedLogRoot 'fan-logging-enabled.flag')
 $parent = $null
 $hostProcess = $null
 $duplicateProcess = $null
+$parentExitSignal = $null
 
 try {
     if (-not (Test-Path -LiteralPath $hostExe -PathType Leaf)) { throw "current release Host executable missing: $hostExe" }
     $session | Set-Content -LiteralPath $sessionPath -Encoding ASCII -NoNewline
+    # Keep the exact synthetic parent alive until readiness and settlement are proved.
+    # Cold startup/logging must not consume an unrelated fixed parent sleep window.
+    $signalName='Local\YeManFanHost-parent-test-'+[guid]::NewGuid().ToString('N')
+    $parentExitSignal=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$signalName)
+    $parentScript='$signal=[Threading.EventWaitHandle]::OpenExisting(''SIGNAL_NAME''); try { if(-not $signal.WaitOne(60000)){exit 3} } finally { $signal.Dispose() }; exit 0'
+    $parentScript=$parentScript.Replace('SIGNAL_NAME',$signalName)
+    $encodedParent=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($parentScript))
     $parent = Start-Process -FilePath (Get-Command powershell.exe).Source -ArgumentList @(
-        '-NoLogo', '-NoProfile', '-Command', 'Start-Sleep -Seconds 10'
+        '-NoLogo', '-NoProfile', '-EncodedCommand', $encodedParent
     ) -PassThru -WindowStyle Hidden
-    $hostProcess = Start-Process -FilePath $hostExe -ArgumentList @(
+    $hostRedirect=@{}
+    if($EvidenceDir){$hostRedirect=@{RedirectStandardOutput=(Join-Path $EvidenceDir 'host.stdout.log');RedirectStandardError=(Join-Path $EvidenceDir 'host.stderr.log')}}
+    $hostProcess = Start-Process -FilePath $hostExe @hostRedirect -ArgumentList @(
         '--port', [string]$port,
         '--protocol-version', '2',
         '--parent-pid', [string]$parent.Id,
@@ -52,7 +73,9 @@ try {
     $health = $null
     # Match the product launcher readiness budget (5s) with a small margin;
     # cold .NET startup can be slower under Defender/first-run compilation.
-    for ($attempt = 0; $attempt -lt 60; $attempt += 1) {
+    $readyBudget=[Diagnostics.Stopwatch]::StartNew()
+    for ($attempt = 0; $attempt -lt 60 -and $readyBudget.ElapsedMilliseconds -lt 6500; $attempt += 1) {
+        if($hostProcess.HasExited){$hostExitCode=$hostProcess.ExitCode;throw ('safe Host exited before authenticated health: '+$hostExitCode)}
         try {
             $health = Invoke-RestMethod -Uri "$base/health" -Headers @{ 'X-YeMan-Fan-Session' = $session } -TimeoutSec 1
             break
@@ -223,7 +246,8 @@ try {
     }
     Write-Output "fan Host recovery terminal split: PASS (cycleId=$boundCycle completed=true terminal=false state=Stopped; settle is not a process exit)"
 
-    $parent.WaitForExit()
+    $null=$parentExitSignal.Set()
+    if(-not $parent.WaitForExit(5000) -or $parent.ExitCode -ne 0){throw 'Synthetic parent did not naturally exit zero after the ready barrier'}
     $deadline = [DateTime]::UtcNow.AddSeconds(8)
     $runtimeLog = Join-Path $isolatedLogRoot 'yeman-fan-host-runtime.log'
     $stoppedRow = $null
@@ -252,12 +276,35 @@ try {
         throw 'parent watchdog: host.stopped must belong to the same Host instance that accepted the handoff'
     }
     Write-Output 'fan Host listener-vs-process split: PASS (host.stopped path=BoundedFinalizeSafe listenerStopped=true engineDisposeDeferred=true failureTerminal=false processExitProven=false; real exit proven separately by this external watchdog via pid+start-time)'
+    $hostProcess.WaitForExit()
+    $hostExitCode = $hostProcess.ExitCode
+    if ($hostExitCode -ne 0) { throw ('Parent-exit Host did not naturally exit zero: ' + $hostExitCode) }
+    if ((Get-FileHash -LiteralPath (Join-Path $hostRoot 'YeManFanHost.dll') -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hostHash) { throw 'Host changed during parent watchdog test' }
+    $passed = $true
     Write-Output 'fan Host parent watchdog selftest: PASS (parent-exit handoff -> safe Host close -> no residual; hardwareWrites=false)'
 }
+catch { $failure = $_.Exception.Message; throw }
 finally {
     if ($null -ne $duplicateProcess -and -not $duplicateProcess.HasExited) { Stop-Process -Id $duplicateProcess.Id -Force -ErrorAction SilentlyContinue }
-    if ($null -ne $hostProcess -and -not $hostProcess.HasExited) { Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
+    if ($null -ne $hostProcess -and -not $hostProcess.HasExited) { $forcedCleanup = $true; Stop-Process -Id $hostProcess.Id -Force -ErrorAction SilentlyContinue }
     if ($null -ne $parent -and -not $parent.HasExited) { Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue }
     if (Test-Path -LiteralPath $sessionPath -PathType Leaf) { Remove-Item -LiteralPath $sessionPath -Force }
+    if ($null -ne $parentExitSignal) { $parentExitSignal.Dispose() }
     $env:YEMANCC_SELFTEST_LOG_ROOT = $previousLogRoot
+    if ($EvidenceDir) {
+        [ordered]@{
+            status = $(if ($passed -and -not $forcedCleanup) {'PASS'} else {'FAIL'})
+            passed = [bool]($passed -and -not $forcedCleanup)
+            hostPayloadRoot = [IO.Path]::GetFullPath($hostRoot)
+            hostDllSha256 = $hostHash
+            hostExitCode = $hostExitCode
+            forcedCleanup = $forcedCleanup
+            naturalShutdownRequired = $true
+            parentReadyBarrier = $true
+            realBackend = $false
+            hardwareAcceptance = $false
+            isolatedLogRoot = $isolatedLogRoot
+            failure = $failure
+        } | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'verification.json') -Encoding UTF8
+    }
 }

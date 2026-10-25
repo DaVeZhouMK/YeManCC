@@ -1,0 +1,26 @@
+{
+  "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+  "manifestSha256": "145308952e437342a4d6978600e73eb4f648e5b49a43ba48ca79a0571ca0dd14",
+  "files": [
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "sha256": "009b582a4e6616a014a2eab542b088bbcb64fac9eb2f89c62f20d146df211166",
+      "gitBlob": "330008e1399c8eb454c427f52b7152336b6c5390"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "sha256": "6de9c1f8190cdca14a051a61ff024bc618c2e5ed3f00e16fdf9ad8c7465d856c",
+      "gitBlob": "1dc9df5007f7d1ac888d98d9a9f94ca7c6c6c375"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+      "sha256": "b768e820d307c78edf7126e3068ba8331cc0784343c2a06340a99ac397ba6d49",
+      "gitBlob": "2f9a92e4280972c89ba2fda0f2725dc8a7fce079"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs",
+      "sha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+      "gitBlob": "0d583a18f0cca3b0d1e78b2a2ca0586311d78aa3"
+    }
+  ]
+}

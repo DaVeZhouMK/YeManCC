@@ -1,0 +1,2054 @@
+{
+  "schemaVersion": 1,
+  "meaning": "Source-reviewed classification/navigation only; catalog declarations and registered IDs are never execution acceptance.",
+  "bindingRules": {
+    "files": "Exact bytes of stable owner/session/binding sources.",
+    "braced": "Unique exact signature through its complete balanced C++ function/lambda body, including all branches; comments/strings do not terminate a body.",
+    "between": "Unique explicit whole-class boundaries; not a line-number window.",
+    "json": "Canonical semantic JSON pointer/domain row; unrelated navigation rows are outside the reviewed binding.",
+    "dependencyBoundary": "Quoted local dependencies of selected stable C++ owners are bound recursively per feature. Motion recipe tables, native lighting routes and stable fan transport/process owners are explicit source inputs. main.cpp binds whole actual consumer/lifecycle functions and the shared ROG state, not a whole-file hash or truncated line window. This is the reviewed classification boundary, not transitive whole-program integrity; external providers/drivers, shared runtime health and execution remain gaps.",
+    "explicitRegionLineEndings": "Only bindings explicitly declaring lineEndings=lf use CRLF-to-LF normalization for complete braced/between reviewed C++ regions and anchors. Original raw file SHA is reported separately. Whitespace/tokens/structure remain exact; whole-file owner bindings and all execution/compiler/receipt source gates keep raw bytes. This is classification/navigation only, never execution acceptance."
+  },
+  "bindings": {
+    "scope:enabled": {
+      "path": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+      "selector": {
+        "kind": "json-pointer",
+        "pointer": "/confirmedEnabledCapabilities"
+      },
+      "sha256": "f5fbd319cb48fda66782a88047348e310bc6e21c2c5681778188f83dd28fffd9"
+    },
+    "scope:inactive": {
+      "path": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+      "selector": {
+        "kind": "json-pointer",
+        "pointer": "/inactiveDisposition"
+      },
+      "sha256": "d310967fb5b7161cbce37f7ed7e900f449f23b2932595d99bef904b3c13d65e5"
+    },
+    "scope:user": {
+      "path": "capabilities/USER-SCOPE-DECISIONS.json",
+      "selector": {
+        "kind": "json-pointer",
+        "pointer": "/entries"
+      },
+      "sha256": "5a49cdeb72a14a23c239dea50e75c48c9e6ccd8039dffd9333f986d0c394e2c6"
+    },
+    "file:capabilities/AI-GUIDE.md": {
+      "path": "capabilities/AI-GUIDE.md",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "4790a36eac1ede01e47d62d49c2ae7109d63ca08504392b2e49091fce3feeffe"
+    },
+    "AI-INDEX.json:fan": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "fan"
+      },
+      "sha256": "d62c84274bc082578316ecdbf3f8f9097ff9a6b3f1c9b1f1b03e313e208e6572"
+    },
+    "EXECUTION-CHAINS.json:fan": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "fan"
+      },
+      "sha256": "1e5139fbb09429c76b43c4fb31d54b57bade6c7b2744b826b8a17a9ab3f8a537"
+    },
+    "INTEGRATION-STATUS.json:fan": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "fan"
+      },
+      "sha256": "69aeaad5133c9362bf07a84b9e2f1b8d86ce3922cff29d2b5754d541078bb057"
+    },
+    "file:capabilities/FanCapabilityCatalog.cs": {
+      "path": "capabilities/FanCapabilityCatalog.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "c07f040ddff59e4894364667a19a547df8998d7e02f771e29c473ef98f547c78"
+    },
+    "file:capabilities/AsusFanCapabilitySession.cs": {
+      "path": "capabilities/AsusFanCapabilitySession.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "45a0e2ef7d907f82c2a8a818a05db4202750800cdde6e8d1600862788b173dee"
+    },
+    "file:capabilities/HcDeviceCapabilityCatalog.cs": {
+      "path": "capabilities/HcDeviceCapabilityCatalog.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "eeae40ef0a3b2c8065f79d74479086a01ea0a54806eda6528426c627896e40b8"
+    },
+    "file:capabilities/HcDeviceCapabilityCatalog.generated.cs": {
+      "path": "capabilities/HcDeviceCapabilityCatalog.generated.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "718d9b0340bec0ff81d4ebff8e1d96e3724d2a362b8169ca72788bf92002b674"
+    },
+    "fan:backend": {
+      "path": "FanLab/real-host/Program.cs",
+      "selector": {
+        "kind": "between",
+        "start": "internal sealed partial class RealHcBackend : IDisposable",
+        "end": "internal sealed class FanHostEngine : IDisposable"
+      },
+      "sha256": "cc5dd137bb5dc44c0b474eaf803cac1c22530e9dfd240be1e8c267b91d4c1ed3"
+    },
+    "fan:engine": {
+      "path": "FanLab/real-host/Program.cs",
+      "selector": {
+        "kind": "between",
+        "start": "internal sealed class FanHostEngine : IDisposable",
+        "end": "internal static class FanHostSelfTest"
+      },
+      "sha256": "883f8a7e2a5d6babc7b53ea21aaf5019d5dedd3f72f9d65d656ff8a5464d055a"
+    },
+    "file:native/fan_resume_owner.h": {
+      "path": "native/fan_resume_owner.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "61a2307d903e22fb421a0ab4ad3a44267b8f92ca78f082a9cbb1f920e88acb9a"
+    },
+    "main:fanHostScheduleFanResume": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void fanHostScheduleFanResume(unsigned long long generation) {"
+      },
+      "sha256": "6e51e7886bb2341b669993830ef291db5291e34ba7183d7d528f714e236e6e87",
+      "lineEndings": "lf"
+    },
+    "AI-INDEX.json:motion": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "motion"
+      },
+      "sha256": "39ba38456efd97eb7ad08b812bd17cb2e85dfa0f76e32c0f1f24414b42095418"
+    },
+    "EXECUTION-CHAINS.json:motion": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "motion"
+      },
+      "sha256": "61017aa4f59ec67e342d74ceeb4bbd4b93f6568f40c00820bb54f77cf7233e02"
+    },
+    "INTEGRATION-STATUS.json:motion": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "motion"
+      },
+      "sha256": "5eb2acaf5d4a19286327b1db43ef88ca52d45bc35ddcaa1af194044ec4a8cde2"
+    },
+    "file:capabilities/HcMotionCapabilityCatalog.h": {
+      "path": "capabilities/HcMotionCapabilityCatalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "44b1d819e627b11b4176f942b391f46a89461e0cf22b62eeeb3f87a845f684e1"
+    },
+    "file:capabilities/HcMotionCapabilityCatalog.generated.h": {
+      "path": "capabilities/HcMotionCapabilityCatalog.generated.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "62f796f01c1c377633337eb1d5d37f66154eb663fafe72a4a1a0f5fb88b75dfb"
+    },
+    "file:native/controller_motion_session.h": {
+      "path": "native/controller_motion_session.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "b1b2b26fefb8efcca0e6a7e1eee34517f855ff86b83105ac2cc3d9b6b0e1101c"
+    },
+    "file:native/controller_motion_processor.h": {
+      "path": "native/controller_motion_processor.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "d52fead85a51c5c5fbf678c34723d891a352871d2089592245b15666517f4f97"
+    },
+    "file:native/windows_motion_submission.h": {
+      "path": "native/windows_motion_submission.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "71e4092ed0b29033af287a728ca95bcc8f5f0d33ea04efcb740a9c580d8ed1f6"
+    },
+    "main:inputCaptureStartWinRtSensorsImpl": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureStartWinRtSensorsImpl() {"
+      },
+      "sha256": "c44a6d3e69383fb0885f52b7614928fb9d3d725d6c8f55cc528b642bc40d7b32",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureShutdown": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureShutdown() {"
+      },
+      "sha256": "527d41c4fa498351b8775fbfb771bf5aedd9ef74425a6457c0557e45898a2cc4",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureSuspendSensorsForPower": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureSuspendSensorsForPower() {"
+      },
+      "sha256": "b0a5f41fce2efc80ef8ab2887e98467cd6d83a12f7cf1bf5acf9f31f576b4b24",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureResumeSensorsForPower": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureResumeSensorsForPower(bool force = false) {"
+      },
+      "sha256": "380385bc109b599ae6a02bf52d9d3fc52a6dd3c6596a6578dc938bb2a1d5a323",
+      "lineEndings": "lf"
+    },
+    "AI-INDEX.json:controller": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "controller"
+      },
+      "sha256": "579bcf835420881ccc959a3ec139b967ed44100ac6245ecb48fe6dd1f594eae0"
+    },
+    "EXECUTION-CHAINS.json:controller": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "controller"
+      },
+      "sha256": "7697008eec57f90a7b453fe5140ea817b7a08a7b0b820abd981740bd30759d13"
+    },
+    "INTEGRATION-STATUS.json:controller": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "controller"
+      },
+      "sha256": "e99abc64508dcd0b750b77ec886bc43687cbbcf7497ba3fb1c63b33478f474ac"
+    },
+    "file:capabilities/HcControllerInputCapabilityCatalog.h": {
+      "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "f7de83c3d11e97fc7e173123a75edcb2700fc710e9e278ab00115399e0014149"
+    },
+    "file:capabilities/HcControllerInputCapabilityCatalog.generated.h": {
+      "path": "capabilities/HcControllerInputCapabilityCatalog.generated.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "e96fbc3ca03df0b69b0037b1138d7c7b20bc8659fab0979577be831cd548b1ca"
+    },
+    "file:native/virtual_controller_stop_runtime.h": {
+      "path": "native/virtual_controller_stop_runtime.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "de4d9c068b6c3b6bcce25a322c44f9f5f73776af7957a71238285426c1dc8240"
+    },
+    "file:native/virtual_controller_runtime_contract.h": {
+      "path": "native/virtual_controller_runtime_contract.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "9185033fb8e543b97e258d6ee21420688ae3dc1ebc7be9a2f7a7f7aa2c078d11"
+    },
+    "file:native/virtual_start_protection.h": {
+      "path": "native/virtual_start_protection.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170"
+    },
+    "file:native/msi_persona_mode_handoff_runtime.h": {
+      "path": "native/msi_persona_mode_handoff_runtime.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "db93de4735f8c89732aa22b548581da5df83bcb352b7c0d139d03e14860ceac0"
+    },
+    "file:native/virtual_controller_start_runtime.h": {
+      "path": "native/virtual_controller_start_runtime.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "7fc54239cfed16128cf59ae046de850878f4ee5b22b9fd0c4e92908b31adbd0d"
+    },
+    "file:native/virtual_switch_execution_return_runtime.h": {
+      "path": "native/virtual_switch_execution_return_runtime.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "27e29695ed3a42148bd51794444b6ab75eaf820ea2266a50a3becc50758e92a9"
+    },
+    "file:InputHost/ParentProcessLifetime.cs": {
+      "path": "InputHost/ParentProcessLifetime.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+    },
+    "file:InputHost/Program.cs": {
+      "path": "InputHost/Program.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "ccc1e36c9c39c5f2653cb95d17a473c1e9d917db5f2509463f2a80a5fbc257c3"
+    },
+    "main:inputCaptureOnGamepad": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureOnGamepad(bool live, const XINPUT_GAMEPAD& pad, DWORD primarySlot, DWORD connectedMask, const std::string& inputSource\n#ifdef YMCC_MSI_REPORT_CHAIN_DIAGNOSTIC\n    , const ymcc::msi::virtualReportDiag::SourceStamp* msiDiagnosticSource\n#endif\n) {"
+      },
+      "sha256": "d5c46396b59b6f7248ecedd14577800e5e8ddee99f479a302f50bfb70b9dbeae",
+      "lineEndings": "lf"
+    },
+    "AI-INDEX.json:lighting": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "lighting"
+      },
+      "sha256": "29183506317049f0fafa46b86d947154b16beb3e9ae3ac7872ab66108e8cb5ae"
+    },
+    "EXECUTION-CHAINS.json:lighting": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "lighting"
+      },
+      "sha256": "84d3ca44452c9d7fa6b45a9df1a8a052069661c93eeba16e8b159a683e504ef7"
+    },
+    "INTEGRATION-STATUS.json:lighting": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "lighting"
+      },
+      "sha256": "688b884122ee221f50d5cb7b0978e5dc83a01caa998b2152946a42a69391913d"
+    },
+    "file:capabilities/HcLightingCapabilityCatalog.cs": {
+      "path": "capabilities/HcLightingCapabilityCatalog.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "46145ce59b799cb46bc2f4ef55c88c6c153d7a438dda8b4337c5fc0ad6147a0e"
+    },
+    "file:native/lighting_device_core_binding.h": {
+      "path": "native/lighting_device_core_binding.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "86196c9f64bd0a5869824dad061876a60d0e935199df17377df4f7db370d3e12"
+    },
+    "file:capabilities/HcLightingCapabilityCatalog.generated.cs": {
+      "path": "capabilities/HcLightingCapabilityCatalog.generated.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "73fda1026ceac203317f868e81d3fee7444aa306cc46a6654433906f5ab5aab4"
+    },
+    "file:FanLab/LightSetter/Program.cs": {
+      "path": "FanLab/LightSetter/Program.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "7953214fff290636dbe2b8ffb63478f505c2f59054b4ae54fdd43031ec011feb"
+    },
+    "file:FanLab/LightSetter/OneXLightingSession.cs": {
+      "path": "FanLab/LightSetter/OneXLightingSession.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "348b462993ad2019883357461468c2f756cb2eb7b92abbfa2f36c6ae73ea5e4d"
+    },
+    "main:ymccLightSetterApply": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static json ymccLightSetterApply(bool enabled, const std::string& mode,\n                                 BYTE r1, BYTE g1, BYTE b1,\n                                 BYTE r2, BYTE g2, BYTE b2,\n                                 int speed, int brightness, const std::string& presetId = {}) {"
+      },
+      "sha256": "21dd73303f12d4a8edc53cc39fe25d5aac9fbb8b33fde573d3ae6aa2472c65ac",
+      "lineEndings": "lf"
+    },
+    "main:rogCloseAuraHandleLocked": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void rogCloseAuraHandleLocked() {"
+      },
+      "sha256": "bb585f0ffba322cf639d30318377cdc796d9b86975025a11a918e80a64cab08a",
+      "lineEndings": "lf"
+    },
+    "main:rogCloseSession": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void rogCloseSession(bool keepIdentity) {"
+      },
+      "sha256": "5b848026a0f337c32663788ebd31a7958fab775c68ea0b108bd48e59fa4175b0",
+      "lineEndings": "lf"
+    },
+    "main:gamepad.setLed": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "ipc_on(\"gamepad.setLed\", [](const json& a) -> json {"
+      },
+      "sha256": "16b065ef7ddd260beb712340fb2fffba56735d8b80d75213e0e0139d3781de16",
+      "lineEndings": "lf"
+    },
+    "AI-INDEX.json:oem-input": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "oem-input"
+      },
+      "sha256": "39d8d1bff148b24a1a8decb8735f038f855d346dd10aad6e66f409354033c77c"
+    },
+    "EXECUTION-CHAINS.json:oem-input": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "oem-input"
+      },
+      "sha256": "69e9e812cee26fdbad6a43e8108c8cc3c6362712c4c92bb9a9b30d01d997b828"
+    },
+    "INTEGRATION-STATUS.json:oem-input": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "oem-input"
+      },
+      "sha256": "030af41cc5181898a9a8d472fe21c4e76a87d0726adc1cf15437d942ab4f2243"
+    },
+    "file:capabilities/HcOemInputCapabilityBinding.h": {
+      "path": "capabilities/HcOemInputCapabilityBinding.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "0e5f36306f84e98c28106b0faa7da9b0bc493d6151efdba52b3ad5f20cd4c4f4"
+    },
+    "file:capabilities/hc-device-catalog.generated.h": {
+      "path": "capabilities/hc-device-catalog.generated.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "93c251fe7676795f3e188cad165f622e6c3e9b3a2f041fcfe3698639a9790507"
+    },
+    "file:capabilities/HcControllerConfigurationCapabilityCatalog.h": {
+      "path": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "1db26fd0350c91551e0596f14a57b00cd90f4fc1c6b033144d6a5c1be51e33c0"
+    },
+    "file:capabilities/HcControllerConfigurationCapabilityCatalog.generated.h": {
+      "path": "capabilities/HcControllerConfigurationCapabilityCatalog.generated.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "cc398df3d54dcd2ab91ce86f315e8bc1402dc6410ad4ccd45b9f4cf5fffc0cbe"
+    },
+    "file:native/msi_rear_protocol.h": {
+      "path": "native/msi_rear_protocol.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "6d181c2e7c5222f5d2e11eb1e98d05b87a88e5b934c02a10fb747c6cadf8721b"
+    },
+    "file:native/oem_input_session.h": {
+      "path": "native/oem_input_session.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "f0b62f9a1d8471ef3d68fe8deca9fcb70b2d8fc97501d2826de6379d3251feb3"
+    },
+    "file:native/oem_input_contract.h": {
+      "path": "native/oem_input_contract.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "12c563cc0736fb0eaf1ea4325a15bdd3f2ca4455f25d6c5bd43af14832fd860d"
+    },
+    "file:native/oem_gamepad_mode_contract.h": {
+      "path": "native/oem_gamepad_mode_contract.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "d98fd03be7d304b2df36dda892298e98c436be7aed9ab4a9aebd70675de89b74"
+    },
+    "file:native/oem_gamepad_mode_session.h": {
+      "path": "native/oem_gamepad_mode_session.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "a89ff44e8eea824c83887aac7a3239950141da3d88bd58c9860ca14d9ddfc667"
+    },
+    "main:oemUnifiedInputBindingFor": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static const ymcc::capabilities::oem::InputBinding<OemCatalogRef>& oemUnifiedInputBindingFor(\n        YmccFamily family, const std::string& cls) {"
+      },
+      "sha256": "3b812b24198f9d746ebdfae2736c47019f10d8749e51d608ab79aacac4c38f11",
+      "lineEndings": "lf"
+    },
+    "main:oemBackMappingReconcileOnUi": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void oemBackMappingReconcileOnUi() {"
+      },
+      "sha256": "176491c4b71c1537cfde30e2206143c789a1162806ca9e53ffb246287cd5accb",
+      "lineEndings": "lf"
+    },
+    "main:oemRawPathReset": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void oemRawPathReset(const char* reason) {"
+      },
+      "sha256": "d815520694c19245555323c47484ee0f6eceb57e3e6e7c168cb3baf46c42c259",
+      "lineEndings": "lf"
+    },
+    "main:oemVendorHidShutdown": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void oemVendorHidShutdown() {"
+      },
+      "sha256": "08f4bee59e3df74d0cf5a0d3ba3e608d15d72b944f742a453da657d607e2d55f",
+      "lineEndings": "lf"
+    },
+    "main:oemBackMappingRefreshGate": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void oemBackMappingRefreshGate(bool targetEnabled, const std::string& configuredPersona,\n                                      bool backMappingRequested) {"
+      },
+      "sha256": "d9f71f8f5884720c29956915934087c451a5a46775a628800ccf6d266a41ce3b",
+      "lineEndings": "lf"
+    },
+    "main:msiClawEnsureM12Remap": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool msiClawEnsureM12Remap(ymcc::msi::rearSdPreparation::Receipt* receipt = nullptr) {"
+      },
+      "sha256": "127f91f468948f23668fef0b3e1daa888140fc219ab470425d6cf921cfca2f42",
+      "lineEndings": "lf"
+    },
+    "file:capabilities/HcControllerFeedbackCapabilityCatalog.h": {
+      "path": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "140be1502b57859b53e84f22101798a1572b586b3c061713ab77273c79471d01"
+    },
+    "file:capabilities/HcControllerFeedbackCapabilityCatalog.generated.h": {
+      "path": "capabilities/HcControllerFeedbackCapabilityCatalog.generated.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "8836d753448bb13cab2f38f712abaf33ce142823e3eb71aaae9d2fe2d1b7e403"
+    },
+    "file:native/game_feedback_dispatch.h": {
+      "path": "native/game_feedback_dispatch.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "403d5147a81787d3c5113ada74aaf38972ba4dfdeba35ab492198465b8172a2e"
+    },
+    "file:native/game_feedback_source_ticket.h": {
+      "path": "native/game_feedback_source_ticket.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "168ebea23d0a93b5a00954e4b2e36f42983484c641432a83dbd4acdb8448b076"
+    },
+    "file:native/game_feedback_receipt.h": {
+      "path": "native/game_feedback_receipt.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "0c31dc2ad40def95d4f2386e409c9369736c84d02a0efc332ebf21f1ce263c88"
+    },
+    "file:native/input_frame_submission.h": {
+      "path": "native/input_frame_submission.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "68d273a464d34b10a22529ad828d0d2616971e07a7a9f25a7bd9ab6b9d106ac8"
+    },
+    "file:native/virtual_output_status.h": {
+      "path": "native/virtual_output_status.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "04285cba1eb4eb6624af7c76d10359137fb611462f080343e423e98953478222"
+    },
+    "file:native/touch_haptic_dispatch.h": {
+      "path": "native/touch_haptic_dispatch.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "3aa5841e72bfed77b966a8f315690f9f17af240ce39830ae6c550ce1e7c36e2a"
+    },
+    "main:nativeWriteBoundGameFeedbackCommand": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static ymcc::touchhaptic::Receipt nativeWriteBoundGameFeedbackCommand(const ymcc::game_feedback::SourceBoundCommand& command) {"
+      },
+      "sha256": "bb97f64a1e76141b6ba0781d746e607fabea2142dba14049a0b0ca7d2e1c409c",
+      "lineEndings": "lf"
+    },
+    "main:physicalFeedbackFinish": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void physicalFeedbackFinish(unsigned long long generation) {"
+      },
+      "sha256": "423be0da70a78d45c7110efd527715cb2e9210b6c841e5a289f0f944b9f1b47a",
+      "lineEndings": "lf"
+    },
+    "main:physicalFeedbackStopTarget": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void physicalFeedbackStopTarget(const PhysicalFeedbackTarget& target,bool touch=false,bool* unresolved=nullptr,bool* zeroAccepted=nullptr,DWORD* stopError=nullptr) {"
+      },
+      "sha256": "e85a2710ec789d9f584bf16ee1caca912e23ab3e46fb9d3c5b61f623b419f6a6",
+      "lineEndings": "lf"
+    },
+    "AI-INDEX.json:battery": {
+      "path": "capabilities/AI-INDEX.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "battery"
+      },
+      "sha256": "722279059b41a10a03613f450a3f16e39f0b0054ce92625f0a4127a2216fdb64"
+    },
+    "EXECUTION-CHAINS.json:battery": {
+      "path": "capabilities/EXECUTION-CHAINS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "battery"
+      },
+      "sha256": "e0fdb6ae17e0af607193da1b94f75f41282ccf31052847003c3e1f94e57034a4"
+    },
+    "INTEGRATION-STATUS.json:battery": {
+      "path": "capabilities/INTEGRATION-STATUS.json",
+      "selector": {
+        "kind": "json-id",
+        "collection": "/domains",
+        "id": "battery"
+      },
+      "sha256": "fb8e6b30b1c4cb485597d05b553a115b2c0b3dc31e85ed97abc2f12d768adf4a"
+    },
+    "file:capabilities/HcBatteryCapabilityCatalog.cs": {
+      "path": "capabilities/HcBatteryCapabilityCatalog.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "461fd68c2cd099442f1b4b101435076255a9620c6038ffb40d31a7bf9af1b14b"
+    },
+    "file:capabilities/HcBatteryCapabilityCatalog.generated.cs": {
+      "path": "capabilities/HcBatteryCapabilityCatalog.generated.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "3763884c94579484d1972a99d611face51e1d33a31aa1e8ac87b0a2787488ca2"
+    },
+    "file:native/BatteryHost/Policy.cs": {
+      "path": "native/BatteryHost/Policy.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "9104651d4386f12e574487ad5cadadaadb26631823bbcc5f3a7dacdc9500f86f"
+    },
+    "file:native/BatteryHost/Controller.cs": {
+      "path": "native/BatteryHost/Controller.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "ea09e8e817f89e103044b3f1bd6d7a9251e6508e24f818f147a7f417424e9a86"
+    },
+    "file:native/BatteryHost/Program.cs": {
+      "path": "native/BatteryHost/Program.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "4ef1483a7a191426149f76153280deb15ec5ba690e74c4e9838746626438084b"
+    },
+    "file:native/BatteryHost/HostDomainRouter.cs": {
+      "path": "native/BatteryHost/HostDomainRouter.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "0942c85cac39e5b7ae9c10d911a3b0ac32477a1600bfbec8718d6b28e9c32f79"
+    },
+    "file:FanLab/real-host/FanCapabilityPolicy.cs": {
+      "path": "FanLab/real-host/FanCapabilityPolicy.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "0330205e9d996c6668065fe28178a2773825caf8b0560700cc9ae885e3bdf2ad"
+    },
+    "file:FanLab/real-host/G1FanContractAdapter.cs": {
+      "path": "FanLab/real-host/G1FanContractAdapter.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "399004d8cb76145cfe2579a9492faadfec43f6f506f66d52f8506a8505a2f387"
+    },
+    "file:FanLab/real-host/MsiFanDeviceLifecycle.cs": {
+      "path": "FanLab/real-host/MsiFanDeviceLifecycle.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "c6a21a708269b31284b0cb9f867d53bc4dd16efa85cf448b41b7239f3bedca13"
+    },
+    "file:FanLab/real-host/OneXFanDeviceLifecycle.cs": {
+      "path": "FanLab/real-host/OneXFanDeviceLifecycle.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "16c9f1f5546340329a6270a05e4d1dfe4206b38a5157d5c2fb7c8a4c89cbf549"
+    },
+    "file:FanLab/real-host/HostProcessLifetime.cs": {
+      "path": "FanLab/real-host/HostProcessLifetime.cs",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "bbbb1b224508b32b394c384a87c3c8472ea5a8d0d51386f8677fcab896831040"
+    },
+    "main:inputCaptureLegacyHcMotionSelectorBound": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureLegacyHcMotionSelectorBound() {"
+      },
+      "sha256": "8357b74ff8b9a4b9c24e5e89b99f57d9b9bb3725334785ca703f20d12bc76f08",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureGenericHcMotionSelectorBound": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureGenericHcMotionSelectorBound() {"
+      },
+      "sha256": "907127de7f499685fa015c0f9c264e3e852f596dc960acae370e7a532fb35fd5",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureDefaultHcMotionSelectorBound": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureDefaultHcMotionSelectorBound() {"
+      },
+      "sha256": "3b4b65e5f702c48cf60e48b4ac5c47e51aa6332d6c46201e66591a1befe4fa19",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureNewHcMotionSelectorBound": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureNewHcMotionSelectorBound() {"
+      },
+      "sha256": "3dce7acbc5466b8c6d4a5fa9f74be67162eba59f7edfcac33384833bbc7f87c8",
+      "lineEndings": "lf"
+    },
+    "main:inputCapturePrivateHcMotionSelectorRecipe": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static const ymcc::hc_model_motion::Recipe* inputCapturePrivateHcMotionSelectorRecipe() noexcept {"
+      },
+      "sha256": "c8a16c5cd98e2a9373e4b70bf7d00c21a6603840d1ef1e3235d95fa36a29cd31",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureMotionSelectorBound": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureMotionSelectorBound() {"
+      },
+      "sha256": "42ef4c1e4d3685c9f76b25c98ec1b3045b74eabe2ba0798ffc6e6e14ba29ebf2",
+      "lineEndings": "lf"
+    },
+    "file:native/hc_model_motion_catalog.h": {
+      "path": "native/hc_model_motion_catalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "da5e2e3d2995137766e473fc64845d53e7270032b9c17913f9c6ada154e638d8"
+    },
+    "file:native/hc_default_motion_catalog.h": {
+      "path": "native/hc_default_motion_catalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "de416c9823fb06e4519feac98fa810c81bfe46ac39e8728fe838c96249ad4d4d"
+    },
+    "file:native/hc_generic_motion_catalog.h": {
+      "path": "native/hc_generic_motion_catalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "05c32b98f731995dc9cfceec8327fe1a4fff151abd8756b68cba3eb55c0b021d"
+    },
+    "file:native/hc_legacy_motion_catalog.h": {
+      "path": "native/hc_legacy_motion_catalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "159462f724dde5e5e7656fcc049899915940d47057c009ea2091df562ce01150"
+    },
+    "file:native/hc_oem_windows_motion_catalog.h": {
+      "path": "native/hc_oem_windows_motion_catalog.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "5619f1eeee1de7d4a97176e51c2574087c3837406482141eca1bc2709e6e36e8"
+    },
+    "file:native/windows_motion_processing.h": {
+      "path": "native/windows_motion_processing.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "e3a305522e0dd00d561b0156d909fd5fd9076acce373928c620e6265b67a907e"
+    },
+    "file:native/input_capture_completion.h": {
+      "path": "native/input_capture_completion.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "7b26fca65ce522f88b57f4d4490833be1cad9a878f9bd21931b8804453706985"
+    },
+    "main:inputCaptureStopWinRtSensorsImpl": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void inputCaptureStopWinRtSensorsImpl() {"
+      },
+      "sha256": "c5dbee8099bbf42e969c381c79910367b9cd63f3d7a53301c5e2995a6134d599",
+      "lineEndings": "lf"
+    },
+    "main:inputCaptureSensorThreadShutdown": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool inputCaptureSensorThreadShutdown() {"
+      },
+      "sha256": "106c1bf2cf9b5e141bcb4d2e7fe6248946af50992ce3d285e387480fe4912ecc",
+      "lineEndings": "lf"
+    },
+    "file:native/oem_lighting_operations.h": {
+      "path": "native/oem_lighting_operations.h",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "656f9d4e5f48fddb1cf86af9deef8b04ed4bae6d142597503772e47480245a7c"
+    },
+    "main:RogInputSession": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "struct RogInputSession {"
+      },
+      "sha256": "aae56044d71108acbc34a190927ccb7b76092ec8037f7c7710c9626a2e4309cb",
+      "lineEndings": "lf"
+    },
+    "main:rogInspectDevice": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static void rogInspectDevice(HANDLE h, const wchar_t* path, USHORT pid) {"
+      },
+      "sha256": "81a37a7596f7d7dc536056ac6a86f656f0211b64b2c730352b96f20f74d35055",
+      "lineEndings": "lf"
+    },
+    "main:rogAuraWriteLocked": {
+      "path": "native/main.cpp",
+      "selector": {
+        "kind": "braced",
+        "anchor": "static bool rogAuraWriteLocked(const std::vector<BYTE>& report) {"
+      },
+      "sha256": "c8193c601077a35284aa6511abb17ab24eac73f861d497783cbf4a3f019a87b6",
+      "lineEndings": "lf"
+    },
+    "file:native/BatteryHost/battery-routes.json": {
+      "path": "native/BatteryHost/battery-routes.json",
+      "selector": {
+        "kind": "file"
+      },
+      "sha256": "3b16212bb524128b99ef3498512c05e69c09a287c889b97abe7454dea90bda8a"
+    }
+  },
+  "features": [
+    {
+      "id": "fan",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "fan"
+      ],
+      "persistence": "persistent",
+      "rationale": "RealHcBackend retains a selected device and catalog lease between control requests; FanHostEngine owns the resident control/power worker. ASUS handback explicitly requires both a completed restore receipt and an observed actual handle close, rather than a completed API call.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:fan",
+        "EXECUTION-CHAINS.json:fan",
+        "INTEGRATION-STATUS.json:fan",
+        "file:capabilities/FanCapabilityCatalog.cs",
+        "file:capabilities/AsusFanCapabilitySession.cs",
+        "file:capabilities/HcDeviceCapabilityCatalog.cs",
+        "file:capabilities/HcDeviceCapabilityCatalog.generated.cs",
+        "fan:backend",
+        "fan:engine",
+        "file:native/fan_resume_owner.h",
+        "main:fanHostScheduleFanResume",
+        "file:FanLab/real-host/FanCapabilityPolicy.cs",
+        "file:FanLab/real-host/G1FanContractAdapter.cs",
+        "file:FanLab/real-host/MsiFanDeviceLifecycle.cs",
+        "file:FanLab/real-host/OneXFanDeviceLifecycle.cs",
+        "file:FanLab/real-host/HostProcessLifetime.cs"
+      ],
+      "anchors": [
+        {
+          "id": "fan.backend",
+          "bindingId": "fan:backend",
+          "symbol": "CloseCore",
+          "role": "owner",
+          "meaning": "Actual backend owns close/restore and retained vendor handle debt."
+        },
+        {
+          "id": "fan.engine",
+          "bindingId": "fan:engine",
+          "symbol": "Suspend",
+          "role": "consumer",
+          "meaning": "Resident engine dispatches requests and power transitions to the real backend."
+        },
+        {
+          "id": "fan.session",
+          "bindingId": "file:capabilities/AsusFanCapabilitySession.cs",
+          "symbol": "CanHandBackToHc",
+          "role": "owner",
+          "meaning": "Catalog session release requires transport restore plus Host-observed handle close."
+        },
+        {
+          "id": "fan.resume",
+          "bindingId": "file:native/fan_resume_owner.h",
+          "symbol": "class RequestOwner",
+          "role": "owner",
+          "meaning": "Coalesces newer wake generations only; this helper owns no timer or device."
+        },
+        {
+          "id": "fan.wake",
+          "bindingId": "main:fanHostScheduleFanResume",
+          "symbol": "fanHostScheduleFanResume",
+          "role": "consumer",
+          "meaning": "Existing native wake schedules the current Host owner, not a catalog-created replacement."
+        },
+        {
+          "id": "fan.policy",
+          "bindingId": "file:FanLab/real-host/FanCapabilityPolicy.cs",
+          "symbol": "internal static class FanCapabilityPolicy",
+          "role": "consumer",
+          "meaning": "Actual runtime fan compatibility admission still precedes the backend writer."
+        },
+        {
+          "id": "fan.msi-owner",
+          "bindingId": "file:FanLab/real-host/MsiFanDeviceLifecycle.cs",
+          "symbol": "internal void Close()",
+          "role": "owner",
+          "meaning": "MSI fan-only transport is retained after failed disposal; broader device lifecycle is not borrowed."
+        },
+        {
+          "id": "fan.onex-owner",
+          "bindingId": "file:FanLab/real-host/OneXFanDeviceLifecycle.cs",
+          "symbol": "private void CloseCore()",
+          "role": "owner",
+          "meaning": "OneX transport/mutex retain cleanup obligations until their own close settles."
+        },
+        {
+          "id": "fan.process-owner",
+          "bindingId": "file:FanLab/real-host/HostProcessLifetime.cs",
+          "symbol": "internal sealed class HostProcessLifetime",
+          "role": "owner",
+          "meaning": "Exact parent/process-exit lifetime and Host instance lease."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device-handles",
+          "ownerAnchor": "fan.backend",
+          "lifetime": "session",
+          "groupId": "fan.backend",
+          "responsibility": "Vendor handle/lease remains Host-owned until restore/close settlement."
+        },
+        {
+          "kind": "resident-processes",
+          "ownerAnchor": "fan.engine",
+          "lifetime": "process",
+          "groupId": "fan.host",
+          "responsibility": "Shared FanHost engine/control worker, not a child-owned process per route."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "fan.backend",
+          "fan.session",
+          "fan.msi-owner",
+          "fan.onex-owner",
+          "fan.process-owner"
+        ],
+        "sleep": [
+          "fan.engine",
+          "fan.wake"
+        ],
+        "faultRecovery": [
+          "fan.backend",
+          "fan.resume"
+        ]
+      },
+      "components": [],
+      "testReferences": [
+        "fan.unified-capability-dispatch",
+        "fan.unified-capability-roundtrip",
+        "fan.explicit-off-host-chain-consumer",
+        "fan.lifecycle-wake-display",
+        "fan.close-observation-refusal-consumer"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Vendor-specific return/firmware proofs remain governed by FAN-RETURN-CONSUMPTION; a restore API receipt is not physical return."
+      ]
+    },
+    {
+      "id": "motion",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "motion"
+      ],
+      "persistence": "persistent",
+      "rationale": "The actual capture source owns subscribed sensors and an STA worker across samples. controller_motion::Session keeps a generation-keyed owner and callbacks until revoke; PublicationFence rejects retired frames. Suspend withdraws ingress and Resume rebuilds/subscribes only under the shared power gate.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:motion",
+        "EXECUTION-CHAINS.json:motion",
+        "INTEGRATION-STATUS.json:motion",
+        "file:capabilities/HcMotionCapabilityCatalog.h",
+        "file:capabilities/HcMotionCapabilityCatalog.generated.h",
+        "file:native/controller_motion_session.h",
+        "file:native/controller_motion_processor.h",
+        "file:native/windows_motion_submission.h",
+        "main:inputCaptureStartWinRtSensorsImpl",
+        "main:inputCaptureShutdown",
+        "main:inputCaptureSuspendSensorsForPower",
+        "main:inputCaptureResumeSensorsForPower",
+        "main:inputCaptureLegacyHcMotionSelectorBound",
+        "main:inputCaptureGenericHcMotionSelectorBound",
+        "main:inputCaptureDefaultHcMotionSelectorBound",
+        "main:inputCaptureNewHcMotionSelectorBound",
+        "main:inputCapturePrivateHcMotionSelectorRecipe",
+        "main:inputCaptureMotionSelectorBound",
+        "file:native/hc_model_motion_catalog.h",
+        "file:native/hc_default_motion_catalog.h",
+        "file:native/hc_generic_motion_catalog.h",
+        "file:native/hc_legacy_motion_catalog.h",
+        "file:native/hc_oem_windows_motion_catalog.h",
+        "file:native/windows_motion_processing.h",
+        "file:native/input_capture_completion.h",
+        "main:inputCaptureStopWinRtSensorsImpl",
+        "main:inputCaptureSensorThreadShutdown"
+      ],
+      "anchors": [
+        {
+          "id": "motion.session",
+          "bindingId": "file:native/controller_motion_session.h",
+          "symbol": "class Session final",
+          "role": "owner",
+          "meaning": "Caller-serialized motion callback owner; this CPU session itself does not create sensor threads."
+        },
+        {
+          "id": "motion.fence",
+          "bindingId": "file:native/windows_motion_submission.h",
+          "symbol": "class PublicationFence final",
+          "role": "owner",
+          "meaning": "Current generation publication fence, permanently revoked for retired frames."
+        },
+        {
+          "id": "motion.execute",
+          "bindingId": "main:inputCaptureStartWinRtSensorsImpl",
+          "symbol": "inputCaptureStartWinRtSensorsImpl",
+          "role": "consumer",
+          "meaning": "Actual HC/WinRT sensor creation/subscription path."
+        },
+        {
+          "id": "motion.exit",
+          "bindingId": "main:inputCaptureShutdown",
+          "symbol": "inputCaptureShutdown",
+          "role": "owner",
+          "meaning": "Retires capture, providers, sensor STA and dependency ownership."
+        },
+        {
+          "id": "motion.suspend",
+          "bindingId": "main:inputCaptureSuspendSensorsForPower",
+          "symbol": "inputCaptureSuspendSensorsForPower",
+          "role": "consumer",
+          "meaning": "Immediately revokes sensor binding generation and posts STA suspend."
+        },
+        {
+          "id": "motion.resume",
+          "bindingId": "main:inputCaptureResumeSensorsForPower",
+          "symbol": "inputCaptureResumeSensorsForPower",
+          "role": "consumer",
+          "meaning": "Uses current power gate before rebuilding sensors/subscriptions."
+        },
+        {
+          "id": "motion.consume.inputCaptureLegacyHcMotionSelectorBound",
+          "bindingId": "main:inputCaptureLegacyHcMotionSelectorBound",
+          "symbol": "inputCaptureLegacyHcMotionSelectorBound",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.consume.inputCaptureGenericHcMotionSelectorBound",
+          "bindingId": "main:inputCaptureGenericHcMotionSelectorBound",
+          "symbol": "inputCaptureGenericHcMotionSelectorBound",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.consume.inputCaptureDefaultHcMotionSelectorBound",
+          "bindingId": "main:inputCaptureDefaultHcMotionSelectorBound",
+          "symbol": "inputCaptureDefaultHcMotionSelectorBound",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.consume.inputCaptureNewHcMotionSelectorBound",
+          "bindingId": "main:inputCaptureNewHcMotionSelectorBound",
+          "symbol": "inputCaptureNewHcMotionSelectorBound",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.consume.inputCapturePrivateHcMotionSelectorRecipe",
+          "bindingId": "main:inputCapturePrivateHcMotionSelectorRecipe",
+          "symbol": "inputCapturePrivateHcMotionSelectorRecipe",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.consume.inputCaptureMotionSelectorBound",
+          "bindingId": "main:inputCaptureMotionSelectorBound",
+          "symbol": "inputCaptureMotionSelectorBound",
+          "role": "consumer",
+          "meaning": "Actual handwritten motion binding consumption keeps identity/recipe and runtime admission semantics in the bound function."
+        },
+        {
+          "id": "motion.unsubscribe",
+          "bindingId": "main:inputCaptureStopWinRtSensorsImpl",
+          "symbol": "inputCaptureStopWinRtSensorsImpl",
+          "role": "owner",
+          "meaning": "Actual sensor token removal/retained-unsubscribe owner, not only a shutdown call site."
+        },
+        {
+          "id": "motion.sta-stop",
+          "bindingId": "main:inputCaptureSensorThreadShutdown",
+          "symbol": "inputCaptureSensorThreadShutdown",
+          "role": "owner",
+          "meaning": "Actual bounded sensor thread termination or retained thread ownership."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "subscriptions",
+          "ownerAnchor": "motion.execute",
+          "lifetime": "cross-event",
+          "groupId": "capture.sensor-subscriptions",
+          "responsibility": "Owned subscription tokens must be retired by the sensor STA."
+        },
+        {
+          "kind": "threads",
+          "ownerAnchor": "motion.exit",
+          "lifetime": "process",
+          "groupId": "capture.worker",
+          "responsibility": "Shared capture/STA lifetime, not a motion-selector-created worker."
+        },
+        {
+          "kind": "leases",
+          "ownerAnchor": "motion.session",
+          "lifetime": "session",
+          "groupId": "motion.generation",
+          "responsibility": "Selection/replacement/revoke invalidates old callbacks and publication."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "motion.exit",
+          "motion.session",
+          "motion.fence",
+          "motion.unsubscribe",
+          "motion.sta-stop"
+        ],
+        "sleep": [
+          "motion.suspend",
+          "motion.resume",
+          "motion.unsubscribe"
+        ],
+        "faultRecovery": [
+          "motion.resume",
+          "motion.fence"
+        ]
+      },
+      "components": [],
+      "testReferences": [
+        "gyro.machine-motion-consumers",
+        "gyro.recipe-dispatch-hotpath",
+        "gyro.unified-motion-bindings",
+        "gyro.preview-lifecycle-consumer"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Selector binding does not prove actual sensor health, bank calibration or recovery of every declared provider."
+      ]
+    },
+    {
+      "id": "controller.input",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "controller"
+      ],
+      "persistence": "persistent",
+      "rationale": "Actual input capture repeatedly submits admitted physical frames to an owned InputHost session/virtual target. Physical endpoint and persona release are retained ownership obligations, not one-shot frame writes; the production stop module serializes return and keeps unresolved release debt.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:controller",
+        "EXECUTION-CHAINS.json:controller",
+        "INTEGRATION-STATUS.json:controller",
+        "file:capabilities/HcControllerInputCapabilityCatalog.h",
+        "file:capabilities/HcControllerInputCapabilityCatalog.generated.h",
+        "file:native/virtual_controller_stop_runtime.h",
+        "file:native/virtual_controller_runtime_contract.h",
+        "file:native/virtual_start_protection.h",
+        "file:native/msi_persona_mode_handoff_runtime.h",
+        "file:native/virtual_controller_start_runtime.h",
+        "file:native/virtual_switch_execution_return_runtime.h",
+        "file:InputHost/ParentProcessLifetime.cs",
+        "file:InputHost/Program.cs",
+        "main:inputCaptureOnGamepad",
+        "main:inputCaptureShutdown"
+      ],
+      "anchors": [
+        {
+          "id": "input.stop",
+          "bindingId": "file:native/virtual_controller_stop_runtime.h",
+          "symbol": "inputHostStopLocked",
+          "role": "owner",
+          "meaning": "Actual serialized target stop, physical visibility return and unconfirmed ownership debt."
+        },
+        {
+          "id": "input.start",
+          "bindingId": "file:native/virtual_controller_start_runtime.h",
+          "symbol": "inputHostStart",
+          "role": "consumer",
+          "meaning": "Actual admitted target/session start with power and retry gates."
+        },
+        {
+          "id": "input.parent",
+          "bindingId": "file:InputHost/ParentProcessLifetime.cs",
+          "symbol": "Dispose",
+          "role": "owner",
+          "meaning": "Lifetime watch is bounded to the exact parent process."
+        },
+        {
+          "id": "input.session",
+          "bindingId": "file:InputHost/Program.cs",
+          "symbol": "private sealed class HostSession",
+          "role": "owner",
+          "meaning": "Actual pipe session owns SDK context/controller and submits current frames."
+        },
+        {
+          "id": "input.execute",
+          "bindingId": "main:inputCaptureOnGamepad",
+          "symbol": "inputCaptureOnGamepad",
+          "role": "consumer",
+          "meaning": "Consumes unified standard input binding at the real capture boundary."
+        },
+        {
+          "id": "input.capture-exit",
+          "bindingId": "main:inputCaptureShutdown",
+          "symbol": "inputCaptureShutdown",
+          "role": "owner",
+          "meaning": "Shared capture disposal entry; independent virtual target return remains required."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "virtual-targets",
+          "ownerAnchor": "input.stop",
+          "lifetime": "session",
+          "groupId": "inputhost.target",
+          "responsibility": "Only lifecycle owner may retire target and settle physical return."
+        },
+        {
+          "kind": "resident-processes",
+          "ownerAnchor": "input.session",
+          "lifetime": "process",
+          "groupId": "inputhost.process",
+          "responsibility": "Owned InputHost/controller/context, shared with feedback; parent disappearance is not a health receipt."
+        },
+        {
+          "kind": "threads",
+          "ownerAnchor": "input.capture-exit",
+          "lifetime": "process",
+          "groupId": "capture.worker",
+          "responsibility": "Shared capture worker; no child feature gets permission to kill the whole owner."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "input.stop",
+          "input.capture-exit",
+          "input.parent"
+        ],
+        "sleep": [
+          "input.start",
+          "input.stop"
+        ],
+        "faultRecovery": [
+          "input.start",
+          "input.stop"
+        ]
+      },
+      "components": [],
+      "testReferences": [
+        "controller.unified-standard-input",
+        "controller.coordinator-lifecycle",
+        "controller.host-lifecycle-protocol",
+        "controller.lifecycle-native-managed-pipe",
+        "controller.input-entry-lifecycle"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "HidHide/device visibility and exact installed/native/managed pipe receipts need separate current-source acceptance."
+      ]
+    },
+    {
+      "id": "lighting",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "lighting"
+      ],
+      "persistence": "persistent",
+      "rationale": "LightSetter operations are finite child transactions, but the enabled lighting capability also uses a native ROG Aura handle retained in RogInputSession across requests and closed by the shared session owner. Classifying the entire capability as one-shot from the helper process would discard that persistent ownership.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:lighting",
+        "EXECUTION-CHAINS.json:lighting",
+        "INTEGRATION-STATUS.json:lighting",
+        "file:capabilities/HcLightingCapabilityCatalog.cs",
+        "file:native/lighting_device_core_binding.h",
+        "file:capabilities/HcLightingCapabilityCatalog.generated.cs",
+        "file:FanLab/LightSetter/Program.cs",
+        "file:FanLab/LightSetter/OneXLightingSession.cs",
+        "main:ymccLightSetterApply",
+        "main:rogCloseAuraHandleLocked",
+        "main:rogCloseSession",
+        "main:gamepad.setLed",
+        "file:native/oem_lighting_operations.h",
+        "file:capabilities/hc-device-catalog.generated.h",
+        "main:RogInputSession",
+        "main:rogInspectDevice",
+        "main:rogAuraWriteLocked"
+      ],
+      "anchors": [
+        {
+          "id": "lighting.helper",
+          "bindingId": "file:FanLab/LightSetter/Program.cs",
+          "symbol": "ExecuteResolvedCatalogLedAction",
+          "role": "consumer",
+          "meaning": "Finite helper dispatch consumes the handwritten model/action binding."
+        },
+        {
+          "id": "lighting.helper-owner",
+          "bindingId": "file:FanLab/LightSetter/OneXLightingSession.cs",
+          "symbol": "public void Dispose()",
+          "role": "owner",
+          "meaning": "This operation-scoped serial session closes/disposes only its own port."
+        },
+        {
+          "id": "lighting.apply",
+          "bindingId": "main:ymccLightSetterApply",
+          "symbol": "ymccLightSetterApply",
+          "role": "consumer",
+          "meaning": "Native helper invocation validates identity, completion and bounded output."
+        },
+        {
+          "id": "lighting.aura-close",
+          "bindingId": "main:rogCloseAuraHandleLocked",
+          "symbol": "rogCloseAuraHandleLocked",
+          "role": "owner",
+          "meaning": "Actual retained Aura HID handle close."
+        },
+        {
+          "id": "lighting.session-close",
+          "bindingId": "main:rogCloseSession",
+          "symbol": "rogCloseSession",
+          "role": "owner",
+          "meaning": "Shared ROG session closes Aura under the owner mutex."
+        },
+        {
+          "id": "lighting.dispatch",
+          "bindingId": "main:gamepad.setLed",
+          "symbol": "lightingRoute",
+          "role": "consumer",
+          "meaning": "Original IPC route selects native/helper provider and keeps power admission."
+        },
+        {
+          "id": "lighting.shared-state",
+          "bindingId": "main:RogInputSession",
+          "symbol": "HANDLE auraControl",
+          "role": "owner",
+          "meaning": "Actual shared ROG session retains the distinct Aura HID handle between requests."
+        },
+        {
+          "id": "lighting.adopt",
+          "bindingId": "main:rogInspectDevice",
+          "symbol": "rogInspectDevice",
+          "role": "consumer",
+          "meaning": "Actual HID classification and mutex-protected Aura handle adoption; device presence is not established by reading this source."
+        },
+        {
+          "id": "lighting.native-write",
+          "bindingId": "main:rogAuraWriteLocked",
+          "symbol": "rogAuraWriteLocked",
+          "role": "consumer",
+          "meaning": "Actual native Aura writer consumes only the retained session handle and checks full report transport."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "device-handles",
+          "ownerAnchor": "lighting.aura-close",
+          "lifetime": "session",
+          "groupId": "rog.aura",
+          "responsibility": "Persistent native provider handle; shared ROG session, not owned by a finite UI action."
+        },
+        {
+          "kind": "child-processes",
+          "ownerAnchor": "lighting.helper",
+          "lifetime": "operation",
+          "groupId": "lighting.helper",
+          "responsibility": "Only while the helper request is outstanding; not the reason for persistent classification."
+        },
+        {
+          "kind": "leases",
+          "ownerAnchor": "lighting.shared-state",
+          "lifetime": "session",
+          "groupId": "rog.aura",
+          "responsibility": "Shared ROG state owns the Aura handle; feature components cannot retire unrelated shared session resources."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "lighting.aura-close",
+          "lighting.session-close",
+          "lighting.helper-owner"
+        ],
+        "sleep": [],
+        "faultRecovery": [
+          "lighting.session-close"
+        ]
+      },
+      "components": [
+        {
+          "id": "lighting.helper-request",
+          "persistence": "one-shot",
+          "anchor": "lighting.helper-owner",
+          "reason": "On-demand helper/serial transaction has an operation-local Dispose; this does not classify the parent lighting capability."
+        }
+      ],
+      "testReferences": [
+        "lighting.unified-capability-dispatch",
+        "lighting.signal-consumer",
+        "lighting.ui-feedback-ordering-consumer",
+        "lifecycle.lighting-component-continuity"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "No independently verified cross-provider LED wake/reapply health endpoint is supplied; sleep entry remains unlocated rather than inferred from stored ON."
+      ]
+    },
+    {
+      "id": "oem.back-buttons",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "oem-input",
+        "controller"
+      ],
+      "persistence": "persistent",
+      "rationale": "Rear HID/button mappings retain qualified device/source generations, held-key state and shared hook/raw-input admission across events. The binding cache owns no OS hooks: actual UI hook reconciliation, raw reset and vendor-HID shutdown remain the resource/lifecycle owners.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:oem-input",
+        "EXECUTION-CHAINS.json:oem-input",
+        "INTEGRATION-STATUS.json:oem-input",
+        "AI-INDEX.json:controller",
+        "EXECUTION-CHAINS.json:controller",
+        "INTEGRATION-STATUS.json:controller",
+        "file:capabilities/HcOemInputCapabilityBinding.h",
+        "file:capabilities/hc-device-catalog.generated.h",
+        "file:capabilities/HcControllerConfigurationCapabilityCatalog.h",
+        "file:capabilities/HcControllerConfigurationCapabilityCatalog.generated.h",
+        "file:native/msi_rear_protocol.h",
+        "file:native/oem_input_session.h",
+        "file:native/oem_input_contract.h",
+        "file:native/oem_gamepad_mode_contract.h",
+        "file:native/oem_gamepad_mode_session.h",
+        "main:oemUnifiedInputBindingFor",
+        "main:oemBackMappingReconcileOnUi",
+        "main:oemRawPathReset",
+        "main:oemVendorHidShutdown",
+        "main:oemBackMappingRefreshGate",
+        "main:msiClawEnsureM12Remap"
+      ],
+      "anchors": [
+        {
+          "id": "oem.session",
+          "bindingId": "file:native/oem_input_session.h",
+          "symbol": "class InputSession",
+          "role": "owner",
+          "meaning": "Actual immutable owner/source/host-epoch contract admission and release; no IO is created by this pure session."
+        },
+        {
+          "id": "oem.binding",
+          "bindingId": "main:oemUnifiedInputBindingFor",
+          "symbol": "oemUnifiedInputBindingFor",
+          "role": "consumer",
+          "meaning": "Actual cached handwritten binding reaches the consumer."
+        },
+        {
+          "id": "oem.hooks",
+          "bindingId": "main:oemBackMappingReconcileOnUi",
+          "symbol": "oemBackMappingReconcileOnUi",
+          "role": "owner",
+          "meaning": "UI-thread hook install/unhook and held-key repayment, gated by wanted/exit state."
+        },
+        {
+          "id": "oem.raw",
+          "bindingId": "main:oemRawPathReset",
+          "symbol": "oemRawPathReset",
+          "role": "owner",
+          "meaning": "Retires only the qualified raw path and its held input state."
+        },
+        {
+          "id": "oem.close",
+          "bindingId": "main:oemVendorHidShutdown",
+          "symbol": "oemVendorHidShutdown",
+          "role": "owner",
+          "meaning": "Only capture lifecycle owner closes actual vendor HID resources."
+        },
+        {
+          "id": "oem.gate",
+          "bindingId": "main:oemBackMappingRefreshGate",
+          "symbol": "oemBackMappingRefreshGate",
+          "role": "consumer",
+          "meaning": "Dedicated shortcut/chord demand can outlive the back-mapping/persona toggle."
+        },
+        {
+          "id": "oem.msi-config",
+          "bindingId": "main:msiClawEnsureM12Remap",
+          "symbol": "msiClawEnsureM12Remap",
+          "role": "consumer",
+          "meaning": "Enabled SD M1/M2 transaction only; endpoint/firmware and handle cleanup are real consumer checks."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "subscriptions",
+          "ownerAnchor": "oem.hooks",
+          "lifetime": "cross-event",
+          "groupId": "oem.hooks",
+          "responsibility": "Shared keyboard/mouse hooks; feature OFF cannot destroy another qualified raw owner."
+        },
+        {
+          "kind": "device-handles",
+          "ownerAnchor": "oem.close",
+          "lifetime": "session",
+          "groupId": "oem.vendor-hid",
+          "responsibility": "Shared vendor reads/handles; unresolved IO stays in its original stable slot."
+        },
+        {
+          "kind": "input-state",
+          "ownerAnchor": "oem.raw",
+          "lifetime": "cross-event",
+          "groupId": "oem.held-state",
+          "responsibility": "Identity/epoch-qualified held keys and replay ledger require release."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "oem.close",
+          "oem.hooks",
+          "oem.raw"
+        ],
+        "sleep": [],
+        "faultRecovery": [
+          "oem.hooks",
+          "oem.raw"
+        ]
+      },
+      "components": [
+        {
+          "id": "oem.msi-sd-configuration",
+          "persistence": "one-shot",
+          "anchor": "oem.msi-config",
+          "reason": "Finite configuration transaction; the input/hook feature remains persistent. Experimental native keyboard writer stays record-only."
+        }
+      ],
+      "testReferences": [
+        "controller.unified-oem-input-binding",
+        "controller.unified-oem-input-consumers",
+        "controller.msi-sd-rear-consumer"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Feature-specific vendor sleep handback and current-generation healthy reopen are not located as an independent accepted endpoint; shared capture integration must be reviewed, not assumed."
+      ]
+    },
+    {
+      "id": "oem.dedicated-buttons",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "oem-input"
+      ],
+      "persistence": "persistent",
+      "rationale": "Dedicated chord/raw-key shortcuts retain qualified device/source generations, held-key state and shared hook/raw-input admission across events. The binding cache owns no OS hooks: actual UI hook reconciliation, raw reset and vendor-HID shutdown remain the resource/lifecycle owners.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:oem-input",
+        "EXECUTION-CHAINS.json:oem-input",
+        "INTEGRATION-STATUS.json:oem-input",
+        "file:capabilities/HcOemInputCapabilityBinding.h",
+        "file:capabilities/hc-device-catalog.generated.h",
+        "file:native/oem_input_session.h",
+        "file:native/oem_input_contract.h",
+        "file:native/oem_gamepad_mode_contract.h",
+        "file:native/oem_gamepad_mode_session.h",
+        "main:oemUnifiedInputBindingFor",
+        "main:oemBackMappingReconcileOnUi",
+        "main:oemRawPathReset",
+        "main:oemVendorHidShutdown",
+        "main:oemBackMappingRefreshGate"
+      ],
+      "anchors": [
+        {
+          "id": "oem.session",
+          "bindingId": "file:native/oem_input_session.h",
+          "symbol": "class InputSession",
+          "role": "owner",
+          "meaning": "Actual immutable owner/source/host-epoch contract admission and release; no IO is created by this pure session."
+        },
+        {
+          "id": "oem.binding",
+          "bindingId": "main:oemUnifiedInputBindingFor",
+          "symbol": "oemUnifiedInputBindingFor",
+          "role": "consumer",
+          "meaning": "Actual cached handwritten binding reaches the consumer."
+        },
+        {
+          "id": "oem.hooks",
+          "bindingId": "main:oemBackMappingReconcileOnUi",
+          "symbol": "oemBackMappingReconcileOnUi",
+          "role": "owner",
+          "meaning": "UI-thread hook install/unhook and held-key repayment, gated by wanted/exit state."
+        },
+        {
+          "id": "oem.raw",
+          "bindingId": "main:oemRawPathReset",
+          "symbol": "oemRawPathReset",
+          "role": "owner",
+          "meaning": "Retires only the qualified raw path and its held input state."
+        },
+        {
+          "id": "oem.close",
+          "bindingId": "main:oemVendorHidShutdown",
+          "symbol": "oemVendorHidShutdown",
+          "role": "owner",
+          "meaning": "Only capture lifecycle owner closes actual vendor HID resources."
+        },
+        {
+          "id": "oem.gate",
+          "bindingId": "main:oemBackMappingRefreshGate",
+          "symbol": "oemBackMappingRefreshGate",
+          "role": "consumer",
+          "meaning": "Dedicated shortcut/chord demand can outlive the back-mapping/persona toggle."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "subscriptions",
+          "ownerAnchor": "oem.hooks",
+          "lifetime": "cross-event",
+          "groupId": "oem.hooks",
+          "responsibility": "Shared keyboard/mouse hooks; feature OFF cannot destroy another qualified raw owner."
+        },
+        {
+          "kind": "device-handles",
+          "ownerAnchor": "oem.close",
+          "lifetime": "session",
+          "groupId": "oem.vendor-hid",
+          "responsibility": "Shared vendor reads/handles; unresolved IO stays in its original stable slot."
+        },
+        {
+          "kind": "input-state",
+          "ownerAnchor": "oem.raw",
+          "lifetime": "cross-event",
+          "groupId": "oem.held-state",
+          "responsibility": "Identity/epoch-qualified held keys and replay ledger require release."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "oem.close",
+          "oem.hooks",
+          "oem.raw"
+        ],
+        "sleep": [],
+        "faultRecovery": [
+          "oem.hooks",
+          "oem.raw"
+        ]
+      },
+      "components": [],
+      "testReferences": [
+        "controller.unified-oem-input-binding",
+        "controller.unified-oem-input-consumers"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Feature-specific vendor sleep handback and current-generation healthy reopen are not located as an independent accepted endpoint; shared capture integration must be reviewed, not assumed."
+      ]
+    },
+    {
+      "id": "controller.feedback",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "controller"
+      ],
+      "persistence": "persistent",
+      "rationale": "The game motor consumer keeps a source-bound owner across frames, arbitrates manual pulses and retains stop/zero debt until the exact current physical target can settle it. A finite vibration request does not make the subscribed game-feedback pipeline or deferred stop owner one-shot.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:controller",
+        "EXECUTION-CHAINS.json:controller",
+        "INTEGRATION-STATUS.json:controller",
+        "file:capabilities/HcControllerFeedbackCapabilityCatalog.h",
+        "file:capabilities/HcControllerFeedbackCapabilityCatalog.generated.h",
+        "file:native/game_feedback_dispatch.h",
+        "file:native/game_feedback_source_ticket.h",
+        "file:native/game_feedback_receipt.h",
+        "file:native/input_frame_submission.h",
+        "file:native/virtual_output_status.h",
+        "file:native/touch_haptic_dispatch.h",
+        "main:nativeWriteBoundGameFeedbackCommand",
+        "main:physicalFeedbackFinish",
+        "main:physicalFeedbackStopTarget"
+      ],
+      "anchors": [
+        {
+          "id": "feedback.dispatch",
+          "bindingId": "file:native/game_feedback_dispatch.h",
+          "symbol": "void revoke()",
+          "role": "owner",
+          "meaning": "Current source/frame context retirement and bounded stop completion owner."
+        },
+        {
+          "id": "feedback.source",
+          "bindingId": "file:native/game_feedback_source_ticket.h",
+          "symbol": "struct SourceBoundCommand",
+          "role": "owner",
+          "meaning": "Source-qualified ticket, not arbitrary current controller slot or DMI."
+        },
+        {
+          "id": "feedback.write",
+          "bindingId": "main:nativeWriteBoundGameFeedbackCommand",
+          "symbol": "nativeWriteBoundGameFeedbackCommand",
+          "role": "consumer",
+          "meaning": "Actual source-bound writer consumes admitted game motor commands."
+        },
+        {
+          "id": "feedback.finish",
+          "bindingId": "main:physicalFeedbackFinish",
+          "symbol": "physicalFeedbackFinish",
+          "role": "owner",
+          "meaning": "Actual zero/stop, deferred retry and retained ownership for unconfirmed writes."
+        },
+        {
+          "id": "feedback.stop-target",
+          "bindingId": "main:physicalFeedbackStopTarget",
+          "symbol": "physicalFeedbackStopTarget",
+          "role": "consumer",
+          "meaning": "Only the exact bound target may receive stop/zero."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "leases",
+          "ownerAnchor": "feedback.dispatch",
+          "lifetime": "cross-event",
+          "groupId": "feedback.motor-owner",
+          "responsibility": "Persistent source-generation motor owner and deferred stop debt; not a physical-effect claim."
+        },
+        {
+          "kind": "pending-io",
+          "ownerAnchor": "feedback.finish",
+          "lifetime": "cross-event",
+          "groupId": "feedback.stop-debt",
+          "responsibility": "Stop/zero may await matching identity; explicit OFF is not a reason to forget the debt."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "feedback.finish",
+          "feedback.stop-target",
+          "feedback.dispatch"
+        ],
+        "sleep": [
+          "feedback.dispatch",
+          "feedback.finish"
+        ],
+        "faultRecovery": [
+          "feedback.finish",
+          "feedback.dispatch"
+        ]
+      },
+      "components": [],
+      "testReferences": [
+        "controller.feedback-capabilities",
+        "controller.xinput-feedback-lifecycle",
+        "controller.game-feedback-writer-consumer",
+        "controller.game-motor-private-pipe-consumer"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Identity/current-power revocation is not a measured physical motor stop or complete retry/healthy-wake receipt."
+      ]
+    },
+    {
+      "id": "battery.charge-limit",
+      "scope": "confirmed-enabled",
+      "libraryDomains": [
+        "battery"
+      ],
+      "persistence": "persistent",
+      "rationale": "BatteryHost is a resident parent-bound pipe service with PowerMode/SessionEnding subscriptions and a 2s Tick. Controller retains software bypass ownership and durable recovery records across requests; shutdown/suspend restore only journalled owned values and resume re-admits a saved software policy under conflict/readback gates.",
+      "bindingIds": [
+        "scope:enabled",
+        "scope:inactive",
+        "scope:user",
+        "file:capabilities/AI-GUIDE.md",
+        "AI-INDEX.json:battery",
+        "EXECUTION-CHAINS.json:battery",
+        "INTEGRATION-STATUS.json:battery",
+        "file:capabilities/HcBatteryCapabilityCatalog.cs",
+        "file:capabilities/HcBatteryCapabilityCatalog.generated.cs",
+        "file:native/BatteryHost/Policy.cs",
+        "file:native/BatteryHost/Controller.cs",
+        "file:native/BatteryHost/Program.cs",
+        "file:native/BatteryHost/HostDomainRouter.cs",
+        "file:native/BatteryHost/battery-routes.json"
+      ],
+      "anchors": [
+        {
+          "id": "battery.policy",
+          "bindingId": "file:native/BatteryHost/Policy.cs",
+          "symbol": "ResolveCapability",
+          "role": "consumer",
+          "meaning": "Actual identity/firmware route resolved through handwritten capability dispatcher."
+        },
+        {
+          "id": "battery.controller",
+          "bindingId": "file:native/BatteryHost/Controller.cs",
+          "symbol": "public void Shutdown()",
+          "role": "owner",
+          "meaning": "Persistent active/recovery/conflict owner; Tick, RestoreOwned, Suspend and Resume are in this source."
+        },
+        {
+          "id": "battery.host",
+          "bindingId": "file:native/BatteryHost/Program.cs",
+          "symbol": "domains.Tick()",
+          "role": "consumer",
+          "meaning": "Actual parent-bound service timer/pipe and power event registration."
+        },
+        {
+          "id": "battery.router",
+          "bindingId": "file:native/BatteryHost/HostDomainRouter.cs",
+          "symbol": "public void Shutdown()",
+          "role": "owner",
+          "meaning": "Lazy domain router owns stop/suspend; recording secondary-display source does not activate it."
+        }
+      ],
+      "resources": [
+        {
+          "kind": "periodic-timers",
+          "ownerAnchor": "battery.host",
+          "lifetime": "process",
+          "groupId": "battery.host-monitor",
+          "responsibility": "Resident 2s monitor and exact parent lifetime."
+        },
+        {
+          "kind": "subscriptions",
+          "ownerAnchor": "battery.host",
+          "lifetime": "process",
+          "groupId": "battery.power-events",
+          "responsibility": "Power/session event handlers belong to the Host and must unsubscribe in finally."
+        },
+        {
+          "kind": "recovery-journals",
+          "ownerAnchor": "battery.controller",
+          "lifetime": "cross-event",
+          "groupId": "battery.write-owner",
+          "responsibility": "Durable ownership before writes; conflicts/read failures prohibit guessed restoration."
+        }
+      ],
+      "lifecycle": {
+        "exit": [
+          "battery.controller",
+          "battery.router",
+          "battery.host"
+        ],
+        "sleep": [
+          "battery.controller",
+          "battery.router"
+        ],
+        "faultRecovery": [
+          "battery.controller"
+        ]
+      },
+      "components": [
+        {
+          "id": "battery.hardware-limit-request",
+          "persistence": "one-shot",
+          "anchor": "battery.controller",
+          "reason": "Apply/readback is a finite transaction, but software bypass/Host ownership remains persistent."
+        }
+      ],
+      "testReferences": [
+        "battery.charge-workflow",
+        "battery.native-host-roundtrip-consumer",
+        "battery.ui-native-recovery-consumer"
+      ],
+      "gaps": [
+        "CATALOG_IS_NOT_EXECUTION_EVIDENCE",
+        "BOUNDED_NORMAL_AND_FALLBACK_DESTRUCTION_MEASUREMENTS_REQUIRED",
+        "OFF_FATAL_OFF_AND_LATE_CALLBACK_EVIDENCE_REQUIRED",
+        "CURRENT_GENERATION_SLEEP_HEALTH_AND_BOUNDED_FAULT_RECOVERY_NOT_ACCEPTED_BY_THIS_CATALOG",
+        "Dormant SuiPlay route and secondary display remain excluded; software policy recovery does not prove firmware/physical battery effect."
+      ]
+    }
+  ],
+  "inactive": [
+    {
+      "id": "model.secondary-display",
+      "reason": "ACTIVE-INTEGRATION-SCOPE inactiveDisposition and USER-SCOPE-DECISIONS forbid activation; retained source is not runtime admission.",
+      "activation": false
+    },
+    {
+      "id": "settings.wake-password-ui",
+      "reason": "Explicitly USER_EXCLUDED; not a missing enabled capability and not reintroduced.",
+      "activation": false
+    },
+    {
+      "id": "controller.experimental-native-rear-keyboard-writer",
+      "reason": "Record-only; bindRear admits only the existing DInputButtons route.",
+      "activation": false
+    }
+  ]
+}

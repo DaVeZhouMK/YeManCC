@@ -1,0 +1,35 @@
+    private readonly long[] _costSubmitUsSamples = new long[2048];
+    private int _costSubmitUsCount;
+    private long _costFrames, _costJsonParseUsSum, _costJsonParseCount,
+        _costHidSubmitUsSum, _costHidSubmitCount, _costPipeReadUsSum,
+        _costPipeReadCount, _costFramesRejected, _costHidHideQueryFull,
+        _costHidHideQueryState, _costLastAllocBytes;
+    private double _costLastGcPauseMs, _costLastProcCpuMs;
+    private readonly Dictionary<int,double> _costLastThreadCpuMs = new();
+    private readonly Dictionary<string,int> _costRoleOsTid = new(StringComparer.Ordinal);
+    private long _costWindowStartTicks = Environment.TickCount64;
+    private bool _costFlagEnabled = true;
+    private readonly bool _msiCostDeferredRequested;
+    private readonly MsiCostWindowDiagnostics? _msiCostDiagnostics;
+    private readonly Func<bool> _fakeFlag;
+    private readonly MsiHostStageEvidence _msiHostStageEvidence = new();
+    private UsbipTransportObservation? _usbipTransportObservation;
+    private readonly string _hostInstanceId = "fixture-host";
+    private FakeTuple? _tuple = new("old-run",8,1,"steamdeck","steam-deck-composite");
+    private ulong _lastSequence = 20588;
+    private bool _assetVerified = true;
+    private object? _controller = new();
+    private FakePhase _phase = FakePhase.Active;
+    private static string CostStateDir => throw new Exception("caller file boundary reached");
+    private bool CostLoggingRequestedByFlag()=>_fakeFlag();
+    private double ComputeGcPauseMsPerSec(long windowMs)=>throw new Exception("common runtime boundary reached");
+    private string RoleOfCostThread(int id)=>"fake-role";
+    private object? CaptureUsbipTransportSafely(string phase,bool requested)=>throw new Exception("common SDK boundary reached");
+    internal COST_HOST_NAME(bool requested,MsiCostWindowDiagnostics? diagnostics,Func<bool>? fakeFlag=null) { _msiCostDeferredRequested=requested;_msiCostDiagnostics=diagnostics;_fakeFlag=fakeFlag??(()=>throw new Exception("common flag boundary reached"));_costRoleOsTid["hid-submit"]=7; }
+    internal void DueFrame(long submitUs=4) { _costWindowStartTicks=Environment.TickCount64-1100;RecordCostFrame(submitUs,false); }
+    internal void MutateAfterQueue() { Array.Fill(_costSubmitUsSamples,999L);_costRoleOsTid["hid-submit"]=999;_tuple=new("new-run",9,3,"elite","xbox-elite-v2");_lastSequence=1; }
+    internal long FramesRemaining=>_costFrames;
+    internal int SamplesRemaining=>_costSubmitUsCount;
+    internal void Enabled(bool enabled)=>_costFlagEnabled=enabled;
+    internal void RemoveSource()=>_controller=null;
+    internal void SourceAsset(bool verified)=>_assetVerified=verified;

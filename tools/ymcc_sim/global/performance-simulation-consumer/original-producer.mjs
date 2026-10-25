@@ -1,0 +1,11 @@
+import fs from 'node:fs';import path from 'node:path';import {hash,sha,need,write} from './contract.mjs';
+/** Preserve the producer byte for byte; repair only its obsolete memory-port helper. */
+export function prepareOriginalSplitProducer(ctx,out){
+ const producer='tools/performance_simulation_split_browser_selftest.mjs',helper='tools/lib/continuousPerformancePreview.mjs',original=fs.readFileSync(path.join(ctx.root,helper),'utf8'),rootAnchor="path.resolve(import.meta.dirname,'../..')",exportAnchor="export const onPerformanceScheduleChanged=cb=>{listeners.add(cb);return()=>listeners.delete(cb)};export const onGameCustomConfigChanged=()=>()=>{};export const loadGameCustomConfig=async()=>({entries:{},rtss:{}});";
+ need(original.split(rootAnchor).length===2&&original.split(exportAnchor).length===2,'ORIGINAL_HELPER_REPAIR_ANCHOR_CHANGED');
+ const extra="export const removeGameCustomProfile=async()=>{throw Error('UNUSED_MEMORY_REMOVE_ENTRY_NOT_AUTHORIZED_BY_SPLIT_TEST')};export const restorePerformanceScheduleIfConfigured=async()=>{throw Error('UNUSED_MEMORY_RESTORE_ENTRY_NOT_AUTHORIZED_BY_SPLIT_TEST')};";
+ const repaired=original.replace(rootAnchor,JSON.stringify(ctx.root)).replace(exportAnchor,exportAnchor+extra),entry=path.join(out,'tools',path.basename(producer)),helperTarget=path.join(out,helper);
+ fs.mkdirSync(path.dirname(helperTarget),{recursive:true});fs.copyFileSync(path.join(ctx.root,producer),entry);fs.writeFileSync(helperTarget,repaired);need(hash(entry)===hash(path.join(ctx.root,producer)),'ORIGINAL_PRODUCER_CHANGED');
+ const proof={kind:'D-private-original-producer-helper-overlay',producer:{source:producer,sourceSha256:hash(path.join(ctx.root,producer)),actual:entry,actualSha256:hash(entry),byteExact:true,allOriginalAssertionsRetained:true},helper:{source:helper,beforeSha256:sha(original),actual:helperTarget,afterSha256:hash(helperTarget)},changes:[{purpose:'D helper location binds exact captured B48 product and tool root',from:rootAnchor,to:ctx.root},{purpose:'Two unused memory boundary exports required by current real component imports; throw if unexpectedly invoked',from:exportAnchor,to:exportAnchor+extra}],productSourcesChanged:false,modelChanged:false};write(path.join(out,'producer-helper-overlay.json'),proof);return {entry,proof};
+}
+

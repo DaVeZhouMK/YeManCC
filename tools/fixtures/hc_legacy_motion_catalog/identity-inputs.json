@@ -1,0 +1,1937 @@
+[
+  {
+    "id": "MinisforumV3-0",
+    "manufacturer": "SHENZHEN MEIGAO ELECTRONIC EQUIPMENT CO.,LTD",
+    "product": "HPPAC",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LokiMiniPro-1",
+    "manufacturer": "AYN",
+    "product": "Loki MiniPro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LokiZero-2",
+    "manufacturer": "AYN",
+    "product": "Loki Zero",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LokiMax6600U-3",
+    "manufacturer": "AYN",
+    "product": "Loki Max",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 6600U with Radeon Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LokiMax6800U-4",
+    "manufacturer": "AYN",
+    "product": "Loki Max",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 6800U with Radeon Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AOKZOEA1-5",
+    "manufacturer": "AOKZOE",
+    "product": "AOKZOE A1 AR07",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AOKZOEA1Pro-6",
+    "manufacturer": "AOKZOE",
+    "product": "AOKZOE A1 Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AOKZOEA1X-7",
+    "manufacturer": "AOKZOE",
+    "product": "AOKZOE A1X",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AOKZOEA2-8",
+    "manufacturer": "AOKZOE",
+    "product": "AOKZOE A2 Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR-9",
+    "manufacturer": "AYADEVICE",
+    "product": "AIR",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR-10",
+    "manufacturer": "AYANEO",
+    "product": "AIR",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPro-11",
+    "manufacturer": "AYADEVICE",
+    "product": "AIR Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPro-12",
+    "manufacturer": "AYANEO",
+    "product": "AIR Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR1S-13",
+    "manufacturer": "AYADEVICE",
+    "product": "AIR 1S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR1S-14",
+    "manufacturer": "AYADEVICE",
+    "product": "AIR 1S Limited",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR1S-15",
+    "manufacturer": "AYANEO",
+    "product": "AIR 1S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIR1S-16",
+    "manufacturer": "AYANEO",
+    "product": "AIR 1S Limited",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRLite-17",
+    "manufacturer": "AYADEVICE",
+    "product": "AIR Lite",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRLite-18",
+    "manufacturer": "AYANEO",
+    "product": "AIR Lite",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021-19",
+    "manufacturer": "AYADEVICE",
+    "product": "AYA NEO FOUNDER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021-20",
+    "manufacturer": "AYADEVICE",
+    "product": "AYANEO 2021",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021-21",
+    "manufacturer": "AYANEO",
+    "product": "AYA NEO FOUNDER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021-22",
+    "manufacturer": "AYANEO",
+    "product": "AYANEO 2021",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021Pro-23",
+    "manufacturer": "AYADEVICE",
+    "product": "AYANEO 2021 Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021Pro-24",
+    "manufacturer": "AYADEVICE",
+    "product": "AYANEO 2021 Pro Retro Power",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021Pro-25",
+    "manufacturer": "AYANEO",
+    "product": "AYANEO 2021 Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2021Pro-26",
+    "manufacturer": "AYANEO",
+    "product": "AYANEO 2021 Pro Retro Power",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOKUN-27",
+    "manufacturer": "AYADEVICE",
+    "product": "KUN",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOKUN-28",
+    "manufacturer": "AYANEO",
+    "product": "KUN",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOSlide-29",
+    "manufacturer": "AYADEVICE",
+    "product": "AS01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOSlide-30",
+    "manufacturer": "AYANEO",
+    "product": "AS01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-31",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-32",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Advance",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-33",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-34",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-35",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Advance",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXT-36",
+    "manufacturer": "AYANEO",
+    "product": "NEXT",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite4500U-37",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 4500U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite4500U-38",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 4800U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite4500U-39",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 4500U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite4500U-40",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 4800U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite-41",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 4500U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite-42",
+    "manufacturer": "AYADEVICE",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 4800U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite-43",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 4500U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEONEXTLite-44",
+    "manufacturer": "AYANEO",
+    "product": "NEXT Lite",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 4800U",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2-45",
+    "manufacturer": "AYADEVICE",
+    "product": "AYANEO 2",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2-46",
+    "manufacturer": "AYADEVICE",
+    "product": "GEEK",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2-47",
+    "manufacturer": "AYANEO",
+    "product": "AYANEO 2",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2-48",
+    "manufacturer": "AYANEO",
+    "product": "GEEK",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusAMD-49",
+    "manufacturer": "AYADEVICE",
+    "product": "AB05-AMD",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusAMD-50",
+    "manufacturer": "AYANEO",
+    "product": "AB05-AMD",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusAMDMendocino-51",
+    "manufacturer": "AYADEVICE",
+    "product": "AB05-Mendocino",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusAMDMendocino-52",
+    "manufacturer": "AYANEO",
+    "product": "AB05-Mendocino",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusIntel-53",
+    "manufacturer": "AYADEVICE",
+    "product": "AB05-Intel",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOAIRPlusIntel-54",
+    "manufacturer": "AYANEO",
+    "product": "AB05-Intel",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2S-55",
+    "manufacturer": "AYADEVICE",
+    "product": "AYANEO 2S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2S-56",
+    "manufacturer": "AYADEVICE",
+    "product": "GEEK 1S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2S-57",
+    "manufacturer": "AYANEO",
+    "product": "AYANEO 2S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEO2S-58",
+    "manufacturer": "AYANEO",
+    "product": "GEEK 1S",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlipKB-59",
+    "manufacturer": "AYADEVICE",
+    "product": "FLIP KB",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlipKB-60",
+    "manufacturer": "AYANEO",
+    "product": "FLIP KB",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlipDS-61",
+    "manufacturer": "AYADEVICE",
+    "product": "FLIP DS",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlipDS-62",
+    "manufacturer": "AYANEO",
+    "product": "FLIP DS",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlip1SDS-63",
+    "manufacturer": "AYADEVICE",
+    "product": "FLIP 1S DS",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlip1SDS-64",
+    "manufacturer": "AYANEO",
+    "product": "FLIP 1S DS",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlip1SKB-65",
+    "manufacturer": "AYADEVICE",
+    "product": "FLIP 1S KB",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "AYANEOFlip1SKB-66",
+    "manufacturer": "AYANEO",
+    "product": "FLIP 1S KB",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "SuiPlay0X1-67",
+    "manufacturer": "MYSTEN LABS, INC.",
+    "product": "SuiPlay0X1",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin2-68",
+    "manufacturer": "GPD",
+    "product": "WIN2",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMini_7640U-69",
+    "manufacturer": "GPD",
+    "product": "G1617-01",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 7640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMini-70",
+    "manufacturer": "GPD",
+    "product": "G1617-01",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMini_8840U-71",
+    "manufacturer": "GPD",
+    "product": "G1617-01",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMini_HX370-72",
+    "manufacturer": "GPD",
+    "product": "G1617-02",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin3-73",
+    "manufacturer": "GPD",
+    "product": "G1618-03",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4-74",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 6800U with Radeon Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4_2023_7640U-75",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 7640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4_2023-76",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4_2024_8640U-77",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 8640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4_2024-78",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin4_2024_HX370-79",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWin5-80",
+    "manufacturer": "GPD",
+    "product": "G1618-05",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2Intel-81",
+    "manufacturer": "GPD",
+    "product": "G1619-03",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2022_6800U-82",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 6800U with Radeon Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2022_6800U-83",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 6800U with Radeon Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2023_7640U-84",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 7640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2023_7640U-85",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 7640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2023_7840U-86",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2023_7840U-87",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 7840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8640U-88",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 8640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8640U-89",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 5 8640U w/ Radeon 760M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8840U-90",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8840U-91",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "__unknown__",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8840U-92",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen 7 8840U w/ Radeon 780M Graphics",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_8840U-93",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "__unknown__",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_HX370-94",
+    "manufacturer": "GPD",
+    "product": "G1619-04",
+    "systemProduct": "",
+    "processor": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GPDWinMax2_2024_HX370-95",
+    "manufacturer": "GPD",
+    "product": "G1619-05",
+    "systemProduct": "",
+    "processor": "AMD Ryzen AI 9 HX 370 w/ Radeon 890M",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Intel-96",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER X1 i",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Intel-97",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER X1 i",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1AMD-98",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER X1 A",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1AMD-99",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER X1z",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1AMD-100",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER X1 A",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1AMD-101",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER X1z",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Mini-102",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER X1 mini",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Mini-103",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER X1 mini",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Pro-104",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER X1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerX1Pro-105",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER X1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerApex-106",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER APEX",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerApex-107",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYERAPEX",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerApex-108",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER APEX",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerApex-109",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYERAPEX",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerG1Intel-110",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER G1 i",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerG1Intel-111",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER G1 i",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerG1AMD-112",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER G1 A",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerG1AMD-113",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER G1 A",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFly-114",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER F1",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Default string",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFly-115",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER F1",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFly-116",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER F1",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Default string",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFly-117",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER F1",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFlyF1Pro-118",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER F1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Default string",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFlyF1Pro-119",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER F1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFlyF1Pro-120",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER F1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Default string",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerOneXFlyF1Pro-121",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER F1Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-122",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V01",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-123",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-124",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V01",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-125",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-126",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V01",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-127",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-128",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V01",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-129",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniIntel-130",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "1002-C",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniIntel-131",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "1002-C",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniIntel-132",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "1002-C",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniIntel-133",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "1002-C",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniPro-134",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V03",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniPro-135",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V03",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniPro-136",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONE XPLAYER",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V03",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniPro-137",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER Mini Pro",
+    "systemProduct": "",
+    "processor": "",
+    "version": "V03",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-138",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER mini A07",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayerMiniAMD-139",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER mini A07",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2-140",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 ARP23",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Ver.1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2-141",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 ARP23",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2-142",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 ARP23",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Ver.1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2-143",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 ARP23",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-144",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 PRO ARP23P",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Version 1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-145",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 PRO ARP23P",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-146",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 PRO ARP23P EVA-01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Version 1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-147",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "ONEXPLAYER 2 PRO ARP23P EVA-01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-148",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 PRO ARP23P",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Version 1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-149",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 PRO ARP23P",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-150",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 PRO ARP23P EVA-01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "Version 1.0",
+    "cores": 8
+  },
+  {
+    "id": "OneXPlayer2Pro-151",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "ONEXPLAYER 2 PRO ARP23P EVA-01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "__unknown__",
+    "cores": 8
+  },
+  {
+    "id": "ROGAlly-152",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "RC71L",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ROGAllyX-153",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "RC72LA",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "XboxROGAlly-154",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "RC73YA",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "XboxROGAllyX-155",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "RC73XA",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ASUS-156",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "__unknown__",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "SteamDeck-157",
+    "manufacturer": "VALVE",
+    "product": "Jupiter",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "SteamDeck-158",
+    "manufacturer": "VALVE",
+    "product": "Galileo",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoTablet-159",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83E1",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoTablet2-160",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83N0",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoTablet2-161",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83N1",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoSZ2-162",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83L3",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoSZ1-163",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83N6",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoSZ1-164",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83Q2",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "LegionGoSZ1-165",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "83Q3",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ClawA1M-166",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T41",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ClawA2VM-167",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T42",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ClawA2VM-168",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T52",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ClawBZ2EM-169",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T8K",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ClawCG3EM-170",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T91",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GamingZone-171",
+    "manufacturer": "PC PARTNER LIMITED",
+    "product": "G0A1W",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "GamingZone-172",
+    "manufacturer": "ZOTAC",
+    "product": "G0A1W",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "unknown-SHENZHEN MEIGAO ELECTRONIC EQUIPMENT CO.,LTD",
+    "manufacturer": "SHENZHEN MEIGAO ELECTRONIC EQUIPMENT CO.,LTD",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-AYN",
+    "manufacturer": "AYN",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-AOKZOE",
+    "manufacturer": "AOKZOE",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-AYADEVICE",
+    "manufacturer": "AYADEVICE",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-AYANEO",
+    "manufacturer": "AYANEO",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-MYSTEN LABS, INC.",
+    "manufacturer": "MYSTEN LABS, INC.",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-GPD",
+    "manufacturer": "GPD",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-ONE-NETBOOK",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-ASUSTEK COMPUTER INC.",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-VALVE",
+    "manufacturer": "VALVE",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-LENOVO",
+    "manufacturer": "LENOVO",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-MICRO-STAR INTERNATIONAL CO., LTD.",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-PC PARTNER LIMITED",
+    "manufacturer": "PC PARTNER LIMITED",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "unknown-ZOTAC",
+    "manufacturer": "ZOTAC",
+    "product": "YMCC-UNKNOWN-BOARD",
+    "systemProduct": "YMCC-UNKNOWN-MODEL",
+    "processor": "Unknown CPU",
+    "version": "Unknown",
+    "cores": 8
+  },
+  {
+    "id": "deck-jupiter-system",
+    "manufacturer": "VALVE",
+    "product": "4030",
+    "systemProduct": "Jupiter",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "deck-galileo-system",
+    "manufacturer": "VALVE",
+    "product": "4030",
+    "systemProduct": "Galileo",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "zotac-board-only",
+    "manufacturer": "",
+    "product": "G0A1W",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "minisforum-board-only",
+    "manufacturer": "",
+    "product": "HPPAC",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "minisforum-system-only",
+    "manufacturer": "",
+    "product": "",
+    "systemProduct": "HPPAC",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "ayaneo-slide-name",
+    "manufacturer": "AYANEO",
+    "product": "SLIDE",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "loki-no-cpu",
+    "manufacturer": "AYN",
+    "product": "Loki Max",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "gpd-win4-no-cpu",
+    "manufacturer": "GPD",
+    "product": "G1618-04",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "gpd-mini-no-cpu",
+    "manufacturer": "GPD",
+    "product": "G1617-01",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "msi-g3e-board-first",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "MS-1T91",
+    "systemProduct": "Claw A8",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-SHENZHEN MEIGAO ELECTRONIC EQUIPMENT CO.,LTD",
+    "manufacturer": "SHENZHEN MEIGAO ELECTRONIC EQUIPMENT CO.,LTD",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-AYN",
+    "manufacturer": "AYN",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-AOKZOE",
+    "manufacturer": "AOKZOE",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-AYADEVICE",
+    "manufacturer": "AYADEVICE",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-AYANEO",
+    "manufacturer": "AYANEO",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-MYSTEN LABS, INC.",
+    "manufacturer": "MYSTEN LABS, INC.",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-GPD",
+    "manufacturer": "GPD",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "manufacturer": "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-ONE-NETBOOK",
+    "manufacturer": "ONE-NETBOOK",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-ASUSTEK COMPUTER INC.",
+    "manufacturer": "ASUSTEK COMPUTER INC.",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-VALVE",
+    "manufacturer": "VALVE",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-LENOVO",
+    "manufacturer": "LENOVO",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-MICRO-STAR INTERNATIONAL CO., LTD.",
+    "manufacturer": "MICRO-STAR INTERNATIONAL CO., LTD.",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-PC PARTNER LIMITED",
+    "manufacturer": "PC PARTNER LIMITED",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-ZOTAC",
+    "manufacturer": "ZOTAC",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-",
+    "manufacturer": "",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 8
+  },
+  {
+    "id": "empty-dmi",
+    "manufacturer": "",
+    "product": "",
+    "systemProduct": "",
+    "processor": "",
+    "version": "",
+    "cores": 0
+  }
+]

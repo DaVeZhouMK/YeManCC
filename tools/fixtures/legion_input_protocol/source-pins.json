@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "historicalCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+  "files": [
+    {
+      "path": "HandheldCompanion/Controllers/Lenovo/LegionController.cs",
+      "sha256": "432faf1da2ecb81bcbf4aee5724d4bb36acc66d5819403c7ce2ffe3e0f0c0a87",
+      "gitBlob": "5ff7f4ca2eb65f346c68bba44e4d82b4d2ba01c0"
+    },
+    {
+      "path": "HandheldCompanion/Controllers/Lenovo/LegionControllerS.cs",
+      "sha256": "5c2c6955c50435c51748732c476b350e890bd6232c1e48c318cdaa97efb6aa10",
+      "gitBlob": "30fc7de2ee69cc5a045457807334a38f831a9481"
+    }
+  ],
+  "tabletUnshiftedConstants": {
+    "LCONTROLLER_ACCE_IDX": 35,
+    "LCONTROLLER_GYRO_IDX": 41,
+    "RCONTROLLER_ACCE_IDX": 48,
+    "RCONTROLLER_GYRO_IDX": 54
+  },
+  "localTabletPolicy": "fixed primary IMU indices 35/41 left, 48/54 right; actualBytes>=47/60; byte1 does not shift IMU; correct prior YMCC -2 and all60 source deviations; no firmware claim",
+  "goSPolicy": "logical core>=26, little endian, only sensorIndex0; HC wrapper reader capacity33 is not actual-count whitelist"
+}

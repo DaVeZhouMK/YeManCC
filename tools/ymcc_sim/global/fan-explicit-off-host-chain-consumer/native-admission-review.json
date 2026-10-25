@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "kind": "native-power-admission-source-stage",
+  "productSource": "src/bridge/fanHost.ts",
+  "productBeforeSha256": "e2aee041f41cf5b2c0ac1b27ae560b3f4c5b97bf22bf98ce16eceb65836a6a23",
+  "productReviewedSha256": "8aac422c52007cd04369f6fa3c79b5bb090878487775374e27c62b5f12b083ca",
+  "currentTsFixtureSha256": "b2a7c55e059bec6757f70553075ae9dd5617a15a436f94fca909f1927ee78ae0",
+  "historicalTsSha256": "cca250364b46462d4908487584034303fbbe75f4567242ae5e11fcf826dd4c0e",
+  "beforeCause": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-native-admission-20261020\\CAUSE-BEFORE-FIX.json",
+    "sha256": "7dd8789f3190b40d92ae09d02171c65b899d256c6eb9986ac0a8b4087eb6b56b"
+  },
+  "originalBehavior": {
+    "root": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-native-admission-20261020\\original-chain-r4",
+    "status": "PASS",
+    "positiveChecks": 412,
+    "preciseFaultFailures": 1,
+    "otherFaultChecksPassed": 81
+  },
+  "deterministicProbeChecks": 13,
+  "semanticFaultMaintenance": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-native-admission-20261020\\native-mutation-results.json",
+    "sha256": "1a09b9a310dd04588637bc39f51266bc8ab0e091ce4aab2ac6566c160e17b242",
+    "faultFailureCounts": [
+      8,
+      1
+    ]
+  },
+  "existingCompatibility": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-native-admission-20261020\\existing-native-compatibility\\result.json",
+    "sha256": "2e21e88a3a0e11118bbd8ccbe13940bbad8c99c77de55c5c186437db58ef47ae",
+    "checks": [
+      17,
+      28,
+      20
+    ]
+  },
+  "CSharpSourceStage": "Reviewed fixed r3 base Program6643; no new Program identity adopted",
+  "guardReceiptFinalRevision": "requires explicit zero-denial natural-exit receipt",
+  "formalGlobal": "NOT_RUN",
+  "wholePrimaryApproved": false,
+  "physicalAcceptance": false,
+  "sourceCommentsAfterR4": {
+    "diff": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-native-admission-20261020\\fanHost-observed-after-r4.diff",
+    "sha256": "813d5b96dae8a206e0eae811c71ead1559b3dafba9928830dddb272b1306366a",
+    "meaning": "four externally added documentation-only hunks retained; final local source stage will bind their actual bytes"
+  }
+}

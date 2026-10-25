@@ -4,7 +4,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const controller: ControllerFrame = {
-  runId: 'run-1', epoch: 1, powerGeneration: 0, targetId: 'target-1', persona: 'xbox360', configRevision: 1,
+  runId: 'run-1', epoch: 1, powerGeneration: 0, targetId: 'target-1', persona: 'elite', configRevision: 1,
   inputSequence: 1, timestamp: 10, buttons: 0x20, axes: {}, triggers: {}, rightStick: { x: 0.4, y: -0.2 },
 };
 const c = new InputCoordinatorMock();
@@ -84,7 +84,7 @@ const restoredEvents = restored.snapshotTrace().filter((item) => item.event.star
 if (restoredEvents.map((item) => item.event).join(',') !== 'dismiss-revoke,dismiss-neutral,dismiss-commit') throw new Error('dismiss handoff order failed');
 const events = c.snapshotTrace();
 if (events.filter((item) => item.inputSequence === 2).length !== 1) throw new Error('frame trace duplicated');
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/HC-Parity/S-20-input-coordinator-mock-trace.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/HC-Parity'), 'S-20-input-coordinator-mock-trace.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify({
   evidenceId: 'S-20-INPUT-COORDINATOR-MOCK-20260903',

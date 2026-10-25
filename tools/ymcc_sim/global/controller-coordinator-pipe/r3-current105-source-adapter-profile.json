@@ -1,0 +1,127 @@
+{
+  "schemaVersion": 1,
+  "kind": "EXACT_CURRENT105_OFFLINE_SOURCE_ADAPTERS",
+  "main": {
+    "relative": "native/main.cpp",
+    "sha256": "5581d2f2f9781f094d045f29671c15c47359c8b87b7ec95d4b7230a07fb7171f"
+  },
+  "producer": {
+    "relative": "tools/input_coordinator_lifecycle_selftest.mjs",
+    "sha256": "192c59f948a3054d5eea7368bf221b7089df370bb4cf98d0e0e9cc68ffe1c984"
+  },
+  "fixture": {
+    "relative": "tools/fixtures/input_coordinator_lifecycle/fixture.cpp",
+    "sha256": "7078261d04d0378b0b81b7132fd000244d3791fbbff614f53a119761a5062537"
+  },
+  "steamRecovery": {
+    "runtimeHeader": {
+      "relative": "native/steam_original_recovery_runtime.h",
+      "sha256": "1604c3ac08570d678f193c266d1866ca50898703d9e0c6634471477df5710032"
+    },
+    "engine": {
+      "relative": "native/steam_original_recovery_engine.cpp",
+      "sha256": "b57a72c9f37111344a54e4c95562a37b3d21b0ccb4239e929f6e469859650023"
+    },
+    "startSha256": "d100d77c08f9e11e62ad8661700d63326bf001c70b2d839fa9c5bbdc0894fe4e",
+    "bridgeSha256": "e11e62dc1dbd443d301523c46d4bfa5093e3000d7417de10bc20202bb2b497dd"
+  },
+  "fixtureObservationChanges": [
+    {
+      "label": "annotate existing check/failure without changing bool or assertion",
+      "before": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks}});if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name}});}",
+      "after": "static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?\"bootstrap\":cases.back().value(\"name\",\"\");\n const auto ordinal=cases.size();unsigned occurrence=0;for(const auto& item:cases)if(item.value(\"name\",\"\")==owner)++occurrence;\n if(!cases.empty()){cases.back()[\"sourceOrdinal\"]=ordinal;cases.back()[\"nameOccurrence\"]=occurrence;}\n assertionTrace.push_back({{\"case\",owner},{\"assertion\",name},{\"passed\",good},{\"checkIndex\",checks},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence}});\n if(!good)failures.push_back({{\"case\",owner},{\"assertion\",name},{\"sourceOrdinal\",ordinal},{\"nameOccurrence\",occurrence},{\"checkIndex\",checks}});}",
+      "count": 1
+    },
+    {
+      "label": "read-only boundary snapshots",
+      "before": "int wmain(",
+      "after": "// Read-only observations at the old95 boundary and after the B49 tail.\n// Same resource fields/lock as the original grouped witness; no new check,\n// seed, Stop, debt assignment, process query or file/device operation.\nstatic json fixtureCurrentOrderedReturn=json::object();\nstatic json fixtureCurrentOrderedBoundary(){\n std::lock_guard<std::mutex> work(g_inputHostLifecycleWorkMx);\n return json{{\"afterSourceOrdinal\",cases.size()},{\"lastCaseName\",cases.empty()?\"\":cases.back().value(\"name\",\"\")},{\"checks\",checks},{\"nativeEvents\",fixtureEvents},{\"resources\",json{{\"hostHandle\",g_inputHostProcess!=nullptr},{\"pipeHandle\",g_inputHostServerPipe!=nullptr},{\"pipeConnected\",g_inputHostPipeConnected},{\"prepared\",g_inputHostPrepared},{\"quarantined\",g_inputHostReleaseQuarantined},{\"visibility\",g_hidHideVisibilityJournal.active},{\"childObservers\",fullPipeChildObservers.size()},{\"workQueue\",g_inputHostLifecycleWorkQueue.size()},{\"workRequested\",g_inputHostLifecycleWorkRequested.load()},{\"workInFlight\",g_inputHostLifecycleWorkInFlight.load()},{\"psRetirement\",g_psEndpointOwnership.retirementRequired()},{\"msiSdDebt\",g_msiSteamDeckReleaseDebt.required()},{\"msiModeDebt\",g_msiDinputReturnOwed.load()},{\"msiModeDebtEpisode\",g_msiDinputReturnDebtEpisode.load()},{\"startBlocked\",g_inputHostStartBlocked},{\"spawnCount\",fullPipeSpawnCount},{\"receiptPaths\",fullPipeReceipts.size()}}}};\n}\nint wmain(",
+      "count": 1
+    },
+    {
+      "label": "preserve both calls and record separate boundaries",
+      "before": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureTargetReturnFullPipeCases();ok=failures.empty();}",
+      "after": "else if(mode==L\"full-pipe\"){fullPipeCases();fixtureCurrentOrderedReturn[\"preTargetReturnBody\"]=fixtureCurrentOrderedBoundary();fixtureTargetReturnFullPipeCases();fixtureCurrentOrderedReturn[\"postTargetReturnTail\"]=fixtureCurrentOrderedBoundary();ok=failures.empty();}",
+      "count": 1
+    },
+    {
+      "label": "retain raw report and exception with extra boundary field",
+      "before": "{\"assertionTrace\",assertionTrace},{\"cases\",cases}",
+      "after": "{\"assertionTrace\",assertionTrace},{\"orderedReturn\",fixtureCurrentOrderedReturn},{\"cases\",cases}",
+      "count": 2
+    }
+  ],
+  "sourceAdapterChangesBusinessChecks": false,
+  "sourceAdapterGrantsExecution": false,
+  "sourceReviewRevision": {
+    "name": "opaque-os-pnp-readonly-cost-suite-and-owned-hash-source-review-r63l-20261022",
+    "scope": "Real Steam Start stays renamed and original-name entry throws. Entire real recovery engine bridge stays throw-only. TaskView and desktop mouse additions are full TU compile inputs, never dispatched by the original105 fixture. New legacy loader has separate selected memory/HTTP consumer receipts. This source review does not grant product runtime, hardware, actual Steam or sleep acceptance.",
+    "mainDeltaReview": "Exact inverse removes one header, additive async command and existing IPC registration for explicit Decky manual repair; all75 coordinator core bodies and20 managed inputs independently exact. This branch is compiler input only here, no manual-repair runtime or Steam write authority granted.",
+    "review": "Only main route-window selector and base-log registration changed after r63c; exact selected route source independently passed11/175 and original policy/fault masks13/2/1. All75 current coordinator functions and20 managed originals remain exact. Full current compile/public qualification still required.",
+    "engineChangeReview": "Steam wake observer now performs one4-process liveness wait and records bounded settle/hint/healthy timestamps and recovery CPU cost. This fixture unconditionally rejects real Start and complete EngineHandle entry; new engine code is a real compiled third TU but its runtime behavior is not accepted by coordinator tests.",
+    "timestampReview": "lastHealthyProbeFileTime starts at0 until an actual healthy probe is observed. Sole normalized engine source change; real recovery entry remains unconditionally rejected in the coordinator fixture. Full latest compile/qualification/public execution still required.",
+    "currentCoreReview": "G:\\YeManCC-Work\\Build\\Tasks\\HC-Wiring-IndependentAudit-20261020\\round63-current-sdk2-wiring/R63H-EXPLICIT-CORE-FIXTURE-DELTA-REVIEW.json",
+    "fixtureReview": "74 original core bodies exact; cold-return3 diagnostic fields only, PnP OS opaque-ID read census supported by97/917 two positives/four compiled negatives and unchanged persisted record authority. Fixture and producer additions exactly invert to r63k; default105/order/masks and all budgets unchanged. Optional cost suites are compiler inputs here, not granted runtime acceptance.",
+    "actualInputScope": "Engine compiles under current exact inputs; actual recovery Start and complete engine bridge remain reject-only with unchanged original function bodies. No Steam/session/driver path is granted by coordinator approval.",
+    "currentColdMsiReview": {
+      "path": "G:\\YeManCC-Work\\Build\\Tasks\\HC-Wiring-IndependentAudit-20261020\\round63-current-sdk2-wiring/CURRENT-COLD-MSI-PRODUCER-FIXTURE-EXPLICIT-REVIEW-20261022.json",
+      "sha256": "769695a116dd85db992df0fb618a25ca4d2328fba6762df709361c01978c524a"
+    },
+    "currentColdMsiScope": "Only explicitly selected cold-msi-archive sets the new flag. Complete fixture and producer additions exactly invert to qualified r63m; all original105/16 assertions/order/masks/budgets and the entire quoted lifecycle log leaf remain unchanged. New mode has no runtime approval from this source review. Full current compilation, qualification and public execution remain required.",
+    "currentOemReadOnlyReview": {
+      "path": "G:/YeManCC-Work/Build/Tasks/HC-Wiring-IndependentAudit-20261020/round63-current-sdk2-wiring/CURRENT-OEM-STATUS-MAIN-AND-UI-MEMORY-REVIEW-20261022.json",
+      "sha256": "ac5c57a4aa0ea35f8f1386cc05b2ff548d5fc20623affd6a462d34a3f67aa57f"
+    },
+    "currentOemReadOnlyScope": "One read-only OEM status handler added to reg_extras. Exact removal returns qualified r63q main after EOL normalization; original coordinator75 and managed20 retained, no new endpoint runtime approval. Corresponding UI memory contract returns explicit unknown unless a raw fixture reply is supplied.",
+    "currentLifecycleLogDataReader": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/fixtures/input_coordinator_lifecycle/lifecycle-log-data.mjs",
+      "sha256": "4df6c5cdb0eb5583f6b0e2a6db174bf83c57938de4c66feb24a9c343ee3b882f"
+    },
+    "currentOemStatusLogEmissionReview": {
+      "path": "G:/YeManCC-Work/Build/Tasks/HC-Wiring-IndependentAudit-20261020/round63-current-sdk2-wiring/CURRENT-OEM-STATUS-LOG-EMISSION-REVIEW-20261022.json",
+      "sha256": "3f138501d195a399ecd7dc47401ee1ad37abb5f12978179827b1476d8669e41c"
+    },
+    "currentFocusFixtureCompileOnly": {
+      "review": "G:\\YeManCC-Work\\Build\\Tasks\\HC-Wiring-IndependentAudit-20261020\\round63-current-sdk2-wiring/CURRENT-FOCUS-RECOVERY-FIXTURE-INVERSE-REVIEW-20261022.json",
+      "fixtureInverseToR63qExact": true,
+      "scope": "Three additive fixture include/declaration/mode insertions. All original default105 and16 bodies unchanged. Explicit focus mode and its port are not invoked by the current compile-only producer or qualification; full source and direct include still compiler observed and pinned. No runtime acceptance for the new focus suite is inferred."
+    },
+    "currentDeckyAutomaticMainReview": {
+      "path": "G:/YeManCC-Work/Build/Tasks/HC-Wiring-IndependentAudit-20261020/round63-current-sdk2-wiring/CURRENT-DECKY-AUTO-REPAIR-MAIN-EXPLICIT-REVIEW-20261022.json",
+      "sha256": "218560fe179580c2475b130bf5e400acb1fc0306cfba8581afe34c00f813f699"
+    },
+    "currentDeckyAutomaticScope": "Exact9 reviewed main insertions/changes invert to qualified v. All original75 core and20 managed bodies retained; existing runtime/manual headers exact; automatic header has bounded session/document state and inert default constructors. Normal main/IPC/runtime callbacks are not called by offline fixture. No actual Steam repair runtime approval from this review.",
+    "currentScreenExitBootstrapReview": {
+      "path": "G:\\YeManCC-Work\\Build\\Tasks\\HC-Wiring-IndependentAudit-20261020\\round63-current-sdk2-wiring/LATEST-MAIN-SCREEN-EXIT-BOOTSTRAP-EXPLICIT-REVIEW-20261022.json",
+      "sha256": "abc4e8e627b300b5f6d6c812561fc3a851263a68152a61e9b905a65846a1effc"
+    },
+    "currentScreenExitBootstrapScope": "Normal app shutdown now records each exit entry through the same screen release helper and ordinary event channel. Bootstrap first-load recovery fields are only assigned outside retained transport rebinding. Native main is fully compiled but its UI startup/shutdown/Decky bootstrap is never dispatched by this coordinator fixture.",
+    "currentDeckyFreshSessionReview": {
+      "path": "G:\\YeManCC-Work\\Build\\Tasks\\HC-Wiring-IndependentAudit-20261020\\round63-current-sdk2-wiring/LATEST-MAIN-DECKY-FRESH-SESSION-EXPLICIT-REVIEW-20261022.json",
+      "sha256": "a8bebac9a9da8e00c2882d656f9865bca2fcbe8caaeac70ba6d73e18d2c6416c"
+    },
+    "currentDeckyFreshSessionScope": "Five Decky presentation/preflight/event/fresh-session locations changed. This explicit source review preserves all coordinator business algorithms and fixture inputs, but does not approve the new repair header, UI/runtime behavior or current full native binary. Completed r63ae compilation and qualifications remain tied to earlier793e main; current674e must be captured/compiled/qualified separately."
+  },
+  "producerData": {
+    "schemaVersion": 1,
+    "relative": "tools/input_coordinator_lifecycle_selftest.mjs",
+    "key": "appendNativeLifecycleLog",
+    "decodedUtf8Bytes": 877,
+    "decodedUtf8Sha256": "fee1e275715d037b953baa1b8471e42fd4e0ea2f3be78557e80b25b6d43ef7fb"
+  },
+  "currentNative75CompilePreparation20261022": {
+    "review": "Build/Tasks/HC-Wiring-IndependentAudit-20261020/round63-current-sdk2-wiring/CURRENT-NATIVE75-TWO-DELTAS-EXACT-INVERSE-REVIEW-20261022.json",
+    "rawExact": 29,
+    "lineEndingOnly": 44,
+    "semanticDeltaFunctions": [
+      "inputHostXboxConfirmStartupLocked",
+      "inputHostSubmitPad"
+    ],
+    "engineOfflineTest": {
+      "path": "G:/YeManCC-Work/Build/V/hc-current-engine-offline-20261022-r2/run.stdout.log",
+      "sha256": "8cc8c0c2aa1eca3cc15b9fd8181a90242960794d6699efd61f1eac341dee0fac"
+    },
+    "engineOfflineCases": 114,
+    "scope": "Current source byte binding and rejecting NoIO fixture compilation preparation only. Existing75 core function identities, all105/6457/6463 fault masks, native60 and lifecycle45/90 remain. No current runtime/public/physical or Steam field acceptance granted; old engine pin remains recorded in the preimage."
+  }
+}

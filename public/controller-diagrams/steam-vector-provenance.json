@@ -1,0 +1,12 @@
+{
+  "source": "D:/game/steam/steamui/sp.js",
+  "sha256": "5a28c25041d07e69cf591a414519e0cf970b6884c1a0106659dcd9f1fb9586f9",
+  "exports": [
+    "SteamDeckTiltedOutline",
+    "PS5ControllerFrontOutline",
+    "XboxOneControllerFrontOutline"
+  ],
+  "method": "Only declarative SVG path geometry, stroke/fill attributes and per-control pose diffs. Pure render evaluated with inert JSX/color/clamp stubs, no Steam runtime or native transport.",
+  "license": "Valve Steam client proprietary resources. Local prototype provenance; not an open-source/MIT claim.",
+  "rearSlots": "PS5/Xbox add four visual rear slots using the original SteamDeckTiltedOutline rear fill/outline paths with group translations/scales. Original front geometry remains unchanged. Native catalog backIndex 1..4 governs availability; these are not a claim that every physical controller has four paddles."
+}

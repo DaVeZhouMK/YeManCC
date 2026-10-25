@@ -15,6 +15,7 @@ param(
   [string]$HcRuntimeRoot = '',
   [Parameter(Mandatory = $true)][string]$PayloadRoot,
   [string]$RuntimeRoot = '',
+  [string]$SharedRuntimeRoot = '',
   [string[]]$ExcludedRuntimeFiles = @()
 )
 
@@ -168,6 +169,29 @@ Get-ChildItem -LiteralPath $PayloadRoot -File -Filter '*.dll' | ForEach-Object {
 if ($runtimeRoot -ne $PayloadRoot) {
   Get-ChildItem -LiteralPath $runtimeRoot -File -Filter '*.dll' | ForEach-Object { $payloadAssemblies[$_.BaseName] = $true }
 }
+$sharedDeviceCount = 0
+$deviceManifestPath = Join-Path $runtimeRoot 'HandheldCompanion.runtime.json'
+if (Test-Path -LiteralPath $deviceManifestPath -PathType Leaf) {
+  $deviceManifest = Get-Content -LiteralPath $deviceManifestPath -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($deviceManifest.PSObject.Properties['sharedDependencies']) {
+    if ([string]$deviceManifest.sharedDependencies.directory -cne 'PowerControl/ymcc-shared-runtime') { throw 'Unexpected shared device runtime directory.' }
+    if (-not $SharedRuntimeRoot) {
+      $SharedRuntimeRoot = Join-Path (Split-Path -Parent (Split-Path -Parent $runtimeRoot)) 'ymcc-shared-runtime'
+    }
+    $seenShared = @{}
+    foreach ($entry in @($deviceManifest.sharedDependencies.files)) {
+      $name = [string]$entry.path
+      if ($name -notmatch '^[^/\\:]+\.dll$' -or $seenShared.ContainsKey($name)) { throw 'Unsafe or duplicate shared device dependency.' }
+      $seenShared[$name] = $true
+      $path = Join-Path $SharedRuntimeRoot $name
+      if (-not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -ne [int64]$entry.bytes -or
+          (Get-Sha256 $path) -cne [string]$entry.sha256) { throw "Shared device dependency missing or changed: $name" }
+      $payloadAssemblies[[IO.Path]::GetFileNameWithoutExtension($name)] = $true
+      $sharedDeviceCount++
+    }
+    if ($sharedDeviceCount -ne 7) { throw 'Incomplete shared device dependency contract.' }
+  }
+}
 $frameworkPattern = '^(?:System(?:\.|$)|Microsoft(?:\.|$)|netstandard$|WindowsBase$|PresentationCore$|PresentationFramework$|Accessibility$|UIAutomation(?:\.|$))'
 
 # Device IL identifies only the factory call graph. HC's own startup also
@@ -204,7 +228,7 @@ $unavailableReferenceAssets = @()
 foreach ($name in @('GamepadMotion.dll', 'hidapi.dll', 'IGCL_Wrapper.dll', 'JoyShockLibrary.dll', 'libVIIPER.dll', 'SapientiaUsb.dll', 'SDL3.dll', 'UEFIVaribleDll.dll', 'Xinput1_4.dll')) {
   $source = Join-Path $HcRuntimeRoot $name
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
-    $unavailableReferenceAssets += $name
+    if ($normalizedExcludedRuntimeFiles -notcontains $name) { $unavailableReferenceAssets += $name }
     continue
   }
   if ($excludedRuntime.ContainsKey($name)) { continue }
@@ -283,7 +307,7 @@ try {
     if ($unavailableReferenceAssets.Count -gt 0) {
       Write-Output "fan HC runtime/device closure self-test: needs-investigation (selfConsistentRuntimeFiles=$($runtimeClosure.Count), deviceTypes=$($deviceTypes.Count), unavailableReferenceAssets=$($unavailableReferenceAssets -join ', '), hardwareWrites=false)"
     } else {
-      Write-Output "fan HC runtime/device closure self-test: PASS (runtimeFiles=$($runtimeClosure.Count), deviceTypes=$($deviceTypes.Count), hardwareWrites=false)"
+      Write-Output "fan HC runtime/device closure self-test: PASS (runtimeFiles=$($runtimeClosure.Count), sharedDeviceFiles=$sharedDeviceCount, deviceTypes=$($deviceTypes.Count), hardwareWrites=false)"
     }
   } finally { $pe.Dispose() }
 } finally { $stream.Dispose() }

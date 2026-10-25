@@ -1,0 +1,5 @@
+import fs from 'node:fs';import path from 'node:path';import{fileURLToPath}from'node:url';
+const root=path.resolve(import.meta.dirname,'..'),source=path.join(root,'native/decky_package_maintenance.ps1'),header=path.join(root,'native/decky_package_maintenance_script.h');
+export function maintenanceHeader(){const ps=fs.readFileSync(source,'utf8').replace(/^\uFEFF/,'').replace(/\r\n/g,'\n');if(ps.includes(')YMCCDECKYPKG"'))throw Error('Package maintenance delimiter collision');return '#pragma once\n// Generated from decky_package_maintenance.ps1 by tools/decky_package_maintenance_embed.mjs.\nnamespace ymcc::deckypackage {\ninline const char* maintenanceScript(){return R"YMCCDECKYPKG('+ps+')YMCCDECKYPKG";}\n}\n';}
+export function verifyMaintenanceHeader(){if(!fs.existsSync(header)||fs.readFileSync(header,'utf8').replace(/\r\n/g,'\n')!==maintenanceHeader())throw Error('Decky package maintenance source/header differ; regenerate before building');}
+if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url)){if(process.argv.includes('--check'))verifyMaintenanceHeader();else fs.writeFileSync(header,maintenanceHeader());}

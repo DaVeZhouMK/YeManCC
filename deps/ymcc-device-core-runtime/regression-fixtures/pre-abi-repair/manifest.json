@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "fixtureId": "HC-PRE-ABI-REPAIR-NEGATIVES-20261023",
+  "role": "Immutable historical broken audio ABI and missing SharpDX callback roots; never production replacements",
+  "files": [
+    {
+      "path": "NAudio.Core.dll",
+      "bytes": 13824,
+      "sha256": "41ae47df2c6039a47aea97ad76624708937360e47a3d498848a7b229c4238450"
+    },
+    {
+      "path": "NAudio.Wasapi.dll",
+      "bytes": 16896,
+      "sha256": "e3443fb2ab478d9f3ecc70db045902a1acbb7a264b6a1ca887c696aaa5410777"
+    },
+    {
+      "path": "SharpDX.dll",
+      "bytes": 45056,
+      "sha256": "e862ba1f03827b812735008cfa03ca8a912d9c09a2d1845007ee0936116fa453"
+    },
+    {
+      "path": "SharpDX.DirectInput.dll",
+      "bytes": 55808,
+      "sha256": "9b68076fda1397229200021c05f062d0283f73e406889a23da47fe7b6f8f7d03"
+    },
+    {
+      "path": "SharpDX.Direct3D9.dll",
+      "bytes": 39936,
+      "sha256": "530a2e95fb84932086f8038d16cbaffd4b9b806b4389f5f29ce1f0ad11486ae7"
+    }
+  ]
+}

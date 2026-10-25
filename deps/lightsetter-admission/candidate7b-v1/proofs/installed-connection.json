@@ -1,0 +1,41 @@
+{
+  "status": "PASS",
+  "passed": true,
+  "planSha256": "2464b03ade43bbec03fefb8cf6f9b39c378c471dda2a74b69c79a925f5f3af85",
+  "startedUtc": "2026-10-19T06:26:41.7173832Z",
+  "hardwareIo": false,
+  "appRestarted": false,
+  "frontendReplaced": false,
+  "nativeReplaced": false,
+  "changedFiles": [
+    "PowerControl/light-setter/YeManLightSetter.dll",
+    "YeManCC/export-identity.json"
+  ],
+  "rollbackPerformed": false,
+  "rollbackConflict": null,
+  "rollbackError": null,
+  "admission": {
+    "status": "PASS",
+    "contract": "lighting-catalog-v2",
+    "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+    "coreSha256": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
+    "sourceInputs": 27,
+    "compiledInputs": 14,
+    "compileSources": 12,
+    "pdbDocuments": 15,
+    "actualCatalogChecks": 549,
+    "actualTargetAssertions": 548,
+    "actualTargetCalls": 552,
+    "models": 47,
+    "actualArtifactChecks": 177,
+    "oldLokiFailureRetained": true,
+    "hardwareAcceptance": false,
+    "installationGranted": false
+  },
+  "helperSha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+  "preservedFiles": 103,
+  "truePreimages": 2,
+  "allAclPreserved": true,
+  "inventoryScope": "Exact lighting helper and its export row; unrelated installed components and identity data preserved.",
+  "finishedUtc": "2026-10-19T06:26:43.5405569Z"
+}

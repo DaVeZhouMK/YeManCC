@@ -1,0 +1,133 @@
+{
+  "schemaVersion": 1,
+  "caseId": "fan.explicit-off-host-chain-consumer",
+  "reviewedAt": "2026-10-20T03:18:36.630Z",
+  "sourceReviewStatus": "REVIEWED_COMPILER_PROGRAM_BYTES_EQUIVALENT_TO_R2",
+  "executionStatus": "R3_FAIL_SLEEP_REFUSAL_GATE",
+  "sourcePath": "src/bridge/yeman.ts",
+  "beforeSha256": "bd49cd55090702a9cdb3136897b259561c40654b42438c307ba1dcbde804431d",
+  "afterSha256": "c3ac032f7401afdde91583e56510a9932b921867d0c5e609d7f53519308ebddb",
+  "sourceReview": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-yeman-r3-20261020\\YEMAN-REVIEW.json",
+    "sha256": "f338c5ceaf6141d4ac5c0e7407fd1801f27b6361025cb1b26d77ddd2dcd9fc0c",
+    "diff": "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-yeman-r3-20261020\\yeman.diff",
+    "diffSha256": "4bf484f004aa4ac23211a3501dca60a138e006c7a305b68f134d26be5708e8b0"
+  },
+  "bundles": [
+    {
+      "folder": "typescript-original",
+      "retainedMemberCount": 97,
+      "added": [],
+      "removed": [],
+      "changedSourceOnly": [
+        "src/bridge/yeman.ts"
+      ],
+      "oldProgramSha256": "f82434ab5e9baef7f0f3135a3d41d44c3ea82abafab8882abc08734e0bfcb2ea",
+      "newProgramSha256": "f82434ab5e9baef7f0f3135a3d41d44c3ea82abafab8882abc08734e0bfcb2ea",
+      "compiledProgramBytesIdentical": true
+    },
+    {
+      "folder": "typescript-private-fault",
+      "retainedMemberCount": 97,
+      "added": [],
+      "removed": [],
+      "changedSourceOnly": [
+        "src/bridge/yeman.ts"
+      ],
+      "oldProgramSha256": "6d1233bda49c4a5f95c86ad35aa4252cd676c6ec588cbf90d8f0f4a5de714c54",
+      "newProgramSha256": "6d1233bda49c4a5f95c86ad35aa4252cd676c6ec588cbf90d8f0f4a5de714c54",
+      "compiledProgramBytesIdentical": true
+    }
+  ],
+  "original97MembersPreserved": true,
+  "extraDependencies": [],
+  "r3": {
+    "rootExit": 1,
+    "naturalExit": true,
+    "acceptedModes": [
+      {
+        "mode": "allowed",
+        "checks": 82
+      },
+      {
+        "mode": "empty-resume",
+        "checks": 83
+      }
+    ],
+    "acceptedChecks": 165,
+    "sleep": {
+      "rawManagedChecks": 82,
+      "rawManagedOk": true,
+      "nodeExit": 0,
+      "originalTs": {
+        "ok": true,
+        "error": "",
+        "mode": "sleep",
+        "scope": "production bridge + HTTP adapter + mock Host; native power/process fixtures; no HC/device proof"
+      },
+      "forbiddenObservedRequests": [
+        {
+          "sequence": 6,
+          "path": "/api/acquire-control"
+        },
+        {
+          "sequence": 7,
+          "path": "/api/enable"
+        }
+      ],
+      "verifierFailure": "FORBIDDEN_CONTROL_AFTER_REFUSAL_OR_FAULT",
+      "accepted": false
+    },
+    "remainingModesNotRun": [
+      "stale-native",
+      "empty-apply"
+    ],
+    "originalSemanticFaultCompiled": true,
+    "originalSemanticFaultExecuted": false,
+    "rootExecution": {
+      "pid": 35860,
+      "parentPid": 40464,
+      "program": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe",
+      "args": [
+        "-NoLogo",
+        "-NoProfile",
+        "-NonInteractive",
+        "-File",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-yeman-r3-20261020\\r3\\input-sources\\tools\\ymcc_sim\\global\\host-process.ps1",
+        "-ScriptPath",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-yeman-r3-20261020\\r3\\input-sources\\tools\\ymcc_sim\\global\\fan-explicit-off-host-chain-consumer\\worker.ps1",
+        "-ArgumentsPath",
+        "D:\\Codex\\2026-10-18\\kai-s\\work\\fan-explicit-yeman-r3-20261020\\r3\\job-arguments.json"
+      ],
+      "startedAt": "2026-10-20T03:15:16.199Z",
+      "scope": "dedicated existing fixture isolation; no global/audit",
+      "endedAt": "2026-10-20T03:15:46.431Z",
+      "exitCode": 1,
+      "signal": null,
+      "error": null,
+      "timedOut": false,
+      "naturalExit": true,
+      "stdout": {
+        "bytes": 250,
+        "sha256": "8435cb0f257a70d0dc3b6182f038a7806669a1493edd5584495c113c3ca48ce8",
+        "truncated": false
+      },
+      "stderr": {
+        "bytes": 985,
+        "sha256": "96d5e7ee93c329fd3acf7200c1b6daa5f0d0bdaef0a71c5c311495aa8adaf6a7",
+        "truncated": false
+      }
+    }
+  },
+  "otherMainlineDriftObservedNotReviewed": [
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "sha256": "6643edb07d80cf723d0be8835c6405c01c0d2ec24ad59689c8d97ce342c9f7cc",
+      "actual": "fd492582f1144038f133b3d2ae4e6e80a89bcb2471004d490f22a4163eaa79ca"
+    }
+  ],
+  "specMeaning": "Only this exact source review identity is advanced after full difference and actual compilation equivalence; r3 remains FAIL, all original guards unchanged, no whole-primary or behavioral approval.",
+  "wholePrimaryApproved": false,
+  "behaviorApprovalGranted": false,
+  "oldR2Unchanged": true
+}

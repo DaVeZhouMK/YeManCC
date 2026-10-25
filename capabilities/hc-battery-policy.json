@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "runtimeRules": "native/BatteryHost/battery-routes.json",
+  "reviewedResearch": "docs/battery-charge-capabilities.json",
+  "reviewedProtocolOverride": "native/BatteryHost/msi-ap-route-review.json",
+  "admittedProviderRoutes": [
+    "asus-ally-acpi",
+    "lenovo-go-conservation",
+    "msi-claw-wmi",
+    "msi-claw-cg3em-ap",
+    "ayaneo-cec-bypass",
+    "ayaneo-ceii-bypass",
+    "oxp-x1-amd-ec",
+    "oxp-x1-intel-ec",
+    "valve-deck-firmware",
+    "gpd-win-mini-2025"
+  ],
+  "reviewedExtensionModels": [
+    "AYANEO3",
+    "AYANEOAIR2",
+    "AYANEOAIRPro1S",
+    "AYANEOFlip11",
+    "AYANEONEXT2",
+    "AYANEOAIRPlusNxx"
+  ],
+  "disabledSourceModels": [
+    {
+      "device": "SuiPlay0X1",
+      "researchRoute": "suiplay-cec-inheritance",
+      "reason": "Inherited EC bypass protocol is a research candidate; Windows route was explicitly withheld in the reviewed allowlist."
+    }
+  ],
+  "admission": "Exact reviewed identity rules select existing consumers; firmware, independent readback, conflict ownership and recovery remain consumer-owned."
+}

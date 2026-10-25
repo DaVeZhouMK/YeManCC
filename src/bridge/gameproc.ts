@@ -1,5 +1,6 @@
 import { fs, proc, shell } from './api';
 import { invoke } from './ipc';
+import { detectGame, isCurrentGameTarget } from './gamedetect';
 
 export interface GameCtlResult {
   ok: boolean;
@@ -79,19 +80,42 @@ export async function suspendGame(
 
 export async function resumeGame(): Promise<GameCtlResult> {
   return withControlLock(async () => {
-    if (!(await fs.exists(SUSPEND_STATE))) {
-      // 状态文件丢失时仍不按名称猜测进程：native 只读取它自己写入的
-      // manual-suspended PID 标记目录。
-      const fallback = await invoke<{ resumed?: number }>('game.resume', { pids: [] }).catch(() => ({ resumed: 0 }));
+    const resumeFromNativeMarkers = async (corruptRaw?: string): Promise<GameCtlResult> => {
+      const fallback = await invoke<{
+        resumed?: number;
+        failedPids?: number[];
+        recoveryPending?: boolean;
+      }>('game.resume', { pids: [] }).catch(() => ({ resumed: 0, recoveryPending: true }));
       const resumed = Number(fallback?.resumed) || 0;
+      const failedPids = 'failedPids' in fallback && Array.isArray(fallback.failedPids)
+        ? [...new Set(fallback.failedPids.filter((pid) => Number.isInteger(pid) && pid > 0))]
+        : [];
+      const pending = fallback.recoveryPending === true || failedPids.length > 0;
+      if (pending) {
+        // PID-only retry records still require the authoritative native marker.
+        // Preserve malformed original bytes inside the recoverable record.
+        await fs.writeTextFileAtomic(SUSPEND_STATE, JSON.stringify({
+          root: failedPids[0] || 0,
+          pids: failedPids,
+          processes: failedPids.map((pid) => ({ pid })),
+          recoveryPending: true,
+          ...(corruptRaw !== undefined ? { recoveryOriginalRaw: corruptRaw } : {}),
+          ts: Date.now(),
+        }));
+        emitSuspendedState(true);
+        const failCount = Math.max(1, failedPids.length);
+        return { ok: resumed > 0, okCount: resumed, failCount, msgs: ['恢复尚未完成，已保留记录，可重试'] };
+      }
+      await fs.remove(SUSPEND_STATE).catch(() => {});
       emitSuspendedState(false);
       return {
         ok: resumed > 0,
         okCount: resumed,
         failCount: 0,
-        msgs: resumed > 0 ? [] : ['没有已暂停的游戏'],
+        msgs: resumed > 0 ? [] : [corruptRaw !== undefined ? '暂停状态损坏，已清除' : '没有已暂停的游戏'],
       };
-    }
+    };
+    if (!(await fs.exists(SUSPEND_STATE))) return resumeFromNativeMarkers();
     let raw: string;
     try { raw = await fs.readTextFile(SUSPEND_STATE); }
     catch (error) {
@@ -101,11 +125,7 @@ export async function resumeGame(): Promise<GameCtlResult> {
     try {
       state = JSON.parse(raw);
     } catch {
-      const fallback = await invoke<{ resumed?: number }>('game.resume', { pids: [] }).catch(() => ({ resumed: 0 }));
-      const resumed = Number(fallback?.resumed) || 0;
-      await fs.remove(SUSPEND_STATE).catch(() => {});
-      emitSuspendedState(false);
-      return { ok: resumed > 0, okCount: resumed, failCount: 0, msgs: resumed > 0 ? [] : ['暂停状态损坏，已清除'] };
+      return resumeFromNativeMarkers(raw);
     }
     const recordedProcesses: SuspendedProcessIdentity[] = Array.isArray(state.processes)
       ? state.processes
@@ -133,6 +153,9 @@ export async function resumeGame(): Promise<GameCtlResult> {
     const recordedValues = recordedPids.length > 0
       ? recordedPids.map((pid) => recordedByPid.get(pid) || { pid })
       : [];
+    if (recordedValues.length === 0) {
+      return resumeFromNativeMarkers(typeof state.recoveryOriginalRaw === 'string' ? state.recoveryOriginalRaw : undefined);
+    }
     const nativeResult = await invoke<{
       resumed?: number;
       failedPids?: number[];
@@ -180,10 +203,7 @@ export async function closeGame(rootPid: number, name: string, processCreated?: 
     }
     // Re-acquire the current valve target immediately before control. The PID
     // held by a page is only an expected value and may already be stale.
-    const valveTarget = await invoke<{
-      pid?: number;
-      processCreated?: string;
-    } | null>('game.detect', {}).catch(() => null);
+    const valveTarget = await detectGame(true).catch(() => null);
     const valvePid = Number(valveTarget?.pid);
     const valveCreated = valveTarget?.processCreated ? String(valveTarget.processCreated) : '';
     if (valvePid !== rootPid || !/^\d+$/.test(valveCreated) || valveCreated === '0' ||
@@ -194,7 +214,7 @@ export async function closeGame(rootPid: number, name: string, processCreated?: 
     // not make the OS operation transactional, but closes the normal PID-reuse
     // window and prevents an old page snapshot from controlling a new process.
     const identity = await proc.identity(rootPid).catch(() => ({ valid: false, processCreated: '' }));
-    if (!identity.valid || String(identity.processCreated || '') !== valveCreated) {
+    if (!identity.valid || String(identity.processCreated || '') !== valveCreated || !isCurrentGameTarget(valveTarget)) {
       return { ok: false, okCount: 0, failCount: 1, msgs: ['Game valve process identity changed; close aborted'] };
     }
     const result = await shell.run('taskkill', ['/F', '/T', '/PID', String(rootPid)])
@@ -258,64 +278,44 @@ export async function waitForProcessExit(pid: number, processCreated?: string, t
 export async function hasSuspendedState(rootPid?: number): Promise<{ suspended: boolean; pid?: number }> {
   try {
     if (await fs.exists(SUSPEND_STATE)) {
-      const state = JSON.parse(await fs.readTextFile(SUSPEND_STATE, 65536)) as { root?: number };
+      const state = JSON.parse(await fs.readTextFile(SUSPEND_STATE, 65536)) as { root?: number; recoveryPending?: boolean };
+      if (state.recoveryPending === true && (!Number.isInteger(Number(state.root)) || Number(state.root) <= 0))
+        return { suspended: true };
       const matches = rootPid === undefined || Number(state.root) === rootPid;
       return { suspended: matches, pid: matches ? Number(state.root) : undefined };
     }
-  } catch { return { suspended: false }; }
+  } catch { return { suspended: true }; }
   if (!rootPid) return { suspended: false };
   const mark = `C:\\SOFT\\YeMan\\PowerControl\\Sleep\\manual-suspended\\${rootPid}.txt`;
   return { suspended: await fs.exists(mark).catch(() => false) };
 }
 
-export async function isJoyxoffRunning(): Promise<boolean> {
-  try {
-    const result = await proc.running(['JoyXoff*']);
-    return Object.keys(result || {}).some((key) => key.toLowerCase().includes('joyxoff') && result[key]);
-  } catch { return false; }
-}
-
-const JOYXOFF_BAT = 'C:\\SOFT\\YeMan\\PowerControl\\JoyXoff.bat';
-const JOYXOFF_VBS = 'C:\\SOFT\\YeMan\\PowerControl\\模拟鼠标.vbs';
-
-export async function toggleJoyxoff(): Promise<boolean> {
-  if (await fs.exists(JOYXOFF_VBS).catch(() => false)) {
-    await shell.hidden('wscript.exe', ['//nologo', JOYXOFF_VBS]).catch(() => {});
-  } else {
-    await shell.run('cmd', ['/c', JOYXOFF_BAT]).catch(() => {});
-  }
-  for (let i = 0; i < 8; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    if (await isJoyxoffRunning()) return true;
-  }
-  return false;
-}
-
-/**
- * 2026-09-30 用户裁决：切到 SteamDeck 虚拟手柄时鼠标由 Steam 接管，JoyXoff 若在跑
- * 必须强行关掉（存在才关）。直接走 JoyXoff.bat 的 taskkill 分支并隐藏执行——
- * 不复用 模拟鼠标.vbs，避免「关闭」时播放开启音效。返回是否真的关过一个进程。
- */
+/** Release the exact JoyXoff backend through native control; never a shell toggle. */
 export async function closeJoyxoffIfRunning(): Promise<boolean> {
-  if (!(await isJoyxoffRunning())) return false;
-  if (await fs.exists(JOYXOFF_BAT).catch(() => false)) {
-    await shell.hidden('cmd.exe', ['/c', JOYXOFF_BAT]).catch(() => {});
-  } else {
-    await shell.hidden('wscript.exe', ['//nologo', JOYXOFF_VBS]).catch(() => {});
-  }
-  for (let i = 0; i < 8; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 250));
-    if (!(await isJoyxoffRunning())) break;
-  }
-  return true;
+  const result = await invoke<{ ok: boolean; closed: boolean; stateKnown: boolean; error?: string }>('mouseMode.releaseJoyxoff', {});
+  if (!result.ok || !result.stateKnown) throw new Error(result.error || 'JoyXoff 关闭未确认');
+  return result.closed === true;
 }
 
 export type MouseBackend = 'gamebar' | 'joyxoff';
 
 export interface MouseModeState {
+  mode?: 'auto' | 'on' | 'off';
+  scene?: string;
+  policyReason?: string;
+  pending?: boolean;
+  fallbackBackend?: MouseBackend;
+  fallbackRestored?: boolean;
+  mutated?: boolean;
+  sequence?: number;
   ok: boolean;
   backend: MouseBackend;
   on: boolean;
+  provider?: 'ymcc' | 'steam';
+  controlAllowed?: boolean;
+  stateKnown?: boolean;
+  mappingVerified?: boolean;
+  verification?: 'unobserved' | 'process-liveness' | 'component-readback' | 'backend-state';
   joyxoffOn?: boolean;
   gamebarOn?: boolean;
   joyxoffAvailable?: boolean;
@@ -343,7 +343,15 @@ export async function getMouseModeState(): Promise<MouseModeState> {
 }
 
 export async function setMouseBackend(backend: MouseBackend): Promise<MouseModeState> {
-  return invoke<MouseModeState>('mouseMode.setBackend', { backend });
+  return invoke<MouseModeState>('mouseMode.setBackend', { backend }, { timeoutMs: 30000 });
+}
+
+export async function setMouseModeEnabled(on: boolean): Promise<MouseModeState> {
+  return invoke<MouseModeState>('mouseMode.set', { on });
+}
+
+export async function setMouseModePolicy(mode: 'auto' | 'on' | 'off'): Promise<MouseModeState> {
+  return invoke<MouseModeState>('mouseMode.setPolicy', { mode });
 }
 
 export async function toggleMouseMode(): Promise<MouseModeState> {

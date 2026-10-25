@@ -30,6 +30,7 @@ export interface SpeedResult {
 
 export interface SpeedTargetIdentity {
   pid: number;
+  identityGeneration?: number;
   processCreated?: string;
   name?: string;
   title?: string;
@@ -148,7 +149,7 @@ function Read-GameValveIdentity {
     $age = [DateTimeOffset]::Now.ToUnixTimeMilliseconds() - [Int64]$snapshot.lastSeen
     if (-not $snapshot.valid -or $snapshotPid -le 0 -or $snapshotCreated -le 0 -or
         $snapshotGeneration -le 0 -or $age -lt 0 -or $age -gt 10000) { return $null }
-    return @{ pid = $snapshotPid; processCreated = $snapshotCreated }
+    return @{ pid = $snapshotPid; processCreated = $snapshotCreated; identityGeneration = [UInt64]$snapshot.identityGeneration }
   } catch {
     return $null
   }
@@ -166,7 +167,8 @@ function Test-TrackedProcessIdentity([int]$targetPid, [UInt64]$expectedCreated) 
 function Test-TargetIdentity([int]$targetPid, [UInt64]$expectedCreated) {
   if (-not (Test-TrackedProcessIdentity $targetPid $expectedCreated)) { return $false }
   $valve = Read-GameValveIdentity
-  return $valve -and $valve.pid -eq $targetPid -and $valve.processCreated -eq $expectedCreated
+  return ($valve -and $valve.pid -eq $targetPid -and $valve.processCreated -eq $expectedCreated -and
+    (-not $script:ymccExpectedIdentityGeneration -or $valve.identityGeneration -eq $script:ymccExpectedIdentityGeneration))
 }
 function Test-TargetEnabled([int]$targetPid) {
   $map = [YeManOpenSpeedyMapProbe]::OpenFileMapping(0x0004, $false, "OpenSpeedy.$targetPid")
@@ -470,11 +472,17 @@ function sameSpeedTarget(
     left.processCreated === right.processCreated);
 }
 
+function sameSpeedLease(left: SpeedTargetIdentity | null, right: SpeedTargetIdentity | null): boolean {
+  return sameSpeedTarget(left, right) &&
+    (!left?.identityGeneration || !right?.identityGeneration || left.identityGeneration === right.identityGeneration);
+}
+
 function valveTargetFromGame(game: DetectedGame): SpeedTargetIdentity | null {
   if (!game.processCreated || !Number.isSafeInteger(game.pid) || game.pid <= 0) return null;
   return {
     pid: game.pid,
     processCreated: game.processCreated,
+    ...(game.identityGeneration ? { identityGeneration: game.identityGeneration } : {}),
     name: game.name,
     title: game.title,
     path: game.path,
@@ -527,7 +535,7 @@ async function speedOp(
   // switch during the queue can never apply the old operation.
   const latest = await detectGame(true).catch(() => null);
   const latestTarget = latest ? valveTargetFromGame(latest) : null;
-  const latestMatchesTarget = !!latestTarget && sameSpeedTarget(latestTarget, currentTarget);
+  const latestMatchesTarget = !!latestTarget && sameSpeedLease(latestTarget, currentTarget);
   if (!latestMatchesTarget && source !== 'target-change') {
     if (operation.kind === 'apply') speedSession = null;
     return {
@@ -742,6 +750,7 @@ function Test-BridgeOk([string]$response) { return $response -match '^OK(?:\\s|$
 function Invoke-SafeRollback { $null = Send-BridgeCommand 'SETSPEED 1'; $null = Send-BridgeCommand 'GETSPEED'; [Console]::Out.WriteLine('SAFE_FALLBACK:1') }
 ${bridgeSpeedReadback}
 ${targetStateProbe}
+$script:ymccExpectedIdentityGeneration = [UInt64]${Number.isSafeInteger(currentTarget.identityGeneration) && currentTarget.identityGeneration! > 0 ? currentTarget.identityGeneration : 0}
 Write-TargetSnapshot 'transaction_begin' ${pid}
 ${transaction}
 $pipe.Close()
@@ -777,7 +786,7 @@ $pipe.Close()
   if (ok && source !== 'target-change') {
     const after = await detectGame(true).catch(() => null);
     const afterTarget = after ? valveTargetFromGame(after) : null;
-    if (!afterTarget || !sameSpeedTarget(afterTarget, currentTarget)) {
+    if (!afterTarget || !sameSpeedLease(afterTarget, currentTarget)) {
       if (operation.kind === 'apply') speedSession = null;
       return {
         ok: true,
@@ -836,7 +845,7 @@ async function applyGameSpeedInternal(
   if ('reason' in admitted) {
     return { ok: true, skipped: true, safeFallback: true, reason: admitted.reason, msgs: ['The requested PID was not admitted by the game valve; kept at 1x'] };
   }
-  if (target?.processCreated && target.processCreated !== admitted.target.processCreated) {
+  if (target?.processCreated && !sameSpeedLease(target, admitted.target)) {
     return { ok: true, skipped: true, safeFallback: true, reason: 'stale_target', msgs: ['The requested process instance is stale; kept at 1x'] };
   }
   // The caller-provided PID is only an expected value. The actual control

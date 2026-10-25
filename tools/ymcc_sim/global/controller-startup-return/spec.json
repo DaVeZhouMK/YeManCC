@@ -1,0 +1,612 @@
+{
+  "schemaVersion": 1,
+  "ownerLiveness": {
+    "runner": "tools/msi_crash_owner_liveness_selftest.mjs",
+    "tests": 12,
+    "assertions": 36,
+    "functions": [
+      "msiCrashProcessCreation",
+      "msiCrashCurrentOwner",
+      "msiCrashOldOwnerDead"
+    ],
+    "compiledSemanticNegatives": [
+      "alive-as-dead",
+      "drop-creation-comparison"
+    ],
+    "scope": "private real Win32 process identity/natural exit; explicit error leaves; no installed/driver or actualHostSession acceptance"
+  },
+  "owned": {
+    "tests": 167,
+    "assertions": 1173,
+    "caseNames": [
+      "retryable/blocked-no-write",
+      "retryable/success",
+      "retryable/error433-zero-byte",
+      "retryable/error1167-zero-byte",
+      "retryable/error6-zero-byte",
+      "retryable/access-denied",
+      "retryable/unknown-error",
+      "retryable/prior-slot-busy-deferred-until-ready",
+      "retryable/unattempted-retired-unknown",
+      "retryable/unattempted-io-design-unknown",
+      "retryable/durable-gate-no-write",
+      "retryable/partial-byte",
+      "retryable/short-write",
+      "retryable/late-completed",
+      "retryable/retired",
+      "retryable/timeout-state",
+      "retryable/timed-out",
+      "retryable/success-but-timed-out",
+      "retryable/blocked-but-retained",
+      "retryable/success-but-retained",
+      "tracking/blocked-new-handle-single-retry-stable-return",
+      "tracking/error433-zero-byte-new-handle-single-retry-stable-return",
+      "tracking/initial-success-new-handle-single-retry-stable-return",
+      "R120/ordinary-confirmation-binds-read-window",
+      "R120/fresh-end-long-read-cannot-discharge",
+      "R120/identity-query-retires-identity",
+      "R120/identity-query-retires-power",
+      "R120/identity-query-retires-topology",
+      "R120/identity-query-retires-elapsed-window",
+      "R120/matching-read-start-at-freshness-boundary",
+      "tracking/blocked-power-readiness-restores-without-losing-debt",
+      "tracking/retry-error433-budget-never-refunded",
+      "tracking/retry-success-budget-never-refunded",
+      "signal-reject/external-controller",
+      "signal-reject/other-root-location",
+      "signal-reject/same-tail-without-location-proof",
+      "signal-reject/legacy-provider-pathless",
+      "signal-reject/empty-cached-path",
+      "signal-reject/virtual-slot",
+      "signal-reject/virtual-parent-spoofed-physical",
+      "signal-reject/unknown-slot",
+      "signal-reject/dinput-pid1902",
+      "signal-reject/wrong-pid1903",
+      "signal-reject/unresolved-parent",
+      "signal-reject/duplicate-physical-matches",
+      "signal-reject/not-live",
+      "signal-reject/unstable-read-context",
+      "signal-reject/zero-sequence",
+      "signal-reject/old-power-sample",
+      "signal-reject/old-topology-sample",
+      "signal-reject/future-completion",
+      "signal-reject/stale-1501ms",
+      "signal-reject/missing-read-start",
+      "signal-reject/start-after-completion",
+      "signal-reject/fresh-end-but-blocked-read",
+      "signal-reject/old-read-identity-with-current-path",
+      "signal-reject/rog-hid-source",
+      "signal-reject/none-source",
+      "signal-reject/sample-slot-disconnected",
+      "signal-reject/current-slot-disconnected",
+      "signal-reject/retired-identity-epoch",
+      "signal-reject/retired-identity-power",
+      "signal/age1500-boundary-valid",
+      "signal/exact-root-without-location-legacy-record",
+      "signal/same-sequence-and-stationary-packet",
+      "signal/invalid-middle-window-resets-stability",
+      "signal/topology-change-resets-stability",
+      "signal/power-change-resets-stability",
+      "context-block/Rog",
+      "context-block/Gpd",
+      "context-block/write-gate-false",
+      "context-block/ready-false",
+      "context-block/exit-fence",
+      "context-block/Host-process",
+      "context-block/Host-prepared",
+      "context-block/Host-active",
+      "context-block/DInput-route-armed",
+      "context/parameter-generations-must-match",
+      "context/quarantined-prepared-Host-can-return",
+      "cancellation/target-enabled",
+      "cancellation/persona-changed",
+      "cancellation/episode-changed",
+      "cancellation/explicit-preserves-episode-tombstone-and-debt",
+      "cancellation/lifecycle-host-lock-unavailable",
+      "record-current-reject/invalid-store",
+      "record-current-reject/return-already-cleared",
+      "record-current-reject/board-key",
+      "record-current-reject/root",
+      "record-current-reject/locations",
+      "record-current-reject/owner-pid",
+      "record-current-reject/owner-creation",
+      "post-query-recheck/power",
+      "post-query-recheck/mode",
+      "post-query-recheck/topology",
+      "post-query-recheck/episode",
+      "post-query-recheck/record",
+      "post-query-recheck/new-target",
+      "post-query-recheck/Host",
+      "post-query-recheck/ready-false",
+      "post-query-recheck/foreground-cycle-pending",
+      "post-query-recheck/foreground-power-hold",
+      "post-query-recheck/foreground-borrow-busy",
+      "before-retry-recheck/power",
+      "before-retry-recheck/mode",
+      "before-retry-recheck/topology",
+      "before-retry-recheck/episode",
+      "before-retry-recheck/record",
+      "before-retry-recheck/new-target",
+      "before-retry-recheck/Host",
+      "before-retry-recheck/ready-false",
+      "before-retry-recheck/foreground-cycle-pending",
+      "before-retry-recheck/foreground-power-hold",
+      "before-retry-recheck/foreground-borrow-busy",
+      "initial-reject/Rog",
+      "initial-reject/Gpd",
+      "initial-reject/target-enabled",
+      "initial-reject/configured-persona",
+      "initial-reject/no-debt",
+      "initial-reject/invalid-schema",
+      "initial-reject/wrong-board-record",
+      "initial-reject/wrong-owner-pid",
+      "initial-reject/wrong-owner-creation",
+      "initial-reject/no-pending-durable-return",
+      "initial-reject/reason-null",
+      "initial-reject/reason-off",
+      "initial-reject/reason-input-host-start",
+      "initial-reject/reason-shutdown",
+      "initial/deferred-transport-reason",
+      "foreground-isolation/cycle-pending-blocks-and-recovers",
+      "foreground-isolation/power-hold-blocks-and-recovers",
+      "foreground-isolation/borrow-busy-blocks-and-recovers",
+      "command-reject/no-command-handle",
+      "command-reject/already-pid1901",
+      "command-reject/other-pid",
+      "command-reject/no-interface-path",
+      "command-reject/unknown-parent",
+      "command-reject/other-root-location",
+      "command-reject/virtual-parent",
+      "command-reject/target-not-absent",
+      "command/exact-full-root-without-location-can-retry",
+      "context/full64-mode-generation",
+      "budget/unsafe-initial-OFF-reentry-cannot-upgrade-retry",
+      "budget/OFF-reentry-and-subsecond-calls-do-not-refresh",
+      "budget/twentieth-observation-can-complete",
+      "dormant/topology-event-reobserves-without-refunding-retry",
+      "dormant/power-event-reobserves-without-refunding-retry",
+      "dormant/late-source-event-reopens-observation",
+      "dormant/same-source-ticks-no-extra-IO-or-retry-reset",
+      "dormant/events-without-input-never-renew-single-retry",
+      "dormant/explicit-new-target-cancel-is-inert",
+      "failed-mode2/new-OFF-resumes-unused-caller-first",
+      "failed-mode2/new-OFF-resumes-unused-settings-first",
+      "failed-mode2/new-OFF-resumes-used-caller-first",
+      "failed-mode2/new-OFF-resumes-used-settings-first",
+      "failed-mode2/unused-retry-still-bounded",
+      "failed-mode2/ambiguous-later-IO-reduces-permission",
+      "failed-mode2/no-resume-no-mode2-outcome",
+      "failed-mode2/no-resume-mode2-success",
+      "failed-mode2/no-resume-wrong-owner",
+      "failed-mode2/no-resume-wrong-root",
+      "failed-mode2/no-resume-different-episode",
+      "failed-mode2/no-resume-still-ON",
+      "failed-mode2/no-resume-exit-fence",
+      "failed-mode2/no-resume-other-terminal",
+      "prior-command/busy-preserves-budget-before-open",
+      "prior-command/physical-match-settles-even-when-command-busy",
+      "initial-refresh/late-ambiguous-result-reduces-permission-and-cancels-only-real-legacy-plan"
+    ]
+  },
+  "startup": {
+    "tests": 91,
+    "assertions": 462,
+    "originalCaseNames": [
+      "startup/old-owner-transfer-to-real-initial-return-and-two-fresh-signals",
+      "startup/retry/error433",
+      "startup/retry/no-device",
+      "startup/ambiguous/partial",
+      "startup/ambiguous/timeout",
+      "startup/ambiguous/unknown-start-failure",
+      "startup/already-XInput-does-not-write-or-settle-on-one-window",
+      "R121/startup-reject/missing-start",
+      "R121/startup-reject/start-after-completion",
+      "R121/startup-reject/future-completion",
+      "R121/startup-reject/long-read-fresh-completion",
+      "R121/startup-reject/retired-read-identity",
+      "R121/startup-reject/stale-cache",
+      "R121/startup-query-recheck/identity",
+      "R121/startup-query-recheck/read-age",
+      "R121/startup-fresh-read-age1500-inclusive",
+      "R121/startup-stale-read-later-fresh-rejoins",
+      "R121/startup-adoption-store-cannot-use-aged-read-for-unhide",
+      "startup/reject/old-owner-live-or-unqueryable",
+      "startup/reject/old-owner-is-current-live-process",
+      "startup/reject/invalid-store",
+      "startup/reject/store-write-fails",
+      "startup/reject/ROG-family",
+      "startup/reject/GPD-family",
+      "startup/reject/board-record-mismatch",
+      "startup/reject/different-root-and-location",
+      "startup/reject/changed-instance-and-location",
+      "startup/reject/PnP-resolution-fails",
+      "startup/reject/source-absent",
+      "startup/reject/stale-source-power",
+      "startup/reject/stale-source-mode",
+      "startup/reject/stale-source-topology",
+      "startup/reject/exit-fence",
+      "startup/reject/Host-present",
+      "startup/reject/Host-prepared",
+      "startup/reject/virtual-request-ON",
+      "startup/reject/persona-request-ON",
+      "startup/reject/hardware-gate-closed",
+      "startup/reject/power-not-ready",
+      "startup/reject/foreground-cycle",
+      "startup/reject/foreground-power-hold",
+      "startup/reject/foreground-borrow",
+      "startup/rejected-store-can-later-adopt-once",
+      "startup/context-drift-during-source-resolution-does-not-adopt",
+      "startup/context-drift-after-adoption-observes-without-initial-write",
+      "startup/deferred-local-target-facts-remain-observable",
+      "startup/no-signal-goes-dormant-and-source-event-can-settle",
+      "startup/foreign-XInput-never-clears-either-debt",
+      "startup/reused-sample-sequence-is-not-second-proof",
+      "startup/deferred-first-return-then-ambiguous-actual-result-reduces-retry",
+      "startup/durable-settlement-failure-retains-observer-and-later-converges",
+      "startup/persistent-settlement-failure-is-bounded-until-source-event",
+      "startup/post-adoption-recheck/power-and-write-gate",
+      "startup/post-adoption-recheck/power",
+      "startup/post-adoption-recheck/mode",
+      "startup/post-adoption-recheck/topology",
+      "startup/post-adoption-recheck/source-generation",
+      "startup/post-adoption-recheck/source-interface",
+      "startup/post-adoption-recheck/source-revoked",
+      "startup/post-adoption-recheck/foreground-cycle",
+      "startup/post-adoption-recheck/foreground-borrow",
+      "startup/post-adoption-recheck/new-virtual-ON"
+    ],
+    "caseNames": [
+      "startup/old-owner-transfer-to-real-initial-return-and-two-fresh-signals",
+      "startup/retry/error433",
+      "startup/retry/no-device",
+      "startup/ambiguous/partial",
+      "startup/ambiguous/timeout",
+      "startup/ambiguous/unknown-start-failure",
+      "startup/already-XInput-does-not-write-or-settle-on-one-window",
+      "R121/startup-reject/missing-start",
+      "R121/startup-reject/start-after-completion",
+      "R121/startup-reject/future-completion",
+      "R121/startup-reject/long-read-fresh-completion",
+      "R121/startup-reject/retired-read-identity",
+      "R121/startup-reject/stale-cache",
+      "R121/startup-query-recheck/identity",
+      "R121/startup-query-recheck/read-age",
+      "R121/startup-fresh-read-age1500-inclusive",
+      "R121/startup-stale-read-later-fresh-rejoins",
+      "R121/startup-adoption-store-cannot-use-aged-read-for-unhide",
+      "startup/reject/old-owner-live-or-unqueryable",
+      "startup/reject/old-owner-is-current-live-process",
+      "startup/reject/invalid-store",
+      "startup/reject/store-write-fails",
+      "startup/reject/ROG-family",
+      "startup/reject/GPD-family",
+      "startup/reject/board-record-mismatch",
+      "startup/reject/different-root-and-location",
+      "startup/reject/changed-instance-and-location",
+      "startup/reject/PnP-resolution-fails",
+      "startup/reject/source-absent",
+      "startup/reject/stale-source-power",
+      "startup/reject/stale-source-mode",
+      "startup/reject/stale-source-topology",
+      "startup/reject/exit-fence",
+      "startup/reject/Host-present",
+      "startup/reject/Host-prepared",
+      "startup/reject/virtual-request-ON",
+      "startup/reject/persona-request-ON",
+      "startup/reject/hardware-gate-closed",
+      "startup/reject/power-not-ready",
+      "startup/reject/foreground-cycle",
+      "startup/reject/foreground-power-hold",
+      "startup/reject/foreground-borrow",
+      "startup/rejected-store-can-later-adopt-once",
+      "startup/context-drift-during-source-resolution-does-not-adopt",
+      "startup/context-drift-after-adoption-observes-without-initial-write",
+      "startup/deferred-local-target-facts-remain-observable",
+      "startup/no-signal-goes-dormant-and-source-event-can-settle",
+      "startup/foreign-XInput-never-clears-either-debt",
+      "startup/reused-sample-sequence-is-not-second-proof",
+      "startup/deferred-first-return-then-ambiguous-actual-result-reduces-retry",
+      "startup/durable-settlement-failure-retains-observer-and-later-converges",
+      "startup/persistent-settlement-failure-is-bounded-until-source-event",
+      "startup/post-adoption-recheck/power-and-write-gate",
+      "startup/post-adoption-recheck/power",
+      "startup/post-adoption-recheck/mode",
+      "startup/post-adoption-recheck/topology",
+      "startup/post-adoption-recheck/source-generation",
+      "startup/post-adoption-recheck/source-interface",
+      "startup/post-adoption-recheck/source-revoked",
+      "startup/post-adoption-recheck/foreground-cycle",
+      "startup/post-adoption-recheck/foreground-borrow",
+      "startup/post-adoption-recheck/new-virtual-ON",
+      "startup-loader/cold-OFF-bytes-through-two-fresh-signals",
+      "startup-loader/already-XInput-loads-and-observes-without-mode-write",
+      "startup-loader/missing-file-does-not-claim-hidden-list",
+      "startup-loader/reject/malformed",
+      "startup-loader/reject/duplicate-key",
+      "startup-loader/reject/foreign-board",
+      "startup-loader/read-error-remains-invalid-after-IO-recovers",
+      "startup-loader/access-denied-retains-file-without-ownership",
+      "startup-loader/owner-alive-or-unknown-retains-loaded-duty",
+      "startup-loader/failed-owner-adoption-retains-original-bytes",
+      "startup-loader/power-gate-loads-duty-then-defers-consumption",
+      "startup-loader/transient-sharing-failure-retries-on-existing-maintenance",
+      "startup-loader/transient-read/32",
+      "startup-loader/transient-read/33",
+      "startup-loader/transient-read/170",
+      "startup-loader/transient-read/1237",
+      "startup-loader/transient-read/21",
+      "startup-loader/transient-read/1117",
+      "startup-loader/transient-read/1167",
+      "startup-loader/transient-read-budget-stops-at-five",
+      "startup-loader/transient-read-time-budget-stops-at-thirty-seconds",
+      "startup-loader/retry-gate/foreign-family",
+      "startup-loader/retry-gate/exit-fence",
+      "startup-loader/retry-gate/suspend",
+      "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed",
+      "startup-loader/missing-during-retry-never-enters-legacy-migration",
+      "startup-loader/transient-then-foreign-record-is-terminal",
+      "startup-loader/non-MSI-initializer-does-not-read-or-claim",
+      "startup-loader/clean-record-has-no-pending-action"
+    ],
+    "addedTests": 29
+  },
+  "negative": {
+    "file": "native/msi_crash_recovery_runtime.h",
+    "before": "g_msiCrashInheritedPending.store(msiCrashHasDuty(g_msiCrashRecord),std::memory_order_release);",
+    "after": "g_msiCrashInheritedPending.store(false,std::memory_order_release);",
+    "failedCaseNames": [
+      "startup-loader/cold-OFF-bytes-through-two-fresh-signals",
+      "startup-loader/already-XInput-loads-and-observes-without-mode-write",
+      "startup-loader/owner-alive-or-unknown-retains-loaded-duty",
+      "startup-loader/failed-owner-adoption-retains-original-bytes",
+      "startup-loader/power-gate-loads-duty-then-defers-consumption",
+      "startup-loader/transient-sharing-failure-retries-on-existing-maintenance",
+      "startup-loader/transient-read/32",
+      "startup-loader/transient-read/33",
+      "startup-loader/transient-read/170",
+      "startup-loader/transient-read/1237",
+      "startup-loader/transient-read/21",
+      "startup-loader/transient-read/1117",
+      "startup-loader/transient-read/1167",
+      "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed",
+      "startup-loader/missing-during-retry-never-enters-legacy-migration"
+    ],
+    "failures": [
+      {
+        "assertion": "loaded old-owner duty is published while virtual target remains OFF",
+        "case": "startup-loader/cold-OFF-bytes-through-two-fresh-signals"
+      },
+      {
+        "assertion": "actual loader responsibility reaches actual owner adoption and initial return",
+        "case": "startup-loader/cold-OFF-bytes-through-two-fresh-signals"
+      },
+      {
+        "assertion": "first current matching signal does not settle loaded obligation",
+        "case": "startup-loader/cold-OFF-bytes-through-two-fresh-signals"
+      },
+      {
+        "assertion": "second fresh signal and durable commit retire loaded startup duty",
+        "case": "startup-loader/cold-OFF-bytes-through-two-fresh-signals"
+      },
+      {
+        "assertion": "loaded already-XInput duty still starts the owned signal observer",
+        "case": "startup-loader/already-XInput-loads-and-observes-without-mode-write"
+      },
+      {
+        "assertion": "current matching read windows settle the loaded already-XInput duty",
+        "case": "startup-loader/already-XInput-loads-and-observes-without-mode-write"
+      },
+      {
+        "assertion": "unknown or living owner keeps the loaded obligation with its old identity",
+        "case": "startup-loader/owner-alive-or-unknown-retains-loaded-duty"
+      },
+      {
+        "assertion": "failed owner persistence retains the exact original durable owner and pending responsibility",
+        "case": "startup-loader/failed-owner-adoption-retains-original-bytes"
+      },
+      {
+        "assertion": "load records the obligation even when hardware-write permission is closed",
+        "case": "startup-loader/power-gate-loads-duty-then-defers-consumption"
+      },
+      {
+        "assertion": "existing serial maintenance consumes the same loaded duty after permission returns",
+        "case": "startup-loader/power-gate-loads-duty-then-defers-consumption"
+      },
+      {
+        "assertion": "recovered exact old-owner record reaches actual OFF return adoption without user toggling",
+        "case": "startup-loader/transient-sharing-failure-retries-on-existing-maintenance"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/32"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/33"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/170"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1237"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/21"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1117"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1167"
+      },
+      {
+        "assertion": "read recovery establishes proven pending ownership while write gate closed",
+        "case": "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed"
+      },
+      {
+        "assertion": "same duty reaches existing writer only after write gate opens",
+        "case": "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed"
+      },
+      {
+        "assertion": "returning same record is revalidated before adoption",
+        "case": "startup-loader/missing-during-retry-never-enters-legacy-migration"
+      }
+    ],
+    "meaning": "Mute actual cold-loader duty publication; retain original62 and all parser assertions."
+  },
+  "ledger": {
+    "tests": 13,
+    "assertions": 8729,
+    "unavailableBranch": "Original symlink fixture emits Win32=1314 NOTE on this host; do not claim that physical symlink variant executed."
+  },
+  "retryNegative": {
+    "file": "native/msi_crash_recovery_runtime.h",
+    "before": "    msiCrashRetryOwnedRecordLoad(now);",
+    "after": "    if(now==0)msiCrashRetryOwnedRecordLoad(now); // negative: suppress every scheduled runtime tick",
+    "failedCaseNames": [
+      "startup-loader/transient-sharing-failure-retries-on-existing-maintenance",
+      "startup-loader/transient-read/32",
+      "startup-loader/transient-read/33",
+      "startup-loader/transient-read/170",
+      "startup-loader/transient-read/1237",
+      "startup-loader/transient-read/21",
+      "startup-loader/transient-read/1117",
+      "startup-loader/transient-read/1167",
+      "startup-loader/transient-read-budget-stops-at-five",
+      "startup-loader/transient-read-time-budget-stops-at-thirty-seconds",
+      "startup-loader/retry-gate/foreign-family",
+      "startup-loader/retry-gate/exit-fence",
+      "startup-loader/retry-gate/suspend",
+      "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed",
+      "startup-loader/missing-during-retry-never-enters-legacy-migration",
+      "startup-loader/transient-then-foreign-record-is-terminal"
+    ],
+    "failures": [
+      {
+        "assertion": "existing serial maintenance reloads the same record after transient IO recovers",
+        "case": "startup-loader/transient-sharing-failure-retries-on-existing-maintenance"
+      },
+      {
+        "assertion": "recovered exact old-owner record reaches actual OFF return adoption without user toggling",
+        "case": "startup-loader/transient-sharing-failure-retries-on-existing-maintenance"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/32"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/32"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/33"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/33"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/170"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/170"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/1237"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1237"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/21"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/21"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/1117"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1117"
+      },
+      {
+        "assertion": "single due retry validates actual parser and terminates retry episode",
+        "case": "startup-loader/transient-read/1167"
+      },
+      {
+        "assertion": "reloaded owned record enters existing actual return adoption",
+        "case": "startup-loader/transient-read/1167"
+      },
+      {
+        "assertion": "persistent IO stops after five bounded attempts retaining blocked authority",
+        "case": "startup-loader/transient-read-budget-stops-at-five"
+      },
+      {
+        "assertion": "exhausted episode never retries forever after IO becomes readable",
+        "case": "startup-loader/transient-read-budget-stops-at-five"
+      },
+      {
+        "assertion": "delayed maintenance at30second ceiling does not silently renew read budget",
+        "case": "startup-loader/transient-read-time-budget-stops-at-thirty-seconds"
+      },
+      {
+        "assertion": "original retry episode resumes once the owning lifecycle is ready",
+        "case": "startup-loader/retry-gate/foreign-family"
+      },
+      {
+        "assertion": "original retry episode resumes once the owning lifecycle is ready",
+        "case": "startup-loader/retry-gate/exit-fence"
+      },
+      {
+        "assertion": "original retry episode resumes once the owning lifecycle is ready",
+        "case": "startup-loader/retry-gate/suspend"
+      },
+      {
+        "assertion": "read recovery establishes proven pending ownership while write gate closed",
+        "case": "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed"
+      },
+      {
+        "assertion": "same duty reaches existing writer only after write gate opens",
+        "case": "startup-loader/read-can-recover-while-hardware-write-gate-remains-closed"
+      },
+      {
+        "assertion": "returning same record is revalidated before adoption",
+        "case": "startup-loader/missing-during-retry-never-enters-legacy-migration"
+      },
+      {
+        "assertion": "a transient IO failure cannot weaken board validation on retry",
+        "case": "startup-loader/transient-then-foreign-record-is-terminal"
+      }
+    ],
+    "meaning": "Suppress scheduled loader retry on every ordinary maintenance tick; all fixture assertions unchanged."
+  },
+  "recordIo": {
+    "runner": "tools/msi_crash_record_io_selftest.mjs",
+    "tests": 16,
+    "assertions": 67,
+    "functions": [
+      "sgWriteFileAtomicFlags",
+      "sgWriteFileAtomic",
+      "msiCrashReadOwnedRecord"
+    ],
+    "compiledSemanticNegatives": [
+      "ignore-flush-failure",
+      "ignore-write-failure"
+    ],
+    "scope": "private real Win32 journal persistence, bounded read/decode, real sharing handle retry and owned writer interruption before rename; explicit write/flush/rename and read uncertainty leaves; no product, devices, OS reboot or power loss acceptance"
+  }
+}

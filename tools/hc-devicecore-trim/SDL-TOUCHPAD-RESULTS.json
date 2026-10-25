@@ -1,0 +1,51 @@
+{
+  "Status": "READY-FOR-HEADLESS-PASSIVE-TIMER-AND-ZERO-TOUCHPAD-INTEGRATION",
+  "RuntimeId": "YMCC-DEVICECORE-SDL-PASSIVE-GUARDS-20261018-08a386607a0e5e72",
+  "Replacement": {
+    "Path": "HandheldCompanion.dll",
+    "File": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\sdl-touchpad\\final\\candidate\\HandheldCompanion.dll",
+    "Bytes": 2774016,
+    "Sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "SourceSha256": "110156b16a20a903029c8f4632b2f6c25de542284827bcf686518865cfbd70ac",
+    "Mvid": "80cb2df3-7340-9bd5-a675-3df4f6dc631d",
+    "AssemblyName": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+    "StrongName": "unsigned",
+    "Authenticode": "NotSigned"
+  },
+  "OtherReplacements": [],
+  "ModernControlsSdkUnchanged": true,
+  "PolicySha256": "0fa56d72b748a1789ced768c6913cf93b336de6ea7e04ff839ba96e64132a7c7",
+  "SourceManifestSha256": "b27799e0786bb757ee9b118ed7f10cb1b90a12f88632d015bbd6da4d6d7456ce",
+  "IndependentAuditSha256": "ddd80c5560a25216073971609bfe3d636555ea44df4a63120a58076023e084ac",
+  "ProbeRuntimePath": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\sdl-touchpad\\final\\runtime-no-sdl",
+  "ProbeRuntimeFiles": 110,
+  "ProbeRuntimeBytes": 29646179,
+  "ProbeManifestSha256": "6e4615bdbe8e6750eeed39e4a6cfafe80a01d002ddf728898c8987c1e269a375",
+  "Gates": {
+    "HcAllGetTypes": 1768,
+    "ZeroHandleOperations": 14,
+    "ActualInitializeInputOutputReceivers": 2,
+    "ZeroHandleNativeAttempts": 0,
+    "NonzeroOriginalCallsDenied": 4,
+    "BaselineOriginalCallsDenied": 6,
+    "OriginalNativeNullQueries": 2,
+    "Callbacks": 22,
+    "ModernPureConstructions": 7,
+    "TimerNativeAttempts": 0,
+    "PhysicallyNoSdl3Dll": true,
+    "NoNativeSdl3ProcessModules": true,
+    "FreshProcessIds": [
+      32532,
+      37660,
+      44328,
+      28640,
+      39008
+    ]
+  },
+  "FullDummyConstructorExecuted": false,
+  "DeviceConstructorsExecuted": false,
+  "RemainingFullConstructorBoundary": "IController creates GamepadMotion.dll!CreateGamepadMotion and accesses ManagerFactory with Tablet/manager initialization; full constructors were not executed.",
+  "PassiveSdlClosureScope": "Independent receiver audit states=59/budget=400 closed the approved passive SDL edges; timer+two guarded methods cover its confirmed sinks. Software evidence runs exact getter implementations and actual unchanged InitializeInputOutput on two controlled passive receiver states.",
+  "Sdl3CsMetadataRetained": true,
+  "Integration": "Replace HC only and regenerate owner pins/manifest. Probe runtime is not a production payload. No profile/consumer/production files modified."
+}

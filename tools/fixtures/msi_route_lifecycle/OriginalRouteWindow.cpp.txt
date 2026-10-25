@@ -1,0 +1,12 @@
+static MsiDinputRouteWindowAction msiDinputRouteWindowDecideForWake(bool armed,bool confirmed,
+    bool resent,ULONGLONG waited,bool observed,ULONGLONG now) {
+    const auto action=msiDinputRouteWindowDecide(armed,confirmed,resent,waited,observed);
+    if(action!=MsiDinputRouteWindowAction::Revert || !msiVirtualWakeWaitSource(now))return action;
+    const auto generation=g_msiVirtualWakeGeneration.load(std::memory_order_acquire);
+    if(g_msiVirtualWakeSourceWaitLoggedGeneration.exchange(generation,std::memory_order_acq_rel)!=generation)
+        appendNativeLifecycleLog("msi-virtual-wake-source-wait",{{"generation",generation},
+            {"hostEpoch",inputHostEpochToken()},{"waitedMs",waited},
+            {"wakeBudgetMs",ymcc::msi::virtualWakeMaxAgeMs},{"modeRetryAdded",false},
+            {"publicationGranted",false},{"policy","authorized-msi-current-wake-bounded-source-wait"}});
+    return MsiDinputRouteWindowAction::Poll;
+}

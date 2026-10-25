@@ -1,0 +1,14 @@
+// Actual old/current Output classes. First reproduce the old clock bug; compare
+// node reuse against the same old class with only that one recovery guard fixed.
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import {spawnSync} from 'node:child_process';import {fileURLToPath} from 'node:url';
+const root=process.cwd().replaceAll('\\','/'),toolDir=path.dirname(fileURLToPath(import.meta.url));
+const out=path.resolve(process.env.YMCC_FRAME_BASE_OUT||'../../../Build/Tasks/YMCC-Steam-HUD-Probe/frame-base-node-reuse-20261017/selftest').replaceAll('\\','/');
+const original=path.resolve(process.env.YMCC_FRAME_BASE_BEFORE||'tools/fixtures/monitor_frame_base_original_20261017.inc').replaceAll('\\','/');
+const after=path.resolve(process.env.YMCC_FRAME_BASE_CANDIDATE||'native/monitor_frame_output.h').replaceAll('\\','/');
+fs.mkdirSync(out,{recursive:true});const sha=x=>crypto.createHash('sha256').update(x).digest('hex');
+const beforeText=fs.readFileSync(original,'utf8').replaceAll('\r\n','\n'),needle='if(packetHardwareRevision_!=hardwareRevision_){';assert.equal(beforeText.split(needle).length,2);
+const reference=out+'/reference-monitor_frame_output.h';fs.writeFileSync(reference,beforeText.replace(needle,'if(packetHardwareRevision_!=hardwareRevision_ || packetScratch_.is_null()){'));
+const pins={original:{path:original,sha256:sha(fs.readFileSync(original))},reference:{path:reference,sha256:sha(fs.readFileSync(reference)),change:'Only the null-cache recovery guard. No JSON node reuse.'},after:{path:after,sha256:sha(fs.readFileSync(after))}};
+const template=fs.readFileSync(path.join(toolDir,'monitor_frame_base_reuse_selftest.cpp'),'utf8');fs.writeFileSync(out+'/test.cpp',template.replaceAll('__ROOT__',root).replace('__BROKEN__',original).replace('__BEFORE__',reference).replace('__AFTER__',after));
+const bat=out+'/compile-run.bat';fs.writeFileSync(bat,['@echo off','call "C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat" >nul','if errorlevel 1 exit /b %ERRORLEVEL%',`cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"${root}/native" "${out}/test.cpp" /Fo"${out}/test.obj" /Fe"${out}/test.exe"`,'if errorlevel 1 exit /b %ERRORLEVEL%',`"${out}/test.exe" "${out}/RESULT.json"`,'exit /b %ERRORLEVEL%',''].join('\r\n'));
+const run=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/s','/c','""'+bat+'""'],{windowsHide:true,windowsVerbatimArguments:true,encoding:'utf8',timeout:60000,maxBuffer:3e6});fs.writeFileSync(out+'/COMPILE-RUN.log',(run.stdout||'')+(run.stderr||''));assert.equal(run.status,0,(run.stdout||'')+(run.stderr||''));assert.equal(pins.after.sha256,sha(fs.readFileSync(after)),'candidate/source changed during test');fs.writeFileSync(out+'/SOURCE-PINS.json',JSON.stringify(pins,null,2));console.log(fs.readFileSync(out+'/RESULT.json','utf8'));

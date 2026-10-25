@@ -1,0 +1,234 @@
+// Dedicated retirement schedules. The actor supplies changed external facts
+// and explicitly calls the actual helper again; no production self-healing,
+// HostStop, WinRT revoke, real apartment, timer or device recovery is claimed.
+static void verifyRetainedOwnerPointers(){
+    for(const auto& entry:handles){
+        auto* h=entry.get();if(!h->resource)continue;
+        bool reachable=h==g_sensorThread||h==g_sensorThreadWake||h==g_onexX2DeviceNotify;
+        for(auto value:g_captureRetainedEvents)reachable=reachable||value==h;
+        for(auto* s:{&g_legionBack,&g_legionSBack,&g_gpdBack,&g_rogOemKey})reachable=reachable||s->device==h||s->ovEvent==h;
+        reachable=reachable||g_onexBack.device==h||g_onexBack.ovEvent==h||g_onexBack.writeEvent==h;
+        check(reachable,"a failed close retains the actual owner pointer: "+h->kind);
+    }
+    check(!gmResource||g_gm!=nullptr,"live GM object cannot be hidden by pointer metadata");
+    check(!dllResource||g_gmDll!=nullptr,"live DLL cannot be hidden by pointer metadata");
+}
+static void seedRetirement(bool log=true,bool dll=true){
+    seed(true,true,true,true,dll,true,true,log,log?3:0);
+    for(auto* s:{&g_legionBack,&g_legionSBack,&g_gpdBack,&g_rogOemKey}){
+        s->device=makeHandle(s==&g_legionBack?"oemDevice":"otherOemDevice");
+        s->ovEvent=makeHandle(s==&g_legionBack?"oemEvent":"otherOemEvent");s->buf.resize(64,42);s->bound=true;
+    }
+    g_onexBack.device=makeHandle("onexDevice");g_onexBack.ovEvent=makeHandle("onexReadEvent");g_onexBack.writeEvent=makeHandle("onexWriteEvent");
+    g_onexBack.buf.resize(64,43);g_onexBack.writeBuf.resize(64,44);g_onexBack.bound=true;
+    g_onexBack.bindGeneration=g_onexBack.readInFlightGen=g_onexBack.writeInFlightGen=11;
+    g_msiSensorApiProvider.arm();g_hcWindowsSensorApiProvider.arm();census.arm();g_onexX2Transport.arm();
+    g_onexX2DeviceNotify=makeHandle("notification");g_onexX2NotifyAttempted=true;
+    g_captureRetainedEvents={makeHandle("timerEvent"),makeHandle("timerEvent")};g_captureResolutionOwed=true;
+    g_inputCaptureStop=true;g_exitRequested=true;g_inputHostExitFence=true;
+}
+static std::uint64_t actorRetire(bool comReady){
+    mark("explicitActorRetire");observed.lastDebt=inputCaptureRetireResources(comReady);return observed.lastDebt;
+}
+static void actorRestoreFacts(){
+    mark("explicitActorRestoresExternalFacts");observed.throwAt.clear();
+    observed.sensorWillSettle=true;observed.dsuStopAllowed=true;observed.ioTerminal=true;observed.ioObservationFailed=false;
+    observed.resolutionEndAllowed=true;observed.freeLibraryAllowed=true;observed.deleteExportAvailable=true;observed.notificationCloseAllowed=true;
+    g_captureMmTimerRetired=true;g_captureEventOverflow=false;
+    for(auto& h:handles){h->closeAllowed=true;h->wait=WAIT_OBJECT_0;}
+    for(auto* child:{&g_msiSensorApiProvider,&g_hcWindowsSensorApiProvider,&census,&g_onexX2Transport,&gamebar}){child->stopAllowed=true;child->runningFlag=false;}
+    if(gyroToken||accelToken)inputCaptureSensorThreadActorReleaseSubscriptions();
+}
+static json retirementCase(const std::string& fault){
+    using namespace ymcc::captureLifecycle;
+    beginCase();seedRetirement();
+    const bool all=fault=="all-debts";
+    auto is=[&](const char* name){return all||fault==name;};
+    const bool gamebarOnly=fault=="gamebar-com-unavailable"||fault=="gamebar-revoke-failure";
+    const bool motionOnly=fault=="free-library-failure"||fault=="missing-delete-export";
+    if(is("sta-timeout")||fault=="sta-wait-failed"||fault=="subscription-revoke-retained")observed.sensorWillSettle=false;
+    if(fault=="sta-wait-failed")g_sensorThread->wait=WAIT_FAILED;
+    if(is("msi-provider"))g_msiSensorApiProvider.stopAllowed=false;
+    if(is("hc-provider"))g_hcWindowsSensorApiProvider.stopAllowed=false;
+    if(fault=="running-provider")g_msiSensorApiProvider.runningFlag=true;
+    if(is("census"))census.stopAllowed=false;
+    if(is("dsu"))observed.dsuStopAllowed=false;
+    if(is("oem-pending")||fault=="oem-observation-failed")g_legionBack.readPending=true;
+    if(fault=="oem-observation-failed")observed.ioObservationFailed=true;
+    if(is("onex-read-pending"))g_onexBack.readPending=true;
+    if(is("onex-write-pending"))g_onexBack.writeInFlight=true;
+    if(is("x2"))g_onexX2Transport.stopAllowed=false;
+    if(is("timer-unproven"))g_captureMmTimerRetired=false;
+    if(fault=="timer-overflow")g_captureEventOverflow=true;
+    if(is("timer-resolution-failure"))observed.resolutionEndAllowed=false;
+    if(fault=="timer-close-failure")g_captureRetainedEvents[0]->closeAllowed=false;
+    if(fault=="sensor-thread-close-failure")g_sensorThread->closeAllowed=false;
+    if(fault=="sensor-wake-close-failure")g_sensorThreadWake->closeAllowed=false;
+    if(fault=="oem-device-close-failure")g_legionBack.device->closeAllowed=false;
+    if(fault=="oem-event-close-failure")g_legionBack.ovEvent->closeAllowed=false;
+    if(fault=="onex-device-close-failure")g_onexBack.device->closeAllowed=false;
+    if(fault=="onex-read-event-close-failure")g_onexBack.ovEvent->closeAllowed=false;
+    if(fault=="onex-write-event-close-failure")g_onexBack.writeEvent->closeAllowed=false;
+    if(is("notification-close-failure"))observed.notificationCloseAllowed=false;
+    if(fault=="free-library-failure")observed.freeLibraryAllowed=false;
+    if(fault=="missing-delete-export")observed.deleteExportAvailable=false;
+    if(all||gamebarOnly){gamebar.arm();gamebar.stopAllowed=fault!="gamebar-revoke-failure"&&!all;}
+    if(all||fault=="subscription-revoke-retained"||fault=="subscription-token-with-sta-exited"){
+        gyroToken=std::make_unique<Resource>("gyroToken");accelToken=std::make_unique<Resource>("accelToken");
+        g_gyroReadingChangedSubscribed=g_accelReadingChangedSubscribed=true;g_sensorUnsubscribeRetained=true;
+    }
+    if(fault=="metadata-is-not-destruction"){
+        const auto before=resourceCount();g_inputCaptureReady=false;g_inputCaptureSensorsSuspended=false;
+        inputCaptureClearExitConfiguration();
+        check(resourceCount()==before&&live("gm")==1&&live("sensorThread")==1,"ready/config/metadata clearing does not destroy resources");
+        observed.sensorWillSettle=false;
+    }
+    if(g_legionBack.readPending)memoryOperations.push_back({&g_legionBack.ov,g_legionBack.device,g_legionBack.ovEvent});
+    if(g_onexBack.readPending)memoryOperations.push_back({&g_onexBack.ov,g_onexBack.device,g_onexBack.ovEvent});
+    if(g_onexBack.writeInFlight)memoryOperations.push_back({&g_onexBack.writeOv,g_onexBack.device,g_onexBack.writeEvent});
+    auto weak=std::weak_ptr<InputCaptureSensorSink>(g_inputCaptureSink);auto* sinkIdentity=g_inputCaptureSink.get();
+    const auto* oemBuffer=g_legionBack.buf.data();const auto* onexReadBuffer=g_onexBack.buf.data();const auto* onexWriteBuffer=g_onexBack.writeBuf.data();
+    json row={{"name","retire-"+fault},{"kind","whole-actual-Shutdown-then-explicit-actor-RetireResources"},
+        {"initial",state()},{"observations",json::array()},{"actualHostStopExecuted",false},
+        {"laterCallsAreExplicitFixtureActor",true},{"productionSelfHealingProven",false},{"harnessTeardownExcludedFromAcceptance",true}};
+    inputCaptureShutdown();
+    row["observations"].push_back(state());
+    check(g_captureShutdownAttempted,"actual Shutdown completion marker reached after sensor request/reap");
+    check(!g_inputCaptureReady,"shutdown clears ready separately from resource destruction");
+    check(g_realStickTest.enabled==(fault!="metadata-is-not-destruction"),"exit configuration remains until fixture HostStop boundary");
+    if(!gamebarOnly&&!motionOnly){
+        check(g_inputCaptureSink.get()==sinkIdentity&&!weak.expired()&&live("sink")==1,"unresolved dependency retains same sink identity");
+        check(g_gm&&g_gmDll&&live("gm")==1&&live("dll")==1&&!gmFunctionsCleared(),"unresolved dependency retains GM, DLL and functions");
+        check(observed.calls["gmDelete"]==0&&observed.calls["freeLibrary"]==0,"no premature delete/unload on initial unresolved debt");
+    }else if(gamebarOnly){
+        check(!live("gm")&&!live("dll")&&!live("sink"),"Gamebar is independent from GM/sink dependency gate");
+        check(live("gamebar")==1&&observed.calls["gamebarShutdown"]==0,"COM-unready shutdown retains Gamebar tokens without COM call");
+    }else{
+        check(live("dll")==1&&g_gmDll&&!gmFunctionsCleared(),"failed library/export operation retains DLL owner and function surface");
+        check(fault!="free-library-failure"||(!g_gm&&!live("gm")),"successful GM delete does not repeat after failed DLL free");
+        check(fault!="missing-delete-export"||(g_gm&&live("gm")==1),"missing delete export retains real GM object");
+    }
+    if(all){
+        check(live("dsu")==1&&live("sensorThread")==1&&live("sensorEvent")==1,"all-debt initial DSU/STA owners remain");
+        check(live("msiProvider")==1&&live("hcProvider")==1&&live("census")==1,"all-debt initial provider/Census resources remain");
+        check(live("oemDevice")==1&&live("onexDevice")==1&&live("x2")==1,"all-debt initial OEM/X2 resources remain");
+        check(live("timerEvent")==2&&live("gamebar")==1&&live("notification")==1,"all-debt initial timer/Gamebar/notification resources remain");
+    }
+    verifyRetainedOwnerPointers();
+    const int acquired=observed.calls["resourceAcquire"],shutdowns=observed.calls["sensorShutdown"],starts=observed.calls["dsuStart"];
+    // Re-observe with all initial failures unchanged; no reconstruction is allowed.
+    const auto debts=actorRetire(false);row["observations"].push_back(state());
+    check(debts!=0,"unknown/failed observation produces actual nonzero debt");
+    if(!gamebarOnly&&!motionOnly)check((debts&Debt::Motion)!=0,"unsettled dependency records retained motion debt");
+    if(all){
+        const std::uint64_t required=Debt::Timer|Debt::Dsu|Debt::SensorSta|Debt::SensorProviders|Debt::Census|Debt::OemIo|Debt::Gamebar|Debt::Motion;
+        check((debts&required)==required,"all distinct unresolved owners are represented by actual debt bits");
+    }
+    if(is("oem-pending")||fault=="oem-observation-failed")check(g_legionBack.buf.data()==oemBuffer&&g_legionBack.buf.size()==64&&g_legionBack.readPending,"pending OEM IO keeps stable buffer and operation");
+    if(is("onex-read-pending"))check(g_onexBack.buf.data()==onexReadBuffer&&g_onexBack.buf.size()==64&&g_onexBack.readPending,"pending OneX read keeps stable buffer and operation");
+    if(is("onex-write-pending"))check(g_onexBack.writeBuf.data()==onexWriteBuffer&&g_onexBack.writeBuf.size()==64&&g_onexBack.writeInFlight,"pending OneX write keeps stable buffer and operation");
+    if(all||fault=="subscription-revoke-retained"){
+        const auto retryCount=observed.calls["sensorExitRetryTicket"];
+        actorRetire(false);actorRetire(false);
+        check(retryCount==1&&observed.calls["sensorExitRetryTicket"]==1,"exit observation appends at most one extra Shutdown ticket");
+        check(live("gyroToken")==1&&live("accelToken")==1,"failed revoke retains independent memory token resources");
+    }
+    if(fault=="gamebar-revoke-failure"){
+        const auto comDebt=actorRetire(true);row["observations"].push_back(state());
+        check((comDebt&Debt::Gamebar)!=0&&live("gamebar")==1,"COM-ready failed revoke retains Gamebar resources");
+    }
+    verifyRetainedOwnerPointers();
+    check(observed.calls["resourceAcquire"]==acquired&&observed.calls["sensorShutdown"]==shutdowns&&observed.calls["dsuStart"]==starts,"retirement observation never recreates or reinitializes input");
+    actorRestoreFacts();
+    const auto finalDebt=actorRetire(true);row["observations"].push_back(state());
+    check(finalDebt==0&&released(),"restored memory facts plus actual retirement close every actual resource");
+    check(!g_inputCaptureSink&&!g_gm&&!g_gmDll&&gmFunctionsCleared(),"final sink/GM/DLL pointers and functions cleared");
+    check(!g_sensorThread&&!g_sensorThreadWake&&!g_onexX2DeviceNotify&&!g_onexX2NotifyAttempted,"final checked-close owner pointers cleared");
+    check(!g_captureRetainedEvents[0]&&!g_captureRetainedEvents[1]&&!g_captureResolutionOwed,"final timer events/resolution ownership returned");
+    check(observed.calls["unexpectedInputPublish"]==0&&observed.calls["unexpectedInputFaultRebind"]==0,"late draining IO never publishes input or rebinds");
+    check(observed.calls["resourceAcquire"]==acquired&&observed.calls["sensorShutdown"]==shutdowns&&observed.calls["dsuStart"]==starts,"recovery consists only of explicit retirement observations/closure");
+    if(fault!="metadata-is-not-destruction")check(g_realStickTest.enabled,"retirement alone preserves exit config until HostStop boundary");
+    mark("fixtureMemoryHostStopBoundary");inputCaptureClearExitConfiguration();
+    check(!g_realStickTest.enabled&&!g_realStickTestAdmissionLogged,"actual ClearExitConfiguration after supplied HostStop boundary");
+    const int destroyed=observed.calls["resourceDestroyed"],deleted=observed.calls["gmDelete"],freed=observed.calls["freeLibrary"];
+    check(actorRetire(true)==0&&released(),"repeated explicit retirement stays settled");
+    check(observed.calls["resourceDestroyed"]==destroyed&&observed.calls["gmDelete"]==deleted&&observed.calls["freeLibrary"]==freed,"no double destruction/delete/unload after closure");
+    row["observations"].push_back(state());row["checks"]=observed.checks;row["failures"]=observed.failures;row["pass"]=observed.failures.empty();
+    row["finalAllResourcesReleased"]=released();row["finalDebt"]=observed.lastDebt;return row;
+}
+
+static json emergencyCase(const std::string& fault){
+    using namespace ymcc::captureLifecycle;
+    beginCase();
+    const bool empty=fault=="already-empty",orphan=fault=="gm-without-dll";
+    if(!empty)seedRetirement(false,!orphan);
+    g_inputCaptureReady=false;g_exitRequested=true;
+    const bool pending=fault=="pending-children"||fault.find("throws")!=std::string::npos;
+    if(pending){
+        observed.sensorWillSettle=false;observed.dsuStopAllowed=false;
+        g_msiSensorApiProvider.stopAllowed=false;g_hcWindowsSensorApiProvider.stopAllowed=false;census.stopAllowed=false;
+        g_onexX2Transport.stopAllowed=false;g_captureMmTimerRetired=false;observed.resolutionEndAllowed=false;
+        g_legionBack.readPending=true;g_onexBack.readPending=g_onexBack.writeInFlight=true;
+        // A partially failed owner may already be draining before this fallback.
+        for(auto* session:{&g_legionBack,&g_legionSBack,&g_gpdBack,&g_rogOemKey})session->closing=true;
+        g_onexBack.draining=true;
+        memoryOperations.push_back({&g_legionBack.ov,g_legionBack.device,g_legionBack.ovEvent});
+        memoryOperations.push_back({&g_onexBack.ov,g_onexBack.device,g_onexBack.ovEvent});
+        memoryOperations.push_back({&g_onexBack.writeOv,g_onexBack.device,g_onexBack.writeEvent});
+    }
+    if(fault=="missing-delete-export")observed.deleteExportAvailable=false;
+    if(fault=="free-library-failure")observed.freeLibraryAllowed=false;
+    if(fault=="stop-onex-throws")observed.throwAt="onexStop";
+    if(fault=="stop-windows-throws")observed.throwAt="windowsRetire";
+    if(fault=="stop-oem-throws")observed.throwAt="vendorShutdown";
+    if(fault=="stop-legion-throws")observed.throwAt="legionRevoke";
+    if(fault=="sensor-shutdown-throws")observed.throwAt="sensorPost";
+    if(fault=="retirement-observation-throws")observed.throwAt="censusRetire";
+    auto weak=std::weak_ptr<InputCaptureSensorSink>(g_inputCaptureSink);auto* sinkIdentity=g_inputCaptureSink.get();
+    json row={{"name","emergency-"+fault},{"kind","whole-actual-EmergencyCleanup-then-explicit-RetireResources"},
+        {"initial",state()},{"observations",json::array()},{"harnessTeardownExcludedFromAcceptance",true},
+        {"laterCallsAreExplicitFixtureActor",true},{"productionSelfHealingProven",false},
+        {"actualHostStopExecuted",false},{"closureExpected",!orphan}};
+    inputCaptureEmergencyCleanup();
+    row["observations"].push_back(state());
+    check(!g_inputCaptureReady,"actual Emergency is valid before ready");
+    check(!g_captureShutdownAttempted,"Emergency does not forge normal Shutdown completion marker");
+    check(observed.calls["onexStop"]==1&&observed.calls["windowsRetire"]==1&&observed.calls["vendorShutdown"]==1&&observed.calls["legionRevoke"]==1,"each independent Emergency stop request is attempted even when a sibling throws");
+    check(observed.calls["sensorShutdown"]==1,"Emergency attempts sensor request after independent failures");
+    if(pending){
+        check(g_inputCaptureSink.get()==sinkIdentity&&!weak.expired()&&live("sink")==1,"Emergency retains same sink for unresolved child debt or observation exception");
+        check(g_gm&&g_gmDll&&live("gm")==1&&live("dll")==1,"Emergency request attempts cannot delete GM or unload dependencies");
+        check(observed.calls["gmDelete"]==0&&observed.calls["freeLibrary"]==0,"pending Emergency performs no direct delete or unload");
+        check(live("sensorThread")==1&&live("census")==1&&live("msiProvider")==1&&live("hcProvider")==1,"pending Emergency child resources remain alive");
+        check(g_legionBack.readPending&&g_onexBack.readPending&&g_onexBack.writeInFlight&&live("timerEvent")==2,"pending Emergency retains IO and unproven timer resources");
+    }else if(fault=="missing-delete-export"){
+        check(g_gm&&g_gmDll&&live("gm")==1&&live("dll")==1,"Emergency missing Delete export keeps actual GM/DLL ownership");
+        check(observed.calls["gmDelete"]==0&&observed.calls["freeLibrary"]==0,"missing Delete never proceeds to unload");
+    }else if(fault=="free-library-failure"){
+        check(!g_gm&&!live("gm")&&g_gmDll&&live("dll")==1,"Emergency failed FreeLibrary preserves DLL owner after successful object destruction");
+        check(observed.calls["gmDelete"]==1&&observed.calls["freeLibraryFailure"]==1,"Emergency records actual delete and failed unload separately");
+    }
+    if(fault.find("throws")!=std::string::npos)check(observed.calls["injectedMemoryException"]>=1,"injected memory child exception actually reached guarded Emergency path");
+    verifyRetainedOwnerPointers();
+    const int acquires=observed.calls["resourceAcquire"],starts=observed.calls["dsuStart"],requests=observed.calls["sensorShutdown"];
+    if(orphan){
+        const auto debts=actorRetire(true);row["observations"].push_back(state());
+        check((debts&Debt::Motion)!=0&&g_gm&&live("gm")==1&&!g_gmDll,"object without DLL stays owned with explicit Motion debt");
+        check(g_inputCaptureSink.get()==sinkIdentity&&!weak.expired(),"orphan GM debt retains sink dependency");
+        check(observed.calls["gmDelete"]==0&&observed.calls["freeLibrary"]==0,"missing DLL owner cannot be manufactured or treated as deletion");
+        check(!released(),"unrepairable orphan is explicitly unclosed before any harness/process teardown");
+        row["expectedUnresolvedMotionDebt"]=true;row["boundedDestructionProven"]=false;
+    }else{
+        actorRestoreFacts();const auto debts=actorRetire(true);row["observations"].push_back(state());
+        check(debts==0&&released(),"eligible Emergency children close through actual RetireResources and reach zero actual resources");
+        check(!g_gm&&!g_gmDll&&!g_inputCaptureSink&&gmFunctionsCleared(),"Emergency final object/module/sink identities cleared only after actual closure");
+        check(observed.calls["resourceAcquire"]==acquires&&observed.calls["dsuStart"]==starts&&observed.calls["sensorShutdown"]==requests,"Emergency continuation only observes/closes; never rebuilds input or reissues startup");
+        const int destroyed=observed.calls["resourceDestroyed"],deleted=observed.calls["gmDelete"],freed=observed.calls["freeLibrary"];
+        check(actorRetire(true)==0&&released(),"repeated retirement after Emergency remains settled");
+        check(observed.calls["resourceDestroyed"]==destroyed&&observed.calls["gmDelete"]==deleted&&observed.calls["freeLibrary"]==freed,"Emergency resources destroyed exactly once");
+        row["expectedUnresolvedMotionDebt"]=false;
+    }
+    check(observed.calls["unexpectedInputPublish"]==0&&observed.calls["unexpectedInputFaultRebind"]==0,"Emergency late IO retirement never publishes or rebinds");
+    row["checks"]=observed.checks;row["failures"]=observed.failures;row["pass"]=observed.failures.empty();
+    row["finalAllResourcesReleased"]=released();row["finalDebt"]=observed.lastDebt;return row;
+}

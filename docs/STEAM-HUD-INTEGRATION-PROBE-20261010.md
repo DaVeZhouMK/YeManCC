@@ -126,3 +126,21 @@ MagicBlack 商店 2.0.0 固定提交：`6f61a516f64b65d88e5b30248821a5a3b80fcb28
 用户随后要求暂停本机直接验证、允许继续源码分析。已遵守：之后没有CDP、切应用、发键、截图或注入。现成MagicBlack/MangoPeel/Crosshair/PiP/DimmerDeck/浏览器源码与本机Steam原popup/BrowserView源码复核，得到“最低Composition请求 ≠ 独立游戏显示载体”的区别。
 
 21项静态/惰性VM检查通过，但不是实机pass。详情：`G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\docs\STEAM-HUD-CARRIER-SOURCE-REVIEW-20261010.md`。下一轮候选是**原生游戏绑定子popup**，或**当前game-owner的render-only BrowserView**；仍用YMCC统一数据源方向、示例先测、保持独立alpha，不部署外置置顶H5冒充Steam。需要用户恢复现场测试授权才会动桌面。
+
+## 阶段五：native-popup探针实测就绪，尚未执行
+
+采用当前游戏绑定的原生子popup + 原native hook/Portal，不固定根窗口。游戏/renderer/CEF owner的ID分别校验，不假设其相等；只读示例角落信息块，四档alpha和6秒过期。45+8+35项专项和131项既有回归通过，默认bundle排除探针，安装版hash未变。
+
+准备输出：`G:\YeManCC-Work\Build\Tasks\YMCC-Steam-HUD-Probe\native-ready-20261010-164125`。详见 `STEAM-HUD-NATIVE-CHILD-READY-20261010.md`。本轮没有现场CDP/切应用/发键/截图/创建实际窗口。下一步仍用2077；常驻、透明、输入穿透必须真实像素和物理输入验收。
+
+## 阶段六：2077原生子窗口显示与透明度初步成功
+
+用户恢复桌面验证授权后，17:11修订1创建超时且留下自身空descriptor；原失败报告保留，之后精确回收。17:18修订2去掉owner_window覆盖，匹配Steam原factory默认SharedJSContext opener，以target_browser定向当前游戏，实际游戏owner仍独立校验/监听生命周期。
+
+本机真实2077设置页上出现现代H5角落信息块，不是外置桌面网页。人工已核验baseline、0/35/65/90%底板、额外1.8秒短时持显和停止后全部七张game-client截图。底板四档区别可见、文字不随底板淡化；菜单收起且根overlay hidden时仍显示，stop后无残留。本次场景未见新增整屏黑底。用户也明确确认：“目视到成功了”。
+
+证据目录：`G:\YeManCC-Work\Build\Tasks\YMCC-Steam-HUD-Probe\2077-native-opener-20261010-171827`。原始 `2077-NATIVE-CHILD-INTEGRATION.json` 不改；人工后验与用户确认另存 `2077-NATIVE-PIXEL-REVIEW.json`。安装版未替换，探针已移除、owned popup登记为空；不为重复证明显示再操作游戏。
+
+这是显示/透明度/短时持显初步通过，不是完整发布验收。数据仍明确fixture；键鼠/手柄实际输入、长时稳定、菜单切换/Alt-Tab/退出、无边框和DXGI独占全屏未通过。保存Fullscreen选项/覆盖显示器几何不证明运行时独占。测试块占屏偏大需校正；下一步先收紧尺寸和验输入，再补稳定性/显示模式，之后只消费YMCC统一监控接口，不直接读HWiNFO。
+
+失败原因、修订2源码机制、历史构建/资源数据边界及完整验收项见 `G:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\docs\STEAM-HUD-NATIVE-CHILD-READY-20261010.md`。

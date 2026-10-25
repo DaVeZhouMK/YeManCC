@@ -18,7 +18,7 @@ assert(fanView.includes('syncGraphNodeEditMarker(index, true'),
   'FanView does not synchronously arm the selected node');
 assert(fanView.includes('@gp:spatial-edit="onGraphSpatialEdit(index, $event)"'),
   'FanView has no spatial edit handler');
-assert(native.includes('g_uiFanNodeEditActive ? GP_UI_FAN_NODE_REPEAT_MS'),
-  'native fan-node repeat cadence is not scoped to fan editing');
+assert(native.includes('(g_uiFanNodeEditActive || g_uiSliderEditActive)') && native.includes('gamepadUiEditRepeatInterval(now - uiNavHoldStarted)'),
+  'native one-step interval acceleration is not scoped to active editing');
 
 console.log('fan gamepad node selftest: 5/5 passed');

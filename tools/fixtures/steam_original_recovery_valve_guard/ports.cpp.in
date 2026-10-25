@@ -1,0 +1,29 @@
+
+#include <string>
+#include <vector>
+#include <mutex>
+#include <atomic>
+#include <algorithm>
+#include <iostream>
+#include <random>
+#include <cstdint>
+#include <cwchar>
+#include "monitor_identity.h"
+constexpr bool FALSE=false;
+using DWORD=unsigned long;using ULONGLONG=unsigned long long;using SIZE_T=size_t;using HANDLE=void*;
+struct NativeDetectedGame{DWORD pid=7;ULONGLONG processCreated=500;std::wstring path=L"D:\\Game\\wuxia.Exe";bool customConfigured=false,whitelisted=true;};
+struct NativeGameValveSnapshot{NativeDetectedGame game;unsigned long long generation=11,rulesEpoch=5,identityGeneration=11;};
+struct Scenario{bool sessionOk=true,identityOk=true,sameSession=true,monitorExcluded=false,memoryOk=true,openOk=true,refreshEpoch=false;DWORD pid=7;ULONGLONG born=500;std::wstring path=L"D:\\Game\\wuxia.Exe";SIZE_T ws=900;std::vector<std::wstring> white{L"wuxia"},excluded{L"explorer"},custom{L"wuxia"};};
+Scenario s;NativeGameValveSnapshot g_gameValveTarget;std::mutex g_gameRulesMx,g_gameValveMx;std::atomic<unsigned long long> g_gameRulesEpoch{5};int excludesReads=0,whiteReads=0,customReads=0,stamps=0,identityReads=0;
+constexpr DWORD PROCESS_QUERY_LIMITED_INFORMATION=1,PROCESS_VM_READ=2;constexpr SIZE_T SG_MIN_WS=500;
+struct PROCESS_MEMORY_COUNTERS{DWORD cb;SIZE_T WorkingSetSize;};using PROCESS_MEMORY_COUNTERS_EX=PROCESS_MEMORY_COUNTERS;
+DWORD GetCurrentProcessId(){return 1;}bool ProcessIdToSessionId(DWORD pid,DWORD*out){*out=(pid==1||s.sameSession)?1:2;return s.sessionOk;}
+bool focusQueryProcessIdentity(DWORD,std::wstring*p,ULONGLONG*b){++identityReads;*p=s.path;*b=s.born;return s.identityOk;}
+HANDLE OpenProcess(DWORD,bool,DWORD){return s.openOk?reinterpret_cast<HANDLE>(1):nullptr;}void CloseHandle(HANDLE){}
+bool GetProcessMemoryInfo(HANDLE,PROCESS_MEMORY_COUNTERS*p,size_t){p->WorkingSetSize=s.ws;return s.memoryOk;}
+void nativeRefreshGameRulesEpochFromDiskLocked(){++stamps;if(s.refreshEpoch)++g_gameRulesEpoch;}
+std::vector<std::wstring> sgExcludes(){++excludesReads;return s.excluded;}
+std::vector<std::wstring> sgGameWhitelist(){++whiteReads;return s.white;}
+std::vector<std::wstring> nativeConfiguredGameExes(){++customReads;return s.custom;}
+bool nativeMonitorExcluded(const std::wstring&){return s.monitorExcluded;}
+bool nativeIsConfiguredGameExe(const std::wstring&x,const std::vector<std::wstring>&v){return std::find(v.begin(),v.end(),x)!=v.end();}

@@ -1,0 +1,14 @@
+using Mono.Cecil;
+using Mono.Cecil.Cil;
+namespace HcDeviceCoreTrim;
+static class SdlTimerAudit
+{
+    public static void Run(string input,string report)
+    {
+        using var a=Util.Read(input,out var resolver);using var cleanup=resolver;
+        var types=Util.Types(a.MainModule).ToArray();var methods=types.SelectMany(t=>t.Methods).ToArray();
+        var callers=methods.Where(m=>m.HasBody).SelectMany(m=>m.Body.Instructions.Where(i=>i.Operand is MethodReference r&&r.DeclaringType.FullName=="SDL3.SDL"&&(r.Name=="GetPerformanceCounter"||r.Name=="GetPerformanceFrequency")).Select(i=>new{Method=m.FullName,Token=m.MetadataToken.ToString(),Offset=i.Offset,Target=((MethodReference)i.Operand).FullName,TargetToken=((MethodReference)i.Operand).MetadataToken.ToString(),Semantic=Verification.Semantic(m)})).ToArray();
+        var review=methods.Where(m=>m.HasBody&&((m.DeclaringType.FullName=="HandheldCompanion.Helpers.GamepadMotion"&&m.Name==".ctor")||(m.DeclaringType.FullName=="HandheldCompanion.Managers.ManagerFactory"&&m.Name==".cctor")||(m.DeclaringType.FullName=="HandheldCompanion.Controllers.SDL.Xbox360Controller"&&m.Name==".ctor")||(m.Name=="InitializeInputOutput"&&m.DeclaringType.FullName.StartsWith("HandheldCompanion.Controllers.",StringComparison.Ordinal))||m.DeclaringType.FullName=="HandheldCompanion.Controllers.SDLController"||(m.Name==".ctor"&&(m.DeclaringType.FullName.Contains("Dummy")||m.DeclaringType.FullName=="HandheldCompanion.Controllers.IController"||m.DeclaringType.FullName=="HandheldCompanion.Controllers.Xbox360Controller"))||(m.Name==".cctor"&&m.DeclaringType.FullName=="HandheldCompanion.Managers.ControllerManager"))).Select(m=>new{Method=m.FullName,Token=m.MetadataToken.ToString(),Semantic=Verification.Semantic(m),IL=m.Body.Instructions.Select(i=>i.ToString()).ToArray()}).ToArray();
+        Util.Save(report,new{Input=Path.GetFullPath(input),Sha256=Util.HashFile(input),Callers=callers,Reviewed=review,ConstructorNativeEdges=methods.Where(m=>m.DeclaringType.FullName=="HandheldCompanion.Helpers.GamepadMotion"&&m.HasPInvokeInfo).Select(m=>new{Method=m.FullName,Token=m.MetadataToken.ToString(),Library=m.PInvokeInfo.Module.Name,m.PInvokeInfo.EntryPoint}).ToArray(),StopwatchTypes=a.MainModule.GetTypeReferences().Where(t=>t.FullName=="System.Diagnostics.Stopwatch").Select(t=>new{t.FullName,Token=t.MetadataToken.ToString(),Scope=t.Scope.ToString()}).ToArray(),StopwatchMembers=a.MainModule.GetMemberReferences().Where(t=>t.DeclaringType.FullName=="System.Diagnostics.Stopwatch").Select(t=>new{t.FullName,Token=t.MetadataToken.ToString()}).ToArray(),AssemblyRefs=a.MainModule.AssemblyReferences.Select(r=>new{r.FullName,Token=r.MetadataToken.ToString()}).ToArray()});
+    }
+}

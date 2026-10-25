@@ -1,0 +1,27 @@
+import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import assert from 'node:assert/strict';import{spawnSync}from'node:child_process';import{fileURLToPath}from'node:url';
+const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),args=process.argv.slice(2);
+assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_PRIVATE --toolchain ABS_CAPTURED_TOOLCHAIN');
+const out=path.resolve(args[1]),toolchain=path.resolve(args[3]),inside=(p,r)=>{const rel=path.relative(r,p);return !rel||(!rel.startsWith('..')&&!path.isAbsolute(rel));};
+assert(!fs.existsSync(out)&&!inside(out,repo)&&!inside(out,toolchain),'fresh private output outside source/toolchain required');
+const sha=v=>crypto.createHash('sha256').update(v).digest('hex'),hash=p=>sha(fs.readFileSync(p)),read=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')),save=(p,j)=>fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
+const mainPath=path.join(repo,'native/main.cpp'),main=fs.readFileSync(mainPath,'utf8');
+const begin=main.indexOf('        auto addFile = [&](const std::wstring& path) {'),end=main.indexOf('        auto addRotated =',begin);
+assert(begin>=0&&end>begin);const actualAdd=main.slice(begin,end);
+const calls=['addFile(dataDir + L"\\\\controller-return\\\\target-return.json");','addFile(dataDir + L"\\\\controller-return\\\\hidhide-cli-writer.json");'];
+for(const call of calls)assert.equal(main.split(call).length,2,'exact existing-file collector call');
+const a=main.indexOf(calls[0]),z=main.indexOf(calls[1])+calls[1].length,selection=main.slice(a,z);
+assert.equal(selection.trim().split(/\r?\n/).map(x=>x.trim()).join('\n'),calls.join('\n'),'unconditional exact historical file selection only');
+assert(main.includes('const std::wstring dataDir = yemancc_data_dir();')&&main.includes('existingHistoricalBytesOnly=true;noRepairOrDeviceQuery=true;notCurrentInputProof=true'));
+const inputs=['native/main.cpp','native/log_export_evidence.h','deps/json/json.hpp','tools/fixtures/virtual_return_export/fixture.cpp','tools/virtual_return_export_selftest.mjs'].map(relative=>({relative,path:path.join(repo,relative),sha256:hash(path.join(repo,relative))}));
+fs.mkdirSync(out);for(const i of inputs){i.snapshot=path.join(out,path.basename(i.path));fs.copyFileSync(i.path,i.snapshot);}
+fs.writeFileSync(out+'/actual-add-file.inc',actualAdd);fs.writeFileSync(out+'/actual-return-files.inc',selection);
+const capture=read(toolchain+'/build-environment.json'),tm=read(toolchain+'/toolchain-manifest.json'),env={...capture.environment};
+for(const key of Object.keys(env))if(/^(CL|_CL_|LINK|_LINK_)$/i.test(key))delete env[key];env.INCLUDE=tm.roots.filter(r=>r.category==='INCLUDE').map(r=>r.frozen).join(';');env.LIB=tm.roots.filter(r=>r.category==='LIB').map(r=>r.frozen).join(';');env.LIBPATH=env.LIB;
+const cl=capture.tools['cl.exe'].paths[0];for(const file of[cl,capture.tools['link.exe'].paths[0]]){const binding=tm.tools.find(t=>path.resolve(t.original).toLowerCase()===path.resolve(file).toLowerCase());assert(binding&&hash(file)===binding.sha256);}
+const byTool=new Map(tm.files.map(f=>[path.resolve(f.frozen).toLowerCase(),f]));const generated=[...['fixture.cpp','log_export_evidence.h','json.hpp','actual-add-file.inc','actual-return-files.inc'].map(name=>({path:path.join(out,name),sha256:hash(path.join(out,name))}))];
+const exe=out+'/ExportFixture.exe',command=['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/DUNICODE','/D_UNICODE','/sourceDependencies',out+'/dependencies.json',out+'/fixture.cpp','/I'+out,'/Fo'+out+'/fixture.obj','/Fe'+exe];
+const build=spawnSync(cl,command,{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:60000,maxBuffer:8*1024*1024});fs.writeFileSync(out+'/build.log',(build.stdout??'')+(build.stderr??''));save(out+'/COMMAND.json',{executable:cl,arguments:command,exit:build.status});assert.equal(build.status,0,'actual collector fixture compile failed; retain build.log');
+const byGenerated=new Map(generated.map(x=>[path.resolve(x.path).toLowerCase(),x])),dep=read(out+'/dependencies.json');const compilerInputs=[dep.Data.Source,...dep.Data.Includes].map(file=>{const key=path.resolve(file).toLowerCase(),binding=byGenerated.get(key)??byTool.get(key);assert(binding&&hash(file)===binding.sha256,'actual compiler identity '+file);return{path:file,sha256:hash(file)};});save(out+'/COMPILE-CLOSURE.json',{compilerInputs,generated});
+const run=spawnSync(exe,[out+'/private-files'],{cwd:out,env,encoding:'utf8',windowsHide:true,timeout:10000,maxBuffer:2*1024*1024});fs.writeFileSync(out+'/stdout.json',run.stdout??'');fs.writeFileSync(out+'/stderr.log',run.stderr??'');const result=JSON.parse(run.stdout??'{}');assert.equal(run.status,0,'actual collected files assertions failed');
+const drift=inputs.filter(x=>hash(x.path)!==x.sha256||hash(x.snapshot)!==x.sha256).map(x=>x.relative);assert.equal(drift.length,0);
+const receipt={status:result.status,recordedAt:new Date().toISOString(),checks:result.checkCount,inputs,actualSnippetHashes:{addFile:sha(actualAdd),selection:sha(selection)},compilerInputs:compilerInputs.length,executable:{path:exe,sha256:hash(exe)},fixtureResult:{path:out+'/stdout.json',sha256:hash(out+'/stdout.json')},sourceDrift:drift,actualCollectionAndExistingStagedInspector:true,fullExporterOrProductExecuted:false,deviceExecuted:false};save(out+'/RESULT.json',receipt);console.log(JSON.stringify(receipt));

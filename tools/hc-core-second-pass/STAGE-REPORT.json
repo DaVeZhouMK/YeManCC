@@ -1,0 +1,165 @@
+{
+  "schemaVersion": 1,
+  "status": "FINAL_NO_PROMOTION",
+  "decision": "REJECT_PROMOTION_THIS_ROUND",
+  "promotionApproved": false,
+  "candidate": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\candidate\\HandheldCompanion.dll",
+    "bytes": 2238976,
+    "sha256": "4f9d2f534289c4e6cc7183deddd719cfd3dfa613fde1e99946ff5327697149ab",
+    "assemblyIdentity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+    "strongNameAdded": false,
+    "typeCount": 1557,
+    "primaryDevices": 77,
+    "allConcreteDeviceSubclasses": 91,
+    "trialOnly": true
+  },
+  "baseline": {
+    "runtimeBytes": 12372746.0,
+    "runtimeFiles": 86,
+    "hcBytes": 2774016,
+    "hcSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "snapshot": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\baseline"
+  },
+  "net": {
+    "hcSavedBytes": 535040,
+    "hcSavedPercent": 19.2876,
+    "candidateRuntimeFiles": 86,
+    "candidateRuntimeBytesWithFrozenOriginalJson": 11837706,
+    "currentParentRuntimeBytes": 12348335,
+    "projectedRuntimeBytesWithParentJsonOnly": 11813295,
+    "projectedBytesAreNotPromoted": true,
+    "previousUnpromotedDevicesV2HcBytes": 2241536,
+    "additionalBytesVsOldUnpromotedHc": 2560
+  },
+  "requiredChecks": [
+    {
+      "check": "original-baseline-copy",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\baseline-copy.json",
+      "sha256": "65a9011694c2c945fa491bfdf49f145fc9a8597d75b49d0d0cbc4c8e09c85ea0"
+    },
+    {
+      "check": "all-original-device-IL-fields",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\device-IL-unsigned-final.json",
+      "sha256": "9124c017a6120efcbd1636c418a364772fba1bdbd1e1f4b68c34a495e9e83f3e"
+    },
+    {
+      "check": "all-retained-method-IL-native-layouts",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\retained-IL-unsigned-final.json",
+      "sha256": "b03a5c5eb8da7bc8f70dc281fc3905ac8a30bbad2869c830d7073475b6b30de0"
+    },
+    {
+      "check": "factory-initializer-static-forward-closure-and-negative-IL-references",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\closure-unsigned-final.json",
+      "sha256": "e78bc2fff54a43e6be816d8ffcbbdfe9e2f2495c7f0f462d8647bd688bfa27ec"
+    },
+    {
+      "check": "required-types-full-GetTypes-77-primary-and-91-total-devices",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\load-unsigned-final.json",
+      "sha256": "bb171c3585c51255aeecd00709a983aa044e1390292ccc86be73e6ace1ccb170"
+    },
+    {
+      "check": "22-in-memory-ACPI-callback-checks",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\callback-unsigned-final.json",
+      "sha256": "ebdac4a57753bb28fe21e296a5434fc298ebb787cb6ef3524c063ee6a72432ea"
+    },
+    {
+      "check": "production-shared-original-lifecycle",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\lifecycle-baseline\\verification.json",
+      "sha256": "0702011b6ce60b62d57d5e02ee78998004a41a1d41d4f79cf5535d4ba705529b"
+    },
+    {
+      "check": "unsigned-production-shared-candidate-lifecycle",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\lifecycle-unsigned-final\\verification.json",
+      "sha256": "c9dc472a49021ac9382e1d3bf36cd481a9abca8cf22aec7715bb7e200ecaaed1"
+    },
+    {
+      "check": "all-method-signatures-diagnostic",
+      "status": "failed-existing-signatures",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\signature-baseline-candidate.json",
+      "sha256": "8bf162e7b4d2b10a5d4702a08d808af8af524eece8ef0ffc72c71c348918fa5e"
+    },
+    {
+      "check": "resource-payload-preservation",
+      "status": "passed",
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\resource-preservation.json",
+      "sha256": "6b6779b322369169f71c0b5661ca40318e9febb240850c9e4832460730324b6e"
+    }
+  ],
+  "independentComparison": {
+    "originalDeviceMetadataTypes": 260,
+    "deviceMethods": 1826,
+    "deviceFields": 1094,
+    "retainedMethods": 9732,
+    "nativeLayouts": 80,
+    "initializerClosureMethods": 771,
+    "layoutAuditTypes": 327,
+    "missingKeptILReferences": 0,
+    "resourcesUnchanged": true
+  },
+  "signatureDiagnostic": {
+    "status": "failed-existing-signatures",
+    "baselineFailedMethods": 26,
+    "candidateFailedMethods": 23,
+    "candidateOnlyFailures": 0,
+    "existingWindowsDisplayApiMissing": true,
+    "dependenciesAdded": false,
+    "fullGetTypesNotRelaxed": true
+  },
+  "signedTrial": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-third-trim\\core\\rejected-signed\\HandheldCompanion.dll",
+    "bytes": 2239488,
+    "sha256": "2ede83a9727a8e500994a22ca537b42feee76e907c63c3bbc60a5204f5c41e63",
+    "rejected": true,
+    "reason": "Introduced strong-name token 538ea1f68f629a04 where original HC has null. Latest parent instruction requires unchanged HC identity. Only a YMCC development derivative was ever claimed."
+  },
+  "blockers": [
+    {
+      "id": "REFLECTION_SEMANTIC_CLOSURE_UNPROVEN",
+      "detail": "348 retained HC reflection/serialization sites and 649 consumer lexical sites have complete locations and context but are not all classified into live Host/LightSetter targets versus excluded UI/profile flows. Root preservation and GetTypes/fixtures do not prove that arbitrary runtime-selected member names or serialized model types survive."
+    },
+    {
+      "id": "FACTORY_LIFECYCLE_EXECUTION_OUT_OF_SCOPE",
+      "detail": "13 Factory field manager types, Status, profile events/CloneProfile and the 771-method constructor/implicit-cctor closure are retained and independently IL-compared. Real ManagerFactory/device/OpenEvents lifecycle was not executed under the hardware prohibition; static closure is reported as such."
+    }
+  ],
+  "productionSourceDriftByOtherTasks": [
+    {
+      "path": "HandheldCompanion.deps.json",
+      "baselineSha256": "ebfda3b3a0838b76d949ff2eabd8ac203ba9a8b87896d329561656ead3565161",
+      "currentSha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+      "dll": false
+    },
+    {
+      "path": "HandheldCompanion.json",
+      "baselineSha256": "34f7c6eb950156b9e133ce00c35e44d98d2157426ef441951ffc6dc3798b7375",
+      "currentSha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+      "dll": false
+    },
+    {
+      "path": "HandheldCompanion.runtime.json",
+      "baselineSha256": "d861503379dbef6fa0577225804b6345a837fb10f9897f40a1dc71942c2a18a7",
+      "currentSha256": "cf1319fd8024a9c781b5585e8acf65327317af0927ee55424d138f7924543713",
+      "dll": false
+    }
+  ],
+  "wroteProductionRuntimeProfileHostNativeDeployment": false,
+  "productHostDeviceDriverSdlNativeSteamExecuted": false,
+  "networkUsed": false,
+  "metadataTokenRebase": "zero-touch-token-rebase.json; exact original method identities and original fixed tokens checked; candidate full retained IL equality pinned before replacing only three fixture token constants",
+  "noFifthExploration": true,
+  "nextSpecificCuts": [
+    "Classify the recorded 348 retained reflection/serializer sites against actual Host/LightSetter receiver types and string-value sources, especially profile CloneProfile/Newtonsoft schemas and manager event/status reflection.",
+    "Use DELETED-TYPES.json and zero incoming retained IL evidence to assess UI-only regions; preserve actual model getter reflection such as LEDPreset.NameKey/Value and all implicit type-initializer side effects.",
+    "The 11 OneX LED thumbnail payloads total 107169 raw bytes. LEDPreset constructor stores Icon as a string, while LightSetter uses NameKey/Value; prove that no actual headless resource stream/render consumer reaches them before a future resource cut. They remain intact now.",
+    "No application library AssemblyRef disappeared in this candidate, so no leaf DLL removal is approved from this work. Other agents keep ownership of SDK/WinRT/UI libraries."
+  ]
+}

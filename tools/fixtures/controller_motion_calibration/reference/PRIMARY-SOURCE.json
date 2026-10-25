@@ -1,0 +1,24 @@
+{
+  "commit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+  "repository": "Valkirie/HandheldCompanion",
+  "fixedTreeSha256": "01759f37346995b3f981d4b9aa5f648520e6e87f2d396dff863e300d153f71fe",
+  "acquisitionNote": "Node HTTPS rejected the local certificate chain; Windows Invoke-WebRequest with normal certificate validation acquired SensorsManager. All file sizes and Git blobs match the fixed official tree.",
+  "files": [
+    {
+      "path": "HandheldCompanion/Managers/SensorsManager.cs",
+      "file": "SensorsManager.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/06c0b9544db2b1f39abf9cd3796225ccfb096103/HandheldCompanion/Managers/SensorsManager.cs",
+      "bytes": 16006,
+      "sha256": "be3d7c99d721ae474afc08129eb54c2b974cc2b48d7ff7eccb790cfe2494d3cc",
+      "gitBlob": "3cd89dbc735d4e80954b8f8a7ef9b799892e945e"
+    },
+    {
+      "path": "HandheldCompanion/Helpers/GamepadMotion.cs",
+      "file": "GamepadMotion.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/06c0b9544db2b1f39abf9cd3796225ccfb096103/HandheldCompanion/Helpers/GamepadMotion.cs",
+      "bytes": 12816,
+      "sha256": "7ba36f0dcb0e280d526e5b09e95888af58b98927b3c83001858817ec12fb23ed",
+      "gitBlob": "b936bc6ac5ab3282dd4d439b8822a59ab11c5407"
+    }
+  ]
+}

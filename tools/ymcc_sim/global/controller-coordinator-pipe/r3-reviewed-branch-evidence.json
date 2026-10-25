@@ -1,0 +1,982 @@
+{
+  "schemaVersion": 1,
+  "status": "EXACT18_ACCOUNTED_BY_TWO_CORRECTLY_COMPLETED_REQUEST6_WAITS_NOT_DELETED_HELPERS",
+  "createdAt": "2026-10-20T14:57:33.138Z",
+  "task": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/helper-claims-20261020/TASK-A1-CONTROLLER.md",
+    "sha256": "945582f014312a4811e2a45b0fbba52d644d83a227974fab1c97c407296d86ed",
+    "bytes": 2172
+  },
+  "versions": {
+    "oldMainSha256": "ba86ea1e1acd8fe3fa0c7ed57ea8735cabdf0436c7fd7a7568052c4a6fdf640f",
+    "fixedB46MainSha256": "368badc1f6af006a093e16bbc52e6330011abf447441b79101ffb6b7eb2f4d09"
+  },
+  "originalReceipt": {
+    "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-positive/full-pipe/fixture-result.json",
+    "sha256": "1edf8028c237e9e66bf83cba0ff93a95e91086f37542e7bda7acf098c39d575c",
+    "bytes": 15892422
+  },
+  "currentReceipt": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/positive/full-pipe/fixture-result.json",
+    "sha256": "c3afb14dd85f188fb4c9900697f74ee0e0103f58bda822197bddc762403d609d",
+    "bytes": 48996174
+  },
+  "helperIdentity": {
+    "wait": {
+      "old": {
+        "file": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-B36-B39-compatibility-20261020-R1/source/Mainline/YeManCC-source/YeManCC/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "sha256": "184d8433bb137d213a4b26cde9ea0dd4f22e72f344f92e9c4df1de3d7ff4281f",
+        "startLine": 78,
+        "endLine": 101,
+        "source": "static void fullPipeWaitForPlayerLock(const json& current,const json& next){\n const auto before=fullPipeProtectionState();const auto v=g_virtualStartProtection.view(startProtectionClock);json verified=nullptr;\n if(v.locked){\n  fullPipeRejectLockedPlayerWrite(current,next);\n  // Ten elapsed seconds only make verification eligible; the real consumer\n  // still owns final success/failure. A late candidate cannot extend the cap.\n  if(v.verificationPending&&v.verificationRemainingMs<v.remainingMs){\n   if(v.verificationRemainingMs){if(v.verificationRemainingMs>1)startProtectionClock+=v.verificationRemainingMs-1;fullPipeRejectLockedPlayerWrite(current,next);++startProtectionClock;}\n   const auto due=g_virtualStartProtection.view(startProtectionClock);\n   check(due.requestId==v.requestId&&due.locked&&due.phase==\"verifying\"&&due.verificationRemainingMs==0,\"ten-second candidate countdown alone never unlocks a player request\");\n   fullPipeRejectLockedPlayerWrite(current,next);fullPipeVerificationStep();verified=fullPipeProtectionState();\n  }\n  const auto held=g_virtualStartProtection.view(startProtectionClock);\n  if(held.locked){\n   check(held.requestId==v.requestId&&held.remainingMs==fullPipeUserMaxMs-held.elapsedMs,\"missing proof or in-flight recovery retains only the original thirty-second budget\");\n   fullPipeRejectLockedPlayerWrite(current,next);if(held.remainingMs>1)startProtectionClock+=held.remainingMs-1;fullPipeRejectLockedPlayerWrite(current,next);++startProtectionClock;\n   fullPipeVerificationStep();\n  }\n }\n const auto after=g_virtualStartProtection.view(startProtectionClock);\n check(!after.locked&&after.requestId==v.requestId&&(after.phase==\"success\"||after.phase==\"failure\"||after.phase==\"expired\"),\"player admission opens only after actual verification final or original thirty-second expiry\");\n if(!cases.back().contains(\"playerLockWaits\"))cases.back()[\"playerLockWaits\"]=json::array();\n cases.back()[\"playerLockWaits\"].push_back({{\"before\",before},{\"afterVerification\",verified},{\"after\",fullPipeProtectionState()}});\n}"
+      },
+      "current": {
+        "file": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "sha256": "184d8433bb137d213a4b26cde9ea0dd4f22e72f344f92e9c4df1de3d7ff4281f",
+        "startLine": 91,
+        "endLine": 114,
+        "source": "static void fullPipeWaitForPlayerLock(const json& current,const json& next){\n const auto before=fullPipeProtectionState();const auto v=g_virtualStartProtection.view(startProtectionClock);json verified=nullptr;\n if(v.locked){\n  fullPipeRejectLockedPlayerWrite(current,next);\n  // Ten elapsed seconds only make verification eligible; the real consumer\n  // still owns final success/failure. A late candidate cannot extend the cap.\n  if(v.verificationPending&&v.verificationRemainingMs<v.remainingMs){\n   if(v.verificationRemainingMs){if(v.verificationRemainingMs>1)startProtectionClock+=v.verificationRemainingMs-1;fullPipeRejectLockedPlayerWrite(current,next);++startProtectionClock;}\n   const auto due=g_virtualStartProtection.view(startProtectionClock);\n   check(due.requestId==v.requestId&&due.locked&&due.phase==\"verifying\"&&due.verificationRemainingMs==0,\"ten-second candidate countdown alone never unlocks a player request\");\n   fullPipeRejectLockedPlayerWrite(current,next);fullPipeVerificationStep();verified=fullPipeProtectionState();\n  }\n  const auto held=g_virtualStartProtection.view(startProtectionClock);\n  if(held.locked){\n   check(held.requestId==v.requestId&&held.remainingMs==fullPipeUserMaxMs-held.elapsedMs,\"missing proof or in-flight recovery retains only the original thirty-second budget\");\n   fullPipeRejectLockedPlayerWrite(current,next);if(held.remainingMs>1)startProtectionClock+=held.remainingMs-1;fullPipeRejectLockedPlayerWrite(current,next);++startProtectionClock;\n   fullPipeVerificationStep();\n  }\n }\n const auto after=g_virtualStartProtection.view(startProtectionClock);\n check(!after.locked&&after.requestId==v.requestId&&(after.phase==\"success\"||after.phase==\"failure\"||after.phase==\"expired\"),\"player admission opens only after actual verification final or original thirty-second expiry\");\n if(!cases.back().contains(\"playerLockWaits\"))cases.back()[\"playerLockWaits\"]=json::array();\n cases.back()[\"playerLockWaits\"].push_back({{\"before\",before},{\"afterVerification\",verified},{\"after\",fullPipeProtectionState()}});\n}"
+      },
+      "byteIdentical": true
+    },
+    "rejection": {
+      "old": {
+        "file": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-B36-B39-compatibility-20261020-R1/source/Mainline/YeManCC-source/YeManCC/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "sha256": "23f48bf9eb237a7d5d6c748fc9ba288a916e4160318d6883ca9ef8848dd974db",
+        "startLine": 64,
+        "endLine": 73,
+        "source": "static void fullPipeRejectLockedPlayerWrite(const json& current,const json& next){\n const auto protection=fullPipeProtectionState(),before=fullPipePlayerState();const auto process=g_inputHostProcess;\n check(protection.value(\"locked\",false),\"rejected player transition is tested while the original protection is locked\");\n const auto result=writeTarget(current,next);\n check(!result.value(\"ok\",true),\"all explicit player transitions including OFF are rejected during protection\");\n check(fullPipePlayerState()==before&&g_inputHostProcess==process,\"rejected explicit player request changes no settings queue process or effective intent\");\n check(fullPipeProtectionState()==protection,\"rejected player request cannot finish replace or renew the original protection\");\n if(!cases.back().contains(\"lockedPlayerRequests\"))cases.back()[\"lockedPlayerRequests\"]=json::array();\n cases.back()[\"lockedPlayerRequests\"].push_back({{\"requestedPersona\",next[\"input\"][\"outputTarget\"].value(\"persona\",std::string{})},{\"protection\",protection},{\"result\",result},{\"sideEffectsUnchanged\",fullPipePlayerState()==before}});\n}"
+      },
+      "current": {
+        "file": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+        "sha256": "23f48bf9eb237a7d5d6c748fc9ba288a916e4160318d6883ca9ef8848dd974db",
+        "startLine": 77,
+        "endLine": 86,
+        "source": "static void fullPipeRejectLockedPlayerWrite(const json& current,const json& next){\n const auto protection=fullPipeProtectionState(),before=fullPipePlayerState();const auto process=g_inputHostProcess;\n check(protection.value(\"locked\",false),\"rejected player transition is tested while the original protection is locked\");\n const auto result=writeTarget(current,next);\n check(!result.value(\"ok\",true),\"all explicit player transitions including OFF are rejected during protection\");\n check(fullPipePlayerState()==before&&g_inputHostProcess==process,\"rejected explicit player request changes no settings queue process or effective intent\");\n check(fullPipeProtectionState()==protection,\"rejected player request cannot finish replace or renew the original protection\");\n if(!cases.back().contains(\"lockedPlayerRequests\"))cases.back()[\"lockedPlayerRequests\"]=json::array();\n cases.back()[\"lockedPlayerRequests\"].push_back({{\"requestedPersona\",next[\"input\"][\"outputTarget\"].value(\"persona\",std::string{})},{\"protection\",protection},{\"result\",result},{\"sideEffectsUnchanged\",fullPipePlayerState()==before}});\n}"
+      },
+      "byteIdentical": true
+    }
+  },
+  "deadlineHeaderByteIdentical": true,
+  "inspectionMs": 10000,
+  "hardCapMs": 30000,
+  "caseReports": [
+    {
+      "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+      "oldChecks": 188,
+      "currentChecks": 190,
+      "unexecutedOriginalInstances": [
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 310,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 311,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 312,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 313,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 314,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 315,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 316,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 317,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 318,
+          "passed": true
+        }
+      ],
+      "additionalCurrentInstances": [
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 195,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 304,
+          "passed": true
+        },
+        {
+          "assertion": "MSI physical return observation requires exact old child exit and released local DInput/virtual/visibility ownership",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 307,
+          "passed": true
+        },
+        {
+          "assertion": "normal MSI Stop retains its real mode-return obligation until qualified physical observation",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 308,
+          "passed": true
+        },
+        {
+          "assertion": "MODE1 receipt creates only an unproven OFF candidate before physical return is observed",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 309,
+          "passed": true
+        },
+        {
+          "assertion": "fresh released-local-interface observation passes original MSI route/board/physical-XInput qualification",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 310,
+          "passed": true
+        },
+        {
+          "assertion": "sole production discharge consumer logs exactly one qualified XInput settlement for this real mode-return episode",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 311,
+          "passed": true
+        },
+        {
+          "assertion": "qualified physical return does not rewrite the failure candidate or publish an early final result",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 312,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 314,
+          "passed": true
+        },
+        {
+          "assertion": "actual OFF verifier publishes exactly one expected final and no contradictory outcome",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 329,
+          "passed": true
+        },
+        {
+          "assertion": "repeated actual Stop and verification cannot renew or contradict the unique OFF final",
+          "case": "full-coordinator-real-managed-pipe/controller-dispose-once",
+          "checkIndex": 330,
+          "passed": true
+        }
+      ],
+      "changedWait": {
+        "index": 5,
+        "old": {
+          "after": {
+            "candidateOutcome": "success",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "afterVerification": {
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 20000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 0
+          },
+          "before": {
+            "candidateOutcome": "success",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          }
+        },
+        "current": {
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 10000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "success",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "afterVerification": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 10000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "success",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          }
+        },
+        "identical": false
+      },
+      "allOtherFiveWaitsUnchanged": true,
+      "originalRejectCalls": 28,
+      "currentRejectCalls": 26,
+      "oldBudgetChecks": 5,
+      "currentBudgetChecks": 4,
+      "remainingOriginalHardcapWaits": [
+        {
+          "requestId": 1,
+          "before": {
+            "candidateOutcome": "success",
+            "elapsedMs": 100,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "verifying",
+            "remainingMs": 29900,
+            "requestId": 1,
+            "verificationPending": true,
+            "verificationRemainingMs": 9900
+          },
+          "after": {
+            "candidateOutcome": "success",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 1,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 2,
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 1000,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 29000,
+            "requestId": 2,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          },
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 2,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 3,
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 3,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          },
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 3,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 5,
+          "before": {
+            "candidateOutcome": "",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "pending",
+            "remainingMs": 30000,
+            "requestId": 5,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "after": {
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 5,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        }
+      ],
+      "currentFinalCountForRequest6": 1,
+      "sixthCurrentFinal": {
+        "acceptedSourceContinuity": 0,
+        "acceptedSourceHostEpoch": 0,
+        "acceptedSourceMsiModeGeneration": 0,
+        "acceptedSourceRequestId": 0,
+        "acceptedSourceSequence": 0,
+        "candidateIsFinal": false,
+        "candidateOutcome": "failure",
+        "elapsedMs": 10000,
+        "excludedChecks": 0,
+        "executionInspectionDeadlineElapsedMs": 10000,
+        "executionInspectionStartedElapsedMs": 0,
+        "fallbackAttempts": 0,
+        "finalReason": "disabled-local-cleanup-verified",
+        "gameInputVerified": false,
+        "healthyChecks": 3,
+        "hostEpoch": 0,
+        "inspectionChecks": 3,
+        "inspectionFactsAvailable": true,
+        "knownFaultChecks": 0,
+        "lastInspectionEvidence": "disabled-cleanup-proven",
+        "lastInspectionState": "current-local-chain-healthy",
+        "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+        "outcome": "success",
+        "persona": "disabled",
+        "powerGeneration": 4,
+        "requestId": 6,
+        "resultScope": "local-switch-verification",
+        "stage": "final"
+      },
+      "fullEvidence": "D:/Codex/2026-10-19/wo-z/work/controller-B46-original-trace-claim-20261020-R1/case-0-trace-alignment.json",
+      "fullEvidenceSha256": "e904b92dbbb66d37ad4dc367ca3e9daf11f34b087d2231e21a0971c787d0b405"
+    },
+    {
+      "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+      "oldChecks": 178,
+      "currentChecks": 180,
+      "unexecutedOriginalInstances": [
+        {
+          "assertion": "missing proof or in-flight recovery retains only the original thirty-second budget",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 488,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 489,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 490,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 491,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 492,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player transition is tested while the original protection is locked",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 493,
+          "passed": true
+        },
+        {
+          "assertion": "all explicit player transitions including OFF are rejected during protection",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 494,
+          "passed": true
+        },
+        {
+          "assertion": "rejected explicit player request changes no settings queue process or effective intent",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 495,
+          "passed": true
+        },
+        {
+          "assertion": "rejected player request cannot finish replace or renew the original protection",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 496,
+          "passed": true
+        }
+      ],
+      "additionalCurrentInstances": [
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 385,
+          "passed": true
+        },
+        {
+          "assertion": "child receipt observes an exact fixture-owned process handle",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 484,
+          "passed": true
+        },
+        {
+          "assertion": "MSI physical return observation requires exact old child exit and released local DInput/virtual/visibility ownership",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 487,
+          "passed": true
+        },
+        {
+          "assertion": "normal MSI Stop retains its real mode-return obligation until qualified physical observation",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 488,
+          "passed": true
+        },
+        {
+          "assertion": "MODE1 receipt creates only an unproven OFF candidate before physical return is observed",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 489,
+          "passed": true
+        },
+        {
+          "assertion": "fresh released-local-interface observation passes original MSI route/board/physical-XInput qualification",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 490,
+          "passed": true
+        },
+        {
+          "assertion": "sole production discharge consumer logs exactly one qualified XInput settlement for this real mode-return episode",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 491,
+          "passed": true
+        },
+        {
+          "assertion": "qualified physical return does not rewrite the failure candidate or publish an early final result",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 492,
+          "passed": true
+        },
+        {
+          "assertion": "actual queued lifecycle work drains without stranding ownership",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 494,
+          "passed": true
+        },
+        {
+          "assertion": "actual OFF verifier publishes exactly one expected final and no contradictory outcome",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 509,
+          "passed": true
+        },
+        {
+          "assertion": "repeated actual Stop and verification cannot renew or contradict the unique OFF final",
+          "case": "full-coordinator-real-managed-pipe/context-dispose-once",
+          "checkIndex": 510,
+          "passed": true
+        }
+      ],
+      "changedWait": {
+        "index": 5,
+        "old": {
+          "after": {
+            "candidateOutcome": "success",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "afterVerification": {
+            "candidateOutcome": "success",
+            "elapsedMs": 10000,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 20000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 0
+          },
+          "before": {
+            "candidateOutcome": "success",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          }
+        },
+        "current": {
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 10000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "success",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "afterVerification": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 10000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "success",
+            "remainingMs": 0,
+            "requestId": 6,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 6,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          }
+        },
+        "identical": false
+      },
+      "allOtherFiveWaitsUnchanged": true,
+      "originalRejectCalls": 26,
+      "currentRejectCalls": 24,
+      "oldBudgetChecks": 5,
+      "currentBudgetChecks": 4,
+      "remainingOriginalHardcapWaits": [
+        {
+          "requestId": 1,
+          "before": {
+            "candidateOutcome": "success",
+            "elapsedMs": 100,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "verifying",
+            "remainingMs": 29900,
+            "requestId": 1,
+            "verificationPending": true,
+            "verificationRemainingMs": 9900
+          },
+          "after": {
+            "candidateOutcome": "success",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 1,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 2,
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 27000,
+            "locked": true,
+            "persona": "disabled",
+            "phase": "verifying",
+            "remainingMs": 3000,
+            "requestId": 2,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          },
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "disabled",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 2,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 3,
+          "before": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "verifying",
+            "remainingMs": 30000,
+            "requestId": 3,
+            "verificationPending": true,
+            "verificationRemainingMs": 10000
+          },
+          "after": {
+            "candidateOutcome": "failure",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 3,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        },
+        {
+          "requestId": 5,
+          "before": {
+            "candidateOutcome": "",
+            "elapsedMs": 0,
+            "locked": true,
+            "persona": "steamdeck",
+            "phase": "pending",
+            "remainingMs": 30000,
+            "requestId": 5,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          },
+          "after": {
+            "candidateOutcome": "",
+            "elapsedMs": 30000,
+            "locked": false,
+            "persona": "steamdeck",
+            "phase": "expired",
+            "remainingMs": 0,
+            "requestId": 5,
+            "verificationPending": false,
+            "verificationRemainingMs": 0
+          }
+        }
+      ],
+      "currentFinalCountForRequest6": 1,
+      "sixthCurrentFinal": {
+        "acceptedSourceContinuity": 0,
+        "acceptedSourceHostEpoch": 0,
+        "acceptedSourceMsiModeGeneration": 0,
+        "acceptedSourceRequestId": 0,
+        "acceptedSourceSequence": 0,
+        "candidateIsFinal": false,
+        "candidateOutcome": "failure",
+        "elapsedMs": 10000,
+        "excludedChecks": 0,
+        "executionInspectionDeadlineElapsedMs": 10000,
+        "executionInspectionStartedElapsedMs": 0,
+        "fallbackAttempts": 0,
+        "finalReason": "disabled-local-cleanup-verified",
+        "gameInputVerified": false,
+        "healthyChecks": 3,
+        "hostEpoch": 0,
+        "inspectionChecks": 3,
+        "inspectionFactsAvailable": true,
+        "knownFaultChecks": 0,
+        "lastInspectionEvidence": "disabled-cleanup-proven",
+        "lastInspectionState": "current-local-chain-healthy",
+        "lifecycleVersion": "VC-LIFECYCLE-20261020-R3",
+        "outcome": "success",
+        "persona": "disabled",
+        "powerGeneration": 4,
+        "requestId": 6,
+        "resultScope": "local-switch-verification",
+        "stage": "final"
+      },
+      "fullEvidence": "D:/Codex/2026-10-19/wo-z/work/controller-B46-original-trace-claim-20261020-R1/case-1-trace-alignment.json",
+      "fullEvidenceSha256": "ee94039eff4e61ec93dcd559a6aa5bb007632f3e9b5825caef86781fa6144365"
+    }
+  ],
+  "missingOriginalInstances": 18,
+  "fixtureConditionCause": "The unmodified held.locked branch no longer runs in final request6 for two dispose cases: current actual consumer has already finalized success at10s with verified disabled local cleanup from this NoIO consumer fixture, while B39 retained lock and expired at30s. Each skipped conditional branch contains exactly9 real check calls (1budget+2x4write rejection).",
+  "currentSourceDifference": {
+    "file": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+    "line": 1065,
+    "source": "ck(inputHostStart()&&fullPipeSpawnCount==count+1,\"fresh explicit ON after verified return creates exactly one new owned managed Host\");cases.back()[\"afterExplicitRestart\"]=state();\n   const auto finalOff=targetDocument(\"disabled\",5);fullPipeWaitForPlayerLock(newer,finalOff);check(writeTarget(newer,finalOff).value(\"ok\",false),\"second real OFF waits for the replacement startup lock\");inputCaptureRefreshRealStickSettings(true);const auto finalClosing=g_virtualStartProtection.view(startProtectionClock);check(finalClosing.phase==\"pending\"&&finalClosing.persona==\"disabled\",\"replacement OFF waits for actual stop result\");inputHostStop(\"virtual-target-disabled\");fullPipeCheckStopCandidate(finalClosing.requestId,family==0?\"failure\":\"success\");const auto restarted=fullPipeChildOutcome();cases.back()[\"restartManagedReceipt\"]=restarted;if(family==0)fullPipeMsiObserveReleasedPhysicalReturn(restarted,\"explicit-new-ON-clean-OFF-released-MSI-XInput\");check(restarted.value(\"nativeObservedExitCode\",999)==0&&restarted.value(\"finalCleanupOk\",false)&&!g_inputHostReleaseQuarantined&&!g_inputHostPrepared,\"replacement Host follows full clean stop through actual pipe and child exit\");\n   // settings refresh also queued this OFF duty. Its real owner must consume\n   // it before verification can finish; the physical debt was qualified above.\n   fullPipeDrainQueuedLifecycle();\n  }\n  const auto stoppedSettings=json::parse(ymSettingsReadRaw(YM_SETTINGS_FILE));const auto afterStopOn=targetDocument(persona,stoppedSettings[\"input\"][\"revision\"].get<int>()+1);\n  fullPipeWaitForPlayerLock(stoppedSettings,afterStopOn);\n  if(family==0&&!foreign&&!unbound)fullPipeCheckUniqueOffFinal(g_virtualStartProtection.view(startProtectionClock).requestId,true);\n  check(!g_inputHostProcess,\"actual verification final or hard expiry only reopens admission and never creates a replacement process\");\n  cases.back()[\"nativeEvents\"]=fixtureEvents;g_msiSdOwnedPnpSnapshotForTest={};fixtureFullPipe=false;\n }\n fullPipeVerifiedSourceLineageCase();\n fullPipePsProtectedCycleCase();\n for(const std::string variant:{\"natural-return\",\"expired-queued-task\",\"new-same-persona-ticket\",\"unprotected-task-new-ticket\",\"receipt-owned-replay\",\"receipt-untrusted-asset\",\"receipt-untrusted-identity\"})fullPipePsProtectedCycleCase(variant);\n for(const std::string family:{\"MSI\",\"ROG\",\"GPD\"})for(const std::string variant:{\"wake-old-generation\",\"wake-power-not-ready\",\"wake-new-player\",\"wake-duplicate-arm\",\"wake-power-during-hide\",\"wake-inspection-pending\",\"wake-player-expired\"})fullPipePsProtectedCycleCase(variant,family);\n fullPipePsProtectedCycleCase(\"wake-pc-recreate\",\"PC\");\n for(const std::string variant:{\"wake-pc-retry-transient\",\"wake-pc-retry-exhausted\",\"wake-pc-retry-deadline\",\"wake-pc-retry-source-timeout\"})fullPipePsProtected",
+    "changes": [
+      "Current MSI replacement OFF uses NoIO in-memory simulated released-local-interface/XInput fields after its actual owned restarted managed child receipt confirms process exit/local cleanup. No real physical return is accepted.",
+      "Current fixture drains the real queued OFF lifecycle duty before final wait.",
+      "Current fixture requires exactly one successful OFF final."
+    ],
+    "causalLimit": "Source+raw observations establish the specific branch condition. No single-factor source mutation or compiler run was performed to claim each production delta independently."
+  },
+  "assessment": {
+    "assertionTextDeleted": false,
+    "helperCheckExpressionsChanged": false,
+    "earlierFiveWaitsChanged": false,
+    "originalHardDeadlineCoverageStillExecuted": true,
+    "pendingOrUnknownPrematureUnlockObserved": false,
+    "oldRawOrFailChanged": false,
+    "currentPublicGateStillFail": true,
+    "publicAcceptanceGrantedByThisReadOnlyReview": false
+  },
+  "recommendedNextStep": {
+    "kind": "SOURCE_QUALIFIED_TRACE_CONTRACT_MAINTENANCE_REQUIRES_OWNER_DECISION",
+    "mustAccountFor": "exact18 absent request6 held-branch instances, all complete B46 95groups/5856trace and all retained original name/multiplicity/order outside those18, extra groups full trace and each semantic negative",
+    "maintain": "Keep the original4checks at0/9999/10000; require unique request6 success only after actual10s verified current cleanup with no fallback or replacement. Keep the other4 actual expired/missing-proof waits with unchanged30s budget checks. Do not force a known-successful request to remain locked solely to recover historical check counts.",
+    "noSuggestedProductRollback": true,
+    "doNotChange": "raw legacy FAIL/history; complete original fault scenarios or production guards; no blanket observed-count update"
+  },
+  "evidence": [
+    {
+      "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-positive/full-pipe/fixture-result.json",
+      "sha256": "1edf8028c237e9e66bf83cba0ff93a95e91086f37542e7bda7acf098c39d575c",
+      "bytes": 15892422
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/positive/full-pipe/fixture-result.json",
+      "sha256": "c3afb14dd85f188fb4c9900697f74ee0e0103f58bda822197bddc762403d609d",
+      "bytes": 48996174
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99",
+      "bytes": 166503
+    },
+    {
+      "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-B36-B39-compatibility-20261020-R1/source/Mainline/YeManCC-source/YeManCC/tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "sha256": "38e5a408f9e01ca5ac003633b79da8d7455749547281578ddc76d04aafe0e353",
+      "bytes": 98012
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/native/virtual_start_protection.h",
+      "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170",
+      "bytes": 9505
+    },
+    {
+      "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-B36-B39-compatibility-20261020-R1/source/Mainline/YeManCC-source/YeManCC/native/virtual_start_protection.h",
+      "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170",
+      "bytes": 9505
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC-SimSnapshot-20261020-B46/native/virtual_switch_verification_runtime.h",
+      "sha256": "14ac7768976033e0801c9b412229d96f605b6e6e54e956fa119bc5d458ae6454",
+      "bytes": 19244
+    },
+    {
+      "path": "D:/Codex/2026-10-19/wo-z/work/virtual-controller-B36-B39-compatibility-20261020-R1/source/Mainline/YeManCC-source/YeManCC/native/virtual_switch_verification_runtime.h",
+      "sha256": "5e47f75d49db9990aa6c8cf01a9e6657887c10b9ecc16311d733e852123a66f5",
+      "bytes": 19037
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/helper-claims-20261020/TASK-A1-CONTROLLER.md",
+      "sha256": "945582f014312a4811e2a45b0fbba52d644d83a227974fab1c97c407296d86ed",
+      "bytes": 2172
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/B46-fixed-run-input-bindings.json",
+      "sha256": "6d34f0dbbb104966e6de23b282f47b29130656adf82e2dab5448ec331a6826b9",
+      "bytes": 6476
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B46-controller-prerequisite-refresh-20261020-r1/Build/Validation/VirtualController-B46-Current-20261020-R1/positive/source-manifest.json",
+      "sha256": "16680f6aefde213d838da3d1baf56ee30e1f4cacd4cb4683b3909338012ae693",
+      "bytes": 657738
+    },
+    {
+      "path": "G:/YeManCC-Work/Build/Validation/VirtualController-B39-Public-20261020-woz-R1/r3-b39-positive/source-manifest.json",
+      "sha256": "6a02d7f27a576f325d7ad5c8c0341642baedd47bced661a0db2e28ecb84e8e2f",
+      "bytes": 574349
+    }
+  ],
+  "writes": {
+    "root": "D:/Codex/2026-10-19/wo-z/work/controller-B46-original-trace-claim-20261020-R1",
+    "product": false,
+    "sharedFixtures": false,
+    "publicOracle": false,
+    "externalMessagesOnlyUnderExistingUserCoordinationAuthorization": true
+  },
+  "bindings": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/B46-fixed-run-input-bindings.json",
+    "sha256": "6d34f0dbbb104966e6de23b282f47b29130656adf82e2dab5448ec331a6826b9",
+    "bytes": 6476
+  },
+  "softwareBoundary": {
+    "NoIo": true,
+    "realSdkLoaded": false,
+    "deviceIo": false,
+    "realPnpOrXinputOperated": false,
+    "physicalHardwareReturnAccepted": false,
+    "ordinaryPhysicalReturnNamesAreSoftwareFixtureFields": true,
+    "explanation": "The actual production consumers and owned managed pipe/exit were executed by the preserved producer. MSI physical-source/PnP/read observations in this review are controlled in-memory fixtures/fault-hook fields, not measured hardware or game consumption. This claim itself does not launch any process or compiler."
+  },
+  "completeOriginalMapping": {
+    "path": "D:/Codex/2026-10-19/wo-z/work/controller-B46-original-trace-claim-20261020-R1/ALL-2330-ORIGINAL-INSTANCE-MAPPING.json",
+    "sha256": "62b4f260023dfb815162521d87307a9759e5485ad7d7da0d919e1723627bb7c3",
+    "bytes": 1717463
+  },
+  "actualCompiledSourceIdentity": [
+    {
+      "relative": "native/main.cpp",
+      "originalCompileSource": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\overlay\\repo\\native\\main.cpp",
+        "sha256": "368badc1f6af006a093e16bbc52e6330011abf447441b79101ffb6b7eb2f4d09",
+        "bytes": 4947634
+      },
+      "actualCompileSnapshot": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\source\\native\\main.cpp",
+        "sha256": "368badc1f6af006a093e16bbc52e6330011abf447441b79101ffb6b7eb2f4d09",
+        "bytes": 4947634
+      },
+      "fixedB46Source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC-SimSnapshot-20261020-B46\\native\\main.cpp",
+        "sha256": "368badc1f6af006a093e16bbc52e6330011abf447441b79101ffb6b7eb2f4d09",
+        "bytes": 4947634
+      },
+      "allThreeShaEqual": true,
+      "generatedInput": null
+    },
+    {
+      "relative": "native/virtual_start_protection.h",
+      "originalCompileSource": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\overlay\\repo\\native\\virtual_start_protection.h",
+        "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170",
+        "bytes": 9505
+      },
+      "actualCompileSnapshot": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\source\\native\\virtual_start_protection.h",
+        "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170",
+        "bytes": 9505
+      },
+      "fixedB46Source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC-SimSnapshot-20261020-B46\\native\\virtual_start_protection.h",
+        "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170",
+        "bytes": 9505
+      },
+      "allThreeShaEqual": true,
+      "generatedInput": null
+    },
+    {
+      "relative": "native/virtual_switch_verification_runtime.h",
+      "originalCompileSource": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\overlay\\repo\\native\\virtual_switch_verification_runtime.h",
+        "sha256": "14ac7768976033e0801c9b412229d96f605b6e6e54e956fa119bc5d458ae6454",
+        "bytes": 19244
+      },
+      "actualCompileSnapshot": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\source\\native\\virtual_switch_verification_runtime.h",
+        "sha256": "14ac7768976033e0801c9b412229d96f605b6e6e54e956fa119bc5d458ae6454",
+        "bytes": 19244
+      },
+      "fixedB46Source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC-SimSnapshot-20261020-B46\\native\\virtual_switch_verification_runtime.h",
+        "sha256": "14ac7768976033e0801c9b412229d96f605b6e6e54e956fa119bc5d458ae6454",
+        "bytes": 19244
+      },
+      "allThreeShaEqual": true,
+      "generatedInput": null
+    },
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/pipe_cases.inc",
+      "originalCompileSource": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\overlay\\repo\\tools\\fixtures\\input_coordinator_lifecycle\\pipe_cases.inc",
+        "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99",
+        "bytes": 166503
+      },
+      "actualCompileSnapshot": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\source\\tools\\fixtures\\input_coordinator_lifecycle\\pipe_cases.inc",
+        "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99",
+        "bytes": 166503
+      },
+      "fixedB46Source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC-SimSnapshot-20261020-B46\\tools\\fixtures\\input_coordinator_lifecycle\\pipe_cases.inc",
+        "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99",
+        "bytes": 166503
+      },
+      "allThreeShaEqual": true,
+      "generatedInput": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\pipe_cases.inc",
+        "sha256": "aedf0e692b896e9ccc23839f0df9d25bd7cfda4d1017323159638cfa4be16a99"
+      }
+    },
+    {
+      "relative": "tools/fixtures/input_coordinator_lifecycle/off_lifecycle_cases.inc",
+      "originalCompileSource": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\overlay\\repo\\tools\\fixtures\\input_coordinator_lifecycle\\off_lifecycle_cases.inc",
+        "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e",
+        "bytes": 16435
+      },
+      "actualCompileSnapshot": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\source\\tools\\fixtures\\input_coordinator_lifecycle\\off_lifecycle_cases.inc",
+        "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e",
+        "bytes": 16435
+      },
+      "fixedB46Source": {
+        "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC-SimSnapshot-20261020-B46\\tools\\fixtures\\input_coordinator_lifecycle\\off_lifecycle_cases.inc",
+        "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e",
+        "bytes": 16435
+      },
+      "allThreeShaEqual": true,
+      "generatedInput": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-B46-controller-prerequisite-refresh-20261020-r1\\Build\\Validation\\VirtualController-B46-Current-20261020-R1\\positive\\off_lifecycle_cases.inc",
+        "sha256": "70c6d964e90d328718da955a4163ace6855e29882c6599f58606e92b649e167e"
+      }
+    }
+  ],
+  "noIoSourceAndIntent": {
+    "path": "D:/Codex/2026-10-19/wo-z/work/controller-B46-original-trace-claim-20261020-R1/NOIO-RETURN-AND-SOURCE-INTENT.json",
+    "sha256": "2652e9882aad47e93f0efc19350eaee43a3b48841511d26e25f5676f97381ce0",
+    "bytes": 11329
+  }
+}

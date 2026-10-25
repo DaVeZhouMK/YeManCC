@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sharedManifest": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+  "typescriptModule": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\lib\\typescript.js",
+  "additional": [
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\typescript@5.9.3\\node_modules\\typescript\\lib\\typescript.js",
+      "sha256": "3ae902c92cc44dace175c0e69e13a4b0899f6983c6121d76b9ab8dd5795e7675",
+      "roles": [
+        "actual-typescript-in-memory-transpiler"
+      ]
+    }
+  ]
+}

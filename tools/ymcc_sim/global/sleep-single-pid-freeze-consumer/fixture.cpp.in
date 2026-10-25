@@ -1,0 +1,76 @@
+// Test-owned memory ports only. No Win32 header, no real process handle or NT import.
+#include <atomic>
+#include <cassert>
+#include <cstring>
+#include <iostream>
+#include <map>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "json.hpp"
+using json=nlohmann::json;using DWORD=unsigned long;using ULONGLONG=unsigned long long;using HANDLE=unsigned long;using LONG=long;
+constexpr bool FALSE=false;constexpr int PROCESS_SUSPEND_RESUME=1,PROCESS_QUERY_LIMITED_INFORMATION=2;
+struct NativeDetectedGame{DWORD pid=0;ULONGLONG processCreated=0;};
+const std::wstring SG_MANUAL_DIR=L"memory/manual",SG_SLEEP_LEASE_DIR=L"memory/sleep";
+std::atomic<unsigned long long> g_sgManualPauseSerial{0};
+std::map<std::wstring,std::string> markers;
+std::vector<std::string> order;
+std::vector<DWORD> openedPids,suspendedPids,closedHandles;
+bool valveOk=true,refuseSecondValve=false,available=true,currentSessionOk=true,rootSessionOk=true,reconcileOk=true,conflictOk=true,queryOk=true,openOk=true,openedBirthRace=false,nativeOk=true,throwValve=false;
+DWORD rootSession=1;ULONGLONG actualCreated=1234;int valveCalls=0,reconcileCalls=0,conflictCalls=0,writeCalls=0,writeFailAt=0;bool nativeObservedFinalMarker=false;
+std::wstring activeDir=SG_SLEEP_LEASE_DIR;
+std::wstring key(const std::wstring& dir,DWORD pid){return dir+L"\\"+std::to_wstring(pid)+L".txt";}
+void marker(DWORD pid=100,const std::wstring& dir=SG_SLEEP_LEASE_DIR,ULONGLONG created=1234,unsigned long long generation=7,const std::string& state="suspended"){
+ markers[key(dir,pid)]="created="+std::to_string(created)+"|state="+state+"|generation="+std::to_string(generation);
+}
+std::string sgReadFile(const std::wstring& file){const auto i=markers.find(file);return i==markers.end()?std::string{}:i->second;}
+namespace fspath{
+ bool exists(const std::wstring& file){return markers.find(file)!=markers.end();}
+ void remove(const std::wstring& file){order.push_back("marker-remove");markers.erase(file);}
+}
+LONG countedNativeSuspend(HANDLE handle){suspendedPids.push_back(handle);order.push_back("native:"+std::to_string(handle));nativeObservedFinalMarker=activeDir.empty()||sgReadFile(key(activeDir,handle)).find("|state=suspended")!=std::string::npos;return nativeOk?0:-1;}
+using NativeSuspend=LONG(*)(HANDLE);NativeSuspend fnNtSuspend=countedNativeSuspend;
+void sgInitNt(){fnNtSuspend=available?countedNativeSuspend:nullptr;}
+DWORD GetCurrentProcessId(){return 42;}
+bool ProcessIdToSessionId(DWORD pid,DWORD* session){if(pid==42){*session=1;return currentSessionOk;}*session=rootSession;return rootSessionOk;}
+bool nativeValveValidateCurrentTarget(DWORD pid,ULONGLONG created,NativeDetectedGame* target){++valveCalls;if(throwValve)throw std::runtime_error("owned memory valve failure");*target={pid,created};return valveOk&&!(refuseSecondValve&&valveCalls>1);}
+bool sgPrepareWakeRecoveryForPauseUnlocked(DWORD){++reconcileCalls;return reconcileOk;}
+bool sgReleaseConflictingPauseLeaseUnlocked(DWORD){++conflictCalls;return conflictOk;}
+bool focusQueryProcessIdentity(DWORD,void*,ULONGLONG* created){*created=actualCreated;return queryOk;}
+bool sgWriteProcessMarker(const std::wstring& dir,DWORD pid,const char* state,unsigned long long generation){++writeCalls;order.push_back("marker-write:"+std::to_string(pid));if(writeFailAt==writeCalls)return false;marker(pid,dir,actualCreated,generation,state);return true;}
+HANDLE OpenProcess(int,bool,DWORD pid){openedPids.push_back(pid);order.push_back("open:"+std::to_string(pid));return openOk?pid:0;}
+ULONGLONG nativeProcessCreatedFromHandle(HANDLE handle){return actualCreated+(openedBirthRace?1:0)+(handle==100?0:4444);}
+void CloseHandle(HANDLE handle){closedHandles.push_back(handle);order.push_back("close:"+std::to_string(handle));}
+// EXACT_HELPER_DEFINITIONS
+void reset(){markers.clear();order.clear();openedPids.clear();suspendedPids.clear();closedHandles.clear();g_sgManualPauseSerial=0;valveOk=true;refuseSecondValve=false;available=true;currentSessionOk=true;rootSessionOk=true;reconcileOk=true;conflictOk=true;queryOk=true;openOk=true;openedBirthRace=false;nativeOk=true;throwValve=false;rootSession=1;actualCreated=1234;valveCalls=reconcileCalls=conflictCalls=writeCalls=writeFailAt=0;nativeObservedFinalMarker=false;fnNtSuspend=countedNativeSuspend;activeDir=SG_SLEEP_LEASE_DIR;}
+json pause(DWORD pid=100,const std::wstring& dir=SG_SLEEP_LEASE_DIR,bool prevalidated=true,bool release=true,unsigned long long generation=7){NativeDetectedGame target{pid,1234};activeDir=dir;return sgSuspendGameByPidUnlocked(pid,dir,1234,prevalidated?&target:nullptr,release,generation);}
+bool failed(const json& result){return !result.at("paused").get<bool>()&&result.at("okCount").get<int>()==0&&suspendedPids.empty();}
+int main(){int passed=0;auto pass=[&](const char* label){++passed;std::cout<<"PASS "<<label<<"\n";};
+ reset();NativeDetectedGame wrongPid{101,1234};auto r=sgSuspendGameByPidUnlocked(100,SG_SLEEP_LEASE_DIR,1234,&wrongPid,true,7);assert(failed(r)&&r.at("error")=="sleep target identity changed"&&reconcileCalls==0);pass("prevalidated PID mismatch");
+ reset();NativeDetectedGame wrongBirth{100,1235};r=sgSuspendGameByPidUnlocked(100,SG_SLEEP_LEASE_DIR,1234,&wrongBirth,true,7);assert(failed(r)&&r.at("error")=="sleep target identity changed"&&openedPids.empty());pass("prevalidated birth mismatch");
+ reset();valveOk=false;r=pause(100,SG_SLEEP_LEASE_DIR,false);assert(failed(r)&&r.at("error")=="PID is not the current game valve target"&&valveCalls==1);pass("ordinary valve refusal");
+ for(DWORD pid:{0ul,4ul,42ul}){reset();r=pause(pid);assert(failed(r)&&openedPids.empty()&&reconcileCalls==0);}pass("zero system and own PID rejected");
+ reset();available=false;r=pause();assert(failed(r)&&openedPids.empty()&&reconcileCalls==0);pass("missing native function");
+ reset();currentSessionOk=false;r=pause();assert(failed(r)&&openedPids.empty());pass("current session unavailable");
+ reset();rootSessionOk=false;r=pause();assert(failed(r)&&openedPids.empty());pass("root session unavailable");
+ reset();rootSession=2;r=pause();assert(failed(r)&&openedPids.empty());pass("cross session target rejected");
+ reset();r=pause(100,SG_MANUAL_DIR);assert(r.at("paused")==true&&g_sgManualPauseSerial==1);reset();r=pause();assert(r.at("paused")==true&&g_sgManualPauseSerial==0);pass("manual receipt serial belongs to manual pause");
+ reset();reconcileOk=false;r=pause();assert(failed(r)&&r.at("failCount")==1&&r.at("error")=="previous wake recovery cannot yet confirm a new pause"&&writeCalls==0);pass("previous wake reconciliation refusal");
+ reset();conflictOk=false;r=pause();assert(failed(r)&&r.at("failCount")==1&&r.at("error")=="previous pause lease could not be released"&&writeCalls==0);pass("conflicting lease release refusal");
+ reset();conflictOk=false;r=pause(100,SG_SLEEP_LEASE_DIR,true,false);assert(r.at("paused")==true&&conflictCalls==0&&suspendedPids==std::vector<DWORD>{100});pass("explicit conflict release bypass");
+ for(bool missing:{false,true}){reset();if(missing)queryOk=false;else actualCreated=1235;r=pause();assert(failed(r)&&r.at("failCount")==1&&r.at("error")=="sleep target process instance changed"&&openedPids.empty());}pass("birth identity rechecked after reconciliation");
+ reset();refuseSecondValve=true;r=pause(100,SG_SLEEP_LEASE_DIR,false);assert(failed(r)&&valveCalls==2&&r.at("error")=="game valve target changed while releasing previous pause lease");pass("ordinary valve checked after lease release");
+ reset();marker(100,SG_SLEEP_LEASE_DIR,1235);r=pause();assert(r.at("paused")==true&&order.front()=="marker-remove"&&suspendedPids==std::vector<DWORD>{100});pass("stale birth marker removed before new pause");
+ reset();marker(100,SG_SLEEP_LEASE_DIR,1234,7,"pending");r=pause();assert(r.at("paused")==true&&order.front()=="marker-remove"&&suspendedPids==std::vector<DWORD>{100});pass("nonfinal marker removed before new pause");
+ reset();marker(100,SG_SLEEP_LEASE_DIR,1234,6);r=pause();assert(failed(r)&&r.at("failCount")==1&&r.at("error")=="sleep lease belongs to another power generation"&&sgMarkerGeneration(SG_SLEEP_LEASE_DIR,100)==6&&writeCalls==0);pass("wrong generation marker preserved and refused");
+ reset();marker();r=pause();assert(r.at("paused")==true&&r.at("okCount")==0&&r.at("failCount")==0&&openedPids.empty()&&suspendedPids.empty()&&writeCalls==1);pass("existing exact lease does not stack native depth");
+ reset();writeFailAt=1;r=pause();assert(failed(r)&&openedPids.empty()&&markers.empty()&&r.at("failCount")==1);pass("marker write must succeed before opening a process");
+ reset();openOk=false;r=pause();assert(failed(r)&&openedPids==std::vector<DWORD>{100}&&markers.empty()&&closedHandles.empty()&&r.at("failCount")==1);pass("missing opened handle removes failed marker");
+ reset();openedBirthRace=true;r=pause();assert(failed(r)&&suspendedPids.empty()&&markers.empty()&&closedHandles==std::vector<DWORD>{100}&&r.at("failCount")==1);pass("opened handle birth race never reaches native suspend");
+ reset();nativeOk=false;r=pause();assert(!r.at("paused").get<bool>()&&r.at("okCount")==0&&r.at("failCount")==1&&suspendedPids==std::vector<DWORD>{100}&&markers.empty()&&closedHandles==std::vector<DWORD>{100});pass("failed native call removes owned marker");
+ reset();r=pause();assert(r.at("paused")==true&&r.at("okCount")==1&&r.at("failCount")==0&&openedPids==std::vector<DWORD>{100}&&suspendedPids==std::vector<DWORD>{100}&&closedHandles==std::vector<DWORD>{100}&&nativeObservedFinalMarker&&order[0]=="marker-write:100"&&order[1]=="open:100"&&order[2]=="native:100");pass("one root PID only and final marker precedes native call");
+ reset();r=pause();auto duplicate=pause();assert(r.at("paused")==true&&duplicate.at("paused")==true&&openedPids.size()==1&&suspendedPids.size()==1&&sgMarkerGeneration(SG_SLEEP_LEASE_DIR,100)==7);pass("second duplicate call keeps one suspend depth");
+ reset();r=pause(100,L"");assert(r.at("paused")==true&&suspendedPids==std::vector<DWORD>{100}&&markers.empty()&&writeCalls==0);pass("no marker directory retains PID identity and session gates");
+ reset();throwValve=true;r=pause(100,SG_SLEEP_LEASE_DIR,false);assert(failed(r)&&r.at("rootPid")==100&&r.at("failCount")==0&&openedPids.empty());pass("caught memory boundary exception preserves initialized result");
+ assert(passed==26);std::cout<<"native single-pid freeze helper: "<<passed<<" groups PASS (exact production helper; memory NT/process/marker ports)\n";
+}

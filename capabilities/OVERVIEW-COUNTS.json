@@ -1,0 +1,921 @@
+{
+  "schemaVersion": 1,
+  "role": "documentation-only-count-snapshot-not-runtime-dispatch-or-acceptance-gate",
+  "dateHongKong": "2026-10-20",
+  "capturedAtUtc": "2026-10-20T08:11:58.727Z",
+  "timezone": "Asia/Hong_Kong",
+  "identityBaseline": {
+    "name": "HC-BINARY-BATCH12-20260831",
+    "sourceProjectVersion": "0.32.3.2",
+    "binaryAliasVersion": "0.32.4.0",
+    "sourceAndBinaryEquivalenceClaimed": false
+  },
+  "counts": {
+    "sourceClasses": 92,
+    "factoryInstantiableClasses": 80,
+    "sourceFiles": 91,
+    "maintenanceDomains": 9,
+    "enabledProductCategories": 8,
+    "declaredMethods": 397,
+    "distinctMethodNames": 191,
+    "methodGroups": 21
+  },
+  "registration": {
+    "fanRoutes": 70,
+    "lightingModels": 47,
+    "batteryIdentityRules": 40,
+    "batteryProviderRoutes": 10,
+    "motionRecipes": 95,
+    "motionRecipeTables": [
+      {
+        "kind": "Reviewed",
+        "count": 27
+      },
+      {
+        "kind": "Legacy",
+        "count": 57
+      },
+      {
+        "kind": "Default",
+        "count": 3
+      },
+      {
+        "kind": "Generic",
+        "count": 2
+      },
+      {
+        "kind": "Private",
+        "count": 6
+      }
+    ],
+    "standardControllerProviders": 2,
+    "standardControllerProviderIds": [
+      "controller.input.xinput.standard",
+      "controller.input.msi-dinput.standard"
+    ],
+    "controllerSourceFiles": 29,
+    "controllerClassDeclarations": 28,
+    "legionMotionProtocols": 2,
+    "legionMotionModelBindings": 4,
+    "physicalFeedbackProviders": 2,
+    "gameMotorReceiptProfiles": 3,
+    "msiRearModels": 4,
+    "msiRearFirmwareEntries": 8,
+    "msiRearRoutes": 2,
+    "msiRearEnabledRoutes": 1,
+    "msiRearRecordOnlyRoutes": 1
+  },
+  "domains": [
+    {
+      "id": "fan",
+      "name": "风扇",
+      "status": "dispatch-connected",
+      "declaredDeviceMethodCount": 54
+    },
+    {
+      "id": "lighting",
+      "name": "机身灯光",
+      "status": "model-action-consumers-connected",
+      "declaredDeviceMethodCount": 86
+    },
+    {
+      "id": "battery",
+      "name": "充电/电池",
+      "status": "exact-rules-and-actual-controller-consumers-connected",
+      "declaredDeviceMethodCount": 19
+    },
+    {
+      "id": "oem-input",
+      "name": "OEM背键/专用按键",
+      "status": "profile-catalog-consumers-connected-vendor-lifecycle-pending",
+      "declaredDeviceMethodCount": 38
+    },
+    {
+      "id": "motion",
+      "name": "陀螺仪/机身运动",
+      "status": "windows-and-six-private-oem-recipe-bindings-connected;remaining-controller-and-joint-lifecycle-pending",
+      "declaredDeviceMethodCount": 2
+    },
+    {
+      "id": "performance",
+      "name": "CPU/GPU性能资料",
+      "status": "metadata-only-current-consumers-independent",
+      "declaredDeviceMethodCount": 35
+    },
+    {
+      "id": "lifecycle-and-dependencies",
+      "name": "设备生命周期与依赖",
+      "status": "pending-full-audit",
+      "declaredDeviceMethodCount": 121
+    },
+    {
+      "id": "remaining-model-methods",
+      "name": "其余机型方法/停用能力审查",
+      "status": "source-method-classification-connected;method-consumption-reconciliation-open",
+      "declaredDeviceMethodCount": 6
+    },
+    {
+      "id": "controller",
+      "name": "手柄输入/运动/配置/反馈",
+      "status": "standard-input-legion-motion-and-reviewed-classic-source-bound-game-feedback-connected;remaining-controller-and-acceptance-open",
+      "declaredDeviceMethodCount": 36
+    }
+  ],
+  "methodGroups": [
+    {
+      "id": "fan.actions",
+      "domain": "fan",
+      "count": 45
+    },
+    {
+      "id": "fan.protocol-and-return",
+      "domain": "fan",
+      "count": 9
+    },
+    {
+      "id": "lighting.actions",
+      "domain": "lighting",
+      "count": 35
+    },
+    {
+      "id": "lighting.protocol",
+      "domain": "lighting",
+      "count": 51
+    },
+    {
+      "id": "battery.actions",
+      "domain": "battery",
+      "count": 15
+    },
+    {
+      "id": "battery.protocol",
+      "domain": "battery",
+      "count": 4
+    },
+    {
+      "id": "performance.source-reference",
+      "domain": "performance",
+      "count": 35
+    },
+    {
+      "id": "oem.capture-and-action",
+      "domain": "oem-input",
+      "count": 10
+    },
+    {
+      "id": "controller.configuration",
+      "domain": "controller",
+      "count": 22
+    },
+    {
+      "id": "controller.transport",
+      "domain": "controller",
+      "count": 10
+    },
+    {
+      "id": "motion.source",
+      "domain": "motion",
+      "count": 2
+    },
+    {
+      "id": "device.lifecycle",
+      "domain": "lifecycle-and-dependencies",
+      "count": 74
+    },
+    {
+      "id": "device.settings-dependency",
+      "domain": "lifecycle-and-dependencies",
+      "count": 26
+    },
+    {
+      "id": "device.initialization-policy",
+      "domain": "remaining-model-methods",
+      "count": 3
+    },
+    {
+      "id": "device.ec-transport",
+      "domain": "lifecycle-and-dependencies",
+      "count": 13
+    },
+    {
+      "id": "device.setup-dependency",
+      "domain": "lifecycle-and-dependencies",
+      "count": 5
+    },
+    {
+      "id": "device.power-context",
+      "domain": "lifecycle-and-dependencies",
+      "count": 1
+    },
+    {
+      "id": "oem.presentation-reference",
+      "domain": "oem-input",
+      "count": 28
+    },
+    {
+      "id": "model.secondary-display",
+      "domain": "remaining-model-methods",
+      "count": 3
+    },
+    {
+      "id": "protocol.numeric-helpers",
+      "domain": "lifecycle-and-dependencies",
+      "count": 2
+    },
+    {
+      "id": "controller.msi-rear-configuration",
+      "domain": "controller",
+      "count": 4
+    }
+  ],
+  "enabledCategories": [
+    {
+      "id": "fan",
+      "name": "风扇",
+      "libraryDomains": [
+        "fan"
+      ]
+    },
+    {
+      "id": "motion",
+      "name": "陀螺仪",
+      "libraryDomains": [
+        "motion"
+      ]
+    },
+    {
+      "id": "controller.input",
+      "name": "手柄输入",
+      "libraryDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "lighting",
+      "name": "机身灯光",
+      "libraryDomains": [
+        "lighting"
+      ]
+    },
+    {
+      "id": "oem.back-buttons",
+      "name": "背部按键",
+      "libraryDomains": [
+        "oem-input",
+        "controller"
+      ]
+    },
+    {
+      "id": "oem.dedicated-buttons",
+      "name": "专用按键",
+      "libraryDomains": [
+        "oem-input"
+      ]
+    },
+    {
+      "id": "controller.feedback",
+      "name": "震动",
+      "libraryDomains": [
+        "controller"
+      ]
+    },
+    {
+      "id": "battery.charge-limit",
+      "name": "充电上限",
+      "libraryDomains": [
+        "battery"
+      ]
+    }
+  ],
+  "excluded": [
+    "settings.wake-password-ui"
+  ],
+  "inactiveExamples": [
+    "model.secondary-display",
+    "battery.SuiPlay0X1",
+    "controller.unimplemented-providers",
+    "controller.experimental-native-rear-keyboard-writer"
+  ],
+  "performanceMetadata": {
+    "registeredSourceClasses": 92,
+    "factoryInstantiableClasses": 80,
+    "classesWithExactCpuNameEvidence": 17,
+    "classesWithCpuConditionOnly": 2,
+    "classesWithoutCpuNameEvidence": 73,
+    "classesWithPossibleOemCpuDeclaration": 14,
+    "classesWithPossibleOemGpuDeclaration": 1,
+    "runtimeConsumers": 0,
+    "changesExistingCpuTdp": false,
+    "addsGpuFeature": false
+  },
+  "runtime": {
+    "manifest": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/PowerControl/handheldcompanion-runtime/YMCC-DEVICECORE-20261018-v1/HandheldCompanion.runtime.json",
+      "sha256": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8"
+    },
+    "files": 85,
+    "bytes": 14343708,
+    "dllFiles": 82,
+    "allManifestFilesHashMatched": true,
+    "rows": [
+      {
+        "relative": "BlackSharp.Core.dll",
+        "sha256": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96",
+        "bytes": 37376
+      },
+      {
+        "relative": "GameLib.Core.dll",
+        "sha256": "1946b5f67a272a9f0ba25962e091a331c19261e747cc138ef31051b66ce111d8",
+        "bytes": 12288
+      },
+      {
+        "relative": "GamepadMotion.dll",
+        "sha256": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9",
+        "bytes": 25600
+      },
+      {
+        "relative": "Gma.System.MouseKeyHook.dll",
+        "sha256": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485",
+        "bytes": 61440
+      },
+      {
+        "relative": "GongSolutions.WPF.DragDrop.dll",
+        "sha256": "1672736512ddbb8608795c25a54d3c040ebc570c46e3a332ce52727a19d2140e",
+        "bytes": 214392
+      },
+      {
+        "relative": "GregsStack.InputSimulatorStandard.dll",
+        "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+        "bytes": 25600
+      },
+      {
+        "relative": "HandheldCompanion.deps.json",
+        "sha256": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+        "bytes": 59901
+      },
+      {
+        "relative": "HandheldCompanion.dll",
+        "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+        "bytes": 2774016
+      },
+      {
+        "relative": "HandheldCompanion.json",
+        "sha256": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+        "bytes": 379
+      },
+      {
+        "relative": "HidLibrary.dll",
+        "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+        "bytes": 46592
+      },
+      {
+        "relative": "IGDB.dll",
+        "sha256": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2",
+        "bytes": 111104
+      },
+      {
+        "relative": "Interop.IWshRuntimeLibrary.dll",
+        "sha256": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275",
+        "bytes": 37376
+      },
+      {
+        "relative": "Microsoft.Extensions.Configuration.Abstractions.dll",
+        "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33",
+        "bytes": 28496
+      },
+      {
+        "relative": "Microsoft.Extensions.Configuration.Binder.dll",
+        "sha256": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9",
+        "bytes": 43792
+      },
+      {
+        "relative": "Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7",
+        "bytes": 28496
+      },
+      {
+        "relative": "Microsoft.Extensions.Configuration.Json.dll",
+        "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb",
+        "bytes": 27984
+      },
+      {
+        "relative": "Microsoft.Extensions.Configuration.dll",
+        "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121",
+        "bytes": 44880
+      },
+      {
+        "relative": "Microsoft.Extensions.DependencyInjection.dll",
+        "sha256": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869",
+        "bytes": 95568
+      },
+      {
+        "relative": "Microsoft.Extensions.DependencyModel.dll",
+        "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8",
+        "bytes": 85264
+      },
+      {
+        "relative": "Microsoft.Extensions.Diagnostics.Abstractions.dll",
+        "sha256": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32",
+        "bytes": 32040
+      },
+      {
+        "relative": "Microsoft.Extensions.Diagnostics.dll",
+        "sha256": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab",
+        "bytes": 37160
+      },
+      {
+        "relative": "Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970",
+        "bytes": 23376
+      },
+      {
+        "relative": "Microsoft.Extensions.FileProviders.Physical.dll",
+        "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980",
+        "bytes": 45392
+      },
+      {
+        "relative": "Microsoft.Extensions.FileSystemGlobbing.dll",
+        "sha256": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c",
+        "bytes": 47952
+      },
+      {
+        "relative": "Microsoft.Extensions.Http.Polly.dll",
+        "sha256": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe",
+        "bytes": 32544
+      },
+      {
+        "relative": "Microsoft.Extensions.Http.dll",
+        "sha256": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6",
+        "bytes": 92944
+      },
+      {
+        "relative": "Microsoft.Extensions.Logging.dll",
+        "sha256": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f",
+        "bytes": 51536
+      },
+      {
+        "relative": "Microsoft.Extensions.Options.ConfigurationExtensions.dll",
+        "sha256": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732",
+        "bytes": 22824
+      },
+      {
+        "relative": "Microsoft.Extensions.Options.dll",
+        "sha256": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3",
+        "bytes": 65360
+      },
+      {
+        "relative": "Microsoft.Extensions.Primitives.dll",
+        "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8",
+        "bytes": 44880
+      },
+      {
+        "relative": "Microsoft.Win32.TaskScheduler.dll",
+        "sha256": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d",
+        "bytes": 336896
+      },
+      {
+        "relative": "Microsoft.Windows.SDK.NET.dll",
+        "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+        "bytes": 1074688
+      },
+      {
+        "relative": "Microsoft.WindowsAPICodePack.Core.dll",
+        "sha256": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8",
+        "bytes": 104448
+      },
+      {
+        "relative": "Microsoft.WindowsAPICodePack.Shell.dll",
+        "sha256": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039",
+        "bytes": 574464
+      },
+      {
+        "relative": "NAudio.Core.dll",
+        "sha256": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09",
+        "bytes": 187904
+      },
+      {
+        "relative": "NAudio.Vorbis.dll",
+        "sha256": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0",
+        "bytes": 14848
+      },
+      {
+        "relative": "NAudio.Wasapi.dll",
+        "sha256": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e",
+        "bytes": 180224
+      },
+      {
+        "relative": "NAudio.WinMM.dll",
+        "sha256": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b",
+        "bytes": 58368
+      },
+      {
+        "relative": "NVorbis.dll",
+        "sha256": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4",
+        "bytes": 80896
+      },
+      {
+        "relative": "Nefarius.Utilities.Bluetooth.dll",
+        "sha256": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433",
+        "bytes": 255488
+      },
+      {
+        "relative": "Nefarius.ViGEm.Client.dll",
+        "sha256": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036",
+        "bytes": 208384
+      },
+      {
+        "relative": "PInvoke.Kernel32.dll",
+        "sha256": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44",
+        "bytes": 113728
+      },
+      {
+        "relative": "PInvoke.Windows.Core.dll",
+        "sha256": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c",
+        "bytes": 272960
+      },
+      {
+        "relative": "Polly.dll",
+        "sha256": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc",
+        "bytes": 287984
+      },
+      {
+        "relative": "PrecisionTimer.NET.dll",
+        "sha256": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331",
+        "bytes": 22016
+      },
+      {
+        "relative": "Resources/PawnIO/RyzenSMU.bin",
+        "sha256": "dad38b36a08e2da982d4397619aee7264e32be088ea6bcb781b066adfb00efc0",
+        "bytes": 39652
+      },
+      {
+        "relative": "Resources/RTSS/RTSSSharedMemoryNET.dll",
+        "sha256": "685f6e8d09e3b685a8334ae989f30f9859262046a170374f0df8121b2deba74d",
+        "bytes": 80896
+      },
+      {
+        "relative": "Resources/inpoutx64.dll",
+        "sha256": "5f27ed4d5cd58a1ee23deeb802e09e73f3a1d884ce2135f6e827f67b171269e7",
+        "bytes": 98304
+      },
+      {
+        "relative": "Resources/msiapcfg.dll",
+        "sha256": "8f9fcb5f14c3fbc66843687d8c9e1ac54f7e7d62946c2965d67dd70c4b576dc5",
+        "bytes": 13432
+      },
+      {
+        "relative": "RestEase.dll",
+        "sha256": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7",
+        "bytes": 139776
+      },
+      {
+        "relative": "SDL3-CS.dll",
+        "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+        "bytes": 47616
+      },
+      {
+        "relative": "SapientiaUsb.dll",
+        "sha256": "0b7c5845b94b9caf1c45f7555e54918020eb046e83fd4bd625781bcf7acae9f5",
+        "bytes": 828352
+      },
+      {
+        "relative": "Sentry.dll",
+        "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+        "bytes": 827904
+      },
+      {
+        "relative": "Serilog.Extensions.Logging.File.dll",
+        "sha256": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7",
+        "bytes": 11776
+      },
+      {
+        "relative": "Serilog.Extensions.Logging.dll",
+        "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507",
+        "bytes": 28672
+      },
+      {
+        "relative": "Serilog.Formatting.Compact.dll",
+        "sha256": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130",
+        "bytes": 8704
+      },
+      {
+        "relative": "Serilog.Settings.Configuration.dll",
+        "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0",
+        "bytes": 71680
+      },
+      {
+        "relative": "Serilog.Sinks.Async.dll",
+        "sha256": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083",
+        "bytes": 9216
+      },
+      {
+        "relative": "Serilog.Sinks.Console.dll",
+        "sha256": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e",
+        "bytes": 38400
+      },
+      {
+        "relative": "Serilog.Sinks.File.dll",
+        "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+        "bytes": 36864
+      },
+      {
+        "relative": "Serilog.Sinks.RollingFile.dll",
+        "sha256": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e",
+        "bytes": 18432
+      },
+      {
+        "relative": "Serilog.dll",
+        "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505",
+        "bytes": 162304
+      },
+      {
+        "relative": "Shared.dll",
+        "sha256": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1",
+        "bytes": 13312
+      },
+      {
+        "relative": "SharpDX.Direct3D9.dll",
+        "sha256": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55",
+        "bytes": 338944
+      },
+      {
+        "relative": "SharpDX.DirectInput.dll",
+        "sha256": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f",
+        "bytes": 151040
+      },
+      {
+        "relative": "SharpDX.XInput.dll",
+        "sha256": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3",
+        "bytes": 13824
+      },
+      {
+        "relative": "SharpDX.dll",
+        "sha256": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd",
+        "bytes": 275968
+      },
+      {
+        "relative": "System.IO.Ports.dll",
+        "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+        "bytes": 88912
+      },
+      {
+        "relative": "System.Management.dll",
+        "sha256": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb",
+        "bytes": 314632
+      },
+      {
+        "relative": "System.ServiceProcess.ServiceController.dll",
+        "sha256": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8",
+        "bytes": 91984
+      },
+      {
+        "relative": "UEFIVaribleDll.dll",
+        "sha256": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13",
+        "bytes": 21136
+      },
+      {
+        "relative": "WinRT.Runtime.dll",
+        "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+        "bytes": 528944
+      },
+      {
+        "relative": "WindowsInput.dll",
+        "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+        "bytes": 109056
+      },
+      {
+        "relative": "WpfScreenHelper.dll",
+        "sha256": "727c1669a6094285f0ed771263a35847b6305b13a59562265aa955cc2e07b76f",
+        "bytes": 17920
+      },
+      {
+        "relative": "Xinput1_4.dll",
+        "sha256": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec",
+        "bytes": 176640
+      },
+      {
+        "relative": "controller-hidapi.net.dll",
+        "sha256": "cd47d72903dbcba4e8c68cd5cc424b8648c12aa8a5c00cf2a30050aa28e4d0ca",
+        "bytes": 7680
+      },
+      {
+        "relative": "craftersmine.SteamGridDB.Net.dll",
+        "sha256": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564",
+        "bytes": 76288
+      },
+      {
+        "relative": "hidapi.dll",
+        "sha256": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4",
+        "bytes": 162304
+      },
+      {
+        "relative": "hidapi.net.dll",
+        "sha256": "5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17",
+        "bytes": 13312
+      },
+      {
+        "relative": "iNKORE.UI.WPF.Modern.Controls.dll",
+        "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+        "bytes": 547328
+      },
+      {
+        "relative": "iNKORE.UI.WPF.Modern.dll",
+        "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+        "bytes": 272896
+      },
+      {
+        "relative": "protobuf-net.Core.dll",
+        "sha256": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1",
+        "bytes": 301568
+      },
+      {
+        "relative": "protobuf-net.dll",
+        "sha256": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf",
+        "bytes": 285184
+      },
+      {
+        "relative": "ricaun.NamedPipeWrapper.Json.1.8.0.dll",
+        "sha256": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9",
+        "bytes": 23040
+      },
+      {
+        "relative": "steam-hidapi.net.dll",
+        "sha256": "2d1d03847ff4f90b6ca7059d55cf7f9cae40eafd31f01cc9974d514de76c52f9",
+        "bytes": 19968
+      }
+    ],
+    "id": "YMCC-DEVICECORE-20261018-v1",
+    "hcBinaryVersion": "0.32.4.0",
+    "modifiedByYmcc": true,
+    "approvedDerivativeNames": [
+      "HandheldCompanion.dll",
+      "Microsoft.Windows.SDK.NET.dll",
+      "iNKORE.UI.WPF.Modern.dll",
+      "iNKORE.UI.WPF.Modern.Controls.dll",
+      "SDL3-CS.dll"
+    ],
+    "approvedDerivativeFiles": [
+      {
+        "relative": "HandheldCompanion.dll",
+        "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+        "bytes": 2774016
+      },
+      {
+        "relative": "Microsoft.Windows.SDK.NET.dll",
+        "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+        "bytes": 1074688
+      },
+      {
+        "relative": "SDL3-CS.dll",
+        "sha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+        "bytes": 47616
+      },
+      {
+        "relative": "iNKORE.UI.WPF.Modern.Controls.dll",
+        "sha256": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+        "bytes": 547328
+      },
+      {
+        "relative": "iNKORE.UI.WPF.Modern.dll",
+        "sha256": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+        "bytes": 272896
+      }
+    ],
+    "ordinaryDllCount": 77,
+    "filesIncludingManifest": 86
+  },
+  "sharedRuntime": {
+    "manifest": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/PowerControl/ymcc-shared-runtime/manifest.json",
+      "sha256": "4bd622f2aed6cc045f14e11844208b0f081cdce8c9d1af495b3ad8af15c81362"
+    },
+    "files": 8,
+    "bytes": 2886728,
+    "dllFiles": 8,
+    "allManifestFilesHashMatched": true,
+    "rows": [
+      {
+        "relative": "Newtonsoft.Json.dll",
+        "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+        "bytes": 723368
+      },
+      {
+        "relative": "Nefarius.Utilities.DeviceManagement.dll",
+        "sha256": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c",
+        "bytes": 328192
+      },
+      {
+        "relative": "Nefarius.Drivers.HidHide.dll",
+        "sha256": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f",
+        "bytes": 223232
+      },
+      {
+        "relative": "LibreHardwareMonitorLib.dll",
+        "sha256": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+        "bytes": 1204224
+      },
+      {
+        "relative": "RAMSPDToolkit-NDD.dll",
+        "sha256": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+        "bytes": 253952
+      },
+      {
+        "relative": "Nefarius.Vicius.Abstractions.dll",
+        "sha256": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa",
+        "bytes": 20992
+      },
+      {
+        "relative": "Microsoft.Extensions.DependencyInjection.Abstractions.dll",
+        "sha256": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7",
+        "bytes": 65872
+      },
+      {
+        "relative": "Microsoft.Extensions.Logging.Abstractions.dll",
+        "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+        "bytes": 66896
+      }
+    ],
+    "id": "ymcc-shared-runtime-20261018"
+  },
+  "softwareAcceptance": {
+    "certificate": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase29/B40-fixed24-software-closure.json",
+      "sha256": "4ac1bf8d6750fca411c0be694681ff3ee6734ec4a4df3854a3fcc846c3481b93"
+    },
+    "source": "B40",
+    "coreConsumers": 17,
+    "r3PublicIds": 5,
+    "triggeredSleepSoftwareIds": 2,
+    "totalExistingIds": 24,
+    "fixedBatchComplete": true,
+    "separateLifecycleContinuity": 3,
+    "combinedRegisteredValid": 27,
+    "currentPrimaryAccepted": false,
+    "physicalAcceptance": false,
+    "wholeProcessCpuSavingsMeasured": false
+  },
+  "sourcePins": [
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/hc-device-catalog.json",
+      "sha256": "5efd576710e42a62310698eb039ea5cac8c5d4c6607b9ec0b820a3b6b79a2d49"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/MODEL-METHOD-CONSUMPTION.json",
+      "sha256": "046e69aa4334847f1a4cae5c0a83914dd7abd33c843485b492fc3aba1a05723b"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/INTEGRATION-STATUS.json",
+      "sha256": "4d1df3a98103d6211ca0f3f50f4710d88870dfc2f7269a5f144c04cfbd72eb12"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/EXECUTION-CHAINS.json",
+      "sha256": "afbb9dbfa13d82cd01cb579ff97c1fc5bcc8332fb0bd5555f32f6618d2c55600"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+      "sha256": "1cc120a94a82612db2216363d2a4f4d52505fb731e944701d5c43734172f3859"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/USER-SCOPE-DECISIONS.json",
+      "sha256": "1b1e4b338ec653171aa2ce4a28841aa01b90c8970bba5eb0e7c6a84059cff562"
+    },
+    {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/hc-performance-metadata.json",
+      "sha256": "cb1905391a4dc51b0103eccdf50d6ff481554edb838c17775ef7406466e73d85"
+    }
+  ],
+  "taskBookPins": [
+    {
+      "path": "G:/YeManCC-Work/Docs/Tasks/ResourceOptimization/HC-SLIM-01-UNIFIED-DEPENDENCY-MINING-TASKBOOK-20261006.md",
+      "sha256": "84a0c56dd4de2ad27c54dd60f1cc942640f2aa4eb3f527dc6662216f91c83c13"
+    },
+    {
+      "path": "G:/YeManCC-Work/Docs/Tasks/ResourceOptimization/HC-SLIM-01-NIGHTLY-FAN-GAMEPAD-SLIM-20261007.md",
+      "sha256": "74fd8983af1cce64c20bf3188f3172fe40ad6007bd67f1695976f6b8e0901b01"
+    },
+    {
+      "path": "G:/YeManCC-Work/Docs/Research/HC/RuntimeSlimming/HC-SLIM-01-SIZE-ORDER-20261007/TASK-AMENDMENT-20261007.md",
+      "sha256": "12bd180cf723af24d9ee2289add6b46bfccaddda6a472d822f927d2b1d2de97e"
+    },
+    {
+      "path": "G:/YeManCC-Work/Docs/Tasks/Gamepad/GP-HC自有DLL渐进替代与双线边界-20261018.md",
+      "sha256": "fea8e604b084019ef2276d81745ad2d30ca3aa53892f76380f24546bf2acb5c5"
+    },
+    {
+      "path": "G:/YeManCC-Work/Docs/Tasks/Gamepad/GP-HC精简后六链接线认证-20261019.md",
+      "sha256": "69a96f63f40dcb16d33a0d84fc950a8d4f395ead9817b78808a1d8813373274d"
+    },
+    {
+      "path": "D:/Codex/2026-10-18/kai-s/outputs/HC自主化预评估-20261018/执行路线与AI任务书.md",
+      "sha256": "3061108885ba2ccc331c6fff7313ea66d5ec6a1e00f3afa3ef4456c01c1f787d"
+    }
+  ],
+  "countMeaning": {
+    "modelsAreNotPhysicalMachines": true,
+    "methodDeclarationsAreNotIndependentFeatures": true,
+    "registrationUnitsMustNotBeSummed": true,
+    "softwareTestsAreNotCapabilityCount": true,
+    "dormantMetadataDoesNotActivateCapabilities": true
+  },
+  "sourceChangePolicy": "Counts are a dated documentation snapshot. Recompute from these actual source files after a source/policy change; do not infer availability or delete dependencies from a count."
+}

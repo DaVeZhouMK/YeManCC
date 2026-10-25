@@ -57,20 +57,24 @@ function Get-SimDefaults {
   $simRoot = Split-Path -Parent $selfDir
   $toolsDir = Split-Path -Parent $simRoot
   $localApp = Join-Path $env:LOCALAPPDATA 'YeManCC'
-  # 2026-09-23（安装位刷新后的测试前提修正）：正式导出物按设计**不含** lane 的 mock-handshake.flag，
-  # 安装位被正式包刷新后 FanHost 进入"真装/无 mock"模式 ⇒ 依赖 mock 的断言会被 fail-closed 拒绝（这是对的）。
-  # 用 YEMAN_SIM_PAYLOAD_ROOT 指向一份 **lane 载荷副本**（与安装位逐字节同二进制 + 放入 mock 旗标），
-  # 即可对"同一载荷"跑 mock 类生命周期电池，且不写安装位。默认（未设变量）= 安装位原路径，行为不变。
+  # Select the supplied payload when testing a candidate; otherwise use the current installed Host.
+  # Mock behavior requires the explicit --mock-handshake argument on every test launch.
+  # A legacy mock-handshake.flag does not activate test mode or authorize hardware access.
   $payloadOverride = "$env:YEMAN_SIM_PAYLOAD_ROOT"
-  $hostExePath = 'C:\SOFT\YeMan\PowerControl\fan-host\YeManFanHost.exe'
-  $hostDllPath = 'C:\SOFT\YeMan\PowerControl\fan-host\YeManFanHost.dll'
-  $mockFlagPath = 'C:\SOFT\YeMan\PowerControl\fan-host\mock-handshake.flag'
+  # The current installer uses fan-host-v2; retain the legacy location only when v2 is absent.
+  $installedHostRoot = 'C:\SOFT\YeMan\PowerControl\fan-host-v2'
+  if (-not (Test-Path -LiteralPath (Join-Path $installedHostRoot 'YeManFanHost.exe') -PathType Leaf)) {
+    $installedHostRoot = 'C:\SOFT\YeMan\PowerControl\fan-host'
+  }
+  $hostExePath = Join-Path $installedHostRoot 'YeManFanHost.exe'
+  $hostDllPath = Join-Path $installedHostRoot 'YeManFanHost.dll'
+  $mockFlagPath = Join-Path $installedHostRoot 'mock-handshake.flag'
   if ($payloadOverride) {
     $hostExePath = Join-Path $payloadOverride 'YeManFanHost.exe'
     $hostDllPath = Join-Path $payloadOverride 'YeManFanHost.dll'
     $mockFlagPath = Join-Path $payloadOverride 'mock-handshake.flag'
   }
-  return [ordered]@{
+  $defaults = [ordered]@{
     installRoot        = 'C:\SOFT\YeMan'
     appExe             = 'C:\SOFT\YeMan\YeManCC\YeManCC.exe'
     hostExe            = $hostExePath
@@ -99,6 +103,40 @@ function Get-SimDefaults {
     appExitMessage     = 0x0406
     appExitMessageAlt  = 0x0806
   }
+  # Explicit test-only path isolation. No default path or normal application behavior changes.
+  $isolation = "$env:YEMAN_SIM_ISOLATION_ROOT"
+  if($isolation){
+    if(-not [IO.Path]::IsPathFullyQualified($isolation)){throw 'SIM_ISOLATION_ABSOLUTE_PATH_REQUIRED'}
+    $isolatedRoot=[IO.Path]::GetFullPath($isolation).TrimEnd('\')
+    $driveRoot=[IO.Path]::GetPathRoot($isolatedRoot).TrimEnd('\')
+    $repoRoot=[IO.Path]::GetFullPath((Join-Path $simRoot '..\..')).TrimEnd('\')
+    if($isolatedRoot.Length -le $driveRoot.Length+1 -or $isolatedRoot.StartsWith('\\') -or
+       $isolatedRoot -ieq 'C:\SOFT\YeMan' -or $isolatedRoot.StartsWith('C:\SOFT\YeMan\',[StringComparison]::OrdinalIgnoreCase) -or
+       $isolatedRoot -ieq $repoRoot -or $isolatedRoot.StartsWith($repoRoot+'\',[StringComparison]::OrdinalIgnoreCase)){
+      throw 'SIM_ISOLATION_UNSAFE_ROOT'
+    }
+    $cursor=$isolatedRoot
+    while($cursor -and $cursor.Length -ge $driveRoot.Length){
+      if((Test-Path -LiteralPath $cursor) -and ((Get-Item -LiteralPath $cursor -Force).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'SIM_ISOLATION_REPARSE_ROOT'}
+      if($cursor.TrimEnd('\') -ieq $driveRoot){break};$cursor=Split-Path -Parent $cursor
+    }
+    if(-not(Test-Path -LiteralPath (Join-Path $isolatedRoot 'isolation-context.json') -PathType Leaf)){throw 'SIM_ISOLATION_CONTEXT_MISSING'}
+    $context=Get-Content -LiteralPath (Join-Path $isolatedRoot 'isolation-context.json') -Raw -Encoding UTF8|ConvertFrom-Json
+    if($context.schemaVersion -ne 1 -or $context.kind -cne 'ymcc-sim-isolated-run' -or [IO.Path]::GetFullPath($context.root).TrimEnd('\') -ine $isolatedRoot){throw 'SIM_ISOLATION_CONTEXT_INVALID'}
+    $localApp=Join-Path $isolatedRoot 'LocalAppData\YeManCC'
+    $defaults.localAppData=$localApp
+    $defaults.settingsPath=Join-Path $isolatedRoot 'settings\yeman-settings.json'
+    $defaults.sleepFactsLog=Join-Path $localApp 'Sleep\sleep-facts.log'
+    $defaults.sessionTokenPath=Join-Path $localApp 'fan-host\YeManFanHost.session'
+    $defaults.hostRuntimeLog=Join-Path $localApp 'fan-host\logs\yeman-fan-host-runtime.log'
+    $defaults.fanLifecycleLog=Join-Path $localApp 'fan-lifecycle.log'
+    $defaults.fanApiLog=Join-Path $localApp 'fan-api.log'
+    $defaults.nativeLifecycleLog=Join-Path $localApp 'native-lifecycle.log'
+    $defaults.virtualGamepadLog=Join-Path $localApp 'virtual-gamepad.log'
+    $defaults.evidenceDir=Join-Path $isolatedRoot 'evidence'
+    $defaults.isolationRoot=$isolatedRoot
+  }
+  return $defaults
 }
 
 # ------------------------------------------------------------------ identity --

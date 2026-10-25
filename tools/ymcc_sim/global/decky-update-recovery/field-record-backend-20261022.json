@@ -1,0 +1,23 @@
+{
+  "schemaVersion": 1,
+  "id": "decky-retained-bridge-without-official-backend-20261022",
+  "observedAt": "2026-10-22T10:35:44+08:00",
+  "evidence": "D:/Codex/2026-10-18/d/work/decky-manual-repair-hardening-20261022/LIVE-READ.json",
+  "observed": {
+    "steamPid": 19552,
+    "ymccPid": 44724,
+    "officialLoaderVersion": "v3.3.0",
+    "loadedFrontendBuild": "c46f851ea6eefc2224cbc366b6a8805d65304e8460d74ed932bbac68b988a53d",
+    "frontendActive": true,
+    "ymccMirrorPresent": true,
+    "officialLoaderProcesses": 0,
+    "officialBackendPortListening": false,
+    "officialBackendPort": 1337,
+    "runtimePhase": "frontend-attached",
+    "runtimeReason": "retained-frontend-connected",
+    "ownedLoaderPid": 0
+  },
+  "requirement": "Retained YMCC transport must not certify official backend/store readiness; offer explicit repair with same identity/resource/port/OFF checks. Transport exception may follow mutation; keep no-replay reservation.",
+  "actualSteamRepairPerformed": false,
+  "fullProductAcceptance": false
+}

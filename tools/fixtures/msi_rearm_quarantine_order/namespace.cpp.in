@@ -1,0 +1,101 @@
+// Deterministic, inert environment. Only endpoint/readback facts and leaves are
+// modeled. The functions substituted below are byte-for-byte production source.
+// No Windows headers, handles, device APIs, Host, SDK or product process.
+using ULONGLONG = unsigned long long;
+using HANDLE = void*;
+using InputHostMutex = std::mutex;
+InputHostMutex g_inputHostMx;
+std::mutex g_inputHostPersonaMx;
+enum class PowerLifecycle { Ready, Suspending };
+struct Model {
+    bool knownBoard=true, endpointAbsent=true, snapshotComplete=true, restore=true;
+    unsigned probes=0, restores=0, pipeCloses=0;
+    json events=json::array();
+} model;
+struct Config { bool enabled=true, virtualTargetEnabled=false; std::string virtualTargetPersona="disabled"; } g_realStickTest;
+struct Journal { bool active=false; } g_hidHideVisibilityJournal;
+struct Debt { bool pinned=false; bool required()const{return pinned;} void clear(){pinned=false;} };
+Debt g_msiSteamDeckReleaseDebt, g_msiSteamDeckReleaseFence;
+::ymcc::msi::rearm::Ticket g_msiExplicitRearmTicket;
+HANDLE g_inputHostProcess=nullptr, g_inputHostServerPipe=nullptr;
+bool g_inputHostPrepared=false, g_inputHostNeutralized=false, g_inputHostActive=false;
+bool g_inputHostTransportFault{}, g_inputHostHello=false, g_inputHostPipeRetired=false;
+bool g_inputHostPipeConnected=false, g_inputHostMsiStageRequested=false, g_inputHostHidHideStateQuery=false;
+bool g_inputHostReleaseQuarantined=false, g_inputHostStartBlocked=false;
+std::string g_inputHostRunId, g_inputHostStartupNonce, g_inputHostHostInstanceId;
+std::string g_inputHostBoundPersona, g_inputHostLifecycle;
+std::wstring g_inputHostPipeName;
+ULONGLONG g_inputHostEpoch=0, g_inputHostBoundPowerGeneration=0, g_inputHostSequence=0;
+ULONGLONG g_inputHostSampleSequence=0, g_inputHostLastKeepAliveTick=0;
+std::atomic<ULONGLONG> g_inputHostHealthySinceTick{0}, g_inputHostEpochMirror{0};
+std::atomic<ULONGLONG> g_inputHostLastKeepAliveRequestTick{0}, g_powerGeneration{7};
+std::atomic<bool> g_wakeHoldPhysicalUnhide{false}, g_msiVirtualReleaseRearmEligible{false};
+std::atomic<bool> g_inputHostFaultHoldsStart{false}, g_inputHostPowerAdmissionRevoked{false}, g_inputReady{true};
+std::atomic<bool> g_sleepRecoveryOutputWanted{false};
+std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+bool exitFence=false;
+bool g_inputHostFreshNeutralAdmitted=false, g_inputHostAnalogAnchorInitialized=false;
+bool g_inputHostSourceCandidateLogged=false;
+int g_inputHostFreshNeutralFrames=0, g_inputHostFreshNeutralMask=0;
+int g_inputHostAnalogAnchor=0, g_inputHostAnalogStableFrames=0;
+ULONGLONG g_inputHostLastPhysicalIdentityCheckTick=0, g_inputHostLastQuarantineProbeTick=0;
+bool g_xinputPhysicalSourceLocked=false, g_xinputReconfirmRejectLogged=false;
+unsigned g_xinputPhysicalSourceMask=0, g_xinputPreTargetSlots=0, g_xinputAdmittedMask=0;
+unsigned g_xinputLoggedAdmittedMask=0, g_xinputReconfirmMsiGeneration=0, g_xinputConnectedMask=1;
+std::atomic<unsigned> g_xinputSourceReconfirmMask{0};
+std::atomic<bool> g_xinputPreTargetBoundaryScanned{false};
+std::string g_xinputReconfirmIdentity;
+enum class InputHostPublicationStage { Unknown };
+inline void inputHostNotePublicationStage(InputHostPublicationStage){}
+inline void inputHostClearBoundPersona(){g_inputHostBoundPersona.clear();}
+inline void hidHideInvalidateRawInputIdentityCache(){}
+inline bool msiClawKnownBoardAuthority(){return model.knownBoard;}
+inline bool inputHostExitFenceRaised(){return exitFence;}
+inline void inputHostPipeCloseOwned(HANDLE){++model.pipeCloses;}
+inline bool msiSteamDeckRecheckOwnedRemovalDebt(){
+    ++model.probes;
+    return model.snapshotComplete && model.endpointAbsent;
+}
+inline bool hidHideRestorePhysicalTransaction(const char*){
+    ++model.restores;
+    model.events.push_back({{"event","stub-restore"},{"ok",model.restore}});
+    if(model.restore) g_hidHideVisibilityJournal.active=false;
+    return model.restore;
+}
+inline void appendNativeLifecycleLog(const char* event,const json& data){
+    model.events.push_back({{"event",event},{"data",data},
+        {"atCall",{{"transportFault",g_inputHostTransportFault},{"runId",g_inputHostRunId},
+                   {"epoch",g_inputHostEpoch},{"blocked",g_inputHostStartBlocked}}}});
+}
+@@PERSONA@@
+@@PARAM_PERSONA@@
+@@SETTING_CHANGED@@
+@@START_SEQUENCE@@
+@@STARTED@@
+@@RELEASE@@
+@@CLEAR@@
+@@RESTORED@@
+@@RECONCILE@@
+
+// Only the existing settings commit/rearm boundary is replayed. Parsing and the
+// rest of input configuration are outside this test; persona is an explicit input.
+inline void applySetting(bool targetEnabled,const std::string& configuredPersona){
+@@SETTING_COMPARE@@
+@@SETTING_ENABLED@@
+@@SETTING_PERSONA@@
+@@SETTING_RECEIPT@@
+@@SETTING_REARM@@
+}
+// Actual post-old-Host Start gates, ending BEFORE assets, creation and I/O.
+inline bool startAdmissionOnly(){
+@@START_GATES@@
+    return true;
+}
+// Stop transport ACKs/exit/quarantine are supplied facts. Its actual receipt
+// callsite and subsequent Clear are replayed without running Stop's I/O.
+inline void stopReceiptAndClear(const char* reason,bool localReleaseAck,bool shutdownAck,
+                               bool hostExitConfirmed,ULONGLONG msiStopPower){
+@@STOP_RECEIPT@@
+@@STOP_CLEAR@@
+}
+@@CASES@@

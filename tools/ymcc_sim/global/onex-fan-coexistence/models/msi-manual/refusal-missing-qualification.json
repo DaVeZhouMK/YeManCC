@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-manual44-from-accepted-msi92",
+  "evidenceKind": "EXACT_MSI_MANUAL_PREPARE",
+  "role": "positive",
+  "ownedParent": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-manual-source-prepare-20261022-r1",
+  "stageRoot": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-manual-source-prepare-20261022-r1/REFUSAL-NEVER-CREATED-missing-qualification",
+  "acceptedMsiLifecycle92": {
+    "summaryPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/SUMMARY.json",
+      "sha256": "a5cc28db7273fd3ab8e687a581932b0728bee4a12ba11a5296845ec2e06d22ef"
+    },
+    "preparedPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/msi66-positive-r1/PREPARED-PLAN.json",
+      "sha256": "d29dee0fb2cbac0e8b0a3fcddf2970cba727c6c7eebe299afde0f5a4050f4a78"
+    },
+    "graphPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/LOADED-GRAPH.json",
+      "sha256": "d2bd1f30335e71a5a101c24a8a246641fb7d16e8135c62b3558b71ee92761213"
+    },
+    "jointReviewPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-seven-independent-joint-r2/SUMMARY.json",
+      "sha256": "ecc6413373c841effdd932f6eb8f697cf70a87aa793434f91600cb89f5ac9fb9"
+    }
+  },
+  "derivativeQualificationPin": null
+}

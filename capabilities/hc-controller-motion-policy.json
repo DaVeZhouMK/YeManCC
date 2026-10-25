@@ -1,0 +1,59 @@
+{
+  "schemaVersion": 1,
+  "scope": "Existing Legion physical-controller motion routes only; retain the original chassis gate and PID predicates",
+  "providers": [
+    {
+      "model": "LegionGoTablet",
+      "protocol": "Tablet",
+      "vendorId": 6127,
+      "bankCount": 2,
+      "id": "controller.motion.legion-tablet",
+      "references": [
+        "Controllers/Lenovo/LegionController.cs",
+        "Controllers/Lenovo/LegionControllerBase.cs"
+      ]
+    },
+    {
+      "model": "LegionGoTablet2",
+      "protocol": "Tablet",
+      "vendorId": 6127,
+      "bankCount": 2,
+      "id": "controller.motion.legion-tablet",
+      "references": [
+        "Controllers/Lenovo/LegionController.cs",
+        "Controllers/Lenovo/LegionControllerBase.cs"
+      ]
+    },
+    {
+      "model": "LegionGoSZ1",
+      "protocol": "GoS",
+      "vendorId": 6790,
+      "bankCount": 1,
+      "id": "controller.motion.legion-go-s",
+      "references": [
+        "Controllers/Lenovo/LegionControllerS.cs",
+        "Controllers/Lenovo/LegionControllerBase.cs"
+      ]
+    },
+    {
+      "model": "LegionGoSZ2",
+      "protocol": "GoS",
+      "vendorId": 6790,
+      "bankCount": 1,
+      "id": "controller.motion.legion-go-s",
+      "references": [
+        "Controllers/Lenovo/LegionControllerS.cs",
+        "Controllers/Lenovo/LegionControllerBase.cs"
+      ]
+    }
+  ],
+  "protocolSource": "native/legion_input_protocol.h",
+  "pidSources": [
+    "legionBackIsPid",
+    "legionSBackIsPid"
+  ],
+  "consumer": "legionMotionDecodeReport -> source lease/banks -> controller motion session -> final submission guard",
+  "physicalAcceptance": false,
+  "allControllerMotionConnected": false,
+  "protocolSourceSha256": "9c305a12013eec8af4ede8d1c5292e5288460ee91911edf99c6dcdc50668dba6"
+}

@@ -11,7 +11,7 @@ const runtime=process.env.YMCC_UI_BROWSER_MODULE_DIR||'C:/Users/DaVe/.cache/code
 const {chromium}=createRequire(path.join(runtime,'_window-layout-test.cjs'))('playwright');
 const out=path.resolve(process.env.YMCC_WINDOW_LAYOUT_OUT||path.join(root,'Build/Validation/WindowLayoutBrowser'));fs.mkdirSync(out,{recursive:true});
 const source=fs.readFileSync(path.join(root,'src/App.vue'),'utf8');
-const scale=source.slice(source.indexOf('const BASE_W ='),source.indexOf('// M8: Start button'));
+const scale=source.slice(source.indexOf('const layoutBaseWidth ='),source.indexOf('// M8: Start button'));
 const lifecycle=source.slice(source.indexOf('let stageResizeObserver:'),source.indexOf('</script>'));
 assert(scale.includes('function viewportSize()'));assert(lifecycle.includes('onNativeResize'));
 const scope='data-v-window-layout-test',styles=[fs.readFileSync(path.join(root,'src/styles/tokens.css'),'utf8')];
@@ -20,10 +20,12 @@ for(const style of app.styles){const result=compileStyle({source:style.content,f
 const fixture=`<script setup lang="ts">
 import {ref,computed,onMounted,onUnmounted,nextTick} from 'vue';
 import Dropdown from './src/components/Dropdown.vue';
+import {ymccDesignWidth,ymccStageWidth,YMCC_SHELL_BASE_WIDTH,YMCC_SHELL_BASE_HEIGHT,YMCC_SHELL_SCALE_BOOST} from './src/bridge/monitorLayout';
+const router={currentRoute:ref({path:'/'})};
 const isStandaloneEditor=ref(false);
 ${scale}
 ${lifecycle}
-window.__fixture={setStandalone(value){isStandaloneEditor.value=value;updateScale();},flush:nextTick,snapshot(){return {native:nativeViewport.value,viewport:viewportSize(),scale:uiScale.value,stage:scalerStyle.value,cssScale:Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))};}};
+window.__fixture={async setRoute(path){router.currentRoute.value={path};await nextTick();},setStandalone(value){isStandaloneEditor.value=value;updateScale();},flush:nextTick,snapshot(){return {native:nativeViewport.value,viewport:viewportSize(),scale:uiScale.value,stage:scalerStyle.value,cssScale:Number(getComputedStyle(document.documentElement).getPropertyValue('--ui-scale'))};}};
 </script><template><div class="app-root"><div class="user-background-image" style="background-image:linear-gradient(#234,#456)"/><div class="app-backdrop"/><div class="app-stage" :style="scalerStyle"><div style="padding:24px;width:280px"><Dropdown model-value="a" :options="[{value:'a',label:'布局测试'},{value:'b',label:'第二项'}]"/></div></div></div></template>`;
 const {descriptor}=parse(fixture,{filename:'window-layout-fixture.vue'});
 const fixtureScript=compileScript(descriptor,{id:scope,inlineTemplate:true}).content.replace('export default','const component=')+`\ncomponent.__scopeId=${JSON.stringify(scope)};export default component;`;
@@ -54,6 +56,17 @@ try{
   await page.evaluate(async()=>{__fixture.setStandalone(false);await __fixture.flush();});await nativeResize(page,Math.round(800*dpr),Math.round(1080*dpr));await page.evaluate(()=>__fixture.flush());const main=await snapshot(page);assert(Math.abs(main.viewport.w-800)<1);assert(Math.abs(main.viewport.h-1080)<1);assert(Number.parseFloat(main.stage.height)*main.stage.zoom>=1080);checks.push(`DPR ${dpr}: main renderer converts native physical pixels and fills height`);
   await page.setViewportSize({width:800,height:1080});await nativeResize(page,Math.round(800*dpr),Math.round(1080*dpr));await page.evaluate(()=>__fixture.flush());await coverage(page);
   await page.setViewportSize({width:480,height:540});await nativeResize(page,Math.round(480*dpr),Math.round(540*dpr));await page.evaluate(()=>__fixture.flush());const shrunk=await snapshot(page);assert.equal(shrunk.viewport.w,480);assert.equal(shrunk.viewport.h,540);await coverage(page);checks.push(`DPR ${dpr}: smaller native reflow shrinks scale and preserves full-window backgrounds`);
+  // The monitoring page may widen its workbench, not change shell/Dropdown zoom.
+  for(const [width,height] of [[580,780],[800,1080],[900,780],[1280,720],[1920,1080]]){
+   await page.setViewportSize({width,height});await nativeResize(page,Math.round(width*dpr),Math.round(height*dpr));
+   await page.evaluate(async()=>{await __fixture.setRoute('/');await __fixture.flush();});
+   const home=await snapshot(page),homeFont=await menuFont(page);
+   await page.evaluate(()=>__fixture.setRoute('/rtss'));const monitor=await snapshot(page),monitorFont=await menuFont(page);
+   assert.equal(monitor.stage.zoom,home.stage.zoom);assert.equal(monitor.cssScale,home.cssScale);assert.equal(monitorFont,homeFont);
+   assert(Number.parseFloat(monitor.stage.width)*monitor.stage.zoom<=width+1,'Monitor stage fits without shrinking shell');
+   await page.evaluate(()=>__fixture.setRoute('/'));const returned=await snapshot(page);assert.equal(returned.stage.zoom,home.stage.zoom);assert.equal(returned.stage.width,home.stage.width);
+   checks.push(`DPR ${dpr}, ${width}x${height}: monitor navigation preserves shell and popup fonts; workbench adapts within viewport`);
+  }
   await page.evaluate(()=>window.__app.unmount());await nativeResize(page,1071,1440);await page.waitForTimeout(50);await context.close();
  }
  assert.deepEqual(errors,[]);fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({ok:true,checks,errors,observations,scope:'Production App scaling/lifecycle and Dropdown compiled in a minimal Vue fixture; no live native/hardware acceptance.'},null,2));console.log(JSON.stringify({ok:true,checks:checks.length,result:path.join(out,'result.json')},null,2));

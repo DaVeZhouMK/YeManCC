@@ -1,0 +1,817 @@
+{
+  "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+  "manifestSha256": "145308952e437342a4d6978600e73eb4f648e5b49a43ba48ca79a0571ca0dd14",
+  "inventorySha256": "873830327139f59c297cf4dd512d7048cfa874632505e509b696d599915d9c38",
+  "files": [
+    {
+      "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1.cs",
+      "sha256": "ef8b01d6912c2cc88370ace767bca5ff340dcb83b2a56be78898122acd4f6d75",
+      "gitBlob": "bd10aa92d6465bb3dbf70beb292dca3d9f0eecbf"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1X.cs",
+      "sha256": "e8b3dc39e32536e6ddc2125c80f4ac142a9a38394a25fec845a570d6f8e539fb",
+      "gitBlob": "214abcc5998e44075596e48bc596bf5702b40e72"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA2.cs",
+      "sha256": "edef1b3c6a5d883af6ad14d90872b299546decbe156c72ffbcf1db2bba9b27f1",
+      "gitBlob": "d507c9b2302dd0af03a614449356b703eff9d8de"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/ASUS.cs",
+      "sha256": "d551ce453374367f47e17b90e2447e3af4d79594db530d031f7a80e31fccfef9",
+      "gitBlob": "e3984a991a894f84203de54e4e3dd1909577ef2e"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AOKZOE/AOKZOEA1Pro.cs",
+      "sha256": "5baf953bffd62fd4a34175bc46302a5106e9649bf2624e5f1fb3de435686caf5",
+      "gitBlob": "b0c63c0cd55f8ca3f2d207afa2a0dc20c564c9fd"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/AsusACPI.cs",
+      "sha256": "4ead4003484097801ab6591e2043465de4d80ffb970f9f0fa03bfe57c0c7b23e",
+      "gitBlob": "748c401457fb3b06cbed0f796b50f9ffe19dac1c"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/ROGAlly.cs",
+      "sha256": "6ecc1473757550f49b05de608583fe5a2810fa72ca1e46ce14e56f013356ab93",
+      "gitBlob": "d5e691d939b797ee2dc114109c0e9bd27d440f7d"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/ROGAllyX.cs",
+      "sha256": "491da300ea5fca979100f5123ecea72115ac037adf5b90514c1c0a3f08a9271e",
+      "gitBlob": "249f3a348b1a73ab62f61a6c76916d978de0b315"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/XGM.cs",
+      "sha256": "9bc883ad7f66d041f5ae7386eb95b5772adf36ee3408459c1747c4aa76767731",
+      "gitBlob": "df00d6307f102a5fe36bfc45168f0d7456ed96db"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/XboxROGAlly.cs",
+      "sha256": "52faa09d9365466d627f990d65d8f81c3fe298049c6233b6eefd92b1624cb309",
+      "gitBlob": "d70bf9b6ec7cb1788ded924942c7396605ba9604"
+    },
+    {
+      "path": "HandheldCompanion/Devices/ASUS/XboxROGAllyX.cs",
+      "sha256": "ae9c73c26549f02e064ad5725dde0571bb3090fbdf43c3e105e57909bc76b582",
+      "gitBlob": "6d608ee8001975bd8f8fda496a7e5b7ad9094579"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEO2.cs",
+      "sha256": "42b446db0f974034377481cc8a9f1f76106d2cb166c5d5a46995f6823d1759ee",
+      "gitBlob": "eda197f9a4717801fdf00a86e76ee8bdc234a499"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEO2021.cs",
+      "sha256": "155fa21063b3df979a9af307ac4ed963db4e77d0f1f0ba098f600ca09a84e11b",
+      "gitBlob": "c163f8ee7ed7aed4613813fde4a69ba03760ce62"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEO2021Pro.cs",
+      "sha256": "c5dec90aebc8a04f292c79be5e75214f24f69a1778a33adbe921b70e2f3d9b5f",
+      "gitBlob": "9613bc708c31da85a90fdfcfebccbd64375c7d3a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEO2S.cs",
+      "sha256": "a9432099e92f8a83e20fc109d9dbde93694a23134a7a849fef8eca98a3c1974b",
+      "gitBlob": "91fa027477dd3c5a8a7b9ceca676a5d65435e102"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEO3.cs",
+      "sha256": "bee53cd4d730013900da5c542c751b018f006ee09b886c55926f0ac7c17ee88b",
+      "gitBlob": "a6eef2394786c39f3fb8e604a3890ce7dd763980"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR.cs",
+      "sha256": "67d5853ecb799f3b3956a03bd810ddb920ff60b74f30b22e8c448d1d7ac46aea",
+      "gitBlob": "dcfc7a24ef8d688728e4b3ca66027c72d5d73f3a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR1S.cs",
+      "sha256": "55178995c5e307d9d89d3df39fac2737e548a4f05a870b4ef59f7499a8ca475f",
+      "gitBlob": "15f0ee9507b6d0547263b265dc6d532aab54e340"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIR2.cs",
+      "sha256": "0bde655963a66375a30d17191a6f08a23d1ec39f7b0732c3aa28cf321a65a67c",
+      "gitBlob": "f06949e5595145ce77fe6dbed04a29e18e247cb7"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRLite.cs",
+      "sha256": "930149ffd81577930213f8c7707644abc84bc776657937aa9956c042edd09206",
+      "gitBlob": "35c8e6545da5c650fcd6f1dd1e29cf41552a34fc"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlus.cs",
+      "sha256": "6c0891e1bf3e3f36a6b3cf3d7a00eafc2d571b1b2349394c7d0b5bd275e21301",
+      "gitBlob": "1b614bc840bf6ff4212adfa89c0ea7886da84b58"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusAMDMendocino.cs",
+      "sha256": "a061bcea0dcb7d2641b2ed5e6e0a1f0d3c1ee51d2f6387cc1420d7d2f196d749",
+      "gitBlob": "b83816b4d9a92804c1f0acffc90ac369cd01a5bd"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusAMD.cs",
+      "sha256": "ca94037f9fb03ea42af1afc0ae8823f88edfb0913ea9d16631fb3a490afa362b",
+      "gitBlob": "7abd21f59a258c362d6d9bdcda77d659ca0942a1"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusIntel.cs",
+      "sha256": "c30020f4a552c6c2e949fd7896f60c21c7586915fba4eb3786c25ac1c1ce67e7",
+      "gitBlob": "0604377d0fb2b6543be54e3f435c23018ae21003"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPlusNxx.cs",
+      "sha256": "5b9f3d00c3d70a7c38ed3c72418dfd47c8b37f9c7ac25a96cfdb5dedf5f6dd07",
+      "gitBlob": "2f26fb9ce01703af29b97104db2fd9443f86a155"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPro.cs",
+      "sha256": "d5350e2d1a3fb033c5a66f97cf01d0bc94ea24f27d6c69cf38c41c50060e8b93",
+      "gitBlob": "b2ce18b4444fa7b294034f51918d321a9d81bc99"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOAIRPro1S.cs",
+      "sha256": "43a7f1ef360a8ff9ce362974e530ea4b61361118cc93d9de6167c51c3574e652",
+      "gitBlob": "396df145d551a2fd511b372d8a7f6a43c709f753"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEODevice.cs",
+      "sha256": "9fd3849d60ac37688d13b1516f741773412796eb5e81e2c8e0fc033f1174e660",
+      "gitBlob": "22c88f2f51bfb1d6c6b1f2f5ea2dbf8b629eb2e8"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEc.cs",
+      "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da",
+      "gitBlob": "b9c2ad04a07d042906ece72a23cc47d79e5e989d"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEii.cs",
+      "sha256": "2811934f613caf24157b9ba6ef43f8289ee3180c7619c71070827ea909e4a821",
+      "gitBlob": "6f5390c1cc039036c99f8592346e946b85cbb483"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip11.cs",
+      "sha256": "8ebe1ca0c53c740ccb82bc19beac83aef91636b32e67998fd28309787c104d36",
+      "gitBlob": "ac5dc61464ea62699a9772e2e03e17e89cae11e5"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip1SDS.cs",
+      "sha256": "65b0d5b31ed643b3f1537c87e21aaae880033ce6621ce829ee519e2b52841acf",
+      "gitBlob": "82b0a688b43069fd6446b54f4cdd15ae9ff43605"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlip1SKB.cs",
+      "sha256": "c0a1d4c1eac42635abe424b2d26758985be2acffe4ac00b11087864317e3895a",
+      "gitBlob": "376d0b1e34a5e5522e86c5412aebd1a33415a213"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlipDS.cs",
+      "sha256": "1e106e6683da4ed2750810aef7d28a69fc83430d22c893a8f52499b810ba6a90",
+      "gitBlob": "f5a4ec5fcee060513ccb26ddcc305e7fd16b667a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOFlipKB.cs",
+      "sha256": "85ac9f34f6d4dea3e21773f7e344cfe3bf1a128fb5245f5ab1f4ce70c179628c",
+      "gitBlob": "fa5fed2b96b6e20658f3ebfb101e12a0ae064f19"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOKUN.cs",
+      "sha256": "4db27ef7704866c757d4332589e0833c17d013a451140430139d4d4f10398832",
+      "gitBlob": "2ece1242281284280da82146691c3852c02100cd"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXT.cs",
+      "sha256": "0c5fc5f1463c2ba042a1bffb89d305558c7e28fbb1e1cd8010afb7b7cb62506d",
+      "gitBlob": "ebe24e338d37271873b32d6ea0f5faf2fcc1f1d6"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXT2.cs",
+      "sha256": "b47a90a52912eebd2568e920da7c1d0a264a286bb06657f9e274feb7f5da91c2",
+      "gitBlob": "a90ee39423718831d24bb79ae547d58e1d719c9b"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXTLite.cs",
+      "sha256": "bbdd69bb5376507fb2e8f52e153a071b78e112a737ae7700c8c63f52998dd499",
+      "gitBlob": "5e44c5c69854a89bdf5c5e4d37fff128de3f6f92"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEONEXTLite4500U.cs",
+      "sha256": "6995e636613d5550cbd34a6d1a7ef3cd0f6dfacf57b65b53474669bbe83ef02f",
+      "gitBlob": "1b3fc1ff197f2533eed0f99a69c232356b3c7845"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOSLIDE.cs",
+      "sha256": "1ee0ec4ea01d6aa5f71fa7c81e5ba176bdd5a88af696eb034ad71b2fc4f15de4",
+      "gitBlob": "cfdf48033dd2c65d18473a5061247d7c2e274091"
+    },
+    {
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEOSuperJoyRgb.cs",
+      "sha256": "73537d76a1a143f8868bf3fa15b3d25b2ecbe3ee495a7cef781bc240e4776a12",
+      "gitBlob": "b596c4d76e3005e12cba57d0fe2dce05040ed614"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Ayn/AynLoki.cs",
+      "sha256": "5896bca4c3af1177078969cc37133974e6d30ab59884c78eae82450b69ae0688",
+      "gitBlob": "56bd1fb7f099eb2450484cd269d4cc0ea8cbaa1e"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Ayn/AynLokiMax6600U.cs",
+      "sha256": "b552f40777f032a91e738fa04843500a9842accf203fc8f98737e4a859d9377b",
+      "gitBlob": "eea9a37fc9705cbb77def14cdc12c56c11b97070"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Ayn/AynLokiMax6800U.cs",
+      "sha256": "d007e576d92df8834064a8f87a7e41772595fcf8857f24c6ac01d4f81bc89855",
+      "gitBlob": "d4f0233ca474672b0e8f6eec373d53da57d505e8"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Ayn/AynLokiMiniPro.cs",
+      "sha256": "51c18499d460cc17e3fe99201d5d5486bb247599d672b7320342f6e80649ad95",
+      "gitBlob": "af4c3820b99aae4170f331c4b3ff8c200dad0bd4"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Ayn/AynLokiZero.cs",
+      "sha256": "ee221d63767103775b0c444f6f22067484bad8c252bc1960469c114cf5485f76",
+      "gitBlob": "4a9ea29a736b9e0cd483926205d333e18f8ad0f4"
+    },
+    {
+      "path": "HandheldCompanion/Devices/DefaultDevice.cs",
+      "sha256": "18b33ed49e80ae400fd5162971117f4585417d6eb4bdbc8e09050bbac96bcdf1",
+      "gitBlob": "4a91be6114839de82d417dd779040d526427a102"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin2.cs",
+      "sha256": "e67a3367e1762fa8a94e555daa5d7266fe20b186fbf6de88de64e0e137167399",
+      "gitBlob": "dc44f61c17b28de34f5b76caa5107bcfcffba068"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin3.cs",
+      "sha256": "d20f4a9afb8b0071c1f0c8be112d788e49be55682fba3844bbf9a89f9cd4bf1b",
+      "gitBlob": "43887f9081ded70fbdded058b9f412644fc0a668"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4-2023-7640U.cs",
+      "sha256": "171a74b852afe43530f114227cd0aa92d6c5ddcc9f925e100b30d36b75bc6bbc",
+      "gitBlob": "b0f48d342e6c365d7cc33f544c05d89658eaa297"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4-2023.cs",
+      "sha256": "ae875c53ca2b8c7e0993ec443eca2ca38af014e286ab143661de0d915f3d7cd6",
+      "gitBlob": "226738b913eb8163f0c445f06b071e8b24295cda"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024-8640U.cs",
+      "sha256": "f519e043c73d681d65c2f65e563df0255cacf17c5bc33b0fe96e727f8ace2c00",
+      "gitBlob": "7a94575230d491656eed437857d39534b8f885fc"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024-HX370.cs",
+      "sha256": "9a2d83f20b599664dd21c22028b54d3e0b4fef436d303d314e805867f23d0636",
+      "gitBlob": "6d0c011a80b69dcc993a31267e803d72297a719d"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4-2024.cs",
+      "sha256": "dfc9a4bed43743be66186cce078e846d08f8dd71cf2d7a521cd7f56274bfb53a",
+      "gitBlob": "aaa1bd274762475455542a6c3b75af2ac75b2107"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin4.cs",
+      "sha256": "62eb9e429dd668132e2b17e5a959515c35dd785103608cad252177430fecc03f",
+      "gitBlob": "e83e41e5ace65bf30008fdb1ebe9c70d4ea0154d"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWin5.cs",
+      "sha256": "095d3fd92d8afcc9925b4ff91710a6b92c89183a6a9c38950ecfb2cc5d9bfed6",
+      "gitBlob": "e80719a3ef3885865bd970c997f44ac00a0fd882"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2022-6800U.cs",
+      "sha256": "4a9ae61fa690a4144ed42dd7fc028adde4e4f7468e4808ca3b0fd3e14413296b",
+      "gitBlob": "7d8c4202c2f6a8e6d47def434186494ab3c3cf60"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2023-7640U.cs",
+      "sha256": "05a0bf85cdd8087de3e8c9178c0816a5b3afa1dbca282ab89e73a6d315aade40",
+      "gitBlob": "5bca29e8ce66f9b7f32d2a0b550a49709c13d8c1"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2023-7840U.cs",
+      "sha256": "254f153903857633d8c47918977862c8d8e90b48277c0e697ee79c6fef2763b4",
+      "gitBlob": "ad19ecca30eab46c291c6689fe099429bc976968"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-8640U.cs",
+      "sha256": "9b3c18e011cf71fd36fc19db35ccf9df42f1f1024e06cd46af4e50b266f0cc7d",
+      "gitBlob": "f5aa275c10391345245b4173c65d221828180264"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-8840U.cs",
+      "sha256": "be5eb4b72c67eec0e6ce7df7bc6a107e3c6c94eafcede728d80b1f475279c391",
+      "gitBlob": "a7b82cbdbf30e3873c1f2d8a8612fe7f69b0ea1e"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2-2024-HX370.cs",
+      "sha256": "722d080745fa6f0ca405d8e568b9aaaeb9770eac1fcbe4db66261476c29af3a8",
+      "gitBlob": "d86cd00266d7cdf1218e52056270d62f7ec3350b"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2.cs",
+      "sha256": "9cec36c49cf756a52db4a95c1f956b6bc84306886762ff5ace2e3702120cb594",
+      "gitBlob": "4cc9f17eb4387a024042643adef358ccc0ef39ca"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMax2Intel.cs",
+      "sha256": "05ef0c8a59589b5306158f5ddf62c9803e03f6b37f32a1aa38082951c023497c",
+      "gitBlob": "6f03838ac41b31d1343c6737f2e6e6d604c2eb59"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMini-7640U.cs",
+      "sha256": "c5a51a3e9bfb96a4cab843db816c9e720e60bca0ff91fa0870b0744e644e3a87",
+      "gitBlob": "752efd83195f298f207e84938067507695d26a63"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMini-8840U.cs",
+      "sha256": "538d237fd6f7c6157525996ef350dd285cf3efabfbf478662d546c72ebdd3781",
+      "gitBlob": "a8fad622b3940cc09637c2ba9e518a14c1c3cab7"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMini-HX370.cs",
+      "sha256": "5f4d6014167b37209ab18d2568c22b1e8ce10f2dc158109b2e3c10ff113e429a",
+      "gitBlob": "7899b3218e4879a8e20380fb5fd7ea6e8c9162e0"
+    },
+    {
+      "path": "HandheldCompanion/Devices/GPD/GPDWinMini.cs",
+      "sha256": "7d486e56772239c7302ffe187245de8e313451294fba739b3607b301547bf2a5",
+      "gitBlob": "38146b56d6acbad21ea1835c8ac0043239804766"
+    },
+    {
+      "path": "HandheldCompanion/Devices/IDevice.cs",
+      "sha256": "55c788ed61ad59e6f43b62d0f658fd74aa14e3b3d8c26dee3f8db9c0193c32d3",
+      "gitBlob": "3c11ae1361bf213330200f1ab8b610cc79045084"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/FanTable.cs",
+      "sha256": "c84b6872b5eec09ccc6ba03ba1a1770df6aab0560d578cfc64235fe8ec1bae53",
+      "gitBlob": "90a39c7571d9733b9a918a0c60c26020667c1ad5"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGo.cs",
+      "sha256": "1cec038b150e1eba63497a87482a740503bf77ce709f387dbc7cb562eca73d08",
+      "gitBlob": "38a55f35552cf8b7b35ccf778238e5df2b4ae22a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGoSZ1.cs",
+      "sha256": "a23d6c45f8aa499537c611d0493cf47a7ab3f8f58b826e3c9ef4c88641f76872",
+      "gitBlob": "6211118b163465547ba0e07b51d89c6a19869b85"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGoSZ2.cs",
+      "sha256": "387ac22a5a9fd785ed8ed52e3146c4c0725af8533740baa1922523f8a14d608e",
+      "gitBlob": "f435ff69a905d245d32c0ebf1b022879af12d3e1"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGoTablet.cs",
+      "sha256": "60baf403012aa5aa3bb5664c56295f860fcfb758d1fe7743190e09fcb1087b97",
+      "gitBlob": "76b358208f88f63fc5e9fffd384648bde7fcfaec"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGoTablet2.cs",
+      "sha256": "2dbd25993c579edad58c5821b725275540660908ca6f1b5eafc6402b4c1d995d",
+      "gitBlob": "4e170ad7e460c9ebbc80a802fbdddf3bdade2096"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Lenovo/SapientiaUsb.cs",
+      "sha256": "cd6df6f4d763f5402c149f58759761e006761fc8b1c18d4f6e72d162b40dbdee",
+      "gitBlob": "8d200686e47ce143f75f5835093769b84135159b"
+    },
+    {
+      "path": "HandheldCompanion/Devices/MSI/ClawA1M.cs",
+      "sha256": "bf73ff12364d162175b365e15f89c4c55b1c8744b7f845b065ff1645beeaf3f2",
+      "gitBlob": "ea0fe8ea923b1b6322f5790c0daf78d32ee4bb3f"
+    },
+    {
+      "path": "HandheldCompanion/Devices/MSI/ClawA2VM.cs",
+      "sha256": "baad8361a9ef2d0415c586acee379bce3191ef214570184eae500c340cb34648",
+      "gitBlob": "8f159134a5ddc9a76fcc474586c32002ada51eba"
+    },
+    {
+      "path": "HandheldCompanion/Devices/MSI/ClawBZ2EM.cs",
+      "sha256": "2a0e64cf1fd6e303b39b6dd354a5de3a19ef4ccfa763c15c30606e4ee4286696",
+      "gitBlob": "39c698c128fe9eb3cedf7afbe431c74b503b7b90"
+    },
+    {
+      "path": "HandheldCompanion/Devices/MSI/ClawCG3EM.cs",
+      "sha256": "62bf699b3718dd1288a12cea7d205b99f94899f3c1cae18124d386ce81cb66d4",
+      "gitBlob": "023bc2cf2a81d418284e44ccf3b5cac675e9fd79"
+    },
+    {
+      "path": "HandheldCompanion/Devices/MSI/ClawFirmware.cs",
+      "sha256": "f3e098ac541fd8819485d3221f6b81cea13b7181d42614fe7676f73ef226a708",
+      "gitBlob": "62a2ecaef52e2271ac624e271fd2cadaf89f9e24"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Minisforum/MinisforumV3.cs",
+      "sha256": "33e9de9251faf4d2b00374a28816a384419797641b3142837867deeb9e7a4ebd",
+      "gitBlob": "b91cac1f84e835eb04b06048acd26f4f3419ae48"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXAOKZOE.cs",
+      "sha256": "30661f7bfba6b67ba9f025be97158c274fe28cabdcd0faac08ca3fb94c34d718",
+      "gitBlob": "ff66acfd30ffa08683500780a3f2c66b4a71f0b7"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer2.cs",
+      "sha256": "bd8ce3cff11f496be143cb7e5b18e3e6e1892436a2cad7419196aa57b8c3068a",
+      "gitBlob": "34921eedeea198125d0822c5048fb4d1115e3cb6"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "sha256": "009b582a4e6616a014a2eab542b088bbcb64fac9eb2f89c62f20d146df211166",
+      "gitBlob": "330008e1399c8eb454c427f52b7152336b6c5390"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerApex.cs",
+      "sha256": "f16cde1294b01aba99d51542ca9935af25dedf203eafc6638c42338407b74ff8",
+      "gitBlob": "b6bf770da71a52841a39f5c8d8ca983040e8090a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerG1.cs",
+      "sha256": "f03f6f5e3b750e44df9d59f95f6a2330c5ca2febd93399fcc66ba8dde15e887b",
+      "gitBlob": "41cb1c855edf1c71b7a31a54371e1b76777bdaf9"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMini.cs",
+      "sha256": "6dad960267c2a3ae8dc90a68cf20c71c3c5e6e00d0d6b40a95816f08b3c93682",
+      "gitBlob": "4d139ec18c8e9fa68eb08dd725b32672985b3bd3"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerMiniPro.cs",
+      "sha256": "eda4db0c77010713fd93cc3158ea1c697dab72aec49bba28a7973de5678d6cd5",
+      "gitBlob": "3bcc88e84a119450cb1a7c2c5ac131a5faf4d58f"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerOneXFly.cs",
+      "sha256": "082f87fa78e7a75e54c9e4ce2369558a18f4bdcec251e4942a17eb65a921d77b",
+      "gitBlob": "9809958f1d1c93919cad8f9233fc865df47545f7"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerWmiEc.cs",
+      "sha256": "f84150a6e4714568e4cb14c019bd8e3cda394a32ef0cebe620a86f82c16a3021",
+      "gitBlob": "8184bbd9926b7b00f9fb7b2d5ad062219ecd2d00"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "sha256": "6de9c1f8190cdca14a051a61ff024bc618c2e5ed3f00e16fdf9ad8c7465d856c",
+      "gitBlob": "1dc9df5007f7d1ac888d98d9a9f94ca7c6c6c375"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+      "sha256": "93feaddb6b0387e110e92265d000d08c9242968939a36f69d1653bab70630121",
+      "gitBlob": "93ecbbb884feb5a1eef61da3ee3bdf45df7f574c"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Pro.cs",
+      "sha256": "7ae1196c28a0187768c62ec722cad4c886af768cd908e434c26f9738f1d81ef7",
+      "gitBlob": "a474e361f4286d125124fdb234b0d209fbe3639a"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+      "sha256": "b768e820d307c78edf7126e3068ba8331cc0784343c2a06340a99ac397ba6d49",
+      "gitBlob": "2f9a92e4280972c89ba2fda0f2725dc8a7fce079"
+    },
+    {
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2MiniPro.cs",
+      "sha256": "7f06350daeb1d1c7157ae21f1dc231637394008256b3fc4c22c747109e2c7b67",
+      "gitBlob": "0d583a18f0cca3b0d1e78b2a2ca0586311d78aa3"
+    },
+    {
+      "path": "HandheldCompanion/Devices/SuiPlay/SuiPlay0X1.cs",
+      "sha256": "c45be6746dab9b3d7a3f0b1edf17141d373e4fec13aed41da687a91d7ef6dfa7",
+      "gitBlob": "ff77eb53de84b7e5bbe22e2295938352790b64aa"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Valve/DeviceVersion.cs",
+      "sha256": "c858a9d58f67b4cff64ec895e09835f86b969184eab4979808663404810839d6",
+      "gitBlob": "8e94a1a74193d0590227e5502074f9f2898a3e9e"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Valve/RyzenSMU.cs",
+      "sha256": "9247fcb7e89028f885613ed06280ad76fbfbe92ee291e5ab52212e6b78620d4d",
+      "gitBlob": "7d6d9f878c0a5dd3139e3de284c19eb2368a9658"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Valve/SteamDeck.cs",
+      "sha256": "d58b3287f576efa338d45e068f804ecd1b3e6f5e0475d22af127d38c9e655c63",
+      "gitBlob": "d7e7103a2ef9b1fe2914812a64196feb9151c011"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Valve/SteamMachine.cs",
+      "sha256": "f10599c2a1feec1152f19509c9031a0fec3dd7d009a2e25bf7462aeafcbd5075",
+      "gitBlob": "17c3fda88f0525395feea6330a4b12a5bf898931"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Valve/VangoghGPU.cs",
+      "sha256": "8d57855e87e6a2e667343242d1a382a6cdaabb5194283ab3f6a7db12c8458de4",
+      "gitBlob": "adf80fe05d12101c15bfe60e0fe3efda611dd289"
+    },
+    {
+      "path": "HandheldCompanion/Devices/Zotac/GamingZone.cs",
+      "sha256": "1aeac088cc4b544c3797ae56edc60d28e29ddbabefd1dc85f160e62cb9845e8c",
+      "gitBlob": "cb11de0c57a738b1ff6fb49f7430177300c8ea28"
+    },
+    {
+      "path": "HandheldCompanion/Helpers/DeviceConfigurationHelper.cs",
+      "sha256": "cf576f3e135884b6a70ae4c88da610ced1d2ddd5360f7b0d6ecd8f843c3d1d05",
+      "gitBlob": "dfe359432c0769982ce64e1d33ad71730927a3c3"
+    },
+    {
+      "path": "HandheldCompanion/Models/DeviceConfiguration.cs",
+      "sha256": "7709b70f03266c1008e6ff5aa11ba343ef926f63c363832d71dfb7cbde98e909",
+      "gitBlob": "ddbfd605de4d4c9d2fe3c3378fa8a8898f344e93"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AOKZOEA1.json",
+      "sha256": "f881961314ffe340432b6731ecd0965e49c2a9bf58cfc0ccbef9dbaed17412d6",
+      "gitBlob": "04e27f2887083a06149ba14537e235b75d8e853d"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEO2.json",
+      "sha256": "a889b8dfd5c0ca23f67e3d0d8cb0256045fcf45b1d476850d79342bd2709d32a",
+      "gitBlob": "43fc74565eae5a1d88af6154a54499f47c9aba17"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEO2021.json",
+      "sha256": "96ea3414fcf6e1ca34697c7766cfad0d67c82e267418d46b43ffba0cf24820e3",
+      "gitBlob": "d6f1a3608f65a8c8487dc667d2704d9bdd010a65"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOAIR.json",
+      "sha256": "9b8af278c50ceb86e778d2cb88183d1ebc9b1b03f0ebb2d79a549c3a8d332ff9",
+      "gitBlob": "3062d488e49cca8192ecd7893e10e395f31be712"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOAIR1S.json",
+      "sha256": "88163c634f3a7801f8db797ea98034822ac5f58faca1c4fc9d30e21899ff0b60",
+      "gitBlob": "30fdaaed2616d8ecbcab2034da777d2f40d9cf43"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEODeviceCEc.json",
+      "sha256": "f6842f39b7078c87c60cba20dd5f7a215b2abbf8b00a4a2f86d5c03cf03fb803",
+      "gitBlob": "a4ec225b6890cbe01589d4ca3d6b0693cf78b929"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEODeviceCEii.json",
+      "sha256": "77a6c9a0cd1ac76ab6d62041ca8dba0c37a3ada9e854fb16af3e35a1bed9eb57",
+      "gitBlob": "5296b8ae83145679e24efe321a0bba44c41cb5fd"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOFlip1SDS.json",
+      "sha256": "395ae8a181fe37ff98aee6d64d5a315b82009587e87c34f9e680a26cb43857e1",
+      "gitBlob": "0bb64cecd1a8a13e3833ee6173dab825093d01ee"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOFlip1SKB.json",
+      "sha256": "2171b92f2a388aae0899a49d0c627108de219fee85da3a1c594d7230050e6fc6",
+      "gitBlob": "162a90ffd90f04d0bdaf999f14d972cbd530d74e"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOFlipKB.json",
+      "sha256": "f5f7647066e2679618c7569161f75e1375bb311d398143110c0018e4867fae05",
+      "gitBlob": "0de223ca6573c9a679355d4f981bedb24f2b0106"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEONEXT.json",
+      "sha256": "550d3abdf2746e17647c023c1b0051015f084cccc55ee29663b95e76aa1176d1",
+      "gitBlob": "22edbae240b82ef3cef0ccec0df287e464576adb"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEONEXT2.json",
+      "sha256": "bbef5352a5fcc4857e3f86d44955dfcb4206d6e17335bd8262090e424b034f67",
+      "gitBlob": "a145a2b9a554e7a1ad362ed08d371cbed80c4d57"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AYANEOSlide.json",
+      "sha256": "7974b6ae025eae487d3773538702316a79692fb81f56df31c0f8e7450180e603",
+      "gitBlob": "291567cba92dbf859e4de4bb8dd174f0949c5cd8"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/AynLoki.json",
+      "sha256": "ed73898b4d0a46bc0bf3241378b3545db0e979fe6d6acff72dcc2efb9e3f899c",
+      "gitBlob": "9658ff84764cacf940efccf2ca07c9ebc63b3d85"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ClawA1M.json",
+      "sha256": "9ffd3a58a3214a47290ef0a0e65871207983bd40acf6954eac1fadf3b6cf913e",
+      "gitBlob": "b60e664d23f4734709f45082e396693eb2a8510c"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ClawA2VM.json",
+      "sha256": "b9894fdb7bcbbc2e018e9c70bd54b9fda7a18fe7793ef4b2782308c606d1a7a3",
+      "gitBlob": "407823f7b3cb06d7fc774c3b89961f42ff5cf8cb"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ClawBZ2EM.json",
+      "sha256": "efd08be524515cae994f11965c42e735f4c96e18993f57639eb813150f7f674a",
+      "gitBlob": "d3c3fbb321115d2f0a5ad56049a7849d63a51953"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ClawCG3EM.json",
+      "sha256": "a1f4b96eb92c61c0405593a0abe93d2c007b5507867377f7f5f7002d8d663e90",
+      "gitBlob": "aa18c1bd68afc34e00a60318cc9dfc39cfea57fd"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/DefaultDevice.json",
+      "sha256": "c5c539950e9bc737bff519b4bfd6879669f5e3d952e4dd2fdc7ee9f78528ccd7",
+      "gitBlob": "a2699a200aa67196e4e1bcbbcd4c9fa0cd683207"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWin4-2023.json",
+      "sha256": "0e3a4ed684d837a68f0d056b624a4541a513e5b479539576dac99d304db950f8",
+      "gitBlob": "36819764f73bb9c9186f3e590bb1c8c5ae0a4f3d"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWin4-2024.json",
+      "sha256": "ecd7c33d17bcb418f68a7963c7293dfdb4daddebf5d9971bce954ef074b7e7ae",
+      "gitBlob": "07646b3ecde642232a1681ad08e25c9b55c1f5dd"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWin4.json",
+      "sha256": "8d120a6c327f5971115a13a67cd09b745f7187eb1e5be1a240b6d1a048d33ae6",
+      "gitBlob": "1a965dd3ea594fd7ff372b03be23a5e7aa08bf7b"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWin5.json",
+      "sha256": "e20614fa45911fbd0fedf9717200eaba3fedbb5c7817101a57e61d43be982368",
+      "gitBlob": "227cbb31c7a3527526d95677d175ee0653e460cb"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMax2-2024-HX370.json",
+      "sha256": "33104625615c6a093c8ebc1706410ef405a64f191b7b064180ca4ffcd922c495",
+      "gitBlob": "97462074a8e83bbcc7691a8417a0d957754ec2a4"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMax2.json",
+      "sha256": "f93fd13c2bcb12d234807f428d91994074c3bb449342f89580b3d17e17e8a391",
+      "gitBlob": "1455dec718015b69649c06043b5f44800ce1c98f"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMax2Intel.json",
+      "sha256": "ef4980778032275b644b1c5eb86867c8a8e8ea6d891b42c3cf3c323421923234",
+      "gitBlob": "e4609e7f39e306891859ac75418d92160b074a9b"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMini-8840U.json",
+      "sha256": "42402772847f5940840d01ecaa4806d84a388546432ab795999a18744d0e160d",
+      "gitBlob": "8eded18261b724d0a0ca3014e00a51e075035929"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMini-HX370.json",
+      "sha256": "df056527fdddd6f4e29bc5f5aed8b8a5befdd0681e7497eecdc171dab3f297e4",
+      "gitBlob": "24650082ab7f85a49ab32926f64d7ece0431c2e6"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GPDWinMini.json",
+      "sha256": "496ded280fabf822e3dc98f13cda4c200058c8bee828a1e8a9b54745e54d9bab",
+      "gitBlob": "2cad914c6092360507124d2489650137a924b8f7"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/GamingZone.json",
+      "sha256": "12761a81364b4517017f91d2eb8f40c7711e99ce2b424ed529646da02fa02d9b",
+      "gitBlob": "b08c9bfe9a5f597373e23a57488513f8136bf5ee"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/LegionGoSZ1.json",
+      "sha256": "b29f86742c8fbf3955e151b8eda1b0074aeb3469b3812e6ab11d3612accc05ca",
+      "gitBlob": "349324bd20b9437cc31645593c5323b2ac02a8b9"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/LegionGoTablet.json",
+      "sha256": "3aa0ab6f0e7c12d43dae84cda8c4408783e1e1d6bc03747ce13d2c706ff27cd3",
+      "gitBlob": "f8f9ca2887a7493110c436dfefbfc90c441d2d69"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/LegionGoTablet2.json",
+      "sha256": "09edc125f3179678955f19f2e9d9a5ac0b1c4475fb125789c80a3abbacaacf00",
+      "gitBlob": "fd78410bd4f9d90126fa17a6239292a3524f0587"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/MinisforumV3.json",
+      "sha256": "e29c2172ecb4ded0dea7364c6ae22e23c370f6e56b69861f04c3f0acda47d20f",
+      "gitBlob": "cd63069b47753df72f5fa1971e5a25134c8c725c"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayer2.json",
+      "sha256": "9d984d0f4e22188c5ed473f0f9953b6377ff444a985381ec1cf7bead0a03723e",
+      "gitBlob": "5819e0b5a5a804f2c38f10b5fc7ccca8ff37fa77"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayer3.json",
+      "sha256": "40dba7177094cdfb03880554aaa22d38921a57ae2b8deca5eca5f7dc32ced10b",
+      "gitBlob": "2c369e9c9720c6b1cdeb59fb0e471fb8ddfc694c"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerApex.json",
+      "sha256": "2471eef62a1e636d78f30a215988957f1a363bca0df314866faa605501bb9f77",
+      "gitBlob": "4f3c79fc4509ddb9cf4350efd0a5def29b7e9766"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerG1.json",
+      "sha256": "99f94e265b9f053f85ff4fb342fdffc3df1bad4f5500df9bfdb85fe688772f45",
+      "gitBlob": "13eb93978cfc703e7bc6eb09fcc1f7a876a46ffd"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerMini.json",
+      "sha256": "d56b7c17becb56154db23f86c2161a29273393415586bc2f0628df13aff259ee",
+      "gitBlob": "12693048494adb500c4fd033aaf92fc01d4467fc"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerMiniAMD.json",
+      "sha256": "839e9381099a2b50520c6cea91d8c1540d55bc5109a6b63858975da31ee1dc46",
+      "gitBlob": "6819e89ea2fe3b9fee8d210a5420d66d8499003f"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerMiniIntel.json",
+      "sha256": "4908ebbc8d5560218345b49fa0142d8e946c491a5f08d1310e832f1cea35112a",
+      "gitBlob": "298187979254fa3cf5ce96635a48dafccf1e3806"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerMiniPro.json",
+      "sha256": "d3939ee42a4495b87d495e3abc54e3c919348352981eb8b98411eb509cf61b20",
+      "gitBlob": "d0ac2f143504c4cdcd4f739a9c77f2f7c49387d1"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerOneXFly.json",
+      "sha256": "bc0e138cb17a82e6d83b9fbb5e0bed3b0a5c205e4d2645ca48d4590a736c40d8",
+      "gitBlob": "ae70953133c55d5c95cf3e5ac2b7ca089b928bbd"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerX1.json",
+      "sha256": "337348525496d3732b490881fe3953531a4574d51cd3ac60c6372b549d587985",
+      "gitBlob": "274d5e538aa186882b1446e75c68da3abbae5e6d"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerX1AMD.json",
+      "sha256": "c6409f75dffa3d569c12142e371ee1c6405dfdf1eed3412a6989b97f7e90562b",
+      "gitBlob": "5996cd3c8f4f6d996af5d5bb848ace79cd8bd1aa"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerX1Mini.json",
+      "sha256": "2dd5e2ef9634c0077275790b50dff3bfb950b9f85159d614bae904d1e2bc902a",
+      "gitBlob": "ede826cafeb015ee93bbd34ebf6f5fd50fe7fbd3"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerX2.json",
+      "sha256": "6b3e2babf6b7c3482a3b73d2f51d3e9701f90239a7a1b39490337a1eb552bbe8",
+      "gitBlob": "5857af687abf2cba2d9fad35f14a76f972640e96"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/OneXPlayerX2MiniPro.json",
+      "sha256": "5689156e5219ecc5009bfb208dbafbdae8b6607ece15b5f8ca41ea6b5953b57a",
+      "gitBlob": "847ae3aed7be3bd735751ff573815aa11b567626"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ROGAlly.json",
+      "sha256": "0ce72e59106c69041ec5beda91e4dd5d6abc995918710f2f7dd78299a2e4c9fa",
+      "gitBlob": "c53ded865ee59b566819ed1573c1b81a3fe4c382"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/ROGAllyX.json",
+      "sha256": "f43cbd44151038d8abd34d0a764da5d521e456b0411a1547b4cf3c45a7c3d7f6",
+      "gitBlob": "8c0c3f34481c5fe555bdd4329058bc0d5479d9b5"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/SteamDeck.json",
+      "sha256": "27ef6f1e162e67ad9e0f0afc2c62aefede5507cd64222ad2811117feef37897b",
+      "gitBlob": "367a1228405b7e25405f74bd583c593d1c37bfb0"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/XboxROGAlly.json",
+      "sha256": "c3ef742ed4ee4b14aaaf1b7b33efe2cfe50047002c29c9524e111af6aea64322",
+      "gitBlob": "9fe089bd0dc5537322bafd20835943084beade71"
+    },
+    {
+      "path": "HandheldCompanion/Resources/Devices/XboxROGAllyX.json",
+      "sha256": "82b87000f4645cfeec86f774cc5ccea0ce752e0aafe47cbfad3b6999c06844ce",
+      "gitBlob": "855f30ddfc5226b4be21533cbca46d7c1427126c"
+    },
+    {
+      "path": "HandheldCompanion/Managers/SensorsManager.cs",
+      "sha256": "4460ae2a584bae6bbd5ec97c657e6adb635738decfee723c49b0adb99e8ecfb3",
+      "gitBlob": "bea0920e67a21d3d7bf91643aa6930e4b2d7e00f"
+    },
+    {
+      "path": "HandheldCompanion/Sensors/IMUAccelerometer.cs",
+      "sha256": "3cd61c3967cf81ecdb7500a4ab0f37b42d913d7b67be9ddea3dfb2cd8855500a",
+      "gitBlob": "65104007174179f175feef47919565997fca2455"
+    },
+    {
+      "path": "HandheldCompanion/Sensors/IMUGyrometer.cs",
+      "sha256": "6982d2b93db1161baab4dd4a7357d5ca01d9b24432dce7c01e8c2acb65e2812d",
+      "gitBlob": "751a15d55fcb6271fdcc891165fe0c03862f7c9c"
+    }
+  ]
+}

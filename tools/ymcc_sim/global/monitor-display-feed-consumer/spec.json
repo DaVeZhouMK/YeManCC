@@ -1,0 +1,62 @@
+{
+  "schemaVersion": 1,
+  "script": "tools/monitor_display_feed_selftest.mjs",
+  "suite": "Bounded 1Hz display feed / YMCC width policy",
+  "originalScope": "Deterministic production TS logic, virtual monotonic clock, no hardware/runtime",
+  "expectedNames": [
+    "No-subscriber updates allocate no timer, store latest only",
+    "Initial unavailable cache does not delay first real sample",
+    "10000 duplicates cause no pending timer or extra display",
+    "Burst keeps one timer/one value, flushes latest at 1000ms without catch-up",
+    "An early browser timer cannot spend the next sample budget prematurely",
+    "Continuous 100Hz input cannot publish ordinary samples faster than 1Hz",
+    "Health-down invalidates immediately, cannot reset recovery sample-rate budget",
+    "Late display receives latest cache, no extra broadcast to existing display",
+    "Last unsubscribe cancels pending timer; inactive owner never wakes",
+    "Dispose stops future values/subscriptions and removes timer",
+    "Bad display listener cannot break other consumers",
+    "900px baseline is monitor-only; all other YMCC routes retain 580px",
+    "1920×1080: original height zoom, no compression, 755px logical content",
+    "1280×720: original height zoom, no compression, 755px logical content",
+    "DPR2 reference remains uncompressed at supported physical resolutions",
+    "Feed key covers session/sequence/health and per-field freshness, not costly JSON snapshots"
+  ],
+  "sources": [
+    "package.json",
+    "tools/monitor_display_feed_selftest.mjs",
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorLayout.ts",
+    "tools/ymcc_sim/global/tdp-runtime-display-consumer/observe.cjs",
+    "tools/ymcc_sim/global/tdp-runtime-display-consumer/paths.cjs",
+    "tools/ymcc_sim/global/host-process.ps1"
+  ],
+  "observer": "tools/ymcc_sim/global/tdp-runtime-display-consumer/observe.cjs",
+  "buildInputs": [
+    "src/bridge/monitorDisplayFeed.ts",
+    "src/bridge/monitorLayout.ts"
+  ],
+  "report": "DISPLAY-FEED-SELFTEST.json",
+  "program": "display-feed-under-test.mjs",
+  "faults": [
+    {
+      "id": "throttle-budget",
+      "path": "src/bridge/monitorDisplayFeed.ts",
+      "before": "if (!urgent && remaining > 0)",
+      "after": "if (false && remaining > 0)",
+      "originalLine": 12,
+      "expectedCase": "Burst keeps one timer/one value, flushes latest at 1000ms without catch-up",
+      "expectedActual": 0,
+      "expectedExpected": 1
+    },
+    {
+      "id": "last-unsubscribe",
+      "path": "src/bridge/monitorDisplayFeed.ts",
+      "before": "if (!listeners.size && timer !== null) cancel();",
+      "after": "if (false && timer !== null) cancel();",
+      "originalLine": 17,
+      "expectedCase": "Last unsubscribe cancels pending timer; inactive owner never wakes",
+      "expectedActual": 1,
+      "expectedExpected": 0
+    }
+  ]
+}

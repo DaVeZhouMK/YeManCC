@@ -22,6 +22,94 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+. (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
+. (Join-Path $PSScriptRoot 'lighting-build-contract.ps1')
+. (Join-Path $PSScriptRoot 'settings-baseline-contract.ps1')
+
+# Called only after the existing complete Assert-ExportBuildIdentity gate.
+# Native is deployed later in this script: validate its planned source here.
+function Copy-InstalledLightingPayload {
+  [CmdletBinding()]
+  param(
+    [Parameter(Mandatory=$true)][string]$ProjectRoot,
+    [Parameter(Mandatory=$true)][string]$WorkspaceRoot,
+    [Parameter(Mandatory=$true)][string]$SourcePowerControl,
+    [Parameter(Mandatory=$true)][string]$InstalledPowerControl,
+    [Parameter(Mandatory=$true)][string]$BackupRoot,
+    [Parameter(Mandatory=$true)][string]$NativeExe,
+    [Parameter(Mandatory=$true)]$ExportBuildIdentity
+  )
+  $ErrorActionPreference = 'Stop'
+  $source = Resolve-YmccLightingChild $SourcePowerControl 'light-setter'
+  function Assert-LightingTuple([string]$PayloadRoot) {
+    if ($ExportBuildIdentity.schema -ne 1 -or $ExportBuildIdentity.buildId -notmatch '^[a-f0-9]{64}$' -or -not $ExportBuildIdentity.payload) { throw 'LIGHTING_INSTALLED_BUILD_IDENTITY_REQUIRED' }
+    foreach ($relative in @('YeManCC/YeManCC.exe')+@(Get-YmccLightingRuntimeNames | ForEach-Object {'PowerControl/light-setter/'+$_})) {
+      $rows = @($ExportBuildIdentity.payload | Where-Object path -CEQ $relative)
+      if ($rows.Count -ne 1 -or $rows[0].sha256 -cnotmatch '^[a-f0-9]{64}$' -or $rows[0].bytes -le 0) { throw ('LIGHTING_INSTALLED_BUILD_TUPLE_MISSING: '+$relative) }
+      $file = if ($relative -ceq 'YeManCC/YeManCC.exe') { Resolve-YmccLightingChild (Split-Path -Parent $NativeExe) (Split-Path -Leaf $NativeExe) } else { Resolve-YmccLightingChild $PayloadRoot ($relative.Substring('PowerControl/light-setter/'.Length)) }
+      if ((Get-Item -LiteralPath $file).Length -ne $rows[0].bytes -or (Get-YmccLightingFileHash $file) -cne $rows[0].sha256) { throw ('LIGHTING_INSTALLED_BUILD_TUPLE_CHANGED: '+$relative) }
+    }
+    Assert-YmccLightingMainlinePayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -PayloadRoot $PayloadRoot
+  }
+  $admitted = Assert-LightingTuple $source
+  $target = Resolve-YmccLightingChild $InstalledPowerControl 'light-setter'
+  $backup = Resolve-YmccLightingChild $BackupRoot 'PowerControl/light-setter'
+  $existingAcl = [Collections.Generic.List[object]]::new()
+  if (Test-Path -LiteralPath $target -PathType Container) {
+    foreach ($name in @('')+@(Get-YmccLightingRuntimeNames)) {
+      $path = if ($name) { Join-Path $target $name } else { $target }
+      if (Test-Path -LiteralPath $path) {
+        $acl = Get-Acl -LiteralPath $path
+        $existingAcl.Add(@{name=$name;acl=$acl;sddl=$acl.Sddl})
+      }
+    }
+  }
+  function Assert-LightingAcl([string]$PayloadRoot) {
+    foreach ($entry in $existingAcl) {
+      $path = if ($entry.name) { Join-Path $PayloadRoot $entry.name } else { $PayloadRoot }
+      if ((Get-Acl -LiteralPath $path).Sddl -cne $entry.sddl) { throw ('LIGHTING_INSTALLED_ACL_CHANGED: '+$entry.name) }
+    }
+  }
+  $paths = @($source,$target,$backup)
+  for ($i=0; $i -lt $paths.Count; $i++) {
+    for ($j=$i+1; $j -lt $paths.Count; $j++) {
+      if ($paths[$i] -ieq $paths[$j] -or $paths[$i].StartsWith($paths[$j]+'\',[StringComparison]::OrdinalIgnoreCase) -or $paths[$j].StartsWith($paths[$i]+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'LIGHTING_INSTALLED_OVERLAPPING_PATHS' }
+    }
+  }
+  if ([IO.Path]::GetPathRoot($target) -ine [IO.Path]::GetPathRoot($backup)) { throw 'LIGHTING_INSTALLED_STAGE_VOLUME_MISMATCH' }
+  if (Test-Path -LiteralPath $backup) { throw 'LIGHTING_INSTALLED_BACKUP_ALREADY_EXISTS' }
+  $stage = Resolve-YmccLightingChild $BackupRoot ('lighting-stage-'+[Guid]::NewGuid().ToString('N'))
+  New-Item -ItemType Directory -Path $stage -Force | Out-Null
+  foreach ($name in Get-YmccLightingRuntimeNames) { Copy-Item -LiteralPath (Join-Path $source $name) -Destination (Join-Path $stage $name) }
+  foreach ($entry in $existingAcl) {
+    $path = if ($entry.name) { Join-Path $stage $entry.name } else { $stage }
+    Set-Acl -LiteralPath $path -AclObject $entry.acl
+  }
+  Assert-LightingAcl $stage
+  $staged = Assert-LightingTuple $stage
+  if ($staged.receiptSha256 -cne $admitted.receiptSha256) { throw 'LIGHTING_INSTALLED_CANDIDATE_CHANGED' }
+  $oldMoved = $false
+  $newMoved = $false
+  try {
+    if (Test-Path -LiteralPath $target) {
+      New-Item -ItemType Directory -Path (Split-Path -Parent $backup) -Force | Out-Null
+      [IO.Directory]::Move($target,$backup)
+      $oldMoved = $true
+    }
+    [IO.Directory]::Move($stage,$target)
+    $newMoved = $true
+    $installed = Assert-LightingTuple $target
+    Assert-LightingAcl $target
+    if ($installed.receiptSha256 -cne $admitted.receiptSha256) { throw 'LIGHTING_INSTALLED_CANDIDATE_CHANGED' }
+  } catch {
+    $failure = $_
+    if ($newMoved) { [IO.Directory]::Move($target,$stage) }
+    if ($oldMoved) { [IO.Directory]::Move($backup,$target) }
+    throw $failure
+  }
+  return $installed
+}
 
 function Get-FullPath([string]$Path) {
   return [IO.Path]::GetFullPath($Path).TrimEnd('\')
@@ -56,7 +144,44 @@ function Get-RelativePath([string]$Root, [string]$Path) {
 # and redist (HidHide installer/CLI verified by hash at deploy time).
 function Test-InstalledPowerControlExcluded([string]$Relative, [bool]$IsDirectory) {
   $r = $Relative.Replace('/', '\')
-  if ($r -match '^(fan-host(?:-v2)?|light-setter|feature-assets|handheldcompanion-runtime|redist)(?:-quarantine|\\|$)') { return $true }
+  # Battery settings/journals are per-user state; ship only the built immutable helper payload.
+  if ($r -match '^battery-host(?:\\|$)') {
+    if ($IsDirectory) { return $r -ne 'battery-host' }
+    $batteryFiles=(Get-Content -LiteralPath (Join-Path $ProjectRoot 'native\BatteryHost\payload-files.json') -Raw | ConvertFrom-Json)
+    return $r.Substring('battery-host\'.Length) -notin $batteryFiles
+  }
+  # CE-only GameValueScan runtime: bind the adapter, Lua bridge and manifest.
+  # Runtime state, unknown JSON and other added payloads never enter this lane.
+  if ($r -match '^MemoryScan(?:\\|$)') {
+    if ($IsDirectory) { return $r -ine 'MemoryScan' }
+    if ($r -notin @('MemoryScan\MemoryScanHost.cs', 'MemoryScan\MemoryScanHost.exe', 'MemoryScan\MemoryScanHost.payload.json', 'MemoryScan\CeScanEngine.lua')) { return $true }
+    $memoryScanRoot = Join-Path $ProjectRoot 'PowerControl\MemoryScan'
+    $memoryScanManifest = Get-Content -LiteralPath (Join-Path $memoryScanRoot 'MemoryScanHost.payload.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($memoryScanManifest.schema -ne 2 -or $memoryScanManifest.engine -cne 'cheat-engine' -or $memoryScanManifest.source -cne 'MemoryScanHost.cs' -or
+        $memoryScanManifest.binary -cne 'MemoryScanHost.exe' -or $memoryScanManifest.runtime -cne 'Windows .NET Framework 4.8 x64') {
+      throw 'Invalid immutable MemoryScan payload manifest'
+    }
+    if ((Get-Sha256 (Join-Path $memoryScanRoot 'MemoryScanHost.cs')) -ine $memoryScanManifest.sourceSha256 -or
+        (Get-Sha256 (Join-Path $memoryScanRoot 'MemoryScanHost.exe')) -ine $memoryScanManifest.binarySha256 -or
+        (Get-Sha256 (Join-Path $memoryScanRoot 'CeScanEngine.lua')) -ine $memoryScanManifest.luaSha256) {
+      throw 'Unbound immutable MemoryScan payload source or binary'
+    }
+    return $false
+  }
+  # Decky is an exact immutable allowlist, before generic dist/JSON exclusions.
+  # Runtime settings, foreign plugins and backend files are never ordinary assets.
+  if ($r -match '^decky(?:\\|$)') {
+    if ($IsDirectory) {
+      return $r -notin @('decky','decky\plugins','decky\plugins\ymcc-sidebar','decky\plugins\ymcc-sidebar\dist')
+    }
+    return $r -notin @(
+      'decky\PluginLoader_noconsole.exe','decky\LICENSE.decky-loader',
+      'decky\plugins\ymcc-sidebar\dist\index.js',
+      'decky\plugins\ymcc-sidebar\package.json','decky\plugins\ymcc-sidebar\plugin.json',
+      'decky\plugins\ymcc-sidebar\LICENSE.decky-api','decky\plugins\ymcc-sidebar\LICENSE.vue'
+    )
+  }
+  if ($r -match '^(fan-host(?:-v2)?|light-setter|feature-assets|handheldcompanion-runtime|ymcc-shared-runtime|redist)(?:-quarantine|\\|$)') { return $true }
   if ($r -match '(^|\\)(\.git|build|dist|__pycache__|KX\.bak_removed|product-old-files-[^\\]+)(\\|$)') { return $true }
   if ($r -match '^(TPD|intel|ryzenadj|tools|pawnio|OpenSpeedy|RTSS-Overlays)(\\|$)') { return $true }
   if ($IsDirectory) { return $false }
@@ -82,6 +207,26 @@ function Test-InstalledPowerControlExcluded([string]$Relative, [bool]$IsDirector
   if ($r -match '^Sleep\\controlled-sleep') { return $true }
   if ($r -match '^(float-active|fps-monitor\.(hb|pid|log)|hwinfo-ok|hwinfo-recovery\.ts|speedhack\.log|startup_trace\.txt|topmon\.json)$') { return $true }
   if ($r -match '^(FPS-|tdp-).+\.txt$' -or $r -match '^yeman-gcm-search-result.*\.json$') { return $true }
+  # Immutable resources from the current Steam appearance pack. Never include
+  # a user cache/state file merely because it has the same directory prefix.
+  if ($r -match '^steam-appearance\\' -and $r -match '\.json$') {
+    $pack = Join-Path $ProjectRoot 'PowerControl\steam-appearance'
+    $manifest = Get-Content -LiteralPath (Join-Path $pack 'manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+    if ($manifest.id -ne 'ymcc-steam-appearance' -or $manifest.version -ne 1) { throw 'Invalid bundled Steam appearance manifest' }
+    if ($r -ieq 'steam-appearance\manifest.json') { return $false }
+    $prefix = 'steam-appearance\themes\'
+    if (-not $r.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { throw "Unclassified Steam appearance JSON: $r" }
+    $relative = $r.Substring($prefix.Length).Replace('\', '/')
+    $matches = @($manifest.files | Where-Object { $_.path -ieq $relative })
+    $source = Join-Path (Join-Path $pack 'themes') $relative
+    if ($matches.Count -ne 1 -or (Get-Sha256 $source) -ine $matches[0].sha256) { throw "Unbound bundled Steam appearance resource: $r" }
+    return $false
+  }
+  # Keep the immutable shared title policy aligned with package-release.ps1.
+  if (-not $script:installedSettingsBaseline) { $script:installedSettingsBaseline = Read-YmccSettingsBaselineContract $ProjectRoot }
+  if (Test-YmccMutableSettingsPath $r $script:installedSettingsBaseline) { return $true }
+  if ($r -ieq 'settings-baseline.json' -or $r -ieq $script:installedSettingsBaseline.defaultsFile) { return $false }
+  if ($r -ieq 'GameTitlePolicy.json') { return $false }
   if ($r -match '\.json$') {
     throw "Unclassified PowerControl JSON must be added to the install policy: $r"
   }
@@ -232,6 +377,8 @@ function Assert-ExportIsFresh([string]$ProjectRoot, [string]$WorkspaceRoot) {
 }
 
 $ProjectRoot = Get-FullPath (Split-Path -Parent $PSScriptRoot)
+. (Join-Path $PSScriptRoot 'monitor-hud-export.ps1')
+. (Join-Path $PSScriptRoot 'release-export-identity.ps1')
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = Get-FullPath (Join-Path $ProjectRoot '..\..')
 } else {
@@ -239,15 +386,20 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
 }
 
 $WebBuild = Join-Path $WorkspaceRoot 'Build\App\Web'
+$DeckyBuild = Join-Path $WorkspaceRoot 'Build\App\Decky\plugins\ymcc-sidebar'
 $NativeExe = Join-Path $WorkspaceRoot 'Build\App\Native\YeManCC.exe'
 $RecoveryService = Join-Path $WorkspaceRoot 'Build\App\Native\YeManRecoveryService.exe'
+$ControllerVisibilityProbe = Join-Path $WorkspaceRoot 'Build\App\Native\YeManControllerVisibilityProbe.exe'
 $RtssProfileHelper = Join-Path $WorkspaceRoot 'Build\App\Native\YMCCRtssProfileHelper.exe'
 $RtssOverlayBridge = Join-Path $WorkspaceRoot 'Build\App\Native\YMCCOverlayBridge.dll'
 $NativeInputHost = Join-Path $WorkspaceRoot 'Build\App\Native\InputHost'
 $sourcePowerControl = Join-Path $ProjectRoot 'PowerControl'
+# Validate the complete appearance payload before any installed files are moved or copied.
+. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+Get-SteamAppearanceExportFiles $sourcePowerControl | Out-Null
 $FeatureAssetsSource = Join-Path $ProjectRoot 'PowerControl\feature-assets'
 $HcRuntimeSource = Join-Path $ProjectRoot 'PowerControl\handheldcompanion-runtime'
-$HcRuntimeFolderName = 'HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+$HcRuntimeFolderName = 'YMCC-DEVICECORE-20261018-v1'
 $CustomSteamLibrarySource = Join-Path $ProjectRoot 'CustomSteamLibrary'
 $hidHideInstallerName = 'HidHide_1.5.230_x64.exe'
 $hidHideInstallerExpectedSha256 = 'F4BBBCB82E6258641B887C74BC81C4C5F66E4AA811808DFC304347687B7605F6'
@@ -284,12 +436,35 @@ if ($IsolatedRoot) {
 } elseif ($InstallRoot -ne $ExpectedInstall) {
   throw "Unexpected install target: $InstallRoot. Pass -IsolatedRoot to target an isolated copy."
 }
-foreach ($required in @($WebBuild, (Join-Path $WebBuild 'index.html'), (Join-Path $WebBuild 'assets'), $NativeExe, $RecoveryService, $RtssProfileHelper, $RtssOverlayBridge)) {
+foreach ($required in @($WebBuild, (Join-Path $WebBuild 'index.html'), (Join-Path $WebBuild 'hud-output.html'), (Join-Path $WebBuild 'assets'), $NativeExe, $RecoveryService, $ControllerVisibilityProbe, $RtssProfileHelper, $RtssOverlayBridge)) {
   if (-not (Test-Path -LiteralPath $required)) { throw "Build output is incomplete: $required" }
 }
 # Freshness gate: never export an artifact older than its source (see
 # Assert-ExportIsFresh for the QPC/0910-17 regression this prevents).
 Assert-ExportIsFresh $ProjectRoot $WorkspaceRoot | Out-Null
+$exportBuildIdentity = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
+# Ordinary local test exports deliberately have no formal fixture receipts.
+# Admit only the declaration already bound to the complete verified archive.
+$testExportRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
+$testExportMarker = Join-Path $testExportRoot 'YeManCC\test-export.json'
+if (Test-Path -LiteralPath $testExportMarker -PathType Leaf) {
+  Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $testExportRoot -BuildIdentity $exportBuildIdentity | Out-Null
+  $testDeclaration = Get-Content -LiteralPath $testExportMarker -Raw -Encoding UTF8 | ConvertFrom-Json
+  if ($testDeclaration.schemaVersion -ne 1 -or $testDeclaration.kind -cne 'mainline-local-test-export' -or
+      $testDeclaration.formalReleaseAccepted -isnot [bool] -or $testDeclaration.formalReleaseAccepted -ne $false -or
+      $testDeclaration.fixtureValidation -cne 'NOT_RUN' -or $testDeclaration.gitPublished -isnot [bool] -or $testDeclaration.gitPublished -ne $false) {
+    throw 'TEST_EXPORT_DEPLOY_DECLARATION_INVALID'
+  }
+  $env:YEMAN_TEST_EXPORT = '1'
+  Write-Output 'TEST_EXPORT_DEPLOY: formal Decky Build/Package fixture receipts NOT_RUN; source, complete archive and payload identity verified.'
+} else {
+  $env:YEMAN_TEST_EXPORT = '0'
+  & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Verify -WorkspaceRoot $WorkspaceRoot
+}
+Assert-MonitorHudWebExport $WebBuild | Out-Null
+Assert-MonitorHudDeckyExport $DeckyBuild | Out-Null
+& node (Join-Path $PSScriptRoot 'build-decky-sidebar-plugin.mjs') --out $DeckyBuild --check
+if ($LASTEXITCODE -ne 0) { throw "Decky sidebar build identity rejected: exit=$LASTEXITCODE" }
 # Fail before any target file or process is touched; never silently preserve stale V2 bytes.
 & (Join-Path $PSScriptRoot 'fan_host_path_gate.ps1') -ProjectRoot $ProjectRoot -SourceOnly | Out-Null
 . (Join-Path $PSScriptRoot 'fan-host-layout.ps1')
@@ -311,8 +486,8 @@ if (-not (Test-Path -LiteralPath $OptBuildManifest -PathType Leaf)) {
 if ($LASTEXITCODE -ne 0) {
   throw "Adopted-optimization inheritance gate FAILED (pre-copy, exit=$LASTEXITCODE): refusing to replace installed files."
 }
-# HC-SLIM-01: explicit nine-file production export. Two hash-identical utilities
-# resolve only from the pinned HC runtime via RuntimeSharedDependencies. Build
+# Explicit nine-file production export. Two hash-identical utilities resolve
+# from PowerControl/ymcc-shared-runtime via RuntimeSharedDependencies. Build
 # output remains unthinned; only candidate/package/deploy staging is deduplicated.
 $inputHostFiles = @(
   'YeManInputHost.exe',
@@ -329,6 +504,8 @@ $sharedRuntimeFallbackHashes = @{
   'Nefarius.Utilities.DeviceManagement.dll' = 'B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C'
   'Newtonsoft.Json.dll' = 'A28C251DFE36D881E9E2462E171441B8B0EC156FE3F452602C9149B1B9EFE05B'
 }
+Assert-YmccSharedRuntimeSource $ProjectRoot
+$sharedRuntimeSource = Join-Path $ProjectRoot 'deps\ymcc-shared-runtime\bin'
 $inputHostMissing = @()
 if (Test-Path -LiteralPath $NativeInputHost -PathType Container) {
   $inputHostMissing = @($inputHostFiles | Where-Object { -not (Test-Path -LiteralPath (Join-Path $NativeInputHost $_) -PathType Leaf) })
@@ -343,15 +520,17 @@ $nativeInputHostReady = $inputHostMissing.Count -eq 0
 if (-not $nativeInputHostReady) {
   throw "Normal virtual-gamepad export is missing InputHost files: $($inputHostMissing -join ', ')"
 }
+Assert-YmccInputHostBuild $ProjectRoot $NativeInputHost
 $hcRuntimeSource = Join-Path $HcRuntimeSource $HcRuntimeFolderName
 $hcRuntimeManifest = Join-Path $hcRuntimeSource 'HandheldCompanion.runtime.json'
+Assert-YmccDeviceCoreRuntime -ProjectRoot $ProjectRoot -RuntimeRoot $hcRuntimeSource | Out-Null
 if (-not (Test-Path -LiteralPath $hcRuntimeSource -PathType Container) -or
     -not (Test-Path -LiteralPath $hcRuntimeManifest -PathType Leaf)) {
   throw "Normal export is missing locked HC runtime $HcRuntimeFolderName"
 }
 # Filename-specific pins agree with the actual production resolver.
 foreach ($name in $sharedRuntimeFallbackHashes.Keys) {
-  $sharedPath = Join-Path $hcRuntimeSource $name
+  $sharedPath = Get-YmccSharedRuntimeSourceFile $ProjectRoot $name
   if (-not (Test-Path -LiteralPath $sharedPath -PathType Leaf) -or
       (Get-Sha256 $sharedPath) -ne $sharedRuntimeFallbackHashes[$name]) {
     throw "Pinned InputHost shared fallback is missing or changed: $name"
@@ -415,8 +594,8 @@ if (-not (Test-Path -LiteralPath $InstallRoot -PathType Container)) {
 }
 if ($IsolatedRoot) {
   Write-Output 'ISOLATED-ROOT: running-product check skipped (not executed)'
-} elseif (Get-Process -Name 'YeManCC','CustomSteamLibrary','SteamArtworkLab','YeManRecoveryService' -ErrorAction SilentlyContinue) {
-  throw 'YeManCC.exe, CustomSteamLibrary.exe, SteamArtworkLab.exe or YeManRecoveryService.exe is running. Exit them before deployment.'
+} elseif (Get-Process -Name 'YeManCC','CustomSteamLibrary','SteamArtworkLab','YeManRecoveryService','YeManControllerVisibilityProbe' -ErrorAction SilentlyContinue) {
+  throw 'YeManCC.exe, CustomSteamLibrary.exe, SteamArtworkLab.exe, YeManRecoveryService.exe or YeManControllerVisibilityProbe.exe is running. Exit them before deployment.'
 }
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -452,8 +631,27 @@ New-Item -ItemType Directory -Force -Path $installedPowerControl | Out-Null
 # C:\SOFT\YeMan export runnable (T0: HWiNFO/TDP/PawnIO/OpenSpeedy/RTSS must be
 # present, not just feature-assets): first the ordinary main assets via the
 # formal release template policy, then the hash-locked third-party assets.
+# Preserve the ACTUAL previous installed plugin before ordinary assets can overwrite it.
+Move-MonitorHudDeckyBackup $installedPowerControl $BackupRoot
 Copy-InstalledPowerControlMainAssets $sourcePowerControl $installedPowerControl
+. (Join-Path $PSScriptRoot 'steam-appearance-export.ps1')
+Assert-SteamAppearanceExport $sourcePowerControl $installedPowerControl | Out-Null
+# Source-tree dist is not authoritative: install the verified matching task build.
+Copy-MonitorHudDeckyExport $DeckyBuild $installedPowerControl
+# Record the exact identity also consumed by the normal whole-package updater.
+. (Join-Path $ProjectRoot 'native\decky_package_maintenance.ps1')
+$deckyManaged = New-YmccDeckyManifest (Join-Path $installedPowerControl 'decky') (Join-Path $ProjectRoot 'decky-plugin\vendor\decky-loader.lock.json')
+$deckyReceipt = Join-Path $installedPowerControl 'decky\.ymcc-managed.json'
+if (Test-Path -LiteralPath $deckyReceipt -PathType Leaf) {
+  $deckyReceiptBackup = Join-Path $BackupRoot 'PowerControl\decky\.ymcc-managed.json'
+  New-Item -ItemType Directory -Path (Split-Path -Parent $deckyReceiptBackup) -Force | Out-Null
+  Copy-Item -LiteralPath $deckyReceipt -Destination $deckyReceiptBackup -Force
+}
+$deckyManaged | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $deckyReceipt -Encoding UTF8
 Copy-InstalledLockedPowerControlAssets $ProjectRoot $WorkspaceRoot $installedPowerControl $BackupRoot | Out-Null
+$installedSharedRuntime = Join-Path $installedPowerControl 'ymcc-shared-runtime'
+Copy-YmccSharedRuntime $ProjectRoot $installedSharedRuntime (Join-Path $BackupRoot 'PowerControl\ymcc-shared-runtime')
+Assert-YmccBatteryHostCopies $ProjectRoot (Join-Path $installedPowerControl 'battery-host')
 # fan-host is a separate, ACL-authenticated payload lane. On an existing
 # install it must be preserved untouched; on a clean export the source payload
 # is staged so the dedicated install-fan-host-payload.ps1 remains runnable.
@@ -465,22 +663,9 @@ $fanHostDeployMode = if (Test-Path -LiteralPath $installedFanHost -PathType Cont
   Copy-Item -LiteralPath $sourceFanHost -Destination $installedFanHost -Recurse -Force
   'staged'
 }
-# light-setter（L1 方案 B，2026-09-16）：一次性灯光设置器（直驱 HC 程序集，
-# 覆盖非 ROG 机型的灯光后端）。与 fan-host 同属专用 payload——主资产已排除，
-# 此处显式复制（源缺失=该特性不启用，不阻塞部署）。
-# 【栽坑史 2026-09-16】直接 Copy-Item -Recurse 到已存在目录会嵌套出
-# light-setter\light-setter\（幂等性缺失，重部署每次多一层）。改为
-# 先把旧目录移入备份再整目录复制（与 feature-assets 同法），保证幂等 + 可回滚。
-$sourceLightSetter = Join-Path $sourcePowerControl 'light-setter'
-if (Test-Path -LiteralPath $sourceLightSetter -PathType Container) {
-  $installedLightSetter = Join-Path $installedPowerControl 'light-setter'
-  if (Test-Path -LiteralPath $installedLightSetter -PathType Container) {
-    $lightSetterBackup = Join-Path $BackupRoot 'PowerControl\light-setter'
-    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $lightSetterBackup) | Out-Null
-    Move-Item -LiteralPath $installedLightSetter -Destination $lightSetterBackup -Force
-  }
-  Copy-Item -LiteralPath $sourceLightSetter -Destination $installedLightSetter -Recurse -Force
-}
+# Use the validated normal-build tuple; the planned native is copied later.
+# Stage and verify lighting before replacing its old directory, with rollback.
+Copy-InstalledLightingPayload -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -SourcePowerControl $sourcePowerControl -InstalledPowerControl $installedPowerControl -BackupRoot $BackupRoot -NativeExe $NativeExe -ExportBuildIdentity $exportBuildIdentity | Out-Null
 Copy-Item -LiteralPath $FeatureAssetsSource -Destination $installedFeatureAssets -Recurse -Force
 $virtualGamepadAssets = Join-Path $installedFeatureAssets 'virtual-gamepad'
 # P0-3（2026-09-13 用户裁决，HC 严格）：删除 test-xinput-suppress.flag 写入——
@@ -565,6 +750,7 @@ foreach ($item in Get-ChildItem -LiteralPath $WebBuild -Force) {
 }
 Copy-WithBackup $NativeExe (Join-Path $InstallRoot 'YeManCC.exe') $BackupRoot
 Copy-WithBackup $RecoveryService (Join-Path $InstallRoot 'YeManRecoveryService.exe') $BackupRoot
+Copy-WithBackup $ControllerVisibilityProbe (Join-Path $InstallRoot 'YeManControllerVisibilityProbe.exe') $BackupRoot
 Copy-WithBackup $RtssProfileHelper (Join-Path $InstallRoot 'YMCCRtssProfileHelper.exe') $BackupRoot
 Copy-WithBackup $RtssOverlayBridge (Join-Path $InstallRoot 'YMCCOverlayBridge.dll') $BackupRoot
 # S1 墙 A（虚拟手柄常驻-槽位钉死任务书 2026-09-15）：部署 OpenXInput 代理。
@@ -586,7 +772,7 @@ if ($nativeInputHostReady) {
   foreach ($name in $inputHostFiles) {
     $source = if ($name -in @('YeManInputHost.exe','YeManInputHost.dll','YeManInputHost.deps.json','YeManInputHost.runtimeconfig.json','HIDMaestro.Core.dll')) {
       Join-Path $NativeInputHost $name
-    } else { Join-Path $hcRuntimeSource $name }
+    } else { Get-YmccSharedRuntimeSourceFile $ProjectRoot $name }
     if (-not (Test-Path -LiteralPath $source -PathType Leaf)) { throw "Missing InputHost export source: $name" }
     Copy-Item -LiteralPath $source -Destination (Join-Path $virtualGamepadAssets $name) -Force
     if ((Get-Sha256 $source) -ne (Get-Sha256 (Join-Path $virtualGamepadAssets $name))) { throw "InputHost copy drift: $name" }
@@ -608,6 +794,17 @@ foreach ($name in @('version.json', 'YeMan-Support.html')) {
   }
 }
 
+# Runtime repair consumes package-generated manifests, not the Web build tree.
+# Bind them and the generated prerequisite payload to the same verified ZIP;
+# stale installed manifests would otherwise restore an older Decky frontend.
+$completePackageRoot = Join-Path $WorkspaceRoot 'Build\Package\CompleteRoot'
+Assert-ExportArchiveIdentity -Zip (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') -Root $completePackageRoot -BuildIdentity $exportBuildIdentity | Out-Null
+foreach ($relative in @('YeManCC/decky-package.json','YeManCC/module-package.json','YeManCC/update-manifest.json','PowerControl/redist/HIDMaestroSetup.dll','PowerControl/redist/HIDMaestroSetup.manifest.json')) {
+  Copy-WithBackup (Join-Path $completePackageRoot $relative) (Join-Path (Split-Path -Parent $InstallRoot) $relative) $BackupRoot
+}
+Assert-ExportStagedBuild (Split-Path -Parent $InstallRoot) $exportBuildIdentity | Out-Null
+Assert-MonitorHudWebExport $InstallRoot $WebBuild | Out-Null
+Assert-MonitorHudDeckyExport (Join-Path $installedPowerControl 'decky\plugins\ymcc-sidebar') $DeckyBuild | Out-Null
 $installedIndex = Get-Content -LiteralPath (Join-Path $InstallRoot 'index.html') -Raw -Encoding UTF8
 if ($installedIndex -notmatch 'src="\./(assets/[^\"]+\.js)"') { throw 'Installed index.html has no hashed JavaScript entry point' }
 $entry = $Matches[1]
@@ -617,6 +814,7 @@ if (-not (Test-Path -LiteralPath $installedEntry -PathType Leaf)) { throw "Insta
 if ((Get-Sha256 $sourceEntry) -ne (Get-Sha256 $installedEntry)) { throw "Installed entry point differs from build: $entry" }
 if ((Get-Sha256 $NativeExe) -ne (Get-Sha256 (Join-Path $InstallRoot 'YeManCC.exe'))) { throw 'Installed executable differs from build' }
 if ((Get-Sha256 $RecoveryService) -ne (Get-Sha256 (Join-Path $InstallRoot 'YeManRecoveryService.exe'))) { throw 'Installed recovery service differs from build' }
+if ((Get-Sha256 $ControllerVisibilityProbe) -ne (Get-Sha256 (Join-Path $InstallRoot 'YeManControllerVisibilityProbe.exe'))) { throw 'Installed controller visibility probe differs from build' }
 if ((Get-Sha256 $RtssProfileHelper) -ne (Get-Sha256 (Join-Path $InstallRoot 'YMCCRtssProfileHelper.exe'))) { throw 'Installed RTSS helper differs from build' }
 if ((Get-Sha256 $RtssOverlayBridge) -ne (Get-Sha256 (Join-Path $InstallRoot 'YMCCOverlayBridge.dll'))) { throw 'Installed RTSS bridge differs from build' }
 
@@ -630,13 +828,14 @@ $expectedFeatureAssets = @($sourceFeatureAssets +
   'virtual-gamepad\test-auto-install.flag' +
   @($inputHostFiles | ForEach-Object { "virtual-gamepad\$_" }) | Sort-Object -Unique)
 if (Compare-Object $expectedFeatureAssets $installedFeatureAssetsFiles) { throw 'Installed feature asset set differs from source/bundle' }
+Assert-YmccSharedRuntimeStaged $ProjectRoot $installedSharedRuntime
 # Resolve every deps.json runtime declaration at its approved on-disk location.
 $hostDeps = Get-Content -LiteralPath (Join-Path $virtualGamepadAssets 'YeManInputHost.deps.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 foreach ($target in @($hostDeps.targets.PSObject.Properties)) {
   foreach ($pkg in @($target.Value.PSObject.Properties)) {
     if ($null -eq $pkg.Value.runtime) { continue }
     foreach ($name in @($pkg.Value.runtime.PSObject.Properties.Name)) {
-      $runtimePath = if ($sharedRuntimeFallbackHashes.ContainsKey($name)) { Join-Path $installedHcRuntime $name } else { Join-Path $virtualGamepadAssets $name }
+      $runtimePath = if ($sharedRuntimeFallbackHashes.ContainsKey($name)) { Join-Path $installedSharedRuntime $name } else { Join-Path $virtualGamepadAssets $name }
       if (-not (Test-Path -LiteralPath $runtimePath -PathType Leaf)) { throw "Installed InputHost runtime closure missing: $name" }
       if ($sharedRuntimeFallbackHashes.ContainsKey($name)) {
         if (Test-Path -LiteralPath (Join-Path $virtualGamepadAssets $name)) { throw "Unexpected local shared fallback duplicate: $name" }
@@ -654,7 +853,7 @@ foreach ($inputHostFile in $inputHostFiles) {
   $installed = Join-Path $virtualGamepadAssets $inputHostFile
   $source = if ($inputHostFile -in @('YeManInputHost.exe','YeManInputHost.dll','YeManInputHost.deps.json','YeManInputHost.runtimeconfig.json','HIDMaestro.Core.dll')) {
     Join-Path $NativeInputHost $inputHostFile
-  } else { Join-Path $hcRuntimeSource $inputHostFile }
+  } else { Get-YmccSharedRuntimeSourceFile $ProjectRoot $inputHostFile }
   if (-not (Test-Path -LiteralPath $installed -PathType Leaf) -or
       (Get-Sha256 $installed) -ne (Get-Sha256 $source)) {
     throw "Installed InputHost file differs from build: $inputHostFile"
@@ -771,11 +970,10 @@ if ($IsolatedRoot) {
   if ($machineIdentityProcess.ExitCode -ne 0) { throw "native --machine-identity-selftest failed: exit=$($machineIdentityProcess.ExitCode)" }
   $nativeSelftestResult = 'PASS'
 }
-# InputHost 全部 selftest（4 项；exit 0 = PASS。--selftest-ds-wire = 2026-09-16
-# DS4 IMU 错位修复 + DualSense 线缆布局锁）
-$inputHostSelftests = @('--selftest-protocol', '--selftest-xbox360-state', '--selftest-steamdeck-state', '--selftest-ds-wire')
+# InputHost 当前输出 selftest（5 项；exit 0 = PASS）：准入、Elite、Deck、Edge 线缆。
+$inputHostSelftests = @('--selftest-protocol', '--selftest-virtual-output-admission', '--selftest-elite-state', '--selftest-steamdeck-state', '--selftest-edge-wire')
 if ($IsolatedRoot) {
-  Add-IsolatedNote 'InputHost selftests (4 launches) - not executed'
+  Add-IsolatedNote 'InputHost selftests (5 launches) - not executed'
 } else {
 foreach ($ihSelf in $inputHostSelftests) {
   $out = & (Join-Path $virtualGamepadAssets 'YeManInputHost.exe') $ihSelf 2>&1
@@ -793,7 +991,7 @@ foreach ($relative in $CustomSteamLibraryFiles) {
 # PowerControl main assets, not only the virtual-gamepad bundle. These are the
 # native lookup targets that previously failed on a clean (empty) export.
 $criticalPowerControlFiles = @(
-  'YeManHWiNFO.bat', 'YeManHWiNFO.ps1',
+  # HWiNFO configuration/recovery is compiled into YMCC; external entries are optional compatibility assets.
   'TDP\Performance.vbs',
   # R-pawnio-manifest（2026-09-11）：pawnio 根 5 件 + _internal 16 件原子集，
   # 缺 _internal\base_library.zip 时 YeManTdpCtl 弹 "Failed to start embedded
@@ -881,6 +1079,8 @@ if ($LASTEXITCODE -ne 0) {
   throw "Adopted-optimization inheritance gate FAILED (install stage, exit=$LASTEXITCODE): installed tree does not inherit the adopted optimization set."
 }
 
+$installedIdentity = Write-ExportInstalledIdentityFromArchive (Split-Path -Parent $InstallRoot) (Join-Path $WorkspaceRoot 'Release\Packages\YeManCC.zip') $exportBuildIdentity $BackupRoot
+Write-Output ('INSTALLED_EXPORT_BUILD_ID=' + $installedIdentity.buildId)
 Write-Output 'DEPLOY_OK'
 Write-Output "Installed: $InstallRoot"
 Write-Output "Backup:    $BackupRoot"
@@ -892,6 +1092,7 @@ Write-Output "HidHide installer deployed: $([bool]$hidHideInstallerFile)"
 Write-Output "HidHide CLI deployed: $([bool]$hidHideCliFile)"
 Write-Output "InputHost deployed: $nativeInputHostReady (feature-assets\virtual-gamepad)"
 Write-Output "Legacy exe InputHost folder: $(-not (Test-Path -LiteralPath $legacyInputHost)) (retired)"
+Write-Output "Shared third-party runtime: $installedSharedRuntime"
 Write-Output "HC runtime deployed: $([bool]$hcRuntimeSource)"
 if ($hcRuntimeSource) {
   Write-Output "HC runtime: $installedHcRuntime"

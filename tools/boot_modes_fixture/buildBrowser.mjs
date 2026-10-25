@@ -1,0 +1,30 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {require,repo,fixture,evidenceInputs,fingerprints} from './harness.mjs';
+export async function buildBrowser(out,seed,options={}){
+ const {parse,compileScript,compileStyle}=require('vue/compiler-sfc');const styles=[];
+ const native=new Set(['ipc','api','settingsRepository','performanceSchedule','gameproc','yeman','virtualTargetPolicyState','virtualTargetPolicy','gamePolicyTarget','fanFeature','fanHost','topmon','music','gamedetect']);
+ const ts=require('typescript'),routerSource=fs.readFileSync(path.join(repo,'src/router.ts'),'utf8');
+ const ast=ts.createSourceFile('router.ts',routerSource,ts.ScriptTarget.Latest,true);
+ let routes;const componentNames=new Set();function visit(node){if(ts.isVariableDeclaration(node)&&node.name.getText(ast)==='ROUTES')routes=node.initializer;if(ts.isPropertyAssignment(node)&&node.name.getText(ast)==='component'&&ts.isIdentifier(node.initializer))componentNames.add(node.initializer.getText(ast));ts.forEachChild(node,visit);}visit(ast);if(!routes)throw Error('Actual router ROUTES missing');
+ const routerFixture=[...componentNames].map(name=>'const '+name+'=()=>{};').join('')+"const RADIAL_USER_AVAILABLE=false,CUSTOM_STEAM_LIBRARY_ROUTE='/custom-steam-library';export const ROUTES="+routes.getText(ast)+";export const useRoute=()=>({path:'/power'});export const useRouter=()=>({push:()=>{}});export const onBeforeRouteLeave=()=>{};";
+ const result=await require('esbuild').build({entryPoints:[path.join(fixture,'browserEntry.ts')],absWorkingDir:repo,outdir:path.join(out,'compiled'),bundle:true,platform:'browser',format:'iife',write:false,metafile:true,alias:{'@':path.join(repo,'src'),'vue':require.resolve('vue/dist/vue.runtime.esm-bundler.js')},define:{'process.env.NODE_ENV':'"production"','import.meta.env.DEV':'false'},loader:{'.svg':'dataurl','.png':'dataurl','.jpg':'dataurl','.webp':'dataurl','.woff2':'dataurl'},plugins:[{name:'actual-boot-components-memory-io',setup(build){
+ build.onResolve({filter:/.*/},args=>{if(args.path.endsWith('GameQuickActions.vue'))return {path:'quick-actions',namespace:'boot-inert-component'};if(args.path==='@/scheduler')return {path:path.join(fixture,'browserNative.ts')};if(args.path==='boot-seed')return {path:args.path,namespace:'boot-seed'};if(args.path==='vue-router'||args.path==='@/router')return {path:'router',namespace:'boot-router'};const name=args.path.split('/').at(-1).replace(/\.ts$/,'');if(name==='bootModes'&&args.path.includes('bridge/'))return {path:options.bootBridgePath||path.join(fixture,'browserPorts.ts')};if(native.has(name)&&(args.path.includes('bridge/')||args.path.startsWith('./')&&!args.importer.includes('boot_modes_fixture')))return {path:path.join(fixture,'browserNative.ts')};});
+ build.onLoad({filter:/.*/,namespace:'boot-inert-component'},()=>({contents:`import {h} from 'vue';export default {setup:()=>()=>h('div')};`,loader:'ts',resolveDir:repo}));
+ build.onLoad({filter:/.*/,namespace:'boot-seed'},()=>({contents:'export default '+JSON.stringify(seed),loader:'ts'}));
+ build.onLoad({filter:/.*/,namespace:'boot-router'},()=>({contents:routerFixture,loader:'ts'}));
+ build.onLoad({filter:/[\\/]gamepad[\\/]engine\.ts$/},args=>({contents:fs.readFileSync(args.path,'utf8')+`\n(window as any).__bootGamepad={move:moveFocus,focus:focusGamepadElement,focusables,editing:()=>sliderEditMode,command:(action:NativeUiAction)=>dispatchNativeUiAction({router:{currentRoute:{value:{path:'/boot'}},push:()=>{}}} as any,action)};`,loader:'ts',resolveDir:path.dirname(args.path)}));
+ build.onLoad({filter:/\.vue$/},args=>{const source=fs.readFileSync(args.path,'utf8').replace(/^\ufeff/,'');const {descriptor,errors}=parse(source,{filename:args.path});if(errors.length)throw Error(errors.join('\n'));const id='data-v-boot-'+require('node:crypto').createHash('sha256').update(args.path).digest('hex').slice(0,8);const script=compileScript(descriptor,{id,inlineTemplate:true});for(const style of descriptor.styles){const result=compileStyle({source:style.content,filename:args.path,id,scoped:style.scoped});if(result.errors.length)throw Error(result.errors.join('\n'));styles.push(result.code);}return {contents:script.content.replace('export default','const _component=')+'\n_component.__scopeId='+JSON.stringify(id)+';export default _component;',loader:'ts',resolveDir:path.dirname(args.path)};});
+ }}]});
+ const appSource=fs.readFileSync(path.join(repo,'src/App.vue'),'utf8');const appStyles=parse(appSource,{filename:'App.vue'}).descriptor.styles.map(style=>style.content.replace(/:deep\(([^)]+)\)/g,'$1')).join('\n');
+ const cssFiles=['src/styles/tokens.css','src/styles/gamepad.css','src/styles/integratedConsole.css'];
+ let css=cssFiles.map(p=>fs.readFileSync(path.join(repo,p),'utf8')).join('\n')+'\n'+appStyles+'\n'+styles.join('\n')+`\nhtml,body,#app{margin:0;width:100%;height:100%;overflow:hidden;background:#0b1016;font-family:Arial,sans-serif;color:var(--text,#e9eef4)}*{box-sizing:border-box}`;
+ const importedCss=result.outputFiles.filter(file=>file.path.endsWith('.css')).map(file=>file.text).join('\n');
+ css+='\n'+importedCss;
+ const js=result.outputFiles.find(file=>file.path.endsWith('.js')).text;fs.writeFileSync(path.join(out,'boot-browser.js'),js);fs.writeFileSync(path.join(out,'boot-browser.css'),css);
+ const html='<!doctype html><html lang="zh-CN"><meta charset="utf-8"><title>Boot modes isolated actual UI</title><link rel="icon" href="data:,"><link rel="stylesheet" href="/boot-browser.css"><div id="app"></div><script src="/boot-browser.js"></script></html>';fs.writeFileSync(path.join(out,'index.html'),html);
+ const mediaInputs=[...fs.readFileSync(path.join(repo,'src/bridge/bootModePreview.ts'),'utf8').matchAll(/['"](\/boot-modes\/[^'"]+\.(?:mp4|jpg))['"]/g)].map(match=>'public'+match[1]);
+ const inputs=[...new Set([...mediaInputs,...evidenceInputs(result.metafile),...cssFiles,'src/App.vue','src/router.ts','tools/boot_modes_fixture/buildBrowser.mjs','tools/boot_modes_fixture/harness.mjs','tools/boot_modes_browser_selftest.mjs'])].sort();
+ return {js,css,html,inputs,sourceHashes:fingerprints(inputs)};
+}
+

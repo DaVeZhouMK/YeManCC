@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "kind": "OFFLINE_ONLY_REJECT_NEW_STEAM_RECOVERY_ENTRY",
+  "productMainSha256": "40edf2010d46006015a38964b441d14cbc497960d3ef77cfba44721c988dd081",
+  "headers": [
+    {
+      "relative": "native/steam_original_recovery_engine.h",
+      "sha256": "506c423d53f9564a6cc761adee02fc183ded2783facdcda939694b485064c8d1"
+    },
+    {
+      "relative": "native/steam_original_recovery_runtime.h",
+      "sha256": "f4316863d3007478b6c029f2fe6c5831be4ee053e8da2cf2a27f4906bab55169"
+    },
+    {
+      "relative": "native/steam_original_recovery_policy.h",
+      "sha256": "f99ca447a14c6dab1f79e8b75d575a314436f1e685f1ae649a7dac067350787c"
+    }
+  ],
+  "leaves": [
+    {
+      "symbol": "steamOriginalRecoveryStart",
+      "source": "native/steam_original_recovery_runtime.h",
+      "sourceSha256": "a16512c0d86805db07109e94693454648b7c6c9766ebf55142c2e602661c8e74"
+    },
+    {
+      "symbol": "steamOriginalRecoveryEngineHandle",
+      "source": "expanded-native-main",
+      "sourceSha256": "ba24ae539244c4672796bd9e1567d9e361dc7097d0e50991f4a7f745041ac9e7"
+    }
+  ],
+  "meaning": "Original28 fixture environment and73 controller core entries remain unchanged. The exact new main adds a dormant Steam original-recovery worker. Offline input fixtures reject its Start and engine bridge. Start definition is renamed only within its real header include; actual header bytes remain compiler-observed and unchanged. Original Start name has a throw-only fixture definition."
+}

@@ -1,0 +1,230 @@
+{
+  "available": true,
+  "readonly": true,
+  "rows": [
+    {
+      "group": "System: ASUS ",
+      "name": "Virtual Memory Committed",
+      "sensorIndex": 0,
+      "unit": "MB",
+      "value": 36711.0
+    },
+    {
+      "group": "System: ASUS ",
+      "name": "Virtual Memory Available",
+      "sensorIndex": 0,
+      "unit": "MB",
+      "value": 31174.0
+    },
+    {
+      "group": "System: ASUS ",
+      "name": "Virtual Memory Load",
+      "sensorIndex": 0,
+      "unit": "%",
+      "value": 54.0
+    },
+    {
+      "group": "System: ASUS ",
+      "name": "Physical Memory Used",
+      "sensorIndex": 0,
+      "unit": "MB",
+      "value": 25740.0
+    },
+    {
+      "group": "System: ASUS ",
+      "name": "Physical Memory Available",
+      "sensorIndex": 0,
+      "unit": "MB",
+      "value": 37368.0
+    },
+    {
+      "group": "System: ASUS ",
+      "name": "Physical Memory Load",
+      "sensorIndex": 0,
+      "unit": "%",
+      "value": 40.7
+    },
+    {
+      "group": "Memory Timings",
+      "name": "Memory Clock",
+      "sensorIndex": 3,
+      "unit": "MHz",
+      "value": 3000.0
+    },
+    {
+      "group": "Memory Timings",
+      "name": "Memory Clock Ratio",
+      "sensorIndex": 3,
+      "unit": "x",
+      "value": 30.0
+    },
+    {
+      "group": "CPU [#0]: AMD Ryzen 9 9950X: Enhanced",
+      "name": "Memory Controller Clock (UCLK)",
+      "sensorIndex": 4,
+      "unit": "MHz",
+      "value": 3000.0
+    },
+    {
+      "group": "iGPU [#1]: AMD Radeon",
+      "name": "GPU Memory Clock",
+      "sensorIndex": 7,
+      "unit": "MHz",
+      "value": 3000.0
+    },
+    {
+      "group": "iGPU [#1]: AMD Radeon",
+      "name": "GPU D3D Memory Dedicated",
+      "sensorIndex": 7,
+      "unit": "MB",
+      "value": 14.734375
+    },
+    {
+      "group": "iGPU [#1]: AMD Radeon",
+      "name": "GPU D3D Memory Dynamic",
+      "sensorIndex": 7,
+      "unit": "MB",
+      "value": 34.13671875
+    },
+    {
+      "group": "iGPU [#1]: AMD Radeon",
+      "name": "GPU Memory Usage",
+      "sensorIndex": 7,
+      "unit": "MB",
+      "value": 100.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Junction Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 66.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory A0 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 62.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory A1 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 60.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory B0 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 62.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory B1 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 66.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory C0 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 60.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory C1 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 62.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory D0 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 62.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory D1 Temperature",
+      "sensorIndex": 8,
+      "unit": "��",
+      "value": 62.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Clock",
+      "sensorIndex": 8,
+      "unit": "MHz",
+      "value": 1875.125
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Clock (measured)",
+      "sensorIndex": 8,
+      "unit": "MHz",
+      "value": 1873.095375
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Controller Load",
+      "sensorIndex": 8,
+      "unit": "%",
+      "value": 2.0
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Usage",
+      "sensorIndex": 8,
+      "unit": "%",
+      "value": 35.10923986382874
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Available",
+      "sensorIndex": 8,
+      "unit": "MB",
+      "value": 10579.140625
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU Memory Allocated",
+      "sensorIndex": 8,
+      "unit": "MB",
+      "value": 5723.859375
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU D3D Memory Dedicated",
+      "sensorIndex": 8,
+      "unit": "MB",
+      "value": 5416.46875
+    },
+    {
+      "group": "dGPU [#0]: NVIDIA GeForce RTX 5080: GIGABYTE GeForce RTX 5080 AERO OC SFF 16G (GV-N5080AERO OC-16GD)",
+      "name": "GPU D3D Memory Dynamic",
+      "sensorIndex": 8,
+      "unit": "MB",
+      "value": 132.94921875
+    },
+    {
+      "group": "Network: RealTek Semiconductor RTL8125 Gaming 2.5GbE Family Ethernet Controller",
+      "name": "Current DL rate",
+      "sensorIndex": 11,
+      "unit": "KB/s",
+      "value": 99.22135416666666
+    },
+    {
+      "group": "Network: RealTek Semiconductor RTL8125 Gaming 2.5GbE Family Ethernet Controller",
+      "name": "Current UP rate",
+      "sensorIndex": 11,
+      "unit": "KB/s",
+      "value": 224.37760416666666
+    }
+  ]
+}

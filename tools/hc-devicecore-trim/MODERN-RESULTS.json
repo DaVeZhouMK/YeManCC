@@ -1,0 +1,129 @@
+{
+  "Status": "READY-FOR-HEADLESS-INTEGRATION",
+  "RuntimeId": "YMCC-DEVICECORE-MODERN-HEADLESS-20261018-e1e547088b009a75-profile-aligned",
+  "RuntimePath": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\modern-closure\\final\\closure\\runtime",
+  "ReplacementDirectory": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\modern-closure\\final\\replacements",
+  "Files": [
+    {
+      "Path": "HandheldCompanion.dll",
+      "SourceSha256": "94c575e53c66b8fba54b5afbc4d136400c555366c31cd9d25cca86bac6a441ee",
+      "Sha256": "c0e7201b099b66e447ddae67dc5e6e6c04e1594fbec4689cbdb2baf320ebfa15",
+      "SourceBytes": 2772992,
+      "Bytes": 2774016,
+      "BeforeIdentity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+      "AfterIdentity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+      "StrongNameRekeyed": false,
+      "PublicKeyToken": "",
+      "StrongNameVerified": null,
+      "Authenticode": "not signed",
+      "Role": "AssemblyRef retarget; all original IL/device resources retained"
+    },
+    {
+      "Path": "iNKORE.UI.WPF.Modern.Controls.dll",
+      "SourceSha256": "6380a7cdbd90fb5462063f23a72a7a6f3729d2f4894254bbebf9a8f24230d2b7",
+      "Sha256": "953b57e143a2ba9c376105bef174db1d2e82003c9a6537990f4edfa1f44e65c6",
+      "SourceBytes": 1200640,
+      "Bytes": 1203200,
+      "BeforeIdentity": "iNKORE.UI.WPF.Modern.Controls, Version=0.10.2.0, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+      "AfterIdentity": "iNKORE.UI.WPF.Modern.Controls, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+      "StrongNameRekeyed": true,
+      "PublicKeyToken": "538ea1f68f629a04",
+      "StrongNameVerified": true,
+      "Authenticode": "not signed",
+      "Role": "signature/AssemblyRef/BAML identity closure; every resource entry retained"
+    },
+    {
+      "Path": "iNKORE.UI.WPF.Modern.dll",
+      "SourceSha256": "7650b744e0add04549593f680ebf1c8fe40125f36eb8c86445113b974ee25d6c",
+      "Sha256": "5570bbb9d89f92816cd9416a2ba8cf8119fc9b6d4e6bb9648fd17f61bda87fc1",
+      "SourceBytes": 7405056,
+      "Bytes": 2658304,
+      "BeforeIdentity": "iNKORE.UI.WPF.Modern, Version=0.10.2.0, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+      "AfterIdentity": "iNKORE.UI.WPF.Modern, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+      "StrongNameRekeyed": true,
+      "PublicKeyToken": "538ea1f68f629a04",
+      "StrongNameVerified": true,
+      "Authenticode": "not signed",
+      "Role": "headless assets + signature identity + friend closure"
+    }
+  ],
+  "CandidateRuntimeFiles": 111,
+  "CandidateRuntimeBytes": 32486755,
+  "MatchingSourceProfileBytes": 37229923,
+  "NetModernClosureSavedBytes": 4743168,
+  "InputManifestSha256": "276e47b3e477e2a05c67a468fb4a33878a6d7240e2d2178099bad439189c82e4",
+  "ExistingProfileSha256": "bff6907b35795ddea57f82beb6fa0f79299f0af43d650781076cda07ba95729b",
+  "CandidateManifestSha256": "77afd0479f8d9d936dcb8358efa7ee65d4e5e630dc7f643b321ba4f697977513",
+  "StrongName": {
+    "PublicKeyToken": "538ea1f68f629a04",
+    "KeyBits": 1024,
+    "HashAlgorithm": "SHA-1",
+    "Purpose": "Development strong-name binding identity only",
+    "Authenticode": "NotSigned",
+    "PublisherAuthentication": false,
+    "ReleaseSignature": false
+  },
+  "Gates": {
+    "PathLoad": true,
+    "HcAllGetTypes": 1767,
+    "ControlsAllGetTypes": 445,
+    "ReviewedPureConstructions": 7,
+    "CallbackChecks": 22,
+    "DeviceConstructors": false,
+    "WindowOrRendering": false,
+    "FontEnumeration": false,
+    "HardwareValidated": false
+  },
+  "KnownBaselineLimitation": "Modern has 323 loadable of 324 runtime types; one unused legacy UI type requires the absent iNKORE.UI.WPF 1.2.8.0. Baseline and candidate match. HC all types and all reviewed pure constructors pass. No shim added.",
+  "ExistingExclusionsApplied": [
+    {
+      "Path": "XInputPlus/Loader/XInputPlusInjector.dll",
+      "Sha256": "d1835ba3d4d2fc3303d01fd6391b8170afc85fcb95e27b8a4343111013bb6302",
+      "Bytes": 320512,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/Loader/XInputPlusInjector64.dll",
+      "Sha256": "bba052a5316a8ad96670e9e836ee5cd5d50b49fc605f127100792cae42ef51c1",
+      "Bytes": 351232,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x64/Dinput.dl_",
+      "Sha256": "407de31dca03364bd52830029a1e4358aee06097662099e24abe2c4b0c0abb25",
+      "Bytes": 226816,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x64/Dinput8.dl_",
+      "Sha256": "03ec40ffa368ab5312e893535be620413e938922c5c93c5aca0e8aba4aa147bb",
+      "Bytes": 230912,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x64/XInput1_3.dl_",
+      "Sha256": "7a312b9ec5f875fe7d851b4678d60f2ca1dd71118d7494df8f35882867b75db2",
+      "Bytes": 521728,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x86/Dinput.dl_",
+      "Sha256": "e6ad898fdf197ffc71ed9a80912f4dc2b178331ebb1a16092cd256547dd3a6b2",
+      "Bytes": 202752,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x86/Dinput8.dl_",
+      "Sha256": "3e0441bf07bd6529365d6c2b595007299bdf384299f3a0d325413f6be50a1a2b",
+      "Bytes": 203264,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    },
+    {
+      "Path": "XInputPlus/x86/XInput1_3.dl_",
+      "Sha256": "82c45d2a63ae7cc919afa86e9bc3dc0e57b0d4640e5dd68c5232cf67585028e3",
+      "Bytes": 531968,
+      "Reason": "HC Hook/XInputPlus injection assets are outside the approved headless device-core profile. The only owning HC injection workflow and its embedded payloads are already excluded; YMCC does not invoke it. Keep independent Xinput1_4.dll proxy unchanged."
+    }
+  ],
+  "Integration": "Merge exactly the three DLL replacements together into the current owner profile; owner regenerates formal hashes/manifest/pins. Consumer files and production payload were not modified."
+}

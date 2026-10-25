@@ -8,8 +8,8 @@ $lock = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8 | ConvertFrom-Jso
 if ([int]$lock.schemaVersion -ne 1 -or @($lock.files).Count -ne 3) { throw 'InputHost dependency lock is invalid' }
 $expected = @(
   'deps/hidmaestro/HIDMaestro.Core.dll',
-  'PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Utilities.DeviceManagement.dll',
-  'PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902/Nefarius.Drivers.HidHide.dll'
+  'deps/ymcc-shared-runtime/bin/Nefarius.Utilities.DeviceManagement.dll',
+  'deps/ymcc-shared-runtime/bin/Nefarius.Drivers.HidHide.dll'
 )
 $seen = @{}
 foreach ($entry in @($lock.files)) {

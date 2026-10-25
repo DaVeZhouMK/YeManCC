@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <!--
+      HC-SLIM-01 R3 §4.2：ASUS 风扇叶组件。
+      刻意使用平台无关的 net10.0（**非** net10.0-windows*）：
+      指定 Windows SDK 版本的 TFM 会重新引入 C#/WinRT 投影与运行库并带回 SDK；
+      net10.0 从根上避免该投影。UseWPF/UseWindowsForms 保持关闭，叶组件
+      不引用 HC / WPF / Windows SDK / WinRT / LHM（构建后以程序集引用为准）。
+    -->
+    <TargetFramework>net10.0</TargetFramework>
+    <AssemblyName>YeManFanBackend</AssemblyName>
+    <RootNamespace>YeManFanBackend</RootNamespace>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+    <UseWPF>false</UseWPF>
+    <UseWindowsForms>false</UseWindowsForms>
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.cs" Link="Capabilities\HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities\HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="..\..\capabilities\FanCapabilityCatalog.cs" Link="Capabilities\FanCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\AsusFanCapabilitySession.cs" Link="Capabilities\AsusFanCapabilitySession.cs" />
+    <Compile Include="..\..\capabilities\HcLightingCapabilityCatalog.cs" Link="Capabilities\HcLightingCapabilityCatalog.cs" />
+    <Compile Include="..\..\capabilities\HcLightingCapabilityCatalog.generated.cs" Link="Capabilities\HcLightingCapabilityCatalog.generated.cs" />
+  </ItemGroup>
+</Project>

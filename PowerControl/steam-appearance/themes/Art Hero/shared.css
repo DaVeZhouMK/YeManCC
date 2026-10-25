@@ -1,0 +1,132 @@
+:root {
+    --met-game-carousel-height-tens: -50vh;
+	--met-game-carousel-height-ones: -0vh;
+	--met-hero-art-position: center;
+	--met-hero-art-size: cover;
+    --met-game-carousel-font-size: 18px;
+    --met-game-carousel-font-height: -3.5em;
+    --met-hero-height-tens: 0vh;
+	--met-hero-height-ones: 0vh;
+    --met-hero-art-z-order: 1;
+    --met-header-bar-height: 0vh;
+    --met-header-bar-height-ones: 0vh;
+}
+
+.BasicUI .appportrait_PortraitMessage_3gwMk .appportrait_Message_3CRLA {
+    font-size: var(--met-game-carousel-font-size)!important;
+    line-height: calc(var(--met-game-carousel-font-size) * 1.3)!important;
+}
+.BasicUI .appportrait_PortraitMessage_3gwMk .appportrait_SubMessage_3DR9f {
+    font-size: calc(var(--met-game-carousel-font-size) / 1.5) !important;
+    line-height: calc(var(--met-game-carousel-font-size) * 0.6)!important;
+}
+
+
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
+
+    object-fit: var(--met-hero-art-size)!important;
+    object-position: var(--met-hero-art-position)!important
+
+}
+
+.gpfocuswithin>.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W, :hover~.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W, .basicgamecarousel_CarouselGameLabelWrapper_ZkD6W.basicgamecarousel_ShowAsHovered_3tdVJ {
+    transform: translateY(-0.2em);
+    transition-delay: .4s;
+    visibility: visible;
+    top: var(--met-game-carousel-font-height);
+    position: absolute!important;   
+}
+
+.gpfocuswithin~.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf,:hover~.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf {
+    opacity: 1!important
+}
+
+.basicgamecarousel_BasicGameCarousel_3MdH5 {
+    top: -1em;
+    height: 100vh!important;
+}
+
+.gamepadhomerecentgames_RecentGamesContainer_2_cRk {
+    margin-top: 0vh;
+    padding-top: 0
+}
+
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
+    opacity: 1;
+    filter: brightness(100%)!important;
+}
+.gamepadhomerecentgames_RecentGamesBackground_1SRox {
+    opacity: 1!important;
+    filter: none!important
+}
+
+.gamepadhome_RecentSection_39tNv {
+    padding: 0px;
+    height: 105vh;
+}
+
+.gamepadhomerecentgames_RecentGamesHeader_35iRe {
+    display: none!important
+}
+
+.gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 .gamepadhomerecentgames_RecentGamesBackground_1SRox {
+    height: 50vh!important;
+    left: 0!important;
+    max-height: 50vh!important;
+    min-height: 100%!important;
+    min-width: 100vw!important;
+    position: absolute;
+    width: 100vw!important;
+    --round-radius-size: 0!important
+}
+
+.gamepadhomerecentgames_RecentGamesContainer_2_cRk {
+    top: calc(var(--met-hero-height-ones) + var(--met-hero-height-tens));
+}
+
+.gamepadhomerecentgames_RecentGamesInnerContainer_282X0 {
+    top: calc((var(--met-game-carousel-height-ones) + var(--met-game-carousel-height-tens) - calc(var(--met-hero-height-ones) + var(--met-hero-height-tens))));
+    
+}
+.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt, .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
+    /*stops the game card glow being on top of the hero art*/
+    z-index: var(--met-hero-art-z-order);
+}
+.gamepadhomerecentgames_RecentGamesContainer_2_cRk {
+    margin-top: -1vh;
+}
+
+.basicgamecarousel_BasicGameCarouselItem_3YYQ9 .basicgamecarousel_TextBoxCarouselContents_3bvCH {
+    top: 0em!important;
+}
+
+.basicgamecarousel_BasicGameCarouselItemMediaContainer_1HIFN {
+    bottom: -2.8em;
+    position: absolute!important;
+}
+
+.basicgamecarousel_BasicGameCarouselItem_3YYQ9 .basicgamecarousel_TextBoxCarouselContents_3bvCH {
+    /* top: 0em!important; */
+    top: 2.8em!important;
+}
+
+
+.basicgamecarousel_Play_12eKc .basicgamecarousel_ActionIcon_25Qbo{
+    /*If you're wondering where your green triangle went, it's right here.*/
+    /*this thing is such a pain to position when you change font sizes...*/
+    display: none!important;
+}
+
+
+.header_Header_1E_SL {
+    top: calc(var(--met-header-bar-height-ones) + var(--met-header-bar-height));
+    z-index: calc(var(--met-hero-art-z-order) + 6000);
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-art-hero: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-74b82ed7acf53846: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-9455d7d2e159312c: 1; }

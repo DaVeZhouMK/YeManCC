@@ -1,0 +1,691 @@
+{
+  "schemaVersion": 1,
+  "kind": "factory-initialization-source-basis",
+  "caseIds": [
+    "factory-healthy-actual-orchestration:False",
+    "factory-healthy-actual-orchestration:True",
+    "factory-partial-cannot-publish-ready:device.pull-sensors",
+    "factory-retry-continues-same-device:device.pull-sensors",
+    "factory-partial-cannot-publish-ready:device.initialize",
+    "factory-retry-continues-same-device:device.initialize",
+    "factory-partial-cannot-publish-ready:device.identity",
+    "factory-retry-continues-same-device:device.identity",
+    "factory-bootstrap-retry-does-not-replay-completed-stages:assembly.configure",
+    "factory-bootstrap-retry-does-not-replay-completed-stages:motherboard.collect",
+    "factory-bootstrap-retry-does-not-replay-completed-stages:device.construct",
+    "factory-write-admission-completes-pending-initialization",
+    "factory-readonly-sampling-never-uses-partial-core",
+    "factory-authorization-refusal-precedes-new-work",
+    "factory-disposed-cannot-republish-or-reload",
+    "factory-dispose-during-stage-cannot-publish",
+    "factory-reentrant-handshake-cannot-publish-partial-core",
+    "factory-owner-change-during-stage-is-refused:device",
+    "factory-owner-change-during-stage-is-refused:assembly",
+    "factory-completed-owner-change-invalidates-ready:device",
+    "factory-completed-owner-change-invalidates-ready:assembly",
+    "factory-readonly-sample-error-keeps-completed-factory",
+    "factory-disposal-preserves-another-resolver-owner",
+    "factory-resolver-one-registration-and-owned-disposal"
+  ],
+  "caseSourceWitnesses": [
+    {
+      "id": "factory-healthy-actual-orchestration:False",
+      "line": 37,
+      "expression": "\"factory-healthy-actual-orchestration:\"+diagnostic",
+      "bindings": {
+        "diagnostic": "False"
+      }
+    },
+    {
+      "id": "factory-healthy-actual-orchestration:True",
+      "line": 37,
+      "expression": "\"factory-healthy-actual-orchestration:\"+diagnostic",
+      "bindings": {
+        "diagnostic": "True"
+      }
+    },
+    {
+      "id": "factory-partial-cannot-publish-ready:device.pull-sensors",
+      "line": 51,
+      "expression": "\"factory-partial-cannot-publish-ready:\"+stage",
+      "bindings": {
+        "stage": "device.pull-sensors"
+      }
+    },
+    {
+      "id": "factory-partial-cannot-publish-ready:device.initialize",
+      "line": 51,
+      "expression": "\"factory-partial-cannot-publish-ready:\"+stage",
+      "bindings": {
+        "stage": "device.initialize"
+      }
+    },
+    {
+      "id": "factory-partial-cannot-publish-ready:device.identity",
+      "line": 51,
+      "expression": "\"factory-partial-cannot-publish-ready:\"+stage",
+      "bindings": {
+        "stage": "device.identity"
+      }
+    },
+    {
+      "id": "factory-retry-continues-same-device:device.pull-sensors",
+      "line": 60,
+      "expression": "\"factory-retry-continues-same-device:\"+stage",
+      "bindings": {
+        "stage": "device.pull-sensors"
+      }
+    },
+    {
+      "id": "factory-retry-continues-same-device:device.initialize",
+      "line": 60,
+      "expression": "\"factory-retry-continues-same-device:\"+stage",
+      "bindings": {
+        "stage": "device.initialize"
+      }
+    },
+    {
+      "id": "factory-retry-continues-same-device:device.identity",
+      "line": 60,
+      "expression": "\"factory-retry-continues-same-device:\"+stage",
+      "bindings": {
+        "stage": "device.identity"
+      }
+    },
+    {
+      "id": "factory-bootstrap-retry-does-not-replay-completed-stages:assembly.configure",
+      "line": 73,
+      "expression": "\"factory-bootstrap-retry-does-not-replay-completed-stages:\"+stage",
+      "bindings": {
+        "stage": "assembly.configure"
+      }
+    },
+    {
+      "id": "factory-bootstrap-retry-does-not-replay-completed-stages:motherboard.collect",
+      "line": 73,
+      "expression": "\"factory-bootstrap-retry-does-not-replay-completed-stages:\"+stage",
+      "bindings": {
+        "stage": "motherboard.collect"
+      }
+    },
+    {
+      "id": "factory-bootstrap-retry-does-not-replay-completed-stages:device.construct",
+      "line": 73,
+      "expression": "\"factory-bootstrap-retry-does-not-replay-completed-stages:\"+stage",
+      "bindings": {
+        "stage": "device.construct"
+      }
+    },
+    {
+      "id": "factory-write-admission-completes-pending-initialization",
+      "line": 83,
+      "expression": "\"factory-write-admission-completes-pending-initialization\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-readonly-sampling-never-uses-partial-core",
+      "line": 91,
+      "expression": "\"factory-readonly-sampling-never-uses-partial-core\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-authorization-refusal-precedes-new-work",
+      "line": 102,
+      "expression": "\"factory-authorization-refusal-precedes-new-work\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-disposed-cannot-republish-or-reload",
+      "line": 110,
+      "expression": "\"factory-disposed-cannot-republish-or-reload\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-dispose-during-stage-cannot-publish",
+      "line": 120,
+      "expression": "\"factory-dispose-during-stage-cannot-publish\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-reentrant-handshake-cannot-publish-partial-core",
+      "line": 129,
+      "expression": "\"factory-reentrant-handshake-cannot-publish-partial-core\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-owner-change-during-stage-is-refused:device",
+      "line": 139,
+      "expression": "\"factory-owner-change-during-stage-is-refused:\"+kind",
+      "bindings": {
+        "kind": "device"
+      }
+    },
+    {
+      "id": "factory-owner-change-during-stage-is-refused:assembly",
+      "line": 139,
+      "expression": "\"factory-owner-change-during-stage-is-refused:\"+kind",
+      "bindings": {
+        "kind": "assembly"
+      }
+    },
+    {
+      "id": "factory-completed-owner-change-invalidates-ready:device",
+      "line": 150,
+      "expression": "\"factory-completed-owner-change-invalidates-ready:\"+kind",
+      "bindings": {
+        "kind": "device"
+      }
+    },
+    {
+      "id": "factory-completed-owner-change-invalidates-ready:assembly",
+      "line": 150,
+      "expression": "\"factory-completed-owner-change-invalidates-ready:\"+kind",
+      "bindings": {
+        "kind": "assembly"
+      }
+    },
+    {
+      "id": "factory-readonly-sample-error-keeps-completed-factory",
+      "line": 160,
+      "expression": "\"factory-readonly-sample-error-keeps-completed-factory\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-disposal-preserves-another-resolver-owner",
+      "line": 169,
+      "expression": "\"factory-disposal-preserves-another-resolver-owner\"",
+      "bindings": {}
+    },
+    {
+      "id": "factory-resolver-one-registration-and-owned-disposal",
+      "line": 181,
+      "expression": "\"factory-resolver-one-registration-and-owned-disposal\"",
+      "bindings": {}
+    }
+  ],
+  "failureFragments": {
+    "positive": {},
+    "readiness": {
+      "factory-partial-cannot-publish-ready:device.pull-sensors": "Partial factory must not publish IsLoaded or write readiness",
+      "factory-retry-continues-same-device:device.pull-sensors": "Failed factory must resume to complete real readiness and identity",
+      "factory-partial-cannot-publish-ready:device.initialize": "Partial factory must not publish IsLoaded or write readiness",
+      "factory-retry-continues-same-device:device.initialize": "Failed factory must resume to complete real readiness and identity",
+      "factory-partial-cannot-publish-ready:device.identity": "Partial factory must not publish IsLoaded or write readiness",
+      "factory-retry-continues-same-device:device.identity": "Failed factory must resume to complete real readiness and identity",
+      "factory-write-admission-completes-pending-initialization": "HC 核心初始化尚未完成",
+      "factory-readonly-sampling-never-uses-partial-core": "Read-only evidence must not sample or report success from a partial factory",
+      "factory-disposed-cannot-republish-or-reload": "Disposed factory cannot retain ready or write authority",
+      "factory-dispose-during-stage-cannot-publish": "Disposed in-flight factory cannot publish a late ready result",
+      "factory-reentrant-handshake-cannot-publish-partial-core": "Reentrant handshake cannot observe an unfinished initialization as ready",
+      "factory-owner-change-during-stage-is-refused:device": "Changed factory identity cannot be adopted by the old stage",
+      "factory-completed-owner-change-invalidates-ready:device": "Replaced factory object cannot inherit a completed initialization",
+      "factory-owner-change-during-stage-is-refused:assembly": "Changed factory identity cannot be adopted by the old stage",
+      "factory-completed-owner-change-invalidates-ready:assembly": "Replaced factory object cannot inherit a completed initialization"
+    },
+    "continuation": {
+      "factory-retry-continues-same-device:device.pull-sensors": "Retry cannot replay completed bootstrap stages",
+      "factory-retry-continues-same-device:device.initialize": "Retry cannot replay completed bootstrap stages",
+      "factory-retry-continues-same-device:device.identity": "Retry cannot replay completed bootstrap stages",
+      "factory-bootstrap-retry-does-not-replay-completed-stages:motherboard.collect": "Bootstrap retry must preserve completed configuration and motherboard stages",
+      "factory-bootstrap-retry-does-not-replay-completed-stages:device.construct": "Bootstrap retry must preserve completed configuration and motherboard stages",
+      "factory-write-admission-completes-pending-initialization": "Actual write admission must finish pending initialization before accepting the same device",
+      "factory-readonly-sampling-never-uses-partial-core": "Read-only evidence recovers only after the same actual factory completes"
+    }
+  },
+  "images": {
+    "host": "2b59965fce6909b1a85058e1cf670477090ed858d64eda5484a2fda38eec484a",
+    "backend": "2a3ae2d1fa99c382841dfa6ee690ac3c3c9baf429b726b76a9c67c2d6fcfe236",
+    "producer": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+    "launcher": "55bbc787f00ccc7b3c3855023f2f96df6423baf0481883ec40a732f7b5583a0e",
+    "light": "e5460cfcfd1e73ad70b48a0bf8be70176c2115e2f1c655b9105f9e4de33dbadf",
+    "rawHc": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "synthetic": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+  },
+  "identities": {
+    "host": "YeManFanHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "backend": "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+  },
+  "sources": {
+    "factoryProof": "49009f2afbac2d7dd0c09b5e91a390486001e2f9530fee595bd363a611690472",
+    "factoryCases": "bb62318b9984696ccc9af34bfd844fdfb43b5f27cafd5103d8f3c637ca2b123b",
+    "harness": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8",
+    "fixture": "67d13ce16340dd086554c3e8dca8bc2122f204aedf878f9943f273a9d13cf154",
+    "hostSource": "276068d4031942fbc550b1ecd98f55903ff0307c0e8193b236770e187adc9eb6"
+  },
+  "currentSourceBuildSha256": "43aa4b3b999f34d231b325baea2d62d1d0bf714c02aa52c1fe2c96e07b049b7b",
+  "rawReaderSha256": "3bd052bb0165ad8ce1765e2b9ab3504ccec443fa350f365dca1bf899b50e928e",
+  "original37": [
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.deps.json",
+      "sha256": "2ddcefa243cc9abd009154e6a788f982a8b4de381c203e85e144691c3f12b711"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.dll",
+      "sha256": "244f26c326f2ae58a99cfa056b0df792cb2eef51ad76a13b681aa92cc6cfbc85"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.pdb",
+      "sha256": "e8baed3404dcbe929d0a1483ba33dfe512a954999b7ba610111ccf57c2db13bd"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.deps.json",
+      "sha256": "d16a5985d7ffafb34e00e142b4e83144ae81058c6bf80bc58a9f5317c9bada8d"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.dll",
+      "sha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.pdb",
+      "sha256": "813e48ccc0fe8daa43a0223644a464d3cdebcc2302992561523800c9f92ecc32"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ConstructorIoPorts.dll",
+      "sha256": "244f26c326f2ae58a99cfa056b0df792cb2eef51ad76a13b681aa92cc6cfbc85"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ConstructorIoPorts.pdb",
+      "sha256": "e8baed3404dcbe929d0a1483ba33dfe512a954999b7ba610111ccf57c2db13bd"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/HandheldCompanion.dll",
+      "sha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/HandheldCompanion.pdb",
+      "sha256": "813e48ccc0fe8daa43a0223644a464d3cdebcc2302992561523800c9f92ecc32"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/Mono.Cecil.dll",
+      "sha256": "6346621d998fe428b4b97bb365e5090537be5074861d726cead5767d3b2a7cf2"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.deps.json",
+      "sha256": "aeba3c3c23843f056166ebac60fd998089fde4946a1683d2c9f3746ce9fd3265"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.dll",
+      "sha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.exe",
+      "sha256": "e5808b3401ca36e0d0343678a54a3749c1813cc4c2e695a6ebb65dc27f98a10e"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.pdb",
+      "sha256": "08b16e724a2546e315e9ca9d3ea64b79634aa121b1f0c690a4ad28018971ddca"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.dll",
+      "sha256": "55bbc787f00ccc7b3c3855023f2f96df6423baf0481883ec40a732f7b5583a0e"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.exe",
+      "sha256": "43c72d2f71a8e02386cca17ee59dbf67272dc718f5d4c8e7f31fc71660581829"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.pdb",
+      "sha256": "790181fbfd05172812f0af96c3b0c01bc487f2ae505da01d68f2af2c7c8f8697"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.deps.json",
+      "sha256": "18bf3267f925b37e6c24c7c3a90c0ecdb7dfb5300126bc2f53f233c15252ee5b"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/STA/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/STA/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.dll",
+      "sha256": "e4ec9dd28690586166eeaf4eb29d64e4c7a87d061256a647ba123a551e3f6670"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.exe",
+      "sha256": "54dd750a3605d5639b1f88a787aded97b1df775f669407f9e7710691fbb60842"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.pdb",
+      "sha256": "99f0b3ad0201314433bd572e8ea036e90f7729c6c854230b7f10fa8d29409708"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    }
+  ],
+  "leaves": [
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateFormalSessionCapabilityAcl()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "validation.acl"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateDeploymentGenerationForHcLoad()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "validation.payload"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateGamepadMotion()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "assembly.native"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ConfigureHcRuntime()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "assembly.configure"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    },
+    {
+      "signature": "System.Reflection.Assembly YeManFanHost.RealHcBackend::ResolveDependency(System.Runtime.Loader.AssemblyLoadContext,System.Reflection.AssemblyName)",
+      "instructions": [
+        {
+          "opcode": "ldarg.0",
+          "operand": ""
+        },
+        {
+          "opcode": "ldarg.2",
+          "operand": ""
+        },
+        {
+          "opcode": "callvirt",
+          "operand": "System.String System.Reflection.AssemblyName::get_Name() [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Resolve(System.Object,System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ldnull",
+          "operand": ""
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    }
+  ],
+  "selectedMethods": [
+    {
+      "signature": "System.Boolean YeManFanHost.RealHcBackend::get_CanWrite()",
+      "canonicalSha256": "d3a7ff2938d4c37d53070b3dbae0a399c10fff76fc5af853d542b2a1cef76d6b"
+    },
+    {
+      "signature": "System.Boolean YeManFanHost.RealHcBackend::get_IsLoaded()",
+      "canonicalSha256": "8a64e8c57cbbf762d1a1207703270830c5c7d048b67a6716dc386e274111dc55"
+    },
+    {
+      "signature": "System.Boolean YeManFanHost.RealHcBackend::IsAuthorized()",
+      "canonicalSha256": "d241c89e084dcebdc498f493299cbb48b789bbb66c8b8b947e30e7dd593a8562"
+    },
+    {
+      "signature": "System.Collections.Generic.Dictionary`2<System.String,System.String> YeManFanHost.RealHcBackend::get_DeviceIdentity()",
+      "canonicalSha256": "028f7a142166b8089a405e990b812668325f50318b62ea84874d2a7c472799cd"
+    },
+    {
+      "signature": "System.Collections.Generic.Dictionary`2<System.String,System.String> YeManFanHost.RealHcBackend::ReadIdentity(System.Object)",
+      "canonicalSha256": "093613a5d72dd86b20276eca3831bbef96eee36983ef05cb346832cafc0f4f9f"
+    },
+    {
+      "signature": "System.Object YeManFanHost.RealHcBackend::InvokeStatic(System.String,System.String,System.Object[])",
+      "canonicalSha256": "a2c6ba5bfbfb1794b62c6b5bd9e26045bf64ec78fc54b5e3af46a37caad34186"
+    },
+    {
+      "signature": "System.Reflection.Assembly YeManFanHost.RealHcBackend::ResolveDependency(System.Runtime.Loader.AssemblyLoadContext,System.Reflection.AssemblyName)",
+      "canonicalSha256": "f0f997d80e472067f3eeaab3f289ba757b0e59e421ff663c12f55d4dee94bc05"
+    },
+    {
+      "signature": "System.String YeManFanHost.RealHcBackend::get_FactoryType()",
+      "canonicalSha256": "9844dc8ba0b7440ff268f38ae888868046f16ddedc6167da195e586cf70eea24"
+    },
+    {
+      "signature": "System.Type YeManFanHost.RealHcBackend::FindType(System.String)",
+      "canonicalSha256": "0de51c26d623f9ad9e3e3d316e734aefda446baed8259e332701f96cc9c50427"
+    },
+    {
+      "signature": "System.ValueTuple`2<System.Object,System.Int32> YeManFanHost.RealHcBackend::CaptureMsiReadOnlySnapshotCore()",
+      "canonicalSha256": "83deec4e0d9525054e3777c192c1f29ec03f6585c25fe3a0c02d9729460ccda1"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::.cctor()",
+      "canonicalSha256": "d55562639297bb10efb3580b5bc0a6d882796dd17dafdcce24aa682aebe5f0e2"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::.ctor(YeManFanHost.HostOptions)",
+      "canonicalSha256": "3500f70ca651fc8a16b392b8afad3f815312dd9cd61bb97487658a94e6608720"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_0()",
+      "canonicalSha256": "0e1b118c605509cc04cf82bcd12710175ec5c00bbd9ef5d386b596d9678b9e1f"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_1()",
+      "canonicalSha256": "9e9a34378a14a2e0e68756e0af400f2a879a0a9482167bb8d9a0d6d88840467f"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_2()",
+      "canonicalSha256": "73e4776db1efcc29cb2a3d617cdabad715ca98a71682926698698b2edaa21e60"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_3()",
+      "canonicalSha256": "f8830e88836a80db388fd36b904c0e405729028b77429421f677ffc02a06c127"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_4()",
+      "canonicalSha256": "c999f96d18b9ef48d6e18bcf43e8d66d8d89e5c210a9148bb3bbfe703f3b4fc2"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_5()",
+      "canonicalSha256": "ccecd6876a422a7e876245c6a3ba098008d318fed0dd915816a030ad018513ab"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_6()",
+      "canonicalSha256": "87959ea1e93ce05a3fd955680a721c0fed8cc29a277db98c19c167273987381f"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::<LoadAssemblyAndFactory>b__574_7()",
+      "canonicalSha256": "a0370e6d8a35686672d2ef3f54e328467451307334607ae517f527c4aeb7cb69"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ConfigureHcRuntime()",
+      "canonicalSha256": "be4af4a4a8874302bb697b81778487a779f2887d0247c1b4b60e36e5e544d37c"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::DetachCpuTemperatureLoop()",
+      "canonicalSha256": "e5fc5cb5da60589a8680c01f91773a1b9cacaac841c1dff35fed61a92acfa1df"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::Dispose()",
+      "canonicalSha256": "d577051f38098ad3a7cd90ad061e960901a50b8cf034b1728e9becafbf7699f6"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::EnsureHcDependencyResolverRegistered()",
+      "canonicalSha256": "3b1bce67b1078e687534ddb859c7132faa6fe82c19d0becd8ffdc030a737e311"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::EnsureRealWriteAuthorization()",
+      "canonicalSha256": "1367f1573dab311e2164abc05a4f5bc27fcc0296e1241e28c4fd51610b2f8723"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::LoadAssemblyAndFactory()",
+      "canonicalSha256": "289fbd1f30447cbed8cd69fe602536c62f82471f9e1591fe2527add950a26b12"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ReleaseBackendAsusAcpiOwnedHandle(System.String)",
+      "canonicalSha256": "afc213e8b89cdca16df4f36d63ab691fed4627254f160915947cabacf8b3e2b7"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::RequireHcInitializationOwner()",
+      "canonicalSha256": "8b23849be4a9a4fa172d2a571d080e889f3626f28c2b24df5febb726ca69099a"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::RunHcInitializationStage(System.String,System.Action,System.Action`2<System.String,System.Object>)",
+      "canonicalSha256": "5c12db24f23497ace0ad441fe19213b3eb82c9d5bb6422d8c3e0248fe13fabdb"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::StopCpuTemperatureMonitor()",
+      "canonicalSha256": "4e1784d0a10f83443f38805480203efd0543eead9e97b083594983107e6f8bb9"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateDeploymentGenerationForHcLoad()",
+      "canonicalSha256": "76e9091116789daf9039d4f6e1facce67021669bb4fd719db658ebeededbffa2"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateFormalSessionCapabilityAcl()",
+      "canonicalSha256": "902732e414f4f901f94e81e4b227d37cc64258f7533ebbc1014f434c11da2964"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateGamepadMotion()",
+      "canonicalSha256": "8a02404f64f362741b1ef771be6ca43b8c0469d0a28568bb5c27d9ede1dc1aeb"
+    },
+    {
+      "signature": "YeManFanHost.FanCapabilityDecision YeManFanHost.RealHcBackend::ObserveFanCapability()",
+      "canonicalSha256": "955735162ae40caa8b2bef45d58b3655164e3678e9df4488e9ae8f350877a2a3"
+    },
+    {
+      "signature": "YeManFanHost.FanRoute YeManFanHost.RealHcBackend::get_Route()",
+      "canonicalSha256": "b8b80a5378e8fb8dd9c7baa8502f2223e1d91c78a1341e1315db456800d17f57"
+    },
+    {
+      "signature": "YeManFanHost.RealHandshakeResult YeManFanHost.RealHcBackend::LoadAndHandshakeCore()",
+      "canonicalSha256": "405144611c6b13854e2d65e971b9725fec746d7c842f64e2cb67912b71377f32"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend/<>c__DisplayClass574_0::<LoadAssemblyAndFactory>b__8()",
+      "canonicalSha256": "6be1f25db53faf84c232139f8deba25688aa26d010eb5620c833a52ca5a79164"
+    }
+  ],
+  "baseClr": [
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Private.CoreLib.dll",
+      "sha256": "ed80a1a5dd066c0407ad59686f9af90a4f3e55dbf3e4c973b53cc8c9d0706f82",
+      "identity": "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Numerics.Vectors.dll",
+      "sha256": "6beaf983fa8c33d25160c7a77e185967e8f113a5c02e6dc27f05f26e1b34763c",
+      "identity": "System.Numerics.Vectors, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Private.Uri.dll",
+      "sha256": "0546093ec627bf832c244be56d9acca471778385c534e0107f2a6dc6a78f93d2",
+      "identity": "System.Private.Uri, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Immutable.dll",
+      "sha256": "623ad5fa5ac38c460df0073f37fbb649e219ac486c926b822f77ebf02676d56c",
+      "identity": "System.Collections.Immutable, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\netstandard.dll",
+      "sha256": "ce09cef0d758196f2467f320d840c03202453efe9fb1920dddd24ea8277bbbb3",
+      "identity": "netstandard, Version=2.1.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+    },
+    {
+      "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.IO.Pipelines.dll",
+      "sha256": "93ce5ddafb25ba6aeae208ffc750da0f243f25e89fe7dbc5287e1d8b4f26a2e0",
+      "identity": "System.IO.Pipelines, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+    }
+  ],
+  "frameworkMetadataSha256": "2daad3548c0847fa41bd29da6b1d0f2e08655b72c17390ea93595319fdd04495",
+  "basePreloadSha256": "2ad574def20dce37bfd98638f3357d3d9724b5332808faf75997fe0ba737c20e",
+  "defaultContextSha256": "fe4ff92b5420ead46480ca6c835676ed468e8d47d55fbbb9f67900e579e63608"
+}

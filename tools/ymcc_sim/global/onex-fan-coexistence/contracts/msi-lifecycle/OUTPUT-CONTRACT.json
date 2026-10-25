@@ -1,0 +1,212 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-lifecycle23-from-accepted-onex92",
+  "api": {
+    "inspect": "inspectMsiLifecycleInputs({inputsPin:{path,sha256}})",
+    "prepare": "prepareMsiLifecycle({inputsPin:{path,sha256}})",
+    "model": "projectMsiLifecycleMODEL_ONLY(bundle)"
+  },
+  "inputShape": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-lifecycle-source-prepare-20261022-r1/DERIVATIVE-QUALIFICATION-CONTRACT.json",
+    "sha256": "88cad91055e17c60bcda334984015bf3b699b98625387f64dcf223736b78a70f",
+    "bytes": 11031
+  },
+  "pendingExample": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-lifecycle-source-prepare-20261022-r1/EXACT-INPUTS.pending-example.json",
+    "sha256": "5799089395d40f04ac730e29319455f967366607cd8a9764764cbc11c01b768d",
+    "bytes": 1341
+  },
+  "explicitRemainingInput": "Parent-selected derivativeQualificationPin. It must bind actual HC/Host typed review, inventory and negative typed raw rows as specified; null/missing/unreviewed is refused.",
+  "return": {
+    "planPin": "New saved PREPARED-PLAN.json pin",
+    "plan": "Same serialized object"
+  },
+  "plan": {
+    "kind": "msi-original-lifecycle-prepared",
+    "profile": "msi-original-lifecycle23-from-accepted-onex92",
+    "role": "positive/narrow-open/usable/firmware/release-dispatch/settlement/binding",
+    "ownedRoot": "Fresh direct child of explicit existing ownedParent",
+    "program": "Same exact pinned dotnet as accepted OneX92",
+    "artifacts": "All same C9,Ports,Authority,STA/deps/runtimeconfig bytes with fresh relocation",
+    "host": "MSI Host4a461 positive or original audited own one-method fault",
+    "hc": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-hc-ten-leaf-generation\\msi-lifecycle-hc\\owned-stage\\lifecycle-hc\\HandheldCompanion.dll",
+      "sha256": "1827c3e763c0b74fddb2bae6d8b42778d4917d03bfe8a35536c78c23f95d50e1"
+    },
+    "policy": "New POLICY.json; Default92/framework64/alias6 exactly conserved except fresh path and Host/HC SHA substitution",
+    "runtimePins": "New exact116-entry relocated manifest; frameworks remain excluded",
+    "argv": "New business-argv.json; exact nine arguments plus computed hash",
+    "args": [
+      "fresh Host",
+      "fresh HC1827",
+      "fresh runtime directory",
+      "fresh shared directory",
+      "fresh runtime-pins.json",
+      "fresh original constructor inventory.json",
+      "fresh host config.json",
+      "fresh role result.json",
+      "msi-lifecycle"
+    ],
+    "resultPath": "ownedRoot/Build/msi-lifecycle/<role>/case/result.json",
+    "nativeProbeRoot": "case/n length<239; original259 native math boundary unchanged",
+    "expectedCaseIds": [
+      "msi-original-public-cycle:ClawA1M",
+      "msi-original-public-cycle:ClawA2VM",
+      "msi-original-public-cycle:ClawBZ2EM",
+      "msi-original-public-cycle:ClawCG3EM",
+      "msi-original-public-reopen:ClawA1M",
+      "msi-original-public-reopen:ClawA2VM",
+      "msi-original-public-reopen:ClawBZ2EM",
+      "msi-original-public-reopen:ClawCG3EM",
+      "msi-original-disconnected-hid-rebind",
+      "msi-original-unknown-firmware-honest",
+      "msi-original-open-read-failure:TransportFailed",
+      "msi-original-open-read-failure:ShortPayload",
+      "msi-original-open-read-failure:FlagNotSuccessful",
+      "msi-original-open-superseded",
+      "msi-original-release-read-unavailable:Get_Data",
+      "msi-original-release-read-unavailable:Get_AP",
+      "msi-original-release-write-transport-failed",
+      "msi-original-release-readback-mismatch",
+      "msi-original-release-readback-unavailable",
+      "msi-original-already-automatic-no-write",
+      "msi-original-foreign-release-receipt:OperationToken",
+      "msi-original-foreign-release-receipt:BootIdentity",
+      "msi-original-foreign-open-marker"
+    ],
+    "expectedFailureMask": "Original source mask only; no observed counterexample mask invention",
+    "expectedMarkers": "Original source markers per role",
+    "expectedExitCode": "0 positive;2 negative",
+    "failureMasks": {
+      "narrow-open": [
+        "msi-original-public-cycle:ClawA1M",
+        "msi-original-public-cycle:ClawA2VM",
+        "msi-original-public-cycle:ClawBZ2EM",
+        "msi-original-public-cycle:ClawCG3EM",
+        "msi-original-public-reopen:ClawA1M",
+        "msi-original-public-reopen:ClawA2VM",
+        "msi-original-public-reopen:ClawBZ2EM",
+        "msi-original-public-reopen:ClawCG3EM",
+        "msi-original-disconnected-hid-rebind",
+        "msi-original-unknown-firmware-honest",
+        "msi-original-open-read-failure:TransportFailed",
+        "msi-original-open-read-failure:ShortPayload",
+        "msi-original-open-read-failure:FlagNotSuccessful",
+        "msi-original-open-superseded",
+        "msi-original-release-read-unavailable:Get_Data",
+        "msi-original-release-read-unavailable:Get_AP",
+        "msi-original-release-write-transport-failed",
+        "msi-original-release-readback-mismatch",
+        "msi-original-release-readback-unavailable",
+        "msi-original-already-automatic-no-write",
+        "msi-original-foreign-release-receipt:OperationToken",
+        "msi-original-foreign-release-receipt:BootIdentity",
+        "msi-original-foreign-open-marker"
+      ],
+      "usable": [
+        "msi-original-open-read-failure:ShortPayload",
+        "msi-original-open-read-failure:FlagNotSuccessful"
+      ],
+      "firmware": [
+        "msi-original-public-cycle:ClawA1M",
+        "msi-original-public-cycle:ClawA2VM",
+        "msi-original-public-cycle:ClawBZ2EM",
+        "msi-original-public-cycle:ClawCG3EM",
+        "msi-original-disconnected-hid-rebind"
+      ],
+      "release-dispatch": [
+        "msi-original-public-cycle:ClawA1M",
+        "msi-original-public-cycle:ClawA2VM",
+        "msi-original-public-cycle:ClawBZ2EM",
+        "msi-original-public-cycle:ClawCG3EM",
+        "msi-original-public-reopen:ClawA1M",
+        "msi-original-public-reopen:ClawA2VM",
+        "msi-original-public-reopen:ClawBZ2EM",
+        "msi-original-public-reopen:ClawCG3EM",
+        "msi-original-unknown-firmware-honest",
+        "msi-original-release-read-unavailable:Get_Data",
+        "msi-original-release-read-unavailable:Get_AP",
+        "msi-original-release-write-transport-failed",
+        "msi-original-release-readback-mismatch",
+        "msi-original-release-readback-unavailable",
+        "msi-original-already-automatic-no-write",
+        "msi-original-foreign-release-receipt:OperationToken",
+        "msi-original-foreign-release-receipt:BootIdentity"
+      ],
+      "settlement": [
+        "msi-original-release-read-unavailable:Get_Data",
+        "msi-original-release-read-unavailable:Get_AP",
+        "msi-original-release-write-transport-failed",
+        "msi-original-release-readback-mismatch",
+        "msi-original-release-readback-unavailable"
+      ],
+      "binding": [
+        "msi-original-foreign-release-receipt:OperationToken",
+        "msi-original-foreign-release-receipt:BootIdentity"
+      ]
+    },
+    "budgets": {
+      "business": 60000,
+      "parent": 360000,
+      "generation": 30000,
+      "compile": 120000
+    },
+    "expectedMsiLifecycleContract": {
+      "cases": 23,
+      "types": [
+        "HandheldCompanion.Devices.ClawA1M",
+        "HandheldCompanion.Devices.ClawA2VM",
+        "HandheldCompanion.Devices.ClawBZ2EM",
+        "HandheldCompanion.Devices.MSI.ClawCG3EM"
+      ],
+      "ownedSta": 23,
+      "readonlyThreadIdCalls": 23,
+      "originalBaseOpenAndStructuredRelease": true,
+      "readinessOriginalAlgorithmWithOnlyTwoConnectionIo": true,
+      "hidLibraryNotModified": true,
+      "hostResourceFolderMetadataAndPnpTrapOnly": true,
+      "noRealRegistryPnpGeneralOpen": true,
+      "physicalOemAcknowledgement": "UNKNOWN",
+      "nativeIoZeroClaim": false
+    },
+    "acceptedOneX92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/SUMMARY.json",
+        "sha256": "bc53dc914731a6ae380a2da7c8949aaa3cac698455afe65c9309864372a26c7f"
+      },
+      "preparedPin": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+        "sha256": "e7fea6722ce27167b57333817265cd42a98a5aad5326f04cbd3a36249cc82260"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/LOADED-GRAPH.json",
+        "sha256": "a7377291a21860b089ce8bd27136c20267c7707536aa44c49e7ec6713ec3bae9"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-seven-independent-joint/SUMMARY.json",
+        "sha256": "db5fc82bebb2a3c2314c77220dd39f024b43d53e7126b1b994294a2824b813fb"
+      }
+    },
+    "derivativeQualification": "Exact caller-selected pin and normalized review binding",
+    "inventoryEvidence": "Original08A/Hid metadata only; never substitutes runtime HC or adds Default providers",
+    "msiOracle": "Basis and exact selected source pins",
+    "compileReceipt": "Original C9 compilation lineage retained",
+    "sourceProjectionProof": "SOURCE-PROJECTION-PROOF.json exact copy map and conservation proof",
+    "metadataArguments": "[STA,validate,policy.path,policy.sha256,metadataReceiptPath]",
+    "preloadArguments": "[STA,preload,policy.path,policy.sha256,preloadReceiptPath]",
+    "businessArguments": "[STA,run,policy.path,policy.sha256,launchPath,...args9]",
+    "metadataReceiptPath": "ownedRoot/receipts/metadata.json",
+    "preloadReceiptPath": "ownedRoot/receipts/preload.json",
+    "launchPath": "ownedRoot/receipts/tool-launch-000.json",
+    "sourceEvidencePins": "All rehashed original and derivative evidence pins",
+    "outputPins": "115 copied payload/control inputs",
+    "metadataApprovalGranted": false,
+    "executionApprovalGranted": false,
+    "targetExecutions": 0,
+    "msiLifecycleBusinessAccepted": false,
+    "currentPrimaryAccepted": false,
+    "wholeFanPassed": false,
+    "cpuPowerBenefit": null
+  },
+  "scopeNote": "Additional actual dependencies require a separate exact review/extension. This preparer never broadens Default92 or aliases or native/device authority. Aggregate publicFactoryStillUnaccepted and sourceModelsPendingWorker preparation flags do not override actual accepted OneX92 receipts."
+}

@@ -1,0 +1,100 @@
+{
+  "schemaVersion": 1,
+  "id": "controller.host-game-output-observation",
+  "positive": {
+    "configurations": [
+      "Release",
+      "Debug"
+    ],
+    "observationCases": 23,
+    "lifecycleCases": 19,
+    "legacyCases": 57,
+    "retainedLegacyFailureNames": [
+      "flag rejected wrong persona/profile: (dualshock4, dualshock-4-v2)",
+      "flag rejected wrong persona/profile: (steamdeck, wrong-profile)",
+      "flag rejected wrong persona/profile: (xbox360, xbox-360-wired)"
+    ]
+  },
+  "faultConfiguration": "Release",
+  "faults": [
+    {
+      "id": "missing-subscription",
+      "file": "Program.cs",
+      "from": "controller.OutputReceived += callback;",
+      "to": "/* missing output subscription */",
+      "designatedCase": "actual Host callback reaches current response"
+    },
+    {
+      "id": "quiesce-still-subscribed",
+      "file": "Program.cs",
+      "from": "var quiesceOutputDetail = DetachGameOutputObservation();",
+      "to": "var quiesceOutputDetail = \"\";",
+      "designatedCase": "quiesce detaches and rejects already copied callback"
+    },
+    {
+      "id": "release-still-subscribed",
+      "file": "Program.cs",
+      "from": "var gameOutputDetachDetail = DetachGameOutputObservation();",
+      "to": "var gameOutputDetachDetail = \"\";",
+      "designatedCase": "failed output barrier keeps resources but revokes callback before retry"
+    },
+    {
+      "id": "old-binding-accepted",
+      "file": "HostGameOutputObservation.cs",
+      "from": "!ReferenceEquals(_current, binding)",
+      "to": "_current is null",
+      "designatedCase": "same controller rebind cannot accept an old lease"
+    },
+    {
+      "id": "foreign-sender-accepted",
+      "file": "HostGameOutputObservation.cs",
+      "from": "!ReferenceEquals(binding.Controller, sender)",
+      "to": "false",
+      "designatedCase": "wrong event sender cannot publish"
+    },
+    {
+      "id": "payload-overwritten",
+      "file": "HostGameOutputObservation.cs",
+      "from": "data.Span.CopyTo(_payload);",
+      "to": "_payload.AsSpan().Fill(0);",
+      "designatedCase": "steamdeck admitted target subscribes exactly once and preserves payload"
+    },
+    {
+      "id": "oversize-truncated",
+      "file": "HostGameOutputObservation.cs",
+      "from": "if (data.Length > MaximumPayloadBytes) { ++_oversized; return; }",
+      "to": "if (data.Length > MaximumPayloadBytes) { ++_oversized; data = data[..MaximumPayloadBytes]; }",
+      "designatedCase": "oversized report rejected whole and 256 bytes retained"
+    },
+    {
+      "id": "wrong-tuple-accepted",
+      "file": "Program.cs",
+      "from": "!SameTuple(_gameOutputTuple, envelope)",
+      "to": "false",
+      "designatedCase": "actual appender requires full current tuple and successful response"
+    },
+    {
+      "id": "rejected-response-drained",
+      "file": "Program.cs",
+      "from": "|| !ok || envelope is null",
+      "to": "|| false || envelope is null",
+      "designatedCase": "same tuple rejected sequence cannot drain current data"
+    },
+    {
+      "id": "revoke-not-invalidated",
+      "file": "HostGameOutputObservation.cs",
+      "from": "_current = null;",
+      "to": "/* lease remains live */",
+      "designatedCase": "revoked copied callback cannot republish before disposal"
+    }
+  ],
+  "boundary": {
+    "protocolDecoded": false,
+    "gameFeedbackForwardingProven": false,
+    "realHostStarted": false,
+    "realSdkConstructed": false,
+    "physicalAcceptance": false,
+    "newPollerOrThread": false,
+    "cpugpuConsumptionChanged": false
+  }
+}

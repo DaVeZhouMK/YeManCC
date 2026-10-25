@@ -1,0 +1,12 @@
+:root {
+    --ren-game-tile-brightness: 0.5;
+    --ren-game-tile-saturate: 0.5;
+}
+
+/* YMCC: observe this theme file without changing layout or input. */
+:root { --ymcc-receipt-darken-unfocused-games: 1; }
+
+/* YMCC file receipt: current option presence; no visual rule. */
+:root { --ymcc-file-2ec8ffe6c8f63bf7: 1; }
+/* YMCC content receipt: exact bundled file revision. */
+:root { --ymcc-content-17a99962151898fe: 1; }

@@ -1,4 +1,5 @@
 /** Stage F3/T5 assembler. HC LayoutManager gyro blend; no HID/backend IO. */
+import { isVirtualOutputPersona, type ControllerPersona, type VirtualOutputPersona } from './controllerPersona';
 import {
   applyHcGyroAxisModifiers,
   blendGyroShortIntoStick,
@@ -11,7 +12,7 @@ import {
   type ResponseCurvePoint,
 } from './hcInputUtils';
 
-export type InputPersona = 'disabled' | 'dualshock4' | 'xbox360';
+export type InputPersona = ControllerPersona;
 
 export interface ControllerFrame {
   runId: string; epoch: number; powerGeneration: number; targetId: string;
@@ -39,7 +40,7 @@ export interface GyroAxisBlendConfig {
 
 export interface CanonicalFrame {
   schemaVersion: 1; runId: string; epoch: number; powerGeneration: number;
-  targetId: string; persona: Exclude<InputPersona, 'disabled'>; configRevision: number;
+  targetId: string; persona: VirtualOutputPersona; configRevision: number;
   inputSequence: number; sampleSequence: number; timestamp: number; neutral: boolean;
   buttons: number; axes: Record<string, number>; triggers: Record<string, number>;
   rightStickBase: { x: number; y: number };
@@ -47,7 +48,7 @@ export interface CanonicalFrame {
   rightStick: { x: number; y: number };
 }
 
-export type AssembleResult = { ok: true; frame: CanonicalFrame } | { ok: false; reason: 'frame-stale' | 'motion-invalid' | 'invalid-value' | 'persona-disabled' };
+export type AssembleResult = { ok: true; frame: CanonicalFrame } | { ok: false; reason: 'frame-stale' | 'motion-invalid' | 'invalid-value' | 'persona-disabled' | 'persona-unsupported' };
 
 const finite = (v: number) => Number.isFinite(v);
 const clamp = (v: number) => Math.max(-1, Math.min(1, v));
@@ -70,6 +71,7 @@ function gyroShortFromMotion(motion: MotionFrame): { x: number; y: number } {
  */
 export function assembleCanonicalFrame(controller: ControllerFrame, motion?: MotionFrame, blend?: GyroAxisBlendConfig): AssembleResult {
   if (controller.persona === 'disabled') return { ok: false, reason: 'persona-disabled' };
+  if (!isVirtualOutputPersona(controller.persona)) return { ok: false, reason: 'persona-unsupported' };
   const base = controller.rightStick;
   if (![base.x, base.y, controller.timestamp].every(finite) || !Number.isSafeInteger(controller.inputSequence) || controller.inputSequence < 0) {
     return { ok: false, reason: 'invalid-value' };

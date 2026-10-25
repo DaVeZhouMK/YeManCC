@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "id": "audio.music-player",
+  "producer": "tools/music_player_selftest.mjs",
+  "productSource": "src/bridge/music.ts",
+  "originalSources": [
+    "tools/music_player_selftest.mjs",
+    "public/icons/folder.svg",
+    "public/icons/music.svg",
+    "public/icons/mute.svg",
+    "public/icons/next.svg",
+    "public/icons/pause.svg",
+    "public/icons/play.svg",
+    "public/icons/prev.svg",
+    "public/icons/refresh.svg",
+    "public/icons/volume.svg",
+    "src/bridge/music.ts",
+    "src/icons.json",
+    "src/views/QuickAppView.vue",
+    "tools/gen-icons.mjs"
+  ],
+  "producerSha256": "ebd35ce50ed3d718a90e78136d9ba3d58a26aa05bd28fa28fbede0f50143393a",
+  "caseNames": [
+    "Restore saved random mode without auto-playing; first start chooses a random song",
+    "Pause/resume retains both the random song and its playback position",
+    "Random start includes every track, including the first and last",
+    "Stop, rescan and folder changes all allow a fresh random start",
+    "Sequential start and pause/resume behavior remain unchanged",
+    "Switching to random before start takes effect; switching while paused does not skip",
+    "Random previous/next and automatic song end still choose a different song",
+    "A single track starts safely; an empty folder never assigns a bogus random index",
+    "Without a configured folder, start opens folder selection rather than playing",
+    "A rejected play can be retried without unexpectedly selecting another random song",
+    "Every player icon has SVG markup and agrees with the canonical generator and SVG exports"
+  ],
+  "positiveVmRuns": 11,
+  "timeoutMs": 30000,
+  "sourceApproval": false,
+  "faults": [
+    {
+      "id": "resume-rerandomizes",
+      "before": " && !audio.getAttribute('src')",
+      "after": "",
+      "expectedName": "Pause/resume retains both the random song and its playback position",
+      "expectedFailure": {
+        "message": "Expected values to be strictly equal:\n+ actual - expected\n\n+ 'Song 1.mp3'\n- 'Song 3.mp3'\n        ^\n",
+        "line": 114,
+        "column": 10
+      }
+    },
+    {
+      "id": "stop-retains-source",
+      "before": "  audio.removeAttribute('src');",
+      "after": "  /* single-source fault: stop retains the assigned source */",
+      "expectedName": "Random start includes every track, including the first and last",
+      "expectedFailure": {
+        "message": "Expected values to be strictly equal:\n\n0 !== 1\n",
+        "line": 126,
+        "column": 12
+      }
+    }
+  ]
+}

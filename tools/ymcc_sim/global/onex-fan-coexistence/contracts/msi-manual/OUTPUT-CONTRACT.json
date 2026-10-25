@@ -1,0 +1,311 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-manual44-from-accepted-msi92",
+  "api": {
+    "inspect": "inspectMsiManualInputs({inputsPin:{path,sha256}})",
+    "prepare": "prepareMsiManual({inputsPin:{path,sha256}})",
+    "model": "projectMsiManualMODEL_ONLY(bundle)"
+  },
+  "inputContract": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-msi-manual-source-prepare-20261022-r1/INPUT-CONTRACT.json",
+    "sha256": "119106cdabd146bad4ef40fb88abc2d61271b630df65b6549ed2155a0db98a64",
+    "bytes": 7611
+  },
+  "return": {
+    "planPin": "Exact new PREPARED-PLAN.json file pin",
+    "plan": "Same serialized object"
+  },
+  "plan": {
+    "schemaVersion": 1,
+    "kind": "msi-original-manual-prepared",
+    "profile": "msi-original-manual44-from-accepted-msi92",
+    "role": [
+      "positive",
+      "owner",
+      "boundaries",
+      "table-status",
+      "preservation",
+      "fullspeed",
+      "axis-endpoint"
+    ],
+    "ownedRoot": "Fresh direct child of explicit ownedParent; must not exist and must be distinct from accepted base",
+    "program": "Same exact dotnet program pin as accepted parent",
+    "artifacts": "Same exact producerC9/Ports399/authority4962/STA8e/deps/runtimeconfig bytes, relocated",
+    "host": "ManualHost4be for positive/preservation; original own one-method Host fault otherwise",
+    "hc": "Original HC1827 except exact original preservation fault",
+    "policy": "Fresh POLICY.json; exact inherited schema6 Default92/framework64/alias6, only controlled relocation and selected image SHA substitution",
+    "runtimePins": "Fresh exact116 manifest; framework excluded, no native permission added",
+    "argv": "Fresh business-argv.json with exact9 args and SHA",
+    "args": [
+      "Fresh selected Host",
+      "Fresh selected HC",
+      "Fresh runtime directory",
+      "Fresh shared directory",
+      "Fresh runtime-pins.json",
+      "Fresh original constructors inventory.json",
+      "Fresh original YeManFanHost.json",
+      "Fresh resultPath",
+      "msi-manual"
+    ],
+    "resultPath": "ownedRoot/Build/msi-manual/<role>/case/result.json",
+    "nativeProbeRoot": "case/n length<239, original native259boundary remains",
+    "budgets": {
+      "business": 90000,
+      "parent": 360000,
+      "generation": 30000,
+      "compile": 120000
+    },
+    "metadataBudgetMs": 60000,
+    "preloadBudgetMs": 60000,
+    "expectedCaseIds": [
+      "msi-manual-original-public-linear:ClawA1M",
+      "msi-manual-original-public-linear:ClawA2VM",
+      "msi-manual-original-public-linear:ClawBZ2EM",
+      "msi-manual-original-public-linear:ClawCG3EM",
+      "msi-manual-original-epoch-before-write",
+      "msi-manual-original-device-replaced",
+      "msi-manual-original-assembly-replaced",
+      "msi-manual-original-flat-fullspeed:ClawA1M",
+      "msi-manual-original-fullspeed-to-curve:ClawA1M",
+      "msi-manual-original-flat-fullspeed:ClawA2VM",
+      "msi-manual-original-fullspeed-to-curve:ClawA2VM",
+      "msi-manual-original-flat-fullspeed:ClawBZ2EM",
+      "msi-manual-original-fullspeed-to-curve:ClawBZ2EM",
+      "msi-manual-original-flat-fullspeed:ClawCG3EM",
+      "msi-manual-original-fullspeed-to-curve:ClawCG3EM",
+      "msi-manual-original-short-table:0",
+      "msi-manual-original-short-table:7",
+      "msi-manual-original-short-table:8",
+      "msi-manual-original-short-table:30",
+      "msi-manual-original-table-read-failure:1",
+      "msi-manual-original-table-read-failure:2",
+      "msi-manual-original-table-write-failure:1:InParamsUnavailable",
+      "msi-manual-original-table-write-failure:1:TransportFailed",
+      "msi-manual-original-table-write-failure:1:Exception",
+      "msi-manual-original-table-write-failure:2:InParamsUnavailable",
+      "msi-manual-original-table-write-failure:2:TransportFailed",
+      "msi-manual-original-table-write-failure:2:Exception",
+      "msi-manual-original-table-readback-unavailable",
+      "msi-manual-original-table-readback-mismatch",
+      "msi-manual-original-bit-read-failure:1",
+      "msi-manual-original-bit-read-failure:152",
+      "msi-manual-original-epoch-after-stage:1",
+      "msi-manual-original-epoch-after-stage:2",
+      "msi-manual-original-epoch-after-stage:212",
+      "msi-manual-original-epoch-after-stage:152",
+      "msi-manual-original-owner-after-table:device",
+      "msi-manual-original-owner-after-table:assembly",
+      "msi-manual-original-axis-fallback:short",
+      "msi-manual-original-axis-fallback:unordered",
+      "msi-manual-original-axis-fallback:unavailable",
+      "msi-manual-original-current-receipt-after-failure",
+      "msi-manual-original-invalid-public-curves",
+      "msi-manual-original-unadmitted-sleep-gate",
+      "msi-manual-original-extra-response-byte"
+    ],
+    "expectedFailureMask": "Exact source role array; positive empty",
+    "expectedMarkers": "Exact source marker array",
+    "expectedExitCode": "0 positive;2 every original fault",
+    "failureMasks": {
+      "positive": [],
+      "owner": [
+        "msi-manual-original-device-replaced",
+        "msi-manual-original-assembly-replaced",
+        "msi-manual-original-owner-after-table:device",
+        "msi-manual-original-owner-after-table:assembly"
+      ],
+      "boundaries": [
+        "msi-manual-original-device-replaced",
+        "msi-manual-original-assembly-replaced",
+        "msi-manual-original-owner-after-table:device",
+        "msi-manual-original-owner-after-table:assembly",
+        "msi-manual-original-epoch-before-write",
+        "msi-manual-original-epoch-after-stage:1",
+        "msi-manual-original-epoch-after-stage:2",
+        "msi-manual-original-epoch-after-stage:212",
+        "msi-manual-original-epoch-after-stage:152"
+      ],
+      "table-status": [
+        "msi-manual-original-short-table:0",
+        "msi-manual-original-short-table:7",
+        "msi-manual-original-short-table:8",
+        "msi-manual-original-short-table:30",
+        "msi-manual-original-table-read-failure:1",
+        "msi-manual-original-table-read-failure:2",
+        "msi-manual-original-table-write-failure:1:InParamsUnavailable",
+        "msi-manual-original-table-write-failure:1:TransportFailed",
+        "msi-manual-original-table-write-failure:1:Exception",
+        "msi-manual-original-table-write-failure:2:InParamsUnavailable",
+        "msi-manual-original-table-write-failure:2:TransportFailed",
+        "msi-manual-original-table-write-failure:2:Exception",
+        "msi-manual-original-table-readback-unavailable",
+        "msi-manual-original-table-readback-mismatch",
+        "msi-manual-original-current-receipt-after-failure"
+      ],
+      "preservation": [
+        "msi-manual-original-public-linear:ClawA1M",
+        "msi-manual-original-public-linear:ClawA2VM",
+        "msi-manual-original-public-linear:ClawBZ2EM",
+        "msi-manual-original-public-linear:ClawCG3EM"
+      ],
+      "fullspeed": [
+        "msi-manual-original-flat-fullspeed:ClawA1M",
+        "msi-manual-original-fullspeed-to-curve:ClawA1M",
+        "msi-manual-original-flat-fullspeed:ClawA2VM",
+        "msi-manual-original-fullspeed-to-curve:ClawA2VM",
+        "msi-manual-original-flat-fullspeed:ClawBZ2EM",
+        "msi-manual-original-fullspeed-to-curve:ClawBZ2EM",
+        "msi-manual-original-flat-fullspeed:ClawCG3EM",
+        "msi-manual-original-fullspeed-to-curve:ClawCG3EM"
+      ],
+      "axis-endpoint": [
+        "msi-manual-original-public-linear:ClawA1M",
+        "msi-manual-original-public-linear:ClawA2VM",
+        "msi-manual-original-public-linear:ClawBZ2EM",
+        "msi-manual-original-public-linear:ClawCG3EM",
+        "msi-manual-original-epoch-before-write",
+        "msi-manual-original-device-replaced",
+        "msi-manual-original-assembly-replaced",
+        "msi-manual-original-table-readback-unavailable",
+        "msi-manual-original-axis-fallback:short",
+        "msi-manual-original-axis-fallback:unordered",
+        "msi-manual-original-axis-fallback:unavailable"
+      ]
+    },
+    "expectedMsiManualContract": {
+      "caseCount": 44,
+      "types": [
+        "HandheldCompanion.Devices.ClawA1M",
+        "HandheldCompanion.Devices.ClawA2VM",
+        "HandheldCompanion.Devices.ClawBZ2EM",
+        "HandheldCompanion.Devices.MSI.ClawCG3EM"
+      ],
+      "ownedStaLifecycles": 44,
+      "readonlyOsIdentityCalls": 44,
+      "openCycles": 44,
+      "positivePublicAttempts": 52,
+      "positivePublicSuccesses": 21,
+      "checks": "UNKNOWN_UNTIL_ACTUAL_EXECUTION",
+      "forcedThreadCleanup": 0,
+      "deniedNative": 0,
+      "originalBaseOpenAndStructuredReleasePreserved": true,
+      "originalPublicApplyCurveAndTableBitWritersPreserved": true,
+      "originalTimerArmOperandsAndPowerIoOnly": true,
+      "bothTimerArmsIsolated": true,
+      "physicalPowerReadIsolated": true,
+      "originalSentryModuleInitializerPreserved": true,
+      "ownedBuildPayloadWritesRemain": true,
+      "freshChildManualEnabledDefaultFalse": true,
+      "backgroundReplayExecuted": false,
+      "rawWmiDecoderAccepted": false,
+      "nativeIoZeroClaim": false,
+      "physicalOemAcknowledgement": "UNKNOWN",
+      "instrumentationScopeAppliesTo": "canonical-reviewed-host3-before-original-fault"
+    },
+    "selectedOriginalFault": "null positive; role,targetKind,sourcePin,targetPin,proofPin,changedMethods for the selected exact original fault",
+    "acceptedMsiLifecycle92": {
+      "summaryPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/SUMMARY.json",
+        "sha256": "a5cc28db7273fd3ab8e687a581932b0728bee4a12ba11a5296845ec2e06d22ef"
+      },
+      "preparedPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/msi66-positive-r1/PREPARED-PLAN.json",
+        "sha256": "d29dee0fb2cbac0e8b0a3fcddf2970cba727c6c7eebe299afde0f5a4050f4a78"
+      },
+      "graphPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-positive-actual-r1/LOADED-GRAPH.json",
+        "sha256": "d2bd1f30335e71a5a101c24a8a246641fb7d16e8135c62b3558b71ee92761213"
+      },
+      "jointReviewPin": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r66-msi-seven-independent-joint-r2/SUMMARY.json",
+        "sha256": "ecc6413373c841effdd932f6eb8f697cf70a87aa793434f91600cb89f5ac9fb9"
+      }
+    },
+    "derivativeQualificationPin": "Exact selected parent qualification input pin",
+    "manualOracle": {
+      "basisPin": "Actual basis file pin",
+      "sourcePins": [
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/msi-manual-proof.mjs",
+          "sha256": "93365765be5e6606ea6de8a8e06abad54876613dd7ceb202f3be76765d41dae0"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiManualInstrumentation.cs",
+          "sha256": "88536a594cb25e9e522f8ad714e1c6b09e05cd81a9b525ae32870686164d029a"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiManualIoPorts.cs",
+          "sha256": "430e844eb828a78fa2e8e2885d9a917cc3a67040378dfff44f88c41708639b4e"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiManualCases.cs",
+          "sha256": "e08215e14da6bd07e665ac5bc4b894fe5c3274cbdc06c225815c89c79526131d"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryEntry.cs",
+          "sha256": "39e302e7937f9e3acfd1bfccbd23dcceea7a4dddfa6797127a337a6288a70f3d"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryProbe.cs",
+          "sha256": "da6fe877d16abc596d7d9ec9d7430a6f5c6727fe317e24b51f646140aadc3a1c"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+          "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+        },
+        {
+          "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiLifecycleCases.cs",
+          "sha256": "6e502397f3d8da2aeb6b91ea8e60b3e00295b1e273bf2f52679149dbe7fcab3f"
+        }
+      ]
+    },
+    "inventoryEvidence": "Exact reviewed manual host inventory result/process pins (evidence, not argv replacement)",
+    "sourceProjectionProof": "Exact saved SOURCE-PROJECTION-PROOF.json pin",
+    "metadataReceiptPath": "receipts/metadata.json",
+    "preloadReceiptPath": "receipts/preload.json",
+    "launchPath": "receipts/tool-launch-000.json",
+    "metadataArguments": [
+      "STA",
+      "validate",
+      "POLICY.path",
+      "POLICY.sha256",
+      "metadataReceiptPath"
+    ],
+    "preloadArguments": [
+      "STA",
+      "preload",
+      "POLICY.path",
+      "POLICY.sha256",
+      "preloadReceiptPath"
+    ],
+    "businessArguments": [
+      "STA",
+      "run",
+      "POLICY.path",
+      "POLICY.sha256",
+      "launchPath",
+      "...args9"
+    ],
+    "sourceEvidencePins": "All actual read/verified inputs and own helper/basis; no extra load permissions",
+    "outputPins": "115 copied output files (control pins are also bound by named plan fields)",
+    "compileReceipt": "Inherited actual producer qualification, no new compilation",
+    "originalCompileReceipt": "Inherited original qualification",
+    "osIdentityReview": "Inherited read-only OS identity qualification",
+    "acceptedPublic88": "Inherited public premise",
+    "frameworkExtension": "Inherited exact83+5 provenance",
+    "frameworkFourExtension": "Inherited exact88+4 provenance",
+    "initializeRole": "UNKNOWN",
+    "unknownReferences": "Original unchanged list; no static reference permission expansion",
+    "nativeBoundaryLength": 259,
+    "metadataApprovalGranted": false,
+    "executionApprovalGranted": false,
+    "targetExecutions": 0,
+    "msiManualBusinessAccepted": false,
+    "currentPrimaryAccepted": false,
+    "wholeFanPassed": false,
+    "nativeIoZeroClaim": false,
+    "physicalOemAcknowledgement": "UNKNOWN",
+    "cpuPowerBenefit": null
+  },
+  "scope": "Preparation does not execute CLR, Host Main, device IO, replay or raw WMI decoder. Original Sentry initializer and owned Build payload writes remain source facts. Approval must come from actual parent metadata/preload/business/postgraph receipts."
+}

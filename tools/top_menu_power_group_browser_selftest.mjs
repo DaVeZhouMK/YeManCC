@@ -18,15 +18,18 @@ const shared=fs.readFileSync('tools/independent_frame_rate_ui_selftest.mjs','utf
 const mockStart=shared.indexOf('const mocks={'),mockEnd=shared.indexOf('const result=',mockStart);
 assert(mockStart>=0&&mockEnd>mockStart);
 const mocks=vm.runInNewContext('(function(){'+shared.slice(mockStart,mockEnd)+'return mocks;})()');
+mocks['@/bridge/yeman'] += 'export const getTdpExecutionCapability=async()=>null;export const formatTdpTarget=(value)=>String(value)+" W";';
 const engine=fs.readFileSync('src/gamepad/engine.ts','utf8');
 const focusStart=engine.indexOf('function focusables(): HTMLElement[] {'),focusEnd=engine.indexOf('function isRangeInput(',focusStart);
 assert(focusStart>=0&&focusEnd>focusStart);
 const focusCode=engine.slice(focusStart,focusEnd);
+const backCode=engine.slice(engine.indexOf('function handleGamepadBack('),engine.indexOf('function handleGamepadEditGame('));
 Object.assign(mocks,{
- '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused} from './src/gamepad/focus.ts';import {spatialNavigationTarget} from './src/gamepad/spatial.ts';const FOCUSABLE='button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';const activeFanNodeEditor=()=>null;export const isMouseModeSuppressed=()=>false;${focusCode}\nexport const testMoveFocus=moveFocus;`,
+ '@/gamepad/engine': `import {focusGamepadElement,setGamepadFocused} from './src/gamepad/focus.ts';import {spatialNavigationTarget} from './src/gamepad/spatial.ts';const FOCUSABLE='button:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), input:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), select:not([disabled]):not([tabindex="-1"]):not([data-gp-ignore]), [tabindex]:not([tabindex="-1"]):not([data-gp-ignore])';const activeFanNodeEditor=()=>null;export const isMouseModeSuppressed=()=>false;${focusCode}\nexport const testMoveFocus=moveFocus;let sliderEditMode=false;const log=()=>{};${backCode} export const testControllerBack=handleGamepadBack;`,
+ '@/bridge/uiSettings': `export const getUiSetting=()=>window.__fixture.autoTrainer!==false;export const loadUiSettings=async()=>{};export const setUiSettings=async patch=>{window.__fixture.autoTrainer=patch.trainerAutoPrepare;window.dispatchEvent(new CustomEvent('ui-settings:changed'))};`,
  '@/bridge/gamePolicyTarget': `export const getPolicyGame=()=>window.__fixture.game;export function subscribePolicyGameStatus(callback){callback(window.__fixture.game);return ()=>{}};`,
  '@/bridge/gameQuickSession': `export const getLockedGameTarget=()=>null;export const validateLockedGameTarget=async()=>window.__fixture.game;export const unlockGameTarget=()=>{};export const lockGameTarget=game=>game;`,
- '@/bridge/gameTrainer': `export class GameTrainerCancelledError extends Error{};export const openOrSearchGameTrainer=async()=>{};`,
+ '@/bridge/gameTrainer': `export const cancelGameTrainerPreparation=async()=>{};export const getGameTrainerState=()=>window.__fixture.trainerState||null;export const getReadyGameTrainer=(name,path)=>window.__fixture.trainerState?.state==='ready'&&path===window.__fixture.readyPath?{path:'fixture-trainer.exe'}:null;export const subscribeGameTrainerState=cb=>{window.__fixture.trainerChanged=cb;return()=>{window.__fixture.trainerChanged=null}};export class GameTrainerCancelledError extends Error{};export const openGameTrainerManager=async()=>{window.__fixture.managerOpens=(window.__fixture.managerOpens||0)+1};export const openOrSearchGameTrainer=async()=>{window.__fixture.trainerLaunches=(window.__fixture.trainerLaunches||0)+1;return {action:'opened'}};`,
  '@/bridge/quickapp': `export const OPTISCALER_CLIENT_DIR='fixture',OPTISCALER_CLIENT_EXE='fixture.exe',OPTISCALER_CLIENT_URL='https://fixture.invalid/';export const getLosslessGameState=async()=>({enabled:false}),setLosslessScalingEnabled=async()=>true,oneClickOptiScaler=async()=>true,optiscalerAnalyze=async()=>({}),optiConsoleInstalled=async()=>false,openOptiConsole=async()=>{};`,
  '@/bridge/speedhack': `export const SPEED_PRESETS=[0.5,1,1.5,2,3],getGameSpeedState=()=>null,isMinecraftTarget=()=>false,applyGameSpeed=async()=>true,clearGameSpeed=async()=>true;`,
  '@/bridge/gameproc': `export const QUICKAPP_SUSPENDED_EVENT='fixture-suspended';export const hasSuspendedState=async()=>({suspended:false}),closeGame=async()=>true,resumeGame=async()=>({ok:true}),suspendGame=async()=>({ok:true}),toggleMouseMode=async()=>false,waitForProcessExit=async()=>true;export async function closeJoyxoffIfRunning(){window.__fixture.joyCloses++};`,
@@ -36,10 +39,10 @@ Object.assign(mocks,{
  '@/bridge/gamedetect': `export const detectedGameName=game=>game?.name||'',detectGame=async()=>window.__fixture.game;`,
  '@/bridge/gameRules': String.raw`export const gameRuleNameFromPath=path=>path.replaceAll('\\','/').split('/').at(-1).replace(/\.exe$/i,'').toLowerCase();export const getGameRules=async()=>({blacklist:['launcher'],whitelist:[]});export async function setGameRuleList(){window.__fixture.ruleWrites++};`,
 });
-const entry=`import {createApp,h,ref,defineComponent} from 'vue';import Menu from './src/components/GameQuickActions.vue';import {testMoveFocus} from '@/gamepad/engine';
+const entry=`import {createApp,h,ref,defineComponent} from 'vue';import Menu from './src/components/GameQuickActions.vue';import {testMoveFocus,testControllerBack} from '@/gamepad/engine';
 const modes=['eco','balanced','medium','performance','elite','extreme'],profiles=Object.fromEntries(modes.map((mode,index)=>[mode,{cpuPreset:'turbo',coreMode:'big',tdpMax:12+index*4,fpsTarget:120,cpuTarget:'none',tdpStrategy:'none'}]));
 window.__fixture={game:{pid:101,processCreated:'1001',path:'R:/memory/a.exe',name:'Test Game'},events:{},side:'ac',global:{ac:{fps:120,ceiling:120,lastFps:120},dc:{fps:60,ceiling:60,lastFps:60}},custom:{version:1,entries:{'a.exe':{displayName:'Test Game',enabled:true,acMode:'balanced',dcMode:'eco',ac:profiles.balanced,dc:profiles.eco,padPersona:'follow',gyroOverride:'follow'}},rtss:{'a.exe':{enabled:true,acFps:120,dcFps:60,acCeiling:120,dcCeiling:60,acLastFps:120,dcLastFps:60}}},schedule:{enabled:true,configured:true,active:{ac:'balanced',dc:'eco'},profiles:{ac:profiles,dc:structuredClone(profiles)}},globalWrites:[],customWrites:[],performanceWrites:[],applied:[],coreWrites:0,joyCloses:0,ruleWrites:0,status:{}};
-let app;const mount=()=>{app=createApp(defineComponent({setup(){const game=ref(window.__fixture.game);return()=>h('div',{'data-gp-modal':''},[h(Menu,{game:game.value,open:true,onStatus:value=>window.__fixture.status=value})])}}));app.mount('#app')};window.__mount=mount;window.__unmount=()=>app.unmount();window.__move=(dx,dy)=>testMoveFocus(dx,dy);mount();`;
+let app;const mount=()=>{app=createApp(defineComponent({setup(){const game=ref(window.__fixture.game);return()=>h('div',{'data-gp-modal':''},[h(Menu,{game:game.value,open:true,onStatus:value=>window.__fixture.status=value})])}}));app.mount('#app')};window.__mount=mount;window.__unmount=()=>app.unmount();window.__move=(dx,dy)=>testMoveFocus(dx,dy);window.__controllerBack=()=>testControllerBack({});mount();`;
 const styles=[];
 const result=await build({stdin:{contents:entry,resolveDir:root,loader:'ts'},bundle:true,write:false,format:'iife',platform:'browser',alias:{'@':path.join(root,'src')},define:{'process.env.NODE_ENV':'"production"'},plugins:[{name:'top-menu-fixture',setup(builder){
  builder.onResolve({filter:/.*/},args=>args.path in mocks?{path:args.path,namespace:'fixture'}:undefined);
@@ -61,10 +64,59 @@ try{
  await controls.focus();for(const row of collapsed)assert.equal(await move(0,1),row);
  for(const row of ['actions-2','actions-1','rules-entry','custom-entry','controls'])assert.equal(await move(0,-1),row);
  cases.push('Production controller navigation follows controls → profile → rules → quick actions in both directions');
- const duck=page.getByRole('button',{name:'小黄鸭插帧',exact:false}),speed=page.getByRole('button',{name:'游戏变速倍率',exact:true}),fsr=page.locator('[data-gp-game-control="fsr-import"]'),trainer=page.getByRole('button',{name:'游戏修改器',exact:false});
+ const duck=page.getByRole('button',{name:'小黄鸭插帧',exact:false}),speed=page.getByRole('button',{name:'游戏变速倍率',exact:true}),fsr=page.locator('[data-gp-game-control="fsr-import"]'),trainer=page.locator('[data-gp-game-control="trainer-menu"]');
  assert.equal(await duck.count(),1);assert.equal(await page.locator('.quick-action strong').filter({hasText:/^Lossless Scaling$/}).count(),0);
  for(const [from,dy,to] of [[speed,-1,duck],[duck,1,speed],[fsr,1,trainer],[trainer,-1,fsr]]){await from.focus();await move(0,dy);assert.equal(await to.evaluate(node=>document.activeElement===node),true,'Vertical quick action must keep its visual column');}
  cases.push('Right column is 小黄鸭插帧 ↔ game speed; left column is FSR ↔ trainer; display title is renamed without changing the action');
+ for(const [state,hint] of [['ready','已就绪 · 点击启动'],['downloading','后台下载中 · 点击等待启动'],['failed','准备失败 · 点击重试'],['unavailable','暂无匹配资源 · 点击重试']]){
+   await page.evaluate(state=>{window.__fixture.readyPath=window.__fixture.game.path;window.__fixture.trainerState={state};window.__fixture.trainerChanged()},state);
+   await page.waitForFunction(hint=>document.querySelector('[data-gp-game-control="trainer-menu"]')?.textContent.includes(hint),hint);
+   assert.equal(await trainer.isEnabled(),true);
+   assert.equal(await trainer.locator('strong').innerText(),state==='ready'?'已发现修改器':'游戏修改器');
+ }
+ await page.evaluate(()=>{window.__fixture.trainerState={state:'ready'};window.__fixture.trainerChanged()});
+ cases.push('Trainer button renders ready, downloading, failed and unavailable progress without losing controller access');
+ const foundImage=path.join(out,'trainer-found.png');await page.locator('.game-quick-menu').screenshot({path:foundImage,animations:'disabled'});screenshots.push(foundImage);
+ await page.evaluate(()=>{window.__fixture.readyPath='other.exe';window.__fixture.trainerChanged()});await page.waitForFunction(()=>document.querySelector('[data-gp-game-control="trainer-menu"] strong')?.textContent==='游戏修改器');
+ await page.evaluate(()=>{window.__fixture.readyPath=window.__fixture.game.path;window.__fixture.trainerChanged()});await page.waitForFunction(()=>document.querySelector('[data-gp-game-control="trainer-menu"] strong')?.textContent==='已发现修改器');
+ cases.push('Found label is scoped to the current game executable and clears for a different target');
+ await page.evaluate(()=>{window.__fixture.readyPath='unconfirmed';window.__fixture.trainerChanged()});await page.waitForFunction(()=>document.querySelector('[data-gp-game-control="trainer-menu"] small')?.textContent==='身份待确认 · 打开管理器核对');assert.equal(await trainer.locator('strong').innerText(),'游戏修改器');
+ await page.evaluate(()=>{window.__fixture.readyPath=window.__fixture.game.path;window.__fixture.trainerChanged()});cases.push('Unconfirmed local receipt never advertises ready-to-launch in the button hint');
+ await trainer.click();
+ const trainerMenu=page.locator('[data-trainer-menu]');
+ await trainerMenu.waitFor();
+ assert.equal(await page.evaluate(()=>window.__fixture.trainerLaunches||0),0,'Opening submenu must never start a trainer');
+ assert.equal(await trainerMenu.getByRole('button').count(),4);
+ assert.equal(await trainerMenu.getByRole('button').first().evaluate(n=>n===document.activeElement),true);
+ await move(0,1);assert.equal(await trainerMenu.getByRole('button',{name:'打开修改器管理器',exact:false}).evaluate(n=>n===document.activeElement),true);
+ await move(0,1);assert.equal(await trainerMenu.getByRole('button',{name:'关闭自动下载修改器',exact:false}).evaluate(n=>n===document.activeElement),true);
+ await page.evaluate(()=>{window.__parentBackCount=0;window.__parentBack=()=>window.__parentBackCount++;window.addEventListener('ipc:gamepad-back',window.__parentBack);window.__controllerBack()});
+ await trainerMenu.waitFor({state:'detached'});
+ assert.equal(await page.evaluate(()=>window.__parentBackCount),0,'B must be consumed before the enclosing menu');
+ assert.equal(await trainer.evaluate(n=>n===document.activeElement),true,'B restores focus to trainer entry');
+ assert.equal(await page.locator('.game-quick-menu').isVisible(),true);
+ cases.push('Production controller B handler closes only the trainer submenu and restores focus');
+ await trainer.click();await trainerMenu.getByRole('button',{name:'关闭自动下载修改器',exact:false}).click();
+ await trainerMenu.getByRole('button',{name:'开启自动下载修改器',exact:false}).waitFor();
+ assert.equal(await page.evaluate(()=>window.__fixture.autoTrainer),false);
+ await trainerMenu.getByRole('button',{name:'按B取消',exact:false}).click();await trainerMenu.waitFor({state:'detached'});
+ await trainer.click();await trainerMenu.getByRole('button',{name:'开启自动下载修改器',exact:false}).click();
+ assert.equal(await page.evaluate(()=>window.__fixture.autoTrainer),true);
+ await trainerMenu.getByRole('button',{name:'启动 Test Game 游戏修改器',exact:false}).click();
+ await page.waitForFunction(()=>window.__fixture.trainerLaunches===1);
+ await trainerMenu.getByRole('button',{name:'打开修改器管理器',exact:false}).click();
+ await trainerMenu.waitFor({state:'detached'});assert.equal(await page.evaluate(()=>window.__fixture.managerOpens),1);
+ cases.push('Mouse/controller-click cancel, shared automatic-download preference, manual launch and manager action work');
+ await trainer.click();await trainerMenu.waitFor();
+ const menuImage=path.join(out,'trainer-submenu-420.png');await page.setViewportSize({width:420,height:720});
+ await trainerMenu.screenshot({path:menuImage,animations:'disabled'});screenshots.push(menuImage);
+ assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false);
+ const box=await trainerMenu.boundingBox();assert(box.x>=0&&box.x+box.width<=420&&box.y>=0&&box.y+box.height<=720);
+ await page.keyboard.press('Escape');await trainerMenu.waitFor({state:'detached'});
+ await page.evaluate(()=>window.removeEventListener('ipc:gamepad-back',window.__parentBack));
+ cases.push('Trainer submenu fits a handheld viewport and Escape cancels');
+
+
  for(const width of [580,420]){await page.setViewportSize({width,height:1250});const order=await page.evaluate(()=>{const rect=selector=>{const r=document.querySelector(selector).getBoundingClientRect();return {y:r.y,bottom:r.bottom}};return {controls:rect('.quick-game-controls'),custom:rect('[data-gp-custom-panel]'),rules:rect('[data-gp-game-rules]'),actions:rect('.game-quick-actions'),overflow:document.documentElement.scrollWidth>innerWidth}});assert(order.custom.y>=order.controls.bottom);assert(order.rules.y>=order.custom.bottom);assert(order.actions.y>=order.rules.bottom);assert.equal(order.overflow,false);const image=path.join(out,'top-menu-collapsed-'+width+'.png');await page.locator('.game-quick-menu').screenshot({path:image,animations:'disabled'});screenshots.push(image);cases.push('Profile is row 2 directly under controls, rules row 3, no overflow at '+width+'px')}
  await page.locator('[data-gp-custom-entry]').click();await page.waitForSelector('[data-gp-custom-body]');await page.waitForSelector('.custom-submenu-pop-enter-active',{state:'detached'});await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='AC 专属性能档位');
  const expanded=['专用frame-ac','custom-dc','专用frame-dc','custom-core-big-picker'];for(const row of expanded)assert.equal(await move(0,1),row);
@@ -75,7 +127,7 @@ try{
  cases.push('Grouped dedicated frame edit remains per-game/per-side and does not replay the power preset');
  await page.locator('[data-gp-custom-entry]').click();await page.waitForSelector('[data-gp-custom-body]',{state:'detached'});await page.locator('[data-gp-game-rules-entry]').click();await page.waitForSelector('[data-gp-game-rules-body]');await page.locator('[data-gp-game-control="fsr-import"]').focus();assert.equal(await move(0,-1),'rules-footer');
  cases.push('Expanded rule body stays in row-3 navigation; Up from FSR enters its bottom rather than jumping to switch-program');
- await page.evaluate(()=>window.__unmount());await page.evaluate(()=>{window.__fixture.game=null;window.__fixture.status={};window.__mount()});await page.waitForFunction(()=>document.querySelector('[data-gp-custom-entry]')?.getAttribute('aria-disabled')==='true');await controls.focus();assert.equal(await move(0,1),'rules-entry');await page.locator('[data-gp-custom-entry]').dispatchEvent('click');assert.equal(await page.locator('[data-gp-custom-body]').count(),0);assert.equal(await page.evaluate(()=>window.__fixture.customWrites.length),1);assert.equal(await page.evaluate(()=>window.__fixture.ruleWrites),0);
+ await page.evaluate(()=>window.__unmount());await page.evaluate(()=>{window.__fixture.game=null;window.__fixture.status={};window.__mount()});await page.waitForFunction(()=>document.querySelector('[data-gp-custom-entry]')?.getAttribute('aria-disabled')==='true');await controls.focus();assert.equal(await move(0,1),'rules-entry');await page.locator('[data-gp-custom-entry]').dispatchEvent('click');assert.equal(await trainer.locator('strong').innerText(),'游戏修改器');assert.equal(await page.locator('[data-gp-custom-body]').count(),0);assert.equal(await page.evaluate(()=>window.__fixture.customWrites.length),1);assert.equal(await page.evaluate(()=>window.__fixture.ruleWrites),0);
  cases.push('No-game menu keeps profile disabled and controller navigation skips it without creating configuration');
  await page.evaluate(()=>window.__unmount());assert.deepEqual(errors,[]);assert.equal(await page.evaluate(()=>Object.values(window.__fixture.events).reduce((total,set)=>total+set.size,0)),0);
  const report={suite:'YMCC top-menu power/frame groups',passed:cases.length,cases,screenshots,pageErrors:errors,scope:'Real Vue top-menu/profile/rule components and production moveFocus code; all native/storage mocked'};fs.writeFileSync(path.join(out,'results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

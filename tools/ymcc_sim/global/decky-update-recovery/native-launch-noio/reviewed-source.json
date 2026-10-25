@@ -1,0 +1,31 @@
+{
+  "kind": "reviewed-native-launch-NoIO-source",
+  "sourceApprovalGranted": false,
+  "files": [
+    {
+      "path": "native/steam_native_launch.h",
+      "sha256": "55d25e3a9095cf73ddcbe998f0b004d31cebe63367afbc8c0cca96f48eedde42"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "d1cc99816e436d2085b3428c7fe67f378c921aa3107dd62ea0bdf629a1e45897"
+    },
+    {
+      "path": "native/decky_sidebar_launch.h",
+      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa"
+    },
+    {
+      "path": "native/process_efficiency.h",
+      "sha256": "3e48125292aa52b16bf363672e0c8907c700062bd0cf0d8a87438c3ed15af681"
+    },
+    {
+      "path": "tools/steam_native_launch_selftest.cpp",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49"
+    },
+    {
+      "path": "deps/json/json.hpp",
+      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    }
+  ],
+  "reviewNote": "2026-10-24 manual-only fixed Steam Shell fallback, no cooldown for explicit action, unchanged logon grant/fence. Reviewed restricted memory ports; no real Steam/BAT/registry calls."
+}

@@ -91,6 +91,12 @@ static void resetRoute(const json& rules, const json& input = baseInput()) {
     g_oemConsumePolicyProfile = -1;
     g_oemConsumeMatched = 0; g_oemConsumeReplayed = 0; g_oemConsumeReplayFailures = 0; g_oemConsumeCancelled = 0;
     fixtureReplayed.clear(); fixtureSendLimit = UINT_MAX;
+#ifdef YMCC_MSI_QS_MIRROR_SOURCE
+    g_msiQsKeyboardMirrorPolicy=0;g_msiQsKeyboardMirrorSourceGeneration=0;
+#endif
+#ifdef YMCC_MSI_NATIVE_ONLY_REAR_SOURCE
+    fixtureMsiKnownBoard=true;
+#endif
 #endif
 
 }
@@ -227,9 +233,59 @@ static void deliverPhysicalReceipts() {
 #endif
 static void flushJobs() { auto jobs = std::move(fixtureJobs); fixtureJobs.clear(); for (auto& job : jobs) job.first(); }
 #include "shortcut_summon_frontend_cases.h"
+#if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
+const json r12Defaults = json::parse(R"DEFAULTS([{"actionId":"window.summon","defaultKey":"enabled","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-enabled","inputs":[{"source":"controller","code":"lb"},{"source":"controller","code":"rb"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"window.hideToTray","defaultKey":"bDoubleMinimize","doubleWindowMs":500,"enabled":true,"holdMs":2000,"id":"native-bDoubleMinimize","inputs":[{"code":"b","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"double"},{"actionId":"keyboard.numeric","defaultKey":"startDoubleF7","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-startDoubleF7","inputs":[{"code":"start","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"key":"F7"},"trigger":"double"},{"actionId":"power.tdpAdjust","defaultKey":"tdpShortcut","doubleWindowMs":500,"enabled":true,"holdMs":0,"id":"native-tdpShortcut","inputs":[{"code":"start","source":"controller"},{"code":"dpadUp","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"amount":"1","direction":"up","linearAcceleration":true},"trigger":"repeat"},{"actionId":"display.brightnessAdjust","defaultKey":"fpsShortcut","doubleWindowMs":500,"enabled":true,"holdMs":0,"id":"native-fpsShortcut","inputs":[{"code":"start","source":"controller"},{"code":"dpadRight","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"amount":"5","direction":"right","linearAcceleration":true},"trigger":"repeat"},{"actionId":"game.killCurrent","defaultKey":"killGame","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-killGame","inputs":[{"code":"back","source":"controller"},{"code":"b","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"os.openTouchKeyboard","defaultKey":"openKeyboard","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-openKeyboard","inputs":[{"code":"back","source":"controller"},{"code":"x","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"os.returnDesktop","defaultKey":"returnDesktop","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-returnDesktop","inputs":[{"code":"back","source":"controller"},{"code":"a","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"press"},{"actionId":"mouse.toggle","defaultKey":"mouseToggle","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-mouseToggle","inputs":[{"code":"back","source":"controller"},{"code":"y","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"}])DEFAULTS");
+static void startF7RetirementCases() {
+    // Keep the historical enabled row to exercise the real consumer's retirement,
+    // independently of frontend migration or the compatibility boolean.
+    const auto replayDoubleStart = [] {
+        tick(0,10000); tick(XINPUT_GAMEPAD_START,10100); tick(0,10140);
+        tick(XINPUT_GAMEPAD_START,10200); tick(XINPUT_GAMEPAD_START,10220);
+        tick(0,10240); tick(0,11000); flushJobs();
+    };
+    const auto retiredStartF7 = r12Defaults[2];
+    resetRoute(json::array({retiredStartF7})); replayDoubleStart();
+    std::cout << "retired Start F7 replay: F7=" << std::count_if(fixtureInjections.begin(),fixtureInjections.end(),
+        [](const auto& sent){return sent.first==VK_F7;}) << " total=" << fixtureInjections.size() << "\n";
+    check(fixtureInjections.empty() && fixtureJobs.empty() && fixtureOwnActions.empty(),
+        "retired enabled native-default double Start never sends F7");
+    check(g_nativeKeyboardShortcuts.empty() && g_nativeShortcutLegacyOverrideMask==0,
+        "retired Start F7 adds no rule owner or other default override");
+    auto customStartF7 = retiredStartF7;
+    customStartF7["id"]="custom-double-start-f7"; customStartF7["origin"]="custom";
+    resetRoute(json::array({customStartF7})); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.size()==1 && fixtureInjections.size()==1 &&
+          fixtureInjections[0].first==VK_F7 && !fixtureInjections[0].second && fixtureRefreshes==0,
+        "custom identical double Start F7 executes exactly once even with historical defaultKey");
+    customStartF7.erase("defaultKey");
+    resetRoute(json::array({retiredStartF7,customStartF7})); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.size()==1 && fixtureInjections.size()==1 &&
+          fixtureInjections[0].first==VK_F7 && !fixtureInjections[0].second && fixtureRefreshes==0,
+        "saved retired default beside custom double Start sends only the custom F7 once");
+    auto untaggedStartF7=customStartF7; untaggedStartF7.erase("origin");
+    resetRoute(json::array({untaggedStartF7})); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.size()==1 && fixtureInjections.size()==1 && fixtureInjections[0].first==VK_F7,
+        "untagged user double Start F7 remains executable");
+    auto otherDefaultF7=retiredStartF7; otherDefaultF7["defaultKey"]="enabled";
+    resetRoute(json::array({otherDefaultF7})); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.size()==1 && fixtureInjections.size()==1 && fixtureInjections[0].first==VK_F7 &&
+          !nativeShortcutLegacyDefaultAllowed("enabled"),
+        "another native default edited to identical double Start F7 retains its rule owner");
+    auto editedRetiredF7=retiredStartF7; editedRetiredF7["params"]["key"]="F8";
+    resetRoute(json::array({editedRetiredF7})); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.empty() && fixtureInjections.empty() && g_nativeShortcutLegacyOverrideMask==0,
+        "retirement follows exact default tags even when the historical key is edited");
+    resetRoute(r12Defaults); replayDoubleStart();
+    check(g_nativeKeyboardShortcuts.empty() && fixtureInjections.empty() && g_nativeShortcutLegacyOverrideMask==0,
+        "R12 historical defaults retain eight legacy owners without retired Start F7");
+}
+#endif
 int main() {
     try {
-        shortcutSummonFrontendCases();
+#if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
+        startF7RetirementCases();
+#endif
+        // Run the historical frontend suite after the shortcut consumer regressions.
 #if defined(YMCC_ROG_CLICK_SOURCE)
 #if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
         check(oemVendorStackRuleCanTakeover(YmccFamily::AsusRogAlly,kOemBitLib,true,"press"),"R13 executable LIB press may request service takeover");
@@ -240,22 +296,44 @@ int main() {
         check(oemVendorStackFrontMask(YmccFamily::Gpd)==0 && oemVendorStackFrontMask(YmccFamily::Ayanero)==0 && oemVendorStackFrontMask(YmccFamily::OneXPlayer)==0,"R13 no generic-family service takeover inferred");
         check(oemVendorServiceNamesForFamily(YmccFamily::AsusRogAlly).size()==3,"R13 HC ROG service table has three named services");
         check(oemVendorServiceNamesForFamily(YmccFamily::LenovoLegionGo).size()==1,"R13 HC Legion service table is bound");
-        check(oemVendorServiceNamesForFamily(YmccFamily::MsiClaw).size()==1,"R13 HC MSI service table is bound");
+        check(oemVendorServiceNamesForFamily(YmccFamily::MsiClaw).empty() &&
+              oemVendorTaskNamesForFamily(YmccFamily::MsiClaw).size()==2 &&
+              oemVendorProcessNamesForFamily(YmccFamily::MsiClaw).size()==4,
+              "R13 current MSI targets keep the protected service and use explicit task/process tables");
         check(oemVendorServiceNamesForFamily(YmccFamily::ZotacGamingZone).size()==2,"R13 HC Zotac service table is bound");
         check(!oemVendorStackFamilySupported(YmccFamily::Gpd) && !oemVendorStackFamilySupported(YmccFamily::Ayanero) && !oemVendorStackFamilySupported(YmccFamily::OneXPlayer),"R13 no unsupported GPD/AYA/OneX service names invented");
 #endif
         // Replay the exported settings without changing origin/defaultKey or trigger.
         // Missing an external export still exercises its exact edited default row.
-        const json savedInput = fixtureFieldInput.is_object() ? fixtureFieldInput : baseInput();
-        const json savedRules = fixtureFieldInput.is_object()
-            ? fixtureFieldInput["buttonMapping"]["rules"]["shortcutRules"]
-            : json::array({json::parse(R"({"actionId":"window.summon","defaultKey":"enabled","enabled":true,"id":"native-enabled","inputs":[{"code":"lib","source":"oem"}],"origin":"native-default","params":{},"trigger":"press","holdMs":500,"doubleWindowMs":500,"intervalMs":150})")});
+        // This case is ROG/LIB-specific: do not substitute an MSI field export
+        // and then assert it contains a LIB rule. Replay MSI exports below.
+        const json savedInput = baseInput();
+        const json savedRules = json::array({json::parse(R"({"actionId":"window.summon","defaultKey":"enabled","enabled":true,"id":"native-enabled","inputs":[{"code":"lib","source":"oem"}],"origin":"native-default","params":{},"trigger":"press","holdMs":500,"doubleWindowMs":500,"intervalMs":150})")});
         resetRoute(savedRules, savedInput); tick(0,10000);
         const auto fieldGeneration=activateProducer(OemProducerId::RogClick);
         BYTE fieldLib[]={0x5A,147};
         for (int n=0;n<2;++n) { fixtureTick+=1000; rogOemKeyParse(fieldLib,sizeof(fieldLib),fieldGeneration); nativeOemProducerDrain(); flushJobs(); }
         check(fixtureOwnActions.size()==2 && fixtureOwnActions[0]=="window.summon" && fixtureOwnActions[1]=="window.summon" && fixtureLegacyRog==0,
             "R12 exported native-default LIB click reaches summon exactly once per actual click");
+#endif
+#if defined(YMCC_MSI_NATIVE_ONLY_REAR_SOURCE) && defined(YMCC_PRODUCER_EDGE_SOURCE)
+        if(fixtureFieldInput.is_object()) {
+            const auto fieldRules=fixtureFieldInput["buttonMapping"]["rules"]["shortcutRules"];
+            bool hasM1Release=false;
+            for(const auto& row:fieldRules)if(row.value("enabled",true)&&row.value("actionId","")=="window.summon"&&row.value("trigger","")=="release") {
+                uint64_t required=0;hasM1Release=hasM1Release||(nativeKeyboardShortcutRequiredMask(row["inputs"],required)&&required==kOemBitM1);
+            }
+            if(hasM1Release) {
+                resetRoute(fieldRules,fixtureFieldInput);g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);
+                KBDLLHOOKSTRUCT fieldRearKey{};fieldRearKey.vkCode=VK_F11;fixtureTick=10100;
+                oemBackHookProc(HC_ACTION,WM_KEYDOWN,reinterpret_cast<LPARAM>(&fieldRearKey));deliverPhysicalReceipts();flushJobs();
+                check(fixtureOwnActions.empty(),"143315 exact saved M1 release rule cannot summon on DOWN");
+                fieldRearKey.flags=LLKHF_UP;fixtureTick=10200;
+                oemBackHookProc(HC_ACTION,WM_KEYUP,reinterpret_cast<LPARAM>(&fieldRearKey));deliverPhysicalReceipts();flushJobs();
+                check(fixtureOwnActions.size()==1&&fixtureOwnActions[0]=="window.summon","143315 exact saved settings: observed F11 UP reaches YMCC summon once");
+                check(fixtureSendInputs.empty(),"143315 field replay changes no firmware, device or virtual target");
+            }
+        }
 #endif
         for (const auto& preset : {"fps", "racing", "custom", "steam"}) {
             for (const auto& withGame : {false, true}) {
@@ -375,23 +453,21 @@ int main() {
         resetRoute(json::array({legacy})); tick(0, 1000);
         check(g_nativeKeyboardShortcuts.empty(), "unedited legacy own-action template is not dispatched twice");
 #if defined(YMCC_SHORTCUT_DEFAULT_OWNER_SOURCE)
-        const json r12Defaults = json::parse(R"DEFAULTS([{"actionId":"window.summon","defaultKey":"enabled","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-enabled","inputs":[{"source":"controller","code":"lb"},{"source":"controller","code":"rb"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"window.hideToTray","defaultKey":"bDoubleMinimize","doubleWindowMs":500,"enabled":true,"holdMs":2000,"id":"native-bDoubleMinimize","inputs":[{"code":"b","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"double"},{"actionId":"keyboard.numeric","defaultKey":"startDoubleF7","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-startDoubleF7","inputs":[{"code":"start","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"key":"F7"},"trigger":"double"},{"actionId":"power.tdpAdjust","defaultKey":"tdpShortcut","doubleWindowMs":500,"enabled":true,"holdMs":0,"id":"native-tdpShortcut","inputs":[{"code":"start","source":"controller"},{"code":"dpadUp","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"amount":"1","direction":"up","linearAcceleration":true},"trigger":"repeat"},{"actionId":"display.brightnessAdjust","defaultKey":"fpsShortcut","doubleWindowMs":500,"enabled":true,"holdMs":0,"id":"native-fpsShortcut","inputs":[{"code":"start","source":"controller"},{"code":"dpadRight","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{"amount":"5","direction":"right","linearAcceleration":true},"trigger":"repeat"},{"actionId":"game.killCurrent","defaultKey":"killGame","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-killGame","inputs":[{"code":"back","source":"controller"},{"code":"b","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"os.openTouchKeyboard","defaultKey":"openKeyboard","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-openKeyboard","inputs":[{"code":"back","source":"controller"},{"code":"x","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"},{"actionId":"os.returnDesktop","defaultKey":"returnDesktop","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-returnDesktop","inputs":[{"code":"back","source":"controller"},{"code":"a","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"press"},{"actionId":"mouse.toggle","defaultKey":"mouseToggle","doubleWindowMs":500,"enabled":true,"holdMs":500,"id":"native-mouseToggle","inputs":[{"code":"back","source":"controller"},{"code":"y","source":"controller"}],"intervalMs":150,"origin":"native-default","params":{},"trigger":"hold"}])DEFAULTS");
-        resetRoute(r12Defaults); tick(0,10000);
-        check(g_nativeKeyboardShortcuts.size()==1 && g_nativeShortcutLegacyOverrideMask==0,"R12 nine pristine defaults retain eight legacy owners and one F7 rule owner");
         for (const auto& def:r12Defaults) {
-            const auto key=def["defaultKey"].get<std::string>(); const bool hasLegacy=key!="startDoubleF7";
-            if (hasLegacy) check(nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 pristine legacy slot remains available: "+key);
+            const auto key=def["defaultKey"].get<std::string>();
+            if(key=="startDoubleF7")continue; // Retired row is covered above, including its saved enabled form.
+            check(nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 pristine legacy slot remains available: "+key);
             auto changed=def; changed["inputs"]=json::array({{{"source","oem"},{"code","lib"}}}); changed["trigger"]="press";
             resetRoute(json::array({changed}));tick(0,10000);
             check(g_nativeKeyboardShortcuts.size()==1,"R12 saved default remap parses: "+key);
-            if (hasLegacy) check(!nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 edited slot disables only its original legacy owner: "+key);
+            check(!nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 edited slot disables only its original legacy owner: "+key);
             const auto gen=activateProducer(OemProducerId::RogClick);BYTE data[]={0x5A,147};fixtureTick+=20;rogOemKeyParse(data,2,gen);nativeOemProducerDrain();flushJobs();
-            check(key=="startDoubleF7" ? fixtureInjections.size()==1 : fixtureOwnActions.size()==1,"R12 edited default performs its configured action exactly once: "+key);
+            check(fixtureOwnActions.size()==1,"R12 edited default performs its configured action exactly once: "+key);
             changed["enabled"]=false;resetRoute(json::array({changed}));tick(0,10000);
             const auto offGen=activateProducer(OemProducerId::RogClick);rogOemKeyParse(data,2,offGen);nativeOemProducerDrain();flushJobs();
             check(g_nativeKeyboardShortcuts.empty() && fixtureOwnActions.empty() && fixtureInjections.empty(),"R12 disabled remap cannot fire: "+key);
-            if (hasLegacy) check(!nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 disabled edited slot does not resurrect legacy binding: "+key);
-            resetRoute(r12Defaults);tick(0,10000); if(hasLegacy)check(nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 restoring pristine default restores its legacy owner: "+key);
+            check(!nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 disabled edited slot does not resurrect legacy binding: "+key);
+            resetRoute(r12Defaults);tick(0,10000); check(nativeShortcutLegacyDefaultAllowed(key.c_str()),"R12 restoring pristine default restores its legacy owner: "+key);
         }
         // Relevant trigger timing and parameters must also select the rule owner.
         for (auto def:r12Defaults) {
@@ -611,6 +687,84 @@ int main() {
             key.flags = extraFlags | (up ? LLKHF_UP : 0);
             return oemBackHookProc(HC_ACTION, up ? WM_KEYUP : WM_KEYDOWN, reinterpret_cast<LPARAM>(&key));
         };
+#if defined(YMCC_WMI_CLICK_SOURCE) && defined(YMCC_SHORTCUT_EDGE_SOURCE) && defined(YMCC_MSI_NATIVE_ONLY_REAR_SOURCE)
+        // QS has two independent contracts: WMI owns the action; the known
+        // MSI keyboard mirror must not leak the same configured key to OS.
+        for(const DWORD alias:{DWORD('G'),DWORD(VK_TAB)})for(bool wmiFirst:{false,true}) {
+            auto q=producerRule("qs");resetRoute(json::array({q}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);
+            const auto generation=activateWmi();tick(0,10001);fixtureTick=10100;
+            check(msiWmiShortcutAuthoritative(),"QS leak reproducer uses real WMI authority");
+            if(wmiFirst){msiWmiHandleEvent(88,generation);nativeMsiWmiShortcutDrain();flushJobs();}
+            check(keyEvent(VK_LWIN)==1&&keyEvent(alias)==1,"configured known-MSI QS consumes original Win+G/Win+Tab DOWNs with WMI active");
+            deliverPhysicalReceipts();flushJobs();
+            if(!wmiFirst){msiWmiHandleEvent(88,generation);nativeMsiWmiShortcutDrain();flushJobs();}
+            check(keyEvent(alias,true)==1&&keyEvent(VK_LWIN,true)==1,"configured MSI QS pairs both consumed UPs");deliverPhysicalReceipts();flushJobs();
+            check(fixtureReplayed.empty()&&g_oemKeyboardConsume.replayCount==0,"QS keyboard mirror cannot leak a replayed OS shortcut");
+            check(fixtureOwnActions.size()==1&&fixtureOwnActions[0]=="os.openTouchKeyboard","one WMI click plus keyboard mirror emits exactly one YMCC action in either arrival order");
+        }
+#ifdef YMCC_MSI_QS_MIRROR_SOURCE
+        for(const char* trigger:{"hold","release","repeat"}) {
+            resetRoute(json::array({producerRule("qs",trigger)}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);const auto gen=activateWmi();tick(0,10001);
+            check(!(oemKeyboardConsumeEligibleMask()&kOemBitQs),"unsupported click-only trigger cannot silence OS mirror");
+            check(keyEvent(VK_LWIN)==0&&keyEvent('G')==0&&keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0,"unsupported QS trigger passes original keyboard pairs");
+            msiWmiHandleEvent(88,gen);nativeMsiWmiShortcutDrain();flushJobs();check(fixtureOwnActions.empty()&&clickStatus("unconsumed"),"unsupported WMI rule stays visibly unconsumed, not a fake accepted action");
+        }
+        for(bool disabled:{false,true}) {
+            auto q=producerRule("qs");if(disabled)q["enabled"]=false;else q["inputs"].push_back({{"source","oem"},{"code","m1"}});
+            resetRoute(json::array({q}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);activateWmi();tick(0,10001);
+            check(!(oemKeyboardConsumeEligibleMask()&kOemBitQs),"disabled or composite QS rule has no mirror ownership");
+            check(keyEvent(VK_LWIN)==0&&keyEvent('G')==0&&keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0,"disabled/composite QS does not steal keyboard keys");
+        }
+        for(int profile=0;profile<=24;++profile) {
+            if(profile==static_cast<int>(OemChordProfileId::Msi))continue;
+            resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=profile;tick(0,10000);activateWmi();tick(0,10001);
+            check(!g_msiQsKeyboardMirrorPolicy,"non-MSI profile cannot publish the MSI QS mirror policy");
+            check(keyEvent(VK_LWIN)==0&&keyEvent('G')==0&&keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0,"non-MSI profile preserves Win+G delivery");
+        }
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);fixtureMsiKnownBoard=false;tick(0,10000);activateWmi();tick(0,10001);
+        check(!g_msiQsKeyboardMirrorPolicy&&keyEvent(VK_LWIN)==0&&keyEvent('G')==0,"forcing MSI profile on an unknown board does not authorise QS interception");keyEvent('G',true);keyEvent(VK_LWIN,true);
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);auto mirrorGen=activateWmi();tick(0,10001);
+        check(g_msiQsKeyboardMirrorSourceGeneration==mirrorGen&&(oemKeyboardConsumeEligibleMask()&kOemBitQs),"mirror policy is bound to a current subscribed source");
+        fixtureWmiTerminal=true;msiWmiSetEnabled(false);
+        check(!(oemKeyboardConsumeEligibleMask()&kOemBitQs),"WMI loss immediately removes old mirror permission before UI publish");
+        check(keyEvent(VK_LWIN)==0&&keyEvent('G')==0&&keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0,"lost mirror cannot silently become an unarmed fallback consumer");
+        // Deliver posted transition messages once, in Win32 FIFO order, before
+        // the later neutral timer; do not replay already-consumed fixture messages.
+        deliverPhysicalReceipts();flushJobs();
+        check(fixtureOwnActions.empty(),"source transition messages cannot inherit an armed fallback action");
+        fixturePhysicalReceipts.clear();fixtureReceiptTimes.clear();
+        tick(0,11000);check((oemKeyboardConsumeEligibleMask()&kOemBitQs)&&g_msiQsKeyboardMirrorSourceGeneration==0,"neutral UI transition can republish ordinary keyboard fallback");
+        fixtureTick=11100;keyEvent(VK_LWIN);keyEvent('G');keyEvent('G',true);keyEvent(VK_LWIN,true);deliverPhysicalReceipts();flushJobs();
+        check(fixtureOwnActions.size()==1&&fixtureOwnActions[0]=="os.openTouchKeyboard","after neutral republish, WMI unavailable keyboard fallback still acts once");
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);mirrorGen=activateWmi();tick(0,10001);
+        fixtureWmiTerminal=true;msiWmiSetEnabled(false);const auto newMirrorGen=activateWmi();
+        check(newMirrorGen!=mirrorGen&&!(oemKeyboardConsumeEligibleMask()&kOemBitQs),"new WMI subscription cannot inherit older mirror permission");
+        tick(0,11000);check(g_msiQsKeyboardMirrorSourceGeneration==newMirrorGen&&(oemKeyboardConsumeEligibleMask()&kOemBitQs),"current UI authorises only the new subscribed generation");
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);activateWmi();tick(0,10001);g_shortcutRecordingActive=true;
+        check(keyEvent(VK_LWIN)==0&&keyEvent('G')==0&&keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0,"recording never consumes QS keyboard pairs");
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);activateWmi();tick(0,10001);
+        keyEvent('G');keyEvent(VK_TAB);keyEvent(VK_LWIN);fixtureTick=11000;oemKeyboardConsumeMaintain(fixtureTick);
+        check(fixtureReplayed.size()==3&&g_oemConsumeMatched==0,"unmatched Win+G+Tab composite replays instead of claiming QS-only suppression");keyEvent(VK_LWIN,true);keyEvent(VK_TAB,true);keyEvent('G',true);
+        resetRoute(json::array({producerRule("qs")}));g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,10000);mirrorGen=activateWmi();tick(0,10001);fixturePostOk=false;
+        keyEvent(VK_LWIN);keyEvent('G');check(fixtureReplayed.size()==2,"receipt post failure repays both original DOWNs");
+        check(keyEvent('G',true)==0&&keyEvent(VK_LWIN,true)==0&&!oemKeyboardConsumeBusy(),"repaid DOWNs have ordinary paired UPs with no debt");
+        msiWmiHandleEvent(88,mirrorGen);nativeMsiWmiShortcutDrain();flushJobs();check(fixtureOwnActions.size()==1,"keyboard delivery failure does not duplicate the retained WMI action");
+#endif
+#endif
+#ifdef YMCC_MSI_NATIVE_ONLY_REAR_SOURCE
+        // D4462D53 SD success is preserved separately; here prove ordinary OEM
+        // keyboard delivery uses real hook/parser/evaluator with target disabled.
+        for(bool m1:{false,true}){
+            auto ordinary=baseInput();ordinary["outputTarget"]["persona"]="disabled";
+            ordinary["outputTarget"]["buttonMappingEnabled"]=false;ordinary["outputTarget"]["gyroEnabled"]=false;
+            auto nativeRearRule=rule("os.openTouchKeyboard","unused","press","oem",m1?"m1":"m2");nativeRearRule["params"]=json::object();
+            resetRoute(json::array({nativeRearRule}),ordinary);g_oemBackProfileId=static_cast<int>(OemChordProfileId::Msi);tick(0,1000);
+            check(g_msiNativeRearDemand.load(),"ordinary MSI configured rear rule publishes native source demand without virtual target");
+            const DWORD key=m1?VK_F11:VK_F14;check(keyEvent(key)==1&&keyEvent(key,true)==1,"ordinary MSI F11/F14 press and release consumed by exact configured OEM rule");
+            deliverPhysicalReceipts();flushJobs();check(fixtureOwnActions.size()==1&&fixtureOwnActions[0]=="os.openTouchKeyboard","ordinary MSI native keyboard hook-to-receipt-to-action executes once with target disabled");
+            check(g_inputHostBoundPersona=="disabled"&&fixtureSendInputs.empty(),"ordinary MSI action does not create virtual target or inject a synthetic controller");
+        }
+#endif
         auto rearRule = rule("os.openTouchKeyboard", "unused", "press", "oem", "l4"); rearRule["params"] = json::object();
         resetRoute(json::array({rearRule})); tick(0, 1000);
         check(g_oemConsumePolicyMask == kOemBitL4, "armed independent OEM rule publishes consumption policy");
@@ -1763,6 +1917,7 @@ int main() {
             check(frontCount==2 && rearSlots==(isS?3:15),"catalog separates two front buttons from actual rear slots");
             check(isS ? !extraM1&&!extraM2 : extraM1&&extraM2,"Go S does not advertise absent M1/M2 extras");
         }
+        shortcutSummonFrontendCases();
         std::cout << "input shortcut native model/real route: " << passed << " cases passed\n";
     } catch (const std::exception& error) { std::cerr << "FAIL " << error.what() << '\n'; return 1; }
     return 0;

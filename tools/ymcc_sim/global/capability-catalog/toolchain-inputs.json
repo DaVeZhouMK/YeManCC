@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "sdkVersion": "10.0.400",
+  "roslynReferences": [
+    {
+      "file": "Microsoft.CodeAnalysis.dll",
+      "sha256": "55e266ac4ffdf5d73fc861a35ed8c2e7c2292ebebc2107d1722b6429d7e6ab78"
+    },
+    {
+      "file": "Microsoft.CodeAnalysis.CSharp.dll",
+      "sha256": "f5c3f59f88b65c04e16644ca7f53740b51859faf214f812dd601137bebe021eb"
+    }
+  ],
+  "scope": "Explicit PcCapabilityAudit Roslyn references and selected SDK version; candidate build records additional actual toolchain inputs separately."
+}

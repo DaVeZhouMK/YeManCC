@@ -1,0 +1,26 @@
+import {lockB51FrozenAuthority,B51_FROZEN_PINS} from './r3-b51-frozen-authority.mjs';
+// A per-batch in-process capability. Full source authority runs exactly at begin
+// and finish; member admission validates this capability without a new tree scan.
+import fs from 'node:fs';import path from 'node:path';import {createHash} from 'node:crypto';
+import {lockB49FrozenAuthority,B49_FROZEN_PINS} from './r3-b49-frozen-authority.mjs';
+import {captureSnapshotNodeToolGraph} from '../snapshot-node-tools.mjs';
+const active=new WeakMap(),sha=b=>createHash('sha256').update(b).digest('hex');
+const need=(v,m)=>{if(!v)throw Error('B49_COMPILE_BATCH_'+m);};
+const equalPath=(a,b)=>path.resolve(a).toLowerCase()===path.resolve(b).toLowerCase();
+const within=(root,file)=>{const rel=path.relative(path.resolve(root),path.resolve(file));return rel!==''&&!rel.startsWith('..'+path.sep)&&rel!=='..'&&!path.isAbsolute(rel);};
+const NODE_BINDING_SHA='ab46adea8af62f96c2a56d68d3d87863871dad71096caf0dfeed7cce5f37e779';
+function nodeTools(layout){const file=path.join(layout.sourceRoot,'.ymcc-source-snapshot/node-tools-binding.json'),bytes=fs.readFileSync(file);need(sha(bytes)===(layout.sourceAuthority.mode===B51_FROZEN_PINS.mode?B51_FROZEN_PINS.nodeBindingSha256:NODE_BINDING_SHA),'ORIGINAL_NODE_BINDING_CHANGED');const bound=JSON.parse(bytes);need(bound.status==='PASS'&&bound.expectedSnapshotManifestSha256===(layout.sourceAuthority.mode===B51_FROZEN_PINS.mode?B51_FROZEN_PINS.manifestSha256:B49_FROZEN_PINS.manifestSha256),'NODE_BINDING_SOURCE_DIFFERS');const current=captureSnapshotNodeToolGraph({primaryRepo:bound.sourceRoot});need(current.sha256===bound.graphAfterSha256&&JSON.stringify(current.graph)===JSON.stringify(bound.graph),'NODE_TOOL_GRAPH_CHANGED');for(const alias of bound.aliases)need(equalPath(fs.realpathSync(alias.path),alias.realpath)&&equalPath(alias.realpath,alias.target),'NODE_ALIAS_CHANGED');return {path:file,sha256:sha(bytes),graphSha256:current.sha256,packages:current.graph.packageCount,files:current.graph.fileCount,packageCodeExecuted:false};}
+function verify(layout){return (layout.sourceAuthority.mode===B51_FROZEN_PINS.mode?lockB51FrozenAuthority:lockB49FrozenAuthority)({...layout.sourceAuthority,sourceRoot:layout.sourceRoot,productMainSha256:layout.productMainSha256,fixedRunInputBinding:layout.fixedRunInputBinding});}
+function snapshotTools(files){return files.map(file=>{need(path.isAbsolute(file)&&fs.statSync(file).isFile(),'ACTUAL_TOOL_FILE_REQUIRED');return {path:file,sha256:sha(fs.readFileSync(file)),bytes:fs.statSync(file).size};});}
+export function beginB49CompileBatch({layout,actualToolFiles,receiptDirectory}){
+ need(['B49_FROZEN_V6',B51_FROZEN_PINS.mode].includes(layout?.sourceAuthority?.mode),'EXPLICIT_FULL_AUTHORITY_REQUIRED');
+ need(path.isAbsolute(layout.workspaceRoot)&&within(path.join(layout.workspaceRoot,'Build/Validation'),layout.authorizedBuildRoot),'OWNED_BUILD_ROOT_REQUIRED');
+ need(fs.realpathSync(layout.authorizedBuildRoot).toLowerCase()===path.resolve(layout.authorizedBuildRoot).toLowerCase(),'BUILD_ROOT_REDIRECTION');
+ need(within(layout.authorizedBuildRoot,receiptDirectory),'BATCH_RECEIPTS_INSIDE_OWNED_BUILD');
+ fs.mkdirSync(receiptDirectory,{recursive:true});
+ const before=verify(layout),tools=nodeTools(layout),actualTools=snapshotTools(actualToolFiles),token=Object.freeze({kind:layout.sourceAuthority.mode===B51_FROZEN_PINS.mode?'B51_PRIVATE_COMPILE_ONLY_IN_PROCESS_CAPABILITY':'B49_COMPILE_ONLY_IN_PROCESS_CAPABILITY'});
+ const state={layout:structuredClone(layout),before,nodeToolsBefore:tools,actualTools,receiptDirectory,fullSourceVerificationCalls:1,memberAdmissions:0,closed:false};active.set(token,state);
+ fs.writeFileSync(path.join(receiptDirectory,'authority-before.json'),JSON.stringify({source:before,nodeTools:tools,actualTools,fullSourceVerificationCalls:1},null,2)+'\n',{flag:'wx'});return token;
+}
+export function requireB49CompileBatch(token,{sourceRoot,output,memberAdmission=false}={}){const state=active.get(token);need(state&&!state.closed,'LIVE_BRANDED_BATCH_REQUIRED');if(sourceRoot)need(equalPath(sourceRoot,state.layout.sourceRoot),'SOURCE_ROOT_DIFFERS');if(output)need(within(state.layout.authorizedBuildRoot,output),'OUTPUT_OUTSIDE_BATCH');for(const tool of state.actualTools)need(sha(fs.readFileSync(tool.path))===tool.sha256,'ACTUAL_TOOL_CHANGED:'+tool.path);if(memberAdmission)state.memberAdmissions++;return structuredClone(state.layout);}
+export function finishB49CompileBatch(token){const state=active.get(token);need(state&&!state.closed,'LIVE_BRANDED_BATCH_REQUIRED');let result;try{requireB49CompileBatch(token);state.fullSourceVerificationCalls++;const after=verify(state.layout),tools=nodeTools(state.layout);need(tools.graphSha256===state.nodeToolsBefore.graphSha256,'BATCH_NODE_GRAPH_DRIFT');result={status:'AUTHORITY_STABLE',source:after,nodeTools:tools,actualTools:state.actualTools,fullSourceVerificationCalls:state.fullSourceVerificationCalls,memberAdmissions:state.memberAdmissions,managedMemberAdmissionFullTreeScans:0,sourceApprovalGranted:false,scope:'Compile-only source authority, no execution acceptance'};fs.writeFileSync(path.join(state.receiptDirectory,'authority-after.json'),JSON.stringify(result,null,2)+'\n',{flag:'wx'});return result;}finally{state.closed=true;}}

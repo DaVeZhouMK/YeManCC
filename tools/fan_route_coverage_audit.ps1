@@ -247,6 +247,31 @@ foreach ($m in [regex]::Matches($blockNc, $bPattern)) {
     })
 }
 
+# B2) Exact route aliases, including nested HC namespaces (e.g. OneXPlayer.Apex).
+# Resolve the full namespace against source first; an arbitrary suffix is not authority.
+$aliasRoutePattern = 'routes\[\s*"(?<dst>HandheldCompanion\.Devices\.[\w.]+)"\s*\]\s*=\s*routes\[\s*"(?<src>HandheldCompanion\.Devices\.[\w.]+)"\s*\]\s*;'
+foreach ($m in [regex]::Matches($blockNc, $aliasRoutePattern)) {
+    $resolved = @{}
+    foreach ($side in @('dst', 'src')) {
+        $fullName = $m.Groups[$side].Value
+        $simpleName = $fullName.Split('.')[-1]
+        if (-not $classFile.ContainsKey($simpleName)) {
+            $failures.Add("alias-class-missing: $fullName")
+            continue
+        }
+        $classSource = Convert-Blank (Get-Content -LiteralPath $classFile[$simpleName] -Raw) $true
+        $ns = [regex]::Match($classSource, '\bnamespace\s+(?<n>[\w.]+)\s*[;{]').Groups['n'].Value
+        if ($fullName -cne "$ns.$simpleName") {
+            $failures.Add("alias-namespace-mismatch: $fullName != $ns.$simpleName")
+            continue
+        }
+        $resolved[$side] = $simpleName
+    }
+    if ($resolved.Count -eq 2) {
+        $events.Add([pscustomobject]@{ Index = $m.Index; Type = 'Alias'; Classes = @($resolved.dst); Source = $resolved.src })
+    }
+}
+
 # C/D) foreach (var n in new[] { ... }) <stmt>;
 $fePattern = 'foreach\s*\(\s*var\s+(?<v>[A-Za-z_]\w*)\s+in\s+new\s*\[\s*\]\s*\{(?<list>[^}]*)\}\s*\)\s*(?<stmt>[^;]*);'
 $foreachCount = [regex]::Matches($blockNc, '\bforeach\s*\(').Count
@@ -316,6 +341,19 @@ foreach ($ev in ($events | Sort-Object Index)) {
             }
         }
     }
+    elseif ($ev.Type -eq 'Alias') {
+        foreach ($c in $ev.Classes) {
+            if (-not $routes.ContainsKey($ev.Source)) {
+                $failures.Add("alias-missing-base: $c -> $($ev.Source)")
+                continue
+            }
+            $sourceRoute = $routes[$ev.Source]
+            $routes[$c] = [pscustomobject]@{
+                DeviceClass = $c; Kind = $sourceRoute.Kind; Strategy = $sourceRoute.Strategy
+                Evidence = $sourceRoute.Evidence; Wr = $sourceRoute.Wr; Hc = $sourceRoute.Hc
+            }
+        }
+    }
     elseif ($ev.Type -eq 'Override') {
         foreach ($c in $ev.Classes) {
             if (-not $routes.ContainsKey($c)) {
@@ -381,7 +419,7 @@ $routedNoFan = New-Object System.Collections.Generic.List[string]
 foreach ($c in ($routes.Keys | Sort-Object)) {
     if (-not (Get-EffectiveFanControl $c)) {
         $routedNoFan.Add($c) | Out-Null
-        $infos.Add("routed-without-effective-fancontrol: $c (base class wipes FanControl; kept for identity/documentation, not a candidate for another writer)")
+        $infos.Add("routed-without-effective-fancontrol: $c (base class wipes FanControl; inspect FanCapabilityPolicy and the exact inherited EC contract separately; no physical validation implied)")
     }
 }
 

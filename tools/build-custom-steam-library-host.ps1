@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([string]$OutputDirectory='', [switch]$RunSelfTests, [switch]$Publish)
 $ErrorActionPreference='Stop'
 # Windows PowerShell launched by pnpm/pwsh must resolve its own modules first.
@@ -27,6 +27,8 @@ Assert-CustomSteamLibraryCompilation -ExitCode $buildExitCode -OutputLines $buil
 Assert-CustomSteamLibrarySourceIndex -ProjectRoot $projectRoot -Kind 'host' -SourceIndex $sourceIndex
 foreach ($exe in $expectedExecutables) { Copy-Item -LiteralPath (Join-Path $compileDirectory $exe) -Destination (Join-Path $OutputDirectory $exe) -Force }
 if($RunSelfTests){
+  & node (Join-Path $projectRoot 'tools\custom_steam_library_account_status_selftest.mjs') (Join-Path $OutputDirectory 'account-status-summary.json')
+  if($LASTEXITCODE -ne 0){throw 'Steam account status UI regression failed'}
   $fixtures=Join-Path $OutputDirectory ('host-artwork-'+[guid]::NewGuid().ToString('N').Substring(0,8))
   & (Join-Path $OutputDirectory 'custom_steam_library_host_artwork_selftest.exe') $fixtures
   if($LASTEXITCODE -ne 0){throw 'Host artwork fixture regression failed'}
@@ -57,6 +59,12 @@ if($Publish){
     $file.sha256=(Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
   }
   if(-not $manifest.sourceBuild){$manifest | Add-Member -NotePropertyName sourceBuild -NotePropertyValue ([pscustomobject]@{}) -Force}
+  $manifest | Add-Member -NotePropertyName backgroundMediaProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundCatalogProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundIdentityProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundVideoQualityPolicy -NotePropertyValue 3 -Force
+  $manifest | Add-Member -NotePropertyName backgroundManualProtocol -NotePropertyValue 1 -Force
+  $manifest | Add-Member -NotePropertyName backgroundVideoSelectionProtocol -NotePropertyValue 1 -Force
   $manifest.sourceBuild.host=$hash
   $manifest.sourceBuild | Add-Member -NotePropertyName hostSources -NotePropertyValue $sourceIndex -Force
   $manifest.generatedAt=[DateTimeOffset]::Now.ToString('o')

@@ -1,0 +1,57 @@
+{
+  "schemaVersion": 1,
+  "kind": "ymcc-lighting-build-delivery-global-contract-v1",
+  "zip": {
+    "name": "fixture.zip",
+    "sha256": "33900f91a113a452e7202388a15a74385b9e0f532598d60fec36c2a3a5531da9",
+    "bytes": 61920067,
+    "members": 955,
+    "uncompressedBytes": 221485413
+  },
+  "index": {
+    "name": "fixture-index.json",
+    "sha256": "262c7612959818bf83b26c82d6c0d70dede452c1b4337d4007d368f1b919e539"
+  },
+  "fixedTuple": {
+    "helper": "b6ac9696173ec864ea63a982635b4e3bd47ae1806b2835834d59261172a69e00",
+    "core": "88e5a77f781b2bf7e12df4d45b636b16f97031d02e8617572c7bba7176b8fb7e",
+    "catalog": "56fcc0dcaed4376ead15956aeb9f05ce52e3552b782497617a7691370878f45e",
+    "native": "e6a504666d5382261b65e116365a92210c3d79b490b6cca77c4ff2b8b7dc8092",
+    "hc": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "runtimeManifest": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "fanHost": "98acebb4d81f40309b5180766a92c7ee915a7f05b7002185982d21342d7cf3ff",
+    "fanBackend": "d8cb348ca9b081388c22247f4f44fca140c273260a78cbf6d7263ca6614cbc8a",
+    "fanManifest": "3afc1d0ccdcc331dd91921eecd086caf1134a4624b5226348df54a6689167bae"
+  },
+  "v4ManifestSha256": "595b8f3c0a4bead8fbfd2e18436712f2d7f098d88b26d012c44535f8c42c4281",
+  "legacyReviewedContractSha256": "92f820533b2744fe695029b301111bdb528c9d5449af6ffdeb164496a1829d93",
+  "frozenTools": [
+    {
+      "path": "tools/hc-device-runtime/lighting-native-build-consumer.py",
+      "sha256": "604caacbf78930ca9f41a8a05ae0814c21f098bdb7ac9fd1425bd5069f781155"
+    },
+    {
+      "path": "tools/hc-device-runtime/lighting-build-delivery.ps1",
+      "sha256": "91a15ce78f9fe5e4be825009aa6a916b959a00747657c0589e7a758928dbfc8c"
+    },
+    {
+      "path": "tools/hc-device-runtime/New-LightingBuildDelivery.ps1",
+      "sha256": "93979a4246dbc41cb22b41ef661e746886ddee3aa467bd5189121ff6817db715"
+    },
+    {
+      "path": "tools/hc-device-runtime/Test-LightingBuildDelivery.ps1",
+      "sha256": "e19bf02612d5bcd45eab5262c9c317e7dedd0718a73d6dd761a7ec6015db8b73"
+    },
+    {
+      "path": "tools/hc-device-runtime/verify-lighting-catalog-evidence.ps1",
+      "sha256": "8b370c31fc5c4b95ef9e9a8e3df6dbbfa497c26dd97f0a6b0b54d99c5297507a"
+    },
+    {
+      "path": "tools/hc-device-runtime/connect-installed-lighting.ps1",
+      "sha256": "34e6588950d7534e1eac21fd828afefd4ae5b7d1975f659beface15899313bad"
+    }
+  ],
+  "runtimeExport": false,
+  "newRuntimeDlls": 0,
+  "physicalAcceptance": false
+}

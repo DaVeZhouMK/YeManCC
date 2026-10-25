@@ -1,0 +1,8 @@
+export const MAINTENANCE_CASE_IDS=Object.freeze(['current','premature-complete','missing-consumer','missing-anchor','untracked-issue','candidate-inactive-method-change','candidate-model-source-change','candidate-duplicate-device','candidate-operation-change','candidate-battery-change','candidate-motion-change','candidate-private-motion-change','candidate-controller-change','candidate-controller-motion-change','candidate-controller-feedback-change','missing-controller-stage','missing-controller-source','changed-controller-source-proof','performance-cpu-activation','performance-gpu-activation','performance-tdp-takeover','performance-missing-model','performance-changed-source-proof','scope-unknown-domain','scope-inactive-promotion','scope-excluded-enabled','scope-ui-reimport']);
+const positive=new Set(['current','candidate-inactive-method-change','candidate-model-source-change','candidate-operation-change','candidate-battery-change','candidate-motion-change','candidate-private-motion-change','candidate-controller-change','candidate-controller-motion-change','candidate-controller-feedback-change']);
+export function validateMaintenanceResult(result){
+ if(result?.status!=='PASS'||result.hardwareIo!==false||!Array.isArray(result.cases))throw Error('MAINTENANCE_ORIGINAL_RESULT_NOT_PASS');
+ if(JSON.stringify(result.cases.map(x=>x.id))!==JSON.stringify(MAINTENANCE_CASE_IDS))throw Error('MAINTENANCE_ORIGINAL_CASES_CHANGED');
+ for(const row of result.cases){if(row.status!=='PASS')throw Error('MAINTENANCE_ORIGINAL_CASE_FAILED:'+row.id);if(!row.id.startsWith('scope-')&&row.executionExitCode!==(positive.has(row.id)?0:1))throw Error('MAINTENANCE_CHILD_VERDICT_CHANGED:'+row.id);}
+ return true;
+}

@@ -6,7 +6,7 @@ source=args.candidate.resolve();out=args.output.resolve();assert not out.exists(
 root=out/'fixture';shutil.copytree(source,root)
 tools=Path(__file__).resolve().parent
 workspace=tools.parents[2]
-hc=root/'PowerControl/handheldcompanion-runtime/HC-CANDIDATE-0.32.4.0-06c0b954-20260902'
+hc=root/'PowerControl/ymcc-shared-runtime'
 vg=root/'PowerControl/feature-assets/virtual-gamepad'
 a=hc/'Newtonsoft.Json.dll';b=hc/'Nefarius.Utilities.DeviceManagement.dll'
 a_bytes=a.read_bytes();b_bytes=b.read_bytes();rows=[]

@@ -1,0 +1,35 @@
+const state={enabled:true,mode:'custom',suspended:0,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnNonUserWake:true,joyXoffAutoClose:true,wakePasswordEnabled:false,plan:true,acButton:0,dcButton:1,hibernate:true,size:50,scheme:'1cb8b882-a900-4b9f-9bac-99d151e64441',timeouts:{acScreen:10,dcScreen:5,acSleep:30,dcSleep:15,acHibernate:0,dcHibernate:60}};
+(window as any).__sleepFixture=state;
+const idleStaticWake={enabled:false,phase:'idle',lastScanEpoch:0,devices:0,software:0,timers:0,protectedDevices:0,failed:0,restorePending:0,diagnosticSourceReady:false,lastError:''};
+const staticWake={status:{...idleStaticWake},calls:[] as string[],hold:false,release:null as null|(()=>void),failure:false,throwAction:false,throwRead:false,holdRead:false,releaseRead:null as null|(()=>void),failPlanSave:false};
+(window as any).__staticWakeFixture=staticWake;
+const trace=(name:string,value:any)=>{(window as any).__sleepWrites??=[];(window as any).__sleepWrites.push({name,value});};
+export const PW={YEMAN:'1cb8b882-a900-4b9f-9bac-99d151e64441'};
+export type PowerBtnIdx=0|1|2|3;
+export type SleepGuardStatus=any;export type SleepTimeoutSettings=any;export type StaticWakeStatus=typeof idleStaticWake;
+export const sleepGuardGet=async()=>({...state});
+export const sleepGuardSet=async(on:boolean)=>{state.enabled=on;trace('guard',on)};
+export const sleepGuardSetConfig=async(patch:any)=>{Object.assign(state,patch);trace('config',patch)};
+export const getPowerBtnIdx=async(ac:boolean)=>ac?state.acButton:state.dcButton;
+export const setPowerBtnIdx=async(ac:boolean,index:number)=>{state[ac?'acButton':'dcButton']=index;trace(ac?'acButton':'dcButton',index)};
+export const getActiveScheme=async()=>state.scheme;
+export const reactivateCurrentScheme=async()=>{};
+export const readHibernateState=async()=>({supportedKnown:true,supported:true,enabledKnown:true,enabled:state.hibernate});
+export const setHibernate=async(value:boolean)=>{state.hibernate=value;trace('hibernate',value);return {exitCode:0}};
+export const readHibernateSize=async()=>state.size;
+export const setHibernateSize=async(value:number)=>{state.size=value;trace('hibernateSize',value)};
+export const readTotalMemoryGB=async()=>32;
+export const readSleepTimeouts=async()=>({...state.timeouts});
+export const setSleepTimeout=async(field:string,ac:boolean,value:number)=>{const key=(ac?'ac':'dc')+field[0].toUpperCase()+field.slice(1);state.timeouts[key]=value;trace(key,value)};
+export const getStaticWakeStatus=async()=>{staticWake.calls.push('get');const snapshot={...staticWake.status};if(staticWake.holdRead)await new Promise<void>(resolve=>{staticWake.releaseRead=resolve});if(staticWake.throwRead)throw Error('memory status unavailable');return snapshot};
+async function staticWakeAction(action:'scan'|'restore'){
+  staticWake.calls.push(action);trace('staticWake',action);
+  if(staticWake.hold)await new Promise<void>(resolve=>{staticWake.release=resolve});
+  if(staticWake.throwAction)throw Error('memory action transport unavailable');
+  staticWake.status=action==='scan'?{...idleStaticWake,enabled:true,phase:staticWake.failure?'partial':'applied',lastScanEpoch:1,devices:2,software:3,timers:1,protectedDevices:2,failed:staticWake.failure?1:0,diagnosticSourceReady:true,lastError:staticWake.failure?'memory item refused':''}:{...idleStaticWake,phase:staticWake.failure?'restore-pending':'idle',lastScanEpoch:staticWake.status.lastScanEpoch,restorePending:staticWake.failure?1:0,lastError:staticWake.failure?'memory owner value changed':''};
+  return {ok:!staticWake.failure,status:{...staticWake.status}};
+}
+export const scanStaticWakeSources=()=>staticWakeAction('scan');
+export const restoreStaticWakeSources=()=>staticWakeAction('restore');
+export const getSleepPowerPlanOptimizationEnabled=async()=>state.plan;
+export const setSleepPowerPlanOptimizationEnabled=async(value:boolean)=>{if(staticWake.failPlanSave)throw Error('memory preference save refused');state.plan=value;trace('plan',value)};

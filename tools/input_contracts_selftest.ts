@@ -1,12 +1,27 @@
-import { normalizeGyroTelemetry, validateInputSnapshot } from '../src/bridge/inputContracts';
+import { normalizeGyroTelemetry, validateInputSnapshot, type GyroMotionConfigV1, type InputPersona } from '../src/bridge/inputContracts';
 import { normalizeSettings } from '../src/bridge/settingsRepository';
-const base = { schemaVersion: 1, revision: 0, outputTarget: { schemaVersion: 1, revision: 0, closure: 'CLOSED' as const, persona: 'xbox360' as const, descriptorHash: 'sha', buttonMappingEnabled: true, gyroEnabled: false, visibilityPolicy: 'hidden' as const }, gyroMotion: { schemaVersion: 1, revision: 0, closure: 'NOT-APPLICABLE' as const } };
+import { VIRTUAL_OUTPUT_PERSONAS } from '../src/bridge/controllerPersona';
+const base = { schemaVersion: 1, revision: 0, outputTarget: { schemaVersion: 1, revision: 0, closure: 'CLOSED' as const, persona: 'elite' as const, descriptorHash: 'sha', buttonMappingEnabled: true, gyroEnabled: false, visibilityPolicy: 'hidden' as const }, gyroMotion: { schemaVersion: 1, revision: 0, closure: 'NOT-APPLICABLE' as const } };
 if (validateInputSnapshot({ ...base, outputTarget: { ...base.outputTarget, gyroEnabled: true }, gyroMotion: { schemaVersion: 1, revision: 0, closure: 'CLOSED' as const } }).ok) throw new Error('missing closed gyro data should not be admitted');
 const valid = { ...base, gyroMotion: { schemaVersion: 1, revision: 0, closure: 'CLOSED' as const, provider: 'hc-gamepad-motion', unit: 'deg/s', calibrationId: 'cal-1' } };
 if (!validateInputSnapshot(valid).ok) throw new Error('valid snapshot rejected');
+for (const persona of VIRTUAL_OUTPUT_PERSONAS) {
+  for (const outputMode of ['virtual-stick', 'disabled'] as const) {
+    if (!validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, persona }, gyroMotion: { ...valid.gyroMotion, outputMode } }).ok) throw new Error(`current snapshot rejected: ${persona}/${outputMode}`);
+  }
+  for (const outputMode of ['ds4-imu', 'unknown', null, true, 0, {}] as unknown[]) {
+    const rejected = validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, persona }, gyroMotion: { ...valid.gyroMotion, outputMode: outputMode as GyroMotionConfigV1['outputMode'] } });
+    if (rejected.ok || rejected.reason !== 'persona-conflict') throw new Error(`retired/unknown motion output admitted: ${persona}/${String(outputMode)}`);
+  }
+}
+for (const persona of ['xbox360', 'dualshock4', 'dualsense', 'physical', 'unknown', null, undefined, 0, true, {}, ['elite']] as unknown[]) {
+  const rejected = validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, persona: persona as InputPersona } });
+  if (rejected.ok || rejected.reason !== 'schema-invalid') throw new Error(`retired/unknown runtime persona admitted: ${String(persona)}`);
+}
+if (!validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, persona: 'disabled', buttonMappingEnabled: false } }).ok) throw new Error('disabled current snapshot rejected');
 if (validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, gyroEnabled: true }, gyroMotion: { ...valid.gyroMotion, enabled: false } }).ok) throw new Error('mismatched gyro enabled gates accepted');
 if (validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, gyroEnabled: false }, gyroMotion: { ...valid.gyroMotion, enabled: true } }).ok) throw new Error('motion enabled while target gate disabled accepted');
-if (validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, gyroEnabled: true }, gyroMotion: { ...valid.gyroMotion, enabled: true, outputMode: 'ds4-imu' as const } }).ok) throw new Error('xbox360 DS4 IMU request accepted');
+if (validateInputSnapshot({ ...valid, outputTarget: { ...valid.outputTarget, gyroEnabled: true }, gyroMotion: { ...valid.gyroMotion, enabled: true, outputMode: 'ds4-imu' as unknown as GyroMotionConfigV1['outputMode'] } }).ok) throw new Error('retired direct DS4 IMU request accepted');
 if (validateInputSnapshot({ ...valid, gyroMotion: { ...valid.gyroMotion, unit: 'rad/s' } }).ok) throw new Error('non-HC gyro unit accepted');
 if (validateInputSnapshot({ ...base, outputTarget: { ...base.outputTarget, gyroEnabled: true } }).ok) throw new Error('enabled gyro without CLOSED motion contract accepted');
 if (validateInputSnapshot({ ...valid, revision: -1 }).ok) throw new Error('negative revision accepted');
@@ -17,17 +32,17 @@ const telemetry = normalizeGyroTelemetry({ gyro: { x: 4, y: -2, z: 'bad' }, outp
 if (!telemetry || telemetry.schemaVersion !== 1 || telemetry.gyro.x !== 4 || telemetry.gyro.y !== -2 || telemetry.gyro.z !== 0 || telemetry.sequence !== 7) throw new Error('gyro telemetry normalization failed');
 const hostFrame = normalizeGyroTelemetry({
   gyro: { x: 1, y: 2, z: 3 }, output: { x: 0.5, y: -0.25 }, outputKind: 'native-canonical-pipe-frame', sequence: 8,
-  hostFrame: { hostSubmission: 'frame-accepted', hostActive: true, firstFrame: true, lifecycle: 'host-active', persona: 'dualshock4', rightStick: { x: 0.5, y: -0.25 }, gyroDps: { x: 0, y: 0, z: 0 } },
+  hostFrame: { hostSubmission: 'frame-accepted', hostActive: true, firstFrame: true, lifecycle: 'host-active', persona: 'dualsense-edge', rightStick: { x: 0.5, y: -0.25 }, gyroDps: { x: 0, y: 0, z: 0 } },
 });
 if (!hostFrame || hostFrame.outputKind !== 'native-canonical-pipe-frame' || hostFrame.hostFrame?.hostSubmission !== 'frame-accepted' || !hostFrame.hostFrame.hostActive || !hostFrame.hostFrame.firstFrame || hostFrame.hostFrame.lifecycle !== 'host-active' || hostFrame.hostFrame.rightStick.x !== 0.5 || hostFrame.hostFrame.rightStick.y !== -0.25) throw new Error('native host-frame telemetry normalization failed');
 const listeningSuppressedFrame = normalizeGyroTelemetry({
   gyro: { x: 0, y: 0, z: 0 }, output: { x: 0, y: 0 }, outputKind: 'native-canonical-pipe-frame', sequence: 9,
-  hostFrame: { hostSubmission: 'publication-suppressed', publicationReason: 'shortcut-recording', hostActive: true, firstFrame: false, lifecycle: 'host-active', persona: 'dualshock4', rightStick: { x: 0, y: 0 }, gyroDps: { x: 0, y: 0, z: 0 } },
+  hostFrame: { hostSubmission: 'publication-suppressed', publicationReason: 'shortcut-recording', hostActive: true, firstFrame: false, lifecycle: 'host-active', persona: 'dualsense-edge', rightStick: { x: 0, y: 0 }, gyroDps: { x: 0, y: 0, z: 0 } },
 });
 if (!listeningSuppressedFrame || listeningSuppressedFrame.hostFrame?.hostSubmission !== 'publication-suppressed' || listeningSuppressedFrame.hostFrame.publicationReason !== 'shortcut-recording' || !listeningSuppressedFrame.hostFrame.hostActive || listeningSuppressedFrame.hostFrame.firstFrame) throw new Error('native listening publication suppression telemetry normalization failed');
 const sourceAbsentSuppressedFrame = normalizeGyroTelemetry({
   gyro: { x: 0, y: 0, z: 0 }, output: { x: 0, y: 0 }, outputKind: 'native-canonical-pipe-frame', sequence: 10,
-  hostFrame: { hostSubmission: 'publication-suppressed', publicationReason: 'physical-source-absent', hostActive: true, firstFrame: false, lifecycle: 'host-active', persona: 'dualshock4', rightStick: { x: 0, y: 0 }, gyroDps: { x: 0, y: 0, z: 0 } },
+  hostFrame: { hostSubmission: 'publication-suppressed', publicationReason: 'physical-source-absent', hostActive: true, firstFrame: false, lifecycle: 'host-active', persona: 'dualsense-edge', rightStick: { x: 0, y: 0 }, gyroDps: { x: 0, y: 0, z: 0 } },
 });
 if (!sourceAbsentSuppressedFrame || sourceAbsentSuppressedFrame.hostFrame?.hostSubmission !== 'publication-suppressed' || sourceAbsentSuppressedFrame.hostFrame.publicationReason !== 'physical-source-absent' || !sourceAbsentSuppressedFrame.hostFrame.hostActive || sourceAbsentSuppressedFrame.hostFrame.firstFrame) throw new Error('physical-source no-write telemetry normalization failed');
 const stagedMotionTelemetry = normalizeGyroTelemetry({

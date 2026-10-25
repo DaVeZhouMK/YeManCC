@@ -1,26 +1,46 @@
+import { normalizeBackgroundPosition } from './backgroundPosition';
 import { snapshotSettingsData } from './settingsSnapshot';
 import { getSettingsGeneration, assertSettingsGeneration, readSettingsSection, saveSettingsSection } from './settingsRepository';
 
 export interface UiSettings {
   theme: 'blue-black' | 'red-black' | 'cyberpunk';
   dynamicBackgroundEnabled: boolean;
+  steamDynamicWallpaperEnabled: boolean;
+  steamWallpaperBackgroundDownload: boolean;
+  steamWallpaperDownloadCpuThreshold: number;
   backgroundOpacity: number;
   backgroundBlur: number;
+  backgroundPositionX: number;
+  backgroundPositionY: number;
   videoBatteryPause: boolean;
   scheduleMonitor: boolean;
   steamChartAutoRefresh: 'none' | 'steam' | 'steamdeck';
   windowPlacement: 'left' | 'right';
+  gestureSummonEnabled: boolean;
+  trainerAutoPrepare: boolean;
+  radialTestingEnabled: boolean;
+  fxSoundAutoRepair: boolean;
 }
 
 const DEFAULTS: UiSettings = {
   theme: 'blue-black',
   dynamicBackgroundEnabled: false,
+  // Default ON; a saved OFF remains authoritative across restart and wake.
+  steamDynamicWallpaperEnabled: true,
+  steamWallpaperBackgroundDownload: true,
+  steamWallpaperDownloadCpuThreshold: 15,
   backgroundOpacity: 0.64,
   backgroundBlur: 0,
+  backgroundPositionX: 50,
+  backgroundPositionY: 50,
   videoBatteryPause: true,
   scheduleMonitor: true,
   steamChartAutoRefresh: 'none',
   windowPlacement: 'right',
+  gestureSummonEnabled: false,
+  trainerAutoPrepare: true,
+  radialTestingEnabled: false,
+  fxSoundAutoRepair: true,
 };
 
 let settings: UiSettings = { ...DEFAULTS };
@@ -32,16 +52,27 @@ function normalize(input: Partial<UiSettings>): UiSettings {
   const theme = input.theme === 'red-black' || input.theme === 'cyberpunk' ? input.theme : 'blue-black';
   const opacity = Number(input.backgroundOpacity);
   const blur = Number(input.backgroundBlur);
+  const position = normalizeBackgroundPosition({ x: input.backgroundPositionX, y: input.backgroundPositionY });
   return {
     theme,
     dynamicBackgroundEnabled: input.dynamicBackgroundEnabled === true,
+    steamDynamicWallpaperEnabled: input.steamDynamicWallpaperEnabled !== false,
+    steamWallpaperBackgroundDownload: input.steamWallpaperBackgroundDownload !== false,
+    steamWallpaperDownloadCpuThreshold: Number.isFinite(Number(input.steamWallpaperDownloadCpuThreshold)) ? Math.max(5,Math.min(90,Math.round(Number(input.steamWallpaperDownloadCpuThreshold)))) : 15,
     backgroundOpacity: Number.isFinite(opacity) ? Math.min(0.8, Math.max(0.2, Math.round(opacity * 100) / 100)) : DEFAULTS.backgroundOpacity,
     backgroundBlur: Number.isFinite(blur) ? Math.min(24, Math.max(0, Math.round(blur))) : DEFAULTS.backgroundBlur,
+    backgroundPositionX: position.x,
+    backgroundPositionY: position.y,
     videoBatteryPause: input.videoBatteryPause !== false,
     scheduleMonitor: input.scheduleMonitor !== false,
     steamChartAutoRefresh: input.steamChartAutoRefresh === 'steam' || input.steamChartAutoRefresh === 'steamdeck'
       ? input.steamChartAutoRefresh : 'none',
     windowPlacement: input.windowPlacement === 'left' ? 'left' : 'right',
+    // Inactive because edge touch input can affect Windows functionality.
+    gestureSummonEnabled: false,
+    trainerAutoPrepare: input.trainerAutoPrepare !== false,
+    radialTestingEnabled: input.radialTestingEnabled === true,
+    fxSoundAutoRepair: input.fxSoundAutoRepair === undefined || input.fxSoundAutoRepair === true,
   };
 }
 
@@ -72,6 +103,8 @@ function clearLegacySettings(): void {
     'yeman.ui.schedule-monitor',
   ]) localStorage.removeItem(key);
 }
+
+export function uiSettingsLoaded():boolean{return loaded;}
 
 export function getUiSettings(): UiSettings {
   return { ...settings };

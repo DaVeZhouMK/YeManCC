@@ -1,0 +1,69 @@
+{
+  "schemaVersion": 1,
+  "status": "BUILD_PASS_NOT_INSTALL_APPROVED",
+  "startedUtc": "2026-10-19T05:54:31.895106+00:00",
+  "finishedUtc": "2026-10-19T05:54:33.701722+00:00",
+  "exitCode": 0,
+  "command": [
+    "C:\\Program Files\\dotnet\\dotnet.exe",
+    "build",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source\\FanLab\\LightSetter\\YeManLightSetter.csproj",
+    "--artifacts-path",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts",
+    "-c",
+    "Release",
+    "--nologo",
+    "-v:minimal",
+    "-m:1",
+    "-p:UseSharedCompilation=false",
+    "-nodeReuse:false",
+    "-p:RestoreConfigFile=D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\NuGet.offline.config"
+  ],
+  "snapshot": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\source-snapshot-725b57a97a564988a61973bebe1a23c8\\source-snapshot.json",
+    "sha256": "0af131a0757d71841c5c7d7b437d37780a6aa7daf3620d50600104768eebc25f"
+  },
+  "artifacts": [
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.deps.json",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.deps.json",
+      "sha256": "3c99d2a11a849726eb98a449fcddb646a2e1337825dc8f92d594e8aeb46def90",
+      "bytes": 496
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.dll",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.dll",
+      "sha256": "7bfce707580fd70edb808ec4b864dd4315ddbfe3e2cf5bf36fd956249622a2fe",
+      "bytes": 138240
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.exe",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.exe",
+      "sha256": "ba3e4d6d08e2261433f935bd573d198f70a52ce3ba21e3f4fa9816c641be33d6",
+      "bytes": 162304
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.json",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.json",
+      "sha256": "c5f3a2a195368e0c4f1a1d7f704bdf5412941fdfe09451dc6c03de630a1740e7",
+      "bytes": 350
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.pdb",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.pdb",
+      "sha256": "dcde27bdd7408c4357536f32bab4c57e06ebfacf9eab59dc7766c9e9b69bf815",
+      "bytes": 29424
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\lighting-catalog-candidate-20261019\\build-lightsetter\\artifacts\\bin\\YeManLightSetter\\release_win-x64\\YeManLightSetter.runtimeconfig.json",
+      "relative": "artifacts/bin/YeManLightSetter/release_win-x64/YeManLightSetter.runtimeconfig.json",
+      "sha256": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+      "bytes": 519
+    }
+  ],
+  "sourceDrift": [],
+  "candidateInstalled": false,
+  "actualCWritten": false,
+  "hostOrHelperMainStarted": false,
+  "physicalIo": false
+}

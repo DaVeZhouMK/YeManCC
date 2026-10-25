@@ -24,6 +24,8 @@
 //     --format=cjs --outfile=../Patches/Tests/R196/monitor_data_selftest.cjs --tsconfig=tsconfig.json
 //   node ../Patches/Tests/R196/monitor_data_selftest.cjs
 import assert from 'node:assert/strict';
+import { decodeDisplayedFramerate, displayedFramerateForControl } from '@/bridge/monitorControlFramerate';
+import { hudFromUniformSnapshot } from '@/bridge/monitorHudModel';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import {
@@ -269,11 +271,14 @@ async function main(): Promise<void> {
     releaseFps(); // 释放时刻 now = NOW ⇒ fps.ts<=NOW 的旧回复必须被丢弃
     const releaseTop = hub.acquire('display', { top: true }); // top 有活跃需求（本用例断言 top 保留）
     await flush();
-    resolveSnap!(snap({ collectedAt: NOW, heartbeatAt: NOW, hwinfoOkAt: 0 }));
+    const stoppedTop = JSON.parse(snap().top as string);
+    stoppedTop.displayedFramerate = { source: 'hwinfo-displayed', fps: 75, fps1: 40, pid: 4242, processCreated: '99', game: 'Hades', observedAt: NOW - 1000, validUntil: NOW + 5000, pollPeriodMs: 3000 };
+    resolveSnap!(snap({ collectedAt: NOW, heartbeatAt: NOW, hwinfoOkAt: 0, top: JSON.stringify(stoppedTop) }));
     const v = await inflight;
     assert.equal(v?.fps, null, '旧 fps 数据不得复活');
     assert.equal(v?.heartbeatAt, null);
     assert.notEqual(v?.top, null, 'top 需求未释放 ⇒ 数据保留');
+    assert.equal(v?.top?.displayedFramerate, null, 'FPS 停止后独立 Displayed 控制回执也不得复活');
     releaseTop();
   });
 
@@ -286,10 +291,13 @@ async function main(): Promise<void> {
     await flush();
     const v = await hub.read();
     const expected = [
-      'ac', 'batteryPercent', 'chargeW', 'cpuUsage', 'freqMhz', 'gpuClockMhz', 'gpuPowerW',
-      'hasBattery', 'hwDown', 'remainMin', 'tdpW', 'tempC', 'thermalThrottleFound',
-      'thermalThrottleMax', 'ts', 'virtualMemoryCommittedFound', 'virtualMemoryCommittedMb',
-      'virtualMemoryLoadFound', 'virtualMemoryLoadPct',
+      'ac', 'batteryPercent', 'batteryPowerEstimated', 'batteryPowerSource', 'batteryPowerTs',
+      'batteryPowerValid', 'batteryPowerWindowMs', 'batteryTimeEstimated', 'batteryTimeSource',
+      'batteryTimeTs', 'batteryTimeValid', 'chargeW', 'cpuClockValid', 'cpuPowerValid',
+      'cpuUsage', 'cpuUsageTs', 'cpuUsageValid', 'freqMhz', 'gpuClockMhz',
+      'gpuPowerW', 'hasBattery', 'hwDown', 'remainMin', 'tdpW', 'tempC',
+      'thermalThrottleFound', 'thermalThrottleMax', 'ts', 'virtualMemoryCommittedFound',
+      'virtualMemoryCommittedMb', 'virtualMemoryLoadFound', 'virtualMemoryLoadPct',
     ];
     assert.deepEqual(Object.keys(v!.top!).sort(), expected.sort());
     assert.equal(v!.top!.tempC, 47);
@@ -691,6 +699,7 @@ async function main(): Promise<void> {
 
     const now = Date.now();
     const deps = makeDeps({
+      now: () => now, // Same virtual clock as the native receipt.
       snapshot: () => ({
         schema: 1,
         available: true,
@@ -708,6 +717,8 @@ async function main(): Promise<void> {
       }),
     });
     const hub = createMonitorDataHub(deps);
+    const releaseFixture = hub.acquire('frozen-fixture', { top: true, fps: true });
+    await flush();
     const view = await hub.read();
     assert.ok(view, '快照仍可读（生命周期与心跳可验证）');
     assert.equal(view?.top?.ts, lastFresh, '展示数据保持旧时间（未盖当前时间）');
@@ -717,6 +728,7 @@ async function main(): Promise<void> {
     assert.equal(view?.hwinfoOkAt, null, 'hwinfoOkAt=0 ⇒ 健康门为 false（控制/恢复不得消费）');
     assert.equal(view?.hwDown, true);
     assert.equal(view?.heartbeatAt, now, '独立工作心跳仍在刷新（区分"守护存活但空闲"与"守护已死"）');
+    releaseFixture();
   });
 
   await test('[198] unavailable 快照携带活闩锁 ⇒ 被消费并重新协调（真实启停可核对）', async () => {
@@ -842,6 +854,7 @@ async function main(): Promise<void> {
     const now = Date.now();
     for (const item of items) {
       const deps = makeDeps({
+        now: () => now, // Do not combine live timestamps with module-frozen NOW.
         snapshot: () => ({
           schema: 1, available: true, session: 91, relayEpoch: 0, generation: 3, seq: 2,
           collectedAt: now, heartbeatAt: now, hwinfoOkAt: 0,
@@ -849,13 +862,46 @@ async function main(): Promise<void> {
         }),
       });
       const hub = createMonitorDataHub(deps);
+      const releaseFixture = hub.acquire('bad-state-fixture', { top: true });
+      await flush();
       const view = await hub.read();
       assert.ok(view, '快照仍可读（生命周期可验证）');
       assert.equal(view?.top?.ts, item.ts, 'ts 必须是最近有效时间，不得被盖上当前时间');
       assert.ok(now - item.ts > 6000, '超过既有 <6s 新鲜度门槛 ⇒ 展示/控制按无数据处理');
       assert.equal(view?.hwDown, true, '必须显式标陈旧');
       assert.equal(view?.hwinfoOkAt, null, 'hwinfoOkAt=0 ⇒ 健康门为 false');
+      releaseFixture();
     }
+  });
+
+  await test('HUD Presented and backend Displayed remain independent through the uniform decoder', async () => {
+    const displayed = { source: 'hwinfo-displayed', fps: 75, fps1: 40, pid: 4242, processCreated: '99', game: 'Hades', observedAt: NOW, validUntil: NOW + 6000, pollPeriodMs: 3000 };
+    for (const [source, shown] of [['hwinfo-presented', 160], ['hwinfo-displayed', 75], ['rtss', 200]] as const) {
+      const hub = createMonitorDataHub(makeDeps({}));
+      const view = hub.admitDisplayPublication({ ...snap(), collectedAt: NOW, hwDown: false,
+        top: JSON.stringify({ ts: NOW, hwDown: false, displayedFramerate: displayed }),
+        fps: JSON.stringify({ ts: NOW, fps: shown, fps1: 40, pid: 4242, game: 'Hades', processCreated: '99', fpsSource: source,
+          fpsObservedAt: NOW, fpsValidUntil: NOW + (source === 'rtss' ? 5000 : 6000), fpsPollPeriodMs: source === 'rtss' ? 0 : 3000 }) });
+      assert.ok(view);
+      assert.equal(hudFromUniformSnapshot(view, NOW).values.fps, shown);
+      assert.equal(displayedFramerateForControl(view, NOW)?.fps, 75);
+      assert.equal(view.top?.displayedFramerate?.fps1, 40);
+      assert.equal(Object.isFrozen(view.top?.displayedFramerate), true);
+    }
+  });
+  await test('Displayed control never borrows Presented and never renews the original deadline', async () => {
+    const receipt = decodeDisplayedFramerate({ source: 'hwinfo-displayed', fps: 0, fps1: null, pid: 4242, processCreated: '99', game: 'Hades', observedAt: NOW, validUntil: NOW + 6000, pollPeriodMs: 3000 });
+    assert.ok(receipt);
+    assert.equal(receipt.fps, 0, 'real Displayed zero remains a real control measurement');
+    assert.equal(decodeDisplayedFramerate({ ...receipt, source: 'hwinfo-presented' }), null);
+    const hub = createMonitorDataHub(makeDeps({}));
+    const view = hub.admitDisplayPublication({ ...snap(), collectedAt: NOW, hwDown: false,
+      top: JSON.stringify({ ts: NOW, displayedFramerate: receipt }) });
+    assert.ok(view);
+    assert.equal(displayedFramerateForControl(view, NOW)?.fps, 0);
+    assert.equal(displayedFramerateForControl({ ...view, hwDown: true }, NOW), null);
+    assert.equal(displayedFramerateForControl({ ...view, collectedAt: NOW + 6000, top: { ...view.top!, ts: NOW + 6000 } }, NOW + 6000), null);
+    assert.equal(displayedFramerateForControl({ ...view, top: { ...view.top!, displayedFramerate: null } }, NOW), null);
   });
 
   console.log('monitor-data selftest: ALL PASS');

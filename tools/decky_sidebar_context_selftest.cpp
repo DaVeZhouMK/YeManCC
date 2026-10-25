@@ -1,3 +1,5 @@
+// Historical in-process callback regression; not the owned binding production acceptance.
+#define YMCC_DECKY_RUNTIME_LEGACY_FIXTURE 1
 // Event-driven context-process watch + bounded windows; ONLY source-built inert
 // processes. No Steam discovery, CDP, third-party loader, settings, or hardware IO.
 #include "../native/decky_sidebar_bootstrap.h"
@@ -30,7 +32,7 @@ int main(int argc,char** argv){
         if(!size||size>=32768)throw std::runtime_error("fixture path");
         const std::wstring executable(buffer,size);
         const std::filesystem::path build=std::filesystem::path(executable).parent_path();
-        if(build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Launch25\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Bootstrap26\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Input27\Build)")throw std::runtime_error("fixture outside explicit task Build roots");
+        if(build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-SharedSteamSignal-20261014\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-StartupRecovery-20261014\Build)" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Sidebar\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console20\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console22\\NativeRegression\\Build" && build!=L"G:\\YeManCC-Work\\Build\\Tasks\\YMCC-Decky-Console23\\Build" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Launch25\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Bootstrap26\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-Input27\Build)" && build!=LR"(G:\YeManCC-Work\Build\Tasks\YMCC-Decky-SelfHeal-20261013\Build)")throw std::runtime_error("fixture outside explicit task Build roots");
         if(std::filesystem::path(executable).parent_path()!=build)throw std::runtime_error("fixture must stay in task Build");
         const auto home=(build/L"YMCC-Decky-Context-Fixture-Home").wstring();
         std::filesystem::create_directories(home); // Task-local inert home; no settings files.
@@ -71,15 +73,15 @@ int main(int argc,char** argv){
         selected=0;second.stop();
         const ULONGLONG windowStarted=GetTickCount64();
         check(wait([&]{return refreshes>=2&&runtime.snapshot().bindingRetry;},2500),"second genuine context exit opens a new finite window");
-        check(wait([&]{return refreshes>=6&&!runtime.snapshot().bindingRetry&&runtime.snapshot().bindingAttempts==5;},23000),"persistent unavailability exhausts initial plus four retries");
-        check(GetTickCount64()-windowStarted>=19000,"full window follows production 20-second final offset, not fake accelerated time");
+        check(wait([&]{return refreshes>=6&&runtime.snapshot().bindingRetry&&runtime.snapshot().bindingAttempts==5;},18000),"persistent unavailability retains recovery after four retries");
+        check(GetTickCount64()-windowStarted>=13000,"full window follows production outage delays, not fake accelerated time");
         check(refreshes==6&&runtime.snapshot().reason=="mirror-bootstrap-context-unavailable","failure remains visible, no success fabricated");
-        Sleep(1200);check(refreshes==6&&runtime.snapshot().pid==loaderPid,"exhausted window remains idle and does not restart loader");
+        Sleep(1200);check(refreshes==6&&runtime.snapshot().pid==loaderPid,"long backoff retains loader without repeated rapid reads");
         check(validations==2&&renewals>=8,"network retries do not repeat resource validation and use fresh operation tokens");
         selected=third.pid;
         check(runtime.requestBindingRefresh(42),"new committed resume can open next transport-only window");
         check(!runtime.requestBindingRefresh(42),"duplicate committed event cannot replenish window");
-        check(wait([&]{return refreshes>=7&&!runtime.snapshot().bindingRetry&&runtime.snapshot().reason=="mirror-handshake-pending";},2500),"new event recovers after exhaustion");
+        check(wait([&]{return refreshes>=7&&!runtime.snapshot().bindingRetry&&runtime.snapshot().reason=="mirror-handshake-pending";},2500),"new event recovers during long outage backoff");
         runtime.setEnabled(false);
         check(WaitForSingleObject(loader.h,1000)==WAIT_OBJECT_0&&runtime.snapshot().pid==0,"off terminates only own inert loader Job");
         check(third.alive(),"off closes watch lease without terminating watched context");

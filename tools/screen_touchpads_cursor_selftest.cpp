@@ -66,16 +66,17 @@ static int modelTest(const char* path) {
         }
         check(prefix+"-100-positions-preserve-hotspot",positioned);
         check(prefix+"-100-moves-do-not-rerender-bitmap",cursorUploads==uploads);
-        // R2 regression: touch and mouse outputs can report SUPPRESSED/SHOWING
-        // back-to-back. A single SHOWING sample is not a safe compositor handoff.
+        // Mouse retains the historical grace. Deck gives a confirmed SHOWING
+        // system cursor exclusive drawing; these samples are not a visual test.
         bool interleaveContinuous=true;unsigned visibilityEdges=0;bool lastVisible=cursorVisible;
         for(int n=0;n<128;n++) {
             ci.flags=(n&1)?CURSOR_SHOWING:CURSOR_SUPPRESSED;
             cursorSyncInfo(ci);
             if(lastVisible!=cursorVisible)++visibilityEdges;
-            lastVisible=cursorVisible;interleaveContinuous=interleaveContinuous && cursorVisible;
+            lastVisible=cursorVisible;interleaveContinuous=interleaveContinuous &&
+                cursorVisible==(mode==Mode::Mouse || ci.flags==CURSOR_SUPPRESSED);
         }
-        check(prefix+"-rapid-touch-mouse-interleave-no-flicker",interleaveContinuous && visibilityEdges==0);
+        check(prefix+"-interleaved-samples-follow-owner-policy",interleaveContinuous && (mode==Mode::Deck || visibilityEdges==0));
         for(ULONGLONG cadence:{4ULL,8ULL,16ULL}) {
             ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,1000);
             const auto hides=cursorHides,shows=cursorShows;bool stable=true;
@@ -84,10 +85,11 @@ static int modelTest(const char* path) {
                 if(n%4==1)ci.hCursor=nullptr;else ci.hCursor=arrow;
                 ci.ptScreenPos={400+(LONG)n,300+(LONG)n};cursorSyncInfo(ci,1000+n*cadence);
                 RECT rect{};GetWindowRect(cursorWindow,&rect);
-                stable=stable && cursorVisible && IsWindowVisible(cursorWindow) &&
-                    rect.left+cursorHotspot.x==ci.ptScreenPos.x && rect.top+cursorHotspot.y==ci.ptScreenPos.y;
+                const bool expectedVisible=mode==Mode::Mouse || !(ci.flags&CURSOR_SHOWING) || !ci.hCursor;
+                stable=stable && cursorVisible==expectedVisible && (IsWindowVisible(cursorWindow)!=FALSE)==expectedVisible &&
+                    (!expectedVisible || (rect.left+cursorHotspot.x==ci.ptScreenPos.x && rect.top+cursorHotspot.y==ci.ptScreenPos.y));
             }
-            check(prefix+"-interleave-cadence-"+std::to_string(cadence)+"ms-no-visibility-edges",stable && cursorHides==hides && cursorShows==shows);
+            check(prefix+"-interleave-cadence-"+std::to_string(cadence)+"ms-owner-policy",stable && (mode==Mode::Deck || (cursorHides==hides && cursorShows==shows)));
         }
         ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,4000);
         const auto missingShapeHides=cursorHides;
@@ -102,9 +104,9 @@ static int modelTest(const char* path) {
         ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci,5000);
         ci.flags=CURSOR_SHOWING;cursorSyncInfo(ci,5010);cursorSyncInfo(ci,5080);
         ci.flags=CURSOR_SUPPRESSED;cursorSyncInfo(ci,5085);ci.flags=CURSOR_SHOWING;cursorSyncInfo(ci,5090);
-        check(prefix+"-suppression-resets-stable-handoff-clock",cursorVisible);
-        cursorSyncInfo(ci,5169);check(prefix+"-handoff-not-early-after-suppression",cursorVisible);
-        cursorSyncInfo(ci,5170);check(prefix+"-handoff-completes-after-new-stable-80ms",!cursorVisible);
+        check(prefix+"-suppression-then-showing-follows-mode-policy",cursorVisible==(mode==Mode::Mouse));
+        cursorSyncInfo(ci,5130);cursorSyncInfo(ci,5169);check(prefix+"-Mouse-retains-grace-Deck-has-system-owner",cursorVisible==(mode==Mode::Mouse));
+        cursorSyncInfo(ci,5170);check(prefix+"-handoff-complete-by-stable-80ms",!cursorVisible);
         ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci);
         const auto validShape=cursorShape;ci.hCursor=(HCURSOR)(uintptr_t)0x123456;
         cursorSyncInfo(ci);check(prefix+"-transient-shape-error-keeps-last-good-frame",cursorVisible && cursorShape==validShape);
@@ -114,15 +116,20 @@ static int modelTest(const char* path) {
         check(prefix+"-noactivate-click-through-styles",(styles&(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_LAYERED))==(WS_EX_TRANSPARENT|WS_EX_NOACTIVATE|WS_EX_LAYERED));
         check(prefix+"-cursor-hit-test-transparent",SendMessageW(cursorWindow,WM_NCHITTEST,0,MAKELPARAM(400,300))==HTTRANSPARENT);
         const ULONGLONG handoffStart=1000;ci.flags=CURSOR_SHOWING;cursorSyncInfo(ci,handoffStart);
-        check(prefix+"-single-SHOWING-sample-does-not-blink",cursorVisible);
-        cursorSyncInfo(ci,handoffStart+79);check(prefix+"-handoff-grace-preserves-visual",cursorVisible);
+        check(prefix+"-single-SHOWING-sample-follows-mode-policy",cursorVisible==(mode==Mode::Mouse));
+        cursorSyncInfo(ci,handoffStart+40);cursorSyncInfo(ci,handoffStart+79);check(prefix+"-grace-preserves-only-Mouse-visual",cursorVisible==(mode==Mode::Mouse));
         cursorSyncInfo(ci,handoffStart+80);check(prefix+"-stable-system-cursor-handoff",!cursorVisible && !IsWindowVisible(cursorWindow));
-        ci.flags=0;ci.hCursor=nullptr;cursorSyncInfo(ci);check(prefix+"-explicit-hidden-null-stays-hidden",!cursorVisible);
+        ci.flags=0;ci.hCursor=nullptr;cursorSyncInfo(ci);check(prefix+"-active-hidden-null-obeys-Deck-visibility-override",cursorVisible==(mode==Mode::Deck));
         ci.flags=CURSOR_SUPPRESSED;cursorSyncInfo(ci);check(prefix+"-suppressed-null-shape-resolves-safely",cursorVisible && cursorShape);
-        const auto syncs=cursorSyncs;std::thread bus([]{for(int n=0;n<10000;n++)cursorRequestSync();});bus.join();
-        check(prefix+"-BUS-only-posts-does-not-render",cursorSyncs==syncs);check(prefix+"-BUS-posts-coalesced",cursorSyncPending.load());
+        cursorNextActivePoll.store(0); // explicitly due: the active fallback is now demand/deadline driven.
+        const auto syncs=cursorSyncs,queries=cursorQueries;std::thread bus([]{for(int n=0;n<10000;n++)cursorRequestSync();});bus.join();
+        check(prefix+"-BUS-only-posts-does-not-render",cursorSyncs==syncs&&cursorQueries==queries);check(prefix+"-BUS-posts-coalesced",cursorSyncPending.load());
         // Drain on the actual HWND owner, but do not invoke another BUS tick.
-        pump(2,false);check(prefix+"-BUS-dispatches-one-UI-sync",cursorSyncs==syncs+1);
+        pump(2,false);check(prefix+"-BUS-dispatches-one-UI-query",cursorQueries==queries+1);
+        cursorSyncPending.store(false);cursorNextActivePoll.store(GetTickCount64()+1000);
+        for(int n=0;n<10000;++n)cursorRequestSync();
+        check(prefix+"-active-fallback-not-polled-on-every-BUS-tick",!cursorSyncPending.load()&&cursorQueries==queries+1);
+        cursorNextActivePoll.store(0);
         ci.flags=CURSOR_SUPPRESSED;ci.hCursor=arrow;cursorSyncInfo(ci);
         {std::lock_guard<std::mutex> lock(mutex);core.event(0,77,2,140,180,sizes[0].cx,sizes[0].cy,GetTickCount64());}
         cursorContactChanged(windows[0]);check(prefix+"-Core-up-clears-fallback",!cursorVisible && !cursorTracking.load());

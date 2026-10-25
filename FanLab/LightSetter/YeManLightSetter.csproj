@@ -14,7 +14,10 @@
          hc-runtime-root（HC 运行库目录，自带这两个 DLL）解析 ⇒ 无需随包复制。
          效果：light-setter 目录少 24.2MB（23.73 + 0.50）。 -->
     <TargetFramework>net10.0-windows</TargetFramework>
-    <UseWPF>true</UseWPF>
+    <!-- Default retains the desktop shared framework for the legacy adapter.
+         Core-only builds need only Microsoft.NETCore.App and never load HC/UI. -->
+    <LightSetterLegacyDesktop Condition="'$(LightSetterLegacyDesktop)' == ''">true</LightSetterLegacyDesktop>
+    <UseWPF Condition="'$(LightSetterLegacyDesktop)' == 'true'">true</UseWPF>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -28,5 +31,17 @@
        （2026-09-16 实机复现后发现并补齐）。 -->
   <ItemGroup>
     <Content Include="YeManLightSetter.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Remove="DeviceCore\**\*.cs" />
+    <Compile Include="..\..\native\ProcessEfficiency.cs" Link="ProcessEfficiency.cs" />
+    <Compile Include="..\DeviceCoreSharedDependencies.cs" Link="DeviceCoreSharedDependencies.cs" />
+    <Compile Include="..\RuntimeDependencyContract.cs" Link="RuntimeDependencyContract.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.cs" Link="Capabilities/HcDeviceCapabilityCatalog.cs" />
+    <Compile Include="../../capabilities/HcDeviceCapabilityCatalog.generated.cs" Link="Capabilities/HcDeviceCapabilityCatalog.generated.cs" />
+    <Compile Include="../../capabilities/HcLightingCapabilityCatalog.cs" Link="Capabilities/HcLightingCapabilityCatalog.cs" />
+    <Compile Include="../../capabilities/HcLightingCapabilityCatalog.generated.cs" Link="Capabilities/HcLightingCapabilityCatalog.generated.cs" />
   </ItemGroup>
 </Project>

@@ -1,0 +1,67 @@
+// @environment
+static MachineIdentity g_machineIdentity;
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<unsigned long long> g_powerGeneration{11};
+static std::atomic<unsigned> g_xinputTopologyEpoch{23};
+static bool g_inputCaptureReady=true;
+static std::atomic<bool> g_exitRequested{false},g_shortcutRecordingActive{false};
+static std::atomic<uint32_t> g_oemShortcutEdgeEpoch{1};
+static std::atomic<int> g_oemBackState{0},g_oemBackStateKb{0},g_oemBackProfileId{0};
+static std::atomic<uint64_t> g_oemKeyMask{0},g_oemKeyMaskMsiDinput{0},g_oemKeyMaskMsi{0},g_oemKeyMaskRog{0};
+static std::atomic<uint32_t> g_gpdChordPubGen{0},g_gpdBackIfaceGen{0},g_oemKbDownRaw{0};
+static std::atomic<int> g_gpdChordSnapPhysical{0};
+static std::atomic<uint32_t> g_gpdChordSnapBaseKey{0},g_gpdChordSnapPrefix{0};
+static std::atomic<bool> g_gpdBackIfaceReady{false};
+static bool g_oemMouseLeft=false,g_oemMouseX2=false;
+static uint32_t g_oemKbDown=0;
+static HWND g_hwnd=reinterpret_cast<HWND>(1);
+static constexpr UINT WM_OEM_PRODUCER_EDGE=WM_APP+101;
+static WORD g_curW=0;
+static XINPUT_GAMEPAD g_curPad{};
+static constexpr uint64_t kOemShortcutUnboundEpoch=UINT64_MAX;
+static int msiDinputBackAuthoritativeMask(){return 0;}
+static bool msiWmiShortcutAuthoritative(){return false;}
+static bool hardwareWriteAllowed(){++appmock::permissionChecks;return appmock::writePermissionOverride?appmock::writePermissionOverride():appmock::hardwareAllowed&&g_powerLifecycle.load()==PowerLifecycle::Ready;}
+static bool msiWmiGenerationCurrent(uint64_t){return false;}
+static bool gamepadSerialSubmit(std::function<void()> fn,SerialJobKind){if(!appmock::serialAccepted)return false;appmock::jobs.push_back(std::move(fn));return true;}
+// @forward
+static uint64_t oemProducerAuthorityMask();
+static uint64_t oemProducerPhysicalMask();
+static uint64_t nativeOemKeyboardActionMask();
+// @action
+// Only the backend action side effect is replaced. Token, epoch, exit/recording
+// admission in nativeYmccShortcutSubmit and all new UI decision code are real.
+static bool nativeYmccShortcutEmit(const std::string& action,int delta,uint64_t epoch,uint64_t wg,uint64_t ws,bool fallback,OemProducerTokens tokens){
+    return nativeYmccShortcutSubmit([action,delta]{appmock::actions.push_back(action+":"+std::to_string(delta));},SerialJobKind::YmccOwn,epoch,wg,ws,fallback,tokens);
+}
+namespace ymcc {inline json inputShortcutContext(const json&,int){return json::object();}}
+static json ymSettingsSection(const char*){return json::object();}
+static int gameInputOwnerSession(){return 1;}
+static void nativeInputShortcutToggle(const std::string& action,const std::string&,const json&){appmock::actions.push_back(action);}
+static void nativeKeyboardShortcutSend(WORD key,bool){appmock::actions.push_back("key:"+std::to_string(key));}
+// @ui
+struct Evaluation {WORD buttons;XINPUT_GAMEPAD pad;ULONGLONG capturedAt;uint64_t mask,scope;OemProducerTokens tokens;};
+static std::vector<Evaluation> evaluations;
+static std::vector<OemProducerEdgeReceipt> rogReceipts;
+static void nativeRogClickDispatch(const OemProducerEdgeReceipt& r){rogReceipts.push_back(r);}
+static void nativeKeyboardShortcutsRefresh(ULONGLONG){++appmock::refreshes;}
+static uint32_t g_nativeShortcutLegacyOverrideMask=0,g_nativeOemEdgeEpochSeen=0;
+static bool g_nativeWmiAuthoritySeen=false;
+static std::atomic<uint32_t> g_oemShortcutEdgePostFailures{0};
+static void nativeOemKeyboardConsumeMaintain(ULONGLONG){}
+static void nativeOemKeyboardConsumePublish(){}
+static void nativeMsiWmiShortcutDrain(){}
+static void nativeOemProducerDrain();
+// @observation
+// Observation is a forwarding wrapper, not an evaluator substitute. The real
+// production evaluator executes on every drain call, with its body unchanged.
+static void appObserveRealEvaluation(WORD buttons,const XINPUT_GAMEPAD& pad,ULONGLONG now,bool allowed,const uint64_t* mask,bool oemOnly,uint64_t scope,const OemProducerTokens* tokens){
+    test::check(allowed&&oemOnly&&mask&&tokens&&scope,"real rear evaluator receives explicit scoped source snapshot");
+    evaluations.push_back({buttons,pad,now,*mask,scope,*tokens});
+    nativeKeyboardShortcutsEvaluate(buttons,pad,now,allowed,mask,oemOnly,scope,tokens);
+}
+// @ownerObservation
+// The real revoke executes before a simulated WndProc callback can inspect it.
+static void appObserveRealRevoke(bool clearBinding=true){
+    onexX2RevokeSources(clearBinding);if(appmock::afterSourceRevoke)appmock::afterSourceRevoke(clearBinding);
+}

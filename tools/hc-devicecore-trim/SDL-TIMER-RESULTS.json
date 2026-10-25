@@ -1,0 +1,43 @@
+{
+  "Status": "READY-FOR-HEADLESS-PASSIVE-TIMER-INTEGRATION",
+  "RuntimeId": "YMCC-DEVICECORE-SDL-TIMER-20261018-110156b16a20a903",
+  "Replacement": {
+    "Path": "HandheldCompanion.dll",
+    "File": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\sdl-timer\\final\\candidate\\HandheldCompanion.dll",
+    "Bytes": 2774016,
+    "Sha256": "110156b16a20a903029c8f4632b2f6c25de542284827bcf686518865cfbd70ac",
+    "SourceSha256": "c0e7201b099b66e447ddae67dc5e6e6c04e1594fbec4689cbdb2baf320ebfa15",
+    "AssemblyName": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+    "Mvid": "84534c38-43c5-6f08-02f7-d4f7ee983591",
+    "StrongName": "unsigned",
+    "Authenticode": "NotSigned"
+  },
+  "OtherReplacements": [],
+  "ModernAndControlsUnchanged": true,
+  "SdkUnchanged": true,
+  "PolicyPath": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\tools\\hc-devicecore-trim\\profiles\\sdl-passive-timer.policy.json",
+  "PolicySha256": "a1317b548f14c6b6c40ea74f8fed65fd2d83c2c5cd3c52785ab9ada202b552c1",
+  "InputManifestSha256": "77afd0479f8d9d936dcb8358efa7ee65d4e5e630dc7f643b321ba4f697977513",
+  "ProbeRuntimePath": "D:\\Codex\\2026-10-18\\kai-s\\work\\hc-large-strip\\binary-trim\\sdl-timer\\final\\runtime-no-sdl",
+  "ProbeRuntimeFiles": 110,
+  "ProbeRuntimeBytes": 29646179,
+  "ProbeManifestSha256": "b27799e0786bb757ee9b118ed7f10cb1b90a12f88632d015bbd6da4d6d7456ce",
+  "Gates": {
+    "HcAllGetTypes": 1768,
+    "Callbacks": 22,
+    "ModernPureConstructions": 7,
+    "CandidateProcessId": 14196,
+    "BaselineProcessId": 44308,
+    "CandidateNativeAttempts": 0,
+    "BaselineNativeAttempts": 1,
+    "NoSdlNativeModules": true,
+    "PhysicallyNoSdl3Dll": true,
+    "RawQpcBrackets": 128,
+    "MonotonicSamples": 10000
+  },
+  "SafeExecutionBoundary": "Replay actual 57-byte SDLController default field-initializer IL on an uninitialized DummyXbox360Controller object; stop before IController base constructor. No full controller, device, ManagerFactory/ControllerManager cctor, SDLInit, Host or window execution.",
+  "FullDummyConstructorValidated": false,
+  "RemainingSdlNativeClosureApproved": false,
+  "SdlManagedMetadataRetained": true,
+  "Integration": "Replace HC only; owner regenerates formal source pins/profile/manifest. Physical no-SDL runtime is a scoped probe directory; broader SDL removal awaits the parallel consumer audit. Do not replace the production runtime wholesale."
+}

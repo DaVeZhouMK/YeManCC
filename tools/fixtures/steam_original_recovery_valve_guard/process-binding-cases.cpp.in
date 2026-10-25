@@ -1,0 +1,28 @@
+#include "sleep_steam_capture.h"
+#include <fstream>
+#include <iostream>
+using namespace ymcc::sleepsteam;
+std::vector<Json> cases;unsigned checks=0;
+void need(bool b,const char* why){++checks;if(!b)throw std::runtime_error(why);}
+void test(const char* name,const std::function<void()>& fn){try{fn();cases.push_back({{"name",name},{"passed",true}});}catch(const std::exception&e){cases.push_back({{"name",name},{"passed",false},{"reason",e.what()}});}}
+const std::string path="D:\\Game\\xkfyz\\wuxia.exe",at="2026-10-23 13:55:23",before="2026-10-23 13:55:21",after="2026-10-23 13:55:26";
+const std::string add="[2026-10-23 13:55:23] AppID 10260559608980439040 adding PID 49372 as a tracked process \"\"D:\\Game\\xkfyz\\wuxia.exe\"\"";
+const std::string uiRemove="[2026-10-23 13:55:23] Remove -1905994598 from running list";
+Binding query(const std::vector<std::string>&v,TrackingScope s=TrackingScope::ProcessLifetime){return track(v,49372,path,before,after,s);}
+int main(int argc,char**argv){
+ test("default-running-list-removal-still-revokes",[]{auto b=query({add,uiRemove},TrackingScope::RunningListAndProcess);need(b.status=="removed","default-remove-not-revoked");need(trackedProcessInventory({add,uiRemove}).rows.empty(),"default-inventory-not-revoked");});
+ test("process-lifetime-retains-exact-launch",[]{auto b=query({add,uiRemove});need(b.status=="tracked"&&b.appid==2388972698u&&b.line==1&&b.exactPath,"process-launch-lost-on-ui-remove");auto inv=trackedProcessInventory({add,uiRemove},TrackingScope::ProcessLifetime);need(inv.complete&&inv.rows.size()==1&&inv.rows[0].pid==49372,"process-inventory-lost-on-ui-remove");});
+ test("explicit-pid-drop-still-revokes",[]{const auto drop="[2026-10-23 13:55:24] AppID 10260559608980439040 no longer tracking PID 49372, exit code 0";need(query({add,uiRemove,drop}).status=="removed","explicit-drop-ignored");need(trackedProcessInventory({add,uiRemove,drop},TrackingScope::ProcessLifetime).rows.empty(),"inventory-drop-ignored");});
+ test("new-steam-client-clears-old-association",[]{const auto reset="[2026-10-23 13:55:24] Client version: 1791918634";need(query({add,reset}).status=="unknown","client-reset-ignored");need(trackedProcessInventory({add,reset},TrackingScope::ProcessLifetime).rows.empty(),"inventory-client-reset-ignored");});
+ test("wrong-original-pid-refused",[]{need(track({add,uiRemove},49373,path,before,after,TrackingScope::ProcessLifetime).status=="unknown","wrong-pid-accepted");});
+ test("wrong-original-path-refused",[]{need(track({add,uiRemove},49372,"D:\\Other\\wuxia.exe",before,after,TrackingScope::ProcessLifetime).status=="unknown","wrong-path-accepted");});
+ test("birth-window-still-required",[]{need(track({add,uiRemove},49372,path,"2026-10-23 13:56:00","2026-10-23 13:56:10",TrackingScope::ProcessLifetime).status=="unknown","wrong-birth-window-accepted");});
+ test("missing-launch-never-synthesized",[]{need(query({uiRemove}).status=="unknown","remove-inferred-launch");need(trackedProcessInventory({uiRemove},TrackingScope::ProcessLifetime).rows.empty(),"remove-inferred-inventory");});
+ test("different-gameids-remain-ambiguous",[]{auto other=add;const auto token=other.find("10260559608980439040");other.replace(token,20,"10307630032478011392");need(query({add,other,uiRemove}).status=="ambiguous","different-gameid-inferred");});
+ test("licensed-type0-remains-exact-type0",[]{auto licensed=add;licensed.replace(licensed.find("10260559608980439040"),20,"945360");auto b=query({licensed,"[2026-10-23 13:55:24] Remove 945360 from running list"});need(b.status=="tracked"&&b.appid==945360u,"licensed-identity-changed");std::uint64_t value=0;need(unsignedDecimal("945360",value)&&((value>>24)&255)==0,"licensed-became-type2");});
+ test("malformed-full-gameid-refused",[]{auto bad=add;bad.replace(bad.find("10260559608980439040"),20,"10260559608980439041");need(query({bad}).status=="unknown","malformed-full-id-accepted");});
+ test("live-process-inventory-limit-remains-bounded",[]{std::vector<std::string> rows;for(unsigned i=0;i<33;++i){auto a=add;auto p=a.find("49372");a.replace(p,5,std::to_string(50000+i));rows.push_back(a);}auto inv=trackedProcessInventory(rows,TrackingScope::ProcessLifetime);need(!inv.complete&&inv.reason=="steam-tracker-live-process-limit","inventory-limit-bypassed");});
+ test("captured-real-new-instance-replay",[&]{need(argc==2,"snapshot-path-required");std::ifstream f(argv[1],std::ios::binary);need(f.good(),"snapshot-unreadable");std::vector<std::string> rows;std::string row;while(std::getline(f,row))rows.push_back(row);need(query(rows,TrackingScope::RunningListAndProcess).status=="removed","real-default-defect-not-reproduced");auto b=query(rows);need(b.status=="tracked"&&b.appid==2388972698u&&b.exactPath&&b.line==5108,"real-exact-launch-not-bound");auto inv=trackedProcessInventory(rows,TrackingScope::ProcessLifetime);need(inv.complete&&std::count_if(inv.rows.begin(),inv.rows.end(),[](const auto&p){return p.pid==49372&&p.appid==2388972698u;})==1,"real-process-inventory-missing");});
+ bool passed=true;for(const auto&c:cases)if(!c["passed"].get<bool>())passed=false;
+ std::cout<<Json({{"passed",passed},{"tests",cases.size()},{"checks",checks},{"cases",cases},{"realSteamActions",0},{"sleepActions",0},{"productionHeadersCompiled",true}}).dump();return passed?0:1;
+}

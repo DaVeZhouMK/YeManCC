@@ -1,0 +1,42 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact diagnostic historical closure only; never current-source acceptance",
+  "files": {
+    "identity/BASELINE-DEPENDENCIES.json": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\partial-fixtures\\BASELINE-DEPENDENCIES.json",
+      "sha256": "cf14703810f9bdb40bd38b90613b74b88a012f95da6221148f33763b11254f77"
+    },
+    "identity/LEGACY-EMERGENCY-DEPENDENCIES.json": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\partial-fixtures\\LEGACY-EMERGENCY-DEPENDENCIES.json",
+      "sha256": "5927ef3e6a169b844e380334f0abf39f0d2d4aea8c64545c9da511f620ff9d24"
+    },
+    "baseline-dependencies/ORIGINAL-RESULT.json": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PartialInit23\\baseline\\RESULT.json",
+      "sha256": "076e7615794db4ed7bcd281eb85554e93bad1f90b1c899a2438d218dbe340ba1"
+    },
+    "baseline-dependencies/native/main.cpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PartialInit23\\baseline\\run-20261023-025324-432947-55464\\source\\native\\main.cpp",
+      "sha256": "3ee8847d99483335908d0e0c265885165c9bde90764244de56f77f29c3994992"
+    },
+    "baseline-dependencies/tools/fixtures/input_capture_timer_retirement/partial_init_fixture.cpp.in": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PartialInit23\\baseline\\run-20261023-025324-432947-55464\\source\\tools\\fixtures\\input_capture_timer_retirement\\partial_init_fixture.cpp.in",
+      "sha256": "c09528c3246794d4b65da9c6e585ef61b8f6ecdb8334838006152882e7ab051a"
+    },
+    "baseline-dependencies/deps/json/json.hpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PartialInit23\\baseline\\run-20261023-025324-432947-55464\\source\\deps\\json\\json.hpp",
+      "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
+    },
+    "baseline-dependencies/tools/fixtures/input_capture_timer_retirement/partial_init_baseline.json": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-PartialInit23\\baseline\\run-20261023-025324-432947-55464\\source\\tools\\fixtures\\input_capture_timer_retirement\\partial_init_baseline.json",
+      "sha256": "8ddb2bacc55721256744c81d4dfdb8e02d80c75d738b04894be7140088605529"
+    },
+    "legacy-emergency/native/main.cpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\partial-fixtures\\final-current\\run-20261023-040546-984316-55092\\source\\native\\main.cpp",
+      "sha256": "01a00d9424e1ccb26af3daa88f6ba3be7f79fdf3eb99b20ec467753c804d1343"
+    },
+    "historical-exit/native/main.cpp": {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\main.before.cpp",
+      "sha256": "3469970958a8050f95d1041ad8b59c25d983a1fb35faff57e6c64f7699d7e2c0"
+    }
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Frozen original MSI SD and native endpoint/preparation functions; no behavior substitutes",
+  "files": [
+    {
+      "file": "native/main.cpp",
+      "sha256": "84196dd8ab6a2e2c791501ae0ce88448a1b376fd2dc08f7bc54eb77a3ed20910"
+    },
+    {
+      "file": "native/msi_native_rear_keyboard_runtime.h",
+      "sha256": "4dbdefe7382bac73d272c1d2bdf7bd3cf52efabcd41e6a483433812ff01ea28a"
+    }
+  ],
+  "originalFiles": [
+    {
+      "file": "native/main.cpp",
+      "sha256": "2a7931eed8d216a8b8c26207db36339ecfd9ef430ed1d9028f6dd22403e5e4dd"
+    },
+    {
+      "file": "native/msi_native_rear_keyboard_runtime.h",
+      "sha256": "a783f18e18f44eda3437c97667f7e96bb28978ff3048277ffa18fa5e14950008"
+    }
+  ]
+}

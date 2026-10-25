@@ -1,0 +1,13 @@
+/* Generated from src/components/MonitorHudTemplate.vue; use tools/sync_simulation_monitor_style.mjs.
+   Shared core typography only; no sensor connections. Core SHA256: c4f601752f8bc71002dd74455e964a34df33e6b8541d6d99c3d399fca0e54bd6 */
+.ymcc-hud { position:relative;isolation:isolate;contain:layout paint;color:#f1f5fa;padding:.8em 1em;width:max-content;max-width:none;box-sizing:border-box;font-family:'Segoe UI','Microsoft YaHei UI',sans-serif;line-height:1.35;font-variant-numeric:tabular-nums;pointer-events:none;opacity:1; }
+.hud-column { display:contents; }
+.hud-group { display:flex;gap:var(--hud-gap);padding:.5em 0;min-width:0;align-self:start; }
+.hud-group-content { min-width:0; }.hud-group-label { color:var(--hud-accent);font-size:.78em;font-weight:600;letter-spacing:.06em;margin-bottom:.4em; }
+/* Intrinsic tracks replace the old fixed 22em board and stretching FPS cell. */
+.hud-values { display:grid;grid-template-columns:repeat(var(--hud-value-cols),minmax(4em,max-content));gap:.5em .8em; }
+.hud-metric { display:flex;flex-direction:column;min-width:0; }.hud-metric-label { font-size:.76em;color:var(--hud-secondary);white-space:nowrap; }.hud-number { white-space:nowrap; }.hud-number small { font-size:.72em;margin-left:.25em;color:var(--hud-secondary); }
+.hud-value-digits { display:inline-block;text-align:left;font-variant-numeric:tabular-nums; }
+.hud-unit--hidden,.hud-temp-warning--inactive { visibility:hidden; }
+.hud-fps-low-value { display:inline-block;min-width:3ch;text-align:left;font-variant-numeric:tabular-nums; }
+.hud-fps { display:flex;flex-direction:column;min-width:0;flex:none; }.hud-fps-label { font-size:.8em;color:var(--hud-accent); }.hud-fps strong { font-size:3.8em;line-height:1.04;font-weight:600;letter-spacing:-.03em;min-width:2ch; }

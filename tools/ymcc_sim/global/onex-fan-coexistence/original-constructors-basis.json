@@ -1,0 +1,2535 @@
+{
+  "schemaVersion": 1,
+  "kind": "original-constructors-source-contract",
+  "references": {
+    "basePlan": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-current-sta-bootstrap-original-r1/prepared37/STA-BOOTSTRAP-GENERATION-PLAN.json",
+      "sha256": "1b84fc2b97a81936c57595dc0ace3d4c9dfc4280a0179d1daf91ca52bac14fac"
+    },
+    "sourceBuild": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-current-source-candidate-build-20261021-r1/SOURCE-CANDIDATE.json",
+      "sha256": "43aa4b3b999f34d231b325baea2d62d1d0bf714c02aa52c1fe2c96e07b049b7b"
+    },
+    "metadataSummary": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-current-original-constructor-metadata-r2/SUMMARY.json",
+      "sha256": "cb2cfae16dd6828fa8528680314275d65a0877f6c6028521e1a70b8ff3fbca21"
+    },
+    "inventory": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\fan-current-sta-bootstrap-original-r1\\prepared37\\original37-preparation\\owned-stage\\parent-original-constructor-metadata-r2\\inventory.json",
+      "sha256": "3b97a5e9c808215cfc521aca023c7c876268d35cf30fdf50dccff4d8bdf89b5d"
+    },
+    "portsProof": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\fan-current-sta-bootstrap-original-r1\\prepared37\\original37-preparation\\owned-stage\\parent-original-constructor-metadata-r2\\constructor-ports-proof.json",
+      "sha256": "fa537308776ba1b7bb1f86e99fadf3a461fcc9928e24e71a879611bfa5f9b3a6"
+    },
+    "raw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-current-original-constructor-metadata-r2/CONSTRUCTOR-RAW-RESULT.json",
+      "sha256": "41febb0a587e9e181642285301389e9d2f647c87026c279d01a54b38486dee9d"
+    },
+    "rawRequest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-current-original-constructor-metadata-r2/CONSTRUCTOR-RAW-INPUTS.json",
+      "sha256": "9dd502ab9d1af49a26ab1cbad311f7e322c7e476a92cfdb1896cdf8a7854b13b"
+    },
+    "sourceHc": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.dll",
+      "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583"
+    },
+    "generatedHc": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\fan-current-sta-bootstrap-original-r1\\prepared37\\original37-preparation\\owned-stage\\parent-original-constructor-metadata-r2\\leaf-hc\\HandheldCompanion.dll",
+      "sha256": "7fd600f2c7c7359d25fd99fc0f95e39439c98e86584f08d1439f1e0766a0a479"
+    },
+    "frameworkMetadata": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/framework-metadata.json",
+      "sha256": "2daad3548c0847fa41bd29da6b1d0f2e08655b72c17390ea93595319fdd04495"
+    },
+    "basePreload": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-current-source-policy-metadata-r1/default-preload-metadata.json",
+      "sha256": "2ad574def20dce37bfd98638f3357d3d9724b5332808faf75997fe0ba737c20e"
+    },
+    "moduleBoundary": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-raw-source-integration-r1/MODULE-INITIALIZER-BOUNDARY.json",
+      "sha256": "f39c1e61cafcd786b20f5399a110f8641ff6fd37f8909a73f4cf5239c599b929"
+    },
+    "sideEffects": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-side-effect-boundaries-r57/SUMMARY.json",
+      "sha256": "ed0d4c630d67481865fa536a3ff0532c655afa3097330cdd8d16aa0aa44ddfa1"
+    },
+    "ported512": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-ported-raw-closure-r3/RAW-RESULT.json",
+      "sha256": "f5ba9d637fcd1a5b77d92b228fbca7b8407cb57bc442b442d9e4ac6ccaf85f69"
+    },
+    "appLoggingRaw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/constructor-app-logging-raw-r57-r4/RAW-RESULT.json",
+      "sha256": "ff6dcbb99646bd33ea628889836af5e8ff15803cdeff51b9bb710c753cf4ca70"
+    },
+    "enumRaw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-original-constructors-prepare-20261021-r1/evidence/ENUM-RAW.json",
+      "sha256": "661c6c88e8c6eb099362a6374bec26301c28d99a49c9043eba881a1e5e6a6f19"
+    },
+    "catalog": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/capabilities/hc-device-catalog.json",
+      "sha256": "5efd576710e42a62310698eb039ea5cac8c5d4c6607b9ec0b820a3b6b79a2d49"
+    },
+    "oldResult": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+      "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+    },
+    "oldProof": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/proof.json",
+      "sha256": "756764474adf4b358d6858f0d1c816915fbdac564f68034d3ca7e1b926f4d76d"
+    },
+    "oldNative": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/native-interface.json",
+      "sha256": "ccf16e9017f4907caed0dd5f58031b8837e2bfbd3ca318b68a5dbeb124d2a118"
+    },
+    "oldPins": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/runtime-pins.json",
+      "sha256": "64fb92bc2e6c6c3bcf174448a6289af432969dd35067d935410b2e3a07d067e3"
+    },
+    "dependencyRaw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-original-constructors-prepare-20261021-r1/evidence/DEPENDENCY-RAW.json",
+      "sha256": "9d2cd20702d0f40d4a1f7a087f126079fd4c56fe4d89fa83d6789dd877067a93"
+    },
+    "dependencyRequest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-original-constructors-prepare-20261021-r1/evidence/DEPENDENCY-INPUTS.json",
+      "sha256": "e6e9c7ce71b83230ad6fbcc510ca5b47a2db84eb00754d0fb9746b7577e60488"
+    },
+    "passiveProjection": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/passive-sdk-projection-controls-r57/SUMMARY.json",
+      "sha256": "15f2dfbdadf066395e9047ee98aa026ec9cf79b62d0b5a6f29179935d82810ee"
+    },
+    "desktopRaw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-constructor-desktop-framework-prepare-20261021-r1/evidence/DESKTOP3-RAW.json",
+      "sha256": "28085e9460b8708418bc2ed9c7bbee48e1feffe809c03d0278611e94aef1e59c"
+    },
+    "desktopRawRequest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-constructor-desktop-framework-prepare-20261021-r1/evidence/DESKTOP3-RAW-INPUTS.json",
+      "sha256": "9bc5a63900669cc4b21117bd70569ec51e58549008c1c2f54f692d6f489687ee"
+    },
+    "authoritySchema2Fix": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/original-constructors-authority-schema2-fix-r57/SOURCE-INTEGRATION.json",
+      "sha256": "086a798aa73d14cdc5bfc2160ac0d25b1d43e3cb8cfe089b737bd1f5ac723281"
+    },
+    "desktopRequestFailure": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/fan-original89-current-actual-r57-r2/prepared/original-constructors-launch.json",
+      "sha256": "262f9447ed0ad54a254bf01a53a7a90645ad35e6859983bbf67a46f81733acd4"
+    }
+  },
+  "sources": {
+    "constructor-proof.mjs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/constructor-proof.mjs",
+      "sha256": "6d65939667c934d34ad7ebffbe683c086a0a133e0f16832955b75992b4322712"
+    },
+    "ConstructorCases.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorCases.cs",
+      "sha256": "95bd9e9f30687c5b94f97a4e56432ced75ddb808dc40a8e74d32c3ba5e83e4b7"
+    },
+    "ConstructorInventory.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorInventory.cs",
+      "sha256": "c4b769e583dc8641954eeffdf58ab3e62ff2f5c5ccc2993cb2f9e4be22687d92"
+    },
+    "ConstructorIoPorts.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+      "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+    },
+    "Harness.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/Harness.cs",
+      "sha256": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8"
+    },
+    "HarnessLoadContexts.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/HarnessLoadContexts.cs",
+      "sha256": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230"
+    },
+    "ProducerContextAuthority.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ProducerContextAuthority.cs",
+      "sha256": "668d5085403ffafd816e7e679ec25b067fbb992c0f6eb995801ad3696c886705"
+    },
+    "constructor-raw-contract.mjs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/constructor-raw-contract.mjs",
+      "sha256": "ff41735ce932d34344983a34a1cd5902a84729d94d831ea58aca815c8d00a7cb"
+    },
+    "constructor-raw-basis.json": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/constructor-raw-basis.json",
+      "sha256": "8a23c4af26823ae8fbf7b8d02c24e4e524c5685e3bc6d075c5ba2a5b4bef3edc"
+    },
+    "default-case-contract.mjs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/default-case-contract.mjs",
+      "sha256": "4d181a8556613cb76c4eceb9077986e764cfb2716da7e3e39146175f82d0f00c"
+    },
+    "load-authority/ScopedLoadAuthority.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ScopedLoadAuthority.cs",
+      "sha256": "5ad1e8cd99aec9cfedad0699746d9b0e380ffcab483f32cbba2ec25600ec49e6"
+    },
+    "load-authority/SdkFreeToolEntry.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.cs",
+      "sha256": "a286d33a18e644619a06a91f69eba97358702a6e1d7a2f4384135b204189ca84"
+    },
+    "load-authority/SdkFreeToolEntry.MTA.cs": {
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.MTA.cs",
+      "sha256": "8391b21ace573ad6dea303ae4b0195c94e067784f19e9ad26ae4da8b931e421d"
+    }
+  },
+  "compiledSources": [
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/Harness.cs",
+        "sha256": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/Harness.cs",
+        "sha256": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorInventory.cs",
+        "sha256": "c4b769e583dc8641954eeffdf58ab3e62ff2f5c5ccc2993cb2f9e4be22687d92"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorInventory.cs",
+        "sha256": "c4b769e583dc8641954eeffdf58ab3e62ff2f5c5ccc2993cb2f9e4be22687d92"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorCases.cs",
+        "sha256": "95bd9e9f30687c5b94f97a4e56432ced75ddb808dc40a8e74d32c3ba5e83e4b7"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorCases.cs",
+        "sha256": "95bd9e9f30687c5b94f97a4e56432ced75ddb808dc40a8e74d32c3ba5e83e4b7"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+        "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+        "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/HarnessLoadContexts.cs",
+        "sha256": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/HarnessLoadContexts.cs",
+        "sha256": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ProducerContextAuthority.cs",
+        "sha256": "668d5085403ffafd816e7e679ec25b067fbb992c0f6eb995801ad3696c886705"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/ProducerContextAuthority.cs",
+        "sha256": "668d5085403ffafd816e7e679ec25b067fbb992c0f6eb995801ad3696c886705"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ScopedLoadAuthority.cs",
+        "sha256": "5ad1e8cd99aec9cfedad0699746d9b0e380ffcab483f32cbba2ec25600ec49e6"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/ScopedLoadAuthority.cs",
+        "sha256": "5ad1e8cd99aec9cfedad0699746d9b0e380ffcab483f32cbba2ec25600ec49e6"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.cs",
+        "sha256": "a286d33a18e644619a06a91f69eba97358702a6e1d7a2f4384135b204189ca84"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.cs",
+        "sha256": "a286d33a18e644619a06a91f69eba97358702a6e1d7a2f4384135b204189ca84"
+      }
+    },
+    {
+      "current": {
+        "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.MTA.cs",
+        "sha256": "8391b21ace573ad6dea303ae4b0195c94e067784f19e9ad26ae4da8b931e421d"
+      },
+      "compiledSource": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-first-invocation-prepare-20261021-r1/actual-prepare-final-cli/source-view/tools/ymcc_sim/global/onex-fan-coexistence/load-authority/SdkFreeToolEntry.MTA.cs",
+        "sha256": "8391b21ace573ad6dea303ae4b0195c94e067784f19e9ad26ae4da8b931e421d"
+      }
+    }
+  ],
+  "images": {
+    "generatedHc": "7fd600f2c7c7359d25fd99fc0f95e39439c98e86584f08d1439f1e0766a0a479",
+    "rawHc": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+    "host": "2b59965fce6909b1a85058e1cf670477090ed858d64eda5484a2fda38eec484a",
+    "backend": "2a3ae2d1fa99c382841dfa6ee690ac3c3c9baf429b726b76a9c67c2d6fcfe236",
+    "producer": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846",
+    "launcher": "55bbc787f00ccc7b3c3855023f2f96df6423baf0481883ec40a732f7b5583a0e",
+    "authority": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b",
+    "syntheticHc": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6",
+    "nativeMath": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9"
+  },
+  "identity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+  "original37": [
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.deps.json",
+      "sha256": "2ddcefa243cc9abd009154e6a788f982a8b4de381c203e85e144691c3f12b711"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.dll",
+      "sha256": "244f26c326f2ae58a99cfa056b0df792cb2eef51ad76a13b681aa92cc6cfbc85"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ConstructorIoPorts.pdb",
+      "sha256": "e8baed3404dcbe929d0a1483ba33dfe512a954999b7ba610111ccf57c2db13bd"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/ConstructorIoPorts/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.deps.json",
+      "sha256": "d16a5985d7ffafb34e00e142b4e83144ae81058c6bf80bc58a9f5317c9bada8d"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.dll",
+      "sha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/HandheldCompanion.pdb",
+      "sha256": "813e48ccc0fe8daa43a0223644a464d3cdebcc2302992561523800c9f92ecc32"
+    },
+    {
+      "relative": "test-build/bin/Fixture/release/Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ConstructorIoPorts.dll",
+      "sha256": "244f26c326f2ae58a99cfa056b0df792cb2eef51ad76a13b681aa92cc6cfbc85"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ConstructorIoPorts.pdb",
+      "sha256": "e8baed3404dcbe929d0a1483ba33dfe512a954999b7ba610111ccf57c2db13bd"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/HandheldCompanion.dll",
+      "sha256": "6d7bff05991ee407538b4ef35e12092b21a155d15ab5ca60fe0eae21846391f6"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/HandheldCompanion.pdb",
+      "sha256": "813e48ccc0fe8daa43a0223644a464d3cdebcc2302992561523800c9f92ecc32"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/Mono.Cecil.dll",
+      "sha256": "6346621d998fe428b4b97bb365e5090537be5074861d726cead5767d3b2a7cf2"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.deps.json",
+      "sha256": "aeba3c3c23843f056166ebac60fd998089fde4946a1683d2c9f3746ce9fd3265"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.dll",
+      "sha256": "fe96c6a564e74a1bafcfe4161f1f23f4d84ecaab26b1e510fe332217c6dd4846"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.exe",
+      "sha256": "e5808b3401ca36e0d0343678a54a3749c1813cc4c2e695a6ebb65dc27f98a10e"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.pdb",
+      "sha256": "08b16e724a2546e315e9ca9d3ea64b79634aa121b1f0c690a4ad28018971ddca"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/OneXFanCoexistence.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/Harness/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.dll",
+      "sha256": "55bbc787f00ccc7b3c3855023f2f96df6423baf0481883ec40a732f7b5583a0e"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.exe",
+      "sha256": "43c72d2f71a8e02386cca17ee59dbf67272dc718f5d4c8e7f31fc71660581829"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.pdb",
+      "sha256": "790181fbfd05172812f0af96c3b0c01bc487f2ae505da01d68f2af2c7c8f8697"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/MTA.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/MTA/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.deps.json",
+      "sha256": "18bf3267f925b37e6c24c7c3a90c0ecdb7dfb5300126bc2f53f233c15252ee5b"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/ScopedLoadAuthority/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/STA/release/ScopedLoadAuthority.dll",
+      "sha256": "64ad04c2085e208d6e27aaf6f4c15d2a5ad35b58a4076cec73e3b6b407c1900b"
+    },
+    {
+      "relative": "test-build/bin/STA/release/ScopedLoadAuthority.pdb",
+      "sha256": "226a389a6b3f398ea52808fd132063df915c0b5ffcb73ec95d3c78877648a869"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.dll",
+      "sha256": "e4ec9dd28690586166eeaf4eb29d64e4c7a87d061256a647ba123a551e3f6670"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.exe",
+      "sha256": "54dd750a3605d5639b1f88a787aded97b1df775f669407f9e7710691fbb60842"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.pdb",
+      "sha256": "99f0b3ad0201314433bd572e8ea036e90f7729c6c854230b7f10fa8d29409708"
+    },
+    {
+      "relative": "test-build/bin/STA/release/STA.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    }
+  ],
+  "defaultContextSha256": "fe4ff92b5420ead46480ca6c835676ed468e8d47d55fbbb9f67900e579e63608",
+  "inventoryRows": [
+    {
+      "type": "HandheldCompanion.Devices.MinisforumV3",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.MinisforumV3::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMiniPro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.LokiMiniPro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiZero",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.LokiZero::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMax6600U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.LokiMax6600U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMax6800U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.LokiMax6800U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AOKZOEA1::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1Pro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AOKZOEA1Pro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1X",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AOKZOEA1X::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AOKZOEA2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIR",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIR::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIRPro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIR1S",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIR1S::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRLite",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIRLite::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2021",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO2021::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2021Pro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO2021Pro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOKUN",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOKUN::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOSlide",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOSlide::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXT",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEONEXT::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXTLite",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEONEXTLite::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXTLite4500U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEONEXTLite4500U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusAMD::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOAIRPlusIntel::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2S",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO2S::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOFlipKB",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOFlipKB::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOFlipDS",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEOFlipDS::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.SuiPlay0X1",
+      "inactive": true,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.SuiPlay0X1::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_7640U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMini_7640U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMini::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_8840U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMini_8840U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_HX370",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMini_HX370::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin3",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin3::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2023_7640U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4_2023_7640U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2023",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4_2023::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024_8640U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4_2024_8640U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4_2024::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024_HX370",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin4_2024_HX370::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin5",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWin5::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2Intel",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2Intel::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2022_6800U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2023_7640U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2023_7840U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_8640U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_8840U::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.GPDWinMax2_2024_HX370::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerX1Intel::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerX1AMD::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Mini",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerX1Mini::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerX1Pro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerG1Intel",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerG1Intel::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerG1AMD",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerG1AMD::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerOneXFly",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerOneXFly::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniAMD",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerMiniAMD::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniIntel",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerMiniIntel::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniPro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayerMiniPro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayer2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer2Pro",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.OneXPlayer2Pro::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ROGAlly",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ROGAlly::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ROGAllyX",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ROGAllyX::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.XboxROGAlly",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.XboxROGAlly::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.XboxROGAllyX",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.XboxROGAllyX::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ASUS.ASUS",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ASUS.ASUS::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.SteamDeck",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.SteamDeck::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoTablet::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoTablet2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoSZ2::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.Lenovo.LegionGoSZ1::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawA1M",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ClawA1M::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawA2VM",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ClawA2VM::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawBZ2EM",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.ClawBZ2EM::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.MSI.ClawCG3EM",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.MSI.ClawCG3EM::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.Zotac.GamingZone",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.Zotac.GamingZone::.ctor()"
+    },
+    {
+      "type": "HandheldCompanion.Devices.DefaultDevice",
+      "inactive": false,
+      "originalConstructor": "System.Void HandheldCompanion.Devices.DefaultDevice::.ctor()"
+    }
+  ],
+  "nativeDeclarations": [
+    {
+      "method": "System.IntPtr HandheldCompanion.Helpers.GamepadMotion::CreateGamepadMotion()",
+      "entryPoint": "CreateGamepadMotion",
+      "attributes": 256,
+      "returnType": "System.IntPtr",
+      "parameters": []
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::DeleteGamepadMotion(System.IntPtr)",
+      "entryPoint": "DeleteGamepadMotion",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetGamepadMotion(System.IntPtr)",
+      "entryPoint": "ResetGamepadMotion",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::ProcessMotion(System.IntPtr,System.Single,System.Single,System.Single,System.Single,System.Single,System.Single,System.Single)",
+      "entryPoint": "ProcessMotion",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "gyroX",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "gyroY",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "gyroZ",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "accelX",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "accelY",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "accelZ",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "deltaTime",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibratedGyro(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "entryPoint": "GetCalibratedGyro",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "z",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetGravity(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "entryPoint": "GetGravity",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "z",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetProcessedAcceleration(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "entryPoint": "GetProcessedAcceleration",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "z",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetOrientation(System.IntPtr,System.Single&,System.Single&,System.Single&,System.Single&)",
+      "entryPoint": "GetOrientation",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "w",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "z",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetPlayerSpaceGyro(System.IntPtr,System.Single&,System.Single&,System.Single)",
+      "entryPoint": "GetPlayerSpaceGyro",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "yawRelaxFactor",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetWorldSpaceGyro(System.IntPtr,System.Single&,System.Single&,System.Single)",
+      "entryPoint": "GetWorldSpaceGyro",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "x",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "y",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "sideReductionThreshold",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::StartContinuousCalibration(System.IntPtr)",
+      "entryPoint": "StartContinuousCalibration",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::PauseContinuousCalibration(System.IntPtr)",
+      "entryPoint": "PauseContinuousCalibration",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetContinuousCalibration(System.IntPtr)",
+      "entryPoint": "ResetContinuousCalibration",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::GetCalibrationOffset(System.IntPtr,System.Single&,System.Single&,System.Single&)",
+      "entryPoint": "GetCalibrationOffset",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "xOffset",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "yOffset",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        },
+        {
+          "Name": "zOffset",
+          "type": "System.Single&",
+          "attributes": 2,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationOffset(System.IntPtr,System.Single,System.Single,System.Single,System.Int32)",
+      "entryPoint": "SetCalibrationOffset",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "xOffset",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "yOffset",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "zOffset",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "weight",
+          "type": "System.Int32",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Single HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationConfidence(System.IntPtr)",
+      "entryPoint": "GetAutoCalibrationConfidence",
+      "attributes": 256,
+      "returnType": "System.Single",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetAutoCalibrationConfidence(System.IntPtr,System.Single)",
+      "entryPoint": "SetAutoCalibrationConfidence",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "newConfidence",
+          "type": "System.Single",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Boolean HandheldCompanion.Helpers.GamepadMotion::GetAutoCalibrationIsSteady(System.IntPtr)",
+      "entryPoint": "GetAutoCalibrationIsSteady",
+      "attributes": 256,
+      "returnType": "System.Boolean",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "HandheldCompanion.Helpers.CalibrationMode HandheldCompanion.Helpers.GamepadMotion::GetCalibrationMode(System.IntPtr)",
+      "entryPoint": "GetCalibrationMode",
+      "attributes": 256,
+      "returnType": "HandheldCompanion.Helpers.CalibrationMode",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::SetCalibrationMode(System.IntPtr,HandheldCompanion.Helpers.CalibrationMode)",
+      "entryPoint": "SetCalibrationMode",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        },
+        {
+          "Name": "calibrationMode",
+          "type": "HandheldCompanion.Helpers.CalibrationMode",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    },
+    {
+      "method": "System.Void HandheldCompanion.Helpers.GamepadMotion::ResetMotion(System.IntPtr)",
+      "entryPoint": "ResetMotion",
+      "attributes": 256,
+      "returnType": "System.Void",
+      "parameters": [
+        {
+          "Name": "motion",
+          "type": "System.IntPtr",
+          "attributes": 0,
+          "marshal": null
+        }
+      ]
+    }
+  ],
+  "capabilityBits": {
+    "None": 0,
+    "InternalSensor": 1,
+    "ExternalSensor": 2,
+    "FanControl": 4,
+    "DynamicLighting": 8,
+    "DynamicLightingBrightness": 16,
+    "DynamicLightingSecondLEDColor": 32,
+    "BatteryChargeLimit": 64,
+    "BatteryChargeLimitPercent": 128,
+    "BatteryBypassCharging": 256,
+    "FanOverride": 512,
+    "OEMCPU": 1024,
+    "OEMGPU": 2048,
+    "XGMobile": 4096
+  },
+  "reservedHotkeys": [
+    70,
+    71,
+    72,
+    73
+  ],
+  "catalogBounds": [
+    {
+      "type": "HandheldCompanion.Devices.MinisforumV3",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMiniPro",
+      "minimum": [
+        "DynamicLighting",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiZero",
+      "minimum": [
+        "DynamicLighting",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMax6600U",
+      "minimum": [
+        "DynamicLighting",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.LokiMax6800U",
+      "minimum": [
+        "DynamicLighting",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1Pro",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA1X",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AOKZOEA2",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIR",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPro",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIR1S",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRLite",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2021",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2021Pro",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOKUN",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOSlide",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXT",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXTLite",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEONEXTLite4500U",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO2S",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOFlipKB",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEOFlipDS",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin2",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_7640U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_8840U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMini_HX370",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin3",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2023_7640U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2023",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024_8640U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin4_2024_HX370",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWin5",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2Intel",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "possible": [
+        "BatteryBypassCharging",
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "possible": [
+        "BatteryBypassCharging",
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Mini",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "possible": [
+        "BatteryBypassCharging",
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "possible": [
+        "BatteryBypassCharging",
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ],
+      "possible": [
+        "BatteryBypassCharging",
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerG1Intel",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerG1AMD",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerOneXFly",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniAMD",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniIntel",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayerMiniPro",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer2",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.OneXPlayer2Pro",
+      "minimum": [
+        "FanControl"
+      ],
+      "possible": [
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ROGAlly",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ROGAllyX",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.XboxROGAlly",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.XboxROGAllyX",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ASUS.ASUS",
+      "minimum": [],
+      "possible": []
+    },
+    {
+      "type": "HandheldCompanion.Devices.SteamDeck",
+      "minimum": [],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "FanControl",
+        "OEMCPU",
+        "OEMGPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+      "minimum": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+      "minimum": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+      "minimum": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+      "minimum": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawA1M",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawA2VM",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.ClawBZ2EM",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.MSI.ClawCG3EM",
+      "minimum": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ],
+      "possible": [
+        "BatteryChargeLimit",
+        "BatteryChargeLimitPercent",
+        "DynamicLighting",
+        "FanControl",
+        "FanOverride",
+        "OEMCPU"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.Zotac.GamingZone",
+      "minimum": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ],
+      "possible": [
+        "DynamicLighting",
+        "DynamicLightingBrightness",
+        "DynamicLightingSecondLEDColor",
+        "FanControl"
+      ]
+    },
+    {
+      "type": "HandheldCompanion.Devices.DefaultDevice",
+      "minimum": [],
+      "possible": []
+    }
+  ],
+  "dependencies": [
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Sentry.dll",
+      "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+      "identity": "Sentry, Version=6.6.0.0, Culture=neutral, PublicKeyToken=fba2ec45388e2af0",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\Microsoft.Windows.SDK.NET.dll",
+      "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+      "identity": "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": true
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WinRT.Runtime.dll",
+      "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+      "identity": "WinRT.Runtime, Version=2.2.0.0, Culture=neutral, PublicKeyToken=99ea127f02d97709",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": true
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HidLibrary.dll",
+      "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+      "identity": "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\GregsStack.InputSimulatorStandard.dll",
+      "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+      "identity": "GregsStack.InputSimulatorStandard, Version=1.3.5.0, Culture=neutral, PublicKeyToken=null",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\ymcc-shared-runtime\\Newtonsoft.Json.dll",
+      "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+      "identity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\WindowsInput.dll",
+      "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+      "identity": "WindowsInput, Version=6.4.1.0, Culture=neutral, PublicKeyToken=null",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    },
+    {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\System.IO.Ports.dll",
+      "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+      "identity": "System.IO.Ports, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "role": "target",
+      "historicalBinding": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-B47-fan-original-parent-safety-B0-20261021-R3/Build/complete-original-entry-r1/original-constructors/positive/result.json",
+        "sha256": "ecac50c2dddc1fa9b2cd8ba3fadcfe5783467eaa63deaa58b049a01d86f590a3"
+      },
+      "restricted": false
+    }
+  ],
+  "sourceCaseWitnesses": [
+    {
+      "line": 99,
+      "text": "        var scenarios=selected.Select(name=>(Name:name,Id:name,Major:1,Minor:1,Processor:\"AMD Ryzen 9 395\",Flags:(ushort?)null,Clock:(uint?)null)).ToList();\r"
+    },
+    {
+      "line": 102,
+      "text": "            foreach(var (model,major,minor,flags) in new[]{(\"OneXPlayerX1AMD\",1,2,56),(\"OneXPlayerX1AMD\",1,3,504),(\"OneXPlayerX1AMD\",2,0,56),(\"OneXPlayerX1Intel\",0,66,56),(\"OneXPlayerX1Intel\",0,67,504)})\r"
+    },
+    {
+      "line": 103,
+      "text": "            {var name=\"HandheldCompanion.Devices.\"+model;scenarios.Add((name,name+\"@firmware-\"+major+\".\"+minor,major,minor,\"AMD Ryzen 9 395\",(ushort)flags,null));}\r"
+    },
+    {
+      "line": 104,
+      "text": "            foreach(var (processor,clock)in new[]{(\"AMD Ryzen AI Max 385\",5000u),(\"AMD Ryzen AI Max 395\",5100u)})\r"
+    },
+    {
+      "line": 105,
+      "text": "            {var name=\"HandheldCompanion.Devices.GPDWin5\";scenarios.Add((name,name+\"@cpu-\"+clock,1,1,processor,4,clock));}\r"
+    },
+    {
+      "line": 140,
+      "text": "                rows.Add(new{id=\"original-constructor:\"+scenario.Id,status=\"PASS\",checks=Checks-before,snapshot});\r"
+    },
+    {
+      "line": 142,
+      "text": "            catch(Exception error){rows.Add(new{id=\"original-constructor:\"+scenario.Id,status=\"FAIL\",checks=Checks-before,error=error.ToString(),ports=OriginalConstructorPorts.Calls.ToArray()});}\r"
+    },
+    {
+      "line": 157,
+      "text": "                rows.Add(new{id=\"native-admission:\"+kind,status=\"PASS\",checks=Checks-before});\r"
+    },
+    {
+      "line": 158,
+      "text": "            }catch(Exception error){rows.Add(new{id=\"native-admission:\"+kind,status=\"FAIL\",checks=Checks-before,error=error.ToString()});}\r"
+    }
+  ],
+  "desktopFramework": {
+    "profileId": "original89-desktop3",
+    "baseCount": 44,
+    "extensionCount": 3,
+    "totalDefaultCount": 47,
+    "baseContextSha256": "fe4ff92b5420ead46480ca6c835676ed468e8d47d55fbbb9f67900e579e63608",
+    "frameworkRoot": "C:/Program Files/dotnet/shared/Microsoft.WindowsDesktop.App/10.0.11",
+    "pins": [
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationFramework.dll",
+        "sha256": "fa9aa188f9c92dc95b4e56f303b1875244bf45786733948c79034fe95fb0cd86",
+        "identity": "PresentationFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationCore.dll",
+        "sha256": "c2ac0752b0a3018331519b8aec6fa085346bfc59609ea29954821a0ab19ee839",
+        "identity": "PresentationCore, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Xaml.dll",
+        "sha256": "8f5eeaedc35f82a9b457d5562b688b6e1892732ecf6c0c18dd3159b976458d27",
+        "identity": "System.Xaml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+        "role": "framework"
+      }
+    ],
+    "raw": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-constructor-desktop-framework-prepare-20261021-r1/evidence/DESKTOP3-RAW.json",
+      "sha256": "28085e9460b8708418bc2ed9c7bbee48e1feffe809c03d0278611e94aef1e59c"
+    },
+    "rawRequest": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-fan-constructor-desktop-framework-prepare-20261021-r1/evidence/DESKTOP3-RAW-INPUTS.json",
+      "sha256": "9bc5a63900669cc4b21117bd70569ec51e58549008c1c2f54f692d6f489687ee"
+    },
+    "metadataCandidateOnly": true,
+    "wpfInstantiationApproved": false,
+    "fullClrClosureProven": false
+  }
+}

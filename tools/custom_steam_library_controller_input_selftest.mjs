@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import http from 'node:http';
 import assert from 'node:assert/strict';
@@ -12,11 +13,17 @@ const build = path.resolve(repo, '../../Build/CustomSteamLibrary');
 const root = path.resolve(process.argv[2] || path.join(build, 'controller-input-' + Date.now()));
 assert(root.startsWith(build + path.sep) && !fs.existsSync(root), 'Use a fresh isolated Build directory');
 fs.mkdirSync(root, { recursive: true });
-const ui = path.join(repo, 'CustomSteamLibrary/workspace-ui');
+const ui = process.env.YEMAN_LIBRARY_UI_DIRECTORY ? path.resolve(process.env.YEMAN_LIBRARY_UI_DIRECTORY) : path.join(repo, 'CustomSteamLibrary/workspace-ui');
+assert(ui === path.join(repo, 'CustomSteamLibrary/workspace-ui') || ui.startsWith(build + path.sep), 'UI override must be an isolated Build package');
+const sha = file => createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+const inputFiles = ['index.html','app.js','styles.css'].map(name=>path.join(ui,name)).concat(fileURLToPath(import.meta.url));
+const sourceHashes = Object.fromEntries(inputFiles.map(file=>[file,sha(file)]));
 const edge = process.env.YEMAN_BROWSER_EXECUTABLE || 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
 assert(fs.existsSync(edge), 'Microsoft Edge is required');
 const mock = `
   window.fixtureCalls = [];
+  window.fixtureSteamRunning = false;
+  window.fixtureFailures = {};
   window.fixtureGame = { gameDirectory:'G:/Fixture/Games/Portal', directoryName:'Portal',
     primaryExecutable:'G:/Fixture/Games/Portal/Game.exe', primaryProductName:'Portal', status:'ready',
     candidates:[], steam:{appId:620, suggestedName:'Portal', status:'waiting-steam-verification'} };
@@ -24,7 +31,8 @@ const mock = `
   window.fixtureGame.primaryExecutable = window.fixtureGame.primaryExecutable.replaceAll('/',String.fromCharCode(92));
   window.fixtureSnapshot = {config:{roots:['G:/Fixture/Games'],automaticScrapingEnabled:false},
     library:{games:[window.fixtureGame]},manualOverrides:{items:{}},
-    steamPlan:{items:[],summary:{}},steamAccounts:{accounts:[]}};
+    steamPlan:{items:[],summary:{}},steamAccounts:{accounts:[],steamStatus:'installed-no-account'}};
+  window.fixtureSteamAccounts={accounts:[{accountId:'1000',steamRoot:'G:/FixtureSteam'}],steamStatus:'ready'};
   const listeners = [];
   window.chrome.webview = {
     addEventListener(type, listener) { if(type==='message')listeners.push(listener); },
@@ -36,9 +44,15 @@ const mock = `
         window.fixtureSnapshot.config.roots = window.fixtureSnapshot.config.roots.filter(root=>root!==request.arguments.path);
         result = structuredClone(window.fixtureSnapshot);
       }
+      if(request.command==='steamAccounts')result=structuredClone(window.fixtureSteamAccounts);
       if(request.command==='searchArtwork')result={candidates:[]};
-      if(request.command==='steamState')result={running:false,steamPath:''};
-      setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:true,result}})),0);
+      if(request.command==='steamState' || request.command==='steamCommitPreflight')result={steamRunning:window.fixtureSteamRunning,steamPath:''};
+      if(request.command==='closeSteam'){window.fixtureSteamRunning=false;result={steamRunning:false,steamPath:''};}
+      if(window.fixtureFailures[request.command]) {
+        setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:false,error:window.fixtureFailures[request.command]}})),0);
+        return;
+      }
+      setTimeout(()=>listeners.forEach(listener=>listener({data:{kind:'response',id:request.id,ok:true,result}})),request.command==='commit'?80:0);
     }
   };
 `;
@@ -112,6 +126,28 @@ try {
       openEdit(game);await frames();fixtureCalls.length=0;
     };
   `);
+  await test('startup-detects-account-despite-cached-no-account', `
+    if(steamAccountRequest)await steamAccountRequest;
+    check(fixtureCalls.some(call=>call.command==='steamAccounts'),'Startup did not detect accounts');
+    check($('#steam-target-status').textContent.includes('已发现 1 个'),'Cached no-account warning survived startup');
+    check($('#confirm-modal').classList.contains('hidden'),'False login/install modal opened');
+    check($('#busy').classList.contains('hidden'),'Account probe blocked the library');`);
+  await test('older-game-snapshot-does-not-reintroduce-login-warning', `
+    applyLibrarySnapshot(structuredClone(fixtureSnapshot));
+    check($('#steam-target-status').textContent.includes('已发现 1 个'),'Older scan replaced fresh account state');`);
+  await test('no-account-directory-does-not-claim-signed-out-or-offer-install', `
+    fixtureSteamAccounts={accounts:[],steamStatus:'installed-no-account'};
+    await refreshSteamAccountDiscovery(true);
+    check($('#steam-target-status').textContent.includes('暂未检测到'),'Missing account was hidden');
+    check(!/未登录|尚未登录/.test($('#steam-target-status').textContent),'Missing directory was called signed out');
+    check($('#confirm-modal').classList.contains('hidden'),'Installed Steam was offered installation');`);
+  await test('focus-return-recovers-accounts-without-another-click', `
+    fixtureSteamAccounts={accounts:[{accountId:'1000',steamRoot:'G:/FixtureSteam'}],steamStatus:'ready'};
+    steamAccountLastCheck=Date.now()-STEAM_ACCOUNT_RECHECK_MS-1;
+    window.dispatchEvent(new Event('focus'));
+    if(steamAccountRequest)await steamAccountRequest;
+    check($('#steam-target-status').textContent.includes('已发现 1 个'),'Focus did not recheck after login');
+    check($('#in-steam-limitation').classList.contains('hidden'),'Stale warning remained visible');`);
   await test('controller-X-opens-editor-with-locked-inputs-and-no-keyboard', `
     activeTab=category(mergedGames()[0]);renderLibrary();const card=libraryCards()[0];check(card,'Fixture card missing');
     focusLibraryCard(card);fixtureCalls.length=0;routeWorkspaceAction('edit');await frames();
@@ -181,6 +217,139 @@ try {
     check($('#identity-steam-id-clear').disabled,'Native AppID clear enabled');
     focusWorkspaceElement($('#identity-name'));routeWorkspaceAction('accept');
     check(!$('#identity-name').readOnly && keyboardCalls().length===1,'Native game name could not be edited');`);
+  await evaluate(`
+    window.waitFor=async(predicate)=>{for(let i=0;i<150;i++){if(predicate())return;await new Promise(resolve=>setTimeout(resolve,10));}throw Error('Fixture wait timed out');};
+    window.resetCommitFixture=async()=>{
+      if(editorOpen())closeEdit();
+      if(!$('#steam-commit-modal').classList.contains('hidden'))closeSteamCommit();
+      if(!$('#confirm-modal').classList.contains('hidden'))closeConfirm(false);
+      fixtureSteamRunning=false;fixtureFailures={};controllerBackLastAt=0;
+      const games=['Portal','Other','Third'].map(name=>({...structuredClone(fixtureGame),directoryName:name,primaryProductName:name,gameDirectory:'G:/Fixture/Games/'+name,primaryExecutable:'G:/Fixture/Games/'+name+'/Game.exe'}));
+      fixtureSnapshot.library.games=games;fixtureSnapshot.steamPlan={items:games.map(game=>({...game,status:'waiting-steam-verification'})),summary:{}};
+      snapshot=normalizeWorkspaceSnapshot(structuredClone(fixtureSnapshot),snapshot);
+      activeTab='not-in-steam';selectedGameDirectories=null;renderLibrary();
+      openEdit(mergedGames()[0]);await frames();fixtureCalls.length=0;
+    };
+    window.commitCalls=()=>fixtureCalls.filter(call=>call.command==='commit');
+    window.openSingleCommit=async()=>{
+      focusWorkspaceElement($('#edit-add-to-steam'));routeWorkspaceAction('accept');
+      await waitFor(()=>!$('#steam-commit-modal').classList.contains('hidden'));
+    };
+  `);
+  for(const height of [720,800]) {
+    await command('Emulation.setDeviceMetricsOverride',{width:1280,height,deviceScaleFactor:1,mobile:false});
+    await test('single-card-action-row-and-controller-navigation-1280x'+height, `
+      await resetCommitFixture();
+      const buttons=[...document.querySelectorAll('.edit-actions button')];
+      check(buttons.map(button=>button.id).join(',')==='edit-folder,edit-search-game,edit-save-content,edit-add-to-steam,edit-back-button','Incorrect action order');
+      check(!$('#edit-add-to-steam').disabled,'Single-card action disabled');
+      for(let i=0;i<buttons.length;i++){
+        focusWorkspaceElement(buttons[i]);
+        for(const [action,step] of [['navigate-left',-1],['navigate-right',1]]){
+          lastDirectionalActionAt=0;routeWorkspaceAction(action);
+          const expected=buttons[Math.max(0,Math.min(buttons.length-1,i+step))];
+          check(document.activeElement===expected,'Horizontal direction left the visual action row: '+buttons[i].id+' '+action+' -> '+document.activeElement?.id+' expected '+expected.id);
+          focusWorkspaceElement(buttons[i]);
+        }
+      }
+      const rects=buttons.map(button=>button.getBoundingClientRect());
+      check(rects.every(rect=>Math.abs(rect.top-rects[0].top)<1 && rect.left>=0 && rect.right<=innerWidth),'Action row clipped or wrapped');
+      focusWorkspaceElement($('#edit-add-to-steam'));await frames();const rect=$('#edit-add-to-steam').getBoundingClientRect();
+      check(rect.top>=0 && rect.bottom<=innerHeight,'Focused add button is not fully visible');
+      lastDirectionalActionAt=0;routeWorkspaceAction('navigate-up');
+      check(document.activeElement!==$('#edit-add-to-steam') && $('#edit-modal').contains(document.activeElement),'Cannot navigate up from single-card action');
+      focusWorkspaceElement($('#edit-add-to-steam'));
+    `);
+    const screenshot = await command('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});
+    fs.writeFileSync(path.join(root,'single-card-editor-'+height+'.png'),Buffer.from(screenshot.data,'base64'));
+    const actionRow=await evaluate(`(()=>{const r=$('.edit-actions').getBoundingClientRect();return{x:r.left,y:r.top,width:r.width,height:r.height,scale:1};})()`);
+    const rowScreenshot=await command('Page.captureScreenshot',{format:'png',clip:actionRow,captureBeyondViewport:false});
+    fs.writeFileSync(path.join(root,'single-card-actions-'+height+'.png'),Buffer.from(rowScreenshot.data,'base64'));
+    await test('A-opens-existing-single-game-confirmation-and-B-returns-to-editor-'+height, `
+      await openSingleCommit();
+      check($('#commit-summary').textContent.includes('1 个'),'Confirmation did not show one game');
+      check(activeWorkspaceModal().id==='steam-commit-modal','Commit modal does not own navigation');
+      check($('#steam-commit-modal').contains(document.activeElement),'Focus stayed under confirmation');
+      controllerBackLastAt=0;routeWorkspaceAction('back');await frames();
+      check($('#steam-commit-modal').classList.contains('hidden') && editorOpen(),'B discarded editor');
+      check(document.activeElement===$('#edit-add-to-steam'),'Cancel did not restore add button');
+      check(commitCalls().length===0,'Cancel wrote Steam');
+    `);
+  }
+  await test('single-card-write-progress-owns-focus-above-editor-until-complete', `
+    await resetCommitFixture();await openSingleCommit();$('#steam-commit-confirm').click();
+    await waitFor(()=>!$('#busy').classList.contains('hidden'));
+    check(activeWorkspaceModal().id==='busy' && $('#busy').contains(document.activeElement),'Commit progress did not own editor input');
+    await waitFor(()=>$('#busy').classList.contains('hidden'));
+    check(editorOpen() && document.activeElement===$('#edit-add-to-steam'),'Write completion did not restore editor focus');
+  `);
+  await test('single-card-target-survives-selection-page-and-background-changes', `
+    await resetCommitFixture();const key=keyFor(selectedActionGame);await openSingleCommit();
+    selectedGameDirectories=new Set([keyFor(mergedGames()[1])]);activeTab='unclassified';renderLibrary();
+    fixtureSnapshot.library.games.push({...structuredClone(fixtureGame),gameDirectory:'G:/Fixture/Games/Later',primaryExecutable:'G:/Fixture/Games/Later/Game.exe'});
+    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    const args=commitCalls()[0].arguments;
+    check(args.selectionMode==='all-steam-accounts' && args.accountId==='' && args.steamRoot==='','Existing account flow changed');
+    check(JSON.stringify(args.selectedGameDirectories)===JSON.stringify([key]),'Single-card target broadened');
+    check(selectedGameDirectories.size===1 && !selectedGameDirectories.has(key),'Join mutated page checkboxes');
+    check(fixtureCalls.filter(call=>call.command==='steamCommitPreflight').length===2,'Second Steam check skipped');
+    check(!fixtureCalls.some(call=>['saveManualName','identifyOne','saveArtworkOverride','setBucket'].includes(call.command)),'Join implicitly saved editor');
+    check(editorOpen(),'Successful join closed editor');
+  `);
+  await test('single-card-works-with-no-page-checkboxes-selected', `
+    await resetCommitFixture();selectedGameDirectories=new Set();renderLibrary();const key=keyFor(selectedActionGame);
+    await openSingleCommit();$('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Empty page selection replaced editor target');
+  `);
+  await test('cancel-single-card-then-batch-still-imports-all-selected-games', `
+    await resetCommitFixture();await openSingleCommit();$('#steam-commit-cancel').click();closeEdit();
+    const expected=selectedCommitDirectories();check(expected.length===3,'Batch fixture missing: '+JSON.stringify(mergedGames().map(game=>({key:keyFor(game),category:category(game),steam:game.steam}))));
+    $('#commit-button').click();await waitFor(()=>!$('#steam-commit-modal').classList.contains('hidden'));
+    check($('#commit-summary').textContent.includes('3 个'),'Batch kept single-card count');
+    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify(expected),'Single target leaked into batch');
+  `);
+  await test('running-Steam-cancel-keeps-editor-and-does-not-close-Steam', `
+    await resetCommitFixture();fixtureSteamRunning=true;focusWorkspaceElement($('#edit-add-to-steam'));routeWorkspaceAction('accept');
+    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));
+    check(activeWorkspaceModal().id==='confirm-modal' && $('#confirm-modal').contains(document.activeElement),'Steam prompt is under editor');
+    controllerBackLastAt=0;routeWorkspaceAction('back');await waitFor(()=>!steamCommitRequestInFlight);
+    check(editorOpen() && commitCalls().length===0 && !fixtureCalls.some(call=>call.command==='closeSteam'),'Cancel altered Steam or editor');
+    check(document.activeElement===$('#edit-add-to-steam'),'Steam prompt did not restore editor action');
+  `);
+  await test('running-Steam-close-then-explicit-retry-keeps-one-game', `
+    await resetCommitFixture();fixtureSteamRunning=true;$('#edit-add-to-steam').click();
+    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));$('#confirm-confirm').click();
+    await waitFor(()=>!steamCommitRequestInFlight && $('#busy').classList.contains('hidden'));
+    check(fixtureCalls.filter(call=>call.command==='closeSteam').length===1 && commitCalls().length===0,'Close implicitly imported');
+    await openSingleCommit();const key=keyFor(selectedActionGame);$('#steam-commit-confirm').click();
+    await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Retry broadened target');
+  `);
+  await test('Steam-restart-between-confirmations-still-only-closes-Steam', `
+    await resetCommitFixture();await openSingleCommit();fixtureSteamRunning=true;$('#steam-commit-confirm').click();
+    await waitFor(()=>!$('#confirm-modal').classList.contains('hidden'));$('#confirm-confirm').click();
+    await waitFor(()=>fixtureCalls.some(call=>call.command==='closeSteam') && $('#busy').classList.contains('hidden'));
+    check(commitCalls().length===0,'Steam restart bypassed original close-only flow');
+  `);
+  await test('preflight-failure-never-falls-back-to-batch', `
+    await resetCommitFixture();fixtureFailures.steamCommitPreflight='fixture preflight failure';$('#edit-add-to-steam').click();
+    await waitFor(()=>!steamCommitRequestInFlight && fixtureCalls.some(call=>call.command==='steamCommitPreflight'));
+    check(commitCalls().length===0 && $('#steam-commit-modal').classList.contains('hidden') && editorOpen(),'Failure opened or committed stale target');
+  `);
+  await test('commit-failure-does-not-retry-or-expand-selection', `
+    await resetCommitFixture();await openSingleCommit();const key=keyFor(selectedActionGame);fixtureFailures.commit='fixture write failure';
+    $('#steam-commit-confirm').click();await waitFor(()=>commitCalls().length===1 && $('#busy').classList.contains('hidden'));
+    check(JSON.stringify(commitCalls()[0].arguments.selectedGameDirectories)===JSON.stringify([key]),'Failed write broadened target');
+    check(editorOpen(),'Write failure discarded editor');fixtureFailures={};
+  `);
+  await test('native-and-media-only-editors-cannot-create-shortcuts', `
+    await resetCommitFixture();closeEdit();openEdit({...structuredClone(fixtureGame),steamNative:true});
+    check($('#edit-add-to-steam').disabled && !editModalFocusItems().includes($('#edit-add-to-steam')),'Native action enabled');
+    closeEdit();openEdit({mediaOnly:true,mediaKey:'fixture',directoryName:'Wallpaper',steam:{},override:{}});
+    check($('#edit-add-to-steam').disabled && !editModalFocusItems().includes($('#edit-add-to-steam')),'Media-only action enabled');
+    closeEdit();await resetCommitFixture();closeEdit();
+  `);
   await test('cancel-removing-last-scan-root-keeps-current-scope', `
     closeEdit();renderEntry();const button=document.querySelector('.root-row button');check(button && !button.disabled,'Last root disabled');
     const before=fixtureCalls.filter(call=>call.command==='removeRoot').length;
@@ -195,7 +364,9 @@ try {
     check(snapshot.config.roots.length===0 && document.querySelectorAll('.root-row').length===0,'Removed root stayed in UI');`);
   const uiErrors=await evaluate(`fixtureCalls.filter(call=>call.command==='uiError')`);
   cases.push({name:'complete-shipping-UI-has-no-unhandled-errors',passed:uiErrors.length===0,...(uiErrors.length?{errors:uiErrors}:{})});
-  const report={allPassed:cases.every(item=>item.passed),caseCount:cases.length,cases,realBrowserUsed:true,
+  const inputsUnchanged=inputFiles.every(file=>sourceHashes[file]===sha(file));
+  cases.push({name:'tested-shipping-sources-unchanged',passed:inputsUnchanged});
+  const report={sourceHashes,inputsUnchanged,viewportContracts:['1280x720','1280x800'],physicalController:false,allPassed:cases.every(item=>item.passed),caseCount:cases.length,cases,realBrowserUsed:true,
     nativeBridge:'fixture-only',realSteamFilesModified:false,realGamesLaunched:false};
   fs.writeFileSync(path.join(root,'summary.json'),JSON.stringify(report,null,2));
   console.log(JSON.stringify(report,null,2));console.log('REPORT='+path.join(root,'summary.json'));

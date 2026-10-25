@@ -1,0 +1,821 @@
+{
+  "schemaVersion": 1,
+  "caseId": "sleep.startup-exit-consumer",
+  "fixture": {
+    "path": "tools/ymcc_sim/global/sleep-startup-exit-consumer/fixture.cpp.in",
+    "sha256": "197d99ae3bbc1cd4c198241eda1f39ad586d0be2771fc6a30b3d03d6cda4feb8",
+    "positiveGroups": 27
+  },
+  "productSources": [
+    "native/main.cpp",
+    "deps/json/json.hpp"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+      "sha256": "d1cd10430a261d32dbd0f90377fcd0348fe4d361eb4ad7f39596055d1006105d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+      "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae"
+    },
+    {
+      "path": "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+      "sha256": "6ee6e861ef65075d48b1d4d757e26544d7d8ca42a04444384003f81bc7f5cc7d"
+    }
+  ],
+  "reviewedFunctions": [
+    {
+      "name": "sgAppendResumeResult",
+      "sha256": "b3dde83c11d51001babe52b992a3b344f3eca9a7cc5670e14092844fdc0fb6aa",
+      "role": "additional-pure-support"
+    },
+    {
+      "name": "sgMarkerCreated",
+      "sha256": "dcdff96f5c687b8a4cffe5e39569f5f16697f2acfdd65f6158188952f5e83cb9",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgMarkerIsSuspended",
+      "sha256": "bdb68c36b3da240f81c9dfd75e8b0444685f73e6b71008531d75ce6740ebb8d1",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgReadResumeMarkerChecked",
+      "sha256": "36e675d81e7d1eb3910fca31e591f814cd580a9308fc6f71b8ca78814c8ff2e3",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgResumeMarkerDefinitelyStale",
+      "sha256": "66ac85a13fee6d7acb71f2e81f09855d2859e8d3516d858d18ef592c28df82a9",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgMarkerGeneration",
+      "sha256": "3ae66df4f84d86af09bf15a51dbb2ca18ebc2835e6233602476b0d0de6a21837",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "nativeValveValidateOwnedSuspendedTarget",
+      "sha256": "f2ce2d07c40efba7fe6ef91e1881634b1aca4c6bf7e9b023ab569ad2217e97f1",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgDrainProcessSuspendCount",
+      "sha256": "32884d89ddaea916b04c836121d95824e11614f3dcd5c597b28314e776d1c880",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgResumeMarkedDirectoryUnlocked",
+      "sha256": "d0a625a00c7a20a0eabb211676fa71539fcbb7476ff398fc2248f24c9808053f",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgResumeGameByPids",
+      "sha256": "c817c554245db12a884ac1100a87297f2f0910a5636b9d71dec726223623f82e",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgHasPauseMarkerForOtherPid",
+      "sha256": "57d77a735df3bd7e81220ba02d15582962591265260fbe58d3bfa980b370d15c",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgReleaseConflictingPauseLeaseUnlocked",
+      "sha256": "5e148ded64041c844d5465c92962429d0c68f91f02abc23bff9491a95d21fd11",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgResumeTrackedAllUnlocked",
+      "sha256": "1b6a9be8665f0c88b193da2cd6c6a05d92f6031ef9b655a0683192fc6e3e5ec0",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgReadSleepTarget",
+      "sha256": "71596ae5b54c16bb9c41bc6b731b018581a3d8c870ffc0059da3ff5c901482f1",
+      "role": "new-target"
+    },
+    {
+      "name": "sgSleepLeaseOwnedByGeneration",
+      "sha256": "0014fb61ce832f8d2100d2cf97c589d9049dbd9adefcf9d4592af0242177629f",
+      "role": "new-target"
+    },
+    {
+      "name": "sgClearSleepTargetIfMatches",
+      "sha256": "12f9cc8131207ce5c3754fc64dbda75d0265761c1ad6db81f53a8be6c97744c5",
+      "role": "new-target"
+    },
+    {
+      "name": "sgResumeSleepTargetUnlocked",
+      "sha256": "c5bdfbd39bdffc335b09446cf8552ebb03ca9c23e4b35355a10492612e890a25",
+      "role": "previously-tested-support"
+    },
+    {
+      "name": "sgResumeAll",
+      "sha256": "06b458d7ee56cd9cb8fb6c62f37d5c9ba42de0e947344ac9fe25fa94d413db77",
+      "role": "new-target"
+    },
+    {
+      "name": "sgResumeTrackedAll",
+      "sha256": "25625f6c2427dd9a4ef946772a16466bc13f321ea3431c748e4e795766a7b405",
+      "role": "new-target"
+    },
+    {
+      "name": "joinStartupResumeThread",
+      "sha256": "79cb8b5f2bf34695f6bb393e7e5b32941350d620f8bf9733e9056a8a86dd7279",
+      "role": "new-target"
+    },
+    {
+      "name": "startStartupResumeThread",
+      "sha256": "fa50bfec12f81c304005908c35fe2b09cd23ec670a4f6b33feaa61f160211984",
+      "role": "new-target"
+    },
+    {
+      "name": "sgHasMarkerFiles",
+      "sha256": "266b1e19b808d765f13613d2dbcdc8a8a64dc6c535ee81be2989abb56cb25d45",
+      "role": "new-target"
+    },
+    {
+      "name": "sgCleanupBeforeExit",
+      "sha256": "f0c0434d05904e9a73a82c34c6d8c404f6c9a848caefd0d7272211f672111c0c",
+      "role": "new-target"
+    }
+  ],
+  "newTargetFunctions": [
+    "sgReadSleepTarget",
+    "sgSleepLeaseOwnedByGeneration",
+    "sgClearSleepTargetIfMatches",
+    "sgResumeAll",
+    "sgResumeTrackedAll",
+    "joinStartupResumeThread",
+    "startStartupResumeThread",
+    "sgHasMarkerFiles",
+    "sgCleanupBeforeExit"
+  ],
+  "previousActualSupportFunctions": [
+    "sgMarkerCreated",
+    "sgMarkerIsSuspended",
+    "sgReadResumeMarkerChecked",
+    "sgResumeMarkerDefinitelyStale",
+    "sgMarkerGeneration",
+    "nativeValveValidateOwnedSuspendedTarget",
+    "sgDrainProcessSuspendCount",
+    "sgResumeMarkedDirectoryUnlocked",
+    "sgResumeGameByPids",
+    "sgHasPauseMarkerForOtherPid",
+    "sgReleaseConflictingPauseLeaseUnlocked",
+    "sgResumeTrackedAllUnlocked",
+    "sgResumeSleepTargetUnlocked"
+  ],
+  "additionalPureSupportFunctions": [
+    "sgAppendResumeResult"
+  ],
+  "totalFullDefinitions": 23,
+  "actualGlobals": {
+    "retry": "static constexpr ULONGLONG SG_SLEEP_RESUME_RETRY_DELAYS_MS[] = {0ULL, 100ULL, 300ULL, 600ULL};",
+    "startupOwnedThread": "static std::thread g_startupResumeThread;"
+  },
+  "faults": [
+    {
+      "label": "fault-exists-error-classified-empty",
+      "targetFunction": "sgHasMarkerFiles",
+      "before": "if (ec) return true;",
+      "after": "if (ec) return false;",
+      "expectedFailedCases": [
+        "cleanup-sleep-exists-error-false-cannot-confirm-clean",
+        "cleanup-sleep-exists-error-true-cannot-confirm-clean",
+        "cleanup-manual-exists-error-false-cannot-confirm-clean",
+        "cleanup-manual-exists-error-true-cannot-confirm-clean"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-iterator-error-classified-empty",
+      "targetFunction": "sgHasMarkerFiles",
+      "before": "return static_cast<bool>(ec);",
+      "after": "return false;",
+      "expectedFailedCases": [
+        "cleanup-sleep-iterator-error-cannot-confirm-clean",
+        "cleanup-manual-iterator-error-cannot-confirm-clean"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-filesystem-exception-classified-empty",
+      "targetFunction": "sgHasMarkerFiles",
+      "before": "} catch (...) {\n        return true;\n    }",
+      "after": "} catch (...) {\n        return false;\n    }",
+      "expectedFailedCases": [
+        "cleanup-sleep-type-query-exception-cannot-confirm-clean",
+        "cleanup-sleep-increment-query-exception-cannot-confirm-clean",
+        "cleanup-manual-type-query-exception-cannot-confirm-clean",
+        "cleanup-manual-increment-query-exception-cannot-confirm-clean"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-pending-cleanup-completion-consumed",
+      "targetFunction": "sgCleanupBeforeExit",
+      "before": "g_sgCleanupDone = sessionClean;",
+      "after": "g_sgCleanupDone = true;",
+      "expectedFailedCases": [
+        "cleanup-sleep-exists-error-false-cannot-confirm-clean",
+        "cleanup-sleep-exists-error-true-cannot-confirm-clean",
+        "cleanup-manual-exists-error-false-cannot-confirm-clean",
+        "cleanup-manual-exists-error-true-cannot-confirm-clean",
+        "cleanup-sleep-iterator-error-cannot-confirm-clean",
+        "cleanup-manual-iterator-error-cannot-confirm-clean",
+        "cleanup-sleep-type-query-exception-cannot-confirm-clean",
+        "cleanup-sleep-increment-query-exception-cannot-confirm-clean",
+        "cleanup-manual-type-query-exception-cannot-confirm-clean",
+        "cleanup-manual-increment-query-exception-cannot-confirm-clean",
+        "cleanup-unknown-retains-evidence-then-actual-retry-cleans",
+        "cleanup-denied-retains-evidence-then-actual-retry-cleans",
+        "cleanup-native-fail-retains-evidence-then-actual-retry-cleans"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-clear-target-generation-check-removed",
+      "targetFunction": "sgClearSleepTargetIfMatches",
+      "before": "g_sgSleepTarget.processCreated == expected.processCreated &&\n        g_sgSleepTarget.powerGeneration == expected.powerGeneration",
+      "after": "g_sgSleepTarget.processCreated == expected.processCreated",
+      "expectedFailedCases": [
+        "compare-clear-cannot-erase-newer-pid-birth-or-generation"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-generation-owner-accepts-zero",
+      "targetFunction": "sgSleepLeaseOwnedByGeneration",
+      "before": "generation != 0 && g_sgSleepTarget.captured &&",
+      "after": "g_sgSleepTarget.captured &&",
+      "expectedFailedCases": [
+        "generation-owner-requires-nonzero-captured-owned-generation"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-busy-nonblocking-cleanup-pretends-done",
+      "targetFunction": "sgCleanupBeforeExit",
+      "before": "            return false;",
+      "after": "            return true;",
+      "expectedFailedCases": [
+        "nonblocking-busy-mutex-defers-without-consuming-cleanup-and-retries"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-startup-consumer-skipped",
+      "targetFunction": "startStartupResumeThread",
+      "before": "const SgResumeResult recovered = sgResumeTrackedAll();",
+      "after": "const SgResumeResult recovered{};",
+      "expectedFailedCases": [
+        "actual-startup-owned-thread-runs-consumer-and-joins",
+        "second-startup-launch-joins-predecessor-before-thread-replacement",
+        "startup-unknown-owner-retains-marker-then-owned-thread-retry-resumes"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    },
+    {
+      "label": "fault-session-clean-feedback-lost",
+      "targetFunction": "sgCleanupBeforeExit",
+      "before": "const bool sessionClean = !pending && sessionMarkerMarkClean();",
+      "after": "const bool sessionClean = !pending;",
+      "expectedFailedCases": [
+        "empty-cleanup-confirms-clean-once-and-is-idempotent",
+        "cleanup-resumes-manual-marker-before-marking-session-clean",
+        "cleanup-exact-sleep-owner-and-distinct-manual-owner-both-complete",
+        "cleanup-unknown-retains-evidence-then-actual-retry-cleans",
+        "cleanup-denied-retains-evidence-then-actual-retry-cleans",
+        "cleanup-native-fail-retains-evidence-then-actual-retry-cleans",
+        "cleanup-sleep-exists-error-false-cannot-confirm-clean",
+        "cleanup-sleep-exists-error-true-cannot-confirm-clean",
+        "cleanup-manual-exists-error-false-cannot-confirm-clean",
+        "cleanup-manual-exists-error-true-cannot-confirm-clean",
+        "cleanup-sleep-iterator-error-cannot-confirm-clean",
+        "cleanup-manual-iterator-error-cannot-confirm-clean",
+        "nonblocking-busy-mutex-defers-without-consuming-cleanup-and-retries",
+        "cleanup-sleep-type-query-exception-cannot-confirm-clean",
+        "cleanup-sleep-increment-query-exception-cannot-confirm-clean",
+        "cleanup-manual-type-query-exception-cannot-confirm-clean",
+        "cleanup-manual-increment-query-exception-cannot-confirm-clean"
+      ],
+      "path": "native/main.cpp",
+      "expectedNativeExit": 23
+    }
+  ],
+  "fixedAssertions": [
+    {
+      "case": "read-empty-target-is-not-captured",
+      "expected": {
+        "captured": false
+      }
+    },
+    {
+      "case": "read-exact-owned-target-copies-all-identity-fields",
+      "expected": {
+        "captured": true,
+        "created": 1234,
+        "generation": 7,
+        "pid": 100
+      }
+    },
+    {
+      "case": "generation-owner-requires-nonzero-captured-owned-generation",
+      "expected": {
+        "matching": true,
+        "unowned": false,
+        "wrong": false,
+        "zero": false
+      }
+    },
+    {
+      "case": "compare-clear-cannot-erase-newer-pid-birth-or-generation",
+      "expected": {
+        "birthKept": true,
+        "exactCleared": true,
+        "generationKept": true,
+        "pidKept": true
+      }
+    },
+    {
+      "case": "sleep-only-wrapper-cannot-consume-manual-lease",
+      "expected": {
+        "manualDepth": 2,
+        "manualRetained": true,
+        "resumed": 1
+      }
+    },
+    {
+      "case": "tracked-wrapper-actually-resumes-distinct-sleep-and-manual-leases",
+      "expected": {
+        "filesRemaining": 0,
+        "ntSuccesses": 3,
+        "resumed": 2
+      }
+    },
+    {
+      "case": "actual-startup-owned-thread-runs-consumer-and-joins",
+      "expected": {
+        "ends": 1,
+        "joined": true,
+        "resumed": 1,
+        "starts": 1,
+        "timeoutForwarded": 7
+      }
+    },
+    {
+      "case": "second-startup-launch-joins-predecessor-before-thread-replacement",
+      "expected": {
+        "joinedThreads": 2,
+        "ntSuccesses": 1,
+        "starts": 2
+      }
+    },
+    {
+      "case": "startup-unknown-owner-retains-marker-then-owned-thread-retry-resumes",
+      "expected": {
+        "firstResumed": 0,
+        "markerKept": true,
+        "secondResumed": 1
+      }
+    },
+    {
+      "case": "marker-scan-distinguishes-known-missing-nonregular-and-regular",
+      "expected": {
+        "missing": false,
+        "nonregular": false,
+        "regular": true
+      }
+    },
+    {
+      "case": "empty-cleanup-confirms-clean-once-and-is-idempotent",
+      "expected": {
+        "cancels": 1,
+        "cleanMarks": 1,
+        "first": true,
+        "inSuspend": false,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-resumes-manual-marker-before-marking-session-clean",
+      "expected": {
+        "cleanMarks": 1,
+        "done": true,
+        "filesRemaining": 0,
+        "ntSuccesses": 1
+      }
+    },
+    {
+      "case": "cleanup-exact-sleep-owner-and-distinct-manual-owner-both-complete",
+      "expected": {
+        "cleanMarks": 1,
+        "done": true,
+        "ntSuccesses": 3,
+        "sleepOwnerCleared": true
+      }
+    },
+    {
+      "case": "cleanup-unknown-retains-evidence-then-actual-retry-cleans",
+      "expected": {
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-denied-retains-evidence-then-actual-retry-cleans",
+      "expected": {
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-native-fail-retains-evidence-then-actual-retry-cleans",
+      "expected": {
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-sleep-exists-error-false-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-sleep-exists-error-true-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-manual-exists-error-false-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-manual-exists-error-true-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-sleep-iterator-error-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-manual-iterator-error-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "second": true
+      }
+    },
+    {
+      "case": "nonblocking-busy-mutex-defers-without-consuming-cleanup-and-retries",
+      "expected": {
+        "first": false,
+        "firstCancels": 0,
+        "firstMarks": 0,
+        "pending": true,
+        "resumed": 1,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-sleep-type-query-exception-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "raised": false,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-sleep-increment-query-exception-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "raised": false,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-manual-type-query-exception-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "raised": false,
+        "second": true
+      }
+    },
+    {
+      "case": "cleanup-manual-increment-query-exception-cannot-confirm-clean",
+      "expected": {
+        "actualRetryResumed": 1,
+        "finalMarks": 1,
+        "first": false,
+        "firstMarks": 0,
+        "kept": true,
+        "pending": true,
+        "raised": false,
+        "second": true
+      }
+    }
+  ],
+  "positiveSourcePolicy": "Positive executes captured reviewed actually repaired G source,never injects a private repair. Nine source faults mutate isolated complete named functions only; all27 expectations remain fixed.",
+  "memoryPorts": [
+    "checked and legacy file read",
+    "directory exists(error_code) and directory range with real modeled increment/type exceptions",
+    "process handle/birth/session/query/exit/admission/NT depth",
+    "wake recovery cancellation callback",
+    "session marker clean callback",
+    "generic joinThreadBoundedForExit policy with actual owned std::thread.join"
+  ],
+  "actualOwnedFixtureThreads": {
+    "startup": "Actual extracted startStartupResumeThread and global std::thread; prior thread joined before replacement",
+    "busyMutex": "One owned blocker holds actual operation mutex until signaled; actual cleanup(true) must defer and later retry",
+    "allJoined": true,
+    "deadlinePolicyMemory": true
+  },
+  "adversarialExistenceBooleanWithErrorCases": 2,
+  "scopeLimits": [
+    "No real business process,NT,file persistence,sleep,Host,Steam or hardware acceptance",
+    "Generic bounded join policy is explicit memory port; timeout forwarding is checked but real OS deadline not accepted",
+    "Wake cancellation/session marker body outside this consumer is memory port",
+    "Two true+ec cases are adversarial error/Boolean combinations,not actual SDK return claims"
+  ],
+  "historicalOriginal": {
+    "path": "D:/Codex/2026-10-19/mo/work/all-simulation-tests/sleep-startup-exit-consumer/original-r2/execution/original/observed-results.json",
+    "sha256": "05b8dfe79454e6692702656788bfbdd6491de39959695e46ad8024a7455c1a00",
+    "groups": 27,
+    "failed": 10,
+    "controlsPassed": 17,
+    "nativeExit": 23
+  },
+  "wholeGoalComplete": false,
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "55ea54805704339adf3ff6bdb31f946b6d027d77913e97534c2fce47786bc77b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    }
+  ],
+  "compilerSourceReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+    "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae",
+    "oldCompilerLeafSha256": "55ea54805704339adf3ff6bdb31f946b6d027d77913e97534c2fce47786bc77b",
+    "currentCompilerLeafSha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e",
+    "inheritedFunctionsUnchangedAfterCanonicalLf": true,
+    "actualWorkerEsmCoverageRequired": true,
+    "calibrationToolchainPreambleInvocationAllowed": false,
+    "budgetsAndFaultsUnchanged": true,
+    "sourceApproval": false
+  }
+}

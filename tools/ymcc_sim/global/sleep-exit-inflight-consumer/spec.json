@@ -1,0 +1,295 @@
+{
+  "schemaVersion": 1,
+  "caseId": "sleep.exit-inflight-consumer",
+  "fixture": {
+    "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/fixture.cpp.in",
+    "sha256": "e60c8fc36239a8ec4579e93d082f32974376543d59a2a942e4012c2a2335ec8a",
+    "positiveGroups": 2,
+    "nativeStages": 2
+  },
+  "productSources": [
+    "native/main.cpp",
+    "deps/json/json.hpp"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+    "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+      "sha256": "c773aeedde73fc4c2cc81cd2cfd91ab1314d1afcfa20e1e38510acab27000c9a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.mjs",
+      "sha256": "d1cd10430a261d32dbd0f90377fcd0348fe4d361eb4ad7f39596055d1006105d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+      "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae"
+    },
+    {
+      "path": "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+      "sha256": "6ee6e861ef65075d48b1d4d757e26544d7d8ca42a04444384003f81bc7f5cc7d"
+    }
+  ],
+  "reviewedFunctions": [
+    {
+      "name": "trim_ascii",
+      "role": "existing-pure-support",
+      "sha256": "c76f0f63f40aba7686bd97ab970211cdd7eb4bced7f310c1ae4c8e8a7b8b4f23"
+    },
+    {
+      "name": "sessionMarkerPath",
+      "role": "existing-complete-definition",
+      "sha256": "7ecc83a84e67aa530f2189c057f606b5bf93009387c03fde4de6126c9773180b"
+    },
+    {
+      "name": "sessionMarkerWrite",
+      "role": "existing-complete-definition",
+      "sha256": "ce968f655bfe91197ec83c7f2ecf43f492a9a565f8a2b3e747380c449d96a93b"
+    },
+    {
+      "name": "sessionMarkerCheckAtBoot",
+      "role": "existing-complete-definition",
+      "sha256": "4efe17009cd9120b100b615e5d7f578033cd1deaf5987fdd1186d035ed95117f"
+    },
+    {
+      "name": "sessionMarkerMarkClean",
+      "role": "existing-complete-definition",
+      "sha256": "ef0dc770cde25672d61ddd1d802c68b0c4c862d8d90b665aa605015170c882cd"
+    },
+    {
+      "name": "sgHasMarkerFiles",
+      "role": "existing-complete-definition",
+      "sha256": "266b1e19b808d765f13613d2dbcdc8a8a64dc6c535ee81be2989abb56cb25d45"
+    },
+    {
+      "name": "sgCleanupBeforeExit",
+      "role": "existing-complete-definition",
+      "sha256": "f0c0434d05904e9a73a82c34c6d8c404f6c9a848caefd0d7272211f672111c0c"
+    }
+  ],
+  "reviewedGlobalDeclaration": "static std::atomic<bool> g_sgCleanupDone{false};  // 正常退出清理只执行一次（app.exit/WM_DESTROY/会话结束共用）",
+  "reviewedGlobalSha256": "c5daaf8f3cd235fa99e9b95f995b5d9aa7c2e85592ba9739034092f5cac64151",
+  "variants": [
+    {
+      "label": "positive",
+      "sourcePatches": [],
+      "expectedFailedCases": []
+    },
+    {
+      "label": "fault-atomic-only-still-publishes-inflight",
+      "sourcePatches": [
+        {
+          "function": "sgCleanupBeforeExit",
+          "before": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
+          "after": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    g_sgCleanupDone = true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    if (!sessionClean) g_sgCleanupDone = false;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}"
+        }
+      ],
+      "expectedFailedCases": [
+        "second-nonblocking-exit-cannot-complete-while-owner-write-is-inflight",
+        "inflight-file-failure-keeps-completion-unpublished-and-retries"
+      ]
+    },
+    {
+      "label": "fault-forces-completed-after-failed-write",
+      "sourcePatches": [
+        {
+          "function": "sgCleanupBeforeExit",
+          "before": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
+          "after": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = true;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}"
+        }
+      ],
+      "expectedFailedCases": [
+        "inflight-file-failure-keeps-completion-unpublished-and-retries"
+      ]
+    },
+    {
+      "label": "fault-busy-return-pretends-complete",
+      "sourcePatches": [
+        {
+          "function": "sgCleanupBeforeExit",
+          "before": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return false;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}",
+          "after": "static bool sgCleanupBeforeExit(bool nonBlocking) {\n    if (g_sgCleanupDone) return true;\n    std::unique_lock<std::mutex> opLock(g_sgOpMtx, std::defer_lock);\n    if (nonBlocking) {\n        if (!opLock.try_lock()) {\n            sgRecordFact(\"sleep-exit-cleanup-deferred\", {\n                {\"reason\", \"sleep-worker-busy\"}\n            });\n            return true;\n        }\n    } else {\n        opLock.lock();\n    }\n    // A completed flag is published only after recovery and marker persistence.\n    if (g_sgCleanupDone) return true;\n    sgCancelWakeGameRecoveryUnlocked(\"application-exit\");\n    sgRecordFact(\"sleep-exit-cleanup-start\");\n    // 正常退出必须解除所有由本程序挂起的进程。\n    SgSleepTarget currentTarget;\n    if (sgReadSleepTarget(currentTarget) && currentTarget.markerOwned)\n        (void)sgResumeSleepTargetUnlocked(currentTarget.powerGeneration, false);\n    SgResumeResult rr = sgResumeTrackedAllUnlocked();\n    (void)rr;\n    // 若仍有标记，说明恢复失败；允许 WM_DESTROY/消息循环退出再重试一次。\n    const bool pending = sgHasMarkerFiles(SG_SLEEP_LEASE_DIR) ||\n        sgHasMarkerFiles(SG_MANUAL_DIR);\n    const bool sessionClean = !pending && sessionMarkerMarkClean();\n    g_sgCleanupDone = sessionClean;\n    sgRecordFact(\"sleep-exit-cleanup-complete\", {\n        {\"pendingMarkers\", pending}, {\"sessionClean\", sessionClean}, {\"resumed\", rr.count}\n    });\n    g_sgInSuspend = false;\n    return sessionClean;\n}"
+        }
+      ],
+      "expectedFailedCases": [
+        "second-nonblocking-exit-cannot-complete-while-owner-write-is-inflight",
+        "inflight-file-failure-keeps-completion-unpublished-and-retries"
+      ]
+    }
+  ],
+  "fixedFaultFailureCounts": [
+    2,
+    1,
+    2
+  ],
+  "positiveSourceCandidateInjectionAllowed": false,
+  "atomicTypeObservationIsNotSemanticPassPredicate": true,
+  "blockingWaiterAndSessionCancelRaceAccepted": false,
+  "wholeGoalComplete": false,
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/adapter.mjs",
+      "sha256": "59767af40f1e0b3f8a62a7cf90a96c81a40d905a702d8b60eeff4e673dd7ba2c"
+    },
+    {
+      "path": "tools/ymcc_sim/global/marker-ownership-consumer/toolchain-inputs.json",
+      "sha256": "c31d72912fb8523133615f724d7c899ed53e3fb7818cb6f38abfc797c1b0c73d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+      "sha256": "c773aeedde73fc4c2cc81cd2cfd91ab1314d1afcfa20e1e38510acab27000c9a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "55ea54805704339adf3ff6bdb31f946b6d027d77913e97534c2fce47786bc77b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/adapter.mjs",
+      "sha256": "948f426d281262e419ea646e0aabb909e429509f358dc00471d30888379a37cd"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/toolchain-inputs.json",
+      "sha256": "2f970646b4fca1005acd9e53bc497869c1f18ba5f67cd6869b5a5268ad67eaea"
+    }
+  ],
+  "compilerSourceReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-exit-inflight-consumer/compiler-source-review.json",
+    "sha256": "3b5b94a78e34ec77faae67bb8fca8c25bc4e8dc4bbfb48a02fd5643cd6bbb3ae",
+    "oldCompilerLeafSha256": "55ea54805704339adf3ff6bdb31f946b6d027d77913e97534c2fce47786bc77b",
+    "currentCompilerLeafSha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e",
+    "inheritedFunctionsUnchangedAfterCanonicalLf": true,
+    "actualWorkerEsmCoverageRequired": true,
+    "calibrationToolchainPreambleInvocationAllowed": false,
+    "budgetsAndFaultsUnchanged": true,
+    "sourceApproval": false
+  }
+}

@@ -1,0 +1,8 @@
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import crypto from 'node:crypto';
+const out=path.resolve(process.argv[2]),source=path.resolve(process.argv[3]||'native/main.cpp');fs.mkdirSync(out,{recursive:true});const text=fs.readFileSync(source,'utf8');
+function lambda(marker){const a=text.indexOf(marker);assert(a>=0&&text.indexOf(marker,a+1)<0,'Unique production '+marker);const b=text.indexOf('[]',a),end=text.indexOf('\n    };',b);assert(b>=a&&end>b);return text.slice(b,end+6).trim();}
+const callbacks={invalidate:lambda('    cssGuard.invalidateBackend ='),refresh:lambda('    cssGuard.refreshMode =')};
+for(const c of Object.values(callbacks))assert(!/ShellExecute|SetForegroundWindow|SetUIMode|RestartJSContext|launchSteam|CreateProcess/.test(c));
+assert(callbacks.invalidate.includes('sameSession(session, g_steamSettingsObserver.sessionSnapshot())')&&callbacks.invalidate.includes('g_steamCssUse.invalidateForResume(session)'));assert(callbacks.refresh.includes('PowerLifecycle::Ready')&&callbacks.refresh.includes('g_steamModeObserver.requestRefresh(session)'));
+fs.writeFileSync(path.join(out,'production-css-exit.h'),'inline const auto productionExitInvalidation='+callbacks.invalidate+';\ninline const auto productionExitRefresh='+callbacks.refresh+';\n');fs.writeFileSync(path.join(out,'source.json'),JSON.stringify({source,sha256:crypto.createHash('sha256').update(text).digest('hex'),callbacks,scope:'Exact source callbacks with fixture-owned observer/use ports; no installed Steam/CSS'},null,2));
+console.log('Extracted exact backend-exit invalidation and existing Ready/mode refresh callbacks.');

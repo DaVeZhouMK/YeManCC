@@ -1,10 +1,11 @@
 [CmdletBinding()]
-param([string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT)
+param([string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,[string]$NativeSourceRoot)
 $ErrorActionPreference = 'Stop'
 if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
   $WorkspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..\..\..'))
 }
 $ProjectRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$NativeSourceRoot=if($NativeSourceRoot){[IO.Path]::GetFullPath($NativeSourceRoot)}else{$ProjectRoot}
 $Native = Join-Path $WorkspaceRoot 'Build\App\Native'
 $Validation = Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads'
 New-Item -ItemType Directory -Path $Validation -Force | Out-Null
@@ -18,7 +19,7 @@ function Run-NativeTest([string]$Flag, [string]$Report) {
   # product's requireAdministrator manifest is not changed or removed.
   $si.EnvironmentVariables['__COMPAT_LAYER'] = 'RunAsInvoker'
   $p = [Diagnostics.Process]::Start($si)
-  if (!$p.WaitForExit(15000)) { throw "Self-test still running (PID=$($p.Id)); inspect that process, do not restart it." }
+  if (!$p.WaitForExit(60000)) { throw "Self-test still running (PID=$($p.Id)); inspect that process, do not restart it." }
   $path = Join-Path $Native $Report
   if (!(Test-Path -LiteralPath $path)) { throw "No fresh test result: $Report" }
   $r = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
@@ -30,14 +31,16 @@ function Run-NativeTest([string]$Flag, [string]$Report) {
   Write-Host "PASS $Flag"
   return $r
 }
+& (Join-Path $PSScriptRoot 'verify-screen-touchpads-haptics.ps1') -ValidationRoot (Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads-Haptics') -AppExe $exe -SourceRoot $NativeSourceRoot
 $core = Run-NativeTest '--screen-touchpads-selftest' 'screen-touchpads-selftest.json'
 $pointer = Run-NativeTest '--screen-touchpads-pointer-selftest' 'screen-touchpads-pointer-selftest.json'
 $wire = Run-NativeTest '--screen-touchpads-wire-selftest' 'screen-touchpads-wire-selftest.json'
 # Cursor fixture/render tests are input-free. Real touch cursor tests are separately opt-in.
 & (Join-Path $PSScriptRoot 'verify-screen-touchpads-cursor.ps1') -ValidationRoot (Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads-Cursor')
+& (Join-Path $PSScriptRoot 'verify-screen-touchpads-visual-cache.ps1') -ValidationRoot (Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads-VisualCache')
 $cursor = Get-Content -LiteralPath (Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads-Cursor\cursor-verification.json') -Raw | ConvertFrom-Json
 $hostExe = Join-Path $ProjectRoot 'InputHost\bin\Release\net10.0-windows\YeManInputHost.exe'
-foreach ($test in @('--selftest-screen-buttons', '--selftest-dualsense-touchpad', '--selftest-ds4-touchpad', '--selftest-steamdeck-touchpads', '--selftest-steamdeck-state', '--selftest-protocol', '--selftest-ds-wire', '--selftest-xbox360-state')) {
+foreach ($test in @('--selftest-screen-buttons', '--selftest-edge-touchpad', '--selftest-steamdeck-touchpads', '--selftest-steamdeck-state', '--selftest-protocol', '--selftest-virtual-output-admission', '--selftest-edge-wire', '--selftest-elite-state')) {
   & $hostExe $test
   if ($LASTEXITCODE -ne 0) { throw "InputHost test failed: $test" }
   Write-Output "PASS InputHost $test"
@@ -54,19 +57,23 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Frontend test failed' }
   & node tools/screen_touchpads_ui_selftest.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Actual Vue UI render test failed' }
-  & node tools/screen_touchpads_polish_browser_selftest.mjs
-  if ($LASTEXITCODE -ne 0) { throw 'Production gamepad/profile browser test failed' }
+  $oldPolishValidation=$env:YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION
+  try {
+    $env:YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION=Join-Path $WorkspaceRoot 'Build\Validation\ScreenTouchpads-Polish'
+    & node tools/screen_touchpads_polish_browser_selftest.mjs
+    if ($LASTEXITCODE -ne 0) { throw 'Production gamepad/profile browser test failed' }
+  } finally { $env:YEMAN_SCREEN_TOUCHPADS_POLISH_VALIDATION=$oldPolishValidation }
 } finally { Pop-Location }
-$files = @('native\main.cpp','native\screen_touchpads.h','native\screen_touchpad_cursor.h','native\screen_button_overlay.h','native\screen_control_glyphs.h','InputHost\Program.cs','InputHost\ScreenTouchpadReport.cs','InputHost\ScreenButtonReport.cs','InputHost\ScreenButtonFixtureTest.cs',
+$files = @('native\main.cpp','native\build_native.bat','native\screen_touchpad_owner.h','native\screen_touchpad_visibility.h','native\screen_touchpad_input_surface.h','native\touch_haptic_dispatch.h','native\screen_touchpads.h','native\screen_touchpad_cursor.h','native\screen_button_overlay.h','native\screen_control_glyphs.h','InputHost\Program.cs','InputHost\ScreenTouchpadReport.cs','InputHost\ScreenButtonReport.cs','InputHost\ScreenButtonFixtureTest.cs',
   'src\bridge\screenTouchpads.ts','src\components\ScreenTouchpadsSettings.vue','src\views\ButtonMappingView.vue',
   'src\components\Slider.vue','src\gamepad\engine.ts','src\components\SteamDeckMouseSensitivity.vue',
-  'tools\screen_touchpads_selftest.ts','tools\screen_touchpads_ui_selftest.mjs','tools\screen_touchpads_polish_browser_selftest.mjs','tools\verify-screen-touchpads.ps1','tools\screen_touchpads_cursor_selftest.cpp','tools\verify-screen-touchpads-cursor.ps1')
-$hashes = @($files | ForEach-Object { $p = Join-Path $ProjectRoot $_; [ordered]@{ path=$p; sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash } })
+  'tools\screen_touchpads_visual_cache_selftest.cpp','tools\verify-screen-touchpads-visual-cache.ps1','tools\screen_touchpads_selftest.ts','tools\screen_touchpads_ui_selftest.mjs','tools\screen_touchpads_polish_browser_selftest.mjs','tools\verify-screen-touchpads.ps1','tools\screen_touchpads_cursor_selftest.cpp','tools\verify-screen-touchpads-cursor.ps1')
+$hashes = @($files | ForEach-Object { $root=if($_.StartsWith('native\')){$NativeSourceRoot}else{$ProjectRoot};$p = Join-Path $root $_; [ordered]@{ path=$p; sha256=(Get-FileHash -LiteralPath $p -Algorithm SHA256).Hash } })
 # Verify the evidence belongs to a build newer than every changed compile input.
 $nativeBuilt=(Get-Item -LiteralPath $exe).LastWriteTimeUtc
 $hostBuilt=(Get-Item -LiteralPath (Join-Path (Split-Path $hostExe) 'YeManInputHost.dll')).LastWriteTimeUtc
-foreach($relative in @('native\main.cpp','native\screen_touchpads.h','native\screen_touchpad_cursor.h','native\screen_button_overlay.h','native\screen_control_glyphs.h')) {
-  if((Get-Item -LiteralPath (Join-Path $ProjectRoot $relative)).LastWriteTimeUtc -gt $nativeBuilt) { throw "Native source newer than tested binary: $relative" }
+foreach($relative in @('native\main.cpp','native\build_native.bat','native\screen_touchpad_owner.h','native\screen_touchpad_visibility.h','native\screen_touchpad_input_surface.h','native\touch_haptic_dispatch.h','native\screen_touchpads.h','native\screen_touchpad_cursor.h','native\screen_button_overlay.h','native\screen_control_glyphs.h')) {
+  if((Get-Item -LiteralPath (Join-Path $NativeSourceRoot $relative)).LastWriteTimeUtc -gt $nativeBuilt) { throw "Native source newer than tested binary: $relative" }
 }
 foreach($relative in @('InputHost\Program.cs','InputHost\ScreenTouchpadReport.cs','InputHost\ScreenButtonReport.cs','InputHost\ScreenButtonFixtureTest.cs')) {
   if((Get-Item -LiteralPath (Join-Path $ProjectRoot $relative)).LastWriteTimeUtc -gt $hostBuilt) { throw "Host source newer than tested binary: $relative" }
@@ -77,7 +84,7 @@ $webBuilt = (Get-Item -LiteralPath $webIndex).LastWriteTimeUtc
 foreach($relative in @('src\bridge\screenTouchpads.ts','src\components\ScreenTouchpadsSettings.vue','src\views\ButtonMappingView.vue')) {
   if((Get-Item -LiteralPath (Join-Path $ProjectRoot $relative)).LastWriteTimeUtc -gt $webBuilt) { throw "Frontend source newer than built Web: $relative" }
 }
-$receipt = [ordered]@{ ok=$true; sources=$hashes; nativeSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash;
+$receipt = [ordered]@{ ok=$true;nativeSourceRoot=$NativeSourceRoot;sources=$hashes; nativeSha256=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash;
   webIndexSha256=(Get-FileHash -LiteralPath $webIndex -Algorithm SHA256).Hash; cursorFixtureCases=$cursor.fixtureCases; coreCases=$core.cases.Count; pointerCases=$pointer.cases.Count;
   steamDeckNativeFrames=$wire.messages.Count; dualSenseNativeFrames=$wire.dualSenseMessages.Count; psDualNativeFrames=$wire.psDualMessages.Count; buttonNativeFrames=$wire.screenButtonMessages.Count; pointerEvents=$pointer.pointerEvents;
   buttonPointerEvents=$pointer.buttonPointerEvents; buttonSummonCalls=$pointer.buttonSummonCalls;

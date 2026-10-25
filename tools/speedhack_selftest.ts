@@ -7,10 +7,16 @@ const shellScripts: string[] = [];
 const writtenLogs: string[] = [];
 let shellStdout = '';
 let valvePid = 111;
+let valveGeneration = 0;
+let valveIdentityGeneration = 1;
+let observedValvePid = 111;
 
 function dispatch(cmd: string, args: any): any {
   if (cmd === 'game.detect') {
+    valveGeneration++;
+    if (observedValvePid !== valvePid) { observedValvePid = valvePid; valveIdentityGeneration = valveGeneration; }
     return {
+      generation: valveGeneration, identityGeneration: valveIdentityGeneration,
       pid: valvePid,
       name: valvePid === 111 ? 'Dungeons-Win64-Shipping.exe' : 'safe-game.exe',
       title: valvePid === 111 ? 'Minecraft Dungeons' : 'Safe Game',
@@ -192,7 +198,15 @@ async function main() {
   assert(!failed.ok && failed.safeFallback && failed.reason === 'operation_failed', 'failed injection must report 1x fallback');
   passed++;
 
-  console.log(`OpenSpeedy safety self-test: ${passed}/9 passed`);
+  const oldLease = { pid: valvePid, processCreated: String(valvePid * 1000 + 7), identityGeneration: valveIdentityGeneration };
+  valveIdentityGeneration = ++valveGeneration;
+  const scriptsBefore = shellScripts.length;
+  const reselected = await speedhack.applyGameSpeed(valvePid, 2, oldLease);
+  assert(reselected.skipped && reselected.reason === 'stale_target', 'same PID and birth from an old selection lease must be rejected');
+  assert(shellScripts.length === scriptsBefore, 'old selection cannot create a PowerShell transaction');
+  assert(script.includes('$script:ymccExpectedIdentityGeneration') && script.includes('$snapshot.identityGeneration'), 'external transaction must validate the same selection lease');
+  passed++;
+  console.log(`OpenSpeedy safety self-test: ${passed}/10 passed`);
 }
 
 main().catch((error) => {

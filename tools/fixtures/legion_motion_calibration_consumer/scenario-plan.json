@@ -1,0 +1,141 @@
+{
+  "schema": 1,
+  "status": "acceptance-plan; use run summary for execution results",
+  "oracle": "Actual extracted production functions and actual transaction/session headers; no copied request/advance/store implementation.",
+  "cases": [
+    {
+      "name": "request-missing-sample",
+      "expectation": "No lease: request returns ok=false, creates no pending owner, no native or persistence effect.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "request-stale-sample",
+      "expectation": "Expire queue timestamp or retire power/raw/capture: request refuses before admission.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "request-busy-preserves-first-key",
+      "expectation": "Second request while pending/active returns busy and cannot replace the first exact Key or reset its window.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "request-exact-model-scope",
+      "expectation": "Only the four exact routes are admitted; no Windows calibration marker changes on any route.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "request-before-first-handle",
+      "expectation": "Request binds a current Sample Key; later actual Session preparation may consume only that exact Key.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "pending-source-change",
+      "expectation": "Retire physical identity, sensor, power, raw generation and capture epoch separately; old pending cannot attach to new handle.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "active-source-change",
+      "expectation": "Same retirement matrix after preparation: cancel old transaction before owner destruction; no success/store.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "tablet-left-right-persistence",
+      "expectation": "Save distinct left/right candidates; reload by physicalIdentity+sensorIndex and retain both records.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "persistence-preserves-unrelated-records",
+      "expectation": "Keep all pre-existing Windows root calibration values, unrelated JSON fields, other physical identities and sides. Generations never enter persistence keys.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "persistence-atomic-failure",
+      "expectation": "Real isolated temp write; controlled file open/replace failure. Original data remains intact, no candidate application and no saved claim.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "successful-candidate-order",
+      "expectation": "Real prepare/process/observe/candidate path saves before apply. SetMode/SetOffset effects target only the bound controller handle.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "confidence-rejection-and-readback",
+      "expectation": "Follow real transaction acceptance policy: untrusted/nonfinite readback produces no saved result. Threshold values come from the actual header, not a fabricated gate.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "abort-revoke-stop-sleep",
+      "expectation": "Pending and active cancellations through actual Abort/SessionRevoke paths and controlled lifecycle retirement; no stale transaction survives. No real PBT.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "old-token-new-handle",
+      "expectation": "Retired old Key/transaction cannot run callbacks against the successor handle, even with same physical identity/side.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "ui-result-status-contract",
+      "expectation": "Every failure/cancellation result explicitly saved=false. Successful result offset/weight/confidence reflects persisted data. Status uses the existing four UI tokens.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "windows-state-isolation",
+      "expectation": "Every native callback rejects Windows sentinel. Snapshot independent Windows state before/after request/status/advance/abort/store; zero marker writes.",
+      "status": "planned-not-executed"
+    },
+    {
+      "name": "pre-request-receipt-no-training",
+      "expectation": "A current pre-request sample may admit Request but cannot train; prepare still receives zero for time progression.",
+      "status": "see-execution-receipt"
+    },
+    {
+      "name": "request-replaced-ui-id-fence",
+      "expectation": "Expired same-key replacement cancels old transaction and logs old ID without completing/clearing the new UI request.",
+      "status": "see-execution-receipt"
+    },
+    {
+      "name": "log-exception-still-destroys-owner",
+      "expectation": "Controlled log sink exception during noexcept Abort cannot skip Session destroy or keep borrowed transaction state.",
+      "status": "see-execution-receipt"
+    },
+    {
+      "name": "missing-owner-cancels-pending",
+      "expectation": "Missing read/calibration callbacks, failed create and unavailable source before first owner complete pending requests without persistence.",
+      "status": "see-execution-receipt"
+    },
+    {
+      "name": "saved-trust-restored-new-epoch",
+      "expectation": "Stored offset and trusted status restore on a new Session/epoch in the same single JSON read; repeat ticks do not reread or republish.",
+      "status": "see-execution-receipt"
+    },
+    {
+      "name": "legacy-offset-not-trusted",
+      "expectation": "Legacy missing confidence and inconsistent weight/confidence still restore valid offset without claiming trust.",
+      "status": "see-execution-receipt"
+    }
+  ],
+  "candidateMutants": [
+    "bypass-busy-preservation",
+    "alias-persistent-sensor-index",
+    "ignore-exact-pending-key",
+    "apply-before-successful-store",
+    "omit-abort-before-destroy",
+    "claim-saved-on-write-failure"
+  ],
+  "executionBoundary": {
+    "executedAfterBinding": "Actual request/status/store/advance/abort and selected lease/session/lifecycle methods with controlled boundaries.",
+    "sourceOnly": "Whole UI, IPC registration, onGamepad and OS shutdown/sleep callers unless individually extracted later.",
+    "fileIO": "Only fresh evidence-owned paths; actual product calibration path provider is not executed.",
+    "notExecuted": [
+      "product",
+      "DLL",
+      "HID",
+      "registry",
+      "real configuration",
+      "Win32 input",
+      "PBT",
+      "threads",
+      "Host"
+    ]
+  }
+}

@@ -1,0 +1,244 @@
+{
+  "schemaVersion": 1,
+  "esbuildVersion": "0.21.5",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "esbuildModule": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+  "esbuildPackageRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild",
+  "esbuildExecutable": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+  "files": [
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe",
+      "sha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@babel+parser@7.29.8\\node_modules\\@babel\\parser\\lib\\index.js",
+      "sha256": "6969920ae0610df927b6b3e675d1309372c268e36d391652af8e3e0183cbe8f8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@babel+parser@7.29.8\\node_modules\\@babel\\parser\\package.json",
+      "sha256": "6d6a65b879cd7cd249a4367c0b57cce00e78c728de45056ac2a5ca1d1f528d1a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\esbuild.exe",
+      "sha256": "b868c8d988ffe76006c03c91f856312c312e42e2f3932a6bb56d7f4a1790c8b3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@esbuild+win32-x64@0.21.5\\node_modules\\@esbuild\\win32-x64\\package.json",
+      "sha256": "5fefc397d9fe3a69260545a7bfe570493b41498f3a949652e416a153dfdf695b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\dist\\compiler-core.cjs.js",
+      "sha256": "8f566fcdf8be11f6070e895f87d29767d626c7cb7a814c9c0e0fc965977d0187"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\dist\\compiler-core.cjs.prod.js",
+      "sha256": "b12e049146701a7ffc734f89aba904b2373411d56a5a3c1a352e3db818e86b33"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\index.js",
+      "sha256": "ccc969ede88026f2168f8a6ca482913664ac12b2e0cfe1e34cd211767e521a60"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-core@3.5.41\\node_modules\\@vue\\compiler-core\\package.json",
+      "sha256": "826dd51c144b9ef9dc0f60ecc4a8e43d223f189afddf98ffe20b6a51b2340f3f"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\dist\\compiler-dom.cjs.js",
+      "sha256": "982dcfb9dd576ca1d72a36b7e6c9850da761c857efa334653954c85e6653867a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\dist\\compiler-dom.cjs.prod.js",
+      "sha256": "5ae53f681f4f8b8309812689a8797b4e1e96b3f6382eb954fd5997ec17599e3c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\index.js",
+      "sha256": "21407fc5cebe255208627dd039f2284156be88abbd9123281a79581d349b48c1"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+compiler-dom@3.5.41\\node_modules\\@vue\\compiler-dom\\package.json",
+      "sha256": "f57bbca76fbaf1786ae9eda7b6229cb362d7e5b9591d1a4cb0a924fd059e75c7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\dist\\reactivity.cjs.js",
+      "sha256": "ced4b68a84b160893c7cd9951a4ea11cc093b122dfead31139b6f4e89ba2f64a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\dist\\reactivity.cjs.prod.js",
+      "sha256": "69f1ef82d891c809658d46f142f0fa080994f63aa17846d97c4c92cb31975e62"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\index.js",
+      "sha256": "ea58baa61892122ece77249d50c4b4bcdda46dd5233d6908d86d6bb4f874a109"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+reactivity@3.5.41\\node_modules\\@vue\\reactivity\\package.json",
+      "sha256": "f8f16905eaf2a207a0150c2d972232758fc4dfa373d04ecbfec55795341c421a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\dist\\runtime-core.cjs.js",
+      "sha256": "01863738f63ce23838d1251b0f0c5f59568e503741b73e6aac039f08a9b64a45"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\dist\\runtime-core.cjs.prod.js",
+      "sha256": "3c4e62f30a542d5e51dea711f3ceec11af267b3d4b97f20203c28d0c3d985da0"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\index.js",
+      "sha256": "62c7b9f4f1090dd5217eccacffb381d56a5d27f60c0256e7f04915a77489ef82"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-core@3.5.41\\node_modules\\@vue\\runtime-core\\package.json",
+      "sha256": "1d2610263892722de3cc90f493a0fe2c0dd76afa8487ff6febfd5096b757c257"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\dist\\runtime-dom.cjs.js",
+      "sha256": "5f155f9d1a4e5eabb3b2227b8f289da53c0671917e12d6fa9013f80c8b763dbd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\dist\\runtime-dom.cjs.prod.js",
+      "sha256": "4a648d7968e74caf66b5630fcbd54c5dba5b9d3ea741e9619c9f2020ba5b35ad"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\index.js",
+      "sha256": "32a727cae7f8ef6ff93696552dd16b5fd355207439f74421dd9f19d7193f866f"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+runtime-dom@3.5.41\\node_modules\\@vue\\runtime-dom\\package.json",
+      "sha256": "807d437dd13acfb23fa883887c6460504a8b883f7bb29571a62a365feeebc373"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.cjs.js",
+      "sha256": "cb8b5c2d5930cb40d6a3b028266cf8bbf0dd99cced447acb55416ffdbd8e2774"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\dist\\shared.cjs.prod.js",
+      "sha256": "74b4b418e42b037b5aeaa2e4ec608e19ce2191a31b3c220a6111cc0133190146"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\index.js",
+      "sha256": "22aeabedc1f2782f67b05c54df4382d4e52a0e0c384ff02349372e2acd9974ed"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\@vue+shared@3.5.41\\node_modules\\@vue\\shared\\package.json",
+      "sha256": "111fef6001916651a932841286f7e288cdaf8c5bec7d8683956b5b6e91554922"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode-codepoint.js",
+      "sha256": "98d97fd43e4db015e5afa7c69b1055cd1ade8114530ea01734add86184125271"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\decode.js",
+      "sha256": "e318cd751279428b7d7e6e9e4c0dc7cc8a4c78e8c2bd00d42da9f8e7b3ef5c07"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-html.js",
+      "sha256": "80b85ad02696af10d597c1353db7eb01fbbe4db5b922ac8693c29cbe18d53ac4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\generated\\decode-data-xml.js",
+      "sha256": "07e89fa83ca837b188e4cc52a8d6d2b6983fc5a63b15abad789da9be2ea777b6"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\bin-trie-flags.js",
+      "sha256": "ddb6a8fcaab3a1fb6d60c576bf10302a554d71869b6466a14fc11a800264559a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\internal\\decode-shared.js",
+      "sha256": "e68061084a578fa4f95bd96407f2a4e272bb38615ae1b1076d1181981ce95549"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\entities@7.0.1\\node_modules\\entities\\dist\\commonjs\\package.json",
+      "sha256": "8005a3491db7d92f36ac66369861589f9c47123d3a7c71e643fc2c06168cd45a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\lib\\main.js",
+      "sha256": "ac0772cb9176e4dd1d896be746b82edff699103940c8535a286493cecb69bdee"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\esbuild@0.21.5\\node_modules\\esbuild\\package.json",
+      "sha256": "0f35e0d63bd60a43ed85879604a40f7e9688b321904cf28a95be5b1bc629559c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\estree-walker@2.0.2\\node_modules\\estree-walker\\dist\\umd\\estree-walker.js",
+      "sha256": "183597c40a43d2a2ebda3dc85ae2dd70e107b3e5cec305b02a5bffa54e0f4b9b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\estree-walker@2.0.2\\node_modules\\estree-walker\\package.json",
+      "sha256": "6f08430331daeaedaa35e7a8ca347cdb7493922fe9485bf57eb4d619cfb0b3ad"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\array-set.js",
+      "sha256": "163bb3055aaea7140167740036a83161fd912c344b14f992754b80f21477d754"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64-vlq.js",
+      "sha256": "f3407e528f54ec0787bd0a71eeac0c99fffd98445916fcbe116dc69ca3be928b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\base64.js",
+      "sha256": "651bf433cf05e9ec8cee0b94639483236a605d48279e83d3d5c5de81c21d6599"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\binary-search.js",
+      "sha256": "c7f4a47a125af0bd860443dfd71d2f412d1a97dcb53ab7038189d63b91dc32bd"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\mapping-list.js",
+      "sha256": "35ddb82861f11a70ab84cb47d620fcb28d7f884bb444644e06bde815b836ef9e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\quick-sort.js",
+      "sha256": "72ed4911cdc72232cac53cac995e28e865cd4302186173bba74ff6436c089915"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-consumer.js",
+      "sha256": "78f7a8f6d20f51a99a9cbd8d552321b1a72de9b9fb9c39dbeb27dc84eb2eade5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-map-generator.js",
+      "sha256": "645482e8d23fd49cd025a0ad07c2e2beb173995138370d6a73e596e18e889bd8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\source-node.js",
+      "sha256": "b45db8183550ca1e6259976f6ceee89f6764360c56cf206701bd2f7471144e31"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\lib\\util.js",
+      "sha256": "0629f3ae2f3049cda3a2e87ea651dcf0cc71108f4681795ab989a8ac1573fc03"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\package.json",
+      "sha256": "58f8e94a461a5e461e0cb2bb2be681cbd89b9181989fd26fceb858e67711469a"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\source-map-js@1.2.1\\node_modules\\source-map-js\\source-map.js",
+      "sha256": "dc098456c2d9ab90a4c0a17cca9be16665b9813df20906553a98b0088a157be7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\dist\\vue.cjs.js",
+      "sha256": "033c70f903ab358d3e1a2b0474c21a63960e341266d84931d34420b43fb17846"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\dist\\vue.cjs.prod.js",
+      "sha256": "4f042b4caee7d78cdb841837e46e6b2e14711c37e9705627d02ec92f4776cf0b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\index.js",
+      "sha256": "a5287f6056bc5c2c569d318063ee043f55a0d323fa7262f64456d58fd574f928"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\index.mjs",
+      "sha256": "be2f35590bee45e69850d0d8d48f0b8c8f5c0ef0ecf8a7265ab12fb7add6584d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue\\package.json",
+      "sha256": "f4b4f0bcc14f8d48db601ba33f408211438d86e914c08f7169836ad618ae1893"
+    }
+  ],
+  "powershellExecutable": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe",
+  "vuePackageRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\node_modules\\.pnpm\\vue@3.5.41_typescript@5.9.3\\node_modules\\vue"
+}

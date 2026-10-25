@@ -1,0 +1,872 @@
+[
+  {
+    "route": "asus-ally-acpi",
+    "family": "ASUS ROG Ally",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ASUSTEK COMPUTER INC."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "RC71L"
+      ],
+      "deviceClass": "ROGAlly"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "asus-ally-acpi",
+    "family": "ASUS ROG Ally",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ASUSTEK COMPUTER INC."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "RC72LA"
+      ],
+      "deviceClass": "ROGAllyX"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "asus-ally-acpi",
+    "family": "ASUS ROG Ally",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ASUSTEK COMPUTER INC."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "RC73YA"
+      ],
+      "deviceClass": "XboxROGAlly"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "asus-ally-acpi",
+    "family": "ASUS ROG Ally",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ASUSTEK COMPUTER INC."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "RC73XA"
+      ],
+      "deviceClass": "XboxROGAllyX"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "lenovo-go-conservation",
+    "family": "Lenovo Legion Go",
+    "kind": "firmware-fixed",
+    "identity": {
+      "manufacturers": [
+        "LENOVO"
+      ],
+      "field": "systemProduct",
+      "values": [
+        "83N6",
+        "83Q2",
+        "83Q3"
+      ],
+      "deviceClass": "LegionGoSZ1"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "lenovo-go-conservation",
+    "family": "Lenovo Legion Go",
+    "kind": "firmware-fixed",
+    "identity": {
+      "manufacturers": [
+        "LENOVO"
+      ],
+      "field": "systemProduct",
+      "values": [
+        "83L3"
+      ],
+      "deviceClass": "LegionGoSZ2"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "lenovo-go-conservation",
+    "family": "Lenovo Legion Go",
+    "kind": "firmware-fixed",
+    "identity": {
+      "manufacturers": [
+        "LENOVO"
+      ],
+      "field": "systemProduct",
+      "values": [
+        "83E1"
+      ],
+      "deviceClass": "LegionGoTablet"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "lenovo-go-conservation",
+    "family": "Lenovo Legion Go",
+    "kind": "firmware-fixed",
+    "identity": {
+      "manufacturers": [
+        "LENOVO"
+      ],
+      "field": "systemProduct",
+      "values": [
+        "83N0",
+        "83N1"
+      ],
+      "deviceClass": "LegionGoTablet2"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "msi-claw-wmi",
+    "family": "MSI Claw",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "MICRO-STAR INTERNATIONAL CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "MS-1T41"
+      ],
+      "deviceClass": "ClawA1M"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 20
+  },
+  {
+    "route": "msi-claw-wmi",
+    "family": "MSI Claw",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "MICRO-STAR INTERNATIONAL CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "MS-1T42",
+        "MS-1T52"
+      ],
+      "deviceClass": "ClawA2VM"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 20
+  },
+  {
+    "route": "msi-claw-wmi",
+    "family": "MSI Claw",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "MICRO-STAR INTERNATIONAL CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "MS-1T8K"
+      ],
+      "deviceClass": "ClawBZ2EM"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 20
+  },
+  {
+    "route": "msi-claw-cg3em-ap",
+    "family": "MSI Claw",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "MICRO-STAR INTERNATIONAL CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "MS-1T91"
+      ],
+      "deviceClass": "ClawCG3EM"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 20
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AYANEO 2",
+        "GEEK"
+      ],
+      "deviceClass": "AYANEO2"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AYANEO 2S",
+        "GEEK 1S"
+      ],
+      "deviceClass": "AYANEO2S"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AYANEO 3",
+        "AB07"
+      ],
+      "deviceClass": "AYANEO3"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR"
+      ],
+      "deviceClass": "AYANEOAIR"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR 1S",
+        "AIR 1S Limited"
+      ],
+      "deviceClass": "AYANEOAIR1S"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR 2",
+        "AIR2",
+        "AYANEO AIR 2",
+        "AB10"
+      ],
+      "deviceClass": "AYANEOAIR2"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR Lite"
+      ],
+      "deviceClass": "AYANEOAIRLite"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR Pro"
+      ],
+      "deviceClass": "AYANEOAIRPro"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AIR Pro 1S",
+        "AYANEO AIR Pro 1S"
+      ],
+      "deviceClass": "AYANEOAIRPro1S"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "FLIP 11",
+        "AYANEO FLIP 11"
+      ],
+      "deviceClass": "AYANEOFlip11"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "FLIP 1S DS"
+      ],
+      "deviceClass": "AYANEOFlip1SDS"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "FLIP 1S KB"
+      ],
+      "deviceClass": "AYANEOFlip1SKB"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "FLIP DS"
+      ],
+      "deviceClass": "AYANEOFlipDS"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "FLIP KB"
+      ],
+      "deviceClass": "AYANEOFlipKB"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "KUN"
+      ],
+      "deviceClass": "AYANEOKUN"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-cec-bypass",
+    "family": "AYANEO CEc",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "NEXT II",
+        "NEXT 2",
+        "AYANEO NEXT II",
+        "AYANEO NEXT 2",
+        "AB09"
+      ],
+      "deviceClass": "AYANEONEXT2"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-ceii-bypass",
+    "family": "AYANEO CEii",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AB05-AMD"
+      ],
+      "deviceClass": "AYANEOAIRPlusAMD"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-ceii-bypass",
+    "family": "AYANEO CEii",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AB05-Mendocino"
+      ],
+      "deviceClass": "AYANEOAIRPlusAMDMendocino"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-ceii-bypass",
+    "family": "AYANEO CEii",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AB05-Intel"
+      ],
+      "deviceClass": "AYANEOAIRPlusIntel"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-ceii-bypass",
+    "family": "AYANEO CEii",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AB05N",
+        "AB05NXX",
+        "AIR Plus Nxx"
+      ],
+      "deviceClass": "AYANEOAIRPlusNxx"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "ayaneo-ceii-bypass",
+    "family": "AYANEO CEii",
+    "kind": "software-bypass-threshold",
+    "identity": {
+      "manufacturers": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "AS01"
+      ],
+      "deviceClass": "AYANEOSlide"
+    },
+    "firmwareGate": {
+      "kind": "provider-probe-required"
+    },
+    "min": 40
+  },
+  {
+    "route": "oxp-x1-amd-ec",
+    "family": "OneXPlayer X1 AMD / Mini / Pro / Apex",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER X1 A",
+        "ONEXPLAYER X1z"
+      ],
+      "deviceClass": "OneXPlayerX1AMD"
+    },
+    "firmwareGate": {
+      "kind": "hc-ec-components",
+      "majorMin": 1,
+      "minorMin": 3,
+      "unknownValue": 255
+    },
+    "min": 40
+  },
+  {
+    "route": "oxp-x1-amd-ec",
+    "family": "OneXPlayer X1 AMD / Mini / Pro / Apex",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER X1 mini"
+      ],
+      "deviceClass": "OneXPlayerX1Mini"
+    },
+    "firmwareGate": {
+      "kind": "hc-ec-components",
+      "majorMin": 1,
+      "minorMin": 3,
+      "unknownValue": 255
+    },
+    "min": 40
+  },
+  {
+    "route": "oxp-x1-amd-ec",
+    "family": "OneXPlayer X1 AMD / Mini / Pro / Apex",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER X1Pro"
+      ],
+      "deviceClass": "OneXPlayerX1Pro"
+    },
+    "firmwareGate": {
+      "kind": "hc-ec-components",
+      "majorMin": 1,
+      "minorMin": 3,
+      "unknownValue": 255
+    },
+    "min": 40
+  },
+  {
+    "route": "oxp-x1-amd-ec",
+    "family": "OneXPlayer X1 AMD / Mini / Pro / Apex",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER APEX",
+        "ONEXPLAYERAPEX"
+      ],
+      "deviceClass": "OneXPlayerApex"
+    },
+    "firmwareGate": {
+      "kind": "hc-ec-components",
+      "majorMin": 1,
+      "minorMin": 3,
+      "unknownValue": 255
+    },
+    "min": 40
+  },
+  {
+    "route": "oxp-x1-intel-ec",
+    "family": "OneXPlayer X1 Intel",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "ONE-NETBOOK",
+        "ONE-NETBOOK TECHNOLOGY CO., LTD."
+      ],
+      "field": "boardProduct",
+      "values": [
+        "ONEXPLAYER X1 i"
+      ],
+      "deviceClass": "OneXPlayerX1Intel"
+    },
+    "firmwareGate": {
+      "kind": "hc-ec-components",
+      "majorMin": 0,
+      "minorMin": 67,
+      "unknownValue": 255
+    },
+    "min": 40
+  },
+  {
+    "route": "valve-deck-firmware",
+    "family": "Valve Steam Deck",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "VALVE"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "Jupiter",
+        "Galileo"
+      ],
+      "deviceClass": "SteamDeck"
+    },
+    "firmwareGate": {
+      "kind": "exact-board-firmware",
+      "pairs": [
+        {
+          "boardId": 10,
+          "firmware": 45104
+        },
+        {
+          "boardId": 5,
+          "firmware": 4112
+        },
+        {
+          "boardId": 5,
+          "firmware": 4176
+        },
+        {
+          "boardId": 5,
+          "firmware": 4240
+        },
+        {
+          "boardId": 5,
+          "firmware": 4352
+        }
+      ]
+    },
+    "min": 40
+  },
+  {
+    "route": "gpd-win-mini-2025",
+    "family": "GPD WIN Mini 2025 HX370",
+    "kind": "firmware-percent",
+    "identity": {
+      "manufacturers": [
+        "GPD"
+      ],
+      "field": "boardProduct",
+      "values": [
+        "G1617-02"
+      ],
+      "deviceClass": "GPDWinMini_HX370",
+      "processorPattern": "\\bHX\\s*370\\b"
+    },
+    "firmwareGate": {
+      "kind": "exact-reviewed-firmware",
+      "bios": "2.10",
+      "ecMajor": 2,
+      "ecMinor": 7
+    },
+    "min": 60
+  }
+]

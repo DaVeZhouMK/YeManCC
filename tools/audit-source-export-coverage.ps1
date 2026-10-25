@@ -84,9 +84,14 @@ $rules = @(
   [pscustomobject]@{ match='^Release/';           kind='excluded'; dest='-'; code='E-RELEASE-OUTPUT' },
   [pscustomobject]@{ match='^Backup/';            kind='excluded'; dest='-'; code='E-BACKUP' },
   [pscustomobject]@{ match='^Build/';             kind='excluded'; dest='-'; code='E-BUILD-OUTPUT' },
+  [pscustomobject]@{ match='^native/BatteryHost/'; kind='build-input'; dest='PowerControl/battery-host/**'; code='' },
   [pscustomobject]@{ match='^native/';            kind='build-input'; dest='YeManCC/YeManCC.exe, YeManCC/YeManRecoveryService.exe'; code='' },
   [pscustomobject]@{ match='^src/';               kind='build-input'; dest='YeManCC/index.html, YeManCC/assets/**'; code='' },
+  [pscustomobject]@{ match='^radial-output\.html$'; kind='build-input'; dest='YeManCC/radial-output.html (compiled Vite radial entry)'; code='' },
+  [pscustomobject]@{ match='^notice-output\.html$'; kind='build-input'; dest='YeManCC/notice-output.html (compiled Vite entry)'; code='' },
   [pscustomobject]@{ match='^public/';            kind='build-input'; dest='YeManCC/assets/**, YeManCC/icons/**'; code='' },
+  [pscustomobject]@{ match='^deps/fan-host-source/'; kind='excluded'; dest='-'; code='E-BUILD-EVIDENCE' },
+  [pscustomobject]@{ match='^deps/lightsetter-(source|admission)/'; kind='excluded'; dest='-'; code='E-BUILD-EVIDENCE' },
   [pscustomobject]@{ match='^deps/';              kind='build-input'; dest='compiled/linked into YeManCC.exe'; code='' },
   [pscustomobject]@{ match='^InputHost/';         kind='build-input'; dest='PowerControl/feature-assets/virtual-gamepad/YeManInputHost.*'; code='' },
   [pscustomobject]@{ match='^GamepadPrerequisites/';kind='build-input'; dest='PowerControl/redist/HIDMaestroSetup.*'; code='' },
@@ -98,6 +103,30 @@ $rules = @(
   # tools/decky_sidebar_packaging_selftest.mjs 契约）。与 src/、InputHost/、
   # FanLab/LightSetter/ 同属"编译/构建产物进包"车道。
   [pscustomobject]@{ match='^decky-plugin/';      kind='build-input'; dest='PowerControl/decky/plugins/ymcc-sidebar/**'; code='' },
+  [pscustomobject]@{ match='^capabilities/HcBatteryCapabilityCatalog(?:\.generated)?\.cs$'; kind='payload-source'; dest='PowerControl/battery-host/YeManBatteryHost.dll (linked unified capability source)'; code='' },
+  # Explicit linked sources in FanLab/fan-backend/YeManFanBackend.csproj.
+  [pscustomobject]@{ match='^capabilities/Hc(?:Device|Lighting)CapabilityCatalog(?:\.generated)?\.cs$'; kind='payload-source'; dest='PowerControl/fan-host-v2/YeManFanBackend.dll (linked unified capability source; LightSetter also compiles this source)'; code='' },
+  [pscustomobject]@{ match='^capabilities/HcControllerInputCapabilityCatalog(?:\.generated)?\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (unified standard controller input)'; code='' },
+  [pscustomobject]@{ match='^capabilities/HcMotionCapabilityCatalog(?:\.generated)?\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (compiled motion binding)'; code='' },
+  [pscustomobject]@{ match='^capabilities/hc-device-catalog\.generated\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (compiled unified capability data)'; code='' },
+  [pscustomobject]@{ match='^capabilities/hc-(?:device-catalog|lighting-policy|battery-policy|motion-policy|controller-input-policy)\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
+  [pscustomobject]@{ match='^capabilities/(FanCapabilityCatalog|AsusFanCapabilitySession)\.cs$'; kind='payload-source'; dest='PowerControl/fan-host-v2/YeManFanBackend.dll (linked capability source)'; code='' },
+  [pscustomobject]@{ match='^capabilities/(?:INTEGRATION-STATUS|EXECUTION-CHAINS|CONTROLLER-CONSUMPTION)\.json$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  # Exact current native/managed consumers; unrelated capability files still fail closed.
+  [pscustomobject]@{ match='^capabilities/HcController(?:Feedback|Motion)CapabilityCatalog(?:\.generated)?\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (current controller capability consumers)'; code='' },
+  [pscustomobject]@{ match='^capabilities/HcOemInputCapabilityBinding\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (current OEM input binding)'; code='' },
+  [pscustomobject]@{ match='^capabilities/HcControllerGameFeedbackCapabilityCatalog\.generated\.cs$'; kind='build-input'; dest='PowerControl/feature-assets/virtual-gamepad/YeManInputHost.dll (explicit linked generated source)'; code='' },
+  [pscustomobject]@{ match='^capabilities/hc-controller-(?:feedback|motion)-policy\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
+  [pscustomobject]@{ match='^capabilities/(?:CONTROLLER-GAME-MOTOR-RECEIPT|CONTROLLER-GAME-OUTPUT-OBSERVATION|FAN-RETURN-CONSUMPTION|USER-SCOPE-DECISIONS|hc-performance-metadata)\.json$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  # Explicit newly linked battery consumer plus offline review records.
+  [pscustomobject]@{ match='^capabilities/HcSecondaryDisplayCapabilityCatalog\.cs$'; kind='build-input'; dest='PowerControl/battery-host/YeManBatteryHost.dll (explicit linked capability source)'; code='' },
+  [pscustomobject]@{ match='^capabilities/hc-model-method-policy\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
+  [pscustomobject]@{ match='^capabilities/(?:CONTROLLER-STEAMDECK-RUMBLE-RECEIPT|CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT|MODEL-METHOD-CONSUMPTION|SECONDARY-DISPLAY-CONSUMPTION)\.json$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  [pscustomobject]@{ match='^capabilities/HcControllerConfigurationCapabilityCatalog(?:\.generated)?\.h$'; kind='build-input'; dest='Build/App/Native/YeManCC.exe (actual MSI configuration consumer)'; code='' },
+  [pscustomobject]@{ match='^capabilities/hc-controller-configuration-policy\.json$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
+  [pscustomobject]@{ match='^capabilities/ACTIVE-INTEGRATION-SCOPE\.json$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  [pscustomobject]@{ match='^capabilities/(?:AI-GUIDE\.md|AI-INDEX\.json|OVERVIEW-COUNTS\.json|OVERVIEW\.md)$'; kind='excluded'; dest='-'; code='E-DOCS' },
+  [pscustomobject]@{ match='^capabilities/README\.md$'; kind='excluded'; dest='-'; code='E-DOCS' },
   [pscustomobject]@{ match='^FanLab/real-host/';  kind='payload-source'; dest='PowerControl/fan-host-v2/** (verified source: PowerControl/fan-host)'; code='' },
   [pscustomobject]@{ match='^FanLab/';            kind='excluded'; dest='-'; code='E-FANLAB-LAB' },
   [pscustomobject]@{ match='^PowerControl/\.gitignore$'; kind='excluded'; dest='-'; code='E-ROOT-CONFIG' },
@@ -112,6 +141,7 @@ $rules = @(
   [pscustomobject]@{ match='^PowerControl/handheldcompanion-runtime/[^/]+/Resources/xinput1_x(64|86)\.dll$'; kind='excluded'; dest='-'; code='E-BUILD-INPUT' },
   [pscustomobject]@{ match='^PowerControl/';      kind='shipped-asset'; dest='PowerControl/<relative path>'; code='' },
   [pscustomobject]@{ match='^CustomSteamLibrary/';kind='shipped-child'; dest='YeManCC/CustomSteamLibrary/<relative path>'; code='' },
+  [pscustomobject]@{ match='^tools/controller_visibility_probe\.cpp$'; kind='build-input'; dest='YeManCC/YeManControllerVisibilityProbe.exe'; code='' },
   [pscustomobject]@{ match='^tools/';             kind='excluded'; dest='-'; code='E-TOOLS' },
   [pscustomobject]@{ match='^scripts/';           kind='excluded'; dest='-'; code='E-SCRIPTS' },
   [pscustomobject]@{ match='^\.github/';          kind='excluded'; dest='-'; code='E-CI' },
@@ -124,7 +154,12 @@ $rules = @(
   [pscustomobject]@{ match='^icon-gallery\.html$|^test-stability\.ps1$'; kind='excluded'; dest='-'; code='E-TOOLS' },
   [pscustomobject]@{ match='^LICENSE$';           kind='excluded'; dest='-'; code='E-ROOT-CONFIG' }
 )
-$rootConfigPattern = '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(\..+)?\.json|vite\.config\..+|\.gitignore|\.npmrc|\.gitattributes|index\.html|eslint\.config\..+)$'
+# hud-output.html（2026-10-11）：Monitor HUD 的第二张 Vite 入口页（源模块
+# src/monitorHudOutputEntry.ts）。与 index.html 同类 —— 源树根入口文件本身不直接
+# 进包，其构建产物 Build/App/Web/hud-output.html → 包内 YeManCC/hud-output.html
+# 已由 build-workspace.ps1 L306 与 package-release.ps1 L538/L738 的必需清单保证。
+# 按既有 index.html 口径归 E-ROOT-CONFIG，避免误判 GAP。
+$rootConfigPattern = '^(package\.json|pnpm-lock\.yaml|pnpm-workspace\.yaml|tsconfig(\..+)?\.json|vite\.config\..+|\.gitignore|\.npmrc|\.gitattributes|hud-output\.html|index\.html|eslint\.config\..+)$'
 $buildArtifactPattern = '\.(pdb|obj|ilk|log|tmp|bak|bak-[^/]*|pyc)$'
 $userDataPattern = '^data/|^backups/|^\.upgrade/'
 

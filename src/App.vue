@@ -1,29 +1,38 @@
 <script setup lang="ts">
 import { ref, computed, provide, onMounted, onUnmounted, nextTick, watch } from 'vue';
+import { ymccDesignWidth, ymccStageWidth, YMCC_SHELL_BASE_WIDTH, YMCC_SHELL_BASE_HEIGHT, YMCC_SHELL_SCALE_BOOST } from '@/bridge/monitorLayout';
 import { useRouter } from 'vue-router';
+import { resetInnerPageViewport } from '@/bridge/pageViewport';
 import NavRail from '@/components/NavRail.vue';
 import DebugView from '@/components/DebugView.vue';
+import HidHideInstallPrompt from '@/components/HidHideInstallPrompt.vue';
 import { useDebugStore } from '@/stores/debug';
 import { startGamepad } from '@/gamepad/engine';
+import { startControllerShortcutRuntime } from '@/bridge/controllerShortcutRuntime';
 import { enqueueGamepadTaskDetached } from '@/gamepad/serial';
-import { on } from '@/bridge/ipc';
+import { on, invoke } from '@/bridge/ipc';
 import { applyCpuAutostart } from '@/bridge/autostart';
+import { LEGACY_CCD_UNDERVOLT_ACTIVE } from '@/bridge/legacyCpuFeaturePolicy';
 import { applyTrayResident } from '@/bridge/trayResident';
-import { getFloatInfo, applyCpuAutoEnable, setAutofloatPowerControlDir } from '@/bridge/autofloat';
-import { readTdpAutoApply, applyAutoTdpIfNeeded } from '@/bridge/tdpAutoApply';
+import { ensureDesktopModeStartupDefault } from '@/bridge/desktopModeStartup';
+import { restoreSelectedBootMode, migrateBootTrayPreference, cancelBootModeLaunches, cancelBootModeDeferredMouse, readBootModeFanIntent } from '@/bridge/bootModes';
+import { getFloatInfo, setAutofloatPowerControlDir } from '@/bridge/autofloat';
 import { app, fs, powerLifecycle, windowApi } from '@/bridge/api';
 import { initMusic } from '@/bridge/music';
-import { readTdp, setTdp, toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
+import { toggleTask, taskExists, detectPowerMode, detectPowerModeReliable, detectPowerModeStable, reconcileRememberedPowerScheme, resumeTdpDaemonAfterWake, getSleepPowerPlanOptimizationEnabled, optimizeSleepPowerPlans } from '@/bridge/yeman';
 import TopMonitorBar from '@/components/TopMonitorBar.vue';
 import { applyTheme } from '@/bridge/theme';
-import { cyclePerformanceScheduleMode, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
-import { getMouseModeState } from '@/bridge/gameproc';
+import { adjustContinuousPerformanceTdp, getPerformanceScheduleOwnership, refreshPerformanceScheduleCoreMode, restorePerformanceScheduleIfConfigured, SkipApplyError } from '@/bridge/performanceSchedule';
+import { getMouseModeState, type MouseModeState } from '@/bridge/gameproc';
+import { acceptMouseModeState } from '@/bridge/mouseModeState';
 import {
   backgroundGet,
   getBackgroundBlur,
   getBackgroundOpacity,
+  getBackgroundPosition,
   type BackgroundKind,
   type BackgroundState,
+  type MediaPlayback,
 } from '@/bridge/background';
 import {
   cleanGameTitle,
@@ -32,9 +41,28 @@ import {
 } from '@/bridge/dynamicBackground';
 import { detectGame, subscribeGameStatus, type DetectedGame } from '@/bridge/gamedetect';
 import { startGamePolicyRuntime, stopGamePolicyRuntime } from '@/bridge/gamePolicyRuntime';
+import {startLosslessRuntimeOwner} from '@/bridge/losslessRuntimeState';
+let stopLosslessRuntimeOwner:(()=>void)|null=null;
+import { startGameTrainerAutoPrepare } from '@/bridge/gameTrainerAuto';
+let stopGameTrainerAutoPrepare: (() => void) | null = null;
 import { applyIndependentFrameRates } from '@/bridge/frameRateLimits';
 import { startDeckyMirrorHost } from '@/bridge/deckyMirrorHost';
+import { startDeckySafetyNotifications } from '@/bridge/deckySidebar';
+let stopDeckySafetyNotifications:(()=>void)|null=null;
+import { startUpdatePredownload } from '@/bridge/updatePredownloadService';
+import { startMonitorHudHost } from '@/bridge/monitorHudHost';
+import { startRadialTestingHost } from '@/radial/testing';
+import {applyGameMediaRange} from '@/bridge/gameMediaPlayback';
+import {gameMediaRevisions as sharedMediaRevisions} from '@/bridge/gameMediaRevisionFence';
+import {sharedGameMedia,startSharedGameMedia} from '@/bridge/sharedGameMedia';
+import {startSteamWallpaperHost} from '@/bridge/steamWallpaperHost';
+let stopSharedGameMedia:(()=>void)|null=null;
+let steamWallpaperHost:ReturnType<typeof startSteamWallpaperHost>|null=null;
+let updatePredownloadHost: ReturnType<typeof startUpdatePredownload> | null = null;
+let monitorHudHost: ReturnType<typeof startMonitorHudHost> | null = null;
+let radialHost: ReturnType<typeof startRadialTestingHost> | null = null;
 let deckyMirrorHost: ReturnType<typeof startDeckyMirrorHost> | null = null;
+let controllerShortcutRuntime: ReturnType<typeof startControllerShortcutRuntime> | null = null;
 import { startGameInputOverrideWatch, stopGameInputOverrideWatch } from '@/bridge/gameInputOverride';
 import { BOOT_CONTROL_CENTER_TASK, bootMirrorExists, ensureRtssOverlayInstalled, setPowerControlDir, toggleBootMirror } from '@/bridge/yeman';
 import { getUiSetting, loadUiSettings } from '@/bridge/uiSettings';
@@ -42,8 +70,9 @@ import { topMonitorData, type TopMonData } from '@/bridge/topmon';
 import { nextLowBatteryStatic, shouldSkipVideoReconcile } from '@/bridge/backgroundPolicy';
 import { runPowerResumeTransaction } from '@/bridge/powerResume';
 import { readSettingsSection, saveSettingsSection } from '@/bridge/settingsRepository';
-import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible } from '@/bridge/uiLifecycle';
+import { isUiVisible, onUiVisibilityChange, setNativeWindowVisible, startUiPowerReconciliation } from '@/bridge/uiLifecycle';
 import { rememberPowerSourceMode, startForegroundPowerSourceRefresh } from '@/bridge/powerSource';
+import { tdpRuntimeStore } from '@/bridge/tdpRuntimeState';
 import {
   getFanFeatureSettings,
   getFanPresetCurve,
@@ -70,6 +99,7 @@ applyTheme(
 
 // Visibility gates decorative rendering only; native control/renewal remain active.
 const uiVisible = ref(isUiVisible());
+let uiPowerReconciliation: ReturnType<typeof startUiPowerReconciliation> | null = null;
 
 const BOOT_TASK = BOOT_CONTROL_CENTER_TASK;
 const BOOT_CFG = 'C:\\SOFT\\YeMan\\PowerControl\\boot_config.json';
@@ -104,11 +134,17 @@ function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<
     if (generation <= 0 || fanAutoStartGenerations.has(generation)) return Promise.resolve();
     fanAutoStartGenerations.add(generation);
   }
+  // This automatic request cannot inherit authority after a newer explicit OFF/Close.
+  const cancellationRevision = fanHostLifecycle.controlCancellationRevision;
+  const mayProceed = () => cancellationRevision === fanHostLifecycle.controlCancellationRevision
+    && !fanHostLifecycle.hasControlIntent
+    && (reason !== 'resume' || generation === latestResumeGeneration);
   const run = fanAutoStartChain.then(async () => {
     try {
-      if (fanHostLifecycle.hasControlIntent) return;
+      if (!mayProceed()) return;
       const startup = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
-      if (startup.fanControl !== true) return;
+      const sceneWantsFan = await readBootModeFanIntent(reason === 'boot' ? 'startup' : 'current');
+      if ((sceneWantsFan ?? startup.fanControl) !== true || !mayProceed()) return;
       const gate = await fanHostLifecycle.start();
       if (!gate.allowed || !gate.writeReady) {
         fanDiagnosticLog('lifecycle.auto-start-blocked', {
@@ -121,9 +157,10 @@ function ensureFanAutoStart(reason: 'boot' | 'resume', generation = 0): Promise<
         fanDiagnosticLog('lifecycle.auto-start-superseded', { reason, generation, latest: latestResumeGeneration });
         return;
       }
-      if (fanHostLifecycle.hasControlIntent) return;
+      if (!mayProceed()) return;
       const stillOn = await readSettingsSection<{ fanControl?: boolean }>('startupDesired');
-      if (stillOn.fanControl !== true) return;
+      const stillWanted = await readBootModeFanIntent(reason === 'boot' ? 'startup' : 'current');
+      if ((stillWanted ?? stillOn.fanControl) !== true || !mayProceed()) return;
       const fanSettings = getFanFeatureSettings();
       if (fanSettings.featureEnabled !== true) return;
       // 必须使用用户保存的 preset 曲线，不得用写死的默认曲线代替。
@@ -144,12 +181,15 @@ const store = useDebugStore();
 // The legacy deep-link route keeps the editor document free of the main YMCC
 // navigation/monitor chrome. The normal controller entry now renders the
 // editor as a full-screen, centered bubble in the main WebView.
-const isStandaloneEditor = computed(() => router.currentRoute.value.path === '/button-mapping/shortcuts');
+// Owned editor/monitor-preview children share the lightweight shell, never main hardware startup.
+const isStandaloneEditor = computed(() => ['/button-mapping/shortcuts', '/monitor/hud-preview'].includes(router.currentRoute.value.path));
 const backgroundUrl = ref('');
 const backgroundKind = ref<BackgroundKind>('image');
 const backgroundVideo = ref<HTMLVideoElement | null>(null);
 const backgroundOpacity = ref(getBackgroundOpacity());
 const backgroundBlur = ref(getBackgroundBlur());
+const backgroundPosition = ref(getBackgroundPosition());
+const backgroundObjectPosition = computed(() => `${backgroundPosition.value.x}% ${backgroundPosition.value.y}%`);
 const backgroundVideoAutoPause = ref(getUiSetting('videoBatteryPause'));
 const onAcPower = ref(false);
 type VideoPowerState = 'unknown' | 'desktop' | 'charging' | 'discharging';
@@ -172,6 +212,21 @@ const backgroundVideoGeneration = ref(0);
 const dynamicBackgroundActive = ref(false);
 const backgroundSource = ref<'fixed' | 'dynamic'>('fixed');
 const backgroundFallbackUrls = ref<string[]>([]);
+const backgroundPlayback=ref<MediaPlayback|null>(null);
+let activeDynamicMediaKey='';
+let sharedMediaDirty=false;
+let activeDynamicMediaAsset:{key:string;assetId:string;bindingRevision:number;kind?:string}|null=null;
+let sharedMediaRefreshQueued=false;
+function requestSharedBackgroundRefresh(){
+  if(!getDynamicBackgroundConfig().enabled)return;sharedMediaDirty=true;lastDynamicGameIdentity=null;
+  if(!isUiVisible()||sharedMediaRefreshQueued||!resumeLifecycleActive)return;sharedMediaRefreshQueued=true;
+  queueMicrotask(()=>{sharedMediaRefreshQueued=false;if(!resumeLifecycleActive||!isUiVisible()||!getDynamicBackgroundConfig().enabled)return;sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});});
+}
+function onSharedMediaChanged(event:Event){
+  const detail=(event as CustomEvent).detail;sharedMediaRevisions.observe(detail?.key,detail?.revision,detail?.canonicalKey);
+  if(detail?.key===activeDynamicMediaKey)requestSharedBackgroundRefresh();
+}
+function onBackgroundVideoTimeUpdate(){const video=backgroundVideo.value,range=backgroundPlayback.value;if(video&&range)applyGameMediaRange(video,range);}
 const backgroundFallbackIndex = ref(0);
 // 只有图片或未被暂停的视频真正作为背景层显示时，才隐藏默认黑底。
 // 视频在电池保护/窗口隐藏时会暂时卸载，此时仍需要黑底托住半透明界面。
@@ -313,12 +368,17 @@ const backgroundStyle = computed(() =>
   backgroundUrl.value && backgroundKind.value === 'image'
     ? {
         backgroundImage: `url("${backgroundUrl.value}")`,
+        backgroundPosition: backgroundObjectPosition.value,
         opacity: String(backgroundOpacity.value),
         filter: `blur(${backgroundBlur.value}px) saturate(1.12) contrast(1.08)`,
       }
     : undefined,
 );
 function applyBackgroundState(state: BackgroundState | null | undefined, source: 'fixed' | 'dynamic' = 'fixed'): void {
+  if(source==='dynamic'&&sharedMediaRevisions.outdated(state)){requestSharedBackgroundRefresh();return;}
+  backgroundPlayback.value=source==='dynamic'?state?.playback||null:null;
+  activeDynamicMediaKey=source==='dynamic'?state?.mediaKey||'':'';
+  activeDynamicMediaAsset=source==='dynamic'&&state?.mediaAssetId&&state.mediaBindingRevision!==undefined?{key:state.mediaKey||'',assetId:state.mediaAssetId,bindingRevision:state.mediaBindingRevision,kind:state.kind}:null;
   const kind = state?.kind === 'video' ? 'video' : 'image';
   const urls = Array.isArray(state?.fallbackUrls)
     ? state.fallbackUrls.filter((url): url is string => typeof url === 'string' && url.length > 0)
@@ -370,6 +430,11 @@ function onBackgroundOpacityChanged(e: Event): void {
 function onBackgroundBlurChanged(e: Event): void {
   const blur = Number((e as CustomEvent<{ blur?: number }>).detail?.blur);
   if (Number.isFinite(blur)) backgroundBlur.value = blur;
+}
+
+function onBackgroundPositionChanged(e: Event): void {
+  const position = (e as CustomEvent<{ x: number; y: number }>).detail;
+  if (position && Number.isFinite(position.x) && Number.isFinite(position.y)) backgroundPosition.value = position;
 }
 
 async function reconcileBackgroundVideo(): Promise<void> {
@@ -426,6 +491,7 @@ async function reconcileBackgroundVideo(): Promise<void> {
 }
 
 function onBackgroundVideoLoaded(): void {
+  onBackgroundVideoTimeUpdate();
   videoDesired.value = false;
   void reconcileBackgroundVideo();
 }
@@ -601,6 +667,7 @@ function onBackgroundVideoError(message = 'Steam 在线视频播放失败'): voi
   if (backgroundSource.value === 'dynamic' && !getDynamicBackgroundConfig().enabled) return;
   if (backgroundVideoSuspended.value) return;
   if (backgroundKind.value !== 'video') return;
+  if(backgroundSource.value==='dynamic'&&activeDynamicMediaAsset){const failed=activeDynamicMediaAsset;activeDynamicMediaAsset=null;void sharedGameMedia.playbackFailed(failed).catch(()=>{});return;}
   const urls = backgroundFallbackUrls.value;
   const nextIndex = backgroundFallbackIndex.value + 1;
   if (nextIndex >= urls.length) {
@@ -636,9 +703,6 @@ function onBackgroundVideoPlaying(): void {
 const APP_START = performance.now();
 (window as any).__appStart = APP_START;
 const showDebug = ref(false);
-function toggleDebug() {
-  showDebug.value = !showDebug.value;
-}
 
 // ── 全局刷新触发器：支持页刷新按钮触发所有已挂载页面 refresh() ──
 const globalRefreshKey = ref(0);
@@ -649,14 +713,16 @@ provide('globalRefreshKey', globalRefreshKey);
 async function syncMouseModeAtStartup(): Promise<void> {
   try {
     const state = await getMouseModeState();
+    acceptMouseModeState(state);
     window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
-      detail: { on: state.on, backend: state.backend },
+      detail: { ...state },
     }));
   } catch {
     // 启动同步失败保持默认未锁定；不生成后台重试或错误轮询。
   }
 }
 function onBackgroundVisibilityChange(): void {
+  if(document.visibilityState==='visible'&&sharedMediaDirty&&nativeWindowVisible.value){sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});}
   documentVisible.value = document.visibilityState === 'visible';
   // Page visibility and native HWND visibility are independent after a
   // WebView2 controller reload. Never turn a tray-hidden window "visible"
@@ -674,6 +740,7 @@ function onBackgroundWindowHidden(): void {
   pauseBackgroundVideoForWindow();
 }
 function onBackgroundWindowShown(): void {
+  if(sharedMediaDirty){sharedMediaDirty=false;lastDynamicGameIdentity=null;void detectGame().then(onDynamicGameStatus).catch(()=>{});}
   nativeWindowVisible.value = true;
   setNativeWindowVisible(true);
   resumeBackgroundVideo();
@@ -697,16 +764,19 @@ function notePowerTransitionGeneration(e: Event): number {
   return generation;
 }
 function onPowerSuspending(e: Event): void {
+  tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
-  if (generation > 0) fanHostLifecycle.setPowerGeneration(generation);
-  fanHostLifecycle.observePowerBoundary('suspending', generation);
+  if (generation > 0 && generation >= fanHostLifecycle.coordinatorSnapshot.powerGeneration) {
+    fanHostLifecycle.setPowerGeneration(generation);
+    fanHostLifecycle.observePowerBoundary('suspending', generation);
+    setFanControlActive(false);
+  }
   // F4 has exactly one production lifecycle authority: native sends the
   // generation-tagged /api/suspend command. The renderer only freezes local
   // UI writes and keeps its generation/coordinator view coherent; it must not
   // race native with a second HC CurrentDevice.Close request.
   // FanView can be evicted from KeepAlive, so the root owns the navigation
   // indicator at the power boundary as well.
-  setFanControlActive(false);
   if (resumeVideoTimer !== null) {
     window.clearTimeout(resumeVideoTimer);
     resumeVideoTimer = null;
@@ -715,7 +785,15 @@ function onPowerSuspending(e: Event): void {
   // pipeline can leave WebView2 visible while its page input is unavailable.
   suspendBackgroundVideo();
 }
+function onFanPhysicalSuspending(e: Event): void {
+  const generation = Number((e as CustomEvent).detail?.generation) || 0;
+  if (generation <= 0 || generation < fanHostLifecycle.coordinatorSnapshot.powerGeneration) return;
+  fanHostLifecycle.setPowerGeneration(generation);
+  fanHostLifecycle.observePowerBoundary('suspending', generation);
+  setFanControlActive(false);
+}
 function onPowerResuming(e: Event): void {
+  tdpRuntimeStore.invalidatePower();
   const generation = notePowerTransitionGeneration(e);
   fanHostLifecycle.observePowerBoundary('resuming', generation);
   if (resumeVideoTimer !== null) {
@@ -805,6 +883,7 @@ function onBackgroundVideoPauseChanged(e: Event): void {
   reconcileBackgroundLifecycle();
 }
 function onUiSettingsLoaded(): void {
+  backgroundPosition.value = getBackgroundPosition();
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
@@ -813,11 +892,18 @@ function onUiSettingsLoaded(): void {
 // ── UI 缩放层：设计基准 580×780，整体在窗口中居中显示 ──
 // 用户偏好 2026-08-04：在原本「按窗口高度贴齐」基础上再放大 30%，居中后左右两侧留空更协调。
 // 视觉允许高度方向溢出（被裁剪的部分由 .app-content 滚动兜底），但宽度方向不许超窗口，避免点击区跑到屏幕外。
-const BASE_W = 580;
-const BASE_H = 780;
-const SCALE_BOOST = 1.3; // "再放大 30%"
+const layoutBaseWidth = computed(() => ymccDesignWidth(router.currentRoute.value.path));
+const BASE_H = YMCC_SHELL_BASE_HEIGHT;
+const SCALE_BOOST = YMCC_SHELL_SCALE_BOOST; // "再放大 30%"
 const uiScale = ref(1);
+const viewportWidth = ref(window.innerWidth);
 const viewportHeight = ref(window.innerHeight);
+// KeepAlive preserves page data, while the shared scroll viewport must start
+// at the new page title. Do this before the controller's first-focus pass.
+watch(() => router.currentRoute.value.path, async () => {
+  await nextTick();
+  resetInnerPageViewport();
+}, { flush: 'post' });
 // 原生 WM_SIZE 下发的物理客户区尺寸。窗口从隐藏状态被呼出时，WebView2 恢复渲染前
 // window.innerWidth/Height 仍是旧值；只依赖它会让 stage 高度停在旧尺寸，底部露出透明带。
 const nativeViewport = ref<{ w: number; h: number } | null>(null);
@@ -856,6 +942,7 @@ function viewportSize(): { w: number; h: number } {
 }
 function updateScale() {
   const { w, h } = viewportSize();
+  viewportWidth.value = w;
   viewportHeight.value = h;
   if (h <= 0 || w <= 0) {
     setUiScale(1);
@@ -863,8 +950,10 @@ function updateScale() {
   }
   // 用户视觉目标：在原本 innerHeight/BASE_H 的基础上再乘 1.3
   const boosted = (h / BASE_H) * SCALE_BOOST;
-  // 宽度兜底：BASE_W * scale 不能超过 innerWidth（避免焦点跑到屏幕外）
-  const widthCapped = w / BASE_W;
+  // 宽度兜底：原始壳宽 * scale 不能超过视口（避免焦点跑到屏幕外）
+  // The shared shell scale is route-independent. A wider monitor workbench
+  // must adapt its own width, never shrink the sidebar, toolbar or other UI.
+  const widthCapped = w / YMCC_SHELL_BASE_WIDTH;
   setUiScale(Math.min(boosted, widthCapped));
 }
 // 呼出/尺寸变化后视口读数可能分多帧才稳定（WebView2 隐藏→恢复、DWM 合成延迟）。
@@ -885,6 +974,7 @@ function settleScale(frames = 90) {
   };
   settleRaf = requestAnimationFrame(step);
 }
+// Route changes only adapt stage width; they must not alter the shared UI scale.
 function onNativeResize(e: Event) {
   const detail = (e as CustomEvent<{ w?: number; h?: number }>).detail;
   if (!isStandaloneEditor.value && detail && Number(detail.w) > 0 && Number(detail.h) > 0) {
@@ -913,9 +1003,12 @@ const scalerStyle = computed(() => {
   // 比例更高（例如隐藏任务栏后窗口底部吸附到屏幕下沿、高度增加），按宽度算出的
   // 缩放会让 stage 高度小于视口，底部露出透明带（底板/背景层没有延伸）。
   // 这里让 stage 至少撑满视口高度，保证底板与背景层始终覆盖整个窗口。
-  const stageHeight = Math.max(BASE_H, Math.ceil(viewportHeight.value / scale));
+  // The boot page scrolls through startup services and system tools. Its scroll
+  // viewport must end at the physical window edge after zoom, not below it.
+  const viewportStageHeight = Math.ceil(viewportHeight.value / scale);
+  const stageHeight = router.currentRoute.value.path === '/power' ? viewportStageHeight : Math.max(BASE_H, viewportStageHeight);
   return {
-    width: BASE_W + 'px',
+    width: ymccStageWidth(layoutBaseWidth.value, viewportWidth.value, scale) + 'px',
     height: stageHeight + 'px',
     // zoom 同时参与布局和命中测试；transform 只放大绘制层，会让 WebView2
     // 看到的坐标与鼠标点击坐标分离，表现为内容区"看得到但点不到"。
@@ -926,40 +1019,36 @@ const scalerStyle = computed(() => {
   };
 });
 
-// M8: Start button toggles the debug panel via the same 'ipc:gamepad-start' event.
-function onGamepadStart() {
-  toggleDebug();
-}
 function onGamepadRefresh() {
   globalRefreshKey.value++;
 }
-// ── 手柄后台（Start+上/下）：自动模式切换已编辑档位；手动模式实时调节并记忆 TDP 最大值 ──
+// ── 手柄后台（Start+上/下）：自动/手动都调节当前侧的连续 TDP 保存值 ──
 function onGamepadTdpDelta(e: Event) {
-  const d = Number((e as CustomEvent<{ delta?: number }>).detail?.delta) || 0;
+  const detail = (e as CustomEvent<{ delta?: number; feedbackId?: string }>).detail;
+  const d = Number(detail?.delta) || 0;
   if (d !== 0) {
-    enqueueGamepadTaskDetached(() => applyGamepadTdp(d));
+    enqueueGamepadTaskDetached(() => applyGamepadTdp(d, detail?.feedbackId));
   }
 }
-async function applyGamepadTdp(delta: number) {
+async function applyGamepadTdp(delta: number, feedbackId?: string) {
+  const complete = async (outcome: Record<string, unknown>) => { if (feedbackId) await invoke('input.shortcutAction.complete', {id: feedbackId, outcome}).catch(() => {}); };
   try {
-    if (await getPerformanceScheduleOwnership() === 'auto') {
-      const result = await cyclePerformanceScheduleMode(delta > 0 ? 1 : -1);
-      if (result.applied) {
-        globalRefreshKey.value++;
-        window.dispatchEvent(new CustomEvent('gamepad:performance-mode-changed', {
-          detail: { side: result.side, mode: result.mode },
-        }));
-      }
-      return;
+    if (feedbackId && !(await invoke<{ok:boolean}>('input.shortcutAction.claim', {id:feedbackId})).ok) return;
+    // Both automatic and manual modes use the same continuous bank transaction.
+    // The old manual branch wrote the hardware TDP directly, leaving the saved
+    // slider value and the active bank out of sync after a controller adjustment.
+    const result = await adjustContinuousPerformanceTdp(delta);
+    if (result.applied) {
+      globalRefreshKey.value++;
+      window.dispatchEvent(new CustomEvent('gamepad:performance-mode-changed', {
+        detail: { side: result.side },
+      }));
+      await complete({state:'applied',title:'TDP',message:Number.isFinite(result.tdp)?'TDP 已调整为 '+result.tdp+' W。':'TDP 已调整。',...(Number.isFinite(result.tdp)?{value:{text:result.tdp+' W',number:result.tdp,unit:'W'}}:{})});
+    } else {
+      await complete({state:'failed',title:'TDP',message:result.blocked==='boundary'?'已到 TDP 调节边界，本次未更改。':'TDP 本次未调整，请稍后重试。',silent:result.blocked==='cooldown'});
     }
-    const mode = await detectPowerMode().catch(() => null);
-    if (!mode) return;
-    const cur = await readTdp(mode).catch(() => null);
-    if (cur == null) return;
-    const next = Math.max(2, Math.min(200, cur + delta));
-    await setTdp(mode, next, { apply: true, save: true });
-    globalRefreshKey.value++;
   } catch (e) {
+    await complete({state:'failed',title:'TDP',message:'TDP 调整未确认完成，请检查当前性能状态。'});
     console.error('[gamepad tdp-delta]', e);
   }
 }
@@ -972,19 +1061,13 @@ function onGamepadBrightness(e: Event) {
   globalRefreshKey.value++;
 }
 function onGamepadMouseToggle(e: Event) {
-  const detail = (e as CustomEvent<{
-    ok?: boolean;
-    on?: boolean;
-    backend?: 'gamebar' | 'joyxoff';
-    error?: string;
-  }>).detail || {};
+  const detail = (e as CustomEvent<Partial<MouseModeState>>).detail || {};
+  acceptMouseModeState(detail);
   if (detail.ok === false) {
     window.dispatchEvent(new CustomEvent('mouse-mode:error', { detail }));
-    return;
   }
-  window.dispatchEvent(new CustomEvent('gp:mouse-mode', {
-    detail: { on: Boolean(detail.on), backend: detail.backend },
-  }));
+  if (typeof detail.on !== 'boolean' || detail.stateKnown === false) return;
+  window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { ...detail } }));
 }
 function onFanGuardState(e: Event): void {
   const detail = (e as CustomEvent<{ active?: boolean }>).detail ?? {};
@@ -992,19 +1075,12 @@ function onFanGuardState(e: Event): void {
 }
 
 async function applyProgramControls() {
-  const tdp = await readTdp('ac');
-  const floating = getFloatInfo().enabled;
-  const scheduleOwned = await getPerformanceScheduleOwnership().catch(() => false);
-  // 启动自动应用 TDP：仅当开关开启且帧数目标浮动优化未接管时，才把保存的 TDP 最大值下发硬件。
-  // 浮动开启时由 autofloat 管理 TDP，这里跳过（开关此时不生效）。
-  if (tdp != null && !floating && scheduleOwned !== 'auto') {
-    const auto = await readTdpAutoApply();
-    if (auto.boot) void setTdp('ac', tdp, { apply: true, save: false }).catch(() => {});
-  }
-  // Independent AC/DC + dedicated FPS ownership; never restore an AC scalar
-  // over a battery/dedicated owner or let an optimizer retake RTSS.
+  // Hardware performance ownership is restored only by the continuous
+  // performance schedule. Keep this boot hook for the independent FPS owner;
+  // it must not reapply a legacy TDP/CPU setting when no schedule exists.
   void applyIndependentFrameRates().catch(() => {});
 }
+
 
 let stopGamepad: (() => void) | null = null;
 let stopGyroTelemetry: (() => void) | null = null;
@@ -1130,9 +1206,9 @@ function schedulePowerChangePerformanceRestore(expectedSide: 'ac' | 'dc'): void 
       // entry. Do not let the ordinary global scheduler take ownership back.
       const owner = await restorePerformanceScheduleIfConfigured(expectedSide, {
         dedicatedOnly: schemeOwner !== 'auto',
+        automaticOnly: true,
       });
       if (generation !== powerChangeRestoreGeneration) return;
-      if (owner !== 'auto') await applyCpuAutoEnable().catch(() => {});
     } catch (error) {
       // A stale power-side read or an in-flight game/power transition is a
       // retryable condition, not permission to leave the old AC/DC profile.
@@ -1171,7 +1247,12 @@ function scheduleResumeTransaction(generation: number): void {
       // native Ready commit. The fan coordinator keeps the fan write gate closed
       // until that background rebuild completes.
       resumeDaemon: resumeTdpDaemonAfterWake,
-      completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta),
+      completeResume: (resumeGeneration, meta) => powerLifecycle.completeResume(resumeGeneration, meta).then((result) => {
+        if (result.ok && resumeLifecycleActive && latestResumeGeneration === resumeGeneration) {
+          uiPowerReconciliation?.reconcile();
+        }
+        return result;
+      }),
       isGenerationCurrent: isCurrent,
       daemonAttempts: 2,
       commitAttempts: 3,
@@ -1194,15 +1275,10 @@ function scheduleResumeTransaction(generation: number): void {
     const schemeOwner = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
     const performanceOwner = await restorePerformanceScheduleIfConfigured(mode, {
       dedicatedOnly: schemeOwner !== 'auto',
+      automaticOnly: true,
     }).catch(() => null);
-    if (performanceOwner !== null && performanceOwner !== 'auto') {
-      await applyCpuAutoEnable().catch(() => {});
-      await applyAutoTdpIfNeeded('wake', mode).catch(() => {});
-    }
-    // CCD and undervolt settings use separate native controls from the Windows
-    // power plan. Re-apply the remembered safe values after S3/S0 hardware
-    // handles and Raw Input are ready.
-    await applyCpuAutostart().catch(() => {});
+    // Retained legacy controls stay inactive even when old settings opted in.
+    if (LEGACY_CCD_UNDERVOLT_ACTIVE) await applyCpuAutostart().catch(() => {});
   }).catch((error) => {
     // Unexpected frontend errors must use the same bounded retry path instead
     // of being silently swallowed while native remains in Resuming.
@@ -1409,7 +1485,14 @@ onMounted(async () => {
     window.dispatchEvent(new CustomEvent('app-startup-ready'));
     return;
   }
+  controllerShortcutRuntime = startControllerShortcutRuntime();
+  stopDeckySafetyNotifications = startDeckySafetyNotifications();
   deckyMirrorHost = startDeckyMirrorHost();
+  monitorHudHost = startMonitorHudHost();
+  radialHost = startRadialTestingHost(router);
+  stopSharedGameMedia = startSharedGameMedia();
+  window.addEventListener('game-media:changed',onSharedMediaChanged);
+  steamWallpaperHost = startSteamWallpaperHost();
   try {
     aiFanMockActive = parseAiFanMockSession(await app.aiFanMockSession()) !== null;
   } catch (error) {
@@ -1419,11 +1502,16 @@ onMounted(async () => {
       fanDiagnosticLog('ai.mock-session-unreadable', { policy: 'fan-auto-start-suppressed' });
     }
   }
+  // One-time default schedules next logon only; never waits on a page or runs the desktop script.
+  if (!aiFanMockActive && !aiCpuIsolated) void ensureDesktopModeStartupDefault().catch(error => {
+    console.warn('全局桌面模式默认开机任务未完成：', error instanceof Error ? error.message : String(error));
+  });
   resumeLifecycleActive = true;
   // Register the one-shot native wake events before the first awaited startup
   // operation. A controller recreated during S3 recovery can otherwise miss
   // resume-ready while settings/background initialization is still running.
   window.addEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
+  window.addEventListener('ipc:fan.suspending', onFanPhysicalSuspending as EventListener);
   window.addEventListener('ipc:power.resuming', onPowerResuming as EventListener);
   window.addEventListener('ipc:power.resumed', onPowerResumed as EventListener);
   window.addEventListener('fan:guard-state', onFanGuardState as EventListener);
@@ -1434,6 +1522,10 @@ onMounted(async () => {
     onFanResumeReady(Number(generation) || 0);
   });
   const lifecycleAtMountPromise = powerLifecycle.get().catch(() => null);
+  uiPowerReconciliation = startUiPowerReconciliation(
+    () => powerLifecycle.get(1500), lifecycleAtMountPromise,
+  );
+  const fanLifecycleAtMountPromise = powerLifecycle.getForFan().catch(() => null);
   try {
     const isolation = await app.aiCpuIsolatedSession() as any;
     if (!isolation || isolation.schemaVersion !== 1 || typeof isolation.enabled !== 'boolean') throw new Error('AI_ISOLATION_CAPABILITY_INVALID');
@@ -1472,11 +1564,11 @@ onMounted(async () => {
   // FanHost handshake is optional hardware discovery and must not delay the
   // controller receiver. The page can already be visible/clickable while the
   // handshake is in progress, so register Native UI actions first.
-  window.addEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
   window.addEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
   window.addEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
   window.addEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
   window.addEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+  window.addEventListener('ipc:mouseMode.changed', onGamepadMouseToggle as EventListener);
   stopGamepad = startGamepad({ router, onAction: (l) => store.pushGamepad(l) });
   stopGyroTelemetry = on('gyro.telemetry', (data) => {
     window.dispatchEvent(new CustomEvent('input:motion-telemetry', { detail: data }));
@@ -1497,6 +1589,7 @@ onMounted(async () => {
   window.addEventListener('background:changed', onBackgroundChanged as EventListener);
   window.addEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.addEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
+  window.addEventListener('background:position-changed', onBackgroundPositionChanged as EventListener);
   window.addEventListener('ipc:window.minimized', onBackgroundWindowHidden as EventListener);
   window.addEventListener('ipc:window.hidden', onBackgroundWindowHidden as EventListener);
   window.addEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
@@ -1519,6 +1612,8 @@ onMounted(async () => {
   // 否则游戏运行时窗口隐藏会让覆盖无法下发/恢复。
   startGameInputOverrideWatch();
   startGamePolicyRuntime();
+  stopLosslessRuntimeOwner=startLosslessRuntimeOwner();
+  if (!aiFanMockActive && !aiCpuIsolated) stopGameTrainerAutoPrepare = startGameTrainerAutoPrepare();
   stopUiVisibility = onUiVisibilityChange(({ visible }) => {
     uiVisible.value = visible;
     if (visible) {
@@ -1641,6 +1736,11 @@ onMounted(async () => {
   // FAN-927 §5（2026-09-27 用户批准）：渲染器重建 / 主程序非正常退出后重开的**唯一**事件入口。
   // 依据完全来自 native 活动记录：本 run 已确认的意图只接上已有会话（不重开 HC、不重发曲线）；
   // 崩溃前仍有效的记录才做一次有界恢复；无依据时零动作（不启动 Host、不发 HTTP）。
+  const fanLifecycleAtMount = await fanLifecycleAtMountPromise;
+  if (fanLifecycleAtMount?.resumeReady === true
+      && (fanLifecycleAtMount.phase === 'ready' || fanLifecycleAtMount.phase === 'resuming')) {
+    onFanResumeReady(Number(fanLifecycleAtMount.generation) || 0);
+  }
   const fanReattach = fanHostLifecycle.reattachAfterRendererRestart().catch((error) => {
     fanDiagnosticLog('lifecycle.renderer-restart-hook-failed', {
       error: error instanceof Error ? error.message : String(error),
@@ -1650,7 +1750,15 @@ onMounted(async () => {
   // FAN-932 §2.1.4：偏好驱动的开机自动启动必须**等接续判定完成**后再执行（不能 `void` 发出
   // reattach 后立刻另起自动启动，否则可能抢在接续前下发第二条曲线）。串进同一流程后再启动；
   // 若接续已恢复活动曲线，ensureFanAutoStart 会因 hasControlIntent 直接 no-op。
-  void fanReattach.then(() => ensureFanAutoStart('boot'));
+  // Boot scenes apply once per Windows boot; app/renderer restart and wake never replay next-boot scenes.
+  // The original Fan resume ownership decision completes before any scene curve can be requested.
+  await fanReattach;
+  if (!aiFanMockActive && !aiCpuIsolated && await powerLifecycleReadyForWrites()) {
+    await restoreSelectedBootMode().catch((error) => {
+      console.warn('开机模式部分配置未完成，请在开机模式页检查：', error instanceof Error ? error.message : String(error));
+    });
+  }
+  void ensureFanAutoStart('boot');
   // 性能调度统一负责自动模式 CPU/TDP 应用；不再加载或回刷 AC/DC CPU 锁定配置。
   // 性能调度由用户首次选择模式后才接管启动恢复；未配置时保持原 CPU 自动启用链路不变。
   stopSchemeWatch = on('power.schemeChanged', async () => {
@@ -1665,20 +1773,19 @@ onMounted(async () => {
         globalRefreshKey.value++;
         const performanceOwner = await restorePerformanceScheduleIfConfigured(undefined, {
           dedicatedOnly: schemeOwner !== 'auto',
+          automaticOnly: true,
         }).catch(() => null);
-        if (performanceOwner !== null && performanceOwner !== 'auto') {
-          await applyCpuAutoEnable().catch(() => {});
-        }
       })
       .catch(() => {});
   });
   // A freshly recreated page can mount while native is still Resuming. Do not
   // let normal boot restoration race the gated wake transaction; the latter
-  // performs one authoritative CPU/TDP re-apply after commit.
+  // restores the current automatic bank after commit; manual banks stay static.
   if (!aiCpuIsolated && await powerLifecycleReadyForWrites()) {
     const schemeOwnerAtBoot = await reconcileRememberedPowerScheme().catch(() => 'yeman' as const);
     const performanceOwnerAtBoot = await restorePerformanceScheduleIfConfigured(undefined, {
       dedicatedOnly: schemeOwnerAtBoot !== 'auto',
+      automaticOnly: true,
     }).catch(() => null);
     if (performanceOwnerAtBoot === 'auto' && schemeOwnerAtBoot === 'auto') {
       // Some boot tasks/OEM services rewrite the three hybrid-core values
@@ -1687,32 +1794,43 @@ onMounted(async () => {
       window.setTimeout(() => {
         void refreshPerformanceScheduleCoreMode().catch(() => {});
       }, 3000);
-    } else if (performanceOwnerAtBoot !== null && performanceOwnerAtBoot !== 'auto') {
-      await applyCpuAutoEnable().catch(() => {});
+    } else if (performanceOwnerAtBoot === 'none') {
       await applyProgramControls().catch(() => {});
     }
   }
 
   // ── 任务栏常驻偏好：启动期按持久化套用（默认不常驻，由设置/总闸驱动）──
+  if (!aiFanMockActive && !aiCpuIsolated) await migrateBootTrayPreference().catch(() => {});
   applyTrayResident().catch(() => {});
   // ── 音乐播放：启动期恢复已配置的音乐目录（不自动播放）──
   void initMusic();
   // ── 开机启动自愈：若用户曾开启但计划任务被误删，自动重建 ──
   if (!aiCpuIsolated) healBootTask().catch(() => {});
 
-  // ── CPU「30秒自行启用」：打开程序 30 秒后，按记录状态自动套用 CCD / 降压 ──
-  // 延迟 30 秒是开机保护：避免降压过猛（如 risk 档）在开机瞬间直接死机。
+  // Preserve sleep power-plan optimization independently of retired CPU controls.
   if (!aiCpuIsolated) sleepPlanOptimizationTimer = window.setTimeout(() => {
     sleepPlanOptimizationTimer = null;
     scheduleSleepPowerPlanOptimization();
   }, 30000);
-  if (!aiCpuIsolated) window.setTimeout(() => {
+  // No legacy CCD/undervolt startup timer is armed while the feature is inactive.
+  if (!aiCpuIsolated && LEGACY_CCD_UNDERVOLT_ACTIVE) window.setTimeout(() => {
     applyCpuAutostart().catch(() => {});
   }, 30000);
 
-  if (!aiFanMockActive && !aiCpuIsolated) deckyMirrorHost?.ready();
+  if (!aiFanMockActive && !aiCpuIsolated) { deckyMirrorHost?.ready(); monitorHudHost?.ready(); steamWallpaperHost?.ready(); updatePredownloadHost = startUpdatePredownload(); }
 });
 onUnmounted(() => {
+  cancelBootModeLaunches();
+  cancelBootModeDeferredMouse();
+  uiPowerReconciliation?.stop();
+  uiPowerReconciliation = null;
+  updatePredownloadHost?.stop(); updatePredownloadHost = null;
+  controllerShortcutRuntime?.stop(); controllerShortcutRuntime = null;
+  window.removeEventListener('game-media:changed',onSharedMediaChanged);
+  steamWallpaperHost?.stop(); steamWallpaperHost=null;stopSharedGameMedia?.();stopSharedGameMedia=null;
+  radialHost?.stop(); radialHost = null;
+  monitorHudHost?.stop(); monitorHudHost = null;
+  stopDeckySafetyNotifications?.();stopDeckySafetyNotifications=null;
   deckyMirrorHost?.stop(); deckyMirrorHost = null;
   stopAiFanService?.();
   stopAiFanService = null;
@@ -1750,17 +1868,21 @@ onUnmounted(() => {
   invalidateBackgroundMedia();
   stopDynamicBackgroundWatch();
   stopGameInputOverrideWatch();
+  stopLosslessRuntimeOwner?.();stopLosslessRuntimeOwner=null;
   stopGamePolicyRuntime();
+  stopGameTrainerAutoPrepare?.();
+  stopGameTrainerAutoPrepare = null;
   stopUiVisibility?.();
   stopUiVisibility = null;
   window.removeEventListener('background:changed', onBackgroundChanged as EventListener);
   window.removeEventListener('background:opacity-changed', onBackgroundOpacityChanged as EventListener);
   window.removeEventListener('background:blur-changed', onBackgroundBlurChanged as EventListener);
-  window.removeEventListener('ipc:gamepad-start', onGamepadStart as EventListener);
+  window.removeEventListener('background:position-changed', onBackgroundPositionChanged as EventListener);
   window.removeEventListener('ipc:gamepad.refresh', onGamepadRefresh as EventListener);
   window.removeEventListener('ipc:gamepad.tdp-delta', onGamepadTdpDelta as EventListener);
   window.removeEventListener('ipc:gamepad.brightness', onGamepadBrightness as EventListener);
   window.removeEventListener('ipc:gamepad.mouse-toggle', onGamepadMouseToggle as EventListener);
+  window.removeEventListener('ipc:mouseMode.changed', onGamepadMouseToggle as EventListener);
   window.removeEventListener('ipc:window.minimized', onBackgroundWindowHidden as EventListener);
   window.removeEventListener('ipc:window.hidden', onBackgroundWindowHidden as EventListener);
   window.removeEventListener('ipc:window.restored', onBackgroundWindowShown as EventListener);
@@ -1769,6 +1891,7 @@ onUnmounted(() => {
   window.removeEventListener('ipc:window.summoned', onBackgroundWindowShown as EventListener);
   window.removeEventListener('background:video-battery-pause-changed', onBackgroundVideoPauseChanged as EventListener);
   window.removeEventListener('ipc:power.suspending', onPowerSuspending as EventListener);
+  window.removeEventListener('ipc:fan.suspending', onFanPhysicalSuspending as EventListener);
   window.removeEventListener('ipc:power.resuming', onPowerResuming as EventListener);
   window.removeEventListener('ipc:power.resumed', onPowerResumed as EventListener);
   window.removeEventListener('fan:guard-state', onFanGuardState as EventListener);
@@ -1837,7 +1960,7 @@ onUnmounted(() => {
       ref="backgroundVideo"
       class="user-background-video"
       :src="isHlsUrl(backgroundUrl) ? undefined : backgroundUrl"
-      :style="{ opacity: String(backgroundOpacity) }"
+      :style="{ opacity: String(backgroundOpacity), filter: `blur(${backgroundBlur}px) saturate(1.12) contrast(1.08)`, objectFit: backgroundPlayback?.fit || 'cover', objectPosition: backgroundObjectPosition }"
       muted
       loop
       playsinline
@@ -1846,6 +1969,7 @@ onUnmounted(() => {
       tabindex="-1"
       aria-hidden="true"
       @loadedmetadata="onBackgroundVideoLoaded"
+      @timeupdate="onBackgroundVideoTimeUpdate"
       @canplay="onBackgroundVideoCanPlay"
       @playing="onBackgroundVideoPlaying"
       @pause="onBackgroundVideoPause"
@@ -1881,6 +2005,7 @@ onUnmounted(() => {
       </div>
     </div>
 
+    <HidHideInstallPrompt v-if="!isStandaloneEditor" />
     <DebugView v-if="showDebug && !isStandaloneEditor" @close="showDebug = false" />
   </div>
 </template>
@@ -1908,12 +2033,6 @@ onUnmounted(() => {
   /* width / height / zoom 由 inline style 注入；保持原视觉根职责 */
   display: flex;
   flex-direction: column;
-  /* 兜底（纯 CSS，不依赖 JS 读数）：窗口从隐藏被呼出时，JS 的 viewportHeight 可能
-     读到过期值，使 inline height 偏小，stage 物理高度小于视口，底部露出一块未铺满的
-     暗色区域。这里用 100vh 换算回 zoom 坐标系（zoom == --ui-scale），保证 stage 物理
-     高度恒 >= 视口高度（zoom * 100vh/zoom == 100vh）。JS 读数正确时该值与 inline
-     height 取大者，不改变既有布局。 */
-  min-height: calc(100vh / max(0.01, var(--ui-scale, 1)));
   /* 根节点透明；可辨识度由导航、卡片和控件底板分块提供。 */
   background: transparent;
   position: relative;

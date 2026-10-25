@@ -14,22 +14,33 @@ export class PowerChoiceDebounce {
   private valid(choice: PendingPowerChoice, state: ClientState) {
     const current = state.snapshot, expected = choice.snapshot;
     return state.connected && !state.busy && current?.ready && (current.game?current.actions?.game:current.actions?.global) &&
-      current.runId === expected.runId && current.generation === expected.generation && current.revision === expected.revision &&
+      current.runId === expected.runId && current.generation === expected.generation && Number.isSafeInteger(current.revision) && current.revision >= expected.revision &&
+      JSON.stringify((current.game?.fields??current.global?.fields)?.[choice.field]) === JSON.stringify((expected.game?.fields??expected.global?.fields)?.[choice.field]) &&
       current.game?.identity === expected.game?.identity && current.powerSource === (choice.field === 'acMode' ? 'ac' : 'dc') &&
       (current.game?.fields??current.global?.fields)?.[choice.field]?.supported && (current.game?.fields??current.global?.fields)![choice.field].choices.some(option => option.data === choice.value && !option.disabled);
   }
-  observe(state: ClientState) { if (this.pending && !this.valid(this.pending, state)) this.cancel(); }
+  observe(state: ClientState) {
+    if (!this.pending) return;
+    if (!this.valid(this.pending, state)) { this.cancel(); return; }
+    // Keep the user's three-second deadline across unrelated publications.
+    // The selected power field stays unchanged; send against the current revision.
+    if (state.snapshot!.revision > this.pending.snapshot.revision) this.pending.snapshot = structuredClone(state.snapshot!);
+  }
   choose(field: 'acMode' | 'dcMode', value: string, snapshot: MirrorSnapshot) {
     const choice = { field, value, snapshot: structuredClone(snapshot) };
     if (!this.valid(choice, this.deps.state()) || value === 'follow' || value === 'legacy') return;
     this.cancel();
     // Returning to the saved value cancels the previous intent, without a write.
-    if (value === (snapshot.game?.fields??snapshot.global?.fields)?.[field]?.value) return;
+    if (value === (snapshot.game?.fields??snapshot.global?.fields)?.[field]?.value && !(snapshot.game?.fields??snapshot.global?.fields)?.[field]?.inherited) return;
     this.pending = choice;
     this.timer = this.deps.schedule(() => {
       if (this.pending !== choice) return;
       this.timer = null; this.pending = null; this.notify();
-      if (this.valid(choice, this.deps.state())) void this.deps.send(choice).catch(() => {});
+      const state = this.deps.state();
+      if (this.valid(choice, state)) {
+        choice.snapshot = structuredClone(state.snapshot!);
+        void this.deps.send(choice).catch(() => {});
+      }
     }, POWER_CHOICE_DELAY_MS);
     this.notify();
   }

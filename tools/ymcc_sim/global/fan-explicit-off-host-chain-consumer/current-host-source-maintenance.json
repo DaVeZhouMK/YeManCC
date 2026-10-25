@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "atUtc": "2026-10-20T05:12:29.025Z",
+  "fromC34Host": "8c5f198cb047a55a3e6a3a10b44239f195f1ce08c321d354320e2119ebfc06f6",
+  "toFixedHost": "ec00c0a4b639ba535d1739e3960fc16e244c794f2876f127be5047466f31d8ff",
+  "productWrites": 0,
+  "bridgeUnchanged": "8aac422c52007cd04369f6fa3c79b5bb090878487775374e27c62b5f12b083ca",
+  "originalManagedSources": 41,
+  "changedManagedPinCount": 1,
+  "originalOptionsReferencesAnalyzersPreserved": true,
+  "newCompilerInputsSeparateFromOriginal41": true,
+  "reviewedSourceChanges": [
+    {
+      "path": "FanLab/real-host/Program.cs",
+      "before": "8c5f198cb047a55a3e6a3a10b44239f195f1ce08c321d354320e2119ebfc06f6",
+      "after": "ec00c0a4b639ba535d1739e3960fc16e244c794f2876f127be5047466f31d8ff"
+    }
+  ],
+  "originalCountsPreserved": {
+    "positive": 412,
+    "exactFault": 1,
+    "otherFault": 81,
+    "native": 13,
+    "httpTimelines": 6
+  },
+  "supplementalExpected": {
+    "payloadBinding": 12,
+    "staDispatch": 12,
+    "staIdentity": 10,
+    "manualContinuation": 16,
+    "total": 50
+  },
+  "baselineOriginalSpecRefusal": "EXPLICIT_CHAIN_REVIEWED_SOURCE_DRIFT:FanLab/real-host/Program.cs",
+  "baselineOriginalCompilerRefusal": "MANAGED_SOURCE_IDENTITY_DIFFERS:FanLab/real-host/Program.cs",
+  "currentSourceExecution": "PENDING",
+  "sourceQualification": "Fixed declared closure, not an approval of later primary edits",
+  "logNodes": "SIMULATION-LOG-NODES.json",
+  "physicalAcceptance": false,
+  "directFixtureMaintenance": [
+    {
+      "path": "tools/fan_sta_dispatch_binding_selftest.cs",
+      "beforeSha256": "fd5536607c5c86d90751c0d9b2d1ee573b377c576c2880ddb562ed3eef1544e1",
+      "afterSha256": "d5b876acf7a85234d9b050c0c60fca35f6def04e3222d0af09fe2d1d3b92f4a2",
+      "originalBytes": "D:\\Codex\\2026-10-19\\wo-z\\work\\fan-current-host-fixture-upgrade-20261020\\before\\fan_sta_dispatch_binding_selftest.cs",
+      "productChanged": false,
+      "fixtureInputOrBarrierOnly": true
+    },
+    {
+      "path": "tools/fan_cold_start_manual_continuation_selftest.ts",
+      "beforeSha256": "dd3b33ce59a2da69154a33785c81e8da3623c9274db636aebab3e8c8567cf659",
+      "afterSha256": "2576bad64578f73ec195c40694dc0d4dbe7ecaf52a4e1c3dc473828d570336ab",
+      "originalBytes": "D:\\Codex\\2026-10-19\\wo-z\\work\\fan-current-host-fixture-upgrade-20261020\\before\\fan_cold_start_manual_continuation_selftest.ts",
+      "productChanged": false,
+      "fixtureInputOrBarrierOnly": true
+    }
+  ],
+  "compilerMappingUsedInFinal": false,
+  "authCountAsObservationOnly": true,
+  "finitePrivateValidationStatus": "PENDING_FINAL_EXECUTION"
+}

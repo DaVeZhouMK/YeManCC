@@ -1,0 +1,19 @@
+// Fixed B54 child ledger verification only. No target/Host/SDK invocation.
+import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createHash}from'node:crypto';
+const key=p=>path.resolve(p).toLowerCase(),sha=b=>createHash('sha256').update(b).digest('hex');
+export function verifyB54FixedChildren(report,managed,parentPid){
+ const found=[];function visit(o){if(!o||typeof o!=='object')return;if(o.buildReceiptSha256&&o.inputManifestSha256&&o.processId){found.push(o);return;}for(const v of Object.values(o))if(v&&typeof v==='object')visit(v);}visit(report.cases);
+ const children=new Map();for(const c of found){const k=JSON.stringify([c.processId,c.startupNonce]);if(children.has(k))assert.deepEqual(c,children.get(k),'contradictory child');else children.set(k,c);}assert.equal(children.size,110);assert.equal(managed.inputBindings.sources.length,20);
+ const actual=new Map(),hash=p=>{p=path.resolve(p);const k=key(p);if(!actual.has(k))actual.set(k,{path:p,sha256:sha(fs.readFileSync(p))});return actual.get(k).sha256;};
+ const m=managed.inputBindings,groups={sourceOriginals:m.sources.map(x=>({path:x.path,sha256:x.sha256})),sourceSnapshots:m.sources.map(x=>({path:x.snapshot,sha256:x.sha256})),generated:m.generatedInputs,runtimeArtifacts:managed.runtimeArtifacts},allow=new Map(m.toolchainAllowlist.map(x=>[key(x.path),x.sha256])),manifestHash=hash(managed.manifestPath),dllHash=hash(managed.fixtureDll),ledger=[];
+ for(const c of children.values()){
+  assert.equal(c.parentPid,parentPid);assert.equal(c.nativeObservedProcessExit,true);assert.equal(c.nativeObservedExitCode,c.requestedExitCode);assert.equal(c.finalCleanupAttempted,true);assert.equal(typeof c.finalCleanupOk,'boolean');assert.equal(c.status,'OBSERVED');assert.equal(c.failure,null);
+  for(const n of ['realSdkLoaded','hardwareIo','productMainExecuted'])assert.equal(c[n],false);for(const n of ['actualProductionHostSessionConsumer','actualProductionMessageCodec','actualProductionParentProcessLifetime','actualProductionPipeLoop'])assert.equal(c[n],true);
+  assert.equal(c.buildReceiptSha256,manifestHash);assert.equal(c.inputManifestSha256,managed.inputManifestSha256);
+  for(const stage of ['startupBindings','finalBindings']){const binds=c[stage];assert(binds&&Array.isArray(binds.loadedAssemblies));for(const[group,wanted]of Object.entries(groups)){if(stage==='finalBindings'&&group==='runtimeArtifacts'){assert.equal(binds[group],undefined);for(const x of wanted)assert.equal(hash(x.path),x.sha256);continue;}assert.equal(binds[group].length,wanted.length);for(let i=0;i<wanted.length;i++){const row=binds[group][i],expected=wanted[i];assert.equal(row.matched,true);assert.equal(key(row.path),key(expected.path));assert.equal(row.sha256,expected.sha256);assert.equal(hash(row.path),row.sha256);}}
+   const seen=new Set();let own=0;for(const row of binds.loadedAssemblies){assert(!seen.has(key(row.path)));seen.add(key(row.path));assert.equal(hash(row.path),row.sha256);if(row.ownAssembly){assert.equal(key(row.path),key(managed.fixtureDll));assert.equal(row.sha256,dllHash);assert.equal(row.assembly,'Fixture');own++;}else{assert.equal(allow.get(key(row.path)),row.sha256);assert(/^(System(?:\.|$)|Microsoft\.Win32\.)/.test(row.assembly));}}assert.equal(own,1);
+  }
+  ledger.push({pid:c.processId,parentPid:c.parentPid,nonce:c.startupNonce,exitCode:c.nativeObservedExitCode,finalCleanupOk:c.finalCleanupOk,source20StartupFinalMatched:true,manifestMatched:true,loadedAssembliesMatched:true});
+ }
+ return {status:'FIXED_B54_ACTUAL110_CHILD_BINDINGS_VERIFIED',children:110,sourceMembers:20,ledger,finiteActualFilePins:[...actual.values()],intentionalChildNonzeroExits:ledger.filter(x=>x.exitCode!==0).length,cleanupFalseIsPreserved:ledger.filter(x=>!x.finalCleanupOk).length,newTargetExecutions:0};
+}

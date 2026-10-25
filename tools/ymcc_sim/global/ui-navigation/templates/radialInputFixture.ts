@@ -1,0 +1,28 @@
+// Real wheel and original input consumers. Every persistence/device boundary is memory-only.
+import {createApp,h,ref} from 'vue';
+import RadialWheel from '@/components/RadialWheel.vue';
+import {defaultRadialSettings} from '@/radial/model';
+import {createRadialInputActions} from '@/radial/inputActions';
+import {emptyRadialInput,type RadialInputIntent} from '@/radial/input';
+import {globalMirrorRead} from '@/bridge/deckyGlobalActions';
+import {defaultContinuousBank} from '@/bridge/performanceControls';
+export function mountRadialInputWheel(){
+ const node=document.createElement('div');node.style.cssText='position:fixed;inset:0;background:#0b111a;z-index:2400;display:grid;place-items:center';document.body.append(node);
+ const copy=(value:any)=>JSON.parse(JSON.stringify(value)),items=defaultRadialSettings().pages[0].items;
+ const s:any={game:null,policy:null,locked:false,busy:false,ack:false,input:{revision:1,applyStatus:'saved-pending',outputTarget:{persona:'disabled',buttonMappingEnabled:false,gyroEnabled:false},gyroMotion:{enabled:false,preset:'fps',virtualPadLink:true,presets:{custom:{motionMode:'on',motionTrigger:'',sensitivity:3.7,outputStick:'left'}}}},config:{version:1,entries:{},rtss:{}},schedule:{version:2,configured:true,enabled:true,active:{ac:'performance',dc:'eco'},profiles:{ac:{},dc:{}}}};
+ for(const side of ['ac','dc'])for(const mode of ['eco','balanced','medium','performance','elite','extreme'])s.schedule.profiles[side][mode]={cpuPreset:'balanced',coreMode:'big',tdpMax:20,fpsTarget:60,cpuTarget:'none',tdpStrategy:'none'};
+ let alive=true,epoch=0,revision=0;const frame=ref(emptyRadialInput()),pending=ref(false),status=ref(''),wheel=ref<any>(null),events:any[]=[],writes:any[]=[],regions=ref<number[][][]>([]);
+ const gyro=()=>({virtualPad:s.input.outputTarget.persona!=='disabled',padPersona:s.input.outputTarget.persona,enabled:s.input.outputTarget.gyroEnabled&&s.input.gyroMotion.enabled,preset:s.input.gyroMotion.preset,source:JSON.stringify(s.input)});
+ const readGlobal=async()=>globalMirrorRead(s.schedule,s.input,s.policy);
+ const acquire=()=>{if(s.busy)return null;s.busy=true;return()=>s.busy=false};const power=async()=>({generation:1,phase:'ready',hardwareWritesAllowed:true,inputReady:true} as any);
+ const refresh=async()=>{const next=await adapter.read(()=>{if(!alive)throw Error('fixture ended')});if(events.length&&!pending.value&&next.sourceRevision!==frame.value.sourceRevision)status.value=next.notice;frame.value=next;};
+ const adapter=createRadialInputActions({read:async()=>{const common={policy:s.policy,locked:s.locked,busy:s.busy};return s.game?{...common,scope:'game',game:copy(s.game),entry:s.config.entries[s.game.name],schedule:copy(s.schedule),gyro:gyro(),label:'测试游戏 '+s.game.name}:{...common,scope:'global',global:await readGlobal()}},
+  global:{allowed:()=>alive,game:()=>s.game,locked:()=>s.locked,targetPolicy:()=>s.policy,side:()=>null,read:readGlobal,power,acquire,cas:async(revision,patch,admit)=>{if(revision!==s.input.revision||admit&&!admit())return {ok:false,value:s.input};for(const [key,value]of Object.entries(patch))s.input[key]={...s.input[key],...(value as any)};s.input.revision++;s.input.applyStatus=s.ack?'active':'saved-pending';writes.push({scope:'global',patch:copy(patch)});return {ok:true,value:copy(s.input)}},closeJoyxoff:async()=>true,clearShortcut:async()=>true},
+  game:{featureAllowed:()=>alive,game:()=>s.game,label:()=>s.game.name,power,acquire,load:async()=>copy(s.config),current:()=>s.config,schedule:async()=>copy(s.schedule),currentSchedule:()=>s.schedule,save:async config=>{s.config=copy(config);writes.push({scope:'game',exe:s.game.name,config:copy(config)})},closeJoyxoff:async()=>true,targetPolicy:()=>s.policy,rememberWholeInput:true,continuous:async()=>({version:1,ac:defaultContinuousBank('ac'),dc:defaultContinuousBank('dc')}),gyroDefaults:async()=>gyro()},nextRevision:()=>String(++revision)});
+ async function execute(parentId:string,intent:RadialInputIntent){if(pending.value)return;const parent=items.find(item=>item.id===parentId);if(parent?.action!=='input.pad'&&parent?.action!=='input.gyro')throw Error('Wrong fixture parent');const ticket=epoch;pending.value=true;events.push({parentId,intent:copy(intent)});
+  try{const result=await adapter.apply(parent.action,intent,{generation:1,checkpoint:()=>{if(!alive||ticket!==epoch)throw Error('fixture canceled')}});frame.value=result.frame;status.value=result.notice;}catch(error){status.value=(error as Error).message;}finally{pending.value=false;if(alive)await refresh();}}
+ const app=createApp({setup:()=>()=>h(RadialWheel,{ref:wheel,items,input:frame.value,pending:pending.value,status:status.value,onInput:execute,onRegions:(value:number[][][])=>regions.value=value,onClose:()=>events.push({close:true})})});app.mount(node);void refresh();
+ (window as any).__radialInput={get api(){return wheel.value},events,writes,read:()=>({frame:copy(frame.value),pending:pending.value,status:status.value,regions:copy(regions.value),input:copy(s.input),config:copy(s.config)}),
+  changeGame:async(name:string|null)=>{epoch++;s.game=name?{name,path:'C:/Games/'+name,pid:name==='game.exe'?101:102,processCreated:name+'-created',ts:0}:null;await refresh()},changeSource:async()=>{s.input.revision++;await refresh()},setBlocked:async(blocked:boolean)=>{s.policy={steamDeckSelfOutputBlocked:blocked,reason:blocked?'physical-steamdeck-self-output-blocked':''};await refresh()},confirm:async()=>{s.input.applyStatus='active';await refresh()},
+  unmount:()=>{alive=false;epoch++;adapter.stop();app.unmount();node.remove()}};
+}

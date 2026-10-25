@@ -1,26 +1,64 @@
 <script setup lang="ts">
-import { ref, shallowRef, onMounted, onBeforeUnmount, onActivated, onDeactivated, computed } from 'vue';
+import { ref, shallowRef, onMounted, onBeforeUnmount, onActivated, onDeactivated, onBeforeUpdate, onUpdated, computed, watch } from 'vue';
 import { on as onIpc } from '@/bridge/ipc';
 import { isUiVisible, onUiVisibilityChange } from '@/bridge/uiLifecycle';
 import { createGamepadPresenter, EMPTY_GAMEPAD_PRESENTATION } from '@/bridge/gamepadPresentation';
+import { createPressFeedback } from '@/bridge/controllerPressFeedback';
+import { createControllerPreviewTrace } from '@/robust/controllerPreviewTrace';
+import ControllerDeviceDiagram from '@/components/ControllerDeviceDiagram.vue';
+import { CONTROLLER_DIAGRAMS, controllerDiagramPersona } from '@/bridge/controllerDeviceDiagram';
+import { controllerOemDisplayCatalog } from '@/bridge/controllerOemPresentation';
 
 import Toggle from '@/components/Toggle.vue';
 import type { GamepadSettings } from '@/bridge/yeman';
+import { OEM_EMPTY_SNAPSHOT, type OemKeysSnapshot, type OemSpecialKey } from '@/bridge/controllerShortcutRules';
 
 const props = withDefaults(
   defineProps<{
     settings: GamepadSettings;
+    persona?: string;
     highlightButtons?: number[];
+    oemKeys?: OemKeysSnapshot;
+    highlightOemKeys?: string[];
     /** Hide the optional live test-mode switch in compact/editor mirrors. */
     showTestMode?: boolean;
+    minimumPressFeedback?: boolean;
+    /** Use the Steam Deck height in the controller settings card only. */
+    matchSteamDeckHeight?: boolean;
   }>(),
-  { highlightButtons: () => [], showTestMode: true }
+  { persona: 'xbox', highlightButtons: () => [], oemKeys: () => OEM_EMPTY_SNAPSHOT, highlightOemKeys: () => [], showTestMode: true, minimumPressFeedback: false, matchSteamDeckHeight: false }
 );
+
+// Bounded observation only: no input gate or render pacing lives here.
+const previewRoot = ref<HTMLElement | null>(null);
+let previewTrace: ReturnType<typeof createControllerPreviewTrace> | null = null;
+let previewObserver: IntersectionObserver | null = null;
+let previewIntersects = false;
+function stopPreviewTrace(): void {
+  const trace = previewTrace;
+  previewTrace = null;
+  try { previewObserver?.disconnect(); } catch { /* Observation cannot affect controls. */ }
+  previewObserver = null;
+  previewIntersects = false;
+  try { trace?.dispose(); } catch { /* Original input/presenter lifecycle continues. */ }
+}
+function observePreview(phase: 'receipt' | 'presented' | 'willPatch' | 'didPatch', payload?: unknown): void {
+  try {
+    if (!previewTrace) return;
+    if (phase === 'receipt') previewTrace.receipt(payload);
+    else previewTrace[phase]();
+  } catch { stopPreviewTrace(); }
+}
+function syncPreviewTrace(): void {
+  try { previewTrace?.setVisible(viewActive && isUiVisible() && previewIntersects); }
+  catch { stopPreviewTrace(); }
+}
 
 // Independent shallow refs keep axis-only changes out of button/name consumers.
 // The presenter preserves normalized array identity and avoids deep proxy churn.
 const live = shallowRef(EMPTY_GAMEPAD_PRESENTATION.buttons);
 const axes = shallowRef(EMPTY_GAMEPAD_PRESENTATION.axes);
+const oemPressedKeys = shallowRef(EMPTY_GAMEPAD_PRESENTATION.oemPressedKeys);
 const connected = ref(false);
 const padName = ref('');
 const testMode = ref(false);
@@ -29,7 +67,13 @@ const presenter = createGamepadPresenter((state) => {
   padName.value = state.name;
   live.value = state.buttons;
   axes.value = state.axes;
+  oemPressedKeys.value = state.oemPressedKeys;
+  observePreview('presented');
 });
+const pulseKeys = shallowRef<readonly string[]>([]);
+const pressFeedback = createPressFeedback(keys => { pulseKeys.value = keys; });
+const diagramButtons = computed(() => props.minimumPressFeedback ? Array.from({length:Math.max(live.value.length,18)},(_,i)=>Boolean(live.value[i])||pulseKeys.value.includes('button:'+i)) : live.value);
+const diagramOemKeys = computed(() => props.minimumPressFeedback ? [...new Set([...oemPressedKeys.value,...pulseKeys.value.filter(key=>key.startsWith('oem:')).map(key=>key.slice(4))])] : oemPressedKeys.value);
 let viewActive = true;
 let stopState: (() => void) | null = null;
 let stopVisibility: (() => void) | null = null;
@@ -81,6 +125,7 @@ function onBaseImageError(): void {
 function syncPresentationVisibility(): void {
   const visible = viewActive && isUiVisible();
   presenter.setVisible(visible);
+  syncPreviewTrace();
   if (!visible) {
     if (baseImageRetryTimer !== null) imageRefreshPending = true;
     cancelImageRetry();
@@ -111,16 +156,38 @@ function onTestModeEvent(e: Event) {
   syncTestBHold();
 }
 
+onBeforeUpdate(() => observePreview('willPatch'));
+onUpdated(() => observePreview('didPatch'));
+watch(() => props.persona, () => {
+  try { previewTrace?.personaChanged(); } catch { stopPreviewTrace(); }
+});
 onMounted(() => {
+  try {
+    previewTrace = createControllerPreviewTrace({
+      displayPersona: () => controllerDiagramPersona(props.persona),
+      visible: () => viewActive && isUiVisible() && previewIntersects,
+    });
+    if (typeof IntersectionObserver === 'function' && previewRoot.value) {
+      previewObserver = new IntersectionObserver(entries => {
+        if (!previewTrace) return;
+        for (const entry of entries) if (entry.target === previewRoot.value) previewIntersects = entry.isIntersecting;
+        syncPreviewTrace();
+      });
+      previewObserver.observe(previewRoot.value);
+    }
+  } catch { stopPreviewTrace(); }
+  syncPresentationVisibility();
   window.addEventListener('ipc:gamepad.testmode', onTestModeEvent);
   stopVisibility = onUiVisibilityChange(syncPresentationVisibility);
   stopState = onIpc('gamepad.state', (payload) => {
+    observePreview('receipt', payload);
     const raw = payload as { connected?: unknown; buttons?: unknown } | null;
     // The safety/long-press path still observes EVERY snapshot while hidden.
     // Axis-only changes must not restart a held-B deadline.
     testBHeld = Boolean(Array.isArray(raw?.buttons) && raw.buttons[1]);
     if (!raw?.connected && testMode.value) setTestMode(false);
     syncTestBHold();
+    if(props.minimumPressFeedback){const state=payload as {connected?:boolean;buttons?:boolean[];oemPressedKeys?:string[]};if(state.connected){pressFeedback.accept([...(state.buttons||[]).flatMap((down,i)=>down?['button:'+i]:[]),...(state.oemPressedKeys||[]).filter(key=>props.oemKeys.keys.some(k=>k.keyId===key&&k.captureImplemented!==false)).map(key=>'oem:'+key)])}else pressFeedback.reset()}
     presenter.accept(payload);
   });
   stopResumeReady = onIpc('power.resume-ready', refreshBaseImage);
@@ -129,6 +196,8 @@ onMounted(() => {
 onActivated(() => { viewActive = true; syncPresentationVisibility(); });
 onDeactivated(() => { viewActive = false; syncPresentationVisibility(); });
 onBeforeUnmount(() => {
+  stopPreviewTrace();
+  pressFeedback.reset();
   presenter.dispose();
   stopVisibility?.();
   stopVisibility = null;
@@ -170,12 +239,59 @@ function isLive(i: number): boolean {
 function cls(i: number): Record<string, boolean> {
   return { live: isLive(i), mapped: isMapped(i) };
 }
+const displayOemKeys = computed(() => controllerOemDisplayCatalog(props.persona, props.oemKeys));
+const catalogKeys = computed(() => displayOemKeys.value.supported ? displayOemKeys.value.keys : []);
+// Legion Go's two additional rear switches have no 1..4 slot in the existing
+// catalog. Keep their canonical IDs/names in the rear group, never among front keys.
+function isAdditionalBackKey(key: OemSpecialKey): boolean {
+  return props.oemKeys.familyId === 'lenovo-legion-go' && key.backIndex === null &&
+    (key.keyId === 'legionl' || key.keyId === 'legionm2');
+}
+const specialKeys = computed(() => catalogKeys.value.filter(key => key.backIndex === null && !isAdditionalBackKey(key)));
+const diagramPersona = computed(() => controllerDiagramPersona(props.persona));
+// Keep every model at the existing Steam Deck height, with its own aspect ratio.
+const previewFrameStyle = computed(() => {
+  const reference = CONTROLLER_DIAGRAMS.steamdeck;
+  const model = CONTROLLER_DIAGRAMS[diagramPersona.value];
+  const ratio = reference.width / reference.height;
+  return { '--preview-reference-ratio': String(ratio), '--preview-device-scale': String(model.width / model.height / ratio) };
+});
+const exteriorSpecialKeys = specialKeys;
+const additionalBackKeys = computed(() => catalogKeys.value.filter(isAdditionalBackKey));
+const backPositions = [
+  { x: 92, y: 229, right: false }, { x: 328, y: 229, right: true },
+  { x: 81, y: 264, right: false }, { x: 339, y: 264, right: true },
+];
+const backKeys = computed(() => catalogKeys.value
+  .filter(key => key.backIndex !== null && key.backIndex >= 1 && key.backIndex <= 4)
+  .map(key => ({ ...key, ...backPositions[key.backIndex! - 1] })));
+function oemClass(key: OemSpecialKey): Record<string, boolean> {
+  const available = key.captureImplemented !== false;
+  return { mapped: available && props.highlightOemKeys.includes(key.keyId), live: available && diagramOemKeys.value.includes(key.keyId) };
+}
+function oemLabel(key: OemSpecialKey): string {
+  const state = oemClass(key);
+  if (key.captureImplemented === false) return `${key.label}，此按键的输入暂不可用`;
+  return `${key.label}${state.mapped ? '，已选中' : ''}${state.live ? '，已按下' : ''}`;
+}
 </script>
 
 <template>
-  <div class="viz">
+  <div ref="previewRoot" class="viz" :class="{ 'vector-device': Boolean(CONTROLLER_DIAGRAMS[diagramPersona].nodes) }">
     <div class="pad-wrap">
-      <svg viewBox="0 48 420 270" class="pad" aria-label="手柄可视化">
+      <div v-if="exteriorSpecialKeys.length" class="oem-special-exterior" aria-label="专用按键">
+        <div class="oem-caption">专用按键</div>
+        <div class="oem-capsules">
+          <span v-for="key in exteriorSpecialKeys" :key="key.keyId" class="oem-capsule" :class="oemClass(key)"
+            :data-oem-key="key.keyId" role="img" :aria-label="oemLabel(key)" :aria-disabled="key.captureImplemented === false || undefined" :title="key.captureImplemented === false ? oemLabel(key) : key.label">
+            <span class="oem-indicator" aria-hidden="true"></span><span class="oem-name">{{ key.label }}</span>
+          </span>
+        </div>
+      </div>
+      <div v-if="CONTROLLER_DIAGRAMS[diagramPersona].nodes" class="controller-preview-frame" :class="{ 'match-deck-height': matchSteamDeckHeight }" :style="previewFrameStyle">
+        <ControllerDeviceDiagram :persona="diagramPersona" :buttons="diagramButtons" :axes="axes" :mapped-buttons="props.highlightButtons" :pressed-oem-keys="diagramOemKeys" :mapped-oem-keys="props.highlightOemKeys" :oem-keys="displayOemKeys" :interactive="testMode" :revision="baseImageRevision" @image-error="onBaseImageError" />
+      </div>
+      <svg v-else viewBox="0 48 420 282" class="pad" aria-label="手柄可视化">
         <defs>
           <filter id="glow-green" x="-50%" y="-50%" width="200%" height="200%">
             <feGaussianBlur stdDeviation="3" result="coloredBlur" />
@@ -293,7 +409,29 @@ function cls(i: number): Record<string, boolean> {
             </g>
           </g>
         </g>
+        <g v-for="key in backKeys" :key="key.keyId" class="oem-back-key" :class="oemClass(key)"
+          :data-oem-key="key.keyId" role="img" :aria-label="oemLabel(key)" :aria-disabled="key.captureImplemented === false || undefined">
+          <title>{{ key.captureImplemented === false ? oemLabel(key) : key.label }}</title>
+          <path class="oem-back-leader" :d="key.right ? `M${key.x+21} ${key.y+4}h11` : `M${key.x-21} ${key.y+4}h-11`" />
+          <text class="oem-back-name" :x="key.right ? 400 : 20" :y="key.y+7" text-anchor="middle">背部 {{ key.backIndex }}</text>
+          <g :transform="`translate(${key.x} ${key.y}) rotate(${key.right ? 12 : -12})`">
+            <path class="oem-back-paddle" d="M-19-9 Q-20-13-14-13 H13 Q20-13 21-7 L17 9 Q16 13 10 13 H-12 Q-19 13-19 7 Z" />
+            <text class="oem-back-code" x="0" y="4">{{ key.label }}</text>
+          </g>
+        </g>
+        <g v-if="backKeys.length" class="oem-back-caption">
+          <path d="M140 306h22m96 0h22" /><text x="210" y="310">背部按键 · 透视</text>
+        </g>
       </svg>
+      <div v-if="additionalBackKeys.length && !CONTROLLER_DIAGRAMS[diagramPersona].nodes" class="oem-additional-back" aria-label="其他背部按键">
+        <div class="oem-caption">其他背部按键</div>
+        <div class="oem-capsules">
+          <span v-for="key in additionalBackKeys" :key="key.keyId" class="oem-capsule" :class="oemClass(key)"
+            :data-oem-key="key.keyId" role="img" :aria-label="oemLabel(key)" :aria-disabled="key.captureImplemented === false || undefined" :title="key.captureImplemented === false ? oemLabel(key) : key.label">
+            <span class="oem-indicator" aria-hidden="true"></span><span class="oem-name">{{ key.label }}</span>
+          </span>
+        </div>
+      </div>
     </div>
 
     <div v-if="props.showTestMode" class="test-toggle">
@@ -326,6 +464,8 @@ function cls(i: number): Record<string, boolean> {
   display: block;
   margin: 0 auto;
 }
+
+.vector-device .pad-wrap{background:transparent;border:0;border-radius:0;overflow:visible;box-shadow:none}
 
 /* 纯 SVG 手柄：深色机身 + 浅色轮廓，所有输入区均为独立矢量节点 */
 .controller-shell path,
@@ -528,4 +668,37 @@ function cls(i: number): Record<string, boolean> {
   padding-top: 4px;
   border-top: 1px solid rgba(255, 255, 255, 0.06);
 }
+/* Physical OEM preview: read-only, with no additional focus targets or polling. */
+.oem-special-exterior, .oem-additional-back { display: grid; justify-items: center; gap: 8px; padding: 12px 12px 4px; }
+.oem-additional-back { padding-bottom: 12px; }
+.oem-caption { font-size: 10px; color: var(--text-dim); letter-spacing: 1px; }
+.oem-capsules { display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 8px; width: 100%; min-width: 0; }
+.oem-capsule { display: inline-flex; align-items: center; justify-content: center; gap: 8px; box-sizing: border-box; min-height: 32px; max-width: 100%; padding: 6px 15px; border: 1px solid #526579; border-radius: 999px; background: var(--bg-input); color: var(--text); font-size: 11px; font-weight: 600; line-height: 1.35; }
+.oem-name { overflow-wrap: anywhere; min-width: 0; }
+.oem-indicator { width: 5px; height: 5px; flex: 0 0 auto; border: 1px solid #92a6ba; border-radius: 50%; }
+.oem-back-paddle { fill: #192634; fill-opacity: .92; stroke: #8d9fb2; stroke-width: 1.5; stroke-dasharray: 3 2; }
+.oem-back-code { fill: #d7e1ed; font-size: 11px; font-weight: 750; text-anchor: middle; }
+.oem-back-leader { fill: none; stroke: #617186; stroke-width: 1; }
+.oem-back-name { fill: #8b9caf; font-size: 8.5px; }
+.oem-back-caption path { fill: none; stroke: #344355; stroke-width: 1; }
+.oem-back-caption text { fill: var(--text-dim); font-size: 9px; text-anchor: middle; letter-spacing: .5px; }
+.oem-back-key.live .oem-back-paddle { fill: #18452c; stroke: #59d889; stroke-dasharray: none; }
+.oem-back-key.live .oem-back-name, .oem-back-key.live .oem-back-code { fill: #a7eac1; }
+.oem-back-key.mapped .oem-back-paddle { fill: color-mix(in srgb, var(--accent) 30%, var(--bg-input)); stroke: var(--accent); stroke-dasharray: none; }
+.oem-back-key.mapped .oem-back-name, .oem-back-key.mapped .oem-back-code { fill: var(--accent); }
+.oem-back-key.mapped .oem-back-leader { stroke: var(--accent); }
+.oem-capsule.live { border-color: #59d889; color: #a7eac1; background: #163424; }
+.oem-capsule.live .oem-indicator { border-color: #59d889; background: #59d889; }
+.oem-capsule.mapped { border-color: var(--accent); color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, var(--bg-input)); }
+.oem-capsule.mapped .oem-indicator { border-color: var(--accent); background: var(--accent); }
+.vector-device .oem-special-exterior{max-height:108px;box-sizing:border-box;overflow-y:auto;padding:0 8px 8px;gap:5px}
+.vector-device .oem-caption{font-size:11px;letter-spacing:.5px}
+.vector-device .oem-capsule.live{border-color:#8bc4ed;color:#fff;background:#4897d2}
+.vector-device .oem-capsule.live .oem-indicator{border-color:#fff;background:#fff}
+.controller-preview-frame{width:100%}
+.controller-preview-frame.match-deck-height{display:grid;place-items:center;aspect-ratio:var(--preview-reference-ratio)}
+.controller-preview-frame.match-deck-height :deep(.device-diagram){width:calc(100% * var(--preview-device-scale));margin:0 auto}
+.oem-capsule.mapped:not(.live){animation:oem-mapped-fill .85s ease-in-out infinite}
+@keyframes oem-mapped-fill{0%,100%{background-color:color-mix(in srgb,var(--accent) 35%,var(--bg-input))}50%{background-color:color-mix(in srgb,var(--accent) 14%,var(--bg-input))}}
+@media(prefers-reduced-motion:reduce){.oem-capsule.mapped:not(.live){animation:none}}
 </style>

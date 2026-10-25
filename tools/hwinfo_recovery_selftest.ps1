@@ -45,6 +45,7 @@ function Assert-Order([string[]]$expected) {
 }
 function New-TestProcess([int]$id) {
     $process = [pscustomobject]@{ Id = $id; Path = $script:exePath; ProcessorAffinity = [IntPtr]::Zero }
+    $process | Add-Member -MemberType ScriptProperty -Name HasExited -Value { return -not $script:state.Running.Contains($this) }
     $process | Add-Member -MemberType ScriptMethod -Name WaitForExit -Value {
         param($milliseconds)
         [void]$script:state.Events.Add('exit-confirmed')
@@ -57,6 +58,8 @@ function New-TestProcess([int]$id) {
 function Reset-Test([bool]$running = $true, [bool]$healthy = $false) {
     $script:Mode = 'restart'
     $script:Elevated = $false
+    $script:SensorIntervalMs = 0
+    $script:ExecutablePath = ''
     $script:state = @{
         Events = (New-Object Collections.ArrayList)
         Running = (New-Object Collections.ArrayList)
@@ -65,7 +68,7 @@ function Reset-Test([bool]$running = $true, [bool]$healthy = $false) {
         CopyFailures = 0; CorruptCopies = 0; CopyCount = 0; LaunchCount = 0
         Held = $false; LockAvailable = $true; ExitOnStart = $false
         ElevatedCount = 0; CancelUac = $false; ChildExitCode = $null; SpawnOnCopyFailure = $false
-        ExeMissing = $false
+        ExeMissing = $false; ProcessEnumerationsAfterLaunch = 0
     }
     [IO.File]::WriteAllText($srcPath, "[Settings]`r`nSharedMemorySupport=1`r`n")
     [IO.File]::WriteAllText($dstPath, "[Settings]`r`nSharedMemorySupport=0`r`n")
@@ -78,6 +81,7 @@ function Resolve-HWiNFO {
 function Get-Process {
     [CmdletBinding()]
     param([string]$Name, [int]$Id)
+    if ($script:state.LaunchCount -gt 0) { $script:state.ProcessEnumerationsAfterLaunch++ }
     if ($PSBoundParameters.ContainsKey('Id')) { return @($script:state.Running | Where-Object { $_.Id -eq $Id }) }
     return @($script:state.Running)
 }
@@ -94,15 +98,23 @@ function Start-Sleep {
     [void]$script:state.Events.Add('sleep-' + $Milliseconds)
 }
 function Test-HWiNFOSharedMemory {
+    param([int]$ExpectedIntervalMs = 0, [ref]$ProducerProof)
+    if ($null -ne $ProducerProof) { $ProducerProof.Value = $null }
     if ($script:state.LaunchCount -gt 0) {
         $script:state.HealthPolls++
-        return $script:state.HealthyAfterStart -and ($script:state.HealthPolls -gt $script:state.HealthDelay)
+        $healthy = $script:state.HealthyAfterStart -and ($script:state.HealthPolls -gt $script:state.HealthDelay)
+        if ($healthy -and $null -ne $ProducerProof) {
+            $ProducerProof.Value = [pscustomobject]@{ PollTime = $script:state.HealthPolls; Layout = 'fixture-layout' }
+        }
+        return $healthy
     }
     return $script:state.Healthy
 }
 function Get-HWiNFOConfigHash([string]$path) {
     if ($path -eq $script:dstPath) { [void]$script:state.Events.Add('verify') }
-    return (& $script:ProductionHash $path)
+    $hash = & $script:ProductionHash $path
+    if ($path -eq $script:dstPath) { $script:state.VerifiedHash = $hash }
+    return $hash
 }
 function Copy-Item {
     [CmdletBinding()]
@@ -149,18 +161,38 @@ function New-Object {
     }
     return ,(Microsoft.PowerShell.Utility\New-Object -TypeName $TypeName)
 }
+function New-TestElevatedChild([int]$Code) {
+    $child = [pscustomobject]@{ ExitCode = $Code }
+    $child | Add-Member ScriptProperty Handle {
+        [void]$script:state.Events.Add('elevated-handle')
+        return [IntPtr]1234
+    }
+    $child | Add-Member ScriptMethod WaitForExit {
+        param([int]$milliseconds)
+        Assert ($milliseconds -eq 60000) 'Elevated child wait is not bounded'
+        Assert ($script:state.Events.Contains('elevated-handle')) 'Exact child handle was not bound before waiting'
+        [void]$script:state.Events.Add('elevated-wait')
+        return $true
+    }
+    $child | Add-Member ScriptMethod Dispose { [void]$script:state.Events.Add('elevated-dispose') }
+    return $child
+}
 function Start-Process {
     [CmdletBinding()]
     param([string]$FilePath, [string]$WorkingDirectory, [string]$WindowStyle, [string]$Verb,
           [string]$ArgumentList, [switch]$PassThru, [switch]$Wait)
     if ($Verb -eq 'RunAs') {
         Assert (-not $script:state.Held) 'Parent held recovery mutex while waiting for elevated child'
-        Assert ($WindowStyle -eq 'Hidden' -and $Wait) 'Elevated helper must be hidden and awaited'
-        Assert ($ArgumentList -match '-File "[^"]+" -Mode restart -Elevated$') 'Elevated script path is not quoted/full transaction is not restarted'
+        Assert ($WindowStyle -eq 'Hidden') 'Elevated helper must remain hidden'
+        if ($ast.Extent.Text.Contains('function Wait-HWiNFORecoveryChild')) {
+            Assert (-not $Wait) 'Recovery must await its exact child, not the long-lived hardware process tree'
+        } else { Assert ([bool]$Wait) 'Frozen legacy entry no longer exercises its original tree-wait boundary' }
+        Assert ($ArgumentList -match '-File "[^"]+" -Mode restart -Elevated(?: -SensorIntervalMs \d+)?(?: -ExecutablePath "[^"]+")?$') 'Elevated script path is not quoted/full transaction is not restarted'
+        $script:state.ElevationArguments = $ArgumentList
         [void]$script:state.Events.Add('elevate')
         $script:state.ElevatedCount++
         if ($script:state.CancelUac) { throw [ComponentModel.Win32Exception]::new(1223) }
-        if ($null -ne $script:state.ChildExitCode) { return [pscustomobject]@{ ExitCode = $script:state.ChildExitCode } }
+        if ($null -ne $script:state.ChildExitCode) { return (New-TestElevatedChild $script:state.ChildExitCode) }
         $oldMode = $script:Mode
         $script:Mode = 'restart'
         $script:Elevated = $true
@@ -168,11 +200,12 @@ function Start-Process {
         $script:state.CopyDenied = $false
         try { $rc = Invoke-HWiNFORecoveryEntry }
         finally { $script:Elevated = $false; $script:Mode = $oldMode }
-        return [pscustomobject]@{ ExitCode = $rc }
+        return (New-TestElevatedChild $rc)
     }
     Assert $script:state.Held 'HWiNFO launched outside transaction mutex'
     Assert ($script:state.Running.Count -eq 0) 'Launched a duplicate HWiNFO process'
-    Assert ((& $script:ProductionHash $script:srcPath) -eq (& $script:ProductionHash $script:dstPath)) 'Launched before INI copy/verification completed'
+    Assert ($script:state.Events.Contains('verify')) 'Launch preceded verification'
+    Assert ((& $script:ProductionHash $script:dstPath) -eq $script:state.VerifiedHash) 'Launched changed/unverified configuration'
     Assert ($FilePath -eq $script:exePath -and $WorkingDirectory -eq $script:installRoot) 'Wrong executable or working directory'
     Assert (-not $ArgumentList) 'HWiNFO invocation added command-line switches'
     [void]$script:state.Events.Add('launch')
@@ -272,7 +305,7 @@ try {
     Test-Case 'missing shared memory times out; next retry repeats full transaction' {
         $state.HealthyAfterStart = $false
         Assert ((Invoke-HWiNFORecoveryEntry) -eq 7) 'Expected shared memory timeout'
-        Assert ($state.HealthPolls -eq 120) 'Health wait changed unexpectedly'
+        Assert ($state.HealthPolls -eq 30) 'Health wait changed unexpectedly'
         $state.HealthyAfterStart = $true
         Assert ((Invoke-HWiNFORecoveryEntry) -eq 0) 'Second recovery failed'
         Assert-Order @('launch', 'unlock', 'mutex-create', 'stop', 'exit-confirmed', 'copy', 'verify', 'launch')
@@ -281,7 +314,7 @@ try {
     Test-Case 'slow shared-memory initialization waits instead of restarting repeatedly' {
         $state.HealthDelay = 5
         Assert ((Invoke-HWiNFORecoveryEntry) -eq 0) 'Slow initialization failed'
-        Assert ($state.HealthPolls -eq 6 -and $state.LaunchCount -eq 1) 'Initialization restarted prematurely'
+        Assert ($state.HealthPolls -eq 7 -and $state.LaunchCount -eq 1) 'Initialization restarted prematurely'
     }
     Test-Case 'mutex contention is a no-op with code 11' {
         $state.LockAvailable = $false
@@ -289,10 +322,11 @@ try {
         Assert ($state.CopyCount -eq 0 -and $state.LaunchCount -eq 0 -and -not $state.Events.Contains('stop')) 'Busy recovery mutated state'
         Assert (-not $state.Events.Contains('unlock')) 'Released someone else''s mutex'
     }
-    Test-Case 'missing template is detected before stopping HWiNFO' {
+    Test-Case 'missing external template still recovers from the embedded stable baseline' {
         Microsoft.PowerShell.Management\Remove-Item -LiteralPath $srcPath
-        Assert ((Invoke-HWiNFORecoveryEntry) -eq 3) 'Expected missing template'
-        Assert (-not $state.Events.Contains('stop')) 'Stopped HWiNFO without a repair template'
+        Assert ((Invoke-HWiNFORecoveryEntry) -eq 0) 'Embedded recovery failed without the legacy template'
+        Assert ((Read-HWiNFOIni $dstPath).Text.Contains('SensorsSM=1')) 'Embedded sharing configuration missing'
+        Assert-Order @('stop', 'exit-confirmed', 'copy', 'verify', 'launch')
     }
     Test-Case 'missing executable is explicit and does not copy' {
         $state.ExeMissing = $true
@@ -334,7 +368,7 @@ try {
         Test-Case 'real shared-memory probe rejects invalid signature' {
             Assert (-not (& $realSharedMemoryProbe)) 'Invalid signature passed health check'
         }
-        $view.Write(0, [uint32]0x53695748); $view.Write(32, [uint32]44); $view.Write(36, [uint32]316); $view.Write(40, [uint32]1)
+        $view.Write(0, [uint32]0x53695748); $view.Write(20, [uint32]44); $view.Write(32, [uint32]44); $view.Write(36, [uint32]316); $view.Write(40, [uint32]1)
         Test-Case 'real shared-memory probe accepts a readable SM2 reading region' {
             Assert ([bool](& $realSharedMemoryProbe)) 'Valid SM2 mapping rejected'
         }

@@ -34,7 +34,9 @@ export function reportFrontendError(where: string, error: unknown, extra: Partia
     // replaced WebView profile. A missing/old native command is expected in
     // browser-only development and must never recurse into error reporting.
     if (isNativeRuntime) {
-      void invoke('diagnostics.frontendError', record, { timeoutMs: 1000 }).catch(() => {});
+      void invoke<{ ok?: boolean }>('diagnostics.frontendError', record, { timeoutMs: 1000 })
+        .then(result => { if (result?.ok !== true) ++failedDiagnosticDeliveries; })
+        .catch(() => { ++failedDiagnosticDeliveries; });
     }
   } finally {
     reporting = false;
@@ -44,3 +46,18 @@ export function reportFrontendError(where: string, error: unknown, extra: Partia
 export function readFrontendErrorLog(): FrontendErrorRecord[] {
   return log.read();
 }
+
+// Named state tracing is evidence, not an error and not a localStorage error entry.
+// No timer/subscription/control action. Native owns the paths, caps and lane policy.
+let failedDiagnosticDeliveries = 0;
+export function reportFrontendTrace(where: 'gamepad-admission' | 'controller-preview', detail: Record<string, unknown>): void {
+  try {
+    if (!isNativeRuntime) return;
+    const record = { where, message: JSON.stringify(detail),
+      route: typeof window !== 'undefined' ? window.location?.hash ?? '' : '', build: APP_VERSION };
+    void invoke<{ ok?: boolean }>('diagnostics.frontendTrace', record, { timeoutMs: 1000 })
+      .then(result => { if (result?.ok !== true) ++failedDiagnosticDeliveries; })
+      .catch(() => { ++failedDiagnosticDeliveries; });
+  } catch { ++failedDiagnosticDeliveries; }
+}
+export function frontendDiagnosticDeliveryFailures(): number { return failedDiagnosticDeliveries; }

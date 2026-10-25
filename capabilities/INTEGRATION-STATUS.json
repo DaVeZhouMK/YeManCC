@@ -1,0 +1,789 @@
+{
+  "schemaVersion": 1,
+  "gameMotorReceiptContract": "capabilities/CONTROLLER-GAME-MOTOR-RECEIPT.json",
+  "objective": "Frozen HC model capabilities: unified registration, dispatch, invocation and consumption, including missing wiring and required dependencies",
+  "goalComplete": false,
+  "physicalAcceptance": "separate",
+  "userScopeDecisions": "capabilities/USER-SCOPE-DECISIONS.json",
+  "userExcludedCapabilities": [
+    "settings.wake-password-ui"
+  ],
+  "sourceScope": {
+    "baseline": "HC-BINARY-BATCH12-20260831",
+    "deviceClasses": 92,
+    "factoryClasses": 80
+  },
+  "domains": [
+    {
+      "id": "fan",
+      "status": "dispatch-connected",
+      "registeredRoutes": 70,
+      "consumer": "RealHcBackend.ResolveRoute -> existing FanRoute writer and lifecycle",
+      "verifiedScope": "all registered route aliases; ASUS production callback and transport receipts",
+      "remaining": [
+        "complete per-action consumption and cross-domain ownership audit",
+        "retain and verify each vendor writer and restore result contract"
+      ],
+      "evidence": {
+        "dispatchChecks": 601,
+        "selectedConsumerDispatches": 149,
+        "originalSourceRefusalFailures": 71,
+        "asusRoundtripChecks": 62,
+        "catalogCorruptionRejections": 6,
+        "physicalHardwareVerified": false,
+        "maintenanceChecks": 8
+      },
+      "highFrequencyOptimization": {
+        "status": "software-verified",
+        "consumer": "actual RealHcBackend.Route -> HcCapabilityTypeCache<FanRoute>",
+        "hotPath": "immutable runtime Type binding; direct cached consumer on stable Type",
+        "checks": 12,
+        "hotLookupAllocations": 0,
+        "retainedLiveGuards": [
+          "authorization",
+          "readiness",
+          "lease",
+          "device/ownership and restore settlement"
+        ],
+        "wholeProcessCpuReduction": "not measured"
+      },
+      "returnConsumptionContract": {
+        "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
+        "registeredRoutes": 70,
+        "sourceResolvedRoutes": 70,
+        "contractLevels": {
+          "msi-structured-release": 4,
+          "asus-scope-receipts": 4,
+          "hc-compat-callback": 62
+        },
+        "currentCompleteInputExecution": "NOT_OBSERVED",
+        "historicalMsiScope": "ClawA2VM;2026-10-07 + ClawCG3EM(C8EX/MS-1T91);2026-10-16 09:38/18:44; historical structured bit-readback and independent Close settlement; explicit OperationToken log field absent; physical ownership not confirmed",
+        "physicalAcceptance": false,
+        "familySelectionPolicy": {
+          "file": "capabilities/FAN-RETURN-CONSUMPTION.json",
+          "jsonPointer": "/familySelectionPolicies/MSI",
+          "selectedPlan": "ymcc-msi-fan-only-with-hc-structured-io",
+          "retainedAlternative": "hc-maintained-msi-full-device-profile-alternative",
+          "userSelectedOn": "2026-10-19",
+          "hcLowLevelStillRequired": true,
+          "automaticFailover": false,
+          "alternativeRuntimeSwitchAvailable": false
+        }
+      }
+    },
+    {
+      "id": "lighting",
+      "status": "model-action-consumers-connected",
+      "consumers": [
+        "native ROG Aura",
+        "native MSI Claw HID",
+        "actual LightSetter HC callback",
+        "approved independent Mini core"
+      ],
+      "observedRegistration": {
+        "nativeLightingClasses": 47,
+        "sourceMinimumLightingClasses": 51,
+        "nonFactoryBasesNotAdvertised": [
+          "AYANEOAIRPlus",
+          "AYANEODeviceCEc",
+          "AYANEODeviceCEii",
+          "LegionGo"
+        ],
+        "secondColorPolicy": "retain lighting-disabled FlipDS/Flip1SDS exclusion",
+        "nextVerification": "software consumer gates passed; physical protocol/readback and installed-payload acceptance remain separate"
+      },
+      "registeredClasses": 47,
+      "factoryClasses": 44,
+      "explicitNativeBaseAliases": 3,
+      "brightnessRoutes": 42,
+      "secondColorEntries": 21,
+      "namedOneXPresets": 11,
+      "implementedPresetClasses": 5,
+      "verifiedScope": "actual managed operation selection/action functions; full native gate parity; actual ROG/MSI packet consumers; actual capability-query and exported receipt closures; existing product signals",
+      "evidence": {
+        "managedChecks": 549,
+        "nativeParityChecks": 3832,
+        "nativePacketChecks": 260,
+        "nativeCapabilityChecks": 5149,
+        "nativeReceiptChecks": 573,
+        "existingSignalCases": 52,
+        "physicalHardwareVerified": false
+      },
+      "remaining": [
+        "per-vendor HC initialization and transport lifecycle reconciliation with other capability domains",
+        "field verification on matching built/installed payload",
+        "low-frequency activation and remaining HC dependency optimization deferred behind high-frequency domains"
+      ]
+    },
+    {
+      "id": "battery",
+      "status": "exact-rules-and-actual-controller-consumers-connected",
+      "consumers": [
+        "HcBatteryCapabilityCatalog exact identity dispatcher",
+        "actual Policy and Controller",
+        "existing native provider/readback/recovery",
+        "existing component consumes actual Controller JSON"
+      ],
+      "registeredIdentityRules": 40,
+      "frozenIdentityRules": 34,
+      "reviewedNativeExtensions": 6,
+      "sourceDeclarationNotRequiredForReviewedNativeProvider": [
+        "GPDWinMini_HX370"
+      ],
+      "verifiedScope": "All existing rule identities select the original Route instance, enter actual Controller read/write against memory providers, restore software bypass on shutdown, and retain firmware/readback/conflict/recovery rejection. Actual provider protocol and UI tests retained.",
+      "evidence": {
+        "controllerGroups": 60,
+        "uiCases": 24,
+        "liveControllerCases": 6,
+        "sourceChangesDuringLocalRun": 0,
+        "physicalHardwareVerified": false
+      },
+      "runtimeSourceContract": "Includes four source-linked catalog files plus ProcessEfficiency; modified shared generated source is a stale-contract negative",
+      "remaining": [
+        "SuiPlay0X1 inherited source protocol remains explicitly not admitted by reviewed Windows policy",
+        "same-version installation/physical battery and vendor protocol validation are separate",
+        "continue joint lifecycle/dependency review"
+      ]
+    },
+    {
+      "id": "oem-input",
+      "status": "profile-catalog-consumers-connected-vendor-lifecycle-pending",
+      "next": "Continue vendor/source transport and final action-consumer reconciliation; do not infer full OEM completion from profile/catalog wiring",
+      "consumers": [
+        "oemBackMappingRefreshGate -> total-library binding -> original profile -> hook/raw consumers",
+        "gamepadOemPressedKeys -> total-library binding -> original key table",
+        "oem.keys.get -> same model binding and canonical capture predicate"
+      ],
+      "binding": "capabilities/HcOemInputCapabilityBinding.h",
+      "hotPath": "thread-local immutable family/class binding; original selectors and static tables retained; no live permission/state cache",
+      "verifiedScope": "Actual main helper/gate fragment plus complete production gate/query/pressed enumeration/hook recompute/raw reset compiled against memory IO; all registered aliases compared to original canonical selectors",
+      "remaining": [
+        "Vendor HID/WMI transport, OEM source authority and full lifecycle ownership/release still need unified end-to-end reconciliation",
+        "Physical key direction and hardware effects remain separate",
+        "Unknown extensions keep the original family fallback; no new capability is inferred from source declaration"
+      ]
+    },
+    {
+      "id": "motion",
+      "status": "windows-and-six-private-oem-recipe-bindings-connected;remaining-controller-and-joint-lifecycle-pending",
+      "next": "complete unified provider/recipe binding for all existing motion routes; prioritize repeated per-frame lookup/copy/IPC costs, keep sample ownership and generation fences live",
+      "highFrequencyOptimization": {
+        "status": "generic cache preserved; reviewed/legacy Bound consume unified original recipe reference",
+        "checks": 10021,
+        "compiledCacheKeyMutations": 5,
+        "scope": "generic and negative generic recipe selection only; current recognized-model fast guard unchanged",
+        "fullConsumerAssertionsPerConfiguration": 340224,
+        "originalCompiledSemanticFaults": 35,
+        "finalReceipt": "new-current-public-execution;exact-audit-separate",
+        "wholeProcessCpuReduction": "not measured",
+        "additionalPrivateCompiledSemanticFaults": 4,
+        "privateStandardWindowsCalibrationChecksPerConfiguration": 4353,
+        "matrixApplicationBinding": {
+          "status": "direct-unified-original-recipe-reference",
+          "consumer": "inputCaptureApplyHcMatrixCandidate",
+          "originalLiveBoundGuardRetained": true,
+          "logicalReviewedFindCallsPerConversionBefore": 1,
+          "logicalReviewedFindCallsPerConversionAfter": 0,
+          "scope": "Existing reviewedFamily conversion branch only; other source/selector lookups remain and no new model/provider is admitted.",
+          "regressionTool": "tools/hc_motion_matrix_binding_selftest.mjs",
+          "physicalAcceptance": false,
+          "wholeProcessCpuReduction": null,
+          "historicalEvidenceReference": {
+            "file": "capabilities/INTEGRATION-STATUS.json",
+            "pointer": "/domains/4/historicalSoftwareEvidence/substages/q"
+          }
+        }
+      },
+      "registration": {
+        "recipes": 95,
+        "reviewed": 27,
+        "legacy": 57,
+        "default": 3,
+        "generic": 2,
+        "controllerPreferredDeclarationsWindowsBlocked": 4,
+        "actualSelectedConsumers": 242,
+        "newBindingAssertionsPerConfiguration": 3448,
+        "actualConsumerAssertionsPerConfiguration": 340224,
+        "privateProviderBindingComplete": true,
+        "controllerBindingComplete": false,
+        "private": 6
+      },
+      "privateOemScope": {
+        "models": 6,
+        "boardCases": 7,
+        "originalRecipeTable": "native/hc_oem_windows_motion_catalog.h",
+        "originalMsiPolicy": "native/msi_motion_capabilities.h",
+        "bindingConsumer": "inputCapturePrivateHcMotionSelectorRecipe",
+        "calibrationConsumer": "inputCapturePrivateOemCalibrationRecipe",
+        "perFrameTemporaryMsiReceiptRemoved": true,
+        "originalAxesUnchanged": true,
+        "providerAcquisitionAndLifetime": "existing live guards retained; platform capture controlled in software tests",
+        "fullControllerMotionConnected": false,
+        "physicalAcceptance": false
+      },
+      "primaryOwnerDispatch": {
+        "status": "source-integrated;current-software-consumption-and-payload-acceptance-pending",
+        "catalog": "capabilities/HcMotionCapabilityCatalog.generated.h",
+        "generator": "tools/lib/hc_motion_catalog.mjs",
+        "bindingHelper": "capabilities/HcMotionCapabilityCatalog.h::primaryKind",
+        "consumer": "native/main.cpp::inputCaptureMotionSelectorBound",
+        "defaultBound": "native/main.cpp::inputCaptureDefaultHcMotionSelectorBound",
+        "priority": [
+          "Default",
+          "Reviewed",
+          "Legacy",
+          "Private"
+        ],
+        "generic": "original separate generic admission remains first",
+        "cachedRuntimePermission": false,
+        "wholeProcessCpuReduction": null,
+        "historicalEvidenceReference": {
+          "file": "capabilities/INTEGRATION-STATUS.json",
+          "pointer": "/domains/4/historicalSoftwareEvidence/substages/o"
+        }
+      },
+      "historicalSoftwareEvidence": {
+        "testId": "gyro.machine-motion-consumers",
+        "sourceRunId": "2026-10-20T06-33-42-803Z-6189c59f",
+        "evidenceKind": "ACTUAL_HISTORICAL_SOURCE_COMPILED_SOFTWARE_RECEIPTS",
+        "parentReceipt": {
+          "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/result.json",
+          "sha256": "ff765bec8298b051f8a21970ff06a66ba9e12086687fc47a220fb318ed1b7542"
+        },
+        "recordedSource": {
+          "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/q/main.before.cpp",
+          "sha256": "ba86ea1e1acd8fe3fa0c7ed57ea8735cabdf0436c7fd7a7568052c4a6fdf640f"
+        },
+        "sourceApplicability": {
+          "review": {
+            "path": "D:/Codex/2026-10-18/kai-s/work/global-capability-controller-motion-receipt-map-20261022-r1/MAPPING.json",
+            "sha256": "2b695fe8815329a8a447b9e0d5bfadace8c2648ec7fa8d5cf0bd98fd397403ee",
+            "pointer": "/sourceApplicability"
+          },
+          "currentSourceApprovalGranted": false,
+          "meaning": "At the pinned review three selected function bodies matched, while full main, motion binding header and runner differed. Historical PASS does not approve current G or joint lifecycle."
+        },
+        "substages": {
+          "q": {
+            "status": "HISTORICAL_SOFTWARE_PASS_NOT_CURRENT_G_APPROVAL",
+            "receipt": {
+              "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/q/result.json",
+              "sha256": "34781e99051a2a93721e4420af0e2bfa527667d02b9e4b1030ef9ebf34e98759"
+            },
+            "parentPointer": "/matrixEvidence",
+            "positive": {
+              "receipt": {
+                "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/q/p/e/result.json",
+                "sha256": "2946d3471ff4521a7f6699e497069050c43bb4b0e59488f9005a0bdbcd466391"
+              },
+              "pointer": "/configurations",
+              "configurations": [
+                "Release",
+                "Checked"
+              ]
+            },
+            "faults": [
+              {
+                "id": "rollback-to-table-search",
+                "expectedError": "MATRIX_LOOKUP_REMOVAL",
+                "configurations": [
+                  "Release"
+                ],
+                "pointer": "/faults/0"
+              },
+              {
+                "id": "live-reviewed-bound-removed",
+                "expectedError": "MATRIX_OUTPUT_EQUIVALENCE",
+                "configurations": [
+                  "Release"
+                ],
+                "pointer": "/faults/1"
+              },
+              {
+                "id": "wrong-registry-kind",
+                "expectedError": "MATRIX_OUTPUT_EQUIVALENCE",
+                "configurations": [
+                  "Release"
+                ],
+                "pointer": "/faults/2"
+              },
+              {
+                "id": "gyro-transform-skipped",
+                "expectedError": "MATRIX_OUTPUT_EQUIVALENCE",
+                "configurations": [
+                  "Release"
+                ],
+                "pointer": "/faults/3"
+              }
+            ],
+            "sourcePointer": "/sourceBefore",
+            "unchangedSourcePointer": "/sourceAfter",
+            "consumerReferences": [
+              {
+                "file": "native/main.cpp",
+                "anchor": "static void inputCaptureApplyHcMatrixCandidate("
+              }
+            ]
+          },
+          "o": {
+            "status": "HISTORICAL_SOFTWARE_PASS_NOT_CURRENT_G_APPROVAL",
+            "receipt": {
+              "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/o/result.json",
+              "sha256": "3e539744cb343576bb6563548dec173f85a2e576c8238390821a9242247c6331"
+            },
+            "parentPointer": "/ownerEvidence",
+            "positive": {
+              "receipt": {
+                "path": "D:/F39/2026-10-20T06-33-42-803Z-6189c59f/cases/gyro.machine-motion-consumers/m/o/p/e/result.json",
+                "sha256": "5575653d1ef3f6ae5418f58eefc319ff82f44330798f265e2edd5ccc3359e728"
+              },
+              "pointer": "/configurations",
+              "configurations": [
+                "Release",
+                "Checked"
+              ]
+            },
+            "faults": [
+              {
+                "id": "trust-claimed-kind",
+                "expectedError": "REVIEWED_CLASS_CANNOT_FALL_BACK_TO_LEGACY",
+                "configurations": [
+                  "Release",
+                  "Checked"
+                ],
+                "pointer": "/faults/0"
+              },
+              {
+                "id": "skip-default-dmi",
+                "expectedError": "LIVE_BOUND_EQUIVALENCE",
+                "configurations": [
+                  "Release",
+                  "Checked"
+                ],
+                "pointer": "/faults/1"
+              },
+              {
+                "id": "wrong-reviewed-route",
+                "expectedError": "LIVE_BOUND_EQUIVALENCE",
+                "configurations": [
+                  "Release",
+                  "Checked"
+                ],
+                "pointer": "/faults/2"
+              },
+              {
+                "id": "rollback-class-search",
+                "expectedError": "NO_REPEATED_CLASS_TABLE_SEARCH",
+                "configurations": [
+                  "Release",
+                  "Checked"
+                ],
+                "pointer": "/faults/3"
+              },
+              {
+                "id": "wrong-primary-priority",
+                "expectedError": "GENERATED_PRIMARY_OWNER_PRIORITY",
+                "configurations": [
+                  "Release",
+                  "Checked"
+                ],
+                "pointer": "/faults/4"
+              }
+            ],
+            "sourcePointer": "/sourceBefore",
+            "unchangedSourcePointer": "/sourceAfter",
+            "consumerReferences": [
+              {
+                "file": "native/main.cpp",
+                "anchor": "inputCaptureMotionSelectorBound()"
+              },
+              {
+                "file": "capabilities/HcMotionCapabilityCatalog.h",
+                "anchor": "primaryKind"
+              },
+              {
+                "file": "tools/lib/hc_motion_catalog.mjs",
+                "anchor": "row.primaryKind="
+              }
+            ]
+          }
+        },
+        "fullBusExecuted": false,
+        "physicalAcceptance": false,
+        "wholeProcessCpuReduction": null,
+        "currentJointAccepted": false,
+        "evidenceMeaning": "Child pointers below resolve inside each pinned subreceipt. Preserve original resultFile/resultSha256 and processFile bindings; semantic failures were actually reported after successful compilation. No new test ID or current-source PASS is declared."
+      }
+    },
+    {
+      "id": "performance",
+      "status": "metadata-only-current-consumers-independent",
+      "next": "Maintain model and CPU-name evidence with provenance; unresolved names stay unknown. Registration does not authorize runtime dispatch changes.",
+      "metadata": "capabilities/hc-performance-metadata.json",
+      "cpu": "identity metadata only; no new HC CPU calls or takeover of current YMCC consumers",
+      "gpu": "reference registration only; no GPU feature or consumer is enabled",
+      "tdp": "existing independent route; catalog limits do not override current TDP values or dispatch",
+      "runtimeConsumersAdded": 0,
+      "userScopeDecision": {
+        "date": "2026-10-19",
+        "source": "user instruction in capability-library chat",
+        "meaning": "CPU/GPU registration by model and CPU identity must not change current consumption; TDP remains separate"
+      }
+    },
+    {
+      "id": "lifecycle-and-dependencies",
+      "status": "pending-full-audit",
+      "next": "reconcile source/binary provenance, initialization, shared dependencies, resource ownership and restore for every activated consumer"
+    },
+    {
+      "id": "remaining-model-methods",
+      "status": "source-method-classification-connected;method-consumption-reconciliation-open",
+      "next": "classify and connect all remaining frozen model protocol methods; preserve explicit disabled and unsupported states",
+      "sourceMethodConsumption": {
+        "file": "capabilities/MODEL-METHOD-CONSUMPTION.json",
+        "policy": "capabilities/hc-model-method-policy.json",
+        "sourceClasses": 92,
+        "factoryClasses": 80,
+        "sourceFiles": 91,
+        "declaredMethods": 397,
+        "distinctMethodNames": 191,
+        "groups": 20,
+        "proof": "fresh Roslyn AST + authenticated source index and per-file source hashes; exact class/method comparison",
+        "runtimeAvailabilityAuthority": false,
+        "methodSpecificExecution": "not-inferred-from-domain-link",
+        "methodConsumerReconciliation": "open",
+        "physicalAcceptance": false,
+        "performanceSourceMethodsMetadataOnly": 35,
+        "sourceUseReview": "RGB packet builder and HID lighting SaveConfigData are lighting dependencies; MSI OverBoost data/UEFI functions are performance source metadata."
+      },
+      "secondaryDisplay": {
+        "status": "candidate-source-consumers-connected;mainline-global-package-and-physical-acceptance-pending",
+        "models": [
+          "hc.device.AYANEOFlipDS",
+          "hc.device.AYANEOFlip1SDS"
+        ],
+        "catalog": "capabilities/HcSecondaryDisplayCapabilityCatalog.cs",
+        "provider": "native/BatteryHost/SecondaryDisplayController.cs",
+        "nativeClient": "native/secondary_display_client.h",
+        "oemConsumer": "nativeSecondaryDisplayKeyboardConsume",
+        "transport": "existing battery-host pipe; independent lazy domains; EcAccess(false)",
+        "hardwareUiImported": false,
+        "physicalAcceptance": false,
+        "wholeProcessCpuReduction": null
+      }
+    },
+    {
+      "id": "controller",
+      "status": "standard-input-legion-motion-and-reviewed-classic-source-bound-game-feedback-connected;remaining-controller-and-acceptance-open",
+      "next": "connect actual physical controller input/motion, virtual output and owned hide/return receipts using CONTROLLER-CONSUMPTION.json",
+      "feedback": "Sony USB classic and Steam Deck composite classic source-bound software writers are connected. Source-epoch certification, other protocols, runtime UI authority and physical acceptance remain separate.",
+      "frozenSourceInventory": {
+        "files": 29,
+        "classDeclarations": 28,
+        "dummyFiles": 6,
+        "status": "complete-source-inventory-verified;runtime-binding-pending"
+      },
+      "standardInputRegistration": {
+        "providers": 2,
+        "aliases": 3,
+        "actualConsumer": "inputHostFrameSubmissionSample",
+        "verification": "software-consumer-verified;per-controller-extra-and-feedback-bindings-pending",
+        "fullControllerComplete": false,
+        "evidence": {
+          "consumerTest": "controller.unified-standard-input",
+          "originalFrameCases": 82,
+          "currentFrameCases": 169,
+          "frameAssertionsPerConfiguration": 2922,
+          "configurationCounts": {
+            "frame": 4,
+            "pipe": 2,
+            "power": 4,
+            "msiRead": 4
+          },
+          "compiledFaults": 5,
+          "sourceChanges": 0
+        }
+      },
+      "legionMotionBinding": {
+        "status": "actual-decoder-source-retention-and-final-consumers-connected;other-controller-providers-pending",
+        "registeredModels": 4,
+        "originalProtocols": 2,
+        "dispatcher": "capabilities/HcControllerMotionCapabilityCatalog.h",
+        "consumers": [
+          "legionMotionDecodeReport",
+          "legionMotionBoundSource",
+          "legionMotionSourceForSelectedLocked",
+          "legionMotionPublish/Snapshot",
+          "legionMotionObserveReportBanks",
+          "inputCaptureLegionMotion",
+          "legionMotionSubmissionCurrent",
+          "inputCaptureLegionBankWorkCurrent"
+        ],
+        "availability": "original exact canonical class/family and live physical identity/PID/collection/window/epoch/ownership gates",
+        "noRuntimeJson": true,
+        "originalProtocolUnmodified": true,
+        "wholeProcessCpuReduction": "not measured",
+        "remaining": [
+          "other physical-controller motion providers",
+          "private MSI/Xbox motion provider source binding",
+          "full transport/Host/hide/return joint lifecycle and physical acceptance"
+        ]
+      },
+      "physicalFeedback": {
+        "registeredProviders": 2,
+        "scope": "native manual and touch physical feedback only",
+        "dispatcher": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+        "actualConsumers": [
+          "nativePhysicalFeedbackReady",
+          "nativePhysicalFeedbackStart",
+          "msiDinputFeedbackWrite",
+          "physicalFeedbackStopTarget",
+          "physicalFeedbackFinish"
+        ],
+        "sourceSelection": "observed physical MSI main-source record or physical XInput slot; never chassis DMI for provider selection",
+        "retainedBinding": "PhysicalFeedbackTarget.unifiedBinding; Receipt.capabilityToken identifies chosen writer only",
+        "softwarePositiveCasesPerDiagnosticConfiguration": 64,
+        "softwarePositiveChecksPerDiagnosticConfiguration": 299,
+        "diagnosticConfigurations": 2,
+        "compiledSourceFaults": 9,
+        "msiActualSourceLeaseFrameWriteExecuted": true,
+        "platformAndWin32IoControlled": true,
+        "gameOutputCallbackBound": false,
+        "allControllerFeedbackConnected": false,
+        "physicalAcceptance": false,
+        "msiStopFailure": {
+          "actualZeroResultConsumed": true,
+          "failedSameSourceOwnerRetained": true,
+          "existingBoundedRetry": true,
+          "noRecurringTimerAfterBudget": true,
+          "existingSourceEdgeWakeHelper": "msiDinputFeedbackWakePendingStop",
+          "sourcePublicationHooks": "checked original callsites; wake helper and scheduler execute against controlled source events",
+          "replacementDeviceCannotReceiveOldZero": true,
+          "hardwareZeroObservation": false
+        }
+      },
+      "gameMotorSoftwareConsumption": {
+        "capabilityId": "controller.feedback.game.dualsense-edge-usb-classic",
+        "sourceConnected": true,
+        "supportedVirtualTargets": [
+          {
+            "profileIdentity": "dualsense-edge",
+            "protocol": "dualsense-usb-classic-v1",
+            "reportSource": 0,
+            "reportId": 2,
+            "bodyBytes": 63,
+            "motorSemantics": "independent classic left/right rumble; zero pair stops this game owner"
+          }
+        ],
+        "supportedPhysicalSources": [
+          {
+            "inputCapabilityId": "controller.input.xinput.standard",
+            "actualInputAliases": [
+              "xinput",
+              "xinput-any-connected"
+            ],
+            "writerCapabilityId": "controller.feedback.xinput.physical"
+          },
+          {
+            "inputCapabilityId": "controller.input.msi-dinput.standard",
+            "actualInputAliases": [
+              "msi-dinput"
+            ],
+            "writerCapabilityId": "controller.feedback.msi-dinput.physical"
+          }
+        ],
+        "consumers": [
+          {
+            "file": "native/main.cpp",
+            "anchor": "inputCaptureStampFeedbackSourceLocked"
+          },
+          {
+            "file": "native/main.cpp",
+            "anchor": "inputHostConsumeGameMotorReplyLocked"
+          },
+          {
+            "file": "native/main.cpp",
+            "anchor": "GameFeedbackFrameDispatchScope"
+          },
+          {
+            "file": "native/main.cpp",
+            "anchor": "nativeWriteBoundGameFeedbackCommand"
+          },
+          {
+            "file": "native/main.cpp",
+            "anchor": "physicalFeedbackStopTarget"
+          }
+        ],
+        "sourceRule": "The same admitted frame retains its original physical SourceToken; machine family/DMI and an arbitrary current slot never grant writing permission.",
+        "headers": [
+          "native/game_feedback_source_ticket.h",
+          "native/game_feedback_dispatch.h",
+          "native/game_feedback_diagnostics.h"
+        ],
+        "diagnostics": {
+          "existingEvent": "input-host-submit-stats",
+          "field": "gameMotorDispatch",
+          "consumer": "nativeGameFeedbackDiagnosticsSnapshot",
+          "counters": "process lifetime, game operations only",
+          "costGate": "existing tickCostEnabled",
+          "clockWhenDisabled": "no new observation clock reads",
+          "availabilityAuthority": false
+        },
+        "physicalAcceptance": false,
+        "wholeProcessCpuReduction": null,
+        "excludedFromThisSupport": [
+          "Bluetooth Sony raw output",
+          "adaptive triggers or audio haptic stream",
+          "game-controller lighting",
+          "unsupported physical input aliases or unbound sources",
+          "Steam Deck haptic and timed pulse protocols; classic rumble is declared separately",
+          "Xbox HID/BT and impulse-trigger protocols; exact source2 classical rumble is declared separately"
+        ],
+        "softwareAcceptanceEvidenceRecordedSeparately": true
+      },
+      "additionalGameMotorSoftwareConsumption": [
+        {
+          "capabilityId": "controller.feedback.game.steam-deck-usb-classic-rumble",
+          "profileIdentity": "steam-deck-composite",
+          "protocol": "steam-deck-usb-classic-rumble-v1",
+          "sourceConnected": true,
+          "contract": "capabilities/CONTROLLER-STEAMDECK-RUMBLE-RECEIPT.json",
+          "supportedPhysicalSources": [
+            "controller.feedback.xinput.physical",
+            "controller.feedback.msi-dinput.physical"
+          ],
+          "softwareAcceptanceEvidenceRecordedSeparately": true,
+          "physicalAcceptance": false,
+          "wholeProcessCpuReduction": null
+        },
+        {
+          "capabilityId": "controller.feedback.game.xbox-elite-v2-xinput-classic",
+          "profileIdentity": "xbox-elite-v2",
+          "protocol": "xbox-elite-v2-xinput-classic-v1",
+          "sourceConnected": true,
+          "contract": "capabilities/CONTROLLER-XBOX-XINPUT-RUMBLE-RECEIPT.json",
+          "supportedPhysicalSources": [
+            "controller.feedback.xinput.physical",
+            "controller.feedback.msi-dinput.physical"
+          ],
+          "softwareAcceptanceEvidenceRecordedSeparately": true,
+          "physicalAcceptance": false,
+          "wholeProcessCpuReduction": null
+        }
+      ],
+      "msiRearConfiguration": {
+        "status": "source-integrated;current-software-consumption-and-payload-acceptance-pending",
+        "models": 4,
+        "boards": 5,
+        "firmwareVersions": 8,
+        "catalog": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+        "generated": "capabilities/HcControllerConfigurationCapabilityCatalog.generated.h",
+        "sourcePolicy": "capabilities/hc-controller-configuration-policy.json",
+        "actualConsumers": [
+          "msiClawEnsureM12Remap"
+        ],
+        "nativeKeyboardDefaultWritesEnabled": false,
+        "sharedProfileFields": true,
+        "persistentSyncIsWriteReceiptOnly": true,
+        "physicalAcceptance": false,
+        "recordOnlyConsumers": [
+          "msiNativeRearPrepareKeyboard"
+        ],
+        "nativeKeyboardConsumerSourceUnchanged": true
+      },
+      "physicalVisibilityEvidenceReferences": {
+        "source": {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "pointer": "/stages/0/consumerEvidence"
+        },
+        "applyAndApplicationReturn": {
+          "file": "capabilities/CONTROLLER-CONSUMPTION.json",
+          "pointer": "/stages/5/consumerEvidence"
+        },
+        "evidenceMeaning": "Navigation to related software contracts or exact standalone source only. No exact global registration or bound D runtime receipt for these HidHide functions was located in the pinned review; retain UNKNOWN and physical acceptance separately."
+      }
+    }
+  ],
+  "priorities": [
+    "capability registration/invocation/real-consumption/recovery completeness",
+    "fan and motion high-frequency direct consumption",
+    "remaining capability domains",
+    "low-frequency activation optimization"
+  ],
+  "longTerm": {
+    "cpu": "maximum CPU efficiency as a sustained optimization target; use actual per-call and whole-process measurements separately",
+    "hcDependency": "converge to EC-class hardware capabilities, by verified consumer/lifecycle/dependency migration",
+    "smallPurposeDlls": "allowed",
+    "furtherDllTrimming": "deferred-by-user",
+    "maintenanceRecord": "capabilities/EXECUTION-CHAINS.json",
+    "upgradePlanner": "tools/hc_capability_maintenance.mjs"
+  },
+  "maintenance": {
+    "registeredDomains": 9,
+    "recordedRouteIssues": 16,
+    "consumerAndUpgradeChecks": 13,
+    "normalBuildAndPackageGuard": "tools/verify-unified-capability-catalog.ps1",
+    "evidenceScope": "source and memory-transport software validation; no package, installation, real device IO or physical acceptance claimed",
+    "closedSoftwareRouteIssues": 1
+  },
+  "evidenceMeaning": "Successful incomplete paths are not a performance claim: per-rule positive consumers, writes and software-release assertions precede cost interpretation.",
+  "currentBatchAcceptance": {
+    "status": "B40_FIXED_SOFTWARE_ACCEPTED_CURRENT_PRIMARY_NOT_APPROVED",
+    "currentSourceMainSha256": "936acc0b78de9750ec852b71a7e0b9fd14d3f64d6eb9213089a6ae7a98089578",
+    "currentSourceAccepted": false,
+    "needsRerun": null,
+    "historicalAcceptance": {
+      "status": "CURRENT_RECEIPTS_VALID",
+      "selectedCurrentTests": 10,
+      "needsRerun": 0,
+      "auditPath": "D:/Codex/2026-10-19/ni-s/work/ca2g/2026-10-19T06-28-17-342Z-8d22c507/receipt-audit.json",
+      "registeredSelectionValidated": true,
+      "previousAuditHistoricalOnly": "D:/Codex/2026-10-19/ni-s/work/a6g/2026-10-19T05-37-01-979Z-88a8e6ee/receipt-audit.json",
+      "physicalAcceptance": "separate",
+      "completeGoal": false
+    },
+    "currentCompleteNativeBuild": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase26/actual-main-build-enabled-consumer-batch/result.json",
+      "sha256": "31111e5df9dec7c07647b24bc58b33176fefb8a582ac4820f1bd0d9dc31a5d5e",
+      "scope": "compile/link only; product not run"
+    },
+    "currentMsiSdPositive": {
+      "path": "D:/SD27/current-enabled-positive/result.json",
+      "sha256": "95e6aca9381ffd8cac4b85904ef94cac1ecb69f4e48f65d2a6f45578d8da5a9a"
+    },
+    "currentMsiSdFaults": {
+      "path": "D:/SD27/current-enabled-faults/result.json",
+      "sha256": "ac5de6a34c505848115d56316f3f334b74fa0dcb4c2b8dc95bcc362b10d048e6"
+    },
+    "remaining": "The exact fixed B40 software scope is accepted; changing primary, normal Host/runtime gates when triggered, installation/physical behavior and broad provider/game feedback/default-action suppression gaps remain separate. Reuse the original upgrade/consumer regression entry.",
+    "physicalAcceptance": false,
+    "completeGoal": false,
+    "previousMainObservation": {
+      "sha256": "cb6a825e0104603f4c05bcd6933e1a0bc156f8139165b11040e898a9ef313510",
+      "accepted": false
+    },
+    "currentSourceObservedAt": "2026-10-20T07:48:42.162Z",
+    "latestFixedSoftwareBatch": {
+      "id": "HC-ENABLED-FIXED24-B40-20261020",
+      "scope": "Exact B40 fixed24 software acceptance; separate3 existing lifecycle continuity. Not changing whole primary or broad provider acceptance.",
+      "certificate": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase29\\B40-fixed24-software-closure.json",
+        "sha256": "4ac1bf8d6750fca411c0be694681ff3ee6734ec4a4df3854a3fcc846c3481b93"
+      },
+      "fixedProductMainSha256": "ba86ea1e1acd8fe3fa0c7ed57ea8735cabdf0436c7fd7a7568052c4a6fdf640f",
+      "fixedSourceManifestSha256": "a0f2b0d77d1043bd2eff54465b51f06409c67d070a51aa4c9c4ec2e15784823e",
+      "fixedBatchComplete": true,
+      "fixedBatchTests": 24,
+      "registeredScopeComplete": true,
+      "separateLifecycleContinuityPassed": 3,
+      "aggregateRegisteredCurrent": 27,
+      "postSourceAndTools": "PASS_FIXED_INPUT_INTEGRITY_ONLY",
+      "currentPrimaryAccepted": false,
+      "physicalAcceptance": false,
+      "goalComplete": false
+    }
+  },
+  "activeIntegrationScope": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+  "currentWorkObjective": "Complete unified library consumption for capabilities already enabled in YMCC, then close this integration batch; record inactive capability gaps without wiring them.",
+  "activeScopeComplete": false
+}

@@ -1,0 +1,229 @@
+// Compile the complete production owners against explicit in-memory OS/COM ports.
+// Handles below are memory records and are NEVER sent to Win32/COM.
+#define NOMINMAX
+#define YMCC_FAULT_INJECT
+#include <windows.h>
+#include <sensorsapi.h>
+#include <sensors.h>
+#include <PortableDeviceTypes.h>
+#include <wrl/client.h>
+#include <algorithm>
+#include <atomic>
+#include <functional>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <thread>
+#include <type_traits>
+#include <vector>
+#include "sensor_inventory_cache.h"
+namespace port {
+struct Handle {
+    bool thread=false,done=false,closed=false,waitFailed=false,closeFail=false;
+    unsigned closes=0,waits=0;
+    DWORD id=0; LPTHREAD_START_ROUTINE entry=nullptr; void* argument=nullptr;
+};
+static std::vector<std::unique_ptr<Handle>> handles;
+static Handle *lastThread=nullptr,*lastEvent=nullptr;
+static unsigned creates=0,waits=0,closes=0,cancels=0,invalid=0,liveCloses=0,activations=0;
+static bool eventFail=false,threadFail=false,setFail=false,newEventCloseFail=false;
+static HRESULT comResult=S_OK;
+static std::vector<DWORD> budgets;
+static std::function<void()> waitHook,createHook;
+static HANDLE make(bool thread) {
+    auto h=std::make_unique<Handle>();h->thread=thread;h->id=static_cast<DWORD>(handles.size()+1);
+    const auto raw=h.get();handles.push_back(std::move(h));++creates;return raw;
+}
+static HANDLE WINAPI event(LPSECURITY_ATTRIBUTES,BOOL,BOOL,LPCWSTR) {
+    if(createHook) {auto hook=std::move(createHook);createHook={};hook();}
+    if(eventFail)return nullptr;
+    lastEvent=static_cast<Handle*>(make(false));lastEvent->closeFail=newEventCloseFail;return lastEvent;
+}
+static HANDLE WINAPI thread(LPSECURITY_ATTRIBUTES,SIZE_T,LPTHREAD_START_ROUTINE entry,LPVOID argument,DWORD,LPDWORD id) {
+    if(threadFail)return nullptr;
+    lastThread=static_cast<Handle*>(make(true));lastThread->entry=entry;lastThread->argument=argument;
+    if(id)*id=lastThread->id;return lastThread;
+}
+static DWORD WINAPI wait(HANDLE raw,DWORD budget) {
+    ++waits;budgets.push_back(budget);
+    if(waitHook) {auto hook=std::move(waitHook);waitHook={};hook();}
+    const auto h=static_cast<Handle*>(raw);
+    if(!h||h->closed){++invalid;return WAIT_FAILED;}
+    ++h->waits;if(h->waitFailed)return WAIT_FAILED;return h->done?WAIT_OBJECT_0:WAIT_TIMEOUT;
+}
+static BOOL WINAPI close(HANDLE raw) {
+    ++closes;const auto h=static_cast<Handle*>(raw);
+    if(!h||h->closed){++invalid;return FALSE;}++h->closes;
+    if(h->thread&&!h->done)++liveCloses;
+    if(h->closeFail)return FALSE;h->closed=true;return TRUE;
+}
+static BOOL WINAPI set(HANDLE raw) {
+    const auto h=static_cast<Handle*>(raw);if(!h||h->closed){++invalid;return FALSE;}
+    if(setFail)return FALSE;h->done=true;return TRUE;
+}
+static HRESULT WINAPI initialize(LPVOID,DWORD){return comResult;}
+static void WINAPI uninitialize(){}
+static HRESULT WINAPI enable(LPVOID){return S_OK;}
+static HRESULT WINAPI disable(LPVOID){return S_OK;}
+static HRESULT WINAPI cancel(DWORD,ULONG){++cancels;return E_FAIL;}
+static HRESULT WINAPI activate(REFCLSID,LPUNKNOWN,DWORD,REFIID,LPVOID*){++activations;return E_ACCESSDENIED;}
+static void finish(Handle* h) {if(h&&h->entry){auto entry=h->entry;auto arg=h->argument;h->entry=nullptr;h->argument=nullptr;entry(arg);h->done=true;}}
+}
+#define CreateEventW port::event
+#define CreateThread port::thread
+#define WaitForSingleObject port::wait
+#define CloseHandle port::close
+#define SetEvent port::set
+#define CoInitializeEx port::initialize
+#define CoUninitialize port::uninitialize
+#define CoEnableCallCancellation port::enable
+#define CoDisableCallCancellation port::disable
+#define CoCancelCall port::cancel
+#define CoCreateInstance port::activate
+#include "sensorapi_inventory.h"
+#undef CreateEventW
+#undef CreateThread
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef SetEvent
+#undef CoInitializeEx
+#undef CoUninitialize
+#undef CoEnableCallCancellation
+#undef CoDisableCallCancellation
+#undef CoCancelCall
+#undef CoCreateInstance
+using ymcc::msi_sensor::Provider;
+using ymcc::msi_sensor::Options;
+using ymcc::sensors::sensorapi_inventory::Census;
+using ymcc::sensors::inventory::Ticket;
+static_assert(std::is_same_v<decltype(std::declval<const Provider&>().stopped()),bool>);
+static_assert(noexcept(std::declval<const Provider&>().stopped()));
+static_assert(noexcept(Census::stopped())&&noexcept(Census::retire()));
+static unsigned checks=0,failures=0;
+static void check(bool ok,const char* name){++checks;if(!ok){++failures;std::cerr<<"FAIL "<<name<<'\n';}}
+static Options options(std::shared_ptr<int> lifetime={}) {
+    Options value;value.managerFactory=[lifetime](ISensorManager** out){*out=nullptr;return E_ACCESSDENIED;};return value;
+}
+static Ticket ticket(std::uint64_t power=1){static auto owner=std::make_shared<std::atomic<std::uint64_t>>(7);return {{owner,7},power};}
+static bool request(std::uint64_t power=1){return Census::request(ticket(power),[](ISensorManager** out){*out=nullptr;return E_ACCESSDENIED;});}
+static void providerCases() {
+    {
+        Provider p;const auto w=port::waits,c=port::closes;
+        check(p.stopped()&&p.stop(0)&&p.stopped(),"pristine provider and repeat stop");
+        check(port::waits==w&&port::closes==c,"pristine query/stop no OS calls");
+        auto token=std::make_shared<int>(1);std::weak_ptr<int> weak=token;
+        check(p.start(options(token)),"provider starts actual entry with explicit factory");token.reset();
+        const auto h=port::lastThread,e=port::lastEvent;
+        check(p.running()&&!p.stopped()&&!weak.expired(),"live provider remains owned");
+        port::finish(h);
+        const auto qw=port::waits,qc=port::closes;
+        check(!p.stopped()&&!p.stopped(),"terminated thread is not closed owner");
+        check(port::waits==qw&&port::closes==qc,"provider stopped is exactly read only");
+        check(!p.running()&&p.stop(0)&&p.stopped(),"actual entry completion followed by checked thread and event close");
+        check(h->closed&&e->closed&&weak.expired(),"provider state callbacks and both handles released");
+        const auto c2=port::closes;check(p.stop()&&p.stopped()&&port::closes==c2,"provider cleanup is idempotent");
+    }
+    for(bool failed:{false,true}) {
+        Provider p;check(p.start(options()),"timeout/failed provider start");auto h=port::lastThread,e=port::lastEvent;
+        h->waitFailed=failed;port::budgets.clear();const auto c=port::closes;
+        check(!p.stop(),"500ms timeout or WAIT_FAILED never implies stopped");
+        check(port::budgets==std::vector<DWORD>{0,500},"existing 500ms stop budget retained");
+        check(!p.stopped()&&!h->closed&&!e->closed&&port::closes==c,"uncertain provider retains thread event and state");
+        const auto created=port::creates;check(!p.start(options())&&port::creates==created,"uncertain provider cannot stack");
+        h->waitFailed=false;port::finish(h);check(p.stop(0)&&p.stopped(),"later real completion permits retry cleanup");
+    }
+    {
+        Provider p;p.start(options());auto h=port::lastThread,e=port::lastEvent;port::finish(h);h->closeFail=true;
+        check(!p.stop(0)&&!p.stopped()&&!h->closed&&!e->closed,"thread close failure retains provider owner");
+        const auto created=port::creates;check(!p.start(options())&&port::creates==created,"start cannot overwrite failed thread close");
+        h->closeFail=false;check(p.stop(0)&&p.stopped()&&h->closed&&e->closed,"provider checked close retry completes");
+    }
+    {
+        Provider p;auto token=std::make_shared<int>();std::weak_ptr<int> weak=token;p.start(options(token));token.reset();
+        auto h=port::lastThread,e=port::lastEvent;port::finish(h);e->closeFail=true;
+        check(!p.stop(0)&&!p.stopped()&&h->closed&&!e->closed&&!weak.expired(),"event close failure retains state after thread close");
+        const auto created=port::creates;check(!p.start(options())&&port::creates==created,"event close failure prevents new provider");
+        e->closeFail=false;check(p.stop(0)&&p.stopped()&&weak.expired(),"residual event/state can be retired without thread");
+    }
+    {
+        Provider p;p.start(options());auto old=port::lastThread;port::finish(old);
+        check(p.start(options())&&old->closed&&port::lastThread!=old,"start reaps a signalled old owner before creating new reader");
+        port::finish(port::lastThread);check(p.stop(0),"restarted provider completes");
+    }
+    {
+        Provider p;port::eventFail=true;check(!p.start(options())&&p.stopped(),"event creation failure leaves no owner");port::eventFail=false;
+        port::threadFail=true;port::newEventCloseFail=true;check(!p.start(options())&&!p.stopped(),"thread creation failure retains unsuccessfully closed event");port::threadFail=false;port::newEventCloseFail=false;
+        const auto created=port::creates;check(!p.start(options())&&port::creates==created,"failed create residue prevents overwrite");
+        port::lastEvent->closeFail=false;check(p.stop(0)&&p.stopped(),"failed create event cleanup retries");
+    }
+    {
+        Provider p;port::threadFail=true;check(!p.start(options())&&p.stopped(),"failed thread create with successful event close leaves no residue");port::threadFail=false;
+        check(p.start(options()),"provider starts after clean create failure");auto h=port::lastThread;
+        port::setFail=true;check(!p.stop(0)&&!p.stopped(),"failed stop signal/call cancellation never means complete");port::setFail=false;
+        port::finish(h);check(p.stop(0)&&p.stopped(),"stop-signal failure retains owner until actual completion");
+    }
+    {
+        Provider p;port::comResult=E_ACCESSDENIED;p.start(options());port::finish(port::lastThread);port::comResult=S_OK;
+        check(!p.stopped()&&p.stop(0)&&p.stopped(),"COM initialization failure is not destroy until handles close");
+    }
+    {
+        Provider p;p.start(options());auto h=port::lastThread;
+        port::waitHook=[&]{std::thread observer([&]{check(!p.stopped(),"concurrent stop query is conservatively false");check(!p.start(options())&&!p.stop(0),"concurrent lifecycle calls cannot replace owner");});observer.join();};
+        check(!p.stop(0),"concurrent query introduces no wait or deadlock");
+        port::finish(h);check(p.stop(0)&&p.stopped(),"owner drains after concurrent queries");
+        port::createHook=[&]{std::thread observer([&]{check(!p.stopped(),"concurrent start query false before fields are published");check(!p.start(options())&&!p.stop(0),"start lock excludes concurrent lifecycle operations");});observer.join();};
+        check(p.start(options()),"start does not recursively call running under lifecycle lock");port::finish(port::lastThread);check(p.stop(0),"concurrent start owner completes");
+    }
+}
+static void censusCases() {
+    Census::cancel();check(Census::retire()&&Census::stopped(),"pristine census stopped and retire");
+    port::threadFail=true;check(!request()&&Census::stopped(),"census thread creation failure owns no live thread");port::threadFail=false;
+    check(Census::retire()&&Census::stopped(),"census retire resets schedule after create failure");
+    for(bool failed:{false,true}) {
+        check(request(),"census actual request creates one worker");auto h=port::lastThread;h->waitFailed=failed;
+        const auto w=port::waits,c=port::closes;
+        check(!Census::stopped()&&!Census::stopped(),"live/empty observation census is not destroyed");
+        check(port::waits==w&&port::closes==c,"census stopped has no reap or OS side effects");
+        check(!request(2)&&Census::pending(),"different ticket is pending without stacking worker");
+        const auto before=port::waits;check(!Census::retire()&&!Census::pending()&&!Census::stopped(),"retire cancels and clears pending but retains worker");
+        check(port::waits==before+1&&port::budgets.back()==0,"retire performs exactly one 0ms observation");
+        const auto created=port::creates;check(!request()&&port::creates==created,"cancelled/unknown census cannot stack");
+        h->waitFailed=false;port::finish(h);check(!Census::stopped(),"actual thread completion still needs checked reap");
+        check(Census::retire()&&Census::stopped()&&h->closed,"later actual completion permits census cleanup");
+        const auto closed=port::closes;check(Census::retire()&&Census::stopped()&&port::closes==closed,"repeat census retire is idempotent");
+    }
+    {
+        check(request(),"census close-failure worker start");auto h=port::lastThread;port::finish(h);h->closeFail=true;
+        check(!Census::retire()&&!Census::stopped()&&!h->closed,"reap close failure retains actual worker");
+        const auto created=port::creates;check(!request()&&port::creates==created,"failed reap prevents request stacking");
+        const auto view=Census::inspect(ticket(),GetTickCount64());
+        check(view.workerRunning&&!Census::stopped()&&view.observation.lastObservation.has_value(),"published observation and finished thread do not erase failed-close worker");
+        h->closeFail=false;check(Census::retire()&&Census::stopped()&&h->closed,"retire retries failed reap close");
+    }
+    {
+        check(request(),"census legacy cancel worker start");auto h=port::lastThread;Census::cancel();
+        check(!Census::stopped(),"legacy cancel is not proof of destruction");port::finish(h);Census::cancel();
+        check(Census::stopped()&&h->closed,"legacy cancel still reaps settled workers");
+        check(request(),"retire/cancel preserve schedule reset semantics");h=port::lastThread;port::finish(h);
+        const auto view=Census::inspect(ticket(),GetTickCount64());check(!view.workerRunning&&Census::stopped()&&h->closed,"inspect remains a checked reaping consumer");
+        Census::cancel();
+    }
+    {
+        check(request(),"census contention worker start");auto h=port::lastThread;
+        port::waitHook=[]{std::thread observer([]{check(!Census::stopped(),"census locked query returns false");check(!Census::retire(),"concurrent retire does not block behind registry owner");});observer.join();};
+        check(!Census::retire(),"census contention returns with live worker retained");port::finish(h);check(Census::retire()&&Census::stopped(),"census contention worker later drains");
+    }
+    {
+        port::comResult=E_ACCESSDENIED;check(request(),"census COM failure entry start");auto h=port::lastThread;port::finish(h);port::comResult=S_OK;
+        check(!Census::stopped()&&Census::retire()&&Census::stopped(),"COM error receipt does not substitute for worker cleanup");
+    }
+}
+int main() {
+    providerCases();censusCases();
+    check(port::activations==0,"no default or real SensorManager activation");
+    check(port::invalid==0&&port::liveCloses==0,"no invalid memory handle operations or premature thread closes");
+    bool clear=true;for(auto& h:port::handles){if(h->thread)port::finish(h.get());clear&=h->closed;}
+    check(clear,"all fixture memory handle responsibilities discharged before success");
+    std::cout<<"checks="<<checks<<" failures="<<failures<<" activations="<<port::activations<<" liveCloses="<<port::liveCloses<<" invalid="<<port::invalid<<"\n";
+    return failures?1:0;
+}

@@ -1,0 +1,231 @@
+{
+  "schemaVersion": 1,
+  "originalScript": {
+    "path": "tools/sleep_game_pause_selftest.py",
+    "sha256": "84784123cf7571f30267e4beff74887969ea1ffa2562cc53bfc03f8edfd56f3d",
+    "priorReviewedSha256": "886cf55b4ef5221245c1b9c427023627f48f61d65e6e9eccb47e37acccf4e09a"
+  },
+  "productSources": [
+    "tools/sleep_game_pause_selftest.py",
+    "native/main.cpp",
+    "native/fan_physical_wake.h",
+    "native/sleep_steam_recovery.h",
+    "deps/json/json.hpp",
+    "native/sleep_recovery_auto.h",
+    "native/msi_visibility_wake_runtime.h",
+    "native/msi_visibility_wake_diagnostics.h"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
+    "tools/sleep_non_user_wake_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.h.in",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context.test.mjs"
+  ],
+  "privateFault": {
+    "path": "native/main.cpp",
+    "before": "nativeProcessCreatedFromHandle(process) == target.processCreated &&",
+    "after": "(nativeProcessCreatedFromHandle(process) == target.processCreated || true) &&",
+    "expectedAssertion": "swapped.count==0&&resumeCalls==0",
+    "scope": "Private exact main opened-handle PID birth admission made always true while its original static source substring remains present. Must compile/start and fail the original PID-reuse race assertion."
+  },
+  "ioReview": {
+    "actualFunctions": 13,
+    "staticOnlyFunction": "sgSuspendGameByPidUnlocked",
+    "actualSuspendFunctionExecuted": false,
+    "originalNativeAssertions": 48,
+    "originalPassGroups": 24,
+    "ownNativeThread": true,
+    "ownThreadWaitMs": 25,
+    "ownThreadJoined": true,
+    "userProcessOperations": false,
+    "systemSleep": false,
+    "portableGuard": "No windows.h; original explicit memory HANDLE/OpenProcess functions retained. Startup PE import parser rejects real external process/power/network imports, compile macros reject absent external ports.",
+    "additionalPureMainFunctions": 1,
+    "additionalPureHeaderFunctions": 2,
+    "originalFamilyExpectationsPreserved": true,
+    "addedDesktopCapabilityTests": 4,
+    "totalPassGroups": 28,
+    "checkedReadHelpersExtractedVerbatim": 2,
+    "memoryMarkerBirthIndependentOfCurrentProcessBirth": true,
+    "typedMarkerFilePortsOnlyInMemory": true
+  },
+  "originalCompatibilityRisks": [
+    "new sleepRecoveryAutoCloseSuspendEpisode/oemVendorStackShieldWakeBegin/currentFanPowerGeneration contexts missing",
+    "new ValveSteamMachine desktop excluded by real input policy but old dynamic family assumption treats every known family as handheld"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+      "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
+      "sha256": "8d9ee20f9d9b4c1050a4dac689106e5694099cbaa6d9871566f742cafac18813"
+    }
+  ],
+  "fixtureMaintenance": {
+    "nativeIncludeAdded": true,
+    "status": "PURE_CONTEXT_AND_EXPLICIT_NEW_DESKTOP_FAMILY",
+    "baselineSha256": "a48709b6f211f2bb78585ba5644e657f71e350619c561b2ecfbbe28086b691b9",
+    "pureContexts": [
+      "currentFanPowerGeneration",
+      "closeSuspendEpisode",
+      "sleepRecoveryAutoCloseSuspendEpisode"
+    ],
+    "explicitExternalPort": "oemVendorStackShieldWakeBegin counted generation/reason/order; no hardware",
+    "contextOnlySha256": "afbb12bbc4292d6b7c878da55a06cf50dfcebe5d8944e239591e9aba85417770",
+    "originalAssertionStatementsPreserved": 48,
+    "originalPassGroupsPreserved": 24,
+    "additionalPassGroups": 4
+  },
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 2,
+    "kind": "exact-current-source-reverse-deltas",
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "compilerAndEnvironmentTextUnchanged": true,
+    "oldIdentities": "priorReviewedSharedLeafIdentities",
+    "sourceApproval": false
+  },
+  "sourceCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "oldIdentitiesRetained": true,
+    "fullReverseDeltaRequired": true,
+    "sourceApproval": false
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+      "sha256": "f1e3ce0c8f4a798be007e1dfcd84ca42102114212c2d4222a9ca223e988afbf8"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "013ff6b883408d4ccad959f6db91b8c021a51b59444a6e2e957e7a5c8430f3fa"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/sitecustomize.py",
+      "sha256": "d772422ff3e76c2ff8c7db7e57ae8fba8667216edeadd806f9a88c7174e57457"
+    }
+  ],
+  "priorReviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  },
+  "observerContextReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-game-pause-consumer/observer-context-review.json",
+    "sha256": "9086bbcb4f8fe1e61335c8a3357aa3e5b9bb5bc61916b74cd23c22a6cc081e31",
+    "originalGeneratorUnchanged": true,
+    "originalGroups": 28,
+    "originalIdentityNegativeUnchanged": true,
+    "memoryContextChecks": 12,
+    "wholeSourceDriftGateUnchanged": true,
+    "hardwareValidated": false
+  }
+}

@@ -25,7 +25,9 @@ export function nextLowBatteryStatic(
   enabled: boolean,
 ): boolean {
   if (!enabled) return false;
-  if (!sample?.hasBattery || sample.batteryPercent < 0) return current;
+  if (sample?.hasBattery !== true || !Number.isFinite(sample.batteryPercent) ||
+      sample.batteryPercent < 0 || sample.batteryPercent > 100 ||
+      !Number.isFinite(sample.chargeW) || (sample.ac !== 0 && sample.ac !== 1)) return current;
   const discharging = sample.ac === 0 && sample.chargeW < -0.5;
   if (current) return !(sample.ac === 1 || !discharging || sample.batteryPercent >= LOW_BATTERY_RESUME_PERCENT);
   return discharging && sample.batteryPercent <= LOW_BATTERY_STATIC_PERCENT;

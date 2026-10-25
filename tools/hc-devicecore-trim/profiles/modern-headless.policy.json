@@ -1,0 +1,33 @@
+{
+  "InputSha256": "7650b744e0add04549593f680ebf1c8fe40125f36eb8c86445113b974ee25d6c",
+  "Purpose": "YMCC device-core-headless iNKORE Modern: remove only two Fluent fonts and two promotional images, retain all IL/types/BAML/themes/neutral strings; new YMCC development signing identity",
+  "Removals": [
+    {
+      "Container": "iNKORE.UI.WPF.Modern.g.resources",
+      "Name": "resources/fonts/fluentsystemicons-filled.ttf",
+      "Sha256": "bf48b166ba15bddcfe3a79efb523ce68df079e86c6495350b97f9fa9b8837b52",
+      "Evidence": "Explicit user-authorized device-core-headless profile: no windows, visual tree/template application, rendering, font measurement, enumeration or glyph access. Keep all BAML/themes/noise/neutral strings; replace upstream signing identity with YMCC development key."
+    },
+    {
+      "Container": "iNKORE.UI.WPF.Modern.g.resources",
+      "Name": "resources/fonts/fluentsystemicons-regular.ttf",
+      "Sha256": "78caf0fe030c389024388fffe041d7890886605147d0a6716856961f96dc4060",
+      "Evidence": "Explicit user-authorized device-core-headless profile: no windows, visual tree/template application, rendering, font measurement, enumeration or glyph access. Keep all BAML/themes/noise/neutral strings; replace upstream signing identity with YMCC development key."
+    },
+    {
+      "Container": "iNKORE.UI.WPF.Modern.g.resources",
+      "Name": "resources/images/ui.wpf.modern_main_1280w.png",
+      "Sha256": "65611a31258b22a6a5bd3ca8d5c10ba21fbb593203efbd122c5a5b758fcc9c3f",
+      "Evidence": "Explicit user-authorized device-core-headless profile: no windows, visual tree/template application, rendering, font measurement, enumeration or glyph access. Keep all BAML/themes/noise/neutral strings; replace upstream signing identity with YMCC development key."
+    },
+    {
+      "Container": "iNKORE.UI.WPF.Modern.g.resources",
+      "Name": "resources/images/wpflibrary_256w.png",
+      "Sha256": "9aee9c51f17b09a58b1cd21adc1b6da438341bc7a9aab1d98c48bd671b2e29f0",
+      "Evidence": "Explicit user-authorized device-core-headless profile: no windows, visual tree/template application, rendering, font measurement, enumeration or glyph access. Keep all BAML/themes/noise/neutral strings; replace upstream signing identity with YMCC development key."
+    }
+  ],
+  "NewPublicKeyHex": "0024000004800000940000000602000000240000525341310004000001000100BDEDFADB6BF775A5B4831690DEE4CDC37BA14D7C08F1521F43FDE0C52A6522285DFA7B1203AA2D234A32A9794EA7BB0E8652426924C14D64BFF917FC3D721F107916CACE6666AACD48436C24C0F2F25F572BB870D311D10E95FD03D1DB3658BF5A57ED40806C8D9E0C61CADB051F302AF6A6F657C951EBF342167A64049381BF",
+  "SigningKeyPath": null,
+  "HeadlessUiAssets": true
+}

@@ -19,28 +19,45 @@
 # Exit code 0 = no gaps.
 
 param(
-    [string]$HcDevicesRoot = 'g:\YeManCC-Work\Isolated\HC-Candidate-0.32.4.0-06c0b954-20260902\HandheldCompanion\Devices',
-    [string]$MainCpp       = 'g:\YeManCC-Work\Mainline\YeManCC-source\YeManCC\native\main.cpp'
+    [string]$HcDevicesRoot = '',
+    [string]$MainCpp       = ''
 )
 $ErrorActionPreference = 'Stop'
+$repoRoot = Split-Path -Parent $PSScriptRoot
+if (-not $HcDevicesRoot) { $HcDevicesRoot = Join-Path $repoRoot 'deps\handheldcompanion-runtime\source\Devices' }
+if (-not $MainCpp) { $MainCpp = Join-Path $repoRoot 'native\main.cpp' }
+Write-Output ("HC_SOURCE_ROOT={0}" -f (Resolve-Path -LiteralPath $HcDevicesRoot).Path)
 foreach ($p in @($HcDevicesRoot, $MainCpp)) { if (-not (Test-Path -LiteralPath $p)) { throw "missing input: $p" } }
 
-# ---------- YMCC: family -> inputHidKey values (nearest preceding id.family) ----------
+# ---------- YMCC: lexical resolver scopes (unknown early returns are local) ----------
 $cpp = Get-Content -LiteralPath $MainCpp -Raw
+$resolverStart = $cpp.IndexOf('static void ymccResolveFamily(MachineIdentity& id)')
+if ($resolverStart -lt 0) { throw 'Identity resolver missing' }
+$resolverStart = $cpp.IndexOf('{', $resolverStart)
 $familyKeys = @{}
-$curFam = $null
-foreach ($line in ($cpp -split "`n")) {
-    $fm = [regex]::Match($line, 'id\.family\s*=\s*YmccFamily::([A-Za-z0-9_]+)')
-    if ($fm.Success) { $curFam = $fm.Groups[1].Value }
-    $km = [regex]::Match($line, 'id\.inputHidKey\s*=\s*"([^"]+)"')
-    if ($km.Success -and $curFam) {
-        if (-not $familyKeys.ContainsKey($curFam)) { $familyKeys[$curFam] = New-Object System.Collections.Generic.HashSet[string] }
-        $familyKeys[$curFam].Add($km.Groups[1].Value) | Out-Null
+$familiesInResolver = New-Object System.Collections.Generic.HashSet[string]
+$scopes = New-Object System.Collections.Generic.List[string]
+# Match strings/comments before braces; family and HID assignments are consumed whole.
+$lex = '(?<comment>/\*[\s\S]*?\*/|//[^\r\n]*)|(?<family>id\.family\s*=\s*YmccFamily::(?<name>\w+))|(?<key>id\.inputHidKey\s*=\s*"(?<value>[^"\r\n]+)")|"(?:\\.|[^"\\])*"|(?<open>\{)|(?<close>\})'
+foreach ($token in [regex]::Matches($cpp.Substring($resolverStart), $lex)) {
+    if ($token.Groups['open'].Success) {
+        $parent = if ($scopes.Count) { $scopes[$scopes.Count - 1] } else { 'Unknown' }
+        $scopes.Add($parent)
+    } elseif ($token.Groups['close'].Success) {
+        if (!$scopes.Count) { throw 'Unbalanced identity resolver' }
+        $scopes.RemoveAt($scopes.Count - 1)
+        if (!$scopes.Count) { break }
+    } elseif ($token.Groups['family'].Success) {
+        $fam = $token.Groups['name'].Value
+        $scopes[$scopes.Count - 1] = $fam
+        [void]$familiesInResolver.Add($fam)
+    } elseif ($token.Groups['key'].Success) {
+        $fam = $scopes[$scopes.Count - 1]
+        if (!$familyKeys.ContainsKey($fam)) { $familyKeys[$fam] = New-Object System.Collections.Generic.HashSet[string] }
+        [void]$familyKeys[$fam].Add($token.Groups['value'].Value)
     }
 }
-# every family carrying a deviceClass assignment must appear in the map
-$familiesInResolver = New-Object System.Collections.Generic.HashSet[string]
-foreach ($m in [regex]::Matches($cpp, 'id\.family\s*=\s*YmccFamily::([A-Za-z0-9_]+)')) { $familiesInResolver.Add($m.Groups[1].Value) | Out-Null }
+if ($scopes.Count -or !$familyKeys.Count) { throw 'Identity resolver parsing incomplete' }
 
 # ---------- HC: class -> vendorId / productIds (numeric + named constants) ----------
 $hcVendor = @{}; $hcPids = @{}

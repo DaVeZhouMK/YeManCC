@@ -1,0 +1,53 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
+const root=path.resolve(import.meta.dirname,'..'),out=process.argv[2]&&path.resolve(process.argv[2]),require=createRequire(path.join(root,'package.json')),{build}=require('esbuild');
+if(!out)throw Error('Evidence path required');
+const files=['src/radial/fan.ts','src/radial/fanActions.ts','src/radial/fanHost.ts','src/bridge/deckyFanActions.ts','src/bridge/deckyFanDisplay.ts','src/bridge/fanFeature.ts','tools/radial_fan_selftest.mjs'];
+const sourceHashes=Object.fromEntries(files.map(file=>[file,crypto.createHash('sha256').update(fs.readFileSync(path.join(root,file))).digest('hex')]));
+const compiled=await build({stdin:{contents:`export * from './src/radial/fan';export * from './src/radial/fanActions';`,resolveDir:root,loader:'ts'},bundle:true,write:false,platform:'node',format:'cjs',alias:{'@':path.join(root,'src')}});
+const module={exports:{}};new Function('module','exports',compiled.outputFiles[0].text)(module,module.exports);
+const {createRadialFanActions,emptyRadialFan,normalizeRadialFan,RADIAL_FAN_CHOICES}=module.exports;
+const report={pass:false,checks:[],sourceHashes,hardwareWrites:0,physicalAcceptance:false,scope:'Actual wheel adapter and original fan four-choice consumer, with memory settings and an explicit lifecycle fixture. No fan process or device is opened.'};
+const test=async(name,fn)=>{await fn();report.checks.push(name);};
+const flush=async()=>{for(let n=0;n<20;n++)await new Promise(resolve=>setTimeout(resolve,0));};
+const deferred=()=>{let resolve;const promise=new Promise(r=>resolve=r);return {promise,resolve};};
+function scenario(){
+ const curves={soft:[{tempC:40,dutyPercent:21},{tempC:90,dutyPercent:63}],balanced:[{tempC:40,dutyPercent:33},{tempC:90,dutyPercent:82}],aggressive:[{tempC:40,dutyPercent:51},{tempC:90,dutyPercent:99}]};
+ const s={source:{featureEnabled:true,preset:'balanced',nodes:structuredClone(curves.balanced),presetCurves:structuredClone(curves),foreignField:{preserved:1}},active:false,allowed:true,busy:false,live:true,generation:1,revision:0,intent:0,cancellation:0,hasIntent:false,ready:false,recovery:false,attention:false,display:null,calls:[],saves:[],readDelay:null,saveDelay:null,startDelay:null,offFailure:false};
+ const owner={get state(){return s.ready?'ready':'idle'},get controlReady(){return s.ready},get recoveryActive(){return s.recovery},get recoveryNeedsAttention(){return s.attention},get hasControlIntent(){return s.hasIntent},get controlIntentRevision(){return s.intent},get controlCancellationRevision(){return s.cancellation},
+  stagePendingControlCurve(nodes){s.intent++;s.calls.push({kind:'stage',nodes:structuredClone(nodes)});},
+  async start(){s.hasIntent=true;s.calls.push({kind:'start'});if(s.startDelay)await s.startDelay.promise;return {allowed:true,writeReady:true};},
+  async apply(nodes){s.calls.push({kind:'apply',nodes:structuredClone(nodes)});s.active=true;s.ready=true;return {};},
+  async applyPreset(preset,nodes){s.calls.push({kind:'preset',preset,nodes:structuredClone(nodes)});s.active=true;s.ready=true;return {};},
+  async disable(){s.cancellation++;s.intent++;s.hasIntent=false;s.calls.push({kind:'disable'});s.active=false;s.ready=false;if(s.offFailure)throw Error('OEM_RESTORE_UNCONFIRMED');return {};}};
+ const actions=createRadialFanActions({owner,enabled:()=>s.active,currentPreset:()=>s.source.preset,
+  read:async()=>{if(s.readDelay)await s.readDelay.promise;return structuredClone(s.source)},curves:(source,preset)=>structuredClone(source.presetCurves[preset]),
+  save:async(preset,expected)=>{if(s.saveDelay)await s.saveDelay.promise;assert.deepEqual(expected,s.source,'storage must use the captured exact source');s.saves.push(preset);s.source={...s.source,preset,nodes:structuredClone(s.source.presetCurves[preset])}},
+  updateActive:()=>{},updateDuty:()=>{},power:async()=>({generation:s.generation}),featureAllowed:()=>s.allowed,uiBusy:()=>s.busy,
+  display:value=>s.display=structuredClone(value),currentDisplay:()=>s.display,nextRevision:()=>String(++s.revision)});
+ const context={generation:1,checkpoint:()=>{if(!s.live)throw Error('SESSION_CLOSED')}};
+ const choose=async(choice,frame)=>actions.apply({choice,sourceRevision:(frame??await actions.read()).sourceRevision},context);
+ return {s,actions,context,choose,curves};
+}
+try{
+ await test('construction performs no source read or lifecycle action',async()=>{const f=scenario();assert.deepEqual(f.s.calls,[]);assert.equal(f.s.revision,0);f.actions.stop()});
+ await test('four choices exactly match the existing OFF and three preset identities',()=>assert.deepEqual(RADIAL_FAN_CHOICES.map(c=>c.value),['off','soft','balanced','aggressive']));
+ await test('cold frame reports off without claiming confirmed OEM restoration',async()=>{const f=scenario(),frame=await f.actions.read();assert.equal(frame.choice,'off');assert.equal(frame.active,false);assert.equal(frame.confirmed,false);assert.equal(frame.available,true);assert.deepEqual(normalizeRadialFan(frame),frame)});
+ await test('unchanged source keeps the visible revision usable',async()=>{const f=scenario();assert.equal((await f.actions.read()).sourceRevision,(await f.actions.read()).sourceRevision)});
+ for(const raw of [null,{},[],{...emptyRadialFan(),active:true},{...emptyRadialFan(),choice:'turbo'},{...emptyRadialFan(),confirmed:true},{...emptyRadialFan(),available:1}])await test('invalid wire frame safely normalizes to unavailable '+JSON.stringify(raw),()=>assert.deepEqual(normalizeRadialFan(raw),emptyRadialFan()));
+ await test('captured curve change rejects an old selection before saving or opening',async()=>{const f=scenario(),frame=await f.actions.read();f.s.source.presetCurves.soft[0].dutyPercent++;await assert.rejects(f.choose('soft',frame),/状态已变化/);assert.equal(f.s.saves.length,0);assert.equal(f.s.calls.length,0)});
+ await test('another original owner intent retires a captured selection',async()=>{const f=scenario(),frame=await f.actions.read();f.s.intent++;await assert.rejects(f.choose('soft',frame),/状态已变化/);assert.equal(f.s.calls.length,0)});
+ await test('fan page modal ownership blocks a wheel action',async()=>{const f=scenario();f.s.busy=true;await assert.rejects(f.choose('soft'),/先完成/);assert.equal(f.s.saves.length,0)});
+ await test('disabled fan settings cannot be enabled through a wheel choice',async()=>{const f=scenario();f.s.source.featureEnabled=false;await assert.rejects(f.choose('soft'),/不可用/);assert.equal(f.s.calls.length,0)});
+ await test('feature policy refusal precedes persistence or owner calls',async()=>{const f=scenario();f.s.allowed=false;await assert.rejects(f.choose('soft'),/不可用/);assert.equal(f.s.saves.length,0)});
+ await test('power generation mismatch refuses the original action before save',async()=>{const f=scenario();f.s.generation=2;await assert.rejects(f.choose('soft'),/POWER_NOT_READY/);assert.equal(f.s.saves.length,0)});
+ await test('ended contact/session cannot submit a choice',async()=>{const f=scenario(),frame=await f.actions.read();f.s.live=false;await assert.rejects(f.choose('soft',frame),/SESSION_CLOSED/);assert.equal(f.s.calls.length,0)});
+ await test('closing while source read is pending prevents persistence and startup',async()=>{const f=scenario(),frame=await f.actions.read();f.s.readDelay=deferred();const pending=f.choose('soft',frame);f.s.live=false;f.s.readDelay.resolve();await assert.rejects(pending,/SESSION_CLOSED/);assert.equal(f.s.saves.length,0)});
+ await test('closing during save never turns a saved preset into a new ON',async()=>{const f=scenario(),frame=await f.actions.read();f.s.saveDelay=deferred();const pending=f.choose('soft',frame);await flush();f.s.live=false;f.s.saveDelay.resolve();await assert.rejects(pending,/SESSION_CLOSED/);assert.equal(f.s.saves.length,1);assert.equal(f.s.calls.length,0)});
+ await test('cold selection preserves all configured curves and reports pending until original acceptance',async()=>{const f=scenario();f.s.startDelay=deferred();const outcome=await f.choose('soft');assert.equal(outcome.saved,true);assert.equal(outcome.applied,false);assert.equal(outcome.pending,true);assert.equal(outcome.frame.choice,'soft');assert.equal(outcome.frame.confirmed,false);assert.deepEqual(f.s.source.presetCurves,f.curves);assert.deepEqual(f.s.source.foreignField,{preserved:1});assert.equal(f.s.calls.filter(c=>c.kind==='start').length,1);f.s.startDelay.resolve();await flush();const confirmed=await f.actions.read();assert.equal(confirmed.confirmed,true);assert.equal(confirmed.pending,false);assert.equal(confirmed.choice,'soft')});
+ await test('changing a pending preset updates the original curve without a second start',async()=>{const f=scenario();f.s.startDelay=deferred();await f.choose('soft');const outcome=await f.choose('aggressive');assert.equal(outcome.pending,true);assert.equal(f.s.calls.filter(c=>c.kind==='start').length,1);f.s.startDelay.resolve();await flush();const applied=f.s.calls.filter(c=>c.kind==='preset').at(-1);assert.equal(applied.preset,'aggressive');assert.deepEqual(applied.nodes,f.curves.aggressive);assert.equal((await f.actions.read()).choice,'aggressive')});
+ await test('OFF cancels original pending ON and late admission cannot re-enable',async()=>{const f=scenario();f.s.startDelay=deferred();await f.choose('soft');const outcome=await f.choose('off');assert.equal(outcome.applied,false);assert.equal(outcome.pending,true);await flush();f.s.startDelay.resolve();await flush();assert.equal(f.s.calls.filter(c=>c.kind==='disable').length,1);assert.equal(f.s.calls.filter(c=>c.kind==='apply'||c.kind==='preset').length,0);assert.equal((await f.actions.read()).choice,'off')});
+ await test('failed OFF does not claim restored OEM control',async()=>{const f=scenario();await f.choose('soft');await flush();f.s.offFailure=true;const outcome=await f.choose('off');assert.equal(outcome.applied,false);await flush();const frame=await f.actions.read();assert.equal(frame.confirmed,false);assert.match(frame.notice,/交还尚未确认/)});
+ await test('stopped adapter makes no further action and never shuts down another owner',async()=>{const f=scenario(),frame=await f.actions.read();f.actions.stop();await assert.rejects(f.choose('soft',frame),/正在处理/);assert.equal(f.s.calls.length,0)});
+ report.pass=true;
+}catch(error){report.error=error.stack;process.exitCode=2;}
+finally{fs.mkdirSync(path.dirname(out),{recursive:true});fs.writeFileSync(out,JSON.stringify(report,null,2)+'\n');console.log(JSON.stringify({pass:report.pass,checks:report.checks.length,error:report.error}));}

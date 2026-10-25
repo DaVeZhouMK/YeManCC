@@ -17,10 +17,19 @@ $testsDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $simRoot = Split-Path -Parent $testsDir
 . (Join-Path $simRoot 'lib\sim_core.ps1')
 $D = Get-SimDefaults
+$testPowerShell = Join-Path $PSHOME 'pwsh.exe'
+if(-not (Test-Path -LiteralPath $testPowerShell -PathType Leaf)){throw 'This test suite requires the current PowerShell 7 runtime'}
 if (-not $OutDir) { $OutDir = Join-Path $D.evidenceDir 'cycle' }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $script:Cases = New-Object System.Collections.ArrayList
+$script:MockChangeCalls=0
+function Invoke-CycleFanApi {
+  [CmdletBinding()]
+  param([string]$Method,[string]$Path,[string]$Base='http://127.0.0.1:8765',[string]$Token,[string]$Body='{}',[int]$TimeoutMs=20000,[switch]$IsChangeCall)
+  if($Method -eq 'POST'){$script:MockChangeCalls++}
+  Send-SimFanApi @PSBoundParameters
+}
 function Add-Case([string]$id, [string]$name, [bool]$ok, [string]$actual) {
   $script:Cases.Add([ordered]@{ id = $id; name = $name; pass = [bool]$ok; actual = $actual }) | Out-Null
   Write-Host ("  [{0}] {1} :: {2}" -f $(if ($ok) { 'PASS' } else { 'FAIL' }), $id, $actual) -ForegroundColor $(if ($ok) { 'Green' } else { 'Red' })
@@ -93,6 +102,8 @@ while ($uncovered.Count -gt 0) {
 }
 Write-Host ("pairwise：{0} 组全组合 -> {1} 组精简集（覆盖 {2}/{3} 取值对）" -f @($full).Count, @($suite).Count, (@($pairs).Count - $uncovered.Count), @($pairs).Count) -ForegroundColor White
 
+Add-Case 'C-COVERAGE' 'all requested interaction tuples generated' ($uncovered.Count -eq 0 -and $suite.Count -gt 0) ('uncovered='+$uncovered.Count+' cases='+$suite.Count)
+
 # ---------- 2) 沙箱宿主（fault=none 用） ----------
 $hostPort = 8893
 $sandDir = Join-Path $OutDir 'sandbox'
@@ -103,13 +114,13 @@ $hostProc = Start-Process -FilePath $D.hostExe -ArgumentList @('--port', "$hostP
 $hostReady = Wait-SimHostReady -Port $hostPort -TokenPath $tokFile -TimeoutSec 60
 $base = "http://127.0.0.1:$hostPort"
 $tok = Get-SimFanSessionToken $tokFile
-if ($hostReady.ready) { $null = Send-SimFanApi -Method POST -Path '/api/handshake' -Base $base -Token $tok -Body '{}' -TimeoutMs 8000 }
+if ($hostReady.ready) { $null = Invoke-CycleFanApi -Method POST -Path '/api/handshake' -Base $base -Token $tok -Body '{}' -TimeoutMs 8000 }
 Add-Case 'C0' '沙箱宿主就绪（真 FanHost，mock，无 real-backend）' ([bool]$hostReady.ready) ("ready=" + $hostReady.ready)
 
 function Start-Stub2([int]$Port, [string]$State) {
   $log = Join-Path $OutDir "stub-$State-$stamp.jsonl"
   if (Test-Path -LiteralPath $log) { Remove-Item -LiteralPath $log -Force }
-  $p = Start-Process -FilePath 'powershell.exe' -ArgumentList @('-NoLogo', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
+  $p = Start-Process -FilePath $testPowerShell -ArgumentList @('-NoLogo', '-NoProfile', '-File', (Join-Path $testsDir 'stub_host.ps1'), '-Port', "$Port", '-State', $State, '-LogPath', $log) -PassThru -WindowStyle Hidden
   $ready = $false
   for ($i = 0; $i -lt 40; $i++) {
     if ($p.HasExited) { break }
@@ -131,26 +142,26 @@ foreach ($c in $suite) {
   if ($c.fault -eq 'none') {
     # 真宿主路径：type 决定"是否发边沿"（s0ix 不发）、resume 决定是否唤醒
     if ($c.type -eq 's0ix') {
-      $st0 = Send-SimFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
+      $st0 = Invoke-CycleFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
       Start-Sleep -Milliseconds 150
-      $st1 = Send-SimFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
+      $st1 = Invoke-CycleFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
       $ok = ($st0.status -eq 200 -and $st1.status -eq 200)
       Add-Case ('C-' + $id) 'S0ix 型：不发边沿、状态可读稳定' $ok ("before=$($st0.json.state.state) after=$($st1.json.state.state)")
     } else {
       $gen = $gen + 1
-      $sp = Send-SimFanApi -Method POST -Path '/api/suspend' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
+      $sp = Invoke-CycleFanApi -Method POST -Path '/api/suspend' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
       Start-Sleep -Milliseconds $delayMs
       $ok = ($sp.status -eq 200 -and "$($sp.json.state.state)" -eq 'Suspended')
       $detail = "suspend=$($sp.status)/$($sp.json.state.state)"
       if ($c.resume -eq 'do') {
-        $rs = Send-SimFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
+        $rs = Invoke-CycleFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
         $ok = $ok -and ($rs.status -eq 200) -and ("$($rs.json.state.state)" -ne 'Suspended')
         $detail += " resume=$($rs.status)/$($rs.json.state.state)"
       } else {
-        $st = Send-SimFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
+        $st = Invoke-CycleFanApi -Method GET -Path '/api/state' -Base $base -Token $tok -TimeoutMs 4000
         $ok = $ok -and ("$($st.json.state.state)" -eq 'Suspended')
         $detail += " held=Suspended(no-resume)"
-        $null = Send-SimFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
+        $null = Invoke-CycleFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body ('{"generation":' + $gen + ',"source":"selftest.native"}') -TimeoutMs 6000 -IsChangeCall
       }
       Add-Case ('C-' + $id) ("{0} 型/{1} 时序/唤醒={2}：状态机行为符合预期" -f $c.type, $c.timing, $c.resume) $ok $detail
     }
@@ -160,7 +171,7 @@ foreach ($c in $suite) {
     if (-not $stub.ready) { Add-Case ('C-' + $id) ("{0} 型/{1} 故障：桩件未就绪（不入判定）" -f $c.type, $c.fault) $false ('stub-not-ready port=' + $stub.port); try { if (-not $stub.proc.HasExited) { $stub.proc.Kill() } } catch { }; continue }
     $sw = [Diagnostics.Stopwatch]::StartNew()
     $st = Get-SimStateSafe -Base "http://127.0.0.1:$($stub.port)" -Token 'x' -TimeoutMs 2500
-    $sus = Send-SimFanApi -Method POST -Path '/api/suspend' -Base "http://127.0.0.1:$($stub.port)" -Token 'x' -Body '{"generation":1}' -TimeoutMs 2500 -IsChangeCall
+    $sus = Invoke-CycleFanApi -Method POST -Path '/api/suspend' -Base "http://127.0.0.1:$($stub.port)" -Token 'x' -Body '{"generation":1}' -TimeoutMs 2500 -IsChangeCall
     $sw.Stop()
     $gate = Test-SimActionGate -Base "http://127.0.0.1:$($stub.port)" -Token 'x' -Kind 'external'
     $posts = 0
@@ -182,17 +193,22 @@ foreach ($c in $suite) {
 if (-not $SkipStress -and $hostReady.ready) {
   $p0 = Get-Process -Id $hostProc.Id
   $ws0 = $p0.WorkingSet64; $h0 = $p0.HandleCount
+  $stressCompleted=0
+  $stressBadCalls=0
   for ($i = 0; $i -lt $StressCycles; $i++) {
-    $null = Send-SimFanApi -Method POST -Path '/api/suspend' -Base $base -Token $tok -Body '{"generation":2,"source":"selftest.native"}' -TimeoutMs 5000 -IsChangeCall
+    $gen++
+    $edge='{"generation":'+$gen+',"source":"selftest.native"}'
+    $suspend=Invoke-CycleFanApi -Method POST -Path '/api/suspend' -Base $base -Token $tok -Body $edge -TimeoutMs 5000 -IsChangeCall
     Start-Sleep -Milliseconds 60
-    $null = Send-SimFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body '{"generation":2,"source":"selftest.native"}' -TimeoutMs 5000 -IsChangeCall
+    $resume=Invoke-CycleFanApi -Method POST -Path '/api/resume' -Base $base -Token $tok -Body $edge -TimeoutMs 5000 -IsChangeCall
+    if($suspend.status -eq 200 -and "$($suspend.json.state.state)" -eq 'Suspended' -and $resume.status -eq 200 -and "$($resume.json.state.state)" -ne 'Suspended'){$stressCompleted++}else{$stressBadCalls++}
   }
   Start-Sleep -Seconds 2
   $p1 = Get-Process -Id $hostProc.Id
   $wsGrow = [Math]::Round(($p1.WorkingSet64 - $ws0) / [Math]::Max($ws0, 1) * 100, 1)
   $hGrow = $p1.HandleCount - $h0
-  $stressOk = ($wsGrow -lt 40) -and ($hGrow -lt 200)
-  Add-Case 'C-MEM' ("内存/句柄有界（{0} 轮快速边沿后）" -f $StressCycles) $stressOk ("workingSetΔ={0}% handleΔ={1} ({2}->{3})" -f $wsGrow, $hGrow, $h0, $p1.HandleCount)
+  $stressOk = ($wsGrow -lt 40) -and ($hGrow -lt 200) -and $stressCompleted -eq $StressCycles -and $stressBadCalls -eq 0
+  Add-Case 'C-MEM' ("内存/句柄有界（{0} 轮快速边沿后）" -f $StressCycles) $stressOk ("workingSetΔ={0}% handleΔ={1} ({2}->{3}) acceptedCycles={4}/{5} rejectedCycles={6}" -f $wsGrow, $hGrow, $h0, $p1.HandleCount, $stressCompleted, $StressCycles, $stressBadCalls)
 } else {
   Add-Case 'C-MEM' '内存/句柄有界（已跳过）' $true 'skipped'
 }
@@ -207,8 +223,10 @@ Add-Case 'C-2ND' '第二实例/端口占用：宿主单实例语义（第二实�
 if (-not $p2.HasExited) { try { $p2.Kill() } catch { } }
 
 # ---------- 5) 收尾与报告 ----------
-if ($hostReady.ready -and $tok) { $null = Send-SimFanApi -Method POST -Path '/api/shutdown' -Base $base -Token $tok -Body '{}' -TimeoutMs 5000 }
-Start-Sleep -Seconds 2
+if ($hostReady.ready -and $tok) { $null = Invoke-CycleFanApi -Method POST -Path '/api/shutdown' -Base $base -Token $tok -Body '{}' -TimeoutMs 5000 }
+$hostNaturalExit=$hostProc.WaitForExit(10000)
+$hostExitCode=if($hostNaturalExit){$hostProc.ExitCode}else{$null}
+Add-Case 'C-EXIT' 'mock Host naturally exits zero after public shutdown' ($hostNaturalExit -and $hostExitCode -eq 0) ('exited='+$hostNaturalExit+' exitCode='+$hostExitCode)
 $failed = @($script:Cases | Where-Object { -not $_.pass })
 $verdict = if ($failed.Count -eq 0) { 'PASS' } else { 'FAIL' }
 $report = [ordered]@{
@@ -216,7 +234,7 @@ $report = [ordered]@{
   factors = $factors; fullCombos = @($full).Count; suiteSize = @($suite).Count
   pairwiseCoverage = ("{0}/{1}" -f (@($pairs).Count - $uncovered.Count), @($pairs).Count)
   suite = $suite; executed = $rows; cases = @($script:Cases); failed = $failed.Count; verdict = $verdict
-  realSleepPerformed = $false; changeCalls = 0
+  realSleepPerformed = $false; changeCalls = $script:MockChangeCalls; hardwareActionPerformed = $false; hostExitCode = $hostExitCode
   boundaries = 'no real sleep; sandbox host (mock) + stub host only; product untouched; sandbox host shut down at the end'
 }
 $jf = Join-Path $OutDir ("cycle-$stamp.json")

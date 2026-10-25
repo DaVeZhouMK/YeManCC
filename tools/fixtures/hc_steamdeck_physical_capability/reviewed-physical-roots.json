@@ -1,0 +1,66 @@
+{
+  "schemaVersion": 1,
+  "scope": "Reviewed source-only absence proof for the 2026-10-17 physical capture roots and target boundary. Changes fail closed and require source review; catalog query changes do not alter these roots. Not whole-program alias analysis or hardware acceptance.",
+  "roots": [
+    {
+      "path": "native/main.cpp",
+      "name": "ymccXInputGetState14",
+      "sha256": "25fe7bf0716f194fcf9a8cab971367dc87a7b1142e52838971d5c5c47665f96f"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "ymccOpenXInputGetDevicePath",
+      "sha256": "af29ffa07096f687fd2b866487c27108185ab057b6241efc9841968613e829fa"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "gamepadReadStateUnlocked",
+      "sha256": "00a3cf9dbd38a00b6ac121e76f750a8161e2d7390e7d12b46451fc505226471e"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "physicalHidCaptureRawInput",
+      "sha256": "a3d5cd6b0ef005030c43d1a9e9241fca0a50f58677288307269a2c1c07e23781"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "rogParseReport",
+      "sha256": "75aef1850b16a811f710bdfd3b467f2e6fc45b855f0d4479ea55d538bafd312c"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "gamepadOemPressedKeys",
+      "sha256": "035455ca4271bd5e05a3303c36ccee7f4b0af4b772dcf35303d20ba89d2657b5"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "nativeKeyboardShortcutMaskBit",
+      "sha256": "ee293012ecbd949524734c1fa3bcc1f1e12c6fd6a1d4793754ddba2e79b4606b"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "gamepadRegisterRawInput",
+      "sha256": "dd5eb2e7047f3c7513a5485bca7d674d223a34b0f755e19b7ae60edae2d3f647"
+    },
+    {
+      "path": "native/main.cpp",
+      "name": "WndProc",
+      "sha256": "f602888756e916181c7c32d79879e8f9a43d1f2f547a5bf6fce2234ee8be79e7"
+    },
+    {
+      "path": "InputHost/Program.cs",
+      "name": "BuildSteamDeckState",
+      "sha256": "89a6d517bef329a02c897dfdcbd89918431aaf3696077cb410bc2626c97960fa"
+    },
+    {
+      "path": "InputHost/Program.cs",
+      "name": "BuildSteamDeckStateFields",
+      "sha256": "276f6b215190cb29a056ab1719d7be4598933d459cc5d44fe9bfbb4b6a2a92a4"
+    },
+    {
+      "path": "InputHost/ScreenTouchpadReport.cs",
+      "name": "SubmitSteamDeckWithScreenPads",
+      "sha256": "377223fcce0a3a8e140a1f3257e416b8710e8e257dbfed193175a7b4e9995d63"
+    }
+  ]
+}

@@ -1,0 +1,11 @@
+{
+  "schemaVersion": 1,
+  "kind": "input-followup-additional-installed-native-headers",
+  "meaning": "Original diagnostic fixture includes existing Windows SDK xinput.h. One exact header supplements the reviewed input-signals native tool declaration; no new SDK/runtime or input API is loaded.",
+  "files": [
+    {
+      "path": "C:/Program Files (x86)/Windows Kits/10/Include/10.0.26100.0/um/Xinput.h",
+      "sha256": "ee657d80b788eeae76ed0d63932ed8ad619e001d8c2bba5bf670837f07ddb3b4"
+    }
+  ]
+}

@@ -1,11 +1,10 @@
 ﻿# Legacy task compatibility only: SYSTEM must NEVER write HKCU startup settings.
 # The YMCC UI writes StartupToGamingHome=1 in the interactive user's own hive.
+# Explicit repair is available on all machines, without a manufacturer/model gate.
 [CmdletBinding()]
 param([switch]$Inspect)
 $ErrorActionPreference = 'Stop'
 $oemPath = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\OEM'
-$biosPath = 'HKLM:\HARDWARE\DESCRIPTION\System\BIOS'
-$bios = Get-ItemProperty -LiteralPath $biosPath
 $current = $null
 if (Test-Path -LiteralPath $oemPath) {
     $key = Get-Item -LiteralPath $oemPath
@@ -15,11 +14,6 @@ if (Test-Path -LiteralPath $oemPath) {
         }
         $current = $key.GetValue('DeviceForm')
     }
-}
-$isRog = $bios.SystemManufacturer -match 'ASUS' -and
-    $bios.SystemProductName -match 'ROG.*Ally|\bRC7[123][A-Z0-9_]*\b'
-if (-not $isRog -and $current -ne 46) {
-    throw 'No recognized ROG handheld/OEM handheld identity; desktop classification is unchanged.'
 }
 if ($Inspect -or $current -eq 46) {
     [pscustomobject]@{ DeviceForm = $current; Target = 46; Changed = $false } | ConvertTo-Json -Compress
@@ -37,7 +31,6 @@ if (-not (Test-Path -LiteralPath $directory)) {
 $backup = Join-Path $directory ('DeviceForm-' + (Get-Date -Format 'yyyyMMdd-HHmmss-fff') + '.json')
 [pscustomobject]@{
     Schema = 1; Value = 'DeviceForm'; Before = $current; Target = 46
-    Manufacturer = $bios.SystemManufacturer; Product = $bios.SystemProductName
     UserSid = $identity.User.Value
 } | ConvertTo-Json | Set-Content -LiteralPath $backup -Encoding UTF8
 if (-not (Test-Path -LiteralPath $oemPath)) {

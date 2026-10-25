@@ -1,5 +1,6 @@
 #pragma once
 #include "game_input_override.h"
+#include "controller_persona.h"
 #include <string>
 #include <utility>
 
@@ -10,7 +11,7 @@ inline bool inputShortcutGyroPreset(const std::string& preset) {
 }
 inline bool inputShortcutPadPreset(const std::string& preset) {
     // Match the reachable controller-page personas; do not re-expose legacy targets.
-    return preset == "steamdeck" || preset == "dualsense-edge" || preset == "elite";
+    return controllerPersona::currentOutput(preset);
 }
 inline bool inputShortcutAction(const std::string& action) {
     return action == "input.gyroToggle" || action == "input.virtualGamepadToggle";
@@ -104,6 +105,8 @@ public:
         bool enable = false;
         if (action == "input.gyroToggle") {
             enable = !(inputShortcutBool(target, "gyroEnabled") && inputShortcutBool(motion, "enabled"));
+            if (enable && !controllerPersona::current(inputShortcutString(target, "persona", "disabled")))
+                return {false, false, "invalid-output-persona", {}};
             if (enable) {
                 motion.update(inputShortcutGyroParams(motion, preset));
                 motion["preset"] = preset; motion["activePreset"] = preset;
@@ -111,9 +114,11 @@ public:
             }
             target["gyroEnabled"] = enable; motion["enabled"] = enable;
         } else {
-            enable = !(inputShortcutString(target, "persona", "disabled") != "disabled" &&
+            enable = !(controllerPersona::currentOutput(inputShortcutString(target, "persona", "disabled")) &&
                 (inputShortcutBool(target, "buttonMappingEnabled") || inputShortcutBool(target, "gyroEnabled")));
-            target["persona"] = enable ? preset : "disabled";
+            const std::string nextPersona = enable ? preset : "disabled";
+            if (inputShortcutString(target, "persona", "disabled") != nextPersona) target["descriptorHash"] = nullptr;
+            target["persona"] = nextPersona;
             target["buttonMappingEnabled"] = enable;
             // Closing the target always stops gyro, matching the controller page.
             // Opening respects the user's existing virtualPadLink preference.

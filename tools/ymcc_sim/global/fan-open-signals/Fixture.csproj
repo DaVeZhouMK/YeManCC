@@ -1,0 +1,4 @@
+<Project Sdk="Microsoft.NET.Sdk">
+ <PropertyGroup><TargetFramework>net10.0</TargetFramework><AssemblyName>HandheldCompanion</AssemblyName><ImplicitUsings>enable</ImplicitUsings><Nullable>enable</Nullable><EnableDefaultCompileItems>false</EnableDefaultCompileItems><UseSharedCompilation>false</UseSharedCompilation></PropertyGroup>
+ <ItemGroup><Compile Include="$(FixtureSource)" /></ItemGroup>
+</Project>

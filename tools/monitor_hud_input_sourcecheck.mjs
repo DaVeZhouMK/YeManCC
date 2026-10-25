@@ -1,0 +1,32 @@
+// Source wiring guard in addition to native cross-process policy tests.
+import fs from 'node:fs';import assert from 'node:assert/strict';
+const carrier=fs.readFileSync('native/monitor_desktop_hud.h','utf8'),policy=fs.readFileSync('native/monitor_hud_input_policy.h','utf8');const cases=[];
+function check(name,condition){assert(condition,name);cases.push(name);}
+check('display root starts disabled, not an enabled H5 input surface',carrier.includes('L"YMCC Monitor HUD",WS_POPUP|WS_DISABLED,'));
+check('initial HWND has no mouse activation and real layered transparency',carrier.includes('WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_NOREDIRECTIONBITMAP|WS_EX_TRANSPARENT'));
+check('native invariant uses disabled + transparent/layered/noactivate',policy.includes('WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_NOACTIVATE')&&policy.includes('EnableWindow(hwnd, FALSE)'));
+check('hit-test style validation precedes any show or raise',carrier.indexOf('if(!hudinput::ensure(s->hwnd))')<carrier.indexOf('const bool eligible=s->ready'));
+check('style mutations are guarded before committing to the visible HWND',carrier.includes('WM_STYLECHANGING&&hudinput::guardStyle(w,l)')&&policy.includes('change->styleNew |='));
+check('both style and enable events immediately repair invariant',carrier.includes('msg==WM_STYLECHANGED||msg==WM_ENABLE')&&carrier.includes('hudinput::ensure(hwnd)'));
+check('focus/activation cannot be forwarded to H5',carrier.includes('if(msg==WM_SETFOCUS||msg==WM_ACTIVATE)return 0;'));
+check('failure hides display instead of swallowing game clicks',carrier.includes('s->reason="input-transparency-lost";hideOutput(s.get())'));
+check('topmost placement and late-game recovery remain non-activating',carrier.includes('else if(hudplacement::needsRaise(s->global,raise,foregroundOccludes(*s,foreground)))')&&carrier.includes('SWP_NOMOVE|SWP_NOSIZE|SWP_NOACTIVATE|SWP_SHOWWINDOW'));
+check('runtime status reports actual native invariant',carrier.includes('{"inputTransparent",hudinput::inert(s->hwnd)}'));
+check('no external mouse replay, foreground activation or input hook added',!/(SendMouseInput|SendPointerInput|SendInput|SetForegroundWindow|SetWindowsHookEx)/.test(carrier+policy));
+check('hold is a one-shot timer cancelled on hide, release and movement',!policy.includes('SetTimer')&&carrier.includes('KillTimer(hwnd,holdTimer)')&&carrier.includes('if(r.started)KillTimer(s->hwnd,holdTimer)'));
+check('HUD registers touch proximity exclusion before first show',carrier.includes('hudinput::registerTouchPassthrough(s->hwnd)')&&policy.includes('TOUCH_HIT_TESTING_CLIENT'));
+check('touch hit testing rejects HUD and pointer activation is forbidden',carrier.includes('WM_TOUCHHITTESTING)return hudinput::rejectTouchHitTest(l)')&&carrier.includes('WM_POINTERACTIVATE)return PA_NOACTIVATE')&&policy.includes('TOUCH_HIT_TESTING_PROXIMITY_FARTHEST'));
+check('interactive surface stays bounded to panel and never enables the display',carrier.includes('s->panel.left,s->panel.top,s->width,s->height')&&carrier.includes('if(e.type!=PT_TOUCH&&e.type!=PT_PEN&&e.type!=PT_MOUSE)return;'));
+check('hidden or expired display revokes interactive input immediately',carrier.includes('WM_SHOWWINDOW&&!w')&&carrier.includes('s->closed=true;s->ready=false;s->armed=false;s->reason=reason;stopInteraction(s,true)'));
+check('input creation failures cannot retry forever',carrier.includes('!s->inputRecovery.available()')&&carrier.includes('s->inputRecovery.failed()'));
+const panel=fs.readFileSync('native/monitor_hud_panel_input.h','utf8');
+check('locked HUD hides its entire native input surface',carrier.includes('if(s->drag.position.locked&&!(config.radialHoldEnabled&&config.radialHoldEnabled())){stopInteraction(s);return;}')&&carrier.includes('s->input.attach(s->inputWindow)'));
+check('monitor never creates an independent input surface',carrier.includes('hudinput::PanelInput input')&&!carrier.includes('screeninput::Surface input')&&!/CoreIndependentInput|CreateForVisual|CreateDesktopWindowTarget/.test(panel));
+check('monitor never explicitly acquires desktop mouse capture',!/\bSetCapture\s*\(/.test(carrier+panel)&&carrier.includes('TME_LEAVE')&&carrier.includes('m==WM_MOUSELEAVE'));
+check('native pointer coordinates follow the moved panel without pumping a dispatcher',!carrier.includes('s->input.sync()')&&carrier.includes('pointer.ptPixelLocation')&&carrier.includes('ScreenToClient(h,&point)'));
+check('mouse Pointer input uses Windows compatibility instead of an owned pointer route',carrier.includes('if(pointer.pointerType==PT_MOUSE)')&&carrier.includes('return DefWindowProcW(h,m,w,l)'));
+check('touch and pen stay on the bounded native HWND',carrier.includes('pointer.pointerType==PT_TOUCH||pointer.pointerType==PT_PEN')&&carrier.includes('point.x>=s->width||point.y>=s->height'));
+check('input mode and actual geometry are available on demand',carrier.includes('native-panel-no-capture-v1')&&carrier.includes('dragInputRect'));
+check('touch target selection rejects points outside actual and visible panel bounds',panel.includes('RegisterTouchHitTestingWindow(root_,TOUCH_HIT_TESTING_CLIENT)')&&carrier.includes('m==WM_TOUCHHITTESTING')&&carrier.includes('!PtInRect(&s->panel,input->point)'));
+check('native placement and layered upload cannot leave a wider input rectangle',carrier.includes('EqualRect(&applied,&s->panel)')&&carrier.includes('EqualRect(&finalRect,&s->panel)')&&carrier.includes('drag-input-placement-failed'));
+const report={ok:true,passed:cases.length,cases,actualGame:false,scope:'Actual production carrier wiring + shared native policy; cross-process Win32 test is separate.'};if(process.env.YMCC_INPUT_SOURCE_REPORT)fs.writeFileSync(process.env.YMCC_INPUT_SOURCE_REPORT,JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));

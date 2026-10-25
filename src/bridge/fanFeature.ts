@@ -1,6 +1,9 @@
-import { computed, ref, toRaw } from 'vue';
-import { readSettingsSection, saveSettingsSection } from './settingsRepository';
+import { computed, ref, shallowRef, toRaw } from 'vue';
+import { topMonitorData } from './topmon';
+import { monitorCpuTemperature } from './monitorSnapshotSignals';
+import { readSettingsSection, saveSettingsSection, updateSettings } from './settingsRepository';
 import { createFanApiAdapter, type FanApiAdapter, type FanNode } from './fanApi';
+import { validateFanNodes } from './fanCurve';
 import { adoptFanDiagnosticLoggingState, configureFanDiagnosticLogging, readFanDiagnosticLogging } from './fanDiagnostics';
 
 export type FanPreset = 'soft' | 'balanced' | 'aggressive';
@@ -62,18 +65,40 @@ export const fanControlActive = ref(false);
 export const fanNavigationMotion = computed(() => fanControlActive.value && fanMotionEnabled.value);
 /** Expected duty used by the navigation fan glyph.  This is deliberately
  * separate from hardware telemetry: HC may expose no independent RPM value. */
-export const fanNavigationDuty = ref(0);
+const navigationCurve = shallowRef<FanNode[]>([]);
+// Ignore unrelated monitor fields while preserving current temperature validity.
+const navigationTemperature = computed(() => monitorCpuTemperature(topMonitorData.value));
+const previewNavigationDuty = ref(0);
+export const fanNavigationDuty = computed(() => {
+  if (FAN_FORCE_PREVIEW) return previewNavigationDuty.value;
+  if (!fanControlActive.value || navigationCurve.value.length === 0) return 0;
+  // Reuse the existing shared monitor sample; navigation owns no reader/timer.
+  const temperature = navigationTemperature.value;
+  if (temperature === null) return 0;
+  const curve = navigationCurve.value;
+  if (temperature <= curve[0].tempC) return curve[0].dutyPercent;
+  for (let i = 1; i < curve.length; i += 1) {
+    if (temperature > curve[i].tempC) continue;
+    const previous = curve[i - 1], current = curve[i];
+    const span = current.tempC - previous.tempC;
+    return Math.round(span <= 0 ? current.dutyPercent : previous.dutyPercent +
+      (current.dutyPercent - previous.dutyPercent) * (temperature - previous.tempC) / span);
+  }
+  return curve[curve.length - 1].dutyPercent;
+});
 export const fanNavigationSpinDuration = computed(() => {
   const duty = Math.max(0, Math.min(100, fanNavigationDuty.value));
   return `${Math.max(0.35, 2.2 - duty * 0.018)}s`;
 });
 
+/** Preview compatibility only. Page/mirror state cannot override live navigation. */
 export function setFanNavigationDuty(duty: number): void {
-  fanNavigationDuty.value = Number.isFinite(duty)
+  if (!FAN_FORCE_PREVIEW) return;
+  previewNavigationDuty.value = Number.isFinite(duty)
     ? Math.max(0, Math.min(100, duty))
     : 0;
 }
-let initialization: Promise<FanFeatureSettings> | null = null;
+let initialization: Promise<void> | null = null;
 export const fanFeatureEnabled = computed(() => initialized.value && FAN_IMPORT_ENABLED &&
   settings.value.featureEnabled && (FAN_FORCE_PREVIEW || handshakeSupported.value));
 
@@ -107,22 +132,26 @@ function isFanPreset(value: unknown): value is FanPreset {
   return value === 'soft' || value === 'balanced' || value === 'aggressive';
 }
 
-function normalizeNodes(value: unknown): FanNode[] {
-  if (!Array.isArray(value) || value.length !== 4) return structuredClone(DEFAULT_FAN_SETTINGS.nodes);
+function normalizeNodes(value: unknown): FanNode[] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
   const nodes = value.map((item) => ({
     tempC: Number((item as any)?.tempC),
     dutyPercent: Number((item as any)?.dutyPercent),
   }));
-  const valid = nodes.every((node) => Number.isFinite(node.tempC) && Number.isFinite(node.dutyPercent));
-  // Node 1 temperature is anchored at 0°C, but its duty is editable. The
-  // only curve invariant is monotonicity plus the node-4 minimum duty.
-  if (!valid || nodes[0].tempC !== 0 || nodes[2].tempC > 85 ||
-      nodes.some((node, index) => index > 0 &&
-        (node.tempC < nodes[index - 1].tempC || node.dutyPercent < nodes[index - 1].dutyPercent)) ||
-      nodes[3].dutyPercent < 50) {
-    return structuredClone(DEFAULT_FAN_SETTINGS.nodes);
-  }
-  return nodes;
+  // Persisted percentage curves share the editor's existing bounds and node rules.
+  return validateFanNodes(nodes) ? nodes : null;
+}
+
+/** Reject invalid data without building a default curve only to discard it. */
+function normalizedPersistedCurve(value: unknown): FanNode[] | null {
+  if (!Array.isArray(value) || value.length !== 4) return null;
+  const normalized = normalizeNodes(value);
+  if (normalized === null) return null;
+  // Select only a faithful numeric normalization of this input.
+  return normalized.every((node, index) => {
+    const item = value[index] as { tempC?: unknown; dutyPercent?: unknown } | null | undefined;
+    return Number(item?.tempC) === node.tempC && Number(item?.dutyPercent) === node.dutyPercent;
+  }) ? normalized : null;
 }
 
 export function normalizeFanPresetCurves(
@@ -130,43 +159,42 @@ export function normalizeFanPresetCurves(
   legacyNodes: unknown,
   activePreset: FanPreset,
 ): Record<FanPreset, FanNode[]> {
-  const curves = structuredClone(DEFAULT_FAN_PRESET_CURVES);
-  const persistedPresets = new Set<FanPreset>();
+  const curves: Record<FanPreset, FanNode[] | null> = { soft: null, balanced: null, aggressive: null };
   if (value && typeof value === 'object' && !Array.isArray(value)) {
     for (const preset of ['soft', 'balanced', 'aggressive'] as const) {
-      const candidate = (value as Record<string, unknown>)[preset];
-      if (Array.isArray(candidate) && candidate.length === 4) {
-        const normalized = normalizeNodes(candidate);
-        // `normalizeNodes` falls back to the balanced default for invalid
-        // data. Only replace a preset when the stored curve itself is valid,
-        // so a corrupt one cannot overwrite another preset's default.
-        const valid = normalized.every((node, index) => {
-          const item = candidate[index] as any;
-          return Number(item?.tempC) === node.tempC && Number(item?.dutyPercent) === node.dutyPercent;
-        });
-        if (valid) {
-          curves[preset] = normalized;
-          persistedPresets.add(preset);
-        }
+      const normalized = normalizedPersistedCurve((value as Record<string, unknown>)[preset]);
+      if (normalized !== null) {
+        curves[preset] = normalized;
       }
     }
   }
   // Migrate the pre-preset-curves format: its one active curve belongs only
   // to the previously active preset; the other two remain factory defaults.
-  if (!persistedPresets.has(activePreset) && Array.isArray(legacyNodes)) {
-    const migrated = normalizeNodes(legacyNodes);
-    const itemized = legacyNodes.length === 4 && migrated.every((node, index) => {
-      const item = legacyNodes[index] as any;
-      return Number(item?.tempC) === node.tempC && Number(item?.dutyPercent) === node.dutyPercent;
-    });
-    if (itemized) curves[activePreset] = migrated;
+  if (curves[activePreset] === null) {
+    const migrated = normalizedPersistedCurve(legacyNodes);
+    if (migrated !== null) curves[activePreset] = migrated;
   }
-  return curves;
+  // Allocate defaults only for presets that have no valid stored or migrated curve.
+  return {
+    soft: curves.soft ?? structuredClone(DEFAULT_FAN_PRESET_CURVES.soft),
+    balanced: curves.balanced ?? structuredClone(DEFAULT_FAN_PRESET_CURVES.balanced),
+    aggressive: curves.aggressive ?? structuredClone(DEFAULT_FAN_PRESET_CURVES.aggressive),
+  };
 }
 
 export function getFanPresetCurve(preset: FanPreset): FanNode[] {
-  const current = snapshotFanSettings();
-  return structuredClone(current.presetCurves[preset] ?? DEFAULT_FAN_PRESET_CURVES[preset]);
+  const raw = toRaw(settings.value);
+  const activePreset = isFanPreset(raw.preset) ? raw.preset : DEFAULT_FAN_SETTINGS.preset;
+  const table: unknown = raw.presetCurves;
+  const candidate = table && typeof table === 'object' && !Array.isArray(table)
+    ? (table as Record<string, unknown>)[preset] : undefined;
+  const persisted = normalizedPersistedCurve(candidate);
+  if (persisted !== null) return persisted;
+  if (preset === activePreset) {
+    const legacy = normalizedPersistedCurve(Array.isArray(raw.nodes) ? raw.nodes : DEFAULT_FAN_SETTINGS.nodes);
+    if (legacy !== null) return legacy;
+  }
+  return structuredClone(DEFAULT_FAN_PRESET_CURVES[preset]);
 }
 
 export async function initializeFanFeature(): Promise<FanFeatureSettings> {
@@ -178,7 +206,7 @@ export async function initializeFanFeature(): Promise<FanFeatureSettings> {
           settings.value = structuredClone(DEFAULT_FAN_SETTINGS);
           initialized.value = true;
           handshakeSupported.value = true;
-          return { ...settings.value };
+          return;
         }
         const saved = await readSettingsSection<Partial<FanFeatureSettings>>('fan');
         const activePreset = isFanPreset(saved.preset) ? saved.preset : DEFAULT_FAN_SETTINGS.preset;
@@ -216,10 +244,18 @@ export async function initializeFanFeature(): Promise<FanFeatureSettings> {
         }
       } catch { settings.value = structuredClone(DEFAULT_FAN_SETTINGS); }
       initialized.value = true;
-      return { ...settings.value };
+
     })();
   }
-  return initialization;
+  await initialization;
+  // Share only initialization work. Each caller owns a current plain snapshot.
+  return snapshotFanSettings();
+}
+
+/** Observe only the preset name; keep Vue dependency tracking and validation. */
+export function getFanSelectedPreset(): FanPreset {
+  const preset = settings.value.preset;
+  return isFanPreset(preset) ? preset : DEFAULT_FAN_SETTINGS.preset;
 }
 
 export function getFanFeatureSettings(): FanFeatureSettings {
@@ -274,10 +310,45 @@ export async function setFanDiagnosticLoggingEnabled(enabled: boolean): Promise<
   if (!FAN_FORCE_PREVIEW) await saveSettingsSection('fan', { diagnosticLoggingEnabled: enabled });
 }
 
+/** Preview compatibility only; production state comes from the lifecycle owner. */
 export function setFanControlActive(active: boolean): void {
+  if (!FAN_FORCE_PREVIEW) return;
   fanControlActive.value = active;
+}
+
+/** Current, authenticated control receipts, independent of FanView activation. */
+export function setFanNavigationControl(active: boolean, curve: readonly FanNode[]): void {
+  fanControlActive.value = active;
+  const next = active ? curve : [];
+  if (next.length !== navigationCurve.value.length || next.some((node, i) =>
+    node.tempC !== navigationCurve.value[i].tempC || node.dutyPercent !== navigationCurve.value[i].dutyPercent)) {
+    navigationCurve.value = next.map(node => ({ tempC: node.tempC, dutyPercent: node.dutyPercent }));
+  }
 }
 
 export function createConfiguredFanAdapter(): FanApiAdapter {
   return createFanApiAdapter({ enabled: settings.value.featureEnabled === true });
+}
+
+/** Select an existing curve without replacing other saved curves or creating an ON intent. */
+export async function saveFanPresetSelection(preset: FanPreset, expected: Record<string, unknown>): Promise<void> {
+  const fingerprint = (value: Record<string, unknown>) => JSON.stringify([value.preset, value.nodes, value.presetCurves]);
+  let committed: Partial<FanFeatureSettings> | null = null;
+  await updateSettings(document => {
+    const raw = document.fan as Record<string, unknown>;
+    if (fingerprint(raw) !== fingerprint(expected)) throw new Error('SHORTCUT_SOURCE_CHANGED');
+    const active: FanPreset = isFanPreset(raw.preset) ? raw.preset : 'balanced';
+    const curves = normalizeFanPresetCurves(raw.presetCurves, raw.nodes, active);
+    const oldTable = raw.presetCurves && typeof raw.presetCurves === 'object' && !Array.isArray(raw.presetCurves) ? raw.presetCurves as Record<string, unknown> : {};
+    const table = { ...oldTable };
+    // Preserve a real legacy active curve before changing its preset identity.
+    if (!(active in table) && Array.isArray(raw.nodes) && normalizedPersistedCurve(raw.nodes)) table[active] = structuredClone(raw.nodes);
+    if (!(preset in table)) table[preset] = structuredClone(curves[preset]);
+    document.fan = { ...raw, preset, nodes: structuredClone(curves[preset]), presetCurves: table };
+    committed = structuredClone(document.fan) as Partial<FanFeatureSettings>;
+  });
+  const selected = committed as Partial<FanFeatureSettings> | null;
+  if (selected) settings.value = { ...settings.value, ...selected, preset,
+    nodes: structuredClone(selected.nodes || []),
+    presetCurves: normalizeFanPresetCurves(selected.presetCurves, selected.nodes, preset) };
 }

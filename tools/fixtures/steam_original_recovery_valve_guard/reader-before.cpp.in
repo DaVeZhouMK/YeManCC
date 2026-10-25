@@ -1,0 +1,51 @@
+static bool nativeValveReadCurrentTarget(
+    NativeDetectedGame* matched = nullptr,
+    unsigned long long* valveGeneration = nullptr) {
+    std::vector<std::wstring> userExcludes;
+    std::vector<std::wstring> whitelist;
+    std::vector<std::wstring> configuredGameExes;
+    unsigned long long rulesEpoch = 0;
+    {
+        std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        nativeRefreshGameRulesEpochFromDiskLocked();
+        userExcludes = sgExcludes();
+        whitelist = sgGameWhitelist();
+        configuredGameExes = nativeConfiguredGameExes();
+        rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
+    }
+    NativeGameValveSnapshot snapshot;
+    {
+        std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+        snapshot = g_gameValveTarget;
+    }
+    if (!snapshot.game.pid || !snapshot.game.processCreated || !snapshot.generation ||
+        snapshot.rulesEpoch != rulesEpoch ||
+        !nativeValveTargetStillValid(snapshot, userExcludes, whitelist, configuredGameExes))
+        return false;
+
+    DWORD currentSession = 0, targetSession = 0;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
+        !ProcessIdToSessionId(snapshot.game.pid, &targetSession) ||
+        currentSession != targetSession)
+        return false;
+
+    std::wstring currentPath;
+    ULONGLONG currentCreated = 0;
+    if (!focusQueryProcessIdentity(snapshot.game.pid, &currentPath, &currentCreated) ||
+        currentCreated != snapshot.game.processCreated)
+        return false;
+    if (!snapshot.game.path.empty() &&
+        (_wcsicmp(snapshot.game.path.c_str(), currentPath.c_str()) != 0))
+        return false;
+
+    {
+        std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+        if (g_gameValveTarget.generation != snapshot.generation ||
+            g_gameValveTarget.game.pid != snapshot.game.pid ||
+            g_gameValveTarget.game.processCreated != snapshot.game.processCreated)
+            return false;
+    }
+    if (matched) *matched = snapshot.game;
+    if (valveGeneration) *valveGeneration = snapshot.generation;
+    return true;
+}

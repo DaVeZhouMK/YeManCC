@@ -67,21 +67,29 @@ public static class AsusFanCurveWriter
      * （复用同一数组，与 HC 行为一致）。
      * 返回最后一次（Mid）写入的旧返回值；三通道各自的真实结果在 AsusAcpiObservations 收据中。
      */
-    public static int ApplySoftwareCurve(byte[] asusCurve)
+    public static int ApplySoftwareCurve(byte[] asusCurve) => ApplySoftwareCurveObserved(asusCurve, out _);
+
+    public static int ApplySoftwareCurveObserved(byte[] asusCurve, out AsusAcpiCallReceipt[] receipts)
     {
-        AsusACPI.SetFanCurveObserved(AsusFan.CPU, asusCurve, out _);
-        AsusACPI.SetFanCurveObserved(AsusFan.GPU, asusCurve, out _);
-        return AsusACPI.SetFanCurveObserved(AsusFan.Mid, asusCurve, out _);
+        AsusACPI.SetFanCurveObserved(AsusFan.CPU, asusCurve, out var cpu);
+        AsusACPI.SetFanCurveObserved(AsusFan.GPU, asusCurve, out var gpu);
+        var legacyResult = AsusACPI.SetFanCurveObserved(AsusFan.Mid, asusCurve, out var mid);
+        receipts = new[] { cpu, gpu, mid };
+        return legacyResult;
     }
 
     /**
      * 镜像 ROGAlly.SetFanControl(false)：交还 ASUS 默认表（CPU=默认CPU表、GPU=默认GPU表、Mid=默认CPU表）。
      * 返回最后一次（Mid）写入的旧返回值；三通道收据逐扇发布。
      */
-    public static int RestoreDefaultCurves()
+    public static int RestoreDefaultCurves() => RestoreDefaultCurvesObserved(out _);
+
+    public static int RestoreDefaultCurvesObserved(out AsusAcpiCallReceipt[] receipts)
     {
-        AsusACPI.SetFanCurveObserved(AsusFan.CPU, defaultCPUFan, out _);
-        AsusACPI.SetFanCurveObserved(AsusFan.GPU, defaultGPUFan, out _);
-        return AsusACPI.SetFanCurveObserved(AsusFan.Mid, defaultCPUFan, out _);
+        AsusACPI.SetFanCurveObserved(AsusFan.CPU, defaultCPUFan, out var cpu);
+        AsusACPI.SetFanCurveObserved(AsusFan.GPU, defaultGPUFan, out var gpu);
+        var legacyResult = AsusACPI.SetFanCurveObserved(AsusFan.Mid, defaultCPUFan, out var mid);
+        receipts = new[] { cpu, gpu, mid };
+        return legacyResult;
     }
 }

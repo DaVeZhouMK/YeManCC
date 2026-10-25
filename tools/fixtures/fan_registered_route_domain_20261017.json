@@ -1,0 +1,567 @@
+{
+  "schema": 1,
+  "source": "HC-DEVICE-MATRIX-BATCH03-20260817.md + FAN1069 actual source namespace inventory",
+  "scope": "inert test route identities, not hardware support proof",
+  "models": [
+    {
+      "name": "AOKZOEA1",
+      "factory": "HandheldCompanion.Devices.AOKZOEA1",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AOKZOEA1Pro",
+      "factory": "HandheldCompanion.Devices.AOKZOEA1Pro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AOKZOEA1X",
+      "factory": "HandheldCompanion.Devices.AOKZOEA1X",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AOKZOEA2",
+      "factory": "HandheldCompanion.Devices.AOKZOEA2",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEO2",
+      "factory": "HandheldCompanion.Devices.AYANEO2",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEO2S",
+      "factory": "HandheldCompanion.Devices.AYANEO2S",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIR",
+      "factory": "HandheldCompanion.Devices.AYANEOAIR",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIR1S",
+      "factory": "HandheldCompanion.Devices.AYANEOAIR1S",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIRLite",
+      "factory": "HandheldCompanion.Devices.AYANEOAIRLite",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIRPlusAMD",
+      "factory": "HandheldCompanion.Devices.AYANEOAIRPlusAMD",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIRPlusAMDMendocino",
+      "factory": "HandheldCompanion.Devices.AYANEOAIRPlusAMDMendocino",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIRPlusIntel",
+      "factory": "HandheldCompanion.Devices.AYANEOAIRPlusIntel",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOAIRPro",
+      "factory": "HandheldCompanion.Devices.AYANEOAIRPro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOFlip1SDS",
+      "factory": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SDS",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOFlip1SKB",
+      "factory": "HandheldCompanion.Devices.AYANEO.AYANEOFlip1SKB",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOFlipDS",
+      "factory": "HandheldCompanion.Devices.AYANEOFlipDS",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOFlipKB",
+      "factory": "HandheldCompanion.Devices.AYANEOFlipKB",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOKUN",
+      "factory": "HandheldCompanion.Devices.AYANEOKUN",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "AYANEOSlide",
+      "factory": "HandheldCompanion.Devices.AYANEOSlide",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "ClawA1M",
+      "factory": "HandheldCompanion.Devices.ClawA1M",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "ClawA2VM",
+      "factory": "HandheldCompanion.Devices.ClawA2VM",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "ClawBZ2EM",
+      "factory": "HandheldCompanion.Devices.ClawBZ2EM",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "ClawCG3EM",
+      "factory": "HandheldCompanion.Devices.MSI.ClawCG3EM",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4",
+      "factory": "HandheldCompanion.Devices.GPDWin4",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4_2023",
+      "factory": "HandheldCompanion.Devices.GPDWin4_2023",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4_2023_7640U",
+      "factory": "HandheldCompanion.Devices.GPDWin4_2023_7640U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4_2024",
+      "factory": "HandheldCompanion.Devices.GPDWin4_2024",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4_2024_8640U",
+      "factory": "HandheldCompanion.Devices.GPDWin4_2024_8640U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin4_2024_HX370",
+      "factory": "HandheldCompanion.Devices.GPDWin4_2024_HX370",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWin5",
+      "factory": "HandheldCompanion.Devices.GPDWin5",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2Intel",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2Intel",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2022_6800U",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2022_6800U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2023_7640U",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2023_7640U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2023_7840U",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2023_7840U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2024_8640U",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2024_8640U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2024_8840U",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2024_8840U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMax2_2024_HX370",
+      "factory": "HandheldCompanion.Devices.GPDWinMax2_2024_HX370",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMini",
+      "factory": "HandheldCompanion.Devices.GPDWinMini",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMini_7640U",
+      "factory": "HandheldCompanion.Devices.GPDWinMini_7640U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMini_8840U",
+      "factory": "HandheldCompanion.Devices.GPDWinMini_8840U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GPDWinMini_HX370",
+      "factory": "HandheldCompanion.Devices.GPDWinMini_HX370",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "GamingZone",
+      "factory": "HandheldCompanion.Devices.Zotac.GamingZone",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LegionGoSZ1",
+      "factory": "HandheldCompanion.Devices.Lenovo.LegionGoSZ1",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LegionGoSZ2",
+      "factory": "HandheldCompanion.Devices.Lenovo.LegionGoSZ2",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LegionGoTablet",
+      "factory": "HandheldCompanion.Devices.Lenovo.LegionGoTablet",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LegionGoTablet2",
+      "factory": "HandheldCompanion.Devices.Lenovo.LegionGoTablet2",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericRpmTarget",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LokiMax6600U",
+      "factory": "HandheldCompanion.Devices.LokiMax6600U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LokiMax6800U",
+      "factory": "HandheldCompanion.Devices.LokiMax6800U",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LokiMiniPro",
+      "factory": "HandheldCompanion.Devices.LokiMiniPro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "LokiZero",
+      "factory": "HandheldCompanion.Devices.LokiZero",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayer2",
+      "factory": "HandheldCompanion.Devices.OneXPlayer2",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayer2Pro",
+      "factory": "HandheldCompanion.Devices.OneXPlayer2Pro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerApex",
+      "factory": "HandheldCompanion.Devices.OneXPlayer.OneXPlayerApex",
+      "supported": true,
+      "effectiveFanControl": false,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerG1AMD",
+      "factory": "HandheldCompanion.Devices.OneXPlayerG1AMD",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerG1Intel",
+      "factory": "HandheldCompanion.Devices.OneXPlayerG1Intel",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerMiniAMD",
+      "factory": "HandheldCompanion.Devices.OneXPlayerMiniAMD",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerMiniIntel",
+      "factory": "HandheldCompanion.Devices.OneXPlayerMiniIntel",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerMiniPro",
+      "factory": "HandheldCompanion.Devices.OneXPlayerMiniPro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerOneXFly",
+      "factory": "HandheldCompanion.Devices.OneXPlayerOneXFly",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerOneXFlyF1Pro",
+      "factory": "HandheldCompanion.Devices.OneXPlayerOneXFlyF1Pro",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerX1AMD",
+      "factory": "HandheldCompanion.Devices.OneXPlayerX1AMD",
+      "supported": true,
+      "effectiveFanControl": false,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerX1Intel",
+      "factory": "HandheldCompanion.Devices.OneXPlayerX1Intel",
+      "supported": true,
+      "effectiveFanControl": false,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerX1Mini",
+      "factory": "HandheldCompanion.Devices.OneXPlayerX1Mini",
+      "supported": true,
+      "effectiveFanControl": false,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "OneXPlayerX1Pro",
+      "factory": "HandheldCompanion.Devices.OneXPlayerX1Pro",
+      "supported": true,
+      "effectiveFanControl": false,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "ROGAlly",
+      "factory": "HandheldCompanion.Devices.ROGAlly",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "AsusScopeReceipts"
+    },
+    {
+      "name": "ROGAllyX",
+      "factory": "HandheldCompanion.Devices.ROGAllyX",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "AsusScopeReceipts"
+    },
+    {
+      "name": "SteamDeck",
+      "factory": "HandheldCompanion.Devices.SteamDeck",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericRpmTarget",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "SuiPlay0X1",
+      "factory": "HandheldCompanion.Devices.SuiPlay0X1",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "GenericDuty",
+      "evidence": "CompatCallbackNoScope"
+    },
+    {
+      "name": "XboxROGAlly",
+      "factory": "HandheldCompanion.Devices.XboxROGAlly",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "AsusScopeReceipts"
+    },
+    {
+      "name": "XboxROGAllyX",
+      "factory": "HandheldCompanion.Devices.XboxROGAllyX",
+      "supported": true,
+      "effectiveFanControl": true,
+      "kind": "ProfileCurve",
+      "evidence": "AsusScopeReceipts"
+    }
+  ]
+}

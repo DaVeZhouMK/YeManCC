@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "official-loader-empty-frontend-after-auto-repair-20261022",
+  "observed": {
+    "ymccPid": 51864,
+    "automaticRequestAt": "2026-10-22T12:11:48.417+08:00",
+    "ownedLoaderAt": "2026-10-22T12:11:58.479+08:00",
+    "officialWebSocketConnected": true,
+    "officialPlugins": [],
+    "ymccFrontendAbsent": true,
+    "enabledBackendRows": [
+      {
+        "name": "ymcc-sidebar",
+        "version": "0.0.1",
+        "load_type": 1,
+        "disabled": false
+      }
+    ],
+    "readElapsedMs": 0.8
+  },
+  "cause": "Official v3.3.0 loadPlugins waits for a future RegisterForUIModeChanged callback after the observed mode events have already arrived.",
+  "repair": "Native verified bootstrap may once consume the public enabled-plugin list and importPlugin API; receipt must match current frontend build. No Loader byte patch, mode switch, settings write, or replay after an uncertain import.",
+  "physicalWakeAcceptance": false
+}

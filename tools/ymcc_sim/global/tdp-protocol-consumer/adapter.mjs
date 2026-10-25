@@ -1,0 +1,7 @@
+import fs from 'node:fs';import path from 'node:path';import {fileURLToPath} from 'node:url';
+export const MODULE='tools/ymcc_sim/global/tdp-protocol-consumer';
+export const REPO=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../../..');
+export const CASE_ID='performance.tdp-protocol-consumer';
+export const INPUTS=['tools/tdp_protocol_selftest.py','PowerControl/pawnio/YeManTdpCtl.py'];
+export function moduleSources(){return ['adapter.mjs','run.mjs','worker.py','Run-Worker.ps1','spec.json','toolchain-inputs.json','runner.test.mjs'].map(name=>MODULE+'/'+name);}
+export function getTdpProtocolConsumerAdapters(repo=REPO){const tool=JSON.parse(fs.readFileSync(path.join(repo,MODULE,'toolchain-inputs.json'),'utf8'));return[{id:CASE_ID,domain:'performance',title:'Original TDP helper protocol consumers: family/mailbox, Intel encoding, CLI-daemon parity and client admission',kind:'node',path:MODULE+'/run.mjs',args:['--evidence-dir','{outDir}/tdp-protocol'],timeoutMs:90000,profiles:['desktop','full'],scope:'behavioral-mock',resultFiles:['tdp-protocol/result.json'],evidenceInputs:[...moduleSources(),...INPUTS,'tools/ymcc_sim/global/host-process.ps1'],artifactInputs:tool.files.map(row=>row.path),boundary:'Original Python self-test and actual helper functions imported from frozen sources; original fake mailbox/backends, forbidden driver/process/registry/network calls, owned fixture job only. No helper Main, device write or total OEM catalog claim.'}];}

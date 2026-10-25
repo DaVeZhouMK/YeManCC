@@ -1,0 +1,17 @@
+# Actual main Controller consumer / native binary sidecar
+
+Run: node tools/controller_motion_main_binary_selftest.mjs
+
+The existing legion_motion_consumer/extract_main.mjs is imported unchanged to freeze verbatim main functions, types, constants and source-only anchors. This fixture also freezes actual InputCaptureGamepadSnapshot, common/Windows scopes, inputHostFrameSubmissionSample and the SubmitPad carrier prefix, stopping before powerAdmitted. Probe tails test the real issue/request functions. Normal paths always carry a common snapshot; an isolated unreachable Legion-only path is not a production defect.
+
+native_bridge.cpp is compiled as a separate TU with real Windows headers, pinned SHA validation and read lock, and absolute LoadLibraryEx DLL_LOAD_DIR|SYSTEM32. harness_base.inc retains controlled platform globals and private JSON boundaries. All numeric mock callbacks were replaced by actual DLL forwarding; Windows sensor g_gm remains a forbidden sentinel. windows_motion_submission.h is genuine, including retain/current and binding lifetime; it is not stubbed true.
+
+Existing family-topology packets supply four exact models/six side routes. Queue receipt transfer, synthetic generations, canonical snapshot and barrier interleavings are explicitly fixture orchestration; no raw device, full BUS/WM_INPUT/pipe, Host, real PBT or normal app is executed. A TUF B850M desktop does not grant physical Legion acceptance and no production hardware bypass is added.
+
+Session retired-token history is object-local. Cross-new-Session expiry is tested through the actual main source guard, not a global token registry. Calibration values live in private evidence JSON; actual live offsets and manual request-before-training rollback run with actual native read/write callbacks. A seventh bounded scenario admits one strictly post-request sample through actual main and CalibrationTransaction begin/prepare/observe, calls actual ResetContinuousCalibration and ProcessMotion, records real confidence/offset/mode, cancels nonterminal training via main Abort, verifies live XYZ baseline/mode0 rollback without a file change, and then verifies the next idle frame restores Auto preference3. If the native algorithm really completes early, that terminal is recorded instead of fabricating a pending state or asserting cancellation rollback. Reset/Process counters are read-only native bridge observations after actual calls. No actual Auto convergence threshold or deadline is asserted, and full native state restoration or successful manual persistence is not claimed.
+
+Four private source mutants target current-context admission, issue source fencing, the real Windows stamp guard and omission of the Transaction native reset call. The last uses a private copy of the actual calibration header; production headers remain unchanged. Only normal exit1 with an exact assertion and complete native cleanup counts. Prior tests/fixtures, production source, upstream evidence and LATEST remain unchanged.
+
+Guard success is only synchronous pre-issue/request admission. Host write/acknowledgement and game consumption are not validated. Retained run diagnoses are in retained-runs.json; no compiler/fixture runtime failure is counted as a mutant detection.
+
+The accepted 2026-10-17T09-48-58-627Z-5dc32b six-case pass is preserved. Fresh-run RESULT.json verifies its RESULT and manifest fingerprints before and after execution. The bridge resets counter must increase on the new training frame; baseline resets=0 can no longer pass.

@@ -10,7 +10,7 @@ const emit=defineEmits<{(e:'commit',side:FrameRateSide,value:FrameRateSetting):v
 const draft=ref(frameRatePair(props.values));
 watch(()=>props.values,value=>{draft.value=frameRatePair(value);},{deep:true});
 const sides=computed<FrameRateSide[]>(()=>props.side?[props.side]:['ac','dc']);
-const options=FPS_CEILINGS.map(value=>({value,label:value===0?'不锁帧':`${value} FPS`}));
+const options=FPS_CEILINGS.map(value=>({value,label:value===0?'关闭锁帧':`${value} FPS`}));
 function commit(side:FrameRateSide){if(props.disabled)return;draft.value[side]=frameRateSetting(draft.value[side]);emit('commit',side,{...draft.value[side]});}
 function ceiling(side:FrameRateSide,value:string|number){
   if(props.disabled)return;

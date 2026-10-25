@@ -1,6 +1,7 @@
 // A single foreground read repairs missed AC/DC notifications without resident polling.
 // Keep this UI snapshot separate from hardware-write detection/ownership checks.
 import { readonly, ref } from 'vue';
+import { tdpRuntimeStore } from './tdpRuntimeState';
 import { invoke, on } from './ipc';
 import { detectPowerModeReliable } from './yeman';
 import { isUiVisible, onUiVisibilityChange } from './uiLifecycle';
@@ -13,6 +14,7 @@ export const powerSourceMode = readonly(sourceMode);
 export function rememberPowerSourceMode(mode: PowerSourceMode): void {
   ++sourceVersion;
   sourceMode.value = mode;
+  tdpRuntimeStore.powerMode(mode);
 }
 
 interface PowerSourceSnapshot {

@@ -1,0 +1,469 @@
+// Deterministic interleavings of exact production functions. All I/O below
+// uses bounded ports: no Windows headers, real process opens, sleeps or Steam.
+#include <algorithm>
+#include <atomic>
+#include <cstdint>
+#include <cwchar>
+#include <functional>
+#include <iostream>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <utility>
+#include <vector>
+#include "monitor_identity.h"
+#include "json.hpp"
+using json=nlohmann::json;
+std::string W2U(const std::wstring& value){return std::string(value.begin(),value.end());}
+using DWORD=std::uint32_t;using ULONGLONG=unsigned long long;using SIZE_T=std::size_t;using HANDLE=void*;
+constexpr bool FALSE=false;constexpr DWORD PROCESS_QUERY_LIMITED_INFORMATION=1,PROCESS_VM_READ=2;
+constexpr SIZE_T SG_MIN_WS=500;
+@@GAME_STRUCT@@
+struct PROCESS_MEMORY_COUNTERS{DWORD cb=0;SIZE_T WorkingSetSize=0;};using PROCESS_MEMORY_COUNTERS_EX=PROCESS_MEMORY_COUNTERS;
+namespace ports {
+enum class Point{None,Rules,FirstIdentity,FinalIdentity};
+struct State {
+ unsigned steps=0,identities=0,ruleReads=0,hooks=0,publications=0,scans=0;
+ bool identityOk=true,sessionsOk=true,sameSession=true,memoryOk=true,openOk=true,excluded=false;
+ SIZE_T memory=900;double now=100;
+ NativeDetectedGame process,candidate;
+ std::vector<std::wstring> white{L"bluey"},black{L"explorer"},custom{L"bluey"};
+ Point point=Point::None;std::function<void()> hook;
+};
+State s;
+void step(){if(++s.steps>256)throw std::runtime_error("I/O port budget exceeded");}
+void hit(Point point){step();if(s.point==point&&s.hook){s.point=Point::None;auto fn=std::move(s.hook);s.hook={};++s.hooks;fn();}}
+}
+std::mutex g_gameRulesMx,g_rememberedGameTargetMx;
+std::atomic<unsigned long long> g_gameRulesEpoch{5};
+int g_rememberedGameTarget=0;unsigned long long g_rememberedGameDeadline=0;
+void focusLosslessReturnInvalidate(){ports::step();}
+double sgNowEpoch(){ports::step();return ++ports::s.now;}
+DWORD GetCurrentProcessId(){ports::step();return 1;}
+bool ProcessIdToSessionId(DWORD pid,DWORD*out){ports::step();*out=(pid==1||ports::s.sameSession)?1:2;return ports::s.sessionsOk;}
+bool focusQueryProcessIdentity(DWORD,std::wstring*path,ULONGLONG*born){
+ ++ports::s.identities;*path=ports::s.process.path;*born=ports::s.process.processCreated;
+ ports::hit(ports::s.identities==1?ports::Point::FirstIdentity:ports::Point::FinalIdentity);
+ return ports::s.identityOk;
+}
+HANDLE OpenProcess(DWORD,bool,DWORD){ports::step();return ports::s.openOk?reinterpret_cast<void*>(1):nullptr;}
+void CloseHandle(HANDLE){ports::step();}
+bool GetProcessMemoryInfo(HANDLE,PROCESS_MEMORY_COUNTERS*p,std::size_t){ports::step();p->WorkingSetSize=ports::s.memory;return ports::s.memoryOk;}
+void nativeRefreshGameRulesEpochFromDiskLocked(){++ports::s.ruleReads;ports::hit(ports::Point::Rules);}
+std::vector<std::wstring> sgExcludes(){ports::step();return ports::s.black;}
+std::vector<std::wstring> sgGameWhitelist(){ports::step();return ports::s.white;}
+std::vector<std::wstring> nativeConfiguredGameExes(){ports::step();return ports::s.custom;}
+bool nativeMonitorExcluded(const std::wstring&){ports::step();return ports::s.excluded;}
+bool nativeIsConfiguredGameExe(const std::wstring& name,const std::vector<std::wstring>& list){ports::step();return std::find(list.begin(),list.end(),name)!=list.end();}
+enum class NativeOnePidResult{Ok,NameUnavailable,Missing};
+NativeOnePidResult nativeScanGameOnePid(DWORD,const std::wstring&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*out){ports::step();++ports::s.scans;*out=ports::s.candidate;return out->pid?NativeOnePidResult::Ok:NativeOnePidResult::Missing;}
+NativeDetectedGame nativeScanGame(DWORD,const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&){ports::step();++ports::s.scans;return ports::s.candidate;}
+bool nativeScanGameConfiguredBest(const std::vector<std::wstring>&,const std::vector<std::wstring>&,const std::vector<std::wstring>&,NativeDetectedGame*){ports::step();++ports::s.scans;return false;}
+std::wstring nativeProcessWindowTitle(DWORD){ports::step();return L"Bluey";}
+namespace frozen {
+// BEGIN PRESERVED ROG 20261023-125040 FUNCTIONS
+struct NativeGameValveSnapshot {
+    NativeDetectedGame game;
+    double selectedAtEpoch = 0.0;
+    double lastSeenEpoch = 0.0;
+    unsigned long long rulesEpoch = 0;
+    // Monotonic publication sequence.  The native owner may acquire the valve
+    // concurrently from IPC, monitor and power workers; a later snapshot must
+    // never be allowed to overwrite the file with an older one merely because
+    // its disk write completed later.
+    unsigned long long generation = 0;
+};
+static NativeGameValveSnapshot g_gameValveTarget;
+static unsigned long long g_gameValveGeneration=0;
+std::mutex g_gameValveMx;
+static void nativeValvePublish(const NativeGameValveSnapshot&){ports::step();++ports::s.publications;}
+static std::wstring sgBaseName(const std::wstring& path) { // 取文件名并去 .exe/小写
+    // A9：实现搬到共享头 monitor_identity.h（harness 引用同一份），此处仅转发。
+    return nativeIdentityNormalizeName(path);
+}
+
+static bool sgNamePatternMatches(const std::wstring& value, const std::wstring& pattern) {
+    size_t valueIndex = 0, patternIndex = 0, starIndex = std::wstring::npos, starValue = 0;
+    while (valueIndex < value.size()) {
+        if (patternIndex < pattern.size() &&
+            (pattern[patternIndex] == L'?' || pattern[patternIndex] == value[valueIndex])) {
+            ++valueIndex;
+            ++patternIndex;
+        } else if (patternIndex < pattern.size() && pattern[patternIndex] == L'*') {
+            starIndex = patternIndex++;
+            starValue = valueIndex;
+        } else if (starIndex != std::wstring::npos) {
+            patternIndex = starIndex + 1;
+            valueIndex = ++starValue;
+        } else {
+            return false;
+        }
+    }
+    while (patternIndex < pattern.size() && pattern[patternIndex] == L'*') ++patternIndex;
+    return patternIndex == pattern.size();
+}
+
+static bool sgNameExcludedBy(const std::wstring& name, const std::vector<std::wstring>& patterns) {
+    return std::any_of(patterns.begin(), patterns.end(), [&](const std::wstring& pattern) {
+        return sgNamePatternMatches(name, pattern);
+    });
+}
+
+static bool nativeValveTargetStillValid(
+    const NativeGameValveSnapshot& target,
+    const std::vector<std::wstring>& userExcludes,
+    const std::vector<std::wstring>& whitelist,
+    const std::vector<std::wstring>& configuredGameExes) {
+    if (!target.game.pid || !target.game.processCreated) return false;
+    DWORD currentSession = 0, targetSession = 0;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
+        !ProcessIdToSessionId(target.game.pid, &targetSession) ||
+        currentSession != targetSession) return false;
+
+    std::wstring currentPath;
+    ULONGLONG currentCreated = 0;
+    if (!focusQueryProcessIdentity(target.game.pid, &currentPath, &currentCreated)) return false;
+    if (!currentCreated || currentCreated != target.game.processCreated) return false;
+    if (!target.game.path.empty() && !currentPath.empty() &&
+        _wcsicmp(target.game.path.c_str(), currentPath.c_str()) != 0) return false;
+
+    const std::wstring currentName = sgBaseName(currentPath);
+    const bool isWhitelisted = sgNameExcludedBy(currentName, whitelist);
+    if (currentName.empty() || (!isWhitelisted &&
+        (nativeMonitorExcluded(currentName) || sgNameExcludedBy(currentName, userExcludes)))) return false;
+    if (target.game.customConfigured &&
+        !nativeIsConfiguredGameExe(currentName, configuredGameExes)) return false;
+
+    // A whitelist target may remain below the capture threshold while the
+    // process is running.  If the whitelist rule disappears, however, it is
+    // no longer allowed to bypass the ordinary 500 MB gate.
+    if (target.game.whitelisted && !sgNameExcludedBy(currentName, whitelist)) {
+        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_VM_READ,
+                                      FALSE, target.game.pid);
+        if (!process) return false;
+        PROCESS_MEMORY_COUNTERS_EX memory{};
+        memory.cb = sizeof(memory);
+        SIZE_T workingSet = 0;
+        if (GetProcessMemoryInfo(process, reinterpret_cast<PROCESS_MEMORY_COUNTERS*>(&memory), sizeof(memory)))
+            workingSet = memory.WorkingSetSize;
+        CloseHandle(process);
+        if (workingSet < static_cast<SIZE_T>(SG_MIN_WS)) return false;
+    }
+    return true;
+}
+
+static NativeGameValveSnapshot nativeValveCommitLocked(
+    const NativeDetectedGame& game,
+    unsigned long long rulesEpoch) {
+    const bool sameIdentity = g_gameValveTarget.game.pid == game.pid &&
+        g_gameValveTarget.game.processCreated != 0 &&
+        g_gameValveTarget.game.processCreated == game.processCreated;
+    if (!sameIdentity) {
+        g_gameValveTarget.selectedAtEpoch = sgNowEpoch();
+        // Focus restoration is display state, not a second target source.
+        // Drop the old remembered window at the same arbitration boundary so
+        // a fast game switch cannot refocus the previous process.
+        std::lock_guard<std::mutex> focusLock(g_rememberedGameTargetMx);
+        g_rememberedGameTarget = {};
+        g_rememberedGameDeadline = 0;
+        focusLosslessReturnInvalidate();
+    }
+    g_gameValveTarget.game = game;
+    if (!g_gameValveTarget.selectedAtEpoch) g_gameValveTarget.selectedAtEpoch = sgNowEpoch();
+    g_gameValveTarget.lastSeenEpoch = sgNowEpoch();
+    g_gameValveTarget.rulesEpoch = rulesEpoch;
+    g_gameValveTarget.generation = ++g_gameValveGeneration;
+    return g_gameValveTarget;
+}
+
+static void nativeValveTouchLocked() {
+    g_gameValveTarget.lastSeenEpoch = sgNowEpoch();
+    g_gameValveTarget.generation = ++g_gameValveGeneration;
+}
+
+static void nativeValveClearLocked() {
+    g_gameValveTarget = {};
+    g_gameValveTarget.generation = ++g_gameValveGeneration;
+    std::lock_guard<std::mutex> focusLock(g_rememberedGameTargetMx);
+    g_rememberedGameTarget = {};
+    g_rememberedGameDeadline = 0;
+    focusLosslessReturnInvalidate();
+}
+
+static NativeDetectedGame nativeValveAcquire(DWORD preferredPid = 0, unsigned retryCount = 0) {
+    NativeGameValveSnapshot published;
+    NativeDetectedGame result;
+    bool shouldPublish = false;
+    std::vector<std::wstring> userExcludes;
+    std::vector<std::wstring> whitelist;
+    std::vector<std::wstring> configuredGameExes;
+    unsigned long long rulesEpoch = 0;
+    // File-backed rules are atomically replaced. Snapshot them briefly, then
+    // release the mutex before process enumeration/identity queries. The UI
+    // must be able to answer game.rules.get/set and keep focus timers moving
+    // while the valve scans a busy/full-screen title.
+    {
+        std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        nativeRefreshGameRulesEpochFromDiskLocked();
+        userExcludes = sgExcludes();
+        whitelist = sgGameWhitelist();
+        configuredGameExes = nativeConfiguredGameExes();
+        rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
+    }
+    {
+        std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+
+        if (preferredPid) {
+            // C-D1（155 §3.1-1）：严格 PID 只校验该 PID，不再为它枚举全部进程。
+            // 语义不变——失败仍然返回空并清目标，绝不改选其他 PID。
+            NativeDetectedGame preferred;
+            const auto onePid = nativeScanGameOnePid(
+                preferredPid, std::wstring(), userExcludes, whitelist, configuredGameExes, &preferred);
+            if (onePid == NativeOnePidResult::NameUnavailable) {
+                // 拿不到镜像名（受保护/权限受限进程）：回退到完整枚举，保持旧行为。
+                preferred = nativeScanGame(preferredPid, userExcludes, whitelist, configuredGameExes);
+            } else if (onePid == NativeOnePidResult::Ok) {
+                preferred.title = nativeProcessWindowTitle(preferredPid);
+            }
+            if (!preferred.pid) {
+                // A strict summon request that no longer matches its captured
+                // process is an explicit recognition failure. Do not leave a
+                // previous PID published while the foreground target changed.
+                nativeValveClearLocked();
+                published = g_gameValveTarget;
+                shouldPublish = true;
+            } else {
+                result = nativeValveCommitLocked(preferred, rulesEpoch).game;
+                published = g_gameValveTarget;
+                shouldPublish = true;
+            }
+        } else {
+            bool currentValid = false;
+            if (g_gameValveTarget.game.pid) {
+                if (g_gameValveTarget.rulesEpoch == rulesEpoch) {
+                    currentValid = nativeValveTargetStillValid(
+                        g_gameValveTarget, userExcludes, whitelist, configuredGameExes);
+                } else {
+                    // A rule change is a real arbitration boundary. Re-admit
+                    // the old PID using the full threshold logic before
+                    // allowing it to remain the unique target.
+                    const auto refreshed = nativeScanGame(
+                        g_gameValveTarget.game.pid, userExcludes, whitelist, configuredGameExes);
+                    if (refreshed.pid) {
+                        nativeValveCommitLocked(refreshed, rulesEpoch);
+                        currentValid = true;
+                    }
+                }
+            }
+            if (!currentValid) {
+                // 155 §3.1-3：无目标 / 旧目标失效 / 规则需重新仲裁时保留完整发现
+                // 与原顺序，不放大发现间隔。工作集变化没有事件也必须能被发现。
+                const auto candidate = nativeScanGame(
+                    0, userExcludes, whitelist, configuredGameExes);
+                if (candidate.pid) {
+                    nativeValveCommitLocked(candidate, rulesEpoch);
+                } else {
+                    nativeValveClearLocked();
+                }
+                shouldPublish = true;
+            } else {
+                // C-D1（155 §3.1-2）：当前目标有效。旧实现无条件再做一次完整扫描，
+                // 只为判断"是否存在工作集更大的配置优先程序"。下面两种情况可证明
+                // 该分支必为假，因此不再扫描：
+                //   · 当前目标本身就是配置优先程序 ⇒ 原条件 !current.customConfigured 为假；
+                //   · 没有 configuredGameExes ⇒ 优先类必为空。
+                // 其余情况用"按名字筛 PID + 单 PID 定向校验"替代全扫，排名/阈值/
+                // 白名单例外与旧实现一致。
+                if (!g_gameValveTarget.game.customConfigured && !configuredGameExes.empty()) {
+                    NativeDetectedGame priorityCandidate;
+                    if (nativeScanGameConfiguredBest(
+                            userExcludes, whitelist, configuredGameExes, &priorityCandidate) &&
+                        priorityCandidate.customConfigured) {
+                        nativeValveCommitLocked(priorityCandidate, rulesEpoch);
+                    }
+                }
+                nativeValveTouchLocked();
+            }
+            result = g_gameValveTarget.game;
+            published = g_gameValveTarget;
+            // Keep the shared snapshot heartbeat fresh even when the target
+            // remains unchanged, so external legacy consumers cannot use a
+            // stale PID after the native owner disappears.
+            shouldPublish = true;
+        }
+    }
+    // A rule edit can complete while the process scan is running. Retry a
+    // bounded number of times so sustained file changes fail closed instead
+    // of recursively consuming the caller's stack.
+    if (g_gameRulesEpoch.load(std::memory_order_acquire) != rulesEpoch) {
+        constexpr unsigned maxRuleRetries = 2;
+        if (retryCount >= maxRuleRetries) return {};
+        return nativeValveAcquire(preferredPid, retryCount + 1);
+    }
+    if (shouldPublish) nativeValvePublish(published);
+    return result;
+}
+
+static bool nativeValveReadCurrentTarget(
+    NativeDetectedGame* matched = nullptr,
+    unsigned long long* valveGeneration = nullptr) {
+    // Read the already elected target first; the final generation check below
+    // rejects a concurrent replacement. Never arbitrate or scan another game.
+    NativeGameValveSnapshot snapshot;
+    {
+        std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+        snapshot = g_gameValveTarget;
+    }
+    std::vector<std::wstring> userExcludes;
+    std::vector<std::wstring> whitelist;
+    std::vector<std::wstring> configuredGameExes;
+    unsigned long long rulesEpoch = 0;
+    {
+        std::lock_guard<std::mutex> rulesLock(g_gameRulesMx);
+        nativeRefreshGameRulesEpochFromDiskLocked();
+        // Always refresh disk stamps and the whitelist. The process/path
+        // checks in nativeValveTargetStillValid must succeed before its
+        // whitelist result can bypass exclusions. Thus a nonempty saved path
+        // that still matches the fresh whitelist cannot use userExcludes.
+        whitelist = sgGameWhitelist();
+        const bool savedPathWhitelisted = !snapshot.game.path.empty() &&
+            sgNameExcludedBy(sgBaseName(snapshot.game.path), whitelist);
+        if (!savedPathWhitelisted) userExcludes = sgExcludes();
+        // This list is consulted only for an already custom-configured target.
+        if (snapshot.game.customConfigured) configuredGameExes = nativeConfiguredGameExes();
+        rulesEpoch = g_gameRulesEpoch.load(std::memory_order_acquire);
+    }
+    if (!snapshot.game.pid || !snapshot.game.processCreated || !snapshot.generation ||
+        snapshot.rulesEpoch != rulesEpoch ||
+        !nativeValveTargetStillValid(snapshot, userExcludes, whitelist, configuredGameExes))
+        return false;
+
+    DWORD currentSession = 0, targetSession = 0;
+    if (!ProcessIdToSessionId(GetCurrentProcessId(), &currentSession) ||
+        !ProcessIdToSessionId(snapshot.game.pid, &targetSession) ||
+        currentSession != targetSession)
+        return false;
+
+    std::wstring currentPath;
+    ULONGLONG currentCreated = 0;
+    if (!focusQueryProcessIdentity(snapshot.game.pid, &currentPath, &currentCreated) ||
+        currentCreated != snapshot.game.processCreated)
+        return false;
+    if (!snapshot.game.path.empty() &&
+        (_wcsicmp(snapshot.game.path.c_str(), currentPath.c_str()) != 0))
+        return false;
+
+    {
+        std::lock_guard<std::mutex> valveLock(g_gameValveMx);
+        if (g_gameValveTarget.generation != snapshot.generation ||
+            g_gameValveTarget.game.pid != snapshot.game.pid ||
+            g_gameValveTarget.game.processCreated != snapshot.game.processCreated)
+            return false;
+    }
+    if (matched) *matched = snapshot.game;
+    if (valveGeneration) *valveGeneration = snapshot.generation;
+    return true;
+}
+// END PRESERVED ROG 20261023-125040 FUNCTIONS
+}
+namespace production {
+@@CURRENT_STRUCT@@
+static NativeGameValveSnapshot g_gameValveTarget;
+static unsigned long long g_gameValveGeneration=0;
+std::mutex g_gameValveMx;
+static void nativeValvePublish(const NativeGameValveSnapshot&){ports::step();++ports::s.publications;}
+@@CURRENT_FUNCTIONS@@
+}
+struct View{NativeDetectedGame game;unsigned long long generation=0,identity=0,rules=0;double selected=0,last=0;};
+template<class T> View viewOf(const T&t){View v{t.game,t.generation,0,t.rulesEpoch,t.selectedAtEpoch,t.lastSeenEpoch};if constexpr(requires{t.identityGeneration;})v.identity=t.identityGeneration;return v;}
+#define ADAPTER(TYPE,NS) struct TYPE{ \
+ static void reset(){NS::g_gameValveTarget={};NS::g_gameValveGeneration=0;} \
+ static View view(){return viewOf(NS::g_gameValveTarget);} \
+ static void commit(const NativeDetectedGame&g,unsigned long long e=5){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveCommitLocked(g,e);} \
+ static void touch(){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveTouchLocked();} \
+ static void clear(){std::lock_guard lock(NS::g_gameValveMx);NS::nativeValveClearLocked();} \
+ static void acquire(){NS::nativeValveAcquire();} \
+ static bool read(NativeDetectedGame*g,unsigned long long*n){return NS::nativeValveReadCurrentTarget(g,n);} \
+ static auto& raw(){return NS::g_gameValveTarget;} \
+};
+ADAPTER(Old,frozen)
+ADAPTER(New,production)
+#undef ADAPTER
+unsigned checks=0,cases=0,maxPortSteps=0;
+void check(bool okay,const std::string& why){++checks;if(!okay)throw std::runtime_error(why);}
+NativeDetectedGame original(){NativeDetectedGame g;g.pid=10340;g.name=L"bluey";g.title=L"Bluey";g.path=L"D:\\Game\\Bluey.exe";g.processCreated=134372069314736092ULL;g.workingSet=900;g.whitelisted=true;g.customConfigured=true;g.whitelistRule=L"bluey";return g;}
+template<class A> void reset(){ports::s={};g_gameRulesEpoch=5;ports::s.process=original();ports::s.candidate=original();A::reset();A::commit(original());}
+struct Result{bool accepted=false;View begin,end;unsigned long long output=999;NativeDetectedGame game;unsigned hooks=0;};
+template<class A> Result round(ports::Point point,std::function<void()> hook,bool expected,const char*name){
+ Result r;r.begin=A::view();ports::s.point=point;ports::s.hook=std::move(hook);r.game.pid=999;
+ r.accepted=A::read(&r.game,&r.output);r.end=A::view();r.hooks=ports::s.hooks;
+ maxPortSteps=std::max(maxPortSteps,ports::s.steps);++cases;check(r.accepted==expected,name);
+ if(point!=ports::Point::None)check(r.hooks==1,std::string(name)+": interleaving not executed once");
+ if(expected){check(r.output==r.begin.generation,std::string(name)+": output lost snapshot publication generation");check(r.game.pid==r.begin.game.pid&&r.game.processCreated==r.begin.game.processCreated&&r.game.path==r.begin.game.path,std::string(name)+": output identity changed");}
+ else check(r.output==999&&r.game.pid==999,std::string(name)+": failed reader published output");
+ return r;
+}
+void readers(){
+ reset<Old>();round<Old>(ports::Point::None,{},true,"frozen stable original");
+ reset<New>();round<New>(ports::Point::None,{},true,"production stable original");
+ for(auto point:{ports::Point::Rules,ports::Point::FirstIdentity,ports::Point::FinalIdentity}){
+  reset<Old>();auto b=round<Old>(point,[]{Old::touch();},false,"frozen same identity heartbeat falsely refuses");
+  check(b.begin.game.pid==b.end.game.pid&&b.begin.game.processCreated==b.end.game.processCreated&&b.begin.game.path==b.end.game.path&&b.begin.rules==b.end.rules&&b.end.generation>b.begin.generation,"frozen reproduction changed identity/rules");
+  reset<New>();auto n=round<New>(point,[]{New::touch();},true,"production same identity heartbeat remains current");check(n.end.generation>n.begin.generation&&n.end.identity==n.begin.identity,"touch lease/publication semantics");
+ }
+ reset<Old>();round<Old>(ports::Point::FinalIdentity,[]{Old::acquire();},false,"frozen real Acquire heartbeat falsely refuses");check(ports::s.publications==1&&ports::s.scans==0,"frozen retained Acquire branch not executed");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{New::acquire();},true,"production real Acquire heartbeat remains current");check(ports::s.publications==1&&ports::s.scans==0,"production retained Acquire branch not executed");
+ reset<Old>();round<Old>(ports::Point::Rules,[]{Old::commit(original());},false,"frozen same selection commit falsely refuses");
+ reset<New>();round<New>(ports::Point::Rules,[]{New::commit(original());},true,"same selection commit preserves lease");
+ const std::vector<std::pair<const char*,std::function<void(NativeDetectedGame&)>>> changes={
+ {"pid",[](auto&g){++g.pid;}},{"birth",[](auto&g){++g.processCreated;}},{"path",[](auto&g){g.path=L"D:\\Other\\Bluey.exe";}},
+ {"custom",[](auto&g){g.customConfigured=false;}},{"whitelisted",[](auto&g){g.whitelisted=false;}},{"whitelist-rule",[](auto&g){g.whitelistRule=L"blue*";}}};
+ for(const auto&[name,change]:changes){
+  reset<New>();auto changed=original();change(changed);auto lease=New::view().identity;New::commit(changed);check(New::view().identity>lease,std::string("commit must advance lease: ")+name);
+  reset<New>();round<New>(ports::Point::FinalIdentity,[changed]{New::commit(changed);},false,name);
+  reset<New>();round<New>(ports::Point::FinalIdentity,[changed]{New::commit(changed);New::commit(original());},false,(std::string("ABA ")+name).c_str());
+ }
+ reset<New>();round<New>(ports::Point::Rules,[]{New::clear();},false,"clear revokes");
+ reset<New>();round<New>(ports::Point::Rules,[]{New::clear();New::commit(original());},false,"clear then same target ABA revokes");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{++g_gameRulesEpoch;},false,"late global rule epoch revokes");
+ reset<New>();round<New>(ports::Point::Rules,[]{++g_gameRulesEpoch;},false,"disk rule epoch revokes");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{New::commit(original(),6);},false,"late snapshot rules revoke");
+ reset<New>();auto lease=New::view().identity;New::commit(original(),6);check(New::view().identity>lease,"rule selection commit advances identity lease");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{New::commit(original(),6);New::commit(original(),5);},false,"rules ABA revokes");
+ // Defense checks alter one final snapshot field without a commit; these test
+ // the independent full-identity/rule comparisons, not realistic writers.
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{++New::raw().game.pid;},false,"final pid defense");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{++New::raw().game.processCreated;},false,"final birth defense");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{New::raw().game.path=L"D:\\Other\\Bluey.exe";},false,"final path defense");
+ reset<New>();round<New>(ports::Point::FinalIdentity,[]{++New::raw().rulesEpoch;},false,"final rules defense");
+ reset<New>();New::raw().identityGeneration=0;round<New>(ports::Point::None,{},false,"zero identity lease refuses");
+ reset<New>();New::raw().generation=0;round<New>(ports::Point::None,{},false,"zero publication refuses");
+ reset<New>();ports::s.process.processCreated++;round<New>(ports::Point::None,{},false,"OS birth mismatch refuses");
+ reset<New>();ports::s.process.path=L"D:\\Other\\Bluey.exe";round<New>(ports::Point::None,{},false,"OS path mismatch refuses");
+ reset<New>();ports::s.sameSession=false;round<New>(ports::Point::None,{},false,"foreign session refuses");
+ reset<New>();ports::s.identityOk=false;round<New>(ports::Point::None,{},false,"identity I/O failure refuses");
+ reset<New>();ports::s.white.clear();ports::s.black.push_back(L"bluey");round<New>(ports::Point::None,{},false,"removed whitelist honors exclusions");
+ reset<New>();ports::s.white.clear();ports::s.memory=499;round<New>(ports::Point::None,{},false,"removed whitelist enforces memory gate");
+ reset<New>();ports::s.custom.clear();round<New>(ports::Point::None,{},false,"removed custom admission refuses");
+}
+void writers(){
+ reset<New>();auto b=New::view();New::touch();auto n=New::view();check(n.generation>b.generation&&n.identity==b.identity&&n.last>b.last&&n.selected==b.selected,"touch only advances heartbeat publication");
+ reset<New>();b=New::view();auto same=original();same.title=L"new title";same.workingSet=1000;New::commit(same);n=New::view();check(n.generation>b.generation&&n.identity==b.identity&&n.selected==b.selected,"display/memory refresh preserves lease");
+ reset<New>();b=New::view();same=original();same.path=L"d:\\game\\bluey.exe";New::commit(same);check(New::view().identity==b.identity,"path case alone preserves lease");
+ reset<New>();New::raw().identityGeneration=0;New::commit(original());check(New::view().identity>0,"initial zero lease is repaired by commit");
+ reset<New>();b=New::view();New::clear();n=New::view();check(n.generation>b.generation&&n.identity> b.identity&&!n.game.pid,"clear always advances lease and publication");auto previous=n.identity;auto publication=n.generation;New::clear();check(New::view().identity==previous&&New::view().generation>publication,"repeated no-game heartbeat preserves identity lease and advances publication");
+}
+json wireSamples=json::array();
+void responses(){
+ reset<New>();production::NativeGameValveSnapshot observation;
+ const auto selected=production::nativeValveAcquire(0,0,&observation);
+ check(selected.pid==observation.game.pid&&selected.processCreated==observation.game.processCreated,"response captures the elected process instance");
+ check(observation.generation==New::view().generation&&observation.identityGeneration==New::view().identity&&observation.generation>0,"response carries the same lock-captured observation and identity lease");
+ auto payload=production::nativeGameTargetJson(observation);wireSamples.push_back(payload);
+ check(payload["valid"]==true&&payload["pid"]==selected.pid&&payload["processCreated"]==std::to_string(selected.processCreated),"valid wire payload retains elected identity");
+ check(payload["generation"]==observation.generation&&payload["identityGeneration"]==observation.identityGeneration,"valid wire payload carries both generations");
+ New::clear();observation=New::raw();payload=production::nativeGameTargetJson(observation);wireSamples.push_back(payload);
+ check(payload["valid"]==false&&payload["pid"]==0&&payload["processCreated"]=="0","no-game wire payload is an explicit invalid tombstone");
+ check(payload["generation"]==observation.generation&&payload["identityGeneration"]==observation.identityGeneration,"invalid wire payload retains ordered generations");
+}
+int main(){try{readers();writers();responses();std::cout<<"{\"passed\":true,\"checks\":"<<checks<<",\"wireSamples\":"<<wireSamples.dump()<<",\"readerCases\":"<<cases<<",\"maxPortSteps\":"<<maxPortSteps<<",\"portStepBudget\":256,\"frozenHeartbeatFalseRejectionReproduced\":true,\"productionHeartbeatAccepted\":true,\"actualAcquireRetainedBranchExecuted\":true,\"targetAndClearABARejected\":true,\"realWindowsOrSteamActions\":0}";return 0;}catch(const std::exception&e){std::cerr<<e.what()<<'\n';return 1;}}

@@ -1,20 +1,28 @@
 import { invoke, isNativeRuntime } from './ipc';
+import { screenTouchpadDefaults } from './screenTouchpadDefaults';
+export { screenTouchpadDefaults, SCREEN_TOUCHPAD_DEFAULT } from './screenTouchpadDefaults';
 
 export type ScreenTouchpadLayout = 'off' | 'dual' | 'single';
+export type ScreenAutoHideSeconds = 0 | 15 | 30 | 45 | 60 | 120;
+export type TouchFeedbackMode = 'off' | 'minimal' | 'medium' | 'strong';
 export type StandaloneSpecialMode = 'off' | 'steamdeck' | 'ps5';
 export type ScreenSummonPosition = 'off' | 'left' | 'right';
 export type SingleTouchpadMode = 'dualsense' | 'wasd' | 'arrows' | 'mouse';
 export type LeftTouchpadMode = 'steamdeck' | 'dualsense' | 'wasd' | 'arrows' | 'mouse' | 'off';
 export type RightTouchpadMode = 'steamdeck' | 'dualsense' | 'mouse' | 'off';
 export interface ScreenTouchpadConfig {
+  /** Master gate for this persona; layout and all mappings stay saved while off. */
+  masterEnabled: boolean;
   enabled: boolean; // Legacy/native compatibility; layout is the UI authority.
   layout: ScreenTouchpadLayout;
   singleMode: SingleTouchpadMode;
   leftMode: LeftTouchpadMode;
   rightMode: RightTouchpadMode;
   transparency: number;
+  autoHideSeconds: ScreenAutoHideSeconds;
   mouseSensitivity: number;
   scale: number;
+  touchFeedback: TouchFeedbackMode;
   summonPosition: ScreenSummonPosition;
   standaloneSpecialMode: StandaloneSpecialMode; // Dedicated-key pair in the disabled profile only.
   specialMask: number;
@@ -27,35 +35,33 @@ export interface ScreenTouchpadConfig {
 export type ScreenTouchpadPersona = 'disabled' | 'steamdeck' | 'dualsense-edge' | 'elite';
 export function screenTouchpadProfile(persona: string): ScreenTouchpadPersona {
   if (persona === 'steamdeck') return 'steamdeck';
-  if (['dualsense-edge', 'dualsense', 'dualshock4'].includes(persona)) return 'dualsense-edge';
-  if (['elite', 'xbox360'].includes(persona)) return 'elite';
+  if (persona === 'dualsense-edge') return 'dualsense-edge';
+  if (persona === 'elite') return 'elite';
   return 'disabled';
 }
-export function screenTouchpadDefaults(persona: ScreenTouchpadPersona): ScreenTouchpadConfig {
-  // Presets seed missing profiles only; persisted user settings remain authoritative.
-  if (persona === 'steamdeck') return { ...SCREEN_TOUCHPAD_DEFAULT, enabled: true, layout: 'dual', specialMask: 3, specialEnabled: true };
-  if (persona === 'dualsense-edge') return { ...SCREEN_TOUCHPAD_DEFAULT, enabled: true, layout: 'single',
-    leftMode: 'dualsense', rightMode: 'dualsense', singleMode: 'dualsense', specialMask: 3, specialEnabled: true };
-  return { ...SCREEN_TOUCHPAD_DEFAULT, leftMode: 'wasd', rightMode: 'mouse',
-    ...(persona === 'elite' ? { specialMask: 1, specialEnabled: true } : {}) };
-}
 export interface ScreenTouchpadState extends ScreenTouchpadConfig {
-  persona?: ScreenTouchpadPersona; steamDeckAvailable?: boolean; ps5Available?: boolean; ps4Available?: boolean;
+  persona?: ScreenTouchpadPersona; steamDeckAvailable?: boolean; ps5Available?: boolean;
   ok: boolean; available: boolean; visible: boolean;
   events?: number; injectedInputs?: number; repaints?: number;
-  error?: number; reason?: string;
+  autoHidden?: boolean;
+  error?: number; reason?: string; settingsSaved?: boolean;
   standaloneSpecialStatus?: string; standaloneSpecialRequests?: number; standaloneSpecialCompleted?: number;
 }
-export const SCREEN_TOUCHPAD_DEFAULT: ScreenTouchpadConfig = {
-  summonPosition: 'off', standaloneSpecialMode: 'off', specialMask: 0, rearMask: 0,
-  summonEnabled: false, specialEnabled: false, rearEnabled: false,
-  enabled: false, layout: 'off', singleMode: 'mouse', leftMode: 'steamdeck', rightMode: 'steamdeck', transparency: 80, mouseSensitivity: 100, scale: 100,
-};
 export const STANDALONE_SPECIAL_MODES = [
   { value: 'off', label: '关闭' }, { value: 'steamdeck', label: '开启Steam全部' }, { value: 'ps5', label: '开启PS5全部' },
 ] as const;
 export const SCREEN_SUMMON_POSITIONS = [
   { value: 'off', label: '关闭' }, { value: 'left', label: '左侧呼出' }, { value: 'right', label: '右侧呼出' },
+] as const;
+export const SCREEN_AUTO_HIDE_OPTIONS = [
+  { value: 0, label: '关闭' }, { value: 15, label: '15秒' }, { value: 30, label: '30秒' },
+  { value: 45, label: '45秒' }, { value: 60, label: '60秒' }, { value: 120, label: '120秒' },
+] as const;
+export const TOUCH_FEEDBACK_MODES = [
+  { value: 'off', label: '关闭' },
+  { value: 'minimal', label: '最小震动反馈' },
+  { value: 'medium', label: '中震动反馈' },
+  { value: 'strong', label: '强震动反馈' },
 ] as const;
 export const SCREEN_TOUCHPAD_LAYOUTS = [
   { value: 'off', label: '关闭' }, { value: 'dual', label: '双触摸板' }, { value: 'single', label: '单触摸板' },
@@ -84,8 +90,10 @@ export function validateScreenTouchpadPatch(patch: Partial<ScreenTouchpadConfig>
   return entries.every(([key, value]) => {
     switch (key) {
       case 'layout': return SCREEN_TOUCHPAD_LAYOUTS.some(v => v.value === value);
+      case 'autoHideSeconds': return SCREEN_AUTO_HIDE_OPTIONS.some(option => option.value === value);
+      case 'touchFeedback': return TOUCH_FEEDBACK_MODES.some(v => v.value === value);
       case 'singleMode': return SINGLE_TOUCHPAD_MODES.some(v => v.value === value);
-      case 'enabled': case 'summonEnabled': case 'specialEnabled': case 'rearEnabled': return typeof value === 'boolean';
+      case 'masterEnabled': case 'enabled': case 'summonEnabled': case 'specialEnabled': case 'rearEnabled': return typeof value === 'boolean';
       case 'summonPosition': return value === 'off' || value === 'left' || value === 'right';
       case 'standaloneSpecialMode': return STANDALONE_SPECIAL_MODES.some(mode => mode.value === value);
       case 'specialMask': return Number.isInteger(value) && Number(value) >= 0 && Number(value) <= 3;

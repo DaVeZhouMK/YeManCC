@@ -10,6 +10,7 @@ type Pending = {
   resolve: (v: unknown) => void;
   reject: (e: Error) => void;
   timeout?: ReturnType<typeof setTimeout>;
+  dispose?: () => void;
 };
 
 type WebViewBridge = {
@@ -25,8 +26,20 @@ export type IpcMessage = {
   data?: unknown;
 };
 
+/** A native handler/queue returned an error receipt; unlike bridge loss this
+ * proves the request is no longer an unacknowledged native operation. */
+export class IpcRemoteError extends Error {}
+
+/** Only a local response timer can produce this; remote error text is not a timeout. */
+export class IpcTimeoutError extends Error {
+  readonly code = 'IPC_TIMEOUT';
+  constructor(readonly command:string) { super(`IPC command timed out: ${command}`); }
+}
+
 export interface InvokeOptions {
   timeoutMs?: number;
+  /** Forget this request only; native cancellation requires its own receipt. */
+  signal?: AbortSignal;
 }
 
 export interface LogEntry {
@@ -49,6 +62,11 @@ let logSink: ((e: LogInput) => void) | null = null;
 // after the WebView render-ready replay.
 let lastGamepadState: unknown = null;
 let hasLastGamepadState = false;
+
+/** Latest native snapshot for read-only admission checks; absence remains unknown. */
+export function getLastGamepadState(): unknown {
+  return hasLastGamepadState ? lastGamepadState : null;
+}
 
 export function setLogSink(fn: ((e: LogInput) => void) | null): void {
   logSink = fn;
@@ -92,6 +110,7 @@ export function rejectAllPending(reason = 'WebView2 is recovering'): void {
   for (const [id, request] of pending) {
     pending.delete(id);
     if (request.timeout) clearTimeout(request.timeout);
+    request.dispose?.();
     request.reject(error);
   }
 }
@@ -111,7 +130,8 @@ if (hasWebView) {
       if (p) {
         pending.delete(msg.id);
         if (p.timeout) clearTimeout(p.timeout);
-        if ('error' in msg) p.reject(new Error(String(msg.error)));
+        p.dispose?.();
+        if ('error' in msg) p.reject(new IpcRemoteError(String(msg.error)));
         else p.resolve(msg.result);
       }
     }
@@ -135,19 +155,30 @@ export function invoke<T = unknown>(
       reject(new Error('Not running in WebView2'));
       return;
     }
+    if (options.signal?.aborted) { reject(new Error("IPC request retired")); return; }
     const id = nextId++;
     const timeout =
       options.timeoutMs && options.timeoutMs > 0
         ? setTimeout(() => {
             pending.delete(id);
-            reject(new Error(`IPC command timed out: ${cmd}`));
+            options.signal?.removeEventListener("abort", abort);
+            reject(new IpcTimeoutError(cmd));
           }, options.timeoutMs)
         : undefined;
-    pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timeout });
+    const abort = () => {
+      if (!pending.delete(id)) return;
+      if (timeout) clearTimeout(timeout);
+      options.signal?.removeEventListener('abort', abort);
+      reject(new Error('IPC request retired'));
+    };
+    options.signal?.addEventListener('abort', abort, { once: true });
+    pending.set(id, { resolve: resolve as (v: unknown) => void, reject, timeout,
+      dispose: () => options.signal?.removeEventListener('abort', abort) });
     try {
       webview!.postMessage({ id, cmd, args });
     } catch (err) {
       pending.delete(id);
+      options.signal?.removeEventListener("abort", abort);
       if (timeout) clearTimeout(timeout);
       const m = err instanceof Error ? err.message : String(err);
       reject(err instanceof Error ? err : new Error(m));

@@ -1,4 +1,4 @@
-import type { InputPersona } from './inputContracts';
+import { isControllerPersona, type ControllerPersona } from './controllerPersona';
 import { HC_MIN_GYRO_THRESHOLD_DPS } from './hcInputUtils';
 
 export type Vec3 = { x: number; y: number; z: number };
@@ -7,9 +7,7 @@ export type MotionSampleRejection =
   | 'sample-invalid'
   | 'matrix-unverified'
   | 'provider-ingress-unverified'
-  | 'persona-motion-unsupported'
-  | 'descriptor-unverified'
-  | 'direct-imu-path-unresolved';
+  | 'persona-motion-unsupported';
 
 export interface HcAxisMatrixV1 {
   schemaVersion: 1;
@@ -148,15 +146,14 @@ export interface GamepadMotionPortV1 {
 }
 
 export interface MotionPersonaRequestV1 {
-  persona: InputPersona;
-  outputMode: 'virtual-stick' | 'ds4-imu' | 'disabled';
-  descriptorVerified: boolean;
+  persona: ControllerPersona;
+  outputMode: 'virtual-stick' | 'disabled';
   mappedGyroXY: { x: number; y: number };
   rawDsu: { gyro: Vec3; accel: Vec3 };
 }
 
 export type MotionPersonaResult =
-  | { ok: true; reportSemantic: 'virtual-stick' | 'ds4-imu' | 'none'; gyroContributionActive: boolean; imuEncoded: false }
+  | { ok: true; reportSemantic: 'virtual-stick' | 'none'; gyroContributionActive: boolean; imuEncoded: false }
   | { ok: false; reason: MotionSampleRejection };
 
 const finite = (value: number) => Number.isFinite(value);
@@ -258,21 +255,15 @@ export function processPairedMotion(sample: MotionSampleV1, port: GamepadMotionP
 }
 
 /**
- * Persona boundary only. A descriptor claim is not an encoder, independent
- * decoder/readback, or consumer observation. Until the complete T12 gate is
- * wired to a real DS4 report path, this helper must return no-report.
+ * Mock motion-action boundary for current personas. This helper never encodes
+ * IMU reports; raw IMU in normal Edge reports belongs to its existing report
+ * path and is independent of the stick contribution modeled here.
  */
 export function evaluateMotionPersona(request: MotionPersonaRequestV1): MotionPersonaResult {
+  if (!isControllerPersona(request.persona) || (request.outputMode !== 'virtual-stick' && request.outputMode !== 'disabled')) {
+    return { ok: false, reason: 'persona-motion-unsupported' };
+  }
   if (request.outputMode === 'disabled') return { ok: true, reportSemantic: 'none', gyroContributionActive: false, imuEncoded: false };
   if (request.persona === 'disabled') return { ok: false, reason: 'persona-motion-unsupported' };
-  if (request.persona === 'xbox360') {
-    if (request.outputMode === 'ds4-imu') return { ok: false, reason: 'persona-motion-unsupported' };
-    return { ok: true, reportSemantic: 'virtual-stick', gyroContributionActive: true, imuEncoded: false };
-  }
-  if (request.outputMode === 'virtual-stick') return { ok: true, reportSemantic: 'virtual-stick', gyroContributionActive: true, imuEncoded: false };
-  // A missing descriptor fails at the metadata boundary. A claimed descriptor
-  // alone still cannot admit a DS4 IMU report: YMCC has no connected encoder,
-  // independent decoder/readback, or admitted consumer path for it.
-  if (!request.descriptorVerified) return { ok: false, reason: 'descriptor-unverified' };
-  return { ok: false, reason: 'direct-imu-path-unresolved' };
+  return { ok: true, reportSemantic: 'virtual-stick', gyroContributionActive: true, imuEncoded: false };
 }

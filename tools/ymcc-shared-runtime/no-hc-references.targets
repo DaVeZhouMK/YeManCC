@@ -1,0 +1,10 @@
+<Project>
+  <Target Name="YmccAuditResolvedReferences" AfterTargets="ResolveReferences">
+    <ItemGroup>
+      <_YmccResolved Include="@(ReferencePath);@(ReferenceCopyLocalPaths)" />
+      <_YmccForbidden Include="@(_YmccResolved)" Condition="$([System.String]::Copy('%(_YmccResolved.FullPath)').ToLowerInvariant().Contains('handheldcompanion-runtime'))" />
+    </ItemGroup>
+    <Error Condition="'@(_YmccForbidden)' != ''" Text="HC directory dependency forbidden in isolated build: @(_YmccForbidden)" />
+    <WriteLinesToFile File="$(YmccReferenceReceipt)" Lines="@(_YmccResolved->'%(FullPath)')" Overwrite="true" />
+  </Target>
+</Project>

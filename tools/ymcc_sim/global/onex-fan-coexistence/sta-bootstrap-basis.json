@@ -1,0 +1,372 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-derived-sta-bootstrap-basis",
+  "caseIds": [
+    "sta-existing-real-dispatcher-selftest",
+    "sta-public-handshake-real-pump",
+    "sta-public-initialization-retry-same-thread",
+    "sta-public-reentrant-handshake-refused",
+    "sta-normal-disposal-joins-owned-thread",
+    "sta-start-failure-is-terminal-and-disposable",
+    "sta-disposed-before-start-does-not-bootstrap",
+    "sta-disposal-from-own-thread-stops-pump",
+    "sta-disposal-during-startup-does-not-leak-pump",
+    "sta-ended-pump-cannot-be-reused",
+    "sta-concurrent-cold-start-has-one-owner",
+    "sta-dispose-before-thread-start-does-not-join-unstarted",
+    "sta-busy-admission-serializes-public-handshake",
+    "sta-workitem-error-retires-before-next-call",
+    "sta-pump-exit-rejects-pending-public-work",
+    "sta-failed-factory-disposal-joins-thread"
+  ],
+  "caseSourceWitnesses": [
+    {
+      "id": "sta-existing-real-dispatcher-selftest",
+      "line": 47,
+      "expression": "StaCase(\"sta-existing-real-dispatcher-selftest\","
+    },
+    {
+      "id": "sta-public-handshake-real-pump",
+      "line": 53,
+      "expression": "StaCase(\"sta-public-handshake-real-pump\","
+    },
+    {
+      "id": "sta-public-initialization-retry-same-thread",
+      "line": 64,
+      "expression": "StaCase(\"sta-public-initialization-retry-same-thread\","
+    },
+    {
+      "id": "sta-public-reentrant-handshake-refused",
+      "line": 69,
+      "expression": "StaCase(\"sta-public-reentrant-handshake-refused\","
+    },
+    {
+      "id": "sta-normal-disposal-joins-owned-thread",
+      "line": 74,
+      "expression": "StaCase(\"sta-normal-disposal-joins-owned-thread\","
+    },
+    {
+      "id": "sta-start-failure-is-terminal-and-disposable",
+      "line": 79,
+      "expression": "StaCase(\"sta-start-failure-is-terminal-and-disposable\","
+    },
+    {
+      "id": "sta-disposed-before-start-does-not-bootstrap",
+      "line": 88,
+      "expression": "StaCase(\"sta-disposed-before-start-does-not-bootstrap\","
+    },
+    {
+      "id": "sta-disposal-from-own-thread-stops-pump",
+      "line": 93,
+      "expression": "StaCase(\"sta-disposal-from-own-thread-stops-pump\","
+    },
+    {
+      "id": "sta-disposal-during-startup-does-not-leak-pump",
+      "line": 100,
+      "expression": "StaCase(\"sta-disposal-during-startup-does-not-leak-pump\","
+    },
+    {
+      "id": "sta-ended-pump-cannot-be-reused",
+      "line": 114,
+      "expression": "StaCase(\"sta-ended-pump-cannot-be-reused\","
+    },
+    {
+      "id": "sta-concurrent-cold-start-has-one-owner",
+      "line": 123,
+      "expression": "StaCase(\"sta-concurrent-cold-start-has-one-owner\","
+    },
+    {
+      "id": "sta-dispose-before-thread-start-does-not-join-unstarted",
+      "line": 138,
+      "expression": "StaCase(\"sta-dispose-before-thread-start-does-not-join-unstarted\","
+    },
+    {
+      "id": "sta-busy-admission-serializes-public-handshake",
+      "line": 152,
+      "expression": "StaCase(\"sta-busy-admission-serializes-public-handshake\","
+    },
+    {
+      "id": "sta-workitem-error-retires-before-next-call",
+      "line": 163,
+      "expression": "StaCase(\"sta-workitem-error-retires-before-next-call\","
+    },
+    {
+      "id": "sta-pump-exit-rejects-pending-public-work",
+      "line": 169,
+      "expression": "StaCase(\"sta-pump-exit-rejects-pending-public-work\","
+    },
+    {
+      "id": "sta-failed-factory-disposal-joins-thread",
+      "line": 195,
+      "expression": "StaCase(\"sta-failed-factory-disposal-joins-thread\","
+    }
+  ],
+  "negativeFragments": {
+    "self-stop": {
+      "sta-disposal-from-own-thread-stops-pump": "Disposal on the lifecycle STA must stop its own message pump"
+    },
+    "startup-stop": {
+      "sta-disposal-during-startup-does-not-leak-pump": "A disposed pre-publication STA must not enter an unowned message pump"
+    },
+    "ended-owner": {
+      "sta-ended-pump-cannot-be-reused": "Expected ObjectDisposedException; got"
+    },
+    "start-atomic": {
+      "sta-concurrent-cold-start-has-one-owner": "The actual Thread.Start boundary must remain inside its published owner gate",
+      "sta-dispose-before-thread-start-does-not-join-unstarted": "Concurrent disposal must not Join an unstarted thread"
+    },
+    "pending-work": {
+      "sta-pump-exit-rejects-pending-public-work": "Pending public work must be rejected promptly by its ended dispatcher"
+    }
+  },
+  "generationBudgetMs": 30000,
+  "replayBudgetMs": 45000,
+  "positiveMinimumChecks": 100,
+  "sources": {
+    "staProof": "3f86e61ea36b9c6161b8f3a997d0dfbbc2f174a04201d8e3c830b25b11465419",
+    "staCases": "2d569ae54e132957031223eacde1980e632e7444ac93ba4cb8f7ee559456515d",
+    "harness": "c362b198a0ba0c095bbada1028ed01c5ece13bdd410a90adefd14fd8a3b4def8",
+    "harnessLoader": "b282c1fa11c0bf026dd54f68d1b49dcb0c0fff473e1965d8c6b465109e3b0230",
+    "fixture": "67d13ce16340dd086554c3e8dca8bc2122f204aedf878f9943f273a9d13cf154",
+    "hostSource": "276068d4031942fbc550b1ecd98f55903ff0307c0e8193b236770e187adc9eb6",
+    "factoryCases": "bb62318b9984696ccc9af34bfd844fdfb43b5f27cafd5103d8f3c637ca2b123b"
+  },
+  "factoryPrepareSha256": "3805dc5105d1c7fca2c2bdbe7b442fb49adddbd94ed66f62b048a9bd6305c2d1",
+  "factoryBasisSha256": "f10e9fd5c9520d24d2a39fb550b5562ed2e38b9bc4e40a464bdf750ea6a9e653",
+  "rawReaderSha256": "3bd052bb0165ad8ce1765e2b9ab3504ccec443fa350f365dca1bf899b50e928e",
+  "ensureSignature": "System.Windows.Threading.Dispatcher YeManFanHost.RealHcBackend::EnsureStaDispatcher()",
+  "startOpcode": "callvirt",
+  "startOperand": "System.Void System.Threading.Thread::Start() [scope=System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a]",
+  "startProbeOperand": "System.Void ConsumerFixture.StaPorts::BeforeThreadStart(System.Threading.Thread,System.Object) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]",
+  "leaves": [
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateFormalSessionCapabilityAcl()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "validation.acl"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ],
+      "isStatic": false
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateDeploymentGenerationForHcLoad()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "validation.payload"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ],
+      "isStatic": false
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateGamepadMotion()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "assembly.native"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ],
+      "isStatic": false
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ConfigureHcRuntime()",
+      "instructions": [
+        {
+          "opcode": "ldstr",
+          "operand": "assembly.configure"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Check(System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ],
+      "isStatic": false
+    },
+    {
+      "signature": "System.Reflection.Assembly YeManFanHost.RealHcBackend::ResolveDependency(System.Runtime.Loader.AssemblyLoadContext,System.Reflection.AssemblyName)",
+      "instructions": [
+        {
+          "opcode": "ldarg.0",
+          "operand": ""
+        },
+        {
+          "opcode": "ldarg.2",
+          "operand": ""
+        },
+        {
+          "opcode": "callvirt",
+          "operand": "System.String System.Reflection.AssemblyName::get_Name() [scope=System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e]"
+        },
+        {
+          "opcode": "call",
+          "operand": "System.Void ConsumerFixture.FactoryPorts::Resolve(System.Object,System.String) [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ldnull",
+          "operand": ""
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ],
+      "isStatic": false
+    },
+    {
+      "signature": "System.UInt32 YeManFanHost.RealHcBackend::ReadCurrentOsThreadId()",
+      "isStatic": true,
+      "instructions": [
+        {
+          "opcode": "call",
+          "operand": "System.UInt32 ConsumerFixture.StaPorts::ReadOsThreadId() [scope=HandheldCompanion, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null]"
+        },
+        {
+          "opcode": "ret",
+          "operand": ""
+        }
+      ]
+    }
+  ],
+  "realOsActions": [
+    "actual foreground Thread.Start with SetApartmentState(STA), task callers and synchronization waits",
+    "real WindowsBase Dispatcher.CurrentDispatcher/Run/BeginInvoke/shutdown; framework Win32/COM internals remain real OS work",
+    "synthetic StaPorts.ReadOsThreadId forwards to kernel32.GetCurrentThreadId; original Host PInvoke alone is rebound",
+    "real Thread.Join and per-case owned-thread cleanup; no fabricated thread/dispatcher model",
+    "selftest HostOptions.Parse(empty) calls framework cryptographic RNG; no Host Main/product startup"
+  ],
+  "selectedMethods": [
+    {
+      "signature": "System.Collections.Generic.IReadOnlyList`1<System.String> YeManFanHost.RealHcBackend::RunStaDispatcherSelfTest()",
+      "canonicalSha256": "f2e1cac5135a6700d45bfcda52096be4ced62170f73a39d524b911243114f0e3"
+    },
+    {
+      "signature": "System.Reflection.Assembly YeManFanHost.RealHcBackend::ResolveDependency(System.Runtime.Loader.AssemblyLoadContext,System.Reflection.AssemblyName)",
+      "canonicalSha256": "f0f997d80e472067f3eeaab3f289ba757b0e59e421ff663c12f55d4dee94bc05"
+    },
+    {
+      "signature": "System.UInt32 YeManFanHost.RealHcBackend::ReadCurrentOsThreadId()",
+      "canonicalSha256": "4ea269672e64cadc312f4157f384cbc05fe1d2f041ae32374d80f15e73423b02"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::.cctor()",
+      "canonicalSha256": "9189a6856a14bab87c9667c04c09b9b7d4afc68d11e5abce628c7b923569819b"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::.ctor(YeManFanHost.HostOptions)",
+      "canonicalSha256": "caa578de31fba007d46699065c0a2a6b6e4291c9295911ff7d82c87757d92971"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ConfigureHcRuntime()",
+      "canonicalSha256": "5e6fa283c561c842ea38fa873b4136a3aa8c8158edc157362abbb9946798d3f5"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::Dispose()",
+      "canonicalSha256": "1ef9ae62c62292048c8e49df4984e3dec8b1adabed6718176e1abd0c2e3cff5b"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ExecuteStaWorkItem(YeManFanHost.RealHcBackend/StaWorkItem`1<T>)",
+      "canonicalSha256": "7dfa698cfd7dde800e2be14508c742e354ea78384dfa29615baf4038132f525f"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::LoadAssemblyAndFactory()",
+      "canonicalSha256": "111bb6dc990e47d7f76c2fa5fd61c737926b842ac94d76d537167e1bdca79e06"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::OnStaBounded(System.Action,System.String)",
+      "canonicalSha256": "762664b894eddb055aa4d77261111287b6ff7c3f8b9140707e988362f72fadd8"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::RunHcInitializationStage(System.String,System.Action,System.Action`2<System.String,System.Object>)",
+      "canonicalSha256": "5c12db24f23497ace0ad441fe19213b3eb82c9d5bb6422d8c3e0248fe13fabdb"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::StaDispatcherLoop()",
+      "canonicalSha256": "e88f5b944a9d6e2bf8506129db81975db2072dbcabaea24e35cf25e6e8c38fef"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateDeploymentGenerationForHcLoad()",
+      "canonicalSha256": "7b40e7e9232a149bf52bb293b0fc702deb4c225f094bf6e8a43ee97a3c8a9858"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateFormalSessionCapabilityAcl()",
+      "canonicalSha256": "bee2a325e54dbf6996b063b4a633111e43af97a45d657a93092a21d8555d2f00"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend::ValidateGamepadMotion()",
+      "canonicalSha256": "6de7c6238fe240d744daaa25fcf31092bb48603e5ad347048f10a5ee1dd12ac4"
+    },
+    {
+      "signature": "System.Windows.Threading.Dispatcher YeManFanHost.RealHcBackend::EnsureStaDispatcher()",
+      "canonicalSha256": "d16979f45510832ec5c94f2743cf6778ea0d6c17a9c03ee5145f37d36d2acc2f"
+    },
+    {
+      "signature": "T YeManFanHost.RealHcBackend::OnStaBounded(System.Func`1<T>,System.String)",
+      "canonicalSha256": "704c43db050dd570895c89fe328c7664913e59bbd68e10c9800d6eef5dc210ec"
+    },
+    {
+      "signature": "YeManFanHost.RealHandshakeResult YeManFanHost.RealHcBackend::LoadAndHandshake()",
+      "canonicalSha256": "7a64957065b061d2e0ab2b5b6418e8dd3ccef8e58f31e38480a22cd9a069fd64"
+    },
+    {
+      "signature": "YeManFanHost.RealHcBackend/HcStaThreadIdentity YeManFanHost.RealHcBackend::TryCaptureStaThreadIdentity(System.Func`1<System.UInt32>)",
+      "canonicalSha256": "276bcf4403e87db3423f843d2511bf9bb13512eb3f7614a4b712622026c9f4b5"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend/StaWorkItem`1::.ctor(YeManFanHost.RealHcBackend,System.Func`1<T>,System.String)",
+      "canonicalSha256": "614ece1140d8fc4bb4dffe6933a4c6034daab20bf510ca871371a4ad1901a3f3"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend/StaWorkItem`1::Dispatch()",
+      "canonicalSha256": "fad25c4661e84c4b2a7514f3039686df69b6b24a764da0ae6568f856fad2febb"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend/StaWorkItem`1::Execute()",
+      "canonicalSha256": "8d6a1ae0f16abfc91d6b79d9f133289bb7f74ec997b031218743b62b026357b2"
+    },
+    {
+      "signature": "System.Void YeManFanHost.RealHcBackend/StaWorkItem`1::RejectUnexecuted()",
+      "canonicalSha256": "dcb18b52bf71939489092e764ad2cda4f6e7b56ff6a78d426db649feebb1dea3"
+    },
+    {
+      "signature": "System.Void YeManFanHost.HostOptions::.ctor(System.Int32,System.Nullable`1<System.Int32>,System.String,System.Boolean,System.Boolean,System.String,System.String,System.String,System.Boolean,System.Boolean,System.Boolean,System.Int32,System.Int32,System.Boolean,System.Boolean,System.Boolean,System.Boolean,System.Boolean,System.Boolean,System.String,System.String,System.String,System.String,System.String,System.String,System.String,System.Boolean,System.Boolean,System.String,System.Nullable`1<System.Int32>,System.Boolean,System.Boolean,System.String)",
+      "canonicalSha256": "dfe7d8c2908f0694f9092091bf0a35efe5e11418f42a8250bee00e27391a2d08"
+    },
+    {
+      "signature": "System.Void YeManFanHost.HostOptions::.ctor(YeManFanHost.HostOptions)",
+      "canonicalSha256": "51ea60cf96b325a5b851a705d8e43ef31c89b32fe1c6774e913114b470fbd498"
+    },
+    {
+      "signature": "YeManFanHost.HostOptions YeManFanHost.HostOptions::Parse(System.String[])",
+      "canonicalSha256": "5bd74f575c37a37013f5cb09b07c42cba315d6df440dfa010a9dc7b05d5d7122"
+    }
+  ]
+}

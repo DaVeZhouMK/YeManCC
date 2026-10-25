@@ -1,16 +1,22 @@
 <script setup lang="ts">
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref } from 'vue';
+import SteamDeckMouseSensitivity from '@/components/SteamDeckMouseSensitivity.vue';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
+import { useShortcutPreviewFocus } from '@/composables/useShortcutPreviewFocus';
 import InlineIcon from '@/components/InlineIcon.vue';
-import { summonGet, summonSet, type GamepadSettings } from '@/bridge/yeman';
+import { oemKeysGet, summonGet, summonSet, type GamepadSettings } from '@/bridge/yeman';
 import { getGameInputRedistState, installGameInputRedist, setMouseBackend, type MouseBackend, type MouseModeState } from '@/bridge/gameproc';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
+import { preserveControllerShortcutRecords } from '@/bridge/controllerShortcutStorage';
+import { formatControllerShortcutDisplayInputs } from '@/bridge/controllerOemPresentation';
 import { compareAndSwapInputSettings, loadSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
 import {
   NATIVE_DEFAULT_SHORTCUTS,
+  OEM_EMPTY_SNAPSHOT,
+  type OemKeysSnapshot,
   actionById,
   isControllerShortcutActionVisible,
-  formatControllerShortcutInputs,
+  type ControllerShortcutInput,
   highlightedGamepadButtons,
   readControllerShortcutRules,
   reconcileControllerShortcutRules,
@@ -27,7 +33,7 @@ import {
  */
 // 2026-10-05：快捷开关与规则编辑共用同一张卡，页面负责原有编辑器生命周期。
 const emit = defineEmits<{ (e: 'open-editor'): void }>();
-const props = withDefaults(defineProps<{ steamDeckActive?: boolean }>(), { steamDeckActive: false });
+const props = withDefaults(defineProps<{ steamDeckActive?: boolean; persona?: string; previewTarget?: HTMLElement | null }>(), { steamDeckActive: false, persona: 'xbox' });
 const PAGE_SIZE = 8;
 const SYNC_EVENT = 'ipc:controller-shortcuts.updated';
 // 与虚拟手柄卡共用同一份输入配置快照（input 段）。
@@ -36,22 +42,22 @@ const snapshot = ref<InputSettingsSnapshot | null>(null);
 const page = ref(0);
 const busy = ref(false);
 const status = ref('读取快捷规则…');
-const hoverId = ref('');
-const focusId = ref('');
+const previewFocus = useShortcutPreviewFocus();
 const gridEl = ref<HTMLElement | null>(null);
-const activeId = computed(() => hoverId.value || focusId.value);
+const activeId = previewFocus.activeId;
 const visibleRules = computed(() => rules.value.filter((rule) => isControllerShortcutActionVisible(rule.actionId)));
 const activeRule = computed(() => visibleRules.value.find((rule) => rule.id === activeId.value) || null);
 const enabledCount = computed(() => visibleRules.value.filter((rule) => rule.enabled).length);
 const totalPages = computed(() => Math.max(1, Math.ceil(visibleRules.value.length / PAGE_SIZE)));
 const pagedRules = computed(() => visibleRules.value.slice(page.value * PAGE_SIZE, (page.value + 1) * PAGE_SIZE));
 const highlightedButtons = computed(() => highlightedGamepadButtons(activeRule.value));
-const activeInputText = computed(() => activeRule.value ? (formatControllerShortcutInputs(activeRule.value.inputs) || '未录入输入') : '');
+const highlightedOemKeys = computed(() => activeRule.value?.inputs.filter(input => input.source === 'oem').map(input => input.code) ?? []);
+const oemKeys = ref<OemKeysSnapshot>(OEM_EMPTY_SNAPSHOT);
 const mouseToggleEnabled = computed(() => rules.value.some((rule) => rule.enabled && rule.actionId === 'mouse.toggle'));
 // The visualizer still consumes GamepadSettings for its layout; only mouseBackend
 // is read back from it here (shortcut state now lives in the shared rule list).
 const gamepad = ref<GamepadSettings>({
-  enabled: true, bDoubleMinimize: true, startDoubleF7: true, tdpShortcut: true, fpsShortcut: true,
+  enabled: true, bDoubleMinimize: true, startDoubleF7: false, tdpShortcut: true, fpsShortcut: true,
   killGame: true, openKeyboard: true, returnDesktop: true, mouseToggle: true, mouseBackend: 'joyxoff',
 });
 const mouseBackendBusy = ref(false);
@@ -69,6 +75,9 @@ let gameInputRepairPoll = 0;
 function cloneRules(value: readonly ControllerShortcutRule[]): ControllerShortcutRule[] {
   return value.map((rule) => ({ ...rule, inputs: rule.inputs.map((input) => ({ ...input })), params: { ...rule.params } }));
 }
+function formatInputs(inputs: readonly ControllerShortcutInput[]): string {
+  return formatControllerShortcutDisplayInputs(inputs, props.persona, oemKeys.value);
+}
 function originLabel(rule: ControllerShortcutRule): string {
   return rule.origin === 'native-default' ? '默认' : '自定义';
 }
@@ -76,7 +85,8 @@ function clampPage(): void {
   page.value = Math.min(page.value, Math.max(0, totalPages.value - 1));
 }
 async function load(): Promise<void> {
-  gamepad.value = await summonGet().catch(() => gamepad.value);
+  const actual = await summonGet().catch(() => gamepad.value);
+  gamepad.value = { ...actual, mouseBackend: actual.mouseBackend === 'gamebar' ? 'gamebar' : 'joyxoff' };
   const settings = await loadSettings();
   snapshot.value = settings.input;
   const nativeEnabled = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map((definition) => [definition.defaultKey, gamepad.value[definition.defaultKey]]));
@@ -98,7 +108,7 @@ async function persistRules(next: ControllerShortcutRule[]): Promise<void> {
     next.some((rule) => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled),
   ]));
   const result = await compareAndSwapInputSettings(snapshot.value.revision, {
-    buttonMapping: { rules: { ...currentRules, schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: cloneRules(next) } },
+    buttonMapping: { rules: { ...currentRules, schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: preserveControllerShortcutRecords(currentRules, readControllerShortcutRules(currentRules), next) } },
   });
   snapshot.value = result.value;
   if (!result.ok) throw new Error('配置已被其它页面更新，已刷新为最新值');
@@ -125,6 +135,7 @@ async function toggleRule(rule: ControllerShortcutRule): Promise<void> {
 async function changePage(delta: number): Promise<void> {
   const next = Math.min(Math.max(0, page.value + delta), totalPages.value - 1);
   if (next === page.value) return;
+  previewFocus.reset();
   page.value = next;
   await nextTick();
   focusGamepadElement(gridEl.value?.querySelector<HTMLElement>('.shortcut-toggle') ?? null);
@@ -135,7 +146,7 @@ function onRulesUpdated(): void {
 function applyMouseBackend(result: MouseModeState): void {
   gamepad.value = { ...gamepad.value, mouseBackend: result.backend };
   window.dispatchEvent(new CustomEvent('mouse-mode:backend-changed', { detail: { backend: result.backend } }));
-  window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { on: result.on, backend: result.backend } }));
+  window.dispatchEvent(new CustomEvent('gp:mouse-mode', { detail: { ...result } }));
 }
 function openGameInputRepair(): void {
   const placement = getGamepadPopupPlacement(gameInputRepairTriggerEl.value?.getBoundingClientRect() ?? null, Math.min(420, window.innerWidth - 16), 250, 10);
@@ -180,6 +191,7 @@ function onGameInputRepairPointer(event: PointerEvent): void {
   closeGameInputRepair();
 }
 function onGamepadBack(event: Event): void {
+  if (!gameInputRepairOpen.value && mouseBackendNotice.value) { event.preventDefault(); mouseBackendNotice.value = ''; return; }
   if (!gameInputRepairOpen.value || gameInputRepairBusy.value) return;
   event.preventDefault();
   closeGameInputRepair();
@@ -193,15 +205,23 @@ async function onMouseBackend(backend: MouseBackend): Promise<void> {
     const result = await setMouseBackend(backend);
     if (!result.ok) {
       if (backend === 'gamebar' && result.reason === 'gameinput_redist_missing') { openGameInputRepair(); return; }
-      mouseBackendNotice.value = result.error || '模拟鼠标方案不可用';
+      gamepad.value = { ...gamepad.value, mouseBackend: before };
+      const message = result.error || '模拟鼠标方案不可用';
+      mouseBackendNotice.value = result.fallbackRestored ? `${message} 已保留原鼠标方案。` : message;
       return;
     }
     applyMouseBackend(result);
-  } catch (error) { gamepad.value = { ...gamepad.value, mouseBackend: before }; mouseBackendNotice.value = `方案切换失败：${(error as Error).message}`; }
+  } catch (error) {
+    gamepad.value = { ...gamepad.value, mouseBackend: before };
+    const message = error instanceof Error ? error.message : String(error);
+    mouseBackendNotice.value = message.startsWith('IPC command timed out:') ? '鼠标方案响应超时，当前状态未确认。可以返回或重新选择方案。' : `方案切换失败：${message}`;
+  }
   finally { mouseBackendBusy.value = false; }
 }
 
 onMounted(() => {
+  // Device catalog is immutable within this native session: one read, no polling.
+  void oemKeysGet().then(value => { oemKeys.value = value; }).catch(() => undefined);
   void load().catch((error) => { status.value = `读取失败：${(error as Error).message}`; });
   window.addEventListener('ipc:gamepad-back', onGamepadBack);
   window.addEventListener(SYNC_EVENT, onRulesUpdated);
@@ -221,16 +241,17 @@ onBeforeUnmount(() => {
     <div class="card-head">
       <h3 class="card-title"><InlineIcon name="keyboard" /> 手柄快捷操作</h3>
       <div class="shortcut-header-actions">
-        <span class="state-chip" :class="{ on: enabledCount > 0 }">{{ enabledCount }}/{{ visibleRules.length }} 已启用</span>
+        <span class="shortcut-count" :class="{ on: enabledCount > 0 }" role="status" aria-atomic="true">{{ enabledCount }}/{{ visibleRules.length }} 已启用</span>
         <button type="button" class="shortcut-editor-open" aria-haspopup="dialog" @click="emit('open-editor')">打开编辑器</button>
       </div>
     </div>
+    <Teleport :to="props.previewTarget || 'body'" :disabled="!props.previewTarget"><GamepadVisualizer :show-test-mode="false" :persona="props.persona" :settings="gamepad" :highlight-buttons="highlightedButtons" :oem-keys="oemKeys" :highlight-oem-keys="highlightedOemKeys" minimum-press-feedback match-steam-deck-height /></Teleport>
     <div v-if="!visibleRules.length" class="shortcut-empty">尚无快捷规则。请打开编辑器新建，或恢复默认快捷键。</div>
     <div v-else ref="gridEl" class="shortcut-grid">
       <button v-for="rule in pagedRules" :key="rule.id" class="shortcut-toggle"
         :class="{ on: rule.enabled, sel: activeId === rule.id }" :disabled="busy"
-        @mouseenter="hoverId = rule.id" @mouseleave="hoverId = ''" @focus="focusId = rule.id" @blur="focusId = ''" @click="toggleRule(rule)">
-        <span><b>{{ actionById(rule.actionId)?.label || '未知动作' }}</b><small>{{ originLabel(rule) }} · {{ formatControllerShortcutInputs(rule.inputs) || '未录入输入' }}</small></span><i>{{ rule.enabled ? '开' : '关' }}</i>
+        @mouseenter="previewFocus.enter(rule.id)" @mouseleave="previewFocus.leave(rule.id)" @focus="previewFocus.focus(rule.id)" @blur="previewFocus.blur(rule.id)" @click="toggleRule(rule)">
+        <span><b>{{ actionById(rule.actionId)?.label || '未知动作' }}</b><small>{{ originLabel(rule) }} · {{ formatInputs(rule.inputs) || '未录入输入' }}</small></span><i>{{ rule.enabled ? '开' : '关' }}</i>
       </button>
     </div>
     <div v-if="totalPages > 1" class="shortcut-pager">
@@ -238,19 +259,18 @@ onBeforeUnmount(() => {
       <span>第 {{ page + 1 }}/{{ totalPages }} 页 · 共 {{ rules.length }} 条</span>
       <button type="button" :disabled="busy || page >= totalPages - 1" @click="changePage(1)">下一页 ›</button>
     </div>
-    <div v-if="mouseToggleEnabled" class="backend-bubble">
-      <span>鼠标模式后端</span>
+    <div v-if="mouseToggleEnabled || steamDeckActive" class="backend-bubble">
+      <div class="mouse-mode-backends"><span>鼠标模式后端</span>
       <div class="mouse-backend-control">
         <div class="mouse-backend-buttons">
           <button ref="gameInputRepairTriggerEl" type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'gamebar' }" :disabled="steamDeckActive || mouseBackendBusy" @click="onMouseBackend('gamebar')">微软鼠标</button>
           <button type="button" :class="{ active: !steamDeckActive && gamepad.mouseBackend === 'joyxoff' }" :disabled="steamDeckActive || mouseBackendBusy" @click="onMouseBackend('joyxoff')">JoyXoff</button>
-          <button type="button" class="steamdeck-backend" :class="{ active: steamDeckActive }" disabled :aria-pressed="steamDeckActive" title="开启 SteamDeck 虚拟手柄时由 Steam 接管鼠标；此项仅展示状态，不可手动选择">SteamDeck鼠标</button>
+          <button v-if="steamDeckActive" type="button" class="steamdeck-backend active" disabled aria-pressed="true" title="SteamDeck 模式由 Steam 管理">SteamDeck鼠标</button>
         </div>
         <Transition name="mouse-pop"><div v-if="mouseBackendNotice" class="mouse-backend-popover" role="alert"><InlineIcon name="warning" size="15px" /><span>{{ mouseBackendNotice }}</span><button type="button" aria-label="关闭提示" @click="mouseBackendNotice = ''">×</button></div></Transition>
-      </div>
+      </div></div>
+      <SteamDeckMouseSensitivity v-if="steamDeckActive" class="mouse-mode-sensitivity" :disabled="busy || mouseBackendBusy" />
     </div>
-    <p class="shortcut-hint"><template v-if="activeRule"><b>{{ actionById(activeRule.actionId)?.label || '未知动作' }}</b> · <span class="key">{{ activeInputText }}</span> · {{ originLabel(activeRule) }}</template><template v-else>鼠标悬停，或用手柄焦点选择快捷项，可查看对应按键。</template></p>
-    <GamepadVisualizer :settings="gamepad" :highlight-buttons="highlightedButtons" />
     <p v-if="status" class="status-line" role="status"><InlineIcon name="check" /> {{ status }}</p>
   </section>
 
@@ -263,7 +283,7 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
-.card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }.card-title{margin:0}.state-chip{flex:0 0 auto;min-height:24px;display:inline-flex;align-items:center;padding:0 8px;border:1px solid rgba(255,255,255,.12);border-radius:999px;color:var(--text-dim);background:color-mix(in srgb,var(--bg-input) 86%,transparent);font-size:10px;font-weight:700}.state-chip.on{border-color:color-mix(in srgb,var(--accent) 58%,transparent);background:color-mix(in srgb,var(--accent) 14%,transparent);color:var(--accent)}.shortcut-empty{margin-top:10px;padding:14px 12px;border:1px dashed rgba(255,255,255,.16);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent);color:var(--text-dim);font-size:11px;line-height:1.5;text-align:center}.backend-bubble,.shortcut-toggle{border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.shortcut-toggle{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;color:var(--text);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,transform .08s}.shortcut-toggle:active{transform:scale(.98)}.shortcut-toggle span{display:grid;gap:3px;min-width:0}.shortcut-toggle b{font-size:12px}.shortcut-toggle small{color:var(--text-dim);font-size:10px;line-height:1.3}.shortcut-toggle i{font-style:normal;flex:0 0 auto;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.1);color:var(--text-dim);font-size:10px;font-weight:700}.shortcut-toggle.on{border-color:color-mix(in srgb,var(--accent) 55%,transparent);background:color-mix(in srgb,var(--accent) 13%,transparent)}.shortcut-toggle.on i{background:var(--accent);color:#06121d}.shortcut-toggle.sel,.shortcut-toggle:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-toggle:disabled{opacity:.55;cursor:default}.shortcut-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding:6px 9px;border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-pager button{min-height:28px;padding:0 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;background:transparent;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer}.shortcut-pager button:focus-visible{outline:none;box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-pager button:disabled{opacity:.4;cursor:default;border-color:rgba(255,255,255,.12);color:var(--text-dim)}.shortcut-pager span{color:var(--text-dim);font-size:10px;font-weight:700}.backend-bubble{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;padding:8px 10px}.backend-bubble>span{color:var(--text-dim);font-size:11px;font-weight:700}.mouse-backend-control{position:relative;min-width:0}.mouse-backend-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:3px;border-radius:9px;background:var(--bg-panel)}.mouse-backend-buttons button{min-height:28px;padding:4px 7px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-dim);font-size:10px;font-weight:700;cursor:pointer}.mouse-backend-buttons button.active{border-color:color-mix(in srgb,var(--accent) 48%,transparent);background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}.mouse-backend-buttons button:disabled{opacity:.55;cursor:default}.mouse-backend-popover{position:absolute;z-index:25;top:calc(100% + 7px);right:0;width:min(360px,calc(100vw - 24px));display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:12px 14px;border:1px solid color-mix(in srgb,#f5b93d 58%,transparent);border-radius:10px;background:color-mix(in srgb,var(--bg-card) 94%,#17120a);color:#ffd47a;box-shadow:0 8px 22px rgba(0,0,0,.42);font-size:12px;line-height:1.45}.mouse-backend-popover>button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:rgba(255,255,255,.08);color:inherit;cursor:pointer}.shortcut-hint{min-height:36px;margin:8px 2px 4px;color:var(--text-dim);font-size:11px;line-height:1.5}.shortcut-hint b{color:var(--accent)}.shortcut-hint .key{color:#f5b93d;font-size:1.2em;font-weight:700}.status-line{display:flex;align-items:flex-start;gap:5px;margin:9px 2px 0;color:var(--text-dim);font-size:11px;line-height:1.45}.status-line .inline-icon{color:var(--accent);margin-top:1px}.gameinput-repair-confirm{z-index:1200;background:#161d29;border:1px solid #2a3342;border-radius:12px;padding:18px 20px 17px;box-shadow:0 16px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:12px;max-width:calc(100vw - 16px);min-height:0;overflow-y:auto}.gameinput-repair-confirm::before{content:'';position:absolute;width:13px;height:13px;background:#161d29;border-left:1px solid #2a3342;border-top:1px solid #2a3342;transform:rotate(45deg);top:-7px;right:32px}.gameinput-repair-confirm.above::before{top:auto;bottom:-7px;border-left:none;border-top:none;border-right:1px solid #2a3342;border-bottom:1px solid #2a3342}.gameinput-repair-title{display:flex;align-items:center;gap:9px;color:var(--text);font-size:16px;font-weight:700}.gameinput-repair-title .inline-icon{color:var(--danger)}.gameinput-repair-desc,.gameinput-repair-status{margin:0;color:var(--text-dim);font-size:14px;line-height:1.6}.gameinput-repair-status{color:#ffd47a}.gameinput-repair-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:3px}.gameinput-repair-actions button{min-height:44px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:var(--bg-input);color:var(--text);font-size:14px;font-weight:600;cursor:pointer}.gameinput-repair-actions button small{margin-left:4px;color:var(--text-dim);font-size:11px}.gameinput-repair-actions button.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 46%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--bg-input))}.gameinput-repair-actions button:disabled{cursor:default;opacity:.6}.gameinput-repair-pop-enter-active,.gameinput-repair-pop-leave-active,.mouse-pop-enter-active,.mouse-pop-leave-active{transition:opacity .14s ease,transform .14s ease}.gameinput-repair-pop-enter-from,.gameinput-repair-pop-leave-to,.mouse-pop-enter-from,.mouse-pop-leave-to{opacity:0;transform:translateY(-5px)}@media(max-width:580px){.shortcut-grid{grid-template-columns:1fr}.shortcut-pager{align-items:stretch;flex-direction:column}.shortcut-pager button{width:100%}.backend-bubble{align-items:flex-start;flex-direction:column}.mouse-backend-control{width:100%}.mouse-backend-buttons{width:100%}}
+.card-head { display:flex; align-items:center; justify-content:space-between; gap:12px; }.card-title{margin:0}.shortcut-empty{margin-top:10px;padding:14px 12px;border:1px dashed rgba(255,255,255,.16);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent);color:var(--text-dim);font-size:11px;line-height:1.5;text-align:center}.backend-bubble,.shortcut-toggle{border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px;margin-top:8px}.shortcut-toggle{min-height:64px;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:9px 10px;color:var(--text);text-align:left;cursor:pointer;transition:border-color .12s,background .12s,transform .08s}.shortcut-toggle:active{transform:scale(.98)}.shortcut-toggle span{display:grid;gap:3px;min-width:0}.shortcut-toggle b{font-size:12px}.shortcut-toggle small{color:var(--text-dim);font-size:10px;line-height:1.3}.shortcut-toggle i{font-style:normal;flex:0 0 auto;padding:2px 7px;border-radius:999px;background:rgba(255,255,255,.1);color:var(--text-dim);font-size:10px;font-weight:700}.shortcut-toggle.on{border-color:color-mix(in srgb,var(--accent) 55%,transparent);background:color-mix(in srgb,var(--accent) 13%,transparent)}.shortcut-toggle.on i{background:var(--accent);color:#06121d}.shortcut-toggle.sel,.shortcut-toggle:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-toggle:disabled{opacity:.55;cursor:default}.shortcut-pager{display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px;padding:6px 9px;border:1px solid rgba(255,255,255,.07);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--bg-input) 88%,transparent)}.shortcut-pager button{min-height:28px;padding:0 10px;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;background:transparent;color:var(--accent);font-size:11px;font-weight:700;cursor:pointer}.shortcut-pager button:focus-visible{outline:none;box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}.shortcut-pager button:disabled{opacity:.4;cursor:default;border-color:rgba(255,255,255,.12);color:var(--text-dim)}.shortcut-pager span{color:var(--text-dim);font-size:10px;font-weight:700}.backend-bubble{display:block;margin-top:8px;padding:8px 10px}.mouse-mode-backends>span{color:var(--text-dim);font-size:11px;font-weight:700}.mouse-backend-control{position:relative;min-width:0}.mouse-backend-buttons{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:3px;padding:3px;border-radius:9px;background:var(--bg-panel)}.mouse-backend-buttons button{min-height:28px;padding:4px 7px;border:1px solid transparent;border-radius:6px;background:transparent;color:var(--text-dim);font-size:10px;font-weight:700;cursor:pointer}.mouse-backend-buttons button.active{border-color:color-mix(in srgb,var(--accent) 48%,transparent);background:color-mix(in srgb,var(--accent) 18%,transparent);color:var(--accent)}.mouse-backend-buttons button:disabled{opacity:.55;cursor:default}.mouse-backend-popover{position:absolute;z-index:25;top:calc(100% + 7px);right:0;width:min(360px,calc(100vw - 24px));display:grid;grid-template-columns:auto 1fr auto;align-items:center;gap:10px;padding:12px 14px;border:1px solid color-mix(in srgb,#f5b93d 58%,transparent);border-radius:10px;background:color-mix(in srgb,var(--bg-card) 94%,#17120a);color:#ffd47a;box-shadow:0 8px 22px rgba(0,0,0,.42);font-size:12px;line-height:1.45}.mouse-backend-popover>button{width:26px;height:26px;padding:0;border:0;border-radius:6px;background:rgba(255,255,255,.08);color:inherit;cursor:pointer}.shortcut-hint{min-height:36px;margin:8px 2px 4px;color:var(--text-dim);font-size:11px;line-height:1.5}.shortcut-hint b{color:var(--accent)}.shortcut-hint .key{color:#f5b93d;font-size:1.2em;font-weight:700}.status-line{display:flex;align-items:flex-start;gap:5px;margin:9px 2px 0;color:var(--text-dim);font-size:11px;line-height:1.45}.status-line .inline-icon{color:var(--accent);margin-top:1px}.gameinput-repair-confirm{z-index:1200;background:#161d29;border:1px solid #2a3342;border-radius:12px;padding:18px 20px 17px;box-shadow:0 16px 40px rgba(0,0,0,.55);display:flex;flex-direction:column;gap:12px;max-width:calc(100vw - 16px);min-height:0;overflow-y:auto}.gameinput-repair-confirm::before{content:'';position:absolute;width:13px;height:13px;background:#161d29;border-left:1px solid #2a3342;border-top:1px solid #2a3342;transform:rotate(45deg);top:-7px;right:32px}.gameinput-repair-confirm.above::before{top:auto;bottom:-7px;border-left:none;border-top:none;border-right:1px solid #2a3342;border-bottom:1px solid #2a3342}.gameinput-repair-title{display:flex;align-items:center;gap:9px;color:var(--text);font-size:16px;font-weight:700}.gameinput-repair-title .inline-icon{color:var(--danger)}.gameinput-repair-desc,.gameinput-repair-status{margin:0;color:var(--text-dim);font-size:14px;line-height:1.6}.gameinput-repair-status{color:#ffd47a}.gameinput-repair-actions{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:3px}.gameinput-repair-actions button{min-height:44px;border:1px solid rgba(255,255,255,.08);border-radius:9px;background:var(--bg-input);color:var(--text);font-size:14px;font-weight:600;cursor:pointer}.gameinput-repair-actions button small{margin-left:4px;color:var(--text-dim);font-size:11px}.gameinput-repair-actions button.danger{color:var(--danger);border-color:color-mix(in srgb,var(--danger) 46%,transparent);background:color-mix(in srgb,var(--danger) 8%,var(--bg-input))}.gameinput-repair-actions button:disabled{cursor:default;opacity:.6}.gameinput-repair-pop-enter-active,.gameinput-repair-pop-leave-active,.mouse-pop-enter-active,.mouse-pop-leave-active{transition:opacity .14s ease,transform .14s ease}.gameinput-repair-pop-enter-from,.gameinput-repair-pop-leave-to,.mouse-pop-enter-from,.mouse-pop-leave-to{opacity:0;transform:translateY(-5px)}@media(max-width:580px){.shortcut-grid{grid-template-columns:1fr}.backend-bubble{align-items:flex-start;flex-direction:column}.mouse-backend-control{width:100%}.mouse-backend-buttons{width:100%}}
 /* Controller page contract: keep the top shortcut controls two-up at the
    supported 1280x720, 1280x800, and high-DPI equivalent layouts.
    2026-09-28：每页固定 8 条（2×4），超出翻页——卡片尺寸不变。 */
@@ -273,7 +293,16 @@ onBeforeUnmount(() => {
 .shortcut-editor-open{min-height:32px;flex:0 0 auto;padding:0 10px;border:1px solid color-mix(in srgb,var(--accent) 55%,transparent);border-radius:var(--radius-ctrl);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-size:11px;font-weight:700;white-space:nowrap;cursor:pointer}
 .shortcut-editor-open:hover{background:color-mix(in srgb,var(--accent) 20%,transparent)}
 .shortcut-editor-open:focus-visible{outline:none;box-shadow:0 0 0 1px var(--accent),0 0 8px color-mix(in srgb,var(--accent) 40%,transparent)}
-@media(max-width:420px){.shortcut-header-actions{gap:5px}.shortcut-editor-open{padding:0 7px}.state-chip{padding:0 5px}}
+@media(max-width:420px){.shortcut-header-actions{gap:5px}.shortcut-editor-open{padding:0 7px}}
 .mouse-backend-buttons button{white-space:nowrap}.mouse-backend-buttons .steamdeck-backend.active:disabled{opacity:1}.backend-bubble{flex-wrap:wrap}.mouse-backend-control{max-width:100%}
 @media(max-width:480px){.backend-bubble{align-items:stretch}.mouse-backend-control{width:100%}}
+.mouse-mode-backends{display:flex;align-items:center;justify-content:space-between;gap:10px}.mouse-mode-sensitivity{margin-top:8px;padding:10px 0 0;border:0;border-top:1px solid var(--console-line);border-radius:0;background:transparent}
+</style>
+
+<style>
+.shortcuts-card>.card-head{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:8px;margin-bottom:10px}.shortcuts-card>.card-head>.card-title{display:flex;align-items:center;gap:5px;margin:0!important;padding:0!important;border:0!important;font-size:16px;line-height:1.4;white-space:nowrap}.shortcuts-card>.card-head>.card-title::after{display:none!important}.shortcuts-card .shortcut-header-actions{display:inline-flex;align-items:stretch;gap:0;border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:7px;overflow:hidden;min-height:36px;background:color-mix(in srgb,var(--accent) 6%,var(--bg-input));white-space:nowrap}.shortcuts-card .shortcut-count{display:inline-flex;align-items:center;justify-content:center;padding:0 9px;min-height:34px;font-size:12px;font-weight:650;color:var(--text-dim)}.shortcuts-card .shortcut-count.on{color:var(--accent)}.shortcuts-card .shortcut-editor-open{border:0;border-left:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-radius:0;padding:0 10px;min-height:34px;font-size:13px;line-height:1.4;background:color-mix(in srgb,var(--accent) 12%,transparent)}.shortcuts-card .shortcut-editor-open:focus-visible,.shortcuts-card .shortcut-editor-open.focused{outline:2px solid var(--accent);outline-offset:-3px;box-shadow:none}
+</style>
+
+<style>
+.shortcuts-card .shortcut-pager{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);align-items:center;gap:8px;padding:6px;margin-top:8px}.shortcuts-card .shortcut-pager button{width:auto;min-width:0;min-height:34px;white-space:nowrap;font-size:13px;padding:5px 8px}.shortcuts-card .shortcut-pager span{white-space:nowrap;font-size:12px;text-align:center}.shortcuts-card .shortcut-header-actions .shortcut-editor-open{border-radius:0!important}
 </style>

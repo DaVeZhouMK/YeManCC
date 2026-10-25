@@ -1,5 +1,5 @@
 #pragma once
-#include "json.hpp"
+#include "controller_persona_settings.h"
 #include <stdexcept>
 #include <string>
 
@@ -9,7 +9,7 @@ inline nlohmann::json normalizeInputStartupPreferences(const nlohmann::json& raw
     std::string persona = "disabled", preset = "off";
     if (raw.is_object() && raw.contains("virtualGamepadPersona") && raw.at("virtualGamepadPersona").is_string()) {
         const auto value = raw.at("virtualGamepadPersona").get<std::string>();
-        if (value == "steamdeck" || value == "dualsense-edge" || value == "elite") persona = value;
+        persona = controllerPersona::saved(value);
     }
     if (persona != "disabled" && raw.is_object() && raw.contains("gyroPreset") && raw.at("gyroPreset").is_string()) {
         const auto value = raw.at("gyroPreset").get<std::string>();
@@ -53,10 +53,12 @@ inline nlohmann::json startupGyroPresetParams(const std::string& preset, const n
 // Same-session calls are no-ops (renderer reload/wake must not replay boot intent).
 inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
                                              const nlohmann::json& startup,
-                                             const std::string& session) {
+                                             const std::string& session,
+                                             bool applyPreferences = true) {
     using nlohmann::json;
     if (session.empty()) throw std::runtime_error("startup-input-session-empty");
     auto input = savedInput.is_object() ? savedInput : json::object();
+    controllerPersona::migrateSavedInput(input);
     if (input.contains("startupAppliedSession") && input.at("startupAppliedSession") == session) return input;
     long long revision = 0;
     if (input.contains("revision")) {
@@ -65,30 +67,33 @@ inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
             throw std::runtime_error("startup-input-revision-invalid");
         revision = value.get<long long>();
     }
-    const auto preferences = normalizeInputStartupPreferences(startup);
-    const auto persona = preferences.at("virtualGamepadPersona").get<std::string>();
-    const auto preset = preferences.at("gyroPreset").get<std::string>();
-    const bool padEnabled = persona != "disabled", gyroEnabled = padEnabled && preset != "off";
-    auto target = input.contains("outputTarget") && input.at("outputTarget").is_object()
-        ? input.at("outputTarget") : json::object();
-    auto motion = input.contains("gyroMotion") && input.at("gyroMotion").is_object()
-        ? input.at("gyroMotion") : json::object();
-    if (gyroEnabled) {
-        const auto presets = motion.contains("presets") ? motion.at("presets") : json(nullptr);
-        motion.update(startupGyroPresetParams(preset, presets));
-        // A stored preset is parameter memory, never a second boot authority.
-        if (!presets.is_null()) motion["presets"] = presets;
-        motion["preset"] = preset;
-        motion["activePreset"] = preset;
-        motion["outputMode"] = "virtual-stick";
+    if (applyPreferences) {
+        const auto preferences = normalizeInputStartupPreferences(startup);
+        const auto persona = preferences.at("virtualGamepadPersona").get<std::string>();
+        const auto preset = preferences.at("gyroPreset").get<std::string>();
+        const bool padEnabled = persona != "disabled", gyroEnabled = padEnabled && preset != "off";
+        auto target = input.contains("outputTarget") && input.at("outputTarget").is_object()
+            ? input.at("outputTarget") : json::object();
+        auto motion = input.contains("gyroMotion") && input.at("gyroMotion").is_object()
+            ? input.at("gyroMotion") : json::object();
+        if (gyroEnabled) {
+            const auto presets = motion.contains("presets") ? motion.at("presets") : json(nullptr);
+            motion.update(startupGyroPresetParams(preset, presets));
+            // A stored preset is parameter memory, never a second boot authority.
+            if (!presets.is_null()) motion["presets"] = presets;
+            motion["preset"] = preset;
+            motion["activePreset"] = preset;
+            motion["outputMode"] = "virtual-stick";
+        }
+        motion["enabled"] = gyroEnabled;
+        motion.erase("gyroMode");
+        if (!target.contains("persona") || target["persona"] != persona) target["descriptorHash"] = nullptr;
+        target["persona"] = persona;
+        target["buttonMappingEnabled"] = padEnabled;
+        target["gyroEnabled"] = gyroEnabled;
+        input["outputTarget"] = target;
+        input["gyroMotion"] = motion;
     }
-    motion["enabled"] = gyroEnabled;
-    motion.erase("gyroMode");
-    target["persona"] = persona;
-    target["buttonMappingEnabled"] = padEnabled;
-    target["gyroEnabled"] = gyroEnabled;
-    input["outputTarget"] = target;
-    input["gyroMotion"] = motion;
     input["gameOverride"] = nullptr; // previous native session cannot own this baseline
     input["startupAppliedSession"] = session;
     input["schemaVersion"] = 1;
@@ -99,5 +104,53 @@ inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
                               "hostAcknowledgedRevision", "hostAcknowledgedConfigHash"}) input[field] = nullptr;
     input["applyStatus"] = "unknown";
     return input;
+}
+
+// The process identity still retires dead game/Host owners. Only a new confirmed
+// Windows boot may consume the next scene's input preferences. Never infer that
+// boundary from a PID, wall clock, renderer reload, wake, or unknown identity.
+inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
+                                                    const std::string& session,
+                                                    const std::string& boot) {
+    using nlohmann::json;
+    if (!document.is_object()) throw std::runtime_error("startup-settings-invalid");
+    const auto input = document.value("input", json::object());
+    const auto startup = document.value("startupDesired", json::object());
+    auto extensions = document.value("extensions", json::object());
+    if (!extensions.is_object()) extensions = json::object();
+    const auto modes = extensions.value("bootModes", json::object());
+    const bool configured = modes.is_object() && modes.value("schema", json(nullptr)) == 1;
+    const auto previousBoot = input.is_object() ? input.value("startupAppliedBoot", json(nullptr)) : json(nullptr);
+    const auto previousSession = input.is_object() ? input.value("startupAppliedSession", json(nullptr)) : json(nullptr);
+    // An explicit scene save records the Windows boot where it was selected.
+    // That receipt is already a boundary: the next boot must consume its input
+    // even if an older native build never wrote input.startupAppliedBoot.
+    auto selectionBoot = extensions.value("bootModesAppliedBoot", json(nullptr));
+    // A v1 loader tuple cannot prove which boot an old draft belongs to. Anchor
+    // once on upgrade, preserving live input. Explicit selection in this build
+    // records v2; the very next reboot must consume that configured preset.
+    const bool identityUpgrade = configured && boot.rfind("windows-volatile-v2|", 0) == 0 &&
+        selectionBoot.is_string() && selectionBoot.get<std::string>().rfind("windows-loader-v1|", 0) == 0;
+    if (identityUpgrade) {
+        extensions["bootModesIdentityMigration"] = {{"from", selectionBoot}, {"to", boot}, {"policy", "preserve-current-until-next-boot"}};
+        extensions["bootModesAppliedBoot"] = boot;
+        selectionBoot = boot;
+    }
+    const bool haveSelectionBoot = selectionBoot.is_string() && !selectionBoot.get<std::string>().empty();
+    // Anchor only truly unobserved legacy installs, not a known next-boot choice.
+    const bool migration = configured && !haveSelectionBoot && (!previousBoot.is_string() || previousBoot.get<std::string>().empty()) && previousSession.is_string() &&
+        !previousSession.get<std::string>().empty();
+    const bool claimed = !boot.empty() && extensions.value("bootModesAppliedBoot", json(nullptr)) == boot;
+    const bool preserve = configured && (boot.empty() || migration || previousBoot == boot || claimed);
+    auto next = initializeInputStartup(input, startup, session, !preserve);
+    if (!boot.empty()) next["startupAppliedBoot"] = boot;
+    // Unknown observations must not make a previous boot's result look current.
+    next["startupObservedBoot"] = boot.empty() ? json(nullptr) : json(boot);
+    document["input"] = std::move(next);
+    if ((migration || identityUpgrade) && !boot.empty()) {
+        extensions["bootModesAppliedBoot"] = boot;
+        document["extensions"] = std::move(extensions);
+    }
+    return document;
 }
 }

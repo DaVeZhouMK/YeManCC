@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Exact preimage of the production route classifier. Compile beside current source to prove input/window/route semantics, not availability from source declarations.",
+  "fullSourceSha256": "e46b5dba808de2c788f9d54e1b23a9dd4fb398e6335a09eedf3af570590098bf",
+  "ranges": [
+    {
+      "symbol": "inputHostFrameSubmissionSample",
+      "kind": "function",
+      "file": "native/main.cpp",
+      "startLine": 33180,
+      "endLine": 33187,
+      "startUtf8Byte": 1974839,
+      "endUtf8ByteExclusive": 1975487,
+      "sha256": "0f4ba6cba6995d3f689df4d917c85685426da6eb6909e1772aeeb886b283d7b8"
+    }
+  ],
+  "code": "static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(const InputCaptureGamepadSnapshot* sample) {\n    if(!sample)return {};\n    const bool msi=sample->inputSource==\"msi-dinput\";\n    const bool xinput=(sample->inputSource==\"xinput\" || sample->inputSource==\"xinput-any-connected\") && sample->connectedMask!=0;\n    return {{sample->readAttemptSequence,sample->readStartedTick,sample->readCompletedTick,\n        sample->readPowerGeneration,sample->readTopologyGeneration,sample->readContextStable},\n        sample->readIdentityGeneration,sample->readMsiSourceRevision,sample->live,xinput||msi,msi,sample->readMsiModeGeneration};\n}",
+  "codeSha256": "0f4ba6cba6995d3f689df4d917c85685426da6eb6909e1772aeeb886b283d7b8"
+}

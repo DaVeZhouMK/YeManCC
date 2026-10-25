@@ -1,0 +1,662 @@
+{
+  "schemaVersion": 1,
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "pythonExecutable": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe",
+  "powershellExecutable": "C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/native/powershell/pwsh.exe",
+  "runtimeInputs": [
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_bz2.pyd",
+      "sha256": "54268c5cbefd96d9df377b40817cc09447d3a0a6734c300c442c0dde30cc75d7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_ctypes.pyd",
+      "sha256": "eb533050b0b61203cc4918da1826372add87fe4acddb3f6e7b31301c7f93e67d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_hashlib.pyd",
+      "sha256": "d99963665f72156067b432753d153ea456d0a0fa49d235c9b61bdb0a0d372ba4"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_lzma.pyd",
+      "sha256": "6337c7e78b7753865b2759cf296449b9d7af6aae0708b364ab9550dad00272be"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_collections_abc.py",
+      "sha256": "d4945c8410c4bab351741b04bca3de066f7c27ed7e38df89e206a96617102ffb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_compression.py",
+      "sha256": "3ad5d60627477a60939ee44fc1bb3a05dbe8fb52f0f75039b8f5d8f1a278b981"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_weakrefset.py",
+      "sha256": "91895a451d06e9f521a1171b31b9b19bc9740f35af00d4fa106338ab7167c9ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\abc.py",
+      "sha256": "e558702a95cdce3febd289da021715d2b92bc43995b8a1bc58dfa1c3d8010287"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\argparse.py",
+      "sha256": "7cc582dcb3b76e2c957f78a3f74e9809d6c311d6aab7bcaa2c9954d0cbff5f30"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ast.py",
+      "sha256": "b515c23dbbc459329d3b802a3aac742cc456d7472e66f7ed6e9dc97e40596d7d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\bisect.py",
+      "sha256": "f1cf7b85fc36b5da249813fc5ab97d9464f8cc1bc817f7146206fa2713e35999"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\bz2.py",
+      "sha256": "76ab3252924e71e859d7d90e8d3db13b6554975cfcac0fdadced4de7f8779330"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\codecs.py",
+      "sha256": "7b7839e53a77961153240aecfe11edc8054d05b1dedd83894450dae21ec05785"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\collections\\__init__.py",
+      "sha256": "7fdb04dd248ab37909f46d2085bfee56b32d7e91e49ad3a2fad99c453295659b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\collections\\abc.py",
+      "sha256": "9cb4208f99128a0489b6c8e6c61637617dd7d4250c59e065491957eda084dd10"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\configparser.py",
+      "sha256": "cf5318e0c45a2e206b4ec74d4d66493185ed26c3736a86b0ebdf8f3a3e365a1a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\contextlib.py",
+      "sha256": "8b7a477f978a8532852fd81e241c78182516bc4975d672d580a5848a76e11eb6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\copyreg.py",
+      "sha256": "c8eda41f05c6bf95a4da4726a530409d2485ae060b8d019b3a8034389a15d3e9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ctypes\\__init__.py",
+      "sha256": "e0db1242e78267cba0124ee9fe5963b72d1c8a1832bb51a88abcf012a9cbce76"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ctypes\\_endian.py",
+      "sha256": "c5d692bdce10dfee242752620061bab684633bc72445a3def484961ef1bdbf3a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\__init__.py",
+      "sha256": "78c4744d407690f321565488710b5aaf6486b5afa8d185637aa1e7633ab59cd8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\aliases.py",
+      "sha256": "6fdcc49ba23a0203ae6cf28e608f8e6297d7c4d77d52e651db3cb49b9564c6d2"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\gbk.py",
+      "sha256": "eff9b8cbc9ad2ef2e10e96afa83d3db1f775ea044aed275b7a35574ae0d8645b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\utf_8.py",
+      "sha256": "ba0cac060269583523ca9506473a755203037c57d466a11aa89a30a5f6756f3d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\utf_8_sig.py",
+      "sha256": "1ef3da8d8aa08149e7f274dc64dbfce2155da812e5258ca8e8f832428d3b5c2d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\enum.py",
+      "sha256": "f35e542d8c4c1d2b5e910138d726fa48774925f3c4dc5462793ebcb66aa55501"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\fnmatch.py",
+      "sha256": "6683da36e47af523f3f41e18ad244d837783e19e98911cc0b7415dea81494ebc"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\functools.py",
+      "sha256": "de4a1d37c795e2a065124b5c49357893433bc6bb111b41277ccc9930ef08d4c9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\genericpath.py",
+      "sha256": "2b0b35d2206778af4081cf81dd9b513876e72c35a55bec941402e1fa62b1f1aa"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\gettext.py",
+      "sha256": "a5c249a522b6b8e3aa6f1b12a8bcc09508b99ad612b58d2fc973db27ea3b7cc3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\hashlib.py",
+      "sha256": "6dbdebf270868b391080e21dc9687eddfaf321c965ad979f68d3f5c423c613ab"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\__init__.py",
+      "sha256": "d540b5ac137fcb3e26a8d5f2939649e34373c6685f98a30a9f682cf231be5854"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_abc.py",
+      "sha256": "80aab7931dc999dee581c8b8b56fcd973fe156335a96ceeaf6acfc03cebf10e8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_bootstrap.py",
+      "sha256": "d112d54b7831cf4a818d4841d5ff8003b54df220a6dabafa61f67d7c7a5603f7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_bootstrap_external.py",
+      "sha256": "e6ad72f3f0f9b65c99ab52598cd02ab748511dcdce1dd51f18dace9be9a680c6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\machinery.py",
+      "sha256": "d045cd7ecf2a12b6ecbfbef79eb114e87ef2ebd756f5b705f73e6f3266e3dede"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\util.py",
+      "sha256": "671f2995653f673f6d5056a1089debef473bc28ae7114f7a8db71475733d6876"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\io.py",
+      "sha256": "7cec3cb8ac004058dd0a5af246e6d950fb59c7ddd0058fda48bcb3fcb98d8822"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ipaddress.py",
+      "sha256": "ba8d3389ff084fcb232b48204ec04f2b3ea4bd0eadf7b18c814947d185de2c64"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\__init__.py",
+      "sha256": "d5d41e2c29049515d295d81a6d40b4890fbec8d8482cfb401630f8ef2f77e4d5"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\decoder.py",
+      "sha256": "382cd02af6f7efede5a6d4abbcda1015e5c7a75794b0016022878f9cf32a24f6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\encoder.py",
+      "sha256": "52bfb1b66029cc70fa3bd7fe11df9f2e03922d413407a341b387a22c987f24f8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\scanner.py",
+      "sha256": "572958017eae8842eeddd0e3d18d3c56cc0a197348224915e1d87ce937841764"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\keyword.py",
+      "sha256": "18c2be738c04ad20ad375f6a71db34b3823c7f40b0340f5294d0e89f3c9b093b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\linecache.py",
+      "sha256": "9eb9194707991b49f9fea67a5222b0e6a0e49c865cdffc69fbc80a1f829e77fb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\locale.py",
+      "sha256": "3988c5419552d5b9f0bef3695102376f79357f0f440e9cd1f32c501f966e6ef3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\lzma.py",
+      "sha256": "58fb9d2fdc8a8af7b25e218f17ea3b51bdfa53bdf40f440ab33c605974ca5c2e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ntpath.py",
+      "sha256": "6c0d55ee892f98ef87b1ed3c50c9dfc7e267a98d2db47e08d3dc67529af56725"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\operator.py",
+      "sha256": "b2af20f67667203c1730e686cc5d0427becc94db4c97f1d3efe3ed2158473f6a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\os.py",
+      "sha256": "54c43a1fc69c979c70d8f7d097174cee163bfe59937723ee353043dd4a0211e1"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\pathlib.py",
+      "sha256": "10ba48ae8063cfe7589436041d0d4628c05f427c7709cf8e75e486f8930cc32c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\pkgutil.py",
+      "sha256": "44300bc77f6f52ef2ad74d26e5053309c04f49eaa91c099356eb61426cde504f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\posixpath.py",
+      "sha256": "03825681086638649a43480954f7f6a16b4da3bd41ece956864ae96e4f795cd9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\random.py",
+      "sha256": "de48263a837339c7e01cf9f3c4d756696e0e0775f7778eb9cf81ad5b00134569"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\__init__.py",
+      "sha256": "8ff3c37c63b917fcf8dc8d50993a502292a3dc159e41de4f4018c72a53d1c07b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_casefix.py",
+      "sha256": "1b12d9136f23db6c3f6f26053fefc15ca964b886838c7b9c1fabf8d2efc1e5c8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_compiler.py",
+      "sha256": "c75620761098a70ed75b9accef63ef2881d8abb6d4e5cbfd10074bd165eefe4d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_constants.py",
+      "sha256": "fa4fdb200f238f9e7817b63892b0d69833d8165134801e775e10cc113348a375"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_parser.py",
+      "sha256": "a51a85b37cf3f44ba7ff25754da5f31306e4ccfa6eb3c017f9d37bdf4e770840"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\reprlib.py",
+      "sha256": "e177bc70da83a7fbcde6fd261dc15da34e8a20873b1cccd4f9a1f8f27cca3779"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\runpy.py",
+      "sha256": "81e07da29bb2235111079bb64efea7d291639c5d2cf163e7af187d6a38cef389"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\shutil.py",
+      "sha256": "53496e06742fe008fee2bccc8caeac77473e69923bec05358bd43eea467db1f8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\signal.py",
+      "sha256": "0363c964c90ac0b3e515de5749205e6e6454051a1211058375d84d91eab6071a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\stat.py",
+      "sha256": "052af0327eae6941b69b05c088b3e748f79995635f80ac4cc7125eb333eb4c77"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\struct.py",
+      "sha256": "9c231f9497caf513a22dee8f790b07f969b0e45854a0bdd6dd84b492e08c2856"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\subprocess.py",
+      "sha256": "85d29b2bf0249f5436838298c9a60ee93508b1102e9ac43b001f8a7e7ae8f375"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\tempfile.py",
+      "sha256": "2eea4401f4f29d0d3647ed6fc8bcf6aa1daf879c8aa407a8ea310edac9dfc317"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\textwrap.py",
+      "sha256": "62867e40cdea6669b361f72af4d7daf0359f207c92cbeddfc7c7506397c1f31c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\threading.py",
+      "sha256": "846f450ae794e4aab823a163f8c71d27751148af33e91dd3de886686a4e8ebfb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\token.py",
+      "sha256": "1a4d994ce9744f4bfe2d964fc24d112a1e76796a08c2e45a2d73c82a8587f922"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\tokenize.py",
+      "sha256": "026f566ac63e60d69c8185a3880831b657accc5eac984fadf271fc99a5e5825d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\traceback.py",
+      "sha256": "2c44af2848836d9af0c7b3547469695cd22586c64274d362eafcf466af284bd6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\types.py",
+      "sha256": "345474ef027a1273f353da9bdc1f7c18f65335e72e681bcc0376774cc51f2405"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\typing.py",
+      "sha256": "be92d60fb8382bb29ead21c128825d7c96d0e8c915b44f840791e49f5a8d554c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\urllib\\__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\urllib\\parse.py",
+      "sha256": "e6af7f475262f1de335bb2e41e26adb94d6103977cf5fe1ddc430dc6a3b1623f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\warnings.py",
+      "sha256": "6405e281882932205eae641b2d31fba7776f94517a206d289465a1caffbf310e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\weakref.py",
+      "sha256": "56f8d313fb74019e53eb9287400702fbce788b7fe30e097b0b6e06296f3f080c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\zipimport.py",
+      "sha256": "a96f1d7a7b6aaf421a3cf382b94b1422f4f0ad452fdd0bb61d635b560d7a4e91"
+    }
+  ],
+  "files": [
+    {
+      "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+      "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python.exe",
+      "sha256": "372c2eae555b344520bf147be0096e009069aeca4e7f78d6aecea6d53158056a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\native\\powershell\\pwsh.exe",
+      "sha256": "362a356ce7f0940ec74f73a8fc2c990a2cc24a38a11c90bbd8eca947110ad139"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python3.dll",
+      "sha256": "c57bc21e131857f26db78d1512fbfcf67cac3273ee8b1cd704ed5645ec250884"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\python312.dll",
+      "sha256": "c1ce6d603041759061139f482c4b90c4ac9db676e30abf52fda66a794aab1bd0"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_bz2.pyd",
+      "sha256": "54268c5cbefd96d9df377b40817cc09447d3a0a6734c300c442c0dde30cc75d7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_ctypes.pyd",
+      "sha256": "eb533050b0b61203cc4918da1826372add87fe4acddb3f6e7b31301c7f93e67d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_hashlib.pyd",
+      "sha256": "d99963665f72156067b432753d153ea456d0a0fa49d235c9b61bdb0a0d372ba4"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\DLLs\\_lzma.pyd",
+      "sha256": "6337c7e78b7753865b2759cf296449b9d7af6aae0708b364ab9550dad00272be"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_collections_abc.py",
+      "sha256": "d4945c8410c4bab351741b04bca3de066f7c27ed7e38df89e206a96617102ffb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_compression.py",
+      "sha256": "3ad5d60627477a60939ee44fc1bb3a05dbe8fb52f0f75039b8f5d8f1a278b981"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\_weakrefset.py",
+      "sha256": "91895a451d06e9f521a1171b31b9b19bc9740f35af00d4fa106338ab7167c9ac"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\abc.py",
+      "sha256": "e558702a95cdce3febd289da021715d2b92bc43995b8a1bc58dfa1c3d8010287"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\argparse.py",
+      "sha256": "7cc582dcb3b76e2c957f78a3f74e9809d6c311d6aab7bcaa2c9954d0cbff5f30"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ast.py",
+      "sha256": "b515c23dbbc459329d3b802a3aac742cc456d7472e66f7ed6e9dc97e40596d7d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\bisect.py",
+      "sha256": "f1cf7b85fc36b5da249813fc5ab97d9464f8cc1bc817f7146206fa2713e35999"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\bz2.py",
+      "sha256": "76ab3252924e71e859d7d90e8d3db13b6554975cfcac0fdadced4de7f8779330"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\codecs.py",
+      "sha256": "7b7839e53a77961153240aecfe11edc8054d05b1dedd83894450dae21ec05785"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\collections\\__init__.py",
+      "sha256": "7fdb04dd248ab37909f46d2085bfee56b32d7e91e49ad3a2fad99c453295659b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\collections\\abc.py",
+      "sha256": "9cb4208f99128a0489b6c8e6c61637617dd7d4250c59e065491957eda084dd10"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\configparser.py",
+      "sha256": "cf5318e0c45a2e206b4ec74d4d66493185ed26c3736a86b0ebdf8f3a3e365a1a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\contextlib.py",
+      "sha256": "8b7a477f978a8532852fd81e241c78182516bc4975d672d580a5848a76e11eb6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\copyreg.py",
+      "sha256": "c8eda41f05c6bf95a4da4726a530409d2485ae060b8d019b3a8034389a15d3e9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ctypes\\__init__.py",
+      "sha256": "e0db1242e78267cba0124ee9fe5963b72d1c8a1832bb51a88abcf012a9cbce76"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ctypes\\_endian.py",
+      "sha256": "c5d692bdce10dfee242752620061bab684633bc72445a3def484961ef1bdbf3a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\__init__.py",
+      "sha256": "78c4744d407690f321565488710b5aaf6486b5afa8d185637aa1e7633ab59cd8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\aliases.py",
+      "sha256": "6fdcc49ba23a0203ae6cf28e608f8e6297d7c4d77d52e651db3cb49b9564c6d2"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\gbk.py",
+      "sha256": "eff9b8cbc9ad2ef2e10e96afa83d3db1f775ea044aed275b7a35574ae0d8645b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\utf_8.py",
+      "sha256": "ba0cac060269583523ca9506473a755203037c57d466a11aa89a30a5f6756f3d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\encodings\\utf_8_sig.py",
+      "sha256": "1ef3da8d8aa08149e7f274dc64dbfce2155da812e5258ca8e8f832428d3b5c2d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\enum.py",
+      "sha256": "f35e542d8c4c1d2b5e910138d726fa48774925f3c4dc5462793ebcb66aa55501"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\fnmatch.py",
+      "sha256": "6683da36e47af523f3f41e18ad244d837783e19e98911cc0b7415dea81494ebc"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\functools.py",
+      "sha256": "de4a1d37c795e2a065124b5c49357893433bc6bb111b41277ccc9930ef08d4c9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\genericpath.py",
+      "sha256": "2b0b35d2206778af4081cf81dd9b513876e72c35a55bec941402e1fa62b1f1aa"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\gettext.py",
+      "sha256": "a5c249a522b6b8e3aa6f1b12a8bcc09508b99ad612b58d2fc973db27ea3b7cc3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\hashlib.py",
+      "sha256": "6dbdebf270868b391080e21dc9687eddfaf321c965ad979f68d3f5c423c613ab"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\__init__.py",
+      "sha256": "d540b5ac137fcb3e26a8d5f2939649e34373c6685f98a30a9f682cf231be5854"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_abc.py",
+      "sha256": "80aab7931dc999dee581c8b8b56fcd973fe156335a96ceeaf6acfc03cebf10e8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_bootstrap.py",
+      "sha256": "d112d54b7831cf4a818d4841d5ff8003b54df220a6dabafa61f67d7c7a5603f7"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\_bootstrap_external.py",
+      "sha256": "e6ad72f3f0f9b65c99ab52598cd02ab748511dcdce1dd51f18dace9be9a680c6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\machinery.py",
+      "sha256": "d045cd7ecf2a12b6ecbfbef79eb114e87ef2ebd756f5b705f73e6f3266e3dede"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\importlib\\util.py",
+      "sha256": "671f2995653f673f6d5056a1089debef473bc28ae7114f7a8db71475733d6876"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\io.py",
+      "sha256": "7cec3cb8ac004058dd0a5af246e6d950fb59c7ddd0058fda48bcb3fcb98d8822"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ipaddress.py",
+      "sha256": "ba8d3389ff084fcb232b48204ec04f2b3ea4bd0eadf7b18c814947d185de2c64"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\__init__.py",
+      "sha256": "d5d41e2c29049515d295d81a6d40b4890fbec8d8482cfb401630f8ef2f77e4d5"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\decoder.py",
+      "sha256": "382cd02af6f7efede5a6d4abbcda1015e5c7a75794b0016022878f9cf32a24f6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\encoder.py",
+      "sha256": "52bfb1b66029cc70fa3bd7fe11df9f2e03922d413407a341b387a22c987f24f8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\json\\scanner.py",
+      "sha256": "572958017eae8842eeddd0e3d18d3c56cc0a197348224915e1d87ce937841764"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\keyword.py",
+      "sha256": "18c2be738c04ad20ad375f6a71db34b3823c7f40b0340f5294d0e89f3c9b093b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\linecache.py",
+      "sha256": "9eb9194707991b49f9fea67a5222b0e6a0e49c865cdffc69fbc80a1f829e77fb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\locale.py",
+      "sha256": "3988c5419552d5b9f0bef3695102376f79357f0f440e9cd1f32c501f966e6ef3"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\lzma.py",
+      "sha256": "58fb9d2fdc8a8af7b25e218f17ea3b51bdfa53bdf40f440ab33c605974ca5c2e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\ntpath.py",
+      "sha256": "6c0d55ee892f98ef87b1ed3c50c9dfc7e267a98d2db47e08d3dc67529af56725"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\operator.py",
+      "sha256": "b2af20f67667203c1730e686cc5d0427becc94db4c97f1d3efe3ed2158473f6a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\os.py",
+      "sha256": "54c43a1fc69c979c70d8f7d097174cee163bfe59937723ee353043dd4a0211e1"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\pathlib.py",
+      "sha256": "10ba48ae8063cfe7589436041d0d4628c05f427c7709cf8e75e486f8930cc32c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\pkgutil.py",
+      "sha256": "44300bc77f6f52ef2ad74d26e5053309c04f49eaa91c099356eb61426cde504f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\posixpath.py",
+      "sha256": "03825681086638649a43480954f7f6a16b4da3bd41ece956864ae96e4f795cd9"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\random.py",
+      "sha256": "de48263a837339c7e01cf9f3c4d756696e0e0775f7778eb9cf81ad5b00134569"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\__init__.py",
+      "sha256": "8ff3c37c63b917fcf8dc8d50993a502292a3dc159e41de4f4018c72a53d1c07b"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_casefix.py",
+      "sha256": "1b12d9136f23db6c3f6f26053fefc15ca964b886838c7b9c1fabf8d2efc1e5c8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_compiler.py",
+      "sha256": "c75620761098a70ed75b9accef63ef2881d8abb6d4e5cbfd10074bd165eefe4d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_constants.py",
+      "sha256": "fa4fdb200f238f9e7817b63892b0d69833d8165134801e775e10cc113348a375"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\re\\_parser.py",
+      "sha256": "a51a85b37cf3f44ba7ff25754da5f31306e4ccfa6eb3c017f9d37bdf4e770840"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\reprlib.py",
+      "sha256": "e177bc70da83a7fbcde6fd261dc15da34e8a20873b1cccd4f9a1f8f27cca3779"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\runpy.py",
+      "sha256": "81e07da29bb2235111079bb64efea7d291639c5d2cf163e7af187d6a38cef389"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\shutil.py",
+      "sha256": "53496e06742fe008fee2bccc8caeac77473e69923bec05358bd43eea467db1f8"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\signal.py",
+      "sha256": "0363c964c90ac0b3e515de5749205e6e6454051a1211058375d84d91eab6071a"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\stat.py",
+      "sha256": "052af0327eae6941b69b05c088b3e748f79995635f80ac4cc7125eb333eb4c77"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\struct.py",
+      "sha256": "9c231f9497caf513a22dee8f790b07f969b0e45854a0bdd6dd84b492e08c2856"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\subprocess.py",
+      "sha256": "85d29b2bf0249f5436838298c9a60ee93508b1102e9ac43b001f8a7e7ae8f375"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\tempfile.py",
+      "sha256": "2eea4401f4f29d0d3647ed6fc8bcf6aa1daf879c8aa407a8ea310edac9dfc317"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\textwrap.py",
+      "sha256": "62867e40cdea6669b361f72af4d7daf0359f207c92cbeddfc7c7506397c1f31c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\threading.py",
+      "sha256": "846f450ae794e4aab823a163f8c71d27751148af33e91dd3de886686a4e8ebfb"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\token.py",
+      "sha256": "1a4d994ce9744f4bfe2d964fc24d112a1e76796a08c2e45a2d73c82a8587f922"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\tokenize.py",
+      "sha256": "026f566ac63e60d69c8185a3880831b657accc5eac984fadf271fc99a5e5825d"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\traceback.py",
+      "sha256": "2c44af2848836d9af0c7b3547469695cd22586c64274d362eafcf466af284bd6"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\types.py",
+      "sha256": "345474ef027a1273f353da9bdc1f7c18f65335e72e681bcc0376774cc51f2405"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\typing.py",
+      "sha256": "be92d60fb8382bb29ead21c128825d7c96d0e8c915b44f840791e49f5a8d554c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\urllib\\__init__.py",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\urllib\\parse.py",
+      "sha256": "e6af7f475262f1de335bb2e41e26adb94d6103977cf5fe1ddc430dc6a3b1623f"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\warnings.py",
+      "sha256": "6405e281882932205eae641b2d31fba7776f94517a206d289465a1caffbf310e"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\weakref.py",
+      "sha256": "56f8d313fb74019e53eb9287400702fbce788b7fe30e097b0b6e06296f3f080c"
+    },
+    {
+      "path": "C:\\Users\\DaVe\\.cache\\codex-runtimes\\codex-primary-runtime\\dependencies\\python\\Lib\\zipimport.py",
+      "sha256": "a96f1d7a7b6aaf421a3cf382b94b1422f4f0ad452fdd0bb61d635b560d7a4e91"
+    }
+  ]
+}

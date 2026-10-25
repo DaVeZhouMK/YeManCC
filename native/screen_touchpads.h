@@ -1,5 +1,5 @@
 #pragma once
-// Event-driven screen touchpads. No worker, periodic timer, hook or WebView.
+// Event-driven screen touchpads. No worker, periodic timer, input hook or WebView.
 // UI thread owns HWND/SendInput; the existing BUS reads one bounded POD snapshot.
 #include <windows.h>
 #include <windowsx.h>
@@ -13,18 +13,42 @@
 #include <filesystem>
 #include <vector>
 #include <chrono>
-#include "json.hpp"
+#include "controller_persona_settings.h"
 #include "screen_control_glyphs.h"
+#include "touch_haptic_dispatch.h"
+#include "screen_touchpad_display_policy.h"
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+#include "screen_touchpad_input_surface.h"
+#endif
 
 namespace ymcc::screenpads {
 using Json = nlohmann::json;
 inline constexpr UINT kRefreshMessage = WM_APP + 172;
 inline constexpr UINT kSummonMessage = WM_APP + 173;
+inline constexpr UINT kNativeOutputResetMessage = WM_APP + 179;
 inline constexpr ULONG_PTR kInjectedTag = 0x594d5450;
 enum class Mode { Deck, DualSense, Wasd, Arrows, Mouse, Off };
 enum class SummonPosition { Off, Left, Right };
 enum class StandaloneSpecialMode { Off, SteamDeck, PS5 };
 enum class Layout { Dual, Single };
+enum class TouchFeedbackMode { Off, Minimal, Medium, Strong };
+inline const char* touchFeedbackName(TouchFeedbackMode mode) {
+    switch(mode){case TouchFeedbackMode::Minimal:return "minimal";case TouchFeedbackMode::Medium:return "medium";
+        case TouchFeedbackMode::Strong:return "strong";default:return "off";}
+}
+inline constexpr int touchFeedbackStrength(TouchFeedbackMode mode) noexcept {
+    switch(mode){case TouchFeedbackMode::Minimal:return ymcc::touchhaptic::kStrengthPercent;
+        case TouchFeedbackMode::Medium:return ymcc::touchhaptic::kMediumStrengthPercent;
+        case TouchFeedbackMode::Strong:return ymcc::touchhaptic::kStrongStrengthPercent;default:return 0;}
+}
+inline bool parseTouchFeedback(const std::string& value,TouchFeedbackMode& mode) {
+    if(value=="off") mode=TouchFeedbackMode::Off;
+    else if(value=="minimal") mode=TouchFeedbackMode::Minimal;
+    else if(value=="medium") mode=TouchFeedbackMode::Medium;
+    else if(value=="strong") mode=TouchFeedbackMode::Strong;
+    else return false;
+    return true;
+}
 inline bool nativePad(Mode m) {return m==Mode::Deck || m==Mode::DualSense;}
 inline const char* modeName(Mode m) {
     switch (m) { case Mode::Deck: return "steamdeck"; case Mode::DualSense: return "dualsense"; case Mode::Wasd: return "wasd";
@@ -36,7 +60,8 @@ inline bool parseMode(const std::string& s, bool left, Mode& m) {
     else if (left && s == "arrows") m=Mode::Arrows; else return false;
     return true;
 }
-struct Config { bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; SummonPosition summonPosition=SummonPosition::Off; StandaloneSpecialMode standaloneSpecialMode=StandaloneSpecialMode::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=false,specialEnabled=false,rearEnabled=false; };
+struct Config { bool masterEnabled=true; bool enabled=false; Mode left=Mode::Deck, right=Mode::Deck; int transparency=80; int mouseSensitivity=100; int scale=100; Layout layout=Layout::Dual; Mode single=Mode::Mouse; TouchFeedbackMode touchFeedback=TouchFeedbackMode::Medium; SummonPosition summonPosition=SummonPosition::Off; StandaloneSpecialMode standaloneSpecialMode=StandaloneSpecialMode::Off; unsigned specialMask=0,rearMask=0; bool summonEnabled=false,specialEnabled=false,rearEnabled=false; int autoHideSeconds=60; };
+inline bool validAutoHideSeconds(long long seconds) noexcept {return seconds==0 || seconds==15 || seconds==30 || seconds==45 || seconds==60 || seconds==120;}
 inline const char* summonPositionName(SummonPosition p) {return p==SummonPosition::Left?"left":p==SummonPosition::Right?"right":"off";}
 inline bool parseSummonPosition(const std::string& s,SummonPosition& p) {if(s=="off")p=SummonPosition::Off;else if(s=="left")p=SummonPosition::Left;else if(s=="right")p=SummonPosition::Right;else return false;return true;}
 inline SummonPosition effectiveSummonPosition(const Config& c) {return c.summonPosition!=SummonPosition::Off?c.summonPosition:c.summonEnabled?SummonPosition::Right:SummonPosition::Off;}
@@ -56,26 +81,36 @@ inline bool parseStandaloneSpecial(const std::string& value,StandaloneSpecialMod
 inline int standaloneSpecialProfile(const Config& cfg) {
     return cfg.standaloneSpecialMode==StandaloneSpecialMode::SteamDeck?1:cfg.standaloneSpecialMode==StandaloneSpecialMode::PS5?2:0;
 }
+inline void buttonsNativeInputCancel();
+inline void buttonsNativeInputDisable();
+inline bool buttonsNativeInputReady();
 inline void buttonsRelease();
-inline void buttonsRefresh(const Config&,const RECT&,const RECT&);
+inline void buttonsReleaseMapped();
+inline unsigned buttonFeedbackMask();
+inline bool buttonsRefresh(const Config&,const RECT&,const RECT&,bool force=false);
+inline bool buttonsNeedRefresh(const Config&);
 inline void buttonsInitialize();
 inline void buttonsShutdown();
+inline void buttonsQuiesce();
 inline void buttonsRepaint(int);
 inline bool buttonsVisible();
+inline Json buttonVisibilityState(const Config& cfg);
 inline unsigned buttonSnapshot();
 inline Json configJson(const Config& c) {
     const auto summon=effectiveSummonPosition(c);const unsigned special=effectiveSpecialMask(c),rear=effectiveRearMask(c);
     return {{"summonPosition",summonPositionName(summon)},{"standaloneSpecialMode",standaloneSpecialName(c.standaloneSpecialMode)},{"specialMask",special},{"rearMask",rear},
         {"summonEnabled",summon!=SummonPosition::Off},{"specialEnabled",special!=0},{"rearEnabled",rear!=0},
-        {"enabled",c.enabled},{"leftMode",modeName(c.left)},{"rightMode",modeName(c.right)},
+        {"masterEnabled",c.masterEnabled},{"enabled",c.enabled},{"leftMode",modeName(c.left)},{"rightMode",modeName(c.right)},
         {"transparency",c.transparency},{"mouseSensitivity",c.mouseSensitivity},{"scale",c.scale},
+        {"touchFeedback",touchFeedbackName(c.touchFeedback)},{"autoHideSeconds",c.autoHideSeconds},
         {"layout",!c.enabled?"off":c.layout==Layout::Single?"single":"dual"},{"singleMode",modeName(c.single)}};
 }
 inline bool parseConfig(const Json& j, const Config& old, Config& c) {
     Config next=old;bool legacySummon=false,legacySpecial=false,legacyRear=false,hasSummon=false,hasSpecial=false,hasRear=false;
     if(!j.is_object())return false;
     for(const auto& [key,v]:j.items()) {
-        if(key=="enabled") {if(!v.is_boolean())return false;next.enabled=v.get<bool>();}
+        if(key=="masterEnabled") {if(!v.is_boolean())return false;next.masterEnabled=v.get<bool>();}
+        else if(key=="enabled") {if(!v.is_boolean())return false;next.enabled=v.get<bool>();}
         else if(key=="summonEnabled" || key=="specialEnabled" || key=="rearEnabled") {
             if(!v.is_boolean())return false;const bool value=v.get<bool>();
             if(key=="summonEnabled"){legacySummon=true;next.summonEnabled=value;}
@@ -85,6 +120,11 @@ inline bool parseConfig(const Json& j, const Config& old, Config& c) {
             if(!v.is_string() || !parseSummonPosition(v.get<std::string>(),next.summonPosition))return false;hasSummon=true;
         } else if(key=="standaloneSpecialMode") {
             if(!v.is_string() || !parseStandaloneSpecial(v.get<std::string>(),next.standaloneSpecialMode))return false;
+        } else if(key=="touchFeedback") {
+            if(!v.is_string() || !parseTouchFeedback(v.get<std::string>(),next.touchFeedback))return false;
+        } else if(key=="autoHideSeconds") {
+            if(!v.is_number_integer())return false;const auto n=v.get<long long>();
+            if(!validAutoHideSeconds(n))return false;next.autoHideSeconds=(int)n;
         } else if(key=="specialMask") {
             if(!v.is_number_integer())return false;const auto n=v.get<long long>();if(n<0||n>3)return false;next.specialMask=(unsigned)n;hasSpecial=true;
         } else if(key=="rearMask") {
@@ -112,13 +152,10 @@ inline bool parseConfig(const Json& j, const Config& old, Config& c) {
     c=next;return true;
 }
 inline int profileIndex(const std::string& persona) {
-    if(persona=="disabled") return 0;if(persona=="steamdeck") return 1;
-    if(persona=="dualsense-edge" || persona=="dualsense" || persona=="dualshock4") return 2;
-    if(persona=="elite" || persona=="xbox360") return 3;return -1;
+    return ymcc::controllerPersona::screenProfile(persona);
 }
 inline const char* profileName(int index) {
-    constexpr const char* names[]={"disabled","steamdeck","dualsense-edge","elite"};
-    return names[std::clamp(index,0,3)];
+    return ymcc::controllerPersona::screenPersona(index);
 }
 inline Config profileDefault(int index) {
     Config c;
@@ -130,14 +167,19 @@ inline Config profileDefault(int index) {
 }
 struct ProfileBank {
     std::array<Config,4> slots;
-    explicit ProfileBank(const Json& section=Json::object()) {
+    explicit ProfileBank(const Json& savedSection=Json::object()) {
+        Json section=savedSection;ymcc::controllerPersona::migrateSavedScreenProfiles(section);
         for(int i=0;i<4;i++) slots[i]=profileDefault(i);
         const auto readSaved=[](const Json& saved,Config& slot) {
             Config seed=slot;
             // Before layouts existed, a saved profile was dual (or disabled).
             // Do not reinterpret old PS5 settings as the new single-pad preset.
             if(saved.is_object() && !saved.contains("layout")) {seed.enabled=false;seed.layout=Layout::Dual;}
-            parseConfig(saved,seed,slot);
+            // Retired experiment: discard only its old saved field. Do not
+            // reject the whole profile and lose the user's other settings.
+            if(saved.is_object() && saved.contains("deckSmoothing")) {
+                Json migrated=saved;migrated.erase("deckSmoothing");parseConfig(migrated,seed,slot);
+            } else parseConfig(saved,seed,slot);
         };
         if(section.is_object() && section.contains("profiles") && section["profiles"].is_object()) {
             for(int i=0;i<4;i++) if(section["profiles"].contains(profileName(i)))
@@ -157,7 +199,7 @@ inline int basePanelSide(const RECT& monitor) {
     const int width=monitor.right-monitor.left,height=monitor.bottom-monitor.top;
     return std::min(std::clamp(width/6,150,270),std::clamp(height/4,150,250));
 }
-inline constexpr LONG kControlBottomClearance=12,kControlHorizontalGap=10,kControlVerticalGap=20,kControlHeight=54,kControlLiftPercent=30;
+inline constexpr LONG kControlBottomClearance=12,kControlHorizontalGap=10,kControlVerticalGap=40,kControlHeight=54,kControlLiftPercent=30;
 struct PanelRows { LONG gapX=0,gapY=0,keyHeight=0,padBottom=0,specialBottom=0,lift=0; };
 inline PanelRows panelRows(const RECT& monitor,int scale,const RECT* workArea=nullptr) {
     const int percent=std::clamp(scale,50,200);RECT work=monitor,intersection{};
@@ -188,64 +230,121 @@ inline RECT singlePanelRect(const RECT& monitor,int scale,const RECT* workArea=n
     return {left,bottom-height,left+width,bottom};
 }
 inline Mode surfaceMode(const Config& c,int side) {return c.layout==Layout::Single?c.single:(side==0?c.left:c.right);}
-struct Contact { bool down=false, click=false; short x=0,y=0; unsigned short pressure=0; };
+struct Contact { bool down=false, click=false; short x=0,y=0; unsigned short pressure=0; bool operator==(const Contact&)const noexcept=default; };
 struct Snapshot { bool present=false; Contact left{},right{}; };
 inline Json snapshotJson(const Snapshot& s) {
-    auto pad=[](const Contact& p)->Json {return {{"active",p.down},{"click",p.click},
-        {"x",p.down?p.x:0},{"y",p.down?p.y:0},{"pressure",p.down?p.pressure:0}};};
-    return {{"left",pad(s.left)},{"right",pad(s.right)}};
+    auto pad=[](const Contact& p)->Json {
+        Json value = Json::object();
+        value["active"] = p.down;
+        value["click"] = p.click;
+        value["x"] = p.down ? p.x : 0;
+        value["y"] = p.down ? p.y : 0;
+        value["pressure"] = p.down ? p.pressure : 0;
+        return value;
+    };
+    Json value = Json::object();
+    value["left"] = pad(s.left);
+    value["right"] = pad(s.right);
+    return value;
 }
-struct Action { unsigned keys=0; int dx=0,dy=0; bool heldClick=false,tap=false; };
+// POINTER_INFO.dwTime is a wrapping 32-bit event tick. Expand it in the
+// current 64-bit uptime epoch; reject future/ambiguous values rather than
+// manufacturing a days-long hold. Delivery latency must not turn a real
+// long press into a tap when DOWN and UP are drained in the same UI turn.
+inline ULONGLONG pointerEventTick(DWORD sourceTime,ULONGLONG dispatchTick) {
+    const DWORD age=(DWORD)dispatchTick-sourceTime;
+    return age<0x80000000u && (ULONGLONG)age<=dispatchTick?dispatchTick-age:dispatchTick;
+}
+struct Action { unsigned keys=0; int dx=0,dy=0; bool heldClick=false,tap=false; unsigned hapticPulses=0,hapticContacts=0; int hapticStrengthPercent=0; };
+using TouchHapticPulseSink = void (*)(unsigned contacts,bool pulse,int strength);
+inline std::atomic<TouchHapticPulseSink> touchHapticPulseSink{nullptr};
+inline ymcc::touchhaptic::FeedbackOnlyContacts feedbackOnlyContacts; // Guarded by mutex below.
+inline bool* feedbackOnlyForegroundFixture=nullptr; // Dry-run fixture only; never installed by startup.
+inline ymcc::touchhaptic::EventGate touchHapticEventGate; // HWND owner thread only.
+inline void setTouchHapticPulseSink(TouchHapticPulseSink sink) {
+    const auto previous=touchHapticPulseSink.exchange(sink,std::memory_order_acq_rel);
+    touchHapticEventGate.reset();if(previous&&previous!=sink)previous(0,false,0); // revoke old pending work, never replay through a new sink
+}
 struct Pad {
     UINT32 id=0; bool down=false,click=false; float x=0,y=0,lastX=0,lastY=0,startX=0,startY=0;
-    double remainderX=0,remainderY=0; float travel=0; ULONGLONG started=0; unsigned keys=0;
+    double remainderX=0,remainderY=0; float travelSquared=0; ymcc::touchhaptic::Motion haptic; ULONGLONG started=0; unsigned keys=0;
 };
 struct TapClick { bool active=false,published=false; float x=0,y=0; ULONGLONG until=0; };
 // Fixed-size pure state machine shared by production and simulation tests.
 class Core {
 public:
     Config config{}; std::array<Pad,2> pads{}; std::array<TapClick,2> clicks{};
+    bool nativeOutputBlocked=false; ULONGLONG nativeReadyAt=0;
     Action cancel() { pads={}; clicks={}; return {}; }
     Action current() const {
-        Action a; for(int i=0;i<2;i++) {
-            a.keys |= pads[i].keys;
-            if(mode(i)==Mode::Mouse && pads[i].down && pads[i].click) a.heldClick=true;
-        } return a;
+        Action a;if(!config.masterEnabled)return a;const int strength=config.enabled?touchFeedbackStrength(config.touchFeedback):0;
+        for(int i=0;i<2;i++) {
+            const auto& p=pads[i];a.keys|=p.keys;if(!p.down)continue;
+            const auto m=mode(i);if(strength&&m!=Mode::Off)a.hapticContacts|=1u<<i;
+            if(m==Mode::Mouse&&p.click)a.heldClick=true;
+        }
+        if(a.hapticContacts)a.hapticStrengthPercent=strength;return a;
     }
     Mode mode(int side) const { return surfaceMode(config,side); }
-    Action event(int side, UINT32 id, int phase, float x,float y, int width,int height,ULONGLONG now) {
-        Action a=current(); if(side<0 || side>1 || !config.enabled || mode(side)==Mode::Off) return a;
+    Action event(int side, UINT32 id, int phase, float x,float y, int width,int height,ULONGLONG now,ULONGLONG delivered=0) {
+        // Successful events publish current state once, after mutating the contact.
+        // Rejected events still return the complete unchanged state.
+        Action a;const auto eventMode=side>=0&&side<2?mode(side):Mode::Off;
+        const int feedbackStrength=touchFeedbackStrength(config.touchFeedback);
+        if(side<0 || side>1 || phase<0 || phase>2 || !std::isfinite(x) || !std::isfinite(y) ||
+            width<=0 || height<=0 || !config.masterEnabled || !config.enabled || eventMode==Mode::Off) return current();
+        // Recheck under the adapter mutex: a lifecycle failure may have arrived
+        // after handlePointer selected its route. UPDATE/UP never create a contact.
+        if(nativePad(eventMode) && (nativeOutputBlocked || (phase==0 && now<nativeReadyAt)))return current();
         Pad& p=pads[side];
         if(phase==0) {
-            if(p.down) return a; // One independent contact per Deck pad; never swap fingers.
+            if(p.down) return current(); // One independent contact per Deck pad; never swap fingers.
+            // A new Deck gesture must never inherit an earlier 60ms tap's
+            // coordinates, click bit or pressure, even if BUS delivery was late.
+            // Prefer dropping an undelivered old tap to pressing during a swipe.
+            if(eventMode==Mode::Deck) clicks[side]={};
             p={}; p.id=id;p.down=true;p.started=now;
             p.x=p.lastX=p.startX=std::clamp(x,0.f,(float)width);
             p.y=p.lastY=p.startY=std::clamp(y,0.f,(float)height);
+            if(feedbackStrength>0) {
+                p.haptic.begin(p.x,p.y,width,height,now);a.hapticPulses=1;
+            }
             // The whole pad is one gesture surface; no bottom hold/drag zone.
         } else {
-            if(!p.down || p.id!=id) return a;
+            if(!p.down || p.id!=id) return current();
             if(phase==2) {
                 const float limit=std::max(1.f,std::min(width,height)*0.03f);
-                const bool tap=now-p.started<=250 &&
-                    std::max(p.travel,std::hypot(x-p.startX,y-p.startY))<limit;
-                if(tap && nativePad(mode(side)))
-                    clicks[side]={true,false,p.x,p.y,now+60};
-                p={}; a=current();a.tap=tap && mode(side)==Mode::Mouse;return a;
+                const float upDx=x-p.startX,upDy=y-p.startY;
+                const bool tap=now>=p.started && now-p.started<=250 &&
+                    std::max(p.travelSquared,upDx*upDx+upDy*upDy)<limit*limit;
+                if(tap && nativePad(eventMode))
+                    clicks[side]={true,false,p.x,p.y,std::max(now,delivered)+60}; // Classify by source time; publish for a full delivery-time pulse.
+                p={}; a=current();a.tap=tap && eventMode==Mode::Mouse;return a;
             }
-            p.x=std::clamp(x,0.f,(float)width);p.y=std::clamp(y,0.f,(float)height);
+            const float nextX=std::clamp(x,0.f,(float)width),nextY=std::clamp(y,0.f,(float)height);
+            p.x=nextX;p.y=nextY;
         }
-        p.travel=std::max(p.travel,std::hypot(p.x-p.startX,p.y-p.startY));
-        if(mode(side)==Mode::Wasd || mode(side)==Mode::Arrows) {
+        // Directional keyboard mappings never classify taps. Other modes compare
+        // squared displacement, retaining the maximum even after returning home.
+        if(eventMode!=Mode::Wasd && eventMode!=Mode::Arrows) {
+            const float fromX=p.x-p.startX,fromY=p.y-p.startY;
+            p.travelSquared=std::max(p.travelSquared,fromX*fromX+fromY*fromY);
+        }
+        if(phase==1 && feedbackStrength>0 && p.haptic.move(p.x,p.y,now))
+            a.hapticPulses=1;
+        if(eventMode==Mode::Wasd || eventMode==Mode::Arrows) {
             const float nx=2*p.x/std::max(width,1)-1, ny=2*p.y/std::max(height,1)-1;
             // Independent axial Schmitt triggers permit diagonals without boundary chatter.
-            const unsigned bank=p.keys >> (mode(side)==Mode::Arrows?4:0);
+            const unsigned bank=p.keys >> (eventMode==Mode::Arrows?4:0);
             auto on=[&](float v,unsigned bit){return v>((bank & bit)?0.16f:0.22f);};
             unsigned bits=0;if(on(-ny,1))bits|=1;if(on(ny,2))bits|=2;
             if(on(-nx,4))bits|=4;if(on(nx,8))bits|=8;
-            p.keys=bits << (mode(side)==Mode::Arrows?4:0);
+            p.keys=bits << (eventMode==Mode::Arrows?4:0);
         }
+        const unsigned hapticPulses=a.hapticPulses;
         a=current();
-        if(mode(side)==Mode::Mouse && phase==1) {
+        a.hapticPulses=hapticPulses;
+        if(eventMode==Mode::Mouse && phase==1) {
             const double gain=config.mouseSensitivity/100.0;
             p.remainderX+=(p.x-p.lastX)*gain;p.remainderY+=(p.y-p.lastY)*gain;
             a.dx=(int)p.remainderX;a.dy=(int)p.remainderY;
@@ -253,48 +352,216 @@ public:
         }
         p.lastX=p.x;p.lastY=p.y;return a;
     }
+    struct Projection {bool valid=false,click=false;float x=0,y=0;Contact contact{};Mode mode=Mode::Off;};
+    std::array<Projection,2> projections{};
     Snapshot snapshot(ULONGLONG now=0) {
-        Snapshot s;
+        Snapshot s;if(!config.masterEnabled || nativeOutputBlocked)return s;
         for(int i=0;i<2;i++) {
             auto& tap=clicks[i];
             // Expire in the existing BUS snapshot path, without a new timer.
             // Even after a delayed tick, expose at least one pressed report.
             if(tap.active && tap.published && now>=tap.until) tap={};
             if(!config.enabled || !nativePad(mode(i)) || (!pads[i].down && !tap.active)) continue;
-            const Pad& p=pads[i];Contact c;c.down=true;c.click=tap.active;
-            c.x=(short)std::clamp(std::lround(tap.active?tap.x:p.x),-32768L,32767L);
-            c.y=(short)std::clamp(std::lround(tap.active?tap.y:p.y),-32768L,32767L);
-            c.pressure=c.click?32767:8192;(i==0?s.left:s.right)=c;s.present=true;
+            const Pad& p=pads[i];auto& cached=projections[i];const auto contactMode=mode(i);
+            const float x=tap.active?tap.x:p.x,y=tap.active?tap.y:p.y;
+            if(!cached.valid||cached.click!=tap.active||cached.x!=x||cached.y!=y||cached.mode!=contactMode){
+                Contact c;c.down=true;c.click=tap.active;
+                c.x=(short)std::clamp(std::lround(x),-32768L,32767L);
+                c.y=(short)std::clamp(std::lround(y),-32768L,32767L);
+                // Deck touch (bits 19/20), click (17/18), and force (56/58)
+                // are independent in Valve's protocol. A screen swipe supplies
+                // touch + XY only, not artificial force that can activate bindings.
+                c.pressure=c.click?32767:(contactMode==Mode::Deck?0:8192);
+                cached={true,tap.active,x,y,c,contactMode};
+            }
+            (i==0?s.left:s.right)=cached.contact;s.present=true;
             if(tap.active) tap.published=true;
         }return s;
     }
 };
 inline std::mutex mutex;
 inline Core core;
-inline std::atomic<bool> available{false}, psAvailable{false}, ps4Target{false}, enabled{false}, nativeMode{false};
+inline std::atomic<bool> available{false}, psAvailable{false}, enabled{false}, nativeMode{false};
 inline std::atomic<HWND> owner{nullptr};
 inline std::atomic<int> activeProfile{0}, appliedProfile{0};
 inline HINSTANCE instance=nullptr;
+struct NativeTransportObservation {ULONGLONG epoch=0;bool ready=false;};
+struct NativeTransportState {
+    NativeTransportObservation last{};bool observed=false;
+    unsigned long long changes=0,discardedGestures=0;
+};
+inline NativeTransportState nativeTransport; // guarded by mutex; no timer/worker
+inline void observeNativeTransportLocked(NativeTransportObservation next) {
+    next.ready=next.ready && next.epoch!=0;
+    if(nativeTransport.observed && nativeTransport.last.epoch==next.epoch && nativeTransport.last.ready==next.ready)return;
+    nativeTransport.observed=true;nativeTransport.last=next;++nativeTransport.changes;
+    core.nativeOutputBlocked=!next.ready;
+    if(next.ready)core.nativeReadyAt=GetTickCount64();
+    bool changed=false;
+    const bool shared=core.config.layout==Layout::Single && core.config.single==Mode::DualSense;
+    for(int i=0;i<2;++i)if(nativePad(core.mode(i))) {
+        auto& p=core.pads[i];
+        if(p.down) {
+            // Keep physical touch/haptic ownership through UP, but never carry
+            // its coordinates/click into the replacement or recovered target.
+            feedbackOnlyContacts.adopt(i,shared?0:i,p.id,p.haptic,p.x,p.y);
+            ++nativeTransport.discardedGestures;changed=true;
+        }
+        changed=changed||core.clicks[i].active;p={};core.clicks[i]={};
+    }
+    // Lifecycle/BUS threads never draw or inject. The UI re-evaluates its current
+    // cursor/outline state; a delayed notification cannot cancel a newer gesture.
+    if(changed)if(HWND h=owner.load(std::memory_order_acquire))PostMessageW(h,kNativeOutputResetMessage,0,0);
+}
+inline void observeNativeTransport(ULONGLONG epoch,bool ready) {
+    std::lock_guard<std::mutex> l(mutex);observeNativeTransportLocked({epoch,ready});
+}
 // A no-redirection input host is visually empty but retains touch hit-testing.
 // The separate outline has per-pixel alpha and is always click-through.
 inline std::array<HWND,2> windows{}, outlines{};
 inline BYTE outlineAlpha(int transparency) {return (BYTE)(255*(100-transparency)/100);}
+inline int outlineFeedbackTransparency(int transparency,bool pressed) noexcept {
+    const int visible=100-std::clamp(transparency,0,100);
+    // Settings store transparency; lift visibility by 50%, capped at 100%.
+    return 100-(pressed?std::min(100,visible*3/2):visible);
+}
+inline bool surfacePressed(int surface) {
+    if(surface<0||surface>1)return false;
+    bool pressed=false;
+    {std::lock_guard<std::mutex> l(mutex);
+        if(core.config.masterEnabled && core.config.enabled && (core.config.layout!=Layout::Single || surface==0)) {
+            const bool shared=core.config.layout==Layout::Single && core.config.single==Mode::DualSense;
+            pressed=core.pads[surface].down || (shared && core.pads[1].down);
+            // Visual contact feedback also works on the own-UI route and with
+            // vibration disabled; a single Sony surface remains lit for either finger.
+            for(const auto& contact:feedbackOnlyContacts.contacts)
+                pressed=pressed || (contact.active && contact.surface==surface);
+        }
+    }
+    return pressed;
+}
+inline int surfaceOutlineTransparency(int surface,int transparency) {
+    return outlineFeedbackTransparency(transparency,surfacePressed(surface));
+}
+// All auto-hide state belongs to the HWND owner thread, never BUS snapshot().
+struct AutoHideState {
+    bool hidden=false;unsigned visibleMask=0;int seconds=60;
+    std::array<UINT32,2> specialContacts{}; // Physical holds, including foreground-suppressed keys.
+    ULONGLONG lastTouch=0;HWND timerWindow=nullptr;UINT_PTR timer=0,serial=0x59540000;
+    unsigned long long hides=0,wakes=0;
+};
+inline AutoHideState autoHide;
+inline void autoHideSync(bool reset=false);
+inline void autoHideTouch();
+inline void autoHideStop();
+struct AutoHideTouchScope {
+    bool enabled=true;
+    ~AutoHideTouchScope(){if(enabled)autoHideTouch();}
+};
+inline void syncOutlineFeedback(int surface=-1);
+inline void syncContactVisuals(int surface=-1,bool force=false);
+inline void shutdownContactVisuals();
 inline std::array<SIZE,2> sizes{};
-struct OutlineUpload { bool ready=false,interiorClear=false; DWORD centre=0,edge=0; };
+struct OutlineUpload { bool ready=false,interiorClear=false; DWORD centre=0,edge=0; int width=0,height=0,transparency=-1; bool pressed=false;int padding=0; };
+inline unsigned long long outlineUploadCount=0,outlineCacheHits=0,outlinePositionMoves=0,outlineBitmapBuilds=0;
+// Two owner-thread resources. Geometry is immutable between resize events;
+// press/release and transparency changes reuse it with SourceConstantAlpha.
+struct OutlineBitmap {
+    HDC dc=nullptr;HBITMAP bitmap=nullptr;HGDIOBJ previous=nullptr;
+    DWORD* pixels=nullptr;int width=0,height=0;
+    OutlineBitmap()=default;OutlineBitmap(const OutlineBitmap&)=delete;OutlineBitmap& operator=(const OutlineBitmap&)=delete;
+    void reset() noexcept {
+        if(dc&&previous)SelectObject(dc,previous);
+        if(bitmap)DeleteObject(bitmap);if(dc)DeleteDC(dc);
+        dc=nullptr;bitmap=nullptr;previous=nullptr;pixels=nullptr;width=height=0;
+    }
+    ~OutlineBitmap(){reset();}
+};
+inline std::array<OutlineBitmap,2> outlineBitmaps{};
+inline std::array<std::array<OutlineBitmap,2>,2> outlineFrames{};
 inline std::array<OutlineUpload,2> outlineUploads{};
+// HWND owner thread: count-based inserted-prefix ownership, not consumer receipt.
 inline unsigned sentKeys=0; inline bool sentClick=false,dryRun=false;
+// Configure on the owner thread before use. Synchronous observation only: no
+// mutation/reentry; INPUT is borrowed until return. simulated means no OS send.
+// error is the raw post-send GetLastError on short sends (possibly zero/stale),
+// zero on full/simulated sends. The callback must not allocate, log or throw.
+inline void (*outputEvidenceObserver)(const INPUT*,UINT requested,UINT inserted,DWORD error,bool simulated) noexcept=nullptr;
 inline unsigned long long eventCount=0, injectedCount=0, repaintCount=0;
 inline DWORD inputError=0,windowError=0;
-inline bool initialized=false; // HWND owner thread only.
+inline bool initialized=false,inputTeardown=false; // HWND owner thread only.
+// Fixed, terminal-only evidence. Original handles survive nulling of owner
+// arrays, so a failed DestroyWindow cannot be mistaken for successful cleanup.
+inline std::array<HWND,32> exitInputWindows{};
+inline size_t exitInputWindowCount=0;
+struct ExitInputCheck {unsigned keys=0,buttons=0,liveWindows=0,openSources=0;bool mouse=false,contacts=false;DWORD error=0;bool ok=false;};
+inline constexpr unsigned kExitInputRequiredCleanRounds=3;
+inline std::array<ExitInputCheck,6> exitInputChecks{};
+inline unsigned exitInputCheckCount=0;
+inline void rememberExitInputWindow(HWND h) {
+    if(!h)return;for(size_t i=0;i<exitInputWindowCount;++i)if(exitInputWindows[i]==h)return;
+    if(exitInputWindowCount<exitInputWindows.size())exitInputWindows[exitInputWindowCount++]=h;
+}
+inline unsigned buttonsOpenInputSources();
+inline void (*visibilityRefreshObserver)()=nullptr; // Owner adapter only; no callback in pure Core tests.
+inline bool nativeInputCandidateRequested=false;
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+inline ymcc::screeninput::Runtime nativeInputRuntime;
+inline std::array<ymcc::screeninput::Surface,2> nativeInputSurfaces;
+#endif
+inline void nativeInputCancel() {
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    for(auto& surface:nativeInputSurfaces)surface.cancel();buttonsNativeInputCancel();
+#endif
+}
+inline void nativeInputClose(int side) {
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    if(side>=0&&side<2)nativeInputSurfaces[side].close();
+#endif
+}
+inline void setNativeInputCandidate(bool value) {
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    nativeInputCandidateRequested=value;if(!value){for(auto& surface:nativeInputSurfaces)surface.close();buttonsNativeInputDisable();}
+#else
+    nativeInputCandidateRequested=false;
+#endif
+}
 inline Json* testTrace=nullptr; // Only the self-test sets this; no production trace allocations.
 #include "screen_touchpad_cursor.h"
 inline Config getConfig() {std::lock_guard<std::mutex> l(mutex);return core.config;}
 #include "screen_standalone_special.h"
-inline void output(const Action& a) {
-    // Called only on the HWND owner thread. Diff edges, never repeat held keys.
+inline std::atomic<bool> radialHapticContact{false};
+inline std::atomic<bool> monitorHapticContact{false}; // UI-thread owner, merged with the existing pad/button dispatch.
+inline void outputHaptic(const Action& a) {
+    if(dryRun&&!feedbackOnlyForegroundFixture)return;
+    const auto sink=touchHapticPulseSink.load(std::memory_order_acquire);if(!sink)return;
+    unsigned contacts=0;int strength=0;
+    {std::lock_guard<std::mutex> l(mutex);strength=touchFeedbackStrength(core.config.touchFeedback);
+        // Bits 0/1 belong to pads; 2..8 belong to physical button contacts.
+        // A pad UP must not revoke a held button, or vice versa. Off revokes all.
+        if(strength)contacts=a.hapticContacts|feedbackOnlyContacts.mask()|core.current().hapticContacts|buttonFeedbackMask();}
+    if(radialHapticContact.load(std::memory_order_relaxed)&&strength)contacts|=1u<<10;
+    if(monitorHapticContact.load(std::memory_order_relaxed)&&strength)contacts|=1u<<9;
+    const bool pulse=contacts && a.hapticPulses!=0;
+    if(touchHapticEventGate.publish(contacts,pulse,strength))sink(contacts,pulse,strength);
+}
+inline void radialHaptic(bool contact,bool pulse){radialHapticContact.store(contact,std::memory_order_relaxed);Action action;action.hapticPulses=pulse?1u:0u;outputHaptic(action);}
+inline void monitorHaptic(bool contact,bool pulse) {
+    monitorHapticContact.store(contact,std::memory_order_relaxed);Action action;action.hapticPulses=pulse?1u:0u;outputHaptic(action);
+}
+inline void output(const Action& requested) {
+    const Action neutral{};
+    const Action& a=inputTeardown?neutral:requested; // Terminal release cannot replay a queued down/MOVE.
+    outputHaptic(a);
+    // Native-only moves and unchanged keys/clicks have no OS input batch.
+    // Keep haptic publication above this gate, including contact release/pulses.
+    const unsigned changedKeys=(sentKeys^a.keys)&0xffu;
+    const bool sendTap=a.tap && !a.heldClick && !sentClick;
+    if(!changedKeys && !a.dx && !a.dy && a.heldClick==sentClick && !sendTap)return;
     static constexpr WORD vk[8]={'W','S','A','D',VK_UP,VK_DOWN,VK_LEFT,VK_RIGHT};
-    INPUT input[12]{};UINT n=0;
-    for(int i=0;i<8;i++) if((sentKeys^a.keys)&(1u<<i)) {
+    INPUT input[12]{};unsigned keyBits[12]{};UINT n=0;
+    for(int i=0;i<8;i++) if(changedKeys&(1u<<i)) {
+        keyBits[n]=1u<<i;
         INPUT& p=input[n++];p.type=INPUT_KEYBOARD;p.ki.wScan=(WORD)MapVirtualKeyW(vk[i],MAPVK_VK_TO_VSC);
         p.ki.dwFlags=KEYEVENTF_SCANCODE|((a.keys&(1u<<i))?0:KEYEVENTF_KEYUP)|
             (i>=4?KEYEVENTF_EXTENDEDKEY:0);p.ki.dwExtraInfo=kInjectedTag;
@@ -303,23 +570,63 @@ inline void output(const Action& a) {
         p.mi.dwFlags=MOUSEEVENTF_MOVE;p.mi.dwExtraInfo=kInjectedTag; }
     if(a.heldClick!=sentClick) {INPUT& p=input[n++];p.type=INPUT_MOUSE;
         p.mi.dwFlags=a.heldClick?MOUSEEVENTF_LEFTDOWN:MOUSEEVENTF_LEFTUP;p.mi.dwExtraInfo=kInjectedTag;}
-    if(a.tap && !a.heldClick && !sentClick) for(DWORD flag:{MOUSEEVENTF_LEFTDOWN,MOUSEEVENTF_LEFTUP}) {
+    if(sendTap) for(DWORD flag:{MOUSEEVENTF_LEFTDOWN,MOUSEEVENTF_LEFTUP}) {
         INPUT& p=input[n++];p.type=INPUT_MOUSE;p.mi.dwFlags=flag;p.mi.dwExtraInfo=kInjectedTag;
     }
     if(!n) return;
-    if(dryRun || SendInput(n,input,sizeof(INPUT))==n) {sentKeys=a.keys;sentClick=a.heldClick;injectedCount+=n;inputError=0;}
-    else {
-        // A partial batch may already have pressed a key. Remember all potentially-held
-        // downs so cancellation sends compensating ups rather than leaving them stuck.
-        sentKeys |= a.keys; sentClick = sentClick || a.heldClick;
-        inputError=GetLastError();if(!inputError) inputError=ERROR_ACCESS_DENIED;
+    DWORD failure=0;
+    const auto sendBatch=[&]() {
+        const bool simulated=dryRun;
+        const UINT inserted=simulated?n:SendInput(n,input,sizeof(INPUT));
+        const DWORD lastError=GetLastError(); // Capture before any observer call.
+        // SendInput is serial: account its count as an inserted prefix. This is
+        // sender-side ownership, not proof that a hook/application consumed it.
+        const UINT accepted=std::min(inserted,n);
+        for(UINT i=0;i<accepted;++i) {
+            if(keyBits[i]) {
+                if(input[i].ki.dwFlags&KEYEVENTF_KEYUP)sentKeys&=~keyBits[i];
+                else sentKeys|=keyBits[i];
+            } else if(input[i].type==INPUT_MOUSE) {
+                if(input[i].mi.dwFlags&MOUSEEVENTF_LEFTDOWN)sentClick=true;
+                if(input[i].mi.dwFlags&MOUSEEVENTF_LEFTUP)sentClick=false;
+            }
+        }
+        injectedCount+=accepted;
+        if(inserted!=n && !failure)failure=lastError?lastError:ERROR_ACCESS_DENIED;
+        if(const auto observer=outputEvidenceObserver) {
+            observer(input,n,inserted,simulated||inserted==n?0:lastError,simulated);
+            SetLastError(lastError);
+        }
+        return inserted==n;
+    };
+    if(!sendBatch()) {
+        // At most one compensating batch per output(), only for our inserted
+        // downs no longer desired. Never replay movement or an uninserted down.
+        // Failed ups stay owned for subsequent input/release/lifecycle calls.
+        const unsigned releaseKeys=sentKeys&~a.keys&0xffu;
+        n=0;
+        for(int i=0;i<8;++i) if(releaseKeys&(1u<<i)) {
+            keyBits[n]=1u<<i;
+            INPUT& p=input[n++];p={};p.type=INPUT_KEYBOARD;p.ki.wScan=(WORD)MapVirtualKeyW(vk[i],MAPVK_VK_TO_VSC);
+            p.ki.dwFlags=KEYEVENTF_SCANCODE|KEYEVENTF_KEYUP|(i>=4?KEYEVENTF_EXTENDEDKEY:0);p.ki.dwExtraInfo=kInjectedTag;
+        }
+        if(sentClick && !a.heldClick) {
+            keyBits[n]=0;
+            INPUT& p=input[n++];p={};p.type=INPUT_MOUSE;p.mi.dwFlags=MOUSEEVENTF_LEFTUP;p.mi.dwExtraInfo=kInjectedTag;
+        }
+        if(n)sendBatch();
     }
+    inputError=failure;
 }
-inline void release() {
-    buttonsRelease();cursorStop();
+inline void releaseMappedState() {
+    buttonsReleaseMapped();cursorStop();
     bool changed=sentKeys!=0 || sentClick;Action a;
     {std::lock_guard<std::mutex> l(mutex);changed=changed || core.pads[0].down || core.pads[1].down || core.clicks[0].active || core.clicks[1].active;a=core.cancel();}
-    output(a);if(changed) for(HWND h:windows) if(h) InvalidateRect(h,nullptr,FALSE);
+    output(a);syncOutlineFeedback();syncContactVisuals();if(changed) for(HWND h:windows) if(h) InvalidateRect(h,nullptr,FALSE);
+}
+inline void release() {
+    {std::lock_guard<std::mutex> l(mutex);feedbackOnlyContacts.cancel();}
+    nativeInputCancel();buttonsRelease();releaseMappedState();autoHide.specialContacts={};autoHideSync();
 }
 // Dual PS surfaces share one native touchpad: contact IDs are not left/right pads.
 // Keep each screen surface in its own half, with a one-pixel-safe centre split.
@@ -332,11 +639,19 @@ inline Contact normalizeContact(Contact c,LONG width,LONG height,int half=-1) {
     c.y=(short)std::clamp(std::lround((1-2*ny)*32767),-32767L,32767L);
     return c;
 }
-inline Snapshot snapshot() {
-    cursorRequestSync(); // UI-only visuals, using the existing BUS cadence.
-    if(!enabled.load(std::memory_order_relaxed) || !nativeMode.load(std::memory_order_relaxed) ||
-        (!available.load(std::memory_order_acquire) && !psAvailable.load(std::memory_order_acquire)) || activeProfile.load()!=appliedProfile.load()) return {};
-    std::lock_guard<std::mutex> l(mutex);Snapshot s=core.snapshot(GetTickCount64());
+struct NormalizedProjection {Contact input{},output{};int width=0,height=0,half=-2;bool valid=false;};
+inline std::array<NormalizedProjection,2> normalizedProjections{}; // Guarded by mutex; tap expiry still runs every read.
+inline Snapshot snapshot(const NativeTransportObservation* transport=nullptr) {
+    cursorRequestBeforeReport(); // Deck uses the same BUS request after its report attempt.
+    const bool usable=enabled.load(std::memory_order_relaxed) && nativeMode.load(std::memory_order_relaxed) &&
+        (available.load(std::memory_order_acquire) || psAvailable.load(std::memory_order_acquire)) && activeProfile.load()==appliedProfile.load();
+    // Inactive snapshots retain their atomic-only fast path. Explicit fault/stop
+    // edges revoke state separately; the next usable read observes its target
+    // under this mutex before exposing any contact.
+    if(!usable)return {};
+    std::lock_guard<std::mutex> l(mutex);
+    if(transport)observeNativeTransportLocked(*transport);
+    Snapshot s=core.snapshot(GetTickCount64());
     // Normalize either square pads or both contacts on the same wide surface.
     const auto mode=surfaceMode(core.config,0);
     if((mode==Mode::DualSense && !psAvailable.load()) || (mode==Mode::Deck && !available.load())) return {};
@@ -344,8 +659,12 @@ inline Snapshot snapshot() {
         auto& c=i==0?s.left:s.right;if(!c.down) continue;
         const auto contactMode=surfaceMode(core.config,i);
         if((contactMode==Mode::Deck && !available.load()) || (contactMode==Mode::DualSense && !psAvailable.load())){c={};continue;}
-        c=normalizeContact(c,sizes[i].cx,sizes[i].cy,
-            core.config.layout==Layout::Dual && contactMode==Mode::DualSense?i:-1);
+        const int half=core.config.layout==Layout::Dual&&contactMode==Mode::DualSense?i:-1;
+        auto& cached=normalizedProjections[i];
+        if(!cached.valid||cached.input!=c||cached.width!=sizes[i].cx||cached.height!=sizes[i].cy||cached.half!=half){
+            cached={c,normalizeContact(c,sizes[i].cx,sizes[i].cy,half),(int)sizes[i].cx,(int)sizes[i].cy,half,true};
+        }
+        c=cached.output;
     }s.present=s.left.down || s.right.down;return s;
 }
 inline void setAvailable(bool value) {
@@ -356,21 +675,27 @@ inline void setAvailable(bool value) {
 inline std::atomic<bool> controlTargetEnabled{false},controlEdgeEnabled{false};
 inline std::atomic<unsigned> screenButtonMask{0};
 inline void setContext(const std::string& persona,bool targetEnabled) {
+    targetEnabled=targetEnabled && ymcc::controllerPersona::currentOutput(persona);
     const bool controlChanged=controlTargetEnabled.exchange(targetEnabled)!=targetEnabled;
     const bool edgeChanged=controlEdgeEnabled.exchange(persona=="dualsense-edge" && targetEnabled)!=(persona=="dualsense-edge" && targetEnabled);
-    const bool ps4Changed=ps4Target.exchange(persona=="dualshock4")!=(persona=="dualshock4");
     const int next=std::max(0,profileIndex(persona));
     const bool changed=activeProfile.exchange(next)!=next;
-    const bool deck=next==1 && targetEnabled,ps=(persona=="dualsense" || persona=="dualsense-edge" || persona=="dualshock4") && targetEnabled;
+    const bool deck=next==1 && targetEnabled,ps=next==2 && targetEnabled;
     const bool deckChanged=available.exchange(deck)!=deck,psChanged=psAvailable.exchange(ps)!=ps;
-    const bool availabilityChanged=deckChanged || psChanged || ps4Changed || controlChanged || edgeChanged;
+    const bool availabilityChanged=deckChanged || psChanged || controlChanged || edgeChanged;
     if(changed || availabilityChanged) {screenButtonMask.store(0,std::memory_order_release);standaloneCancel();}
     if(changed || availabilityChanged) if(HWND h=owner.load()) PostMessageW(h,kRefreshMessage,0,0);
 }
 inline bool permitted(Mode mode) {return mode!=Mode::Off && (mode!=Mode::Deck || available.load()) && (mode!=Mode::DualSense || psAvailable.load());}
 // Premultiplied BGRA for UpdateLayeredWindow/AC_SRC_ALPHA. Only a one-pixel
-// rounded blue stroke has alpha; all interior and outer-corner pixels are zero.
-inline DWORD outlinePixel(int x,int y,int width,int height,int transparency) {
+// rounded white stroke and a thin centre cross have alpha; the background stays clear.
+inline bool outlineCrossPixel(int x,int y,int width,int height) noexcept {
+    const int inset=std::max(12,std::min(width,height)/10);
+    return (x==width/2 && y>=inset && y<height-inset) ||
+        (y==height/2 && x>=inset && x<width-inset);
+}
+// Shared border only: virtual buttons must not inherit touchpad decorations.
+inline DWORD outlineBorderPixel(int x,int y,int width,int height,int transparency) {
     if(x>=12 && x<width-12 && y>=12 && y<height-12) return 0;
     const double radius=std::min(10.0,std::min(width,height)/2.0-2.0);
     const double qx=std::abs(x+0.5-width/2.0)-(width/2.0-1.5-radius);
@@ -378,38 +703,106 @@ inline DWORD outlinePixel(int x,int y,int width,int height,int transparency) {
     const double distance=std::hypot(std::max(qx,0.0),std::max(qy,0.0))+std::min(std::max(qx,qy),0.0)-radius;
     const auto alpha=(DWORD)std::lround(outlineAlpha(transparency)*std::clamp(1.0-std::abs(distance),0.0,1.0));
     if(!alpha) return 0;
-    const DWORD red=(46*alpha+127)/255,green=(166*alpha+127)/255,blue=alpha;
-    return (alpha<<24)|(red<<16)|(green<<8)|blue;
+    return (alpha<<24)|(alpha<<16)|(alpha<<8)|alpha;
 }
-inline bool renderOutline(int side,int transparency) {
+// Only the touchpad renderer adds the internal cross.
+inline DWORD outlinePixel(int x,int y,int width,int height,int transparency) {
+    if(outlineCrossPixel(x,y,width,height)) {
+        const DWORD alpha=outlineAlpha(transparency)/2;
+        return (alpha<<24)|(alpha<<16)|(alpha<<8)|alpha;
+    }
+    return outlineBorderPixel(x,y,width,height,transparency);
+}
+#include "screen_touchpad_press_visual.h"
+inline bool renderOutline(int side,int transparency,bool force=false) {
     if(!windows[side] || !outlines[side]) return false;
+    const bool pressed=surfacePressed(side);
+    transparency=outlineFeedbackTransparency(transparency,pressed);
     RECT rc{};if(!GetWindowRect(windows[side],&rc)) return false;
     const int width=rc.right-rc.left,height=rc.bottom-rc.top;
     if(width<=0 || height<=0) return false;
-    BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=width;
-    info.bmiHeader.biHeight=-height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
-    HDC screen=GetDC(nullptr),memory=CreateCompatibleDC(screen);void* bits=nullptr;
-    HBITMAP bitmap=CreateDIBSection(screen,&info,DIB_RGB_COLORS,&bits,nullptr,0);
-    if(!screen || !memory || !bitmap || !bits) {
-        windowError=GetLastError();if(!windowError) windowError=ERROR_NOT_ENOUGH_MEMORY;
-        if(bitmap)DeleteObject(bitmap);if(memory)DeleteDC(memory);if(screen)ReleaseDC(nullptr,screen);
-        outlineUploads[side]={};return false;
+    const int padding=pressGlowPadding(getConfig().scale),frameWidth=width+padding*2,frameHeight=height+padding*2;
+    const auto& prior=outlineUploads[side];
+    if(!force && prior.ready && prior.width==width && prior.height==height && prior.transparency==transparency && prior.pressed==pressed && prior.padding==padding) {
+        // Windows retains the last layered bitmap. Move that frame without
+        // replacing it with an empty/identical surface or reallocating GDI.
+        RECT visual{};if(!GetWindowRect(outlines[side],&visual)){windowError=GetLastError();return false;}
+        if(visual.left!=rc.left-padding || visual.top!=rc.top-padding || visual.right-visual.left!=frameWidth || visual.bottom-visual.top!=frameHeight) {
+            if(!SetWindowPos(outlines[side],nullptr,rc.left-padding,rc.top-padding,frameWidth,frameHeight,SWP_NOACTIVATE|SWP_NOZORDER)) {windowError=GetLastError();return false;}
+            ++outlinePositionMoves;
+        }
+        ++outlineCacheHits;return true;
     }
-    const auto old=SelectObject(memory,bitmap);auto pixels=static_cast<DWORD*>(bits);
-    bool clear=true;for(int y=0;y<height;y++) for(int x=0;x<width;x++) {
-        const DWORD pixel=outlinePixel(x,y,width,height,transparency);pixels[y*width+x]=pixel;
-        if(x>=12 && x<width-12 && y>=12 && y<height-12 && pixel!=0) clear=false;
+    auto& image=outlineBitmaps[side];
+    if(!image.dc || image.width!=width || image.height!=height) {
+        for(auto& frame:outlineFrames[side])frame.reset();
+        image.reset();image.dc=CreateCompatibleDC(nullptr);
+        BITMAPINFO info{};info.bmiHeader.biSize=sizeof(BITMAPINFOHEADER);info.bmiHeader.biWidth=width;
+        info.bmiHeader.biHeight=-height;info.bmiHeader.biPlanes=1;info.bmiHeader.biBitCount=32;info.bmiHeader.biCompression=BI_RGB;
+        void* bits=nullptr;
+        if(image.dc)image.bitmap=CreateDIBSection(image.dc,&info,DIB_RGB_COLORS,&bits,nullptr,0);
+        if(!image.dc || !image.bitmap || !bits) {
+            windowError=GetLastError();if(!windowError)windowError=ERROR_NOT_ENOUGH_MEMORY;
+            image.reset();outlineUploads[side]={};return false;
+        }
+        const auto previous=SelectObject(image.dc,image.bitmap);
+        if(!previous || previous==HGDI_ERROR) {
+            windowError=GetLastError();if(!windowError)windowError=ERROR_INVALID_HANDLE;
+            image.reset();outlineUploads[side]={};return false;
+        }
+        image.previous=previous;image.pixels=static_cast<DWORD*>(bits);image.width=width;image.height=height;
+        std::fill_n(image.pixels,(size_t)width*height,0u);
+        // The interior is already zero. Rasterize only the narrow border once,
+        // instead of running a shape calculation for every pixel on every tap.
+        for(int y=0;y<height;++y) {
+            const bool middle=y>=12 && y<height-12 && width>24;
+            const int firstEnd=middle?12:width;
+            for(int x=0;x<firstEnd;++x)image.pixels[(size_t)y*width+x]=outlinePixel(x,y,width,height,0);
+            if(middle)for(int x=width-12;x<width;++x)image.pixels[(size_t)y*width+x]=outlinePixel(x,y,width,height,0);
+        }
+        const int inset=std::max(12,std::min(width,height)/10);
+        for(int y=inset;y<height-inset;++y)image.pixels[(size_t)y*width+width/2]=outlinePixel(width/2,y,width,height,0);
+        for(int x=inset;x<width-inset;++x)image.pixels[(size_t)(height/2)*width+x]=outlinePixel(x,height/2,width,height,0);
+        ++outlineBitmapBuilds;
     }
-    POINT destination{rc.left,rc.top},source{};SIZE size{width,height};
-    BLENDFUNCTION blend{AC_SRC_OVER,0,255,AC_SRC_ALPHA};
-    const bool ok=UpdateLayeredWindow(outlines[side],screen,&destination,&size,memory,&source,0,&blend,ULW_ALPHA)!=FALSE;
-    outlineUploads[side]={ok,clear,pixels[(height/2)*width+width/2],pixels[(height/2)*width+1]};
+    if(!buildPressFrame(image,outlineFrames[side][0],padding,false) || !buildPressFrame(image,outlineFrames[side][1],padding,true))return false;
+    auto& frame=outlineFrames[side][pressed?1:0];
+    POINT destination{rc.left-padding,rc.top-padding},source{};SIZE size{frameWidth,frameHeight};
+    BLENDFUNCTION blend{AC_SRC_OVER,0,outlineAlpha(transparency),AC_SRC_ALPHA};
+    const bool ok=UpdateLayeredWindow(outlines[side],nullptr,&destination,&size,frame.dc,&source,0,&blend,ULW_ALPHA)!=FALSE;
+    outlineUploads[side]={ok,outlineAlpha(transparency)==0,outlinePixel(width/2,height/2,width,height,transparency),
+        outlinePixel(1,height/2,width,height,transparency),width,height,transparency,pressed,padding};
+    ++outlineUploadCount;
     if(!ok) {windowError=GetLastError();if(!windowError)windowError=ERROR_INVALID_DATA;}
-    SelectObject(memory,old);DeleteObject(bitmap);DeleteDC(memory);ReleaseDC(nullptr,screen);
     ++repaintCount;return ok;
 }
+inline void syncOutlineFeedback(int surface) {
+    if(surface>1 || (!outlines[0] && !outlines[1]))return;
+    const int transparency=getConfig().transparency;
+    const int first=surface<0?0:surface,last=surface<0?1:surface;
+    for(int i=first;i<=last;++i) {
+        if(!windows[i] || !outlines[i])continue;
+        // Owner-thread DOWN/UP/cancel only. No MOVE paints, timer, BUS work,
+        // or allocations when the already-uploaded effective alpha is unchanged.
+        const auto& prior=outlineUploads[i];
+        const bool pressed=surfacePressed(i);
+        if(prior.ready && prior.pressed==pressed && prior.transparency==outlineFeedbackTransparency(transparency,pressed))continue;
+        renderOutline(i,transparency);
+    }
+}
+inline void repairButtonOutline(HWND h,bool contentLost);
 inline LRESULT CALLBACK outlineProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     switch(m) {
+    case WM_STYLECHANGED:case WM_ENABLE:{
+        const bool contentLost=m==WM_STYLECHANGED&&w==GWL_EXSTYLE&&lp&&
+            !(reinterpret_cast<const STYLESTRUCT*>(lp)->styleNew&WS_EX_LAYERED);
+        if(!ymcc::screeninput::ensureDisplay(h)){ShowWindow(h,SW_HIDE);return 0;}
+        if(contentLost){
+            bool pad=false;for(int i=0;i<2;++i)if(outlines[i]==h){pad=true;outlineUploads[i]={};
+                if(!renderOutline(i,getConfig().transparency,true))ShowWindow(h,SW_HIDE);}
+            if(!pad)repairButtonOutline(h,true);
+        }
+        return 0;}
     case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
     case WM_POINTERACTIVATE:return PA_NOACTIVATE;
     case WM_NCHITTEST:return HTTRANSPARENT;
@@ -417,12 +810,135 @@ inline LRESULT CALLBACK outlineProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     case WM_PAINT: {PAINTSTRUCT ps;BeginPaint(h,&ps);EndPaint(h,&ps);return 0;}
     }return DefWindowProcW(h,m,w,lp);
 }
+#include "screen_touchpad_contact_visual.h"
+// Both native input routes normalize once, then use the same permission/output core.
+inline LRESULT handlePointer(HWND h,int surface,UINT m,UINT32 id,float x,float y,DWORD flags,DWORD sourceTime=0,bool timeKnown=false) {
+    if(surface<0||surface>1||!std::isfinite(x)||!std::isfinite(y))return 0;int side=surface;
+    if(!enabled.load() || activeProfile.load()!=appliedProfile.load()) return 0;
+    Config cfg;AutoHideTouchScope activity{false};
+    // Foreground only gates mapping. Haptics keep their gesture route through UP;
+    // no focus changes, second Core, synthetic click or BUS output are allowed.
+    const bool ownUi=dryRun&&feedbackOnlyForegroundFixture?*feedbackOnlyForegroundFixture:
+        (!dryRun&&owner.load()==GetForegroundWindow());
+    bool onlyRoute=false,mappedActive=false,outputBlocked=false;{std::lock_guard<std::mutex> l(mutex);
+        // Read config and contact routing under the same already-required lock.
+        cfg=core.config;if(!permitted(surfaceMode(cfg,surface)) || (cfg.layout==Layout::Single && surface!=0))return 0;
+        onlyRoute=feedbackOnlyContacts.find(id,surface)>=0;
+        activity.enabled=(m==WM_POINTERDOWN && !(flags&POINTER_FLAG_CANCELED)) || onlyRoute ||
+            (core.pads[0].down && core.pads[0].id==id) || (core.pads[1].down && core.pads[1].id==id);
+        outputBlocked=nativePad(surfaceMode(cfg,surface)) && core.nativeOutputBlocked;
+        mappedActive=core.pads[0].down||core.pads[1].down||core.clicks[0].active||core.clicks[1].active||sentKeys||sentClick;
+    }
+    if(ownUi||onlyRoute||outputBlocked){
+        if((ownUi&&!onlyRoute)||(ownUi&&mappedActive)){
+            {std::lock_guard<std::mutex> l(mutex);
+                const bool shared=cfg.layout==Layout::Single&&cfg.single==Mode::DualSense;
+                for(int i=0;i<2;++i)if(core.pads[i].down)
+                    feedbackOnlyContacts.adopt(i,shared?0:i,core.pads[i].id,core.pads[i].haptic,core.pads[i].x,core.pads[i].y);}
+            releaseMappedState();
+        }
+        Action feedback;{std::lock_guard<std::mutex> l(mutex);
+            const auto tick=GetTickCount64();
+            const int phase=(flags&POINTER_FLAG_CANCELED)||m==WM_POINTERUP?2:m==WM_POINTERDOWN?0:1;
+            const int strength=touchFeedbackStrength(cfg.touchFeedback);
+            const bool pulse=feedbackOnlyContacts.event(surface,id,phase,x,y,(int)sizes[surface].cx,(int)sizes[surface].cy,
+                timeKnown?pointerEventTick(sourceTime,tick):tick,cfg.layout==Layout::Single&&cfg.single==Mode::DualSense,strength>0);
+            if(strength){feedback.hapticContacts=feedbackOnlyContacts.mask();feedback.hapticPulses=pulse?1u:0u;feedback.hapticStrengthPercent=strength;}
+        }
+        ++eventCount;outputHaptic(feedback);syncContactVisuals(surface);
+        if(m!=WM_POINTERUPDATE || (flags&POINTER_FLAG_CANCELED))syncOutlineFeedback(surface);
+        return 0;
+    }
+    if(m==WM_POINTERDOWN&&!(cfg.layout==Layout::Single&&cfg.single==Mode::DualSense)){
+        std::lock_guard<std::mutex> l(mutex);if(feedbackOnlyContacts.mask()&(1u<<surface))return 0;
+    }
+    if(cfg.layout==Layout::Single && cfg.single==Mode::DualSense) {
+        std::lock_guard<std::mutex> l(mutex);side=-1;
+        for(int i=0;i<2;i++)if(core.pads[i].down && core.pads[i].id==id){side=i;break;}
+        if(side<0 && m==WM_POINTERDOWN)for(int i=0;i<2;i++)if(!core.pads[i].down&&!feedbackOnlyContacts.contacts[i].active){side=i;break;}
+        if(side<0)return 0;
+    }
+    if(flags&POINTER_FLAG_CANCELED) {
+        Action a;{std::lock_guard<std::mutex> l(mutex);
+            if(core.pads[side].down && core.pads[side].id==id) {core.pads[side]={};core.clicks[side]={};}a=core.current();}
+        output(a);syncOutlineFeedback(surface);syncContactVisuals(surface);cursorContactChanged(h);InvalidateRect(h,nullptr,FALSE);return 0;
+    }
+
+    ULONGLONG dispatchTick=0;
+    Action a;{std::lock_guard<std::mutex> l(mutex);
+        dispatchTick=GetTickCount64();
+        a=core.event(side,id,m==WM_POINTERDOWN?0:m==WM_POINTERUP?2:1,x,y,
+            (int)sizes[side].cx,(int)sizes[side].cy,timeKnown?pointerEventTick(sourceTime,dispatchTick):dispatchTick,dispatchTick);}
+    ++eventCount;output(a);syncContactVisuals(surface);
+    cursorContactChanged(h,m==WM_POINTERUP,m==WM_POINTERUPDATE && surfaceMode(cfg,surface)==Mode::Deck,dispatchTick);
+    if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",id},{"flags",flags},
+        {"mode",modeName(core.mode(side))},{"x",x},{"y",y},{"down",core.pads[side].down},{"keys",sentKeys},{"tick",GetTickCount64()},{"snapshot",snapshotJson(snapshot())}});
+    if(m!=WM_POINTERUPDATE) {syncOutlineFeedback(surface);InvalidateRect(h,nullptr,FALSE);}
+    return 0;
+
+}
+inline LRESULT handleCaptureLoss(HWND h,int surface,UINT32 id) {
+    if(surface<0||surface>1)return 0;int side=surface;constexpr UINT m=WM_POINTERCAPTURECHANGED;
+    AutoHideTouchScope activity{false};
+    Action feedback;bool only=false;{std::lock_guard<std::mutex> l(mutex);
+        const int slot=feedbackOnlyContacts.find(id,surface);only=slot>=0;
+        if(only){feedbackOnlyContacts.contacts[slot]={};const int strength=touchFeedbackStrength(core.config.touchFeedback);
+            if(strength){feedback.hapticContacts=feedbackOnlyContacts.mask();feedback.hapticStrengthPercent=strength;}}
+    }
+    if(only){activity.enabled=true;outputHaptic(feedback);syncOutlineFeedback(surface);syncContactVisuals(surface);return 0;}
+    {std::lock_guard<std::mutex> l(mutex);if(core.config.layout==Layout::Single && core.config.single==Mode::DualSense)
+        for(int i=0;i<2;i++)if(core.pads[i].down && core.pads[i].id==id){side=i;break;}}
+    if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",id},
+        {"oldId",core.pads[side].id},{"oldDown",core.pads[side].down}});
+    Action a;bool lostActive=false;{std::lock_guard<std::mutex> l(mutex);
+        if(core.pads[side].down && core.pads[side].id==id) {core.pads[side]={};core.clicks[side]={};lostActive=true;}
+        a=core.current();}output(a);
+    // Windows can notify capture loss after a normal UP. That stale edge
+    // must not erase the passive cursor retained between swipes.
+    if(lostActive){activity.enabled=true;syncOutlineFeedback(surface);syncContactVisuals(surface);cursorContactChanged(h);}InvalidateRect(h,nullptr,FALSE);return 0;
+
+}
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+inline void nativeInputSink(HWND root,const ymcc::screeninput::Event& event,void*) {
+    if(inputTeardown)return;
+    if(event.phase==ymcc::screeninput::Phase::Cancel){handleCaptureLoss(root,event.surface,event.id);return;}
+    const UINT message=event.phase==ymcc::screeninput::Phase::Down?WM_POINTERDOWN:event.phase==ymcc::screeninput::Phase::Up?WM_POINTERUP:WM_POINTERUPDATE;
+    handlePointer(root,event.surface,message,event.id,event.x,event.y,event.cancelled?POINTER_FLAG_CANCELED:0,event.sourceTime,event.timeKnown);
+}
+#endif
+inline bool nativeInputSync(int side,bool wanted,bool force) {
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    if(!nativeInputCandidateRequested){nativeInputClose(side);return true;}
+    if(!wanted){nativeInputSurfaces[side].cancel();return true;}
+    auto& surface=nativeInputSurfaces[side];
+    const bool ok=surface.root()==windows[side]?surface.sync(force):surface.attach(nativeInputRuntime,windows[side],side,nativeInputSink,nullptr);
+    if(!ok){const auto failure=surface.error;surface.close();windowError=(DWORD)failure;}
+    return ok;
+#else
+    return true;
+#endif
+}
 inline LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
     if(m==WM_NCCREATE) {SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)((CREATESTRUCTW*)lp)->lpCreateParams);return TRUE;}
+    if(inputTeardown&&(m==WM_POINTERDOWN||m==WM_POINTERUPDATE||m==WM_POINTERUP||m==WM_POINTERCAPTURECHANGED||
+       m==WM_CANCELMODE||m==WM_STYLECHANGED||m==WM_ENABLE))return 0;
     const int surface=(int)GetWindowLongPtrW(h,GWLP_USERDATA);
     int side=surface;
     switch(m) {
+    case WM_WINDOWPOSCHANGED:case WM_DPICHANGED:case WM_DISPLAYCHANGE:case WM_SHOWWINDOW:case WM_NCDESTROY:
+        invalidateContactGeometry(h);break; // Keep DefWindowProc's MOVE/SIZE/lifecycle handling.
+    case WM_STYLECHANGED:case WM_ENABLE:
+        invalidateContactGeometry(h);
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+        if(surface>=0&&surface<2&&nativeInputSurfaces[surface].root()==h&&nativeInputSurfaces[surface].policyEnabled()&&
+            !nativeInputSurfaces[surface].ensureMousePass()){
+            windowError=(DWORD)nativeInputSurfaces[surface].error;ShowWindow(h,SW_HIDE);
+            if(outlines[surface])ShowWindow(outlines[surface],SW_HIDE);release();
+        }
+#endif
+        return 0;
     case kCursorSyncMessage:cursorSyncPending.store(false,std::memory_order_release);cursorSync();return 0;
+    case cursorvisibility::kMessage:cursorVisibilitySync(h,w);return 0;
     case WM_MOUSEACTIVATE:return MA_NOACTIVATE;
     case WM_POINTERACTIVATE:return PA_NOACTIVATE;
     case WM_ERASEBKGND:return 1;
@@ -431,63 +947,33 @@ inline LRESULT CALLBACK windowProc(HWND h,UINT m,WPARAM w,LPARAM lp) {
         ++repaintCount;PAINTSTRUCT ps;BeginPaint(h,&ps);EndPaint(h,&ps);return 0;
     }
     case WM_POINTERDOWN:case WM_POINTERUPDATE:case WM_POINTERUP: {
-        if(!enabled.load() || activeProfile.load()!=appliedProfile.load()) return 0;
-        const auto cfg=getConfig();if(!permitted(surfaceMode(cfg,surface)) || (cfg.layout==Layout::Single && surface!=0)) return 0;
-        // Never type synthetic game bindings back into YeManCC's own settings UI.
-        if(!dryRun && owner.load()==GetForegroundWindow()) {release();return 0;}
+        // Preserve fail-closed legacy admission before querying/deferring input.
+        if(surface<0||surface>1||!enabled.load()||activeProfile.load()!=appliedProfile.load())return 0;
+        const auto cfg=getConfig();if(!permitted(surfaceMode(cfg,surface))||(cfg.layout==Layout::Single&&surface!=0))return 0;
         POINTER_INFO pi{};const UINT32 id=GET_POINTERID_WPARAM(w);
-        if(!GetPointerInfo(id,&pi) || (pi.pointerType!=PT_TOUCH && pi.pointerType!=PT_PEN)) {
-            if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",id},{"error",GetLastError()}});
-            break;
-        }
-        if(cfg.layout==Layout::Single && cfg.single==Mode::DualSense) {
-            std::lock_guard<std::mutex> l(mutex);side=-1;
-            for(int i=0;i<2;i++)if(core.pads[i].down && core.pads[i].id==id){side=i;break;}
-            if(side<0 && m==WM_POINTERDOWN)for(int i=0;i<2;i++)if(!core.pads[i].down){side=i;break;}
-            if(side<0)return 0;
-        }
-        if(pi.pointerFlags&POINTER_FLAG_CANCELED) {
-            Action a;{std::lock_guard<std::mutex> l(mutex);
-                if(core.pads[side].down && core.pads[side].id==id) {core.pads[side]={};core.clicks[side]={};}a=core.current();}
-            output(a);cursorContactChanged(h);InvalidateRect(h,nullptr,FALSE);return 0;
+        if(!GetPointerInfo(id,&pi)||(pi.pointerType!=PT_TOUCH&&pi.pointerType!=PT_PEN)) {
+            if(testTrace)testTrace->push_back({{"message",m},{"side",surface},{"id",id},{"error",GetLastError()}});break;
         }
         POINT point=pi.ptPixelLocation;ScreenToClient(h,&point);
-        Action a;{std::lock_guard<std::mutex> l(mutex);
-            a=core.event(side,id,m==WM_POINTERDOWN?0:m==WM_POINTERUP?2:1,(float)point.x,(float)point.y,
-                (int)sizes[side].cx,(int)sizes[side].cy,GetTickCount64());}
-        ++eventCount;output(a);cursorContactChanged(h,m==WM_POINTERUP);
-        if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",id},{"flags",pi.pointerFlags},
-            {"mode",modeName(core.mode(side))},{"x",point.x},{"y",point.y},{"down",core.pads[side].down},{"keys",sentKeys},{"tick",GetTickCount64()},{"snapshot",snapshotJson(snapshot())}});
-        if(m!=WM_POINTERUPDATE) InvalidateRect(h,nullptr,FALSE);
-        return 0;
+        return handlePointer(h,surface,m,id,(float)point.x,(float)point.y,pi.pointerFlags,pi.dwTime,true);
     }
-    case WM_POINTERCAPTURECHANGED: {
-        const UINT32 id=GET_POINTERID_WPARAM(w);
-        {std::lock_guard<std::mutex> l(mutex);if(core.config.layout==Layout::Single && core.config.single==Mode::DualSense)
-            for(int i=0;i<2;i++)if(core.pads[i].down && core.pads[i].id==id){side=i;break;}}
-        if(testTrace) testTrace->push_back({{"message",m},{"side",side},{"id",GET_POINTERID_WPARAM(w)},
-            {"oldId",core.pads[side].id},{"oldDown",core.pads[side].down}});
-        Action a;bool lostActive=false;{std::lock_guard<std::mutex> l(mutex);
-            if(core.pads[side].down && core.pads[side].id==GET_POINTERID_WPARAM(w)) {core.pads[side]={};core.clicks[side]={};lostActive=true;}
-            a=core.current();}output(a);
-        // Windows can notify capture loss after a normal UP. That stale edge
-        // must not erase the passive cursor retained between swipes.
-        if(lostActive)cursorContactChanged(h);InvalidateRect(h,nullptr,FALSE);return 0;
-    }
+    case WM_POINTERCAPTURECHANGED:return handleCaptureLoss(h,surface,GET_POINTERID_WPARAM(w));
     case WM_CANCELMODE:if(testTrace)testTrace->push_back({{"message",m},{"tick",GetTickCount64()},{"cancel",true}});release();return 0;
     }
     return DefWindowProcW(h,m,w,lp);
 }
-inline void refresh() {
+inline void refresh(bool forceVisuals=false) {
     if(!initialized) return;
-    const Config cfg=getConfig();release();
-    const bool show=cfg.enabled;
+    // Re-evaluate the whole window set. Keep failures from this pass, but a
+    // successful recovery must not inherit an error from an earlier attachment.
+    const DWORD previousWindowError=windowError;windowError=0;const Config cfg=getConfig();release();
+    const bool show=cfg.masterEnabled && cfg.enabled;
     POINT cursor{};GetCursorPos(&cursor);MONITORINFO mi{sizeof(mi)};
     const HWND parent=owner.load(std::memory_order_acquire);
     if(!GetMonitorInfoW(parent?MonitorFromWindow(parent,MONITOR_DEFAULTTOPRIMARY):
-        MonitorFromPoint(cursor,MONITOR_DEFAULTTOPRIMARY),&mi)){windowError=GetLastError();return;}
+        MonitorFromPoint(cursor,MONITOR_DEFAULTTOPRIMARY),&mi)){windowError=GetLastError();if(!windowError)windowError=previousWindowError?previousWindowError:ERROR_NOT_READY;return;}
     // One monitor/work-area snapshot feeds every input and visual window.
-    buttonsRefresh(cfg,mi.rcMonitor,mi.rcWork);
+    if(!buttonsRefresh(cfg,mi.rcMonitor,mi.rcWork,forceVisuals))return;
     auto rects=panelRects(mi.rcMonitor,cfg.scale,&mi.rcWork);
     if(cfg.layout==Layout::Single) {rects[0]=singlePanelRect(mi.rcMonitor,cfg.scale,&mi.rcWork);rects[1]=rects[0];}
     {std::lock_guard<std::mutex> l(mutex);for(int i=0;i<2;i++)sizes[i]={rects[i].right-rects[i].left,rects[i].bottom-rects[i].top};}
@@ -495,7 +981,8 @@ inline void refresh() {
     for(int i=0;i<2;i++) {
         const Mode mode=surfaceMode(cfg,i);
         if(cfg.layout==Layout::Single && i==1) {
-            if(outlines[i]){DestroyWindow(outlines[i]);outlines[i]=nullptr;outlineUploads[i]={};}
+            nativeInputClose(i);
+            if(outlines[i]){DestroyWindow(outlines[i]);outlines[i]=nullptr;outlineUploads[i]={};}outlineBitmaps[i].reset();for(auto& frame:outlineFrames[i])frame.reset();
             if(windows[i]){DestroyWindow(windows[i]);windows[i]=nullptr;}
             continue;
         }
@@ -506,54 +993,164 @@ inline void refresh() {
         }
         if(windows[i] && !outlines[i]) {
             outlines[i]=CreateWindowExW(WS_EX_TOPMOST|WS_EX_TOOLWINDOW|WS_EX_NOACTIVATE|WS_EX_LAYERED|WS_EX_TRANSPARENT,
-                L"YeManScreenTouchpadOutline",L"YeManCC Touchpad Outline",WS_POPUP,0,0,panelW,panelH,windows[i],nullptr,instance,nullptr);
+                L"YeManScreenTouchpadOutline",L"YeManCC Touchpad Outline",WS_POPUP|WS_DISABLED,0,0,panelW,panelH,windows[i],nullptr,instance,nullptr);
             if(!outlines[i]) windowError=GetLastError();
         }
         if(windows[i]) {
             {std::lock_guard<std::mutex> l(mutex);sizes[i]={panelW,panelH};}
             SetWindowPos(windows[i],HWND_TOPMOST,rects[i].left,rects[i].top,panelW,panelH,SWP_NOACTIVATE);
-            // Upload all alpha-zero interior pixels before either window is
+            const bool inputReady=nativeInputSync(i,show&&permitted(mode),forceVisuals);
+            // Upload the clear background, border and cross before either window is
             // shown, including the first display. No colour-key/black-fill phase.
-            const bool visualReady=outlines[i] && renderOutline(i,cfg.transparency);
-            ShowWindow(windows[i],show && permitted(mode)?SW_SHOWNOACTIVATE:SW_HIDE);
-            if(outlines[i]) ShowWindow(outlines[i],show && permitted(mode) && visualReady?SW_SHOWNOACTIVATE:SW_HIDE);
+            const bool visualReady=outlines[i] && ymcc::screeninput::ensureDisplay(outlines[i]) && renderOutline(i,cfg.transparency,forceVisuals);
+            if(show && permitted(mode) && (!inputReady || !visualReady) && !windowError)windowError=ERROR_NOT_READY;
+            ShowWindow(windows[i],show && permitted(mode) && inputReady?SW_SHOWNOACTIVATE:SW_HIDE);
+            if(outlines[i]) ShowWindow(outlines[i],show && permitted(mode) && inputReady && visualReady && !autoHide.hidden?SW_SHOWNOACTIVATE:SW_HIDE);
             InvalidateRect(windows[i],nullptr,FALSE);
             if(show && permitted(mode)) UpdateWindow(windows[i]);
         }
     }
+    autoHideSync();syncContactVisuals(-1,forceVisuals);if(visibilityRefreshObserver)visibilityRefreshObserver();
 }
-inline void configure(const Config& cfg,int profile=-1) {
+inline bool configure(const Config& cfg,int profile=-1,bool revealFromSettings=false) {
+    if(inputTeardown)return false; // A retiring owner cannot accept queued configuration.
     const int configuredProfile=profile<0?activeProfile.load():profile;
     // Geometry changes release contacts before resizing, preventing stale coordinates/held keys.
     // Transparency-only drags still preserve active fingers.
-    Config old=getConfig();const bool reset=configuredProfile!=appliedProfile.load() || old.enabled!=cfg.enabled || old.left!=cfg.left || old.right!=cfg.right || old.scale!=cfg.scale || old.layout!=cfg.layout || old.single!=cfg.single || old.summonPosition!=cfg.summonPosition || old.specialMask!=cfg.specialMask || old.rearMask!=cfg.rearMask || old.standaloneSpecialMode!=cfg.standaloneSpecialMode || old.summonEnabled!=cfg.summonEnabled || old.specialEnabled!=cfg.specialEnabled || old.rearEnabled!=cfg.rearEnabled;
+    Config old=getConfig();const bool reset=configuredProfile!=appliedProfile.load() || old.masterEnabled!=cfg.masterEnabled || old.enabled!=cfg.enabled || old.left!=cfg.left || old.right!=cfg.right || old.scale!=cfg.scale || old.layout!=cfg.layout || old.single!=cfg.single || old.summonPosition!=cfg.summonPosition || old.specialMask!=cfg.specialMask || old.rearMask!=cfg.rearMask || old.touchFeedback!=cfg.touchFeedback || old.standaloneSpecialMode!=cfg.standaloneSpecialMode || old.summonEnabled!=cfg.summonEnabled || old.specialEnabled!=cfg.specialEnabled || old.rearEnabled!=cfg.rearEnabled;
     if(reset) release();
     {std::lock_guard<std::mutex> l(mutex);core.config=cfg;}
     appliedProfile.store(configuredProfile);
-    nativeMode.store(cfg.enabled && (cfg.layout==Layout::Single?nativePad(cfg.single):nativePad(cfg.left) || nativePad(cfg.right)),std::memory_order_release);
-    enabled.store(cfg.enabled && (cfg.layout==Layout::Single || cfg.left!=Mode::Off || cfg.right!=Mode::Off),std::memory_order_release);
-    if(reset) refresh();else if(old.transparency!=cfg.transparency) {
+    nativeMode.store(cfg.masterEnabled && cfg.enabled && (cfg.layout==Layout::Single?nativePad(cfg.single):nativePad(cfg.left) || nativePad(cfg.right)),std::memory_order_release);
+    enabled.store(cfg.masterEnabled && cfg.enabled && (cfg.layout==Layout::Single || cfg.left!=Mode::Off || cfg.right!=Mode::Off),std::memory_order_release);
+    // Re-selecting an unchanged setting must also repair a missing live button.
+    const bool refreshed=reset || (revealFromSettings && buttonsNeedRefresh(cfg));
+    if(refreshed) refresh();else if(old.transparency!=cfg.transparency) {
         for(int i=0;i<2;i++) if(outlines[i] && !renderOutline(i,cfg.transparency)) ShowWindow(outlines[i],SW_HIDE);
-        buttonsRepaint(cfg.transparency);
+        buttonsRepaint(cfg.transparency);syncContactVisuals();
     }
+    // An explicit selection also previews an unchanged, already-hidden choice.
+    // Owner refresh/rebind calls keep the default and preserve idle hiding.
+    autoHideSync(revealFromSettings || reset || old.autoHideSeconds!=cfg.autoHideSeconds || old.transparency!=cfg.transparency);
+    if(quickAccessContextObserver)quickAccessContextObserver();
+    return refreshed; // Owner can avoid running a second identical refresh.
 }
 inline void initialize(HINSTANCE hi,HWND parent,const Config& cfg,int profile=-1) {
-    instance=hi;owner=parent;initialized=true;WNDCLASSW wc{};wc.lpfnWndProc=windowProc;wc.hInstance=hi;
+    inputTeardown=false;exitInputWindows={};exitInputWindowCount=0;exitInputChecks={};exitInputCheckCount=0;instance=hi;owner=parent;initialized=true;WNDCLASSW wc{};wc.lpfnWndProc=windowProc;wc.hInstance=hi;
     wc.lpszClassName=L"YeManScreenTouchpad";wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);
     if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) windowError=GetLastError();
     wc.lpfnWndProc=outlineProc;wc.lpszClassName=L"YeManScreenTouchpadOutline";
     if(!RegisterClassW(&wc) && GetLastError()!=ERROR_CLASS_ALREADY_EXISTS) windowError=GetLastError();
     buttonsInitialize();
-    configure(cfg,profile);
+    // shutdown preserves the selected config. A same-config reinitialize still
+    // has to recreate its HWNDs; configure() refreshes only when it resets.
+    if(!configure(cfg,profile))refresh();
 }
-inline void shutdown() {cursorShutdown();buttonsShutdown();controlTargetEnabled.store(false);controlEdgeEnabled.store(false);initialized=false;release();enabled.store(false);nativeMode.store(false);available.store(false);psAvailable.store(false);for(HWND& h:outlines){if(h)DestroyWindow(h);h=nullptr;}outlineUploads={};for(HWND& h:windows){if(h)DestroyWindow(h);h=nullptr;}owner=nullptr;}
+inline void quiesce() {
+    if(inputTeardown)return;
+    // Close admission before the first synchronous window notification.
+    inputTeardown=true;initialized=false;
+    enabled.store(false);nativeMode.store(false);available.store(false);psAvailable.store(false);
+    controlTargetEnabled.store(false);controlEdgeEnabled.store(false);screenButtonMask.store(0,std::memory_order_release);
+    autoHideStop();
+    for(HWND h:windows)rememberExitInputWindow(h);for(HWND h:outlines)rememberExitInputWindow(h);
+    for(const auto& visual:contactVisuals)rememberExitInputWindow(visual.window);rememberExitInputWindow(cursorWindow);
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    for(auto& surface:nativeInputSurfaces){rememberExitInputWindow(surface.child());if(!surface.quiesce()&&!windowError)windowError=ERROR_ACCESS_DENIED;}
+#endif
+    // Every pad and dedicated key is hidden/disabled before any cancel sink,
+    // controller Close or other overlay cleanup can wait or reenter the owner.
+    for(HWND h:windows)if(h&&IsWindow(h)){ShowWindow(h,SW_HIDE);EnableWindow(h,FALSE);}
+    buttonsQuiesce();
+    for(HWND h:outlines)if(h)ShowWindow(h,SW_HIDE);
+    for(auto& visual:contactVisuals)hideContactVisual(visual);
+    cursorStop();
+}
+inline ExitInputCheck checkExitInputs() {
+    ExitInputCheck check;
+    check.keys=sentKeys;check.mouse=sentClick;check.buttons=screenButtonMask.load(std::memory_order_acquire);
+    {std::lock_guard<std::mutex> lock(mutex);check.contacts=core.pads[0].down||core.pads[1].down||core.clicks[0].active||core.clicks[1].active||feedbackOnlyContacts.mask()!=0;}
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    for(const auto& surface:nativeInputSurfaces)if(!surface.terminalReleased())++check.openSources;
+#endif
+    check.openSources+=buttonsOpenInputSources();
+    for(size_t i=0;i<exitInputWindowCount;++i)if(IsWindow(exitInputWindows[i]))++check.liveWindows;
+    check.error=inputError?inputError:windowError;
+    check.ok=inputTeardown&&!check.keys&&!check.mouse&&!check.buttons&&!check.contacts&&!check.openSources&&!check.liveWindows;
+    return check;
+}
+inline void confirmExitInputs() {
+    if(!inputTeardown)return; // This audit cannot release an active session.
+    // Each round observes sender-owned signal state and original HWNDs afresh.
+    // Retry only our outstanding releases/destruction, never a down or MOVE.
+    unsigned consecutive=0;
+    for(unsigned round=0;round<exitInputChecks.size();++round){
+        if(sentKeys||sentClick)output(Action{});
+        for(size_t i=0;i<exitInputWindowCount;++i){
+            const HWND h=exitInputWindows[i];if(!IsWindow(h))continue;
+            DWORD pid=0;if(GetWindowThreadProcessId(h,&pid)==GetCurrentThreadId()&&pid==GetCurrentProcessId()){
+                if(!DestroyWindow(h)&&!windowError)windowError=GetLastError();
+            }
+        }
+        exitInputChecks[round]=checkExitInputs();exitInputCheckCount=round+1;
+        consecutive=exitInputChecks[round].ok?consecutive+1:0;
+        if(consecutive>=kExitInputRequiredCleanRounds)break;
+    }
+}
+inline Json exitInputReleaseState(){
+    Json checks=Json::array();unsigned consecutive=0;
+    for(unsigned i=0;i<exitInputCheckCount;++i){const auto& c=exitInputChecks[i];consecutive=c.ok?consecutive+1:0;
+        checks.push_back({{"round",i+1},{"ok",c.ok},{"heldKeys",c.keys},{"heldMouseButton",c.mouse},{"screenButtons",c.buttons},
+            {"contactsPending",c.contacts},{"openSources",c.openSources},{"liveOwnedWindows",c.liveWindows},{"error",c.error}});}
+    return {{"version",1},{"terminalAdmissionClosed",inputTeardown},{"rounds",exitInputCheckCount},{"requiredConsecutiveCleanRounds",kExitInputRequiredCleanRounds},{"verified",consecutive>=kExitInputRequiredCleanRounds},
+        {"checks",std::move(checks)},{"scope","Touchpad sender-owned signals, controlled sources and original window handles only"},
+        {"driverReceiptProven",false},{"downstreamConsumptionProven",false}};
+}
+inline void shutdown() {
+    quiesce();autoHideStop();initialized=false;
+    cursorShutdown();buttonsShutdown();controlTargetEnabled.store(false);controlEdgeEnabled.store(false);
+    release();shutdownContactVisuals();enabled.store(false);nativeMode.store(false);available.store(false);psAvailable.store(false);
+    for(HWND& h:outlines){if(h)DestroyWindow(h);h=nullptr;}outlineUploads={};
+    for(auto& image:outlineBitmaps)image.reset();for(auto& pair:outlineFrames)for(auto& frame:pair)frame.reset();
+    for(int side=0;side<2;++side){nativeInputClose(side);if(windows[side])DestroyWindow(windows[side]);windows[side]=nullptr;}
+    confirmExitInputs();owner=nullptr;
+}
 inline Json state() {
-    Json j=configJson(getConfig());j["ok"]=!windowError && !inputError;j["available"]=true;
-    j["persona"]=profileName(appliedProfile.load());j["steamDeckAvailable"]=available.load();j["ps5Available"]=psAvailable.load() && !ps4Target.load();j["ps4Available"]=psAvailable.load() && ps4Target.load();
+    const Config cfg=getConfig();Json j=configJson(cfg);j["ok"]=!windowError && !inputError;j["available"]=true;
+    j["activePersona"]=profileName(activeProfile.load());j["appliedPersona"]=profileName(appliedProfile.load());
+    j["controlTargetEnabled"]=controlTargetEnabled.load();j["buttonVisibility"]=buttonVisibilityState(cfg);
+    j["persona"]=profileName(appliedProfile.load());j["steamDeckAvailable"]=available.load();j["ps5Available"]=psAvailable.load();
     j["visible"]=(windows[0] && IsWindowVisible(windows[0])) || (windows[1] && IsWindowVisible(windows[1])) || buttonsVisible();
-    j["events"]=eventCount;j["injectedInputs"]=injectedCount;j["repaints"]=repaintCount;
-    j["cursorPolicyVersion"]=2;j["cursorHandoffGraceMs"]=kCursorHandoffMs;j["cursorRetainedPollMs"]=kCursorRetainedPollMs;j["cursorRetainedAfterUp"]=cursorRetained.load();j["cursorFallbackShows"]=cursorShows;j["cursorFallbackHides"]=cursorHides;j["cursorFallbackHandoffs"]=cursorHandoffs;
-    j["cursorFallbackVisible"]=cursorVisible;j["cursorFallbackSyncs"]=cursorSyncs;j["cursorFallbackUploads"]=cursorUploads;j["cursorFallbackError"]=cursorError;
+    j["autoHidden"]=autoHide.hidden;j["autoHideTimerArmed"]=autoHide.timer!=0;
+    j["autoHideTransitions"]=autoHide.hides;j["autoHideWakeups"]=autoHide.wakes;
+    j["inputTeardown"]=inputTeardown;j["exitInputWithdrawalVersion"]=1;j["exitInputRelease"]=exitInputReleaseState();j["nativeMousePassRequested"]=nativeInputCandidateRequested;j["nativeMousePassActive"]=false;j["nativeMousePassCompiled"]=false;
+#ifdef YMCC_SCREEN_NATIVE_INPUT_CANDIDATE
+    j["nativeMousePassCompiled"]=true;bool any=false,ready=true;
+    for(int side=0;side<2;++side)if(windows[side]&&IsWindowVisible(windows[side])){any=true;ready=ready&&nativeInputSurfaces[side].active();}
+    j["nativeMousePassActive"]=nativeInputCandidateRequested&&(any||buttonsVisible())&&ready&&buttonsNativeInputReady();j["nativeMousePassRuntimeError"]=(long)nativeInputRuntime.error;
+#endif
+    j["events"]=eventCount;j["injectedInputs"]=injectedCount;j["repaints"]=repaintCount;j["outlineBitmapBuilds"]=outlineBitmapBuilds;j["pressFrameBuilds"]=pressFrameBuilds;j["outlineUploads"]=outlineUploadCount;j["contactVisualUploads"]=contactVisualUploads;j["contactVisualMoves"]=contactVisualMoves;
+    {std::lock_guard<std::mutex> l(mutex);
+        j["nativeTransportObserved"]=nativeTransport.observed;j["nativeTransportReady"]=nativeTransport.last.ready;
+        j["nativeTransportEpoch"]=nativeTransport.last.epoch;j["nativeTransportChanges"]=nativeTransport.changes;
+        j["nativeDiscardedGestures"]=nativeTransport.discardedGestures;}
+    j["contactGeometryCacheVersion"]=1;j["contactGeometryReads"]=contactGeometryReads;j["contactGeometryHits"]=contactGeometryHits;j["contactGeometryInvalidations"]=contactGeometryInvalidations;
+    j["cursorPolicyVersion"]=17;j["cursorDeckForceVisibleVersion"]=1;j["cursorDeckForcedHiddenSamples"]=cursorDeckForcedHiddenSamples;j["cursorDeckForcedShows"]=cursorDeckForcedShows;j["cursorDeckContactShapeBridgeVersion"]=1;j["cursorDeckContactShapeBridgeShows"]=cursorDeckContactShapeBridgeShows;j["cursorDeckMoveSubmitOrderVersion"]=1;j["cursorDeckMotionGateVersion"]=1;j["cursorHiddenQueryBudgetVersion"]=1;j["cursorSubmitOrderVersion"]=1;j["cursorHandoffGraceMs"]=kCursorHandoffMs;j["cursorRetainedPollMs"]=kCursorRetainedPollMs;j["cursorRetainedAfterUp"]=cursorRetained.load();j["cursorFallbackShows"]=cursorShows;j["cursorFallbackHides"]=cursorHides;j["cursorFallbackHandoffs"]=cursorHandoffs;
+    j["cursorFallbackVisible"]=cursorVisible;j["cursorFallbackSyncs"]=cursorSyncs;j["cursorFallbackQueries"]=cursorQueries;j["cursorActiveFallbackMs"]=kCursorActiveFallbackMs;j["cursorFallbackUploads"]=cursorUploads;j["cursorFallbackError"]=cursorError;
+    j["cursorDeckOnlyTracking"]=cursorDeckOnlyTracking.load(std::memory_order_acquire);j["cursorDeckSystemHandoffs"]=cursorDeckSystemHandoffs;
+    j["cursorDeckReportPulseTick"]=cursorDeckReportPulseTick.load(std::memory_order_acquire);j["cursorDeckMoveFallbackMs"]=kCursorDeckMoveFallbackMs;
+    j["cursorDeckMovePostReportDeferrals"]=cursorDeckMovePostReportDeferrals;j["cursorDeckMoveFallbackRequests"]=cursorDeckMoveFallbackRequests;
+    j["cursorDeckHandoffGraceMs"]=0;
+    j["cursorVisibilityObserver"]=cursorvisibility::state();j["cursorTransitionTrace"]=cursorTransitionState();j["cursorVisibilityContext"]=cursorcontext::state();
+    j["cursorImageUploaded"]=cursorImageUploaded;j["cursorDeckPositionOnlyEnabled"]=cursorDeckPositionOnlyEnabled;
+    j["cursorLayeredResetPending"]=cursorLayeredResetPending;j["cursorLayeredResets"]=cursorLayeredResets;j["cursorLayeredResetFailures"]=cursorLayeredResetFailures;
+    j["cursorDeckPositionOnlyMoves"]=cursorDeckPositionOnlyMoves;j["cursorDeckPositionFallbacks"]=cursorDeckPositionFallbacks;
+    j["cursorDeckPositionLastError"]=cursorDeckPositionLastError;
+    j["cursorDeckStationaryDeferrals"]=cursorDeckStationaryDeferrals;j["cursorDeckMotionStarts"]=cursorDeckMotionStarts;j["cursorDeckPresentRechecks"]=cursorDeckPresentRechecks;j["cursorDeckPresentDeferrals"]=cursorDeckPresentDeferrals;
+    j["cursorDeckDeferredMoves"]=cursorDeckDeferredMoves;j["cursorFlagsObserved"]=cursorFlagsObserved;
+    j["cursorLastFlags"]=cursorLastFlags;j["cursorFlagTransitions"]=cursorFlagTransitions;
+    j["cursorQueryFailures"]=cursorQueryFailures;j["cursorHandoffGapResets"]=cursorHandoffGapResets;
+    j["cursorMaxHandoffSampleGapMs"]=kCursorMaxHandoffSampleGapMs;
     const auto specialStatus=standaloneStatus.load(std::memory_order_acquire);
     j["standaloneSpecialStatus"]=standaloneStatusName(specialStatus);
     j["standaloneSpecialRequests"]=standaloneRequests.load();j["standaloneSpecialCompleted"]=standaloneCompleted.load();
@@ -562,10 +1159,11 @@ inline Json state() {
 inline Json profileState(const Config& cfg,int profile) {
     Json j=state();const bool current=profile==activeProfile.load() && profile==appliedProfile.load();
     j.update(configJson(cfg));j["persona"]=profileName(profile);
-    j["steamDeckAvailable"]=profile==1 && available.load();j["ps5Available"]=profile==2 && psAvailable.load() && !ps4Target.load();j["ps4Available"]=profile==2 && psAvailable.load() && ps4Target.load();
-    if(!current) {j["visible"]=false;j["error"]=0;j["ok"]=true;j["reason"]="";j["standaloneSpecialStatus"]="idle";}return j;
+    j["steamDeckAvailable"]=profile==1 && available.load();j["ps5Available"]=profile==2 && psAvailable.load();
+    if(!current) {j["buttonVisibility"]=nullptr;j["autoHidden"]=false;j["autoHideTimerArmed"]=false;j["visible"]=false;j["error"]=0;j["ok"]=true;j["reason"]="";j["standaloneSpecialStatus"]="idle";}return j;
 }
 #include "screen_button_overlay.h"
+#include "screen_touchpad_auto_hide.h"
 
 inline Json selfTest() {
     Json cases=Json::array();auto check=[&](const char* name,bool ok){cases.push_back({{"name",name},{"ok",ok}});};
@@ -590,6 +1188,13 @@ inline Json selfTest() {
     a=c.event(0,1,1,114,100,200,200,42);check("arrows-hysteresis-releases-right",a.keys==0);
     c.cancel();c.config.left=Mode::Deck;c.config.right=Mode::Deck;
     c.event(0,1,0,100,190,200,200,43);c.event(1,2,0,100,50,200,200,43);
+    Core h;h.config=c.config;h.config.touchFeedback=TouchFeedbackMode::Minimal;
+    check("minimal-haptic-on-touch",h.event(0,1,0,100,100,200,200,0).hapticPulses==1);
+    check("minimal-haptic-after-distance",h.event(0,1,1,115,100,200,200,100).hapticPulses==1);
+    check("minimal-haptic-throttles-short-interval",h.event(0,1,1,130,100,200,200,120).hapticPulses==0);
+    check("minimal-haptic-resumes-after-interval",h.event(0,1,1,170,100,200,200,170).hapticPulses==1);
+    check("stationary-updates-have-no-haptic-backlog",h.event(0,1,1,170,100,200,200,250).hapticPulses==0);
+    h.cancel();check("minimal-haptic-cancel-clears-distance",!h.current().hapticContacts && h.pads[0].haptic.distance==0);
     check("native-touch-is-not-click",!c.snapshot(44).left.click && !c.snapshot(44).right.click);
     c.event(0,1,2,100,190,200,200,50);
     auto tap=c.snapshot(51);check("native-independent-tap-click",tap.left.click && !tap.right.click);
@@ -604,6 +1209,12 @@ inline Json selfTest() {
     Config cfg;check("reject-invalid-config",!parseConfig({{"rightMode","wasd"}},cfg,cfg));
     check("default-transparency-80",cfg.transparency==80);
     check("default-scale-100",cfg.scale==100);
+    Config haptic=cfg;
+    check("touch-feedback-medium-by-default",haptic.touchFeedback==TouchFeedbackMode::Medium && configJson(haptic).value("touchFeedback","")=="medium");
+    check("accept-minimal-touch-feedback",parseConfig({{"touchFeedback","minimal"}},haptic,haptic) && haptic.touchFeedback==TouchFeedbackMode::Minimal);
+    check("accept-medium-touch-feedback",parseConfig({{"touchFeedback","medium"}},haptic,haptic) && haptic.touchFeedback==TouchFeedbackMode::Medium);
+    check("accept-strong-touch-feedback",parseConfig({{"touchFeedback","strong"}},haptic,haptic) && haptic.touchFeedback==TouchFeedbackMode::Strong);
+    check("reject-unknown-touch-feedback",!parseConfig({{"touchFeedback","maximal"}},haptic,haptic));
     Config scaled=cfg;
     check("accept-scale-50-to-200-in-5-percent-steps",parseConfig({{"scale",50}},cfg,scaled) && scaled.scale==50 &&
         parseConfig({{"scale",105}},scaled,scaled) && scaled.scale==105 && parseConfig({{"scale",200}},scaled,scaled) && scaled.scale==200);
@@ -626,10 +1237,10 @@ inline Json selfTest() {
     bool pixelsValid=true;for(int t:{0,55,80,100}) for(int y=0;y<200;y++) for(int x=0;x<200;x++) {
         const DWORD p=outlinePixel(x,y,200,200,t),alpha=p>>24;
         if(alpha>(DWORD)outlineAlpha(t) || ((p>>16)&255)>alpha || ((p>>8)&255)>alpha || (p&255)>alpha) pixelsValid=false;
-        if(x>=12 && x<188 && y>=12 && y<188 && p!=0) pixelsValid=false;
+        if(x>=12 && x<188 && y>=12 && y<188 && x!=100 && y!=100 && p!=0) pixelsValid=false;
         if(t==100 && p!=0) pixelsValid=false;
     }
-    check("per-pixel-outline-premultiplied-alpha-and-transparent-interior",pixelsValid);
+    check("per-pixel-outline-cross-premultiplied-alpha-and-clear-background",pixelsValid);
     ProfileBank bank;check("four-profile-defaults",!bank.slots[0].enabled && !bank.slots[3].enabled &&
         bank.slots[1].enabled && bank.slots[1].layout==Layout::Dual && bank.slots[1].left==Mode::Deck && bank.slots[1].right==Mode::Deck &&
         bank.slots[2].enabled && bank.slots[2].layout==Layout::Single && bank.slots[2].single==Mode::DualSense &&
@@ -723,6 +1334,16 @@ inline Json pointerSelfTest(HINSTANCE hi) {
     buttonSummonTestOwner=CreateWindowExW(0,summonSinkClass.lpszClassName,L"",0,0,0,0,0,HWND_MESSAGE,nullptr,hi,summonSinkCounts);
     check("summon-test-has-isolated-owner-message-receiver",buttonSummonTestOwner!=nullptr);
     const HWND foreground=GetForegroundWindow();
+    // Self-test ONLY: observe foreground events scoped to this helper PID.
+    // External apps may legitimately change focus during a 12-second run;
+    // comparing arbitrary before/after HWNDs did not test overlay activation.
+    // Count every own-PID event so even a transient steal followed by return
+    // fails. No input hook or foreground manipulation enters production.
+    static unsigned ownForegroundEvents=0;ownForegroundEvents=0;
+    struct FocusObserver {HWINEVENTHOOK hook=nullptr;~FocusObserver(){if(hook)UnhookWinEvent(hook);}} focusObserver;
+    focusObserver.hook=SetWinEventHook(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,nullptr,
+        [](HWINEVENTHOOK,DWORD,HWND,LONG,LONG,DWORD,DWORD){++ownForegroundEvents;},GetCurrentProcessId(),0,WINEVENT_OUTOFCONTEXT);
+    check("own-process-foreground-observer-registered",focusObserver.hook!=nullptr);
     initialize(hi,nullptr,cfg);available.store(true);refresh();
     auto pump=[](DWORD ms) {
         const ULONGLONG deadline=GetTickCount64()+ms;MSG msg;
@@ -750,7 +1371,7 @@ inline Json pointerSelfTest(HINSTANCE hi) {
         POINT centre{sizes[side].cx/2,sizes[side].cy/2};ClientToScreen(windows[side],&centre);
         check(side==0?"left-transparent-centre-hit-test":"right-transparent-centre-hit-test",
             WindowFromPoint(centre)==windows[side]);
-        check(side==0?"left-uploaded-interior-alpha-zero":"right-uploaded-interior-alpha-zero",upload.interiorClear && upload.centre==0);
+        check(side==0?"left-uploaded-thin-cross":"right-uploaded-thin-cross",!upload.interiorClear && (upload.centre>>24)==25);
         result[side==0?"leftCentreArgb":"rightCentreArgb"]=upload.centre;
         result[side==0?"leftEdgeAlpha":"rightEdgeAlpha"]=upload.edge>>24;
     }
@@ -880,8 +1501,8 @@ inline Json pointerSelfTest(HINSTANCE hi) {
                 EqualRect(&left,&expectedRects[0]) && EqualRect(&right,&expectedRects[1]) &&
                 left.right-left.left==expectedSide && right.right-right.left==expectedSide && sizes[0].cx==expectedSide && sizes[0].cy==expectedSide);
             check(("actual-scale-"+std::to_string(percent)+"-outline-remains-hollow").c_str(),
-                outlineUploads[0].ready && outlineUploads[1].ready && outlineUploads[0].interiorClear && outlineUploads[1].interiorClear &&
-                outlineUploads[0].centre==0 && outlineUploads[1].centre==0 && (outlineUploads[0].edge>>24)==51 && (outlineUploads[1].edge>>24)==51);
+                outlineUploads[0].ready && outlineUploads[1].ready && !outlineUploads[0].interiorClear && !outlineUploads[1].interiorClear &&
+                (outlineUploads[0].centre>>24)==25 && (outlineUploads[1].centre>>24)==25 && (outlineUploads[0].edge>>24)==51 && (outlineUploads[1].edge>>24)==51);
             contact(0,0,.25f,.25f,down);contact(1,1,.75f,.75f,down);const bool downOk=inject(2);
             contact(0,0,.25f,.25f,move);contact(1,1,.75f,.75f,move);const bool moveOk=inject(2);
             const auto normalized=snapshot();
@@ -911,7 +1532,7 @@ inline Json pointerSelfTest(HINSTANCE hi) {
             const auto expected=singlePanelRect(dsMonitor.rcMonitor,percent,&dsMonitor.rcWork);
             check(("PS5-single-scale-"+std::to_string(percent)+"-bottom-centre-geometry").c_str(),EqualRect(&actual,&expected) &&
                 sizes[0].cx==sizes[1].cx && sizes[0].cy==sizes[1].cy && sizes[0].cx>sizes[0].cy);
-            check(("PS5-single-scale-"+std::to_string(percent)+"-hollow").c_str(),outlineUploads[0].ready && outlineUploads[0].interiorClear && outlineUploads[0].centre==0);
+            check(("PS5-single-scale-"+std::to_string(percent)+"-hollow").c_str(),outlineUploads[0].ready && !outlineUploads[0].interiorClear && (outlineUploads[0].centre>>24)==25);
             const auto traceStart=trace.size();
             contact(0,0,.25f,.25f,down);contact(1,1,.75f,.75f,down);
             const HWND hit0=WindowFromPoint(touch[0].pointerInfo.ptPixelLocation),hit1=WindowFromPoint(touch[1].pointerInfo.ptPixelLocation);
@@ -959,8 +1580,8 @@ inline Json pointerSelfTest(HINSTANCE hi) {
             contact(0,0,.1f,.1f,POINTER_FLAG_UP);inject(1);cfg.layout=Layout::Single;configure(cfg);
         }
         // Production two-HWND PS path: each HWND maps to one half of the
-        // same PS4/PS5 surface, with independent IDs and target gating.
-        for(const char* persona:{"dualsense-edge","dualsense","dualshock4"}) {
+        // same PS5 surface, with independent IDs and target gating.
+        for(const char* persona:{"dualsense-edge"}) {
             setContext(persona,true);cfg.enabled=true;cfg.layout=Layout::Dual;cfg.left=cfg.right=Mode::DualSense;
             for(int percent:{50,100,200}) {
                 cfg.scale=percent;configure(cfg);pump(20);
@@ -1034,11 +1655,12 @@ inline Json pointerSelfTest(HINSTANCE hi) {
             for(int n=0;n<7;n++)if(buttonWindows[n] && IsWindowVisible(buttonWindows[n])) {
                 RECT input{},visual{};GetWindowRect(buttonWindows[n],&input);
                 const bool haveVisual=buttonOutlines[n] && GetWindowRect(buttonOutlines[n],&visual);
-                visualAligned=haveVisual && IsWindowVisible(buttonOutlines[n]) && EqualRect(&input,&visual) && visualAligned;
+                RECT expectedVisual=input;const int padding=pressGlowPadding(cfg.scale);InflateRect(&expectedVisual,padding,padding);
+                visualAligned=haveVisual && IsWindowVisible(buttonOutlines[n]) && EqualRect(&expectedVisual,&visual) && visualAligned;
                 visualArt.push_back({{"index",n},{"rect",{visual.left,visual.top,visual.right,visual.bottom}}});
             }
             result["buttonVisualArt"][persona]=visualArt;
-            check((std::string(persona)+"-visible-outline-equals-actual-touch-window").c_str(),visualAligned);
+            check((std::string(persona)+"-visible-outline-wraps-actual-touch-window-with-glow-margin").c_str(),visualAligned);
             MONITORINFO artMonitor{sizeof(artMonitor)};GetMonitorInfoW(MonitorFromWindow(buttonWindows[0],MONITOR_DEFAULTTOPRIMARY),&artMonitor);
             result["buttonMonitor"][persona]={artMonitor.rcMonitor.left,artMonitor.rcMonitor.top,artMonitor.rcMonitor.right,artMonitor.rcMonitor.bottom};
             const auto expectedButtons=buttonRects(artMonitor.rcMonitor,cfg.scale,&artMonitor.rcWork,effectiveSummonPosition(cfg),effectiveRearMask(cfg));
@@ -1112,7 +1734,8 @@ inline Json pointerSelfTest(HINSTANCE hi) {
                     const int side=(n-3)/2,inner=side==0?4:5;
                     const auto expected=mask==15u?full[n]:full[inner];
                     RECT input{},visual{};GetWindowRect(buttonWindows[n],&input);GetWindowRect(buttonOutlines[n],&visual);
-                    positioned=positioned && EqualRect(&input,&expected) && EqualRect(&visual,&expected);
+                    RECT expectedVisual=expected;const int padding=pressGlowPadding(cfg.scale);InflateRect(&expectedVisual,padding,padding);
+                    positioned=positioned && EqualRect(&input,&expected) && EqualRect(&visual,&expectedVisual);
                     if(mask!=15u) {
                         const auto outer=full[side==0?3:6];POINT p{(outer.left+outer.right)/2,(outer.top+outer.bottom)/2};
                         positioned=positioned && WindowFromPoint(p)!=buttonWindows[n];
@@ -1150,8 +1773,9 @@ inline Json pointerSelfTest(HINSTANCE hi) {
             const auto verifyRects=[&]() {
                 for(int n=0;n<7;n++)if(buttonWindows[n] && IsWindowVisible(buttonWindows[n])) {
                     RECT input{},visual{};GetWindowRect(buttonWindows[n],&input);
+                    RECT expectedVisual=input;const int padding=pressGlowPadding(cfg.scale);InflateRect(&expectedVisual,padding,padding);
                     aligned=aligned && buttonOutlines[n] && GetWindowRect(buttonOutlines[n],&visual) &&
-                        IsWindowVisible(buttonOutlines[n]) && EqualRect(&input,&visual) &&
+                        IsWindowVisible(buttonOutlines[n]) && EqualRect(&expectedVisual,&visual) &&
                         buttonUploads[n].width==input.right-input.left && buttonUploads[n].height==input.bottom-input.top;
                 }
             };
@@ -1163,7 +1787,7 @@ inline Json pointerSelfTest(HINSTANCE hi) {
             for(int side=0;side<2;side++) {
                 RECT pad{},special{},rear{};GetWindowRect(windows[side],&pad);GetWindowRect(buttonWindows[1+side],&special);
                 GetWindowRect(buttonWindows[3+2*side],&rear);
-                const LONG gap=MulDiv(20,percent,100);
+                const LONG gap=MulDiv(40,percent,100);
                 taskbarSafe=taskbarSafe && special.bottom==rowMonitor.rcWork.bottom-kControlBottomClearance-panelRows(rowMonitor.rcMonitor,percent,&rowMonitor.rcWork).lift &&
                     special.top-pad.bottom==gap && pad.top-rear.bottom==gap && rear.top>=rowMonitor.rcWork.top;
             }
@@ -1200,7 +1824,9 @@ inline Json pointerSelfTest(HINSTANCE hi) {
         result["disabledMillionButtonSnapshotsUs"]=std::chrono::duration_cast<std::chrono::microseconds>(std::chrono::steady_clock::now()-buttonBenchStart).count();
         check("disabled-button-snapshot-hot-path-no-extra-input",buttonChecksum==0);
         result["foregroundBefore"]=(unsigned long long)(uintptr_t)foreground;result["foregroundAfter"]=(unsigned long long)(uintptr_t)GetForegroundWindow();
-        check("overlay-does-not-steal-focus",GetForegroundWindow()==foreground);
+        result["externalForegroundChangedDuringTest"]=GetForegroundWindow()!=foreground;
+        // The ownership check is made after the final pump/shutdown below.
+
         pump(50);const auto paints=repaintCount,events=eventCount;
         auto processCpu=[] {
             FILETIME created{},exited{},kernel{},user{};
@@ -1236,6 +1862,11 @@ inline Json pointerSelfTest(HINSTANCE hi) {
     bool buttonsDestroyed=true;for(HWND h:buttonWindows)buttonsDestroyed=buttonsDestroyed && !h;for(HWND h:buttonOutlines)buttonsDestroyed=buttonsDestroyed && !h;
     check("shutdown-destroys-all-button-input-and-icon-windows",buttonsDestroyed && buttonSnapshot()==0);
     if(buttonSummonTestOwner)DestroyWindow(buttonSummonTestOwner);buttonSummonTestOwner=nullptr;
+    pump(30);DWORD foregroundPid=0;
+    if(HWND finalForeground=GetForegroundWindow())GetWindowThreadProcessId(finalForeground,&foregroundPid);
+    result["ownForegroundEvents"]=ownForegroundEvents;result["focusObserverProcessId"]=GetCurrentProcessId();
+    result["focusObserverScope"]="selftest-process-only";
+    check("overlay-does-not-steal-focus",focusObserver.hook && ownForegroundEvents==0 && foregroundPid!=GetCurrentProcessId());
     testTrace=nullptr;result["trace"]=trace;
     result["injectionErrors"]=injectionErrors;result["pointerEvents"]=events;result["cases"]=cases;bool ok=true;
     for(const auto& c:cases)ok=ok&&c["ok"].get<bool>();result["ok"]=ok;

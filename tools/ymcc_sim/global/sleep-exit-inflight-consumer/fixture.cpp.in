@@ -1,0 +1,82 @@
+#include <atomic>
+#include <thread>
+#include <condition_variable>
+#include <chrono>
+#include <type_traits>
+#include <cctype>
+#include <iostream>
+#include <mutex>
+#include <sstream>
+#include <stdexcept>
+#include "json.hpp"
+using json = nlohmann::json;
+namespace fspath = std::filesystem;
+static fspath::path caseDataDir;
+static unsigned long memoryPid = 100;
+static unsigned long long memoryTick = 100;
+static bool g_fanPriorRunUnclean = false;
+static std::string g_fanCurrentRunToken;
+static std::string g_fanPriorRunToken;
+// EXACT_COMPLETION_GLOBAL
+static std::mutex g_sgOpMtx;
+static std::atomic<bool> g_sgInSuspend{false};
+static std::wstring SG_SLEEP_LEASE_DIR, SG_MANUAL_DIR;
+static int cancelCalls = 0;
+static std::vector<json> lifecycleLogs, businessFacts;
+static bool holdClock=false, holdPath=false, writerEntered=false, releaseWriter=false;
+static std::mutex testGateMutex;
+static std::condition_variable testGateCv;
+static thread_local bool isOwnedWriter=false;
+static std::atomic<bool> firstFinished{false};
+static void controlledGate(bool enabled) {
+ if(!isOwnedWriter||!enabled)return;
+ std::unique_lock<std::mutex> lock(testGateMutex);writerEntered=true;testGateCv.notify_all();
+ if(!testGateCv.wait_for(lock,std::chrono::seconds(5),[]{return releaseWriter;}))throw std::runtime_error("owned writer gate timeout");
+}
+static std::wstring yemancc_data_dir() { controlledGate(holdPath); return caseDataDir.wstring(); }
+static unsigned long GetCurrentProcessId() { return memoryPid; }
+static unsigned long long GetTickCount64() { controlledGate(holdClock); return memoryTick; }
+static void appendNativeLifecycleLog(const char* kind, json data) { lifecycleLogs.push_back({{"kind",kind},{"data",data}}); }
+static void sgRecordFact(const char* kind, const json& data = json::object()) { businessFacts.push_back({{"kind",kind},{"data",data}}); }
+struct SgSleepTarget { bool markerOwned=false; unsigned long long powerGeneration=0; };
+struct SgResumeResult { int count=0; };
+static bool sgReadSleepTarget(SgSleepTarget&) { return false; }
+static bool sgResumeSleepTargetUnlocked(unsigned long long, bool) { throw std::runtime_error("unexpected memory target resume"); }
+static SgResumeResult sgResumeTrackedAllUnlocked() { businessFacts.push_back({{"kind","memory-empty-resume"}}); return {}; }
+static void sgCancelWakeGameRecoveryUnlocked(const char* reason) { ++cancelCalls; businessFacts.push_back({{"kind","memory-wake-cancel"},{"reason",reason}}); }
+// EXACT_CURRENT_FULL_DEFINITIONS
+static void need(bool condition, const char* text) { if(!condition)throw std::runtime_error(text); }
+static fspath::path marker() { return fspath::path(sessionMarkerPath()); }
+static std::string readBytes(const fspath::path& file) { std::ifstream input(file,std::ios::binary);need(bool(input),"fixture read failed");std::ostringstream stream;stream<<input.rdbuf();need(!input.bad(),"fixture read bad");return stream.str(); }
+static void seed(const std::string& bytes) { std::ofstream out(marker(),std::ios::binary|std::ios::trunc);need(bool(out),"fixture seed open failed");out<<bytes;out.flush();need(bool(out),"fixture seed write failed"); }
+static int logCount(const char* kind) { int n=0;for(const auto& row:lifecycleLogs)if(row.at("kind")==kind)++n;return n; }
+static json snapshot() {
+ const auto file=marker();const bool exists=fspath::exists(file),regular=exists&&fspath::is_regular_file(file),directory=exists&&fspath::is_directory(file);
+ return {{"markerType",regular?"file":directory?"directory":"missing"},{"markerBytes",regular?readBytes(file):""},{"currentToken",g_fanCurrentRunToken},{"priorUnclean",g_fanPriorRunUnclean},{"priorToken",g_fanPriorRunToken},{"abnormalLogs",logCount("session-abnormal-termination")},{"cleanLogs",logCount("session-clean-exit")},{"writeFailureLogs",logCount("session-clean-exit-failed")},{"cleanupDone",bool(g_sgCleanupDone)},{"cancelCalls",cancelCalls}};
+}
+static fspath::path heldMarker() { return caseDataDir/"held-unclean.marker"; }
+static void blockMarker() { need(fspath::is_regular_file(marker()),"block requires actual existing file");fspath::rename(marker(),heldMarker());need(fspath::create_directory(marker()),"block directory not created");need(fspath::is_directory(marker()),"actual directory refusal absent"); }
+static void unblockMarker() { need(fspath::is_directory(marker()),"unblock requires owned directory");need(fspath::remove(marker()),"owned refusal directory not removed");fspath::rename(heldMarker(),marker()); }
+struct OwnedThreads {
+ std::thread first,second;
+ static void release(){ {std::lock_guard<std::mutex> lock(testGateMutex);releaseWriter=true;}testGateCv.notify_all(); }
+ ~OwnedThreads(){release();if(second.joinable())second.join();if(first.joinable())first.join();}
+};
+static json run(const std::string& action) {
+ need(action=="inflight-success"||action=="inflight-failure-retry","unknown temporal action");
+ sessionMarkerCheckAtBoot();memoryTick=200;const bool failure=action=="inflight-failure-retry";holdPath=failure;holdClock=!failure;
+ bool firstReturned=false,secondReturned=false;std::exception_ptr firstError,secondError;std::string firstId,secondId;OwnedThreads threads;
+ threads.first=std::thread([&]{isOwnedWriter=true;std::ostringstream id;id<<std::this_thread::get_id();firstId=id.str();try{firstReturned=sgCleanupBeforeExit(false);}catch(...){firstError=std::current_exception();}firstFinished.store(true);testGateCv.notify_all();});
+ {std::unique_lock<std::mutex> lock(testGateMutex);need(testGateCv.wait_for(lock,std::chrono::seconds(5),[]{return writerEntered||firstFinished.load();}),"first owned thread did not enter bounded gate");need(writerEntered&&!firstFinished.load(),"first caller finished before actual write gate");}
+ if(failure)blockMarker();
+ threads.second=std::thread([&]{std::ostringstream id;id<<std::this_thread::get_id();secondId=id.str();try{secondReturned=sgCleanupBeforeExit(true);}catch(...){secondError=std::current_exception();}});
+ threads.second.join();if(secondError)std::rethrow_exception(secondError);
+ const json during={{"secondReturned",secondReturned},{"firstFinishedBeforeRelease",firstFinished.load()},{"completionPublishedBeforeRelease",bool(g_sgCleanupDone)},{"cleanLogsBeforeRelease",logCount("session-clean-exit")}};
+ OwnedThreads::release();threads.first.join();if(firstError)std::rethrow_exception(firstError);need(firstId!=secondId,"distinct concurrently live owned threads required");
+ json result;if(failure){const auto afterFirst=snapshot();unblockMarker();memoryTick=300;const bool retry=sgCleanupBeforeExit(false);result={{"during",during},{"firstReturned",firstReturned},{"afterFirst",afterFirst},{"retryReturned",retry},{"final",snapshot()}};}else{const bool post=sgCleanupBeforeExit(true);result={{"during",during},{"firstReturned",firstReturned},{"postCompleteReturned",post},{"final",snapshot()}};}
+ businessFacts.push_back({{"kind","owned-thread-join-receipt"},{"created",2},{"joined",2},{"firstId",firstId},{"secondId",secondId},{"firstWasPausedUntilSecondReturned",!during.at("firstFinishedBeforeRelease").get<bool>()}});return result;
+}
+int main(int argc,char** argv) {
+ try{need(argc==2,"one owned config argument required");const auto configFile=fspath::path(argv[1]);need(YmccPauseBoundary::inside(configFile),"config outside owned root");const json config=json::parse(readBytes(configFile));caseDataDir=fspath::path(config.at("dataDir").get<std::string>());need(YmccPauseBoundary::inside(caseDataDir)&&fspath::is_directory(caseDataDir)&&!fspath::is_symlink(fspath::symlink_status(caseDataDir)),"data directory not owned");memoryPid=config.at("pid").get<unsigned long>();memoryTick=config.at("tick").get<unsigned long long>();SG_SLEEP_LEASE_DIR=(caseDataDir/"owned-empty-sleep-leases").wstring();SG_MANUAL_DIR=(caseDataDir/"owned-empty-manual-leases").wstring();const json actual=run(config.at("action").get<std::string>()),expected=config.at("expected");const bool passed=actual==expected;std::cout<<json({{"case",config.at("case")},{"label",config.at("label")},{"expected",expected},{"actual",actual},{"passed",passed},{"lifecycleLogs",lifecycleLogs},{"businessFacts",businessFacts},{"completionGlobalIsAtomic",std::is_same_v<decltype(g_sgCleanupDone),std::atomic<bool>>}}).dump()<<std::endl;return passed?0:23;
+ }catch(const std::exception& error){std::cerr<<json({{"harnessError",error.what()}}).dump()<<std::endl;return 2;}
+}

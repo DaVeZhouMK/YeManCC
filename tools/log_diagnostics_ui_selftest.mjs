@@ -31,7 +31,8 @@ function fixture(handler) {
   const calls = [], messages = [], errMsg = ref('');
   const module = { exports: {} };
   vm.runInNewContext(compiled, {
-    module, exports: module.exports, ref, errMsg, Error, String,
+    module, exports: module.exports, ref, errMsg, Error, String, tdpDiagnosticDeliveryFailures: () => 0,
+    frontendDiagnosticDeliveryFailures: () => 0,
     invoke: async (...args) => { calls.push(args); return handler(...args); },
     dialog: { message: async (...args) => { messages.push(args); throw new Error('Unexpected popup'); } },
   }, { filename: sourcePath });
@@ -56,7 +57,7 @@ try {
     assert.equal((card.match(/<p\b/g) || []).length, 1);
     assert(card.includes('<p v-if="detailLogStatus" class="muted body fan-log-status" role="status">{{ detailLogStatus }}</p>'));
     assert(card.lastIndexOf('</button>') < card.indexOf('<p '));
-    assert(card.includes('@click="exportAllLogs">导出全部日志到桌面</button>'));
+    assert(card.includes('@click="exportAllLogs">导出日志</button>'));
     assert(!source.includes('默认只记录错误与关键事件（开关/连接/睡眠/故障）'));
     assert(!source.includes('detailLogExporting'));
     assert(!section.includes('dialog.message') && !section.includes('showDetailLogMessage'));
@@ -135,6 +136,25 @@ try {
     assert.equal(f.detailLogBusy.value, false);
     assert.equal(f.messages.length, 0);
   });
+  await check('steam-complete-export-reports-copied-count-inline', async () => {
+    const f = fixture(async () => ({ ...successfulArchive, steamLogs: { status: 'collected', copied: 45, skipped: 0, discoveryIssues: 0 } }));
+    await f.exportAllLogs();
+    assert.equal(f.detailLogStatus.value, exportText + '；Steam 日志已复制 45 个');
+    assert.equal(f.messages.length, 0);
+  });
+  await check('steam-partial-export-cannot-look-complete', async () => {
+    const f = fixture(async () => ({ ...successfulArchive, steamLogs: { status: 'snapshot-partial', copied: 44, skipped: 1, discoveryIssues: 0 } }));
+    await f.exportAllLogs();
+    assert(f.detailLogStatus.value.includes('收集不完整（1 项）'));
+    assert(f.detailLogStatus.value.includes('steam/steam-log-export.json'));
+    assert.equal(f.detailLogBusy.value, false);
+  });
+  await check('steam-missing-installation-is-explicit-not-an-export-failure', async () => {
+    const f = fixture(async () => ({ ...successfulArchive, steamLogs: { status: 'not-installed-or-unavailable', copied: 0, skipped: 0 } }));
+    await f.exportAllLogs();
+    assert(f.detailLogStatus.value.includes('Steam 日志已复制 0 个（not-installed-or-unavailable）'));
+    assert(!f.detailLogStatus.value.startsWith('导出失败'));
+  });
   await check('export-failure-is-inline-and-clears-busy-state', async () => {
     const f = fixture(async () => ({ ok: false, reason: 'archive-failed-after-2-attempts' }));
     await f.exportAllLogs();
@@ -178,6 +198,21 @@ try {
     pending.resolve({ ok: true, virtual: true });
     await work;
     assert.equal(f.detailLogStatus.value, '');
+    assert.equal(f.messages.length, 0);
+  });
+  await check('snapshot-half-tail-warning-preserves-success-and-no-popup', async () => {
+    const f = fixture(async () => ({ ok: true, path: 'C:\\fixture\\export.zip', count: 4, snapshotBoundaryWarnings: 1 }));
+    await f.exportAllLogs();
+    assert(f.detailLogStatus.value.includes('已导出'));
+    assert(f.detailLogStatus.value.includes('快照半条尾记录'));
+    assert(f.detailLogStatus.value.includes('原始内容已保留'));
+    assert(f.detailLogStatus.value.includes('log-export-snapshot.json'));
+    assert.equal(f.messages.length, 0);
+  });
+  await check('snapshot-inspection-failure-is-not-silently-complete', async () => {
+    const f = fixture(async () => ({ ok: true, path: 'C:\\fixture\\export.zip', count: 4, snapshotInspectionFailures: 1 }));
+    await f.exportAllLogs();
+    assert(f.detailLogStatus.value.includes('快照检查未完成'));
     assert.equal(f.messages.length, 0);
   });
   await check('export-transport-error-is-inline-without-popup', async () => {

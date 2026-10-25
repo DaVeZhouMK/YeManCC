@@ -134,7 +134,7 @@ if ($hostOpen.Contains('StartHcDeviceManager();')) { throw 'YeMan fan-only Open 
 # §2（FAN-926R 裁决）：旧要求（独立 `private void OpenEventsCore()` + `Invoke` 后轮询
 # `EnsureHcDeviceOpenForRestore()`）已被 920-v1.14 §25 正式取代 —— 现行生产入口为
 # `OpenEventsBeginCore()`，合同 = 调用前确证会话/路由就绪 + 调用后以正式收据开始设备打开。
-$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore()'
+$hostEvents = Slice $hostText 'private HcDeviceOpenNeed OpenEventsBeginCore()' 'private void OpenEventsFinalizeCore(OpenEventsAdmission admission)'
 Require-Order 'YeMan OpenEvents' $hostEvents @(
   'EnsureHcSessionReadyForOpenEvents();',
   'Invoke(device!, "OpenEvents");'
@@ -147,11 +147,30 @@ Require-Order 'YeMan Close' $hostClose @(
 )
 $hostDeviceClose = Slice $hostText 'private void CloseHcDevice()' 'private static void ExecuteCloseBoundary'
 Require-Order 'YeMan virtual close' $hostDeviceClose @(
-  'Invoke(device!, "Close");',
+  'CloseObservedInheritedEcFanDevice();',
   'HcVirtualCloseReturned = true;',
   'UnsubscribeExternalProfileEvents();',
-  'confirmManagerCleanup: ConfirmManagerCleanupAfterClose'
+  'confirmManagerCleanup: () =>',
+  'try { ConfirmManagerCleanupAfterClose(); }'
 )
+# The actual virtual call moved into the identity-bound helper. Preserve
+# both the generic fallback and observed-resource checks around that call.
+$inheritedClose = Slice $hostText 'private void CloseObservedInheritedEcFanDevice()' 'private sealed class InheritedEcFanWriter'
+if (-not $inheritedClose.Contains('if (observation is null) { Invoke(device!, "Close"); return; }')) { throw 'Generic virtual Close fallback is missing' }
+$observedClose = $inheritedClose.Substring($inheritedClose.IndexOf('lock (observation.Gate)', [StringComparison]::Ordinal))
+Require-Order 'YeMan observed virtual Close' $observedClose @(
+  'observation.RequireCurrent(device);',
+  'inheritedEcFanWriter?.RequireMetadataCurrent();',
+  'try { Invoke(device!, "Close"); }',
+  'finally { observation.ObserveCloseExit(); }',
+  'observation.CompleteClose();'
+)
+$postVirtualClose = $observedClose.Substring($observedClose.IndexOf('finally { observation.ObserveCloseExit(); }', [StringComparison]::Ordinal))
+Require-Order 'YeMan observed Close retirement' $postVirtualClose @(
+  'observation.RequireCurrent(device);',
+  'observation.CompleteClose();'
+)
+
 Require-Contains 'YeMan close owner' $hostText 'Interlocked.Exchange(ref closeBoundaryClaimed, 1)'
 Require-Contains 'YeMan close pending dedupe' $hostText 'HC_CLOSE_PENDING'
 Require-Contains 'YeMan manager isolation marker' $hostText 'not-started/no-stop-required'
@@ -176,7 +195,8 @@ Require-Contains 'YeMan resuspend benign skip' $hostText 'the next SystemReady r
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("suspend-confirmed", currentPowerGeneration())'
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("suspend-broadcast", generation)'
 Require-Contains 'native power callback safety' $nativeText 'fanHostScheduleEmergencySuspend("kernel-power-506", generation)'
-Require-Contains 'native detached worker' $nativeText 'std::thread([reasonText = std::string(reason ? reason : "unknown"), generation]'
+# Whitespace is irrelevant to the capture contract; reason is owned by value.
+Require-Contains 'native detached worker' ([regex]::Replace($nativeText, '\s+', '')) 'std::thread([reasonText=std::string(reason?reason:"unknown"),generation]'
 Require-Contains 'native detached worker' $nativeText '}).detach();'
 Require-Contains 'native resume generation gate' $nativeText 'g_resumeReadyGeneration'
 Require-Contains 'native resume generation gate' $nativeText 'PowerLifecycle::Resuming'
@@ -220,8 +240,16 @@ Require-Contains 'frontend resume lifecycle' $frontendText "async resume(): Prom
 # applyMutation(desiredCurve)。断言意图不变：resume 必须事件驱动、先只读快照再经同一
 # applyMutation 重写已记住的曲线，且不得复活 guard/resume-pending 观察窗。
 Require-Contains 'frontend resume lifecycle' $frontendText '() => this.replayResumeCurve(generation, intentRevision)'
-Require-Contains 'frontend resume lifecycle' $frontendText 'this.applyMutation(this.desiredCurve as readonly FanNode[])'
-Require-Contains 'frontend resume lifecycle' $frontendText 'const remote = await this.adapter.getState().catch(() => null);'
+Require-Contains 'frontend resume lifecycle' $frontendText 'this.applyMutation(this.desiredCurve as readonly FanNode[], intentRevision)'
+$resumeReplay = Slice $frontendText 'private async replayResumeCurve(generation: number, intentRevision: number): Promise<void>' 'async close(): Promise<void>'
+$resumeRead = $resumeReplay.Substring($resumeReplay.IndexOf('try { remote = await this.adapter.getState(); }', [StringComparison]::Ordinal))
+Require-Order 'frontend resume read/refusal/currentness' $resumeRead @(
+  'try { remote = await this.adapter.getState(); }',
+  'if (isTerminalFanControlRefusal(error))',
+  'this.parkTerminalControlRefusal(intentRevision, generation, readProcess, readEpoch, error);',
+  'throw error;',
+  'readProcess !== this.process || readSession !== this.sessionGeneration || readEpoch !== this.heartbeatEpoch'
+)
 Require-Contains 'frontend resume lifecycle' $frontendText '无 adapter.resume/协商/观察窗'
 if ($frontendText.Contains('FAN_GUARD_RESUME_PENDING') -or $frontendText.Contains('runFanGuardOnce')) {
   throw 'YeMan frontend must not reintroduce a resident fan-guard/resume-pending window (E9 deletion面)'

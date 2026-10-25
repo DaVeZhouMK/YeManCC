@@ -1,0 +1,11 @@
+# Unconfirmed initial handshake sleep/resume consumer
+
+The unchanged fan_resume_unconfirmed_handshake_selftest.ts executes real FanHostLifecycle public start/suspend/resume/manual apply, original NoIoHost, local power generation facts and memory launcher. Its30 ordered cases cover five interrupted starts, five normal wakes, six permission/refusal shapes, twelve owner/intent reply replacements, latest manual curve and duplicate resume. Power facts are virtual; this suite does not replace the global clock or prove OS sleep.
+
+Original api.proc.findExact is patched before the dynamic FanHost import, then restored. Unmodified-program Node V8 coverage records actual memory launcher start/stop calls and proves both fake/native process lookup calls are zero in the30 cases. A separate explicit leaf control captures an in-memory probe, replaces the API export with a rejecting trap and invokes the actual class stale-status read path: captured fake calls2, exported/native trap calls0, one memory launch and zero real PID operations. This leaf contract is not an extra original business case.
+
+Removing the actual fresh-handshake guard is a private source fault. It must compile and complete all30 ordered results with20 exact original assertion failures and5 separate original write-readiness production refusals. Compilation, metadata, runtime guard rejection and production refusals are not counted as assertion detections. Original assertions are unchanged. UTF8 is captured directly from Node; the first PowerShell prototype encoding issue is preserved separately.
+
+The97-input graph and actual source byte loads are provenance, not full module/CPU provider execution. Metadata on/off program bytes must match and the rebuild is not executed. The original runtime guard and owned Windows Job contain the software fixture and compiler. Product source, registered shared entry, native/Host Main, installed app, hardware/network and OS sleep are unchanged/unexecuted. Private-source faults are counterexamples, not reconstructed historical incidents.
+
+Coordinator registration, original public global execution and current registered audit remain necessary. The complete HC goal and physical acceptance remain open.

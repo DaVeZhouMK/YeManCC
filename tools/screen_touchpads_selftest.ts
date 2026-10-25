@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
-import { SCREEN_TOUCHPAD_DEFAULT, STANDALONE_SPECIAL_MODES, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
+import { SCREEN_TOUCHPAD_DEFAULT, STANDALONE_SPECIAL_MODES, TOUCH_FEEDBACK_MODES, LEFT_TOUCHPAD_MODES, RIGHT_TOUCHPAD_MODES, validateScreenTouchpadPatch, SCREEN_TOUCHPAD_LAYOUTS, SINGLE_TOUCHPAD_MODES, screenTouchpadDefaults, screenTouchpadProfile } from '../src/bridge/screenTouchpads';
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.enabled, false);
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.layout, 'off');
 for(const {value} of SCREEN_TOUCHPAD_LAYOUTS)assert.ok(validateScreenTouchpadPatch({layout:value}));
 for(const {value} of SINGLE_TOUCHPAD_MODES)assert.ok(validateScreenTouchpadPatch({singleMode:value}));
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.transparency, 80);
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.scale, 100);
+assert.equal(SCREEN_TOUCHPAD_DEFAULT.touchFeedback, 'medium');
+for (const {value} of TOUCH_FEEDBACK_MODES) assert.ok(validateScreenTouchpadPatch({ touchFeedback: value }));
+assert.equal(validateScreenTouchpadPatch({ touchFeedback: 'maximal' } as any), false);
+assert.deepEqual(TOUCH_FEEDBACK_MODES.map(({ value, label }) => [value, label]), [
+  ['off', '关闭'], ['minimal', '最小震动反馈'], ['medium', '中震动反馈'], ['strong', '强震动反馈'],
+]);
 for(const field of ['summonEnabled','specialEnabled','rearEnabled'] as const){assert.equal(SCREEN_TOUCHPAD_DEFAULT[field],false);assert.ok(validateScreenTouchpadPatch({[field]:true}));assert.equal(validateScreenTouchpadPatch({[field]:1} as any),false);}
 for (const mask of [0,1,2,3]) assert.ok(validateScreenTouchpadPatch({ specialMask: mask }));
 for (const mask of [0,5,10,15]) assert.ok(validateScreenTouchpadPatch({ rearMask: mask }));
@@ -29,6 +35,7 @@ for (const profile of ['disabled','steamdeck','dualsense-edge','elite'] as const
   const defaults=screenTouchpadDefaults(profile);
   assert.equal(defaults.transparency,80);
   assert.equal(defaults.scale,100);
+  assert.equal(defaults.touchFeedback,'medium');
   assert.equal(defaults.enabled,profile==='steamdeck'||profile==='dualsense-edge');
   assert.equal(defaults.layout,profile==='steamdeck'?'dual':profile==='dualsense-edge'?'single':'off');
   assert.equal(defaults.singleMode,profile==='dualsense-edge'?'dualsense':'mouse');
@@ -45,8 +52,8 @@ assert.equal(LEFT_TOUCHPAD_MODES[1].label,'PS5 左触摸板 (Steam内设置)');
 assert.equal(RIGHT_TOUCHPAD_MODES[1].label,'PS5 右触摸板 (Steam内设置)');
 const custom=screenTouchpadDefaults('steamdeck');custom.layout='off';custom.enabled=false;
 assert.equal(screenTouchpadDefaults('steamdeck').layout,'dual','Mutating a config must not mutate the preset');
-assert.equal(screenTouchpadProfile('dualshock4'),'dualsense-edge');
-assert.equal(screenTouchpadProfile('xbox360'),'elite');
+assert.equal(screenTouchpadProfile('dualshock4'),'disabled');
+assert.equal(screenTouchpadProfile('xbox360'),'disabled');
 
 assert.deepEqual(STANDALONE_SPECIAL_MODES.map(mode=>mode.label),['关闭','开启Steam全部','开启PS5全部']);
 assert.equal(SCREEN_TOUCHPAD_DEFAULT.standaloneSpecialMode,'off');
@@ -54,3 +61,8 @@ for(const {value} of STANDALONE_SPECIAL_MODES)assert.ok(validateScreenTouchpadPa
 for(const value of ['elite','dualsense-edge','all',3,null,true])assert.equal(validateScreenTouchpadPatch({standaloneSpecialMode:value} as any),false);
 for(const profile of ['disabled','steamdeck','dualsense-edge','elite'] as const)assert.equal(screenTouchpadDefaults(profile).standaloneSpecialMode,'off');
 console.log('STANDALONE_SPECIAL_FRONTEND_OK: exact three options, default off, strict validation');
+
+assert.equal(SCREEN_TOUCHPAD_DEFAULT.masterEnabled,true);
+assert.ok(validateScreenTouchpadPatch({masterEnabled:false}));
+assert.ok(validateScreenTouchpadPatch({masterEnabled:true}));
+assert.equal(validateScreenTouchpadPatch({masterEnabled:1} as any),false);

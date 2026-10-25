@@ -1,0 +1,259 @@
+{
+  "schemaVersion": 1,
+  "scope": "Supplemental exact SDK/MSVC input pins for the unchanged typed Runtime/Client/Owner selftest. Base native-launch-noio tool declaration remains unchanged.",
+  "observedCompilerDependency": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\DeckyRuntimeResume-20261023\\typed-runtime-current-r1\\dependencies.json",
+  "observedCompilerDependencySha256": "bc40afc393aa050efdcc261b02a0a0013669d4c6acf4f1e4058b546628747404",
+  "files": [
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\condition_variable",
+      "sha256": "be511dcb80ec92b697d4f81f2d8c99be8a384f9c54dc3a87ccacbb4cff1d8308",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\deque",
+      "sha256": "5a2cf95749f1cb7f2760818b1db1945db17fa3c7e15fe9ce7aa54ac60ce06352",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\future",
+      "sha256": "999707cdad4b19a8007ffb9769b6a77080ea413e6549b0e4fabbba9a5dd3498f",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\pplcancellation_token.h",
+      "sha256": "96d80acdfd872ca88b2376e5f2ff44a9bcb63678a2964e8996effa7552dfe6ca",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\pplinterface.h",
+      "sha256": "b7a3697e1285cc03cddacf25dccbe1aa444e194b397adba823615000cb592b60",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\ppltasks.h",
+      "sha256": "3d03ca7e3adf0164fa76caa3c8a1aa0f9f5a5ba23d75e88d38c2a0437a67aedc",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\ppltaskscheduler.h",
+      "sha256": "e26280040ae00860751c5f172fd47ccdb96fed29124a4d9d9f96a3feca05524c",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\microsoft visual studio\\2022\\buildtools\\vc\\tools\\msvc\\14.44.35207\\include\\pplwin.h",
+      "sha256": "ff322a8707ee3d84386dd46c6fc921397c7f95ce594115922008ceb926c5e83b",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\devpkey.h",
+      "sha256": "132ad3ea096996fbbf79ea8b23c4adb5b348d95a9d2d854bc076cc7fa6a091ab",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ifdef.h",
+      "sha256": "cefa534e00e88225d7820ac45aceb8437d53f8ff3c9103eecf9c31e23f35d03a",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ifmib.h",
+      "sha256": "f4c23e12ec16f550af96b25d25bd159a3b08466571ca992b9f253b366dd1eb91",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\in6addr.h",
+      "sha256": "b363d5f7e732bde66acd46b211d3f9c4470c9571b9447b9d28cf1e0d46fcbf4c",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ipifcons.h",
+      "sha256": "d5069d018bc8da7ebf219f84b8c047cebe5cff22a3c25cb15814cd867dabfe59",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ipmib.h",
+      "sha256": "9c1414adfaec3c7d519be7640e372604f2653872e5e86d003b9e6e169492e2b5",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\iprtrmib.h",
+      "sha256": "cd2cd4632870f8e6dbc835f8f25a86934c138719ff89f9b00c417fb0f4a3e1fb",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\lmcons.h",
+      "sha256": "5c92ff88ccd9f0e72015eb42626178fc5f9de3d0a08fa7b3a84fdb90db66085d",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\mprapidef.h",
+      "sha256": "afd5b586425eaaf3fbcebd228bbc26cc38c3f41c189f7cc872c6a6fbbfce054c",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\hashtypes.h",
+      "sha256": "84c3b1547e51aee8d340112ad5798a2b1ea7ce9052b7a677f8ee4f3cddaa34dc",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\ioctltypes.h",
+      "sha256": "7fc3f0b87be7c2eaabb8fcbc5764f73f6564d69ac6847d32d823a64378f402ff",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\nbluro.h",
+      "sha256": "927bba0eac13df7d100df68663f69e88f999b0240cea9244109add4ea8145b4f",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\ndisport.h",
+      "sha256": "7bc057a910c5e0d76d6b59539a4afcf9c5bfb1a09753df6a27c9f53b91ad0444",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\objectheader.h",
+      "sha256": "bebe4cbf03adfa98fd0ffe5a45f61756528d1e72cca6cc1ea7683beea06ec52b",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\offloadtypes.h",
+      "sha256": "611cf1460910e92897b24a07075860210c424aed06841e17be9bf065e59849e4",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\oidtypes.h",
+      "sha256": "db46a33e25968f4b23422f69552a9096312f9e76d302ac6681500b803c92207d",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\types.h",
+      "sha256": "034cc9d50885d8d33b83140cae7a9e100a3e5023b71546ec7d6108fca0bcfcdf",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ndis\\version.h",
+      "sha256": "15cd282dc1f057f98171d5dc61f341d76e2933cb20194217c95732564f8914ce",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\netioapi.h",
+      "sha256": "7035f59fd6bd88b4b7b023ff25dd66eaec4116646275ba81e29e7598edafb71f",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\nldef.h",
+      "sha256": "11942b91df8cc1c2fc9928db7ecc686daec2603023d87a9235a4be966738dda3",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ntddndis.h",
+      "sha256": "c2d369a293e68fb895be2c2d7afad55af098ca395363f709c8c7eb6611852a40",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\pciprop.h",
+      "sha256": "324e884ba572c8fd7b2447cfc7b1767f301f04e4d1705340d957ab450e2eede7",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\qos.h",
+      "sha256": "e1dda564159bb080003a051a939278cd20aff626c06815e9bcae04607931165d",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\tcpestats.h",
+      "sha256": "e4a81ecffab0f30391856cc9ed899a4a9c2334613c8591b8e8db427efb77df45",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\tcpmib.h",
+      "sha256": "8d202a04f8252892a3d9bcb752dded6ace19a8e56a2e7b92e805208b3f1c9b0f",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\udpmib.h",
+      "sha256": "da6d5bd0106aecedfcccf63c8da5ecf687933f53129f869fb7282b1312c57275",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\windot11.h",
+      "sha256": "f4d2a90e587c840b71afa2d75d35eb8bfa576e08de78aace037cee891030084a",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\wlantypes.h",
+      "sha256": "94438ef9987faa22000f6b9ecb101314fb0fc766fb49c9d3b1941757fb8c2fab",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ws2def.h",
+      "sha256": "57c53a7faa53bb1acfec935eb8e562b1f2d51069a7f30ac3dfa2e046dd6c304f",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\shared\\ws2ipdef.h",
+      "sha256": "31395c8b1b6d00f73bbcdea55d7d88e0cc9d5fcee6565b1c407808bbff067abe",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\ipexport.h",
+      "sha256": "e5dc60d0f9f73ba3633f5186ed60531a261b53476198e3dbe554c88ef8bb2c10",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\iphlpapi.h",
+      "sha256": "639cf8963b00a11fdffa8955ef71e9ca2294f0fbb4193d5df3823e64ab8f5c51",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\iptypes.h",
+      "sha256": "1335fa9ccded9a98fc7faea84dd7e47d9419c771953892ad6c754b0bd35deb81",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\winhttp.h",
+      "sha256": "45b2ccf904eeaa904e773e90a1e677bd04e41fb57e003f3f398cde0195c2fdd2",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\winsock2.h",
+      "sha256": "15098cbb8780bf917b155e2a7df9201f9768717a26544ec3912fd32addcea2c7",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\include\\10.0.26100.0\\um\\ws2tcpip.h",
+      "sha256": "76011c9095fcd50af68eb7d3ffb828d4d2b710cbda09ec4b2653371319886a21",
+      "role": "actual original typed-runtime compiler dependency"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\bcrypt.lib",
+      "sha256": "9fe31df255d17b0339391ff80a71bf2c5d442cc301bd2fe6eeea00b626f10785",
+      "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\shell32.lib",
+      "sha256": "2a22142874964268432783a85cef5e3f5c18ed050ab77e637bb6bab30bb73ab6",
+      "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\user32.lib",
+      "sha256": "f45759349ad08b848bdd4eee39cd9b428b2a7ae63a09889c09a197fe7b01421d",
+      "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\userenv.lib",
+      "sha256": "2ae9d85e10d7536662b2657462ea6e4394c0143a187a75229e4e14599f6e4f2d",
+      "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\winhttp.lib",
+      "sha256": "6873f0b8893e8e7bd86cb7a8310631b3fcde99a85486196fe61ce9f1a352906a",
+      "role": "explicit original typed-runtime link library"
+    },
+    {
+      "path": "c:\\program files (x86)\\windows kits\\10\\lib\\10.0.26100.0\\um\\x64\\ws2_32.lib",
+      "sha256": "a8a552a37d8935e272ff470e2620f55e05433b989707bd05e9911d2482f44134",
+      "role": "explicit original typed-runtime link library"
+    }
+  ],
+  "osLoadedModulesVerified": false
+}

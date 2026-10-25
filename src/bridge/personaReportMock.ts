@@ -1,8 +1,10 @@
 import type { CanonicalFrame } from './virtualReportAssembler';
+import { isVirtualOutputPersona, type VirtualOutputPersona } from './controllerPersona';
 
+/** Fixture data only: this is not a HID/SDK wire report or an encoder capability claim. */
 export type EncodedVirtualReport = {
   schemaVersion: 1;
-  persona: 'dualshock4' | 'xbox360';
+  persona: VirtualOutputPersona;
   outputMode: 'virtual-stick';
   runId: string;
   epoch: number;
@@ -23,11 +25,12 @@ const clamp = (value: number) => Math.max(-1, Math.min(1, value));
 const finite = (value: number) => Number.isFinite(value);
 
 /**
- * F3 fixture-only persona encoder. DS4 IMU is deliberately not synthesized
- * from a virtual-stick frame, so one gyro sample cannot reach two outputs.
+ * F3 fixture-only persona encoder for current virtual outputs. It copies
+ * canonical virtual-stick semantics into mock data, never SDK/HID bytes or IMU
+ * reports, so one gyro sample cannot reach two outputs.
  */
 export function encodePersonaReport(frame: CanonicalFrame): PersonaEncodeResult {
-  if (frame.persona !== 'dualshock4' && frame.persona !== 'xbox360') {
+  if (!isVirtualOutputPersona(frame.persona)) {
     return { ok: false, reason: 'persona-mode-conflict' };
   }
   const values = [

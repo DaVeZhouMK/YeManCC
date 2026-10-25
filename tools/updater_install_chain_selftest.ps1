@@ -1,5 +1,5 @@
 ﻿[CmdletBinding()]
-param()
+param([string]$PackagePath='', [string]$ManifestPath='')
 
 $ErrorActionPreference = 'Stop'
 
@@ -502,8 +502,8 @@ $workspaceRoot = if ([string]::IsNullOrWhiteSpace($env:YEMAN_WORKSPACE_ROOT)) {
 } else {
   [IO.Path]::GetFullPath($env:YEMAN_WORKSPACE_ROOT)
 }
-$package = Join-Path $workspaceRoot 'Release\Packages\YeManCC.zip'
-$releaseManifest = Join-Path $workspaceRoot 'Release\version.json'
+$package = if ($PackagePath) { [IO.Path]::GetFullPath($PackagePath) } else { Join-Path $workspaceRoot 'Release\Packages\YeManCC.zip' }
+$releaseManifest = if ($ManifestPath) { [IO.Path]::GetFullPath($ManifestPath) } else { Join-Path $workspaceRoot 'Release\version.json' }
 if (!(Test-Path -LiteralPath $package -PathType Leaf)) { throw "release package missing: $package" }
 if (!(Test-Path -LiteralPath $releaseManifest -PathType Leaf)) { throw "release manifest missing: $releaseManifest" }
 $manifestText = (Get-Content -LiteralPath $releaseManifest -Raw -Encoding UTF8).TrimStart([char]0xFEFF)

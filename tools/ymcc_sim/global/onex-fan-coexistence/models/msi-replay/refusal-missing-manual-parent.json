@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-replay26-from-accepted-manual92",
+  "evidenceKind": "EXACT_MSI_REPLAY_PREPARE",
+  "role": "positive",
+  "ownedParent": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-msi-replay-parent-bound-source-prepare-20261022-r1",
+  "stageRoot": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-msi-replay-parent-bound-source-prepare-20261022-r1/REFUSAL-NOT-CREATED-missing-manual-parent",
+  "acceptedMsiManual92": null,
+  "derivativeQualificationPin": {
+    "path": "D:/MODEL_ONLY/replay-qualification-NOT-REAL.json",
+    "sha256": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+  }
+}

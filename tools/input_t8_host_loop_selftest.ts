@@ -17,7 +17,7 @@ feedback.ready();
 
 const controller: ControllerFrame = {
   runId: 'run-t8', epoch: coordinator.lifecycle.snapshot().epoch, powerGeneration: coordinator.lifecycle.snapshot().powerGeneration,
-  targetId: 'target-1', persona: 'xbox360', configRevision: 4, inputSequence: 1, timestamp: 10,
+  targetId: 'target-1', persona: 'elite', configRevision: 4, inputSequence: 1, timestamp: 10,
   buttons: 0x10, axes: { leftX: 0.2, leftY: 0 }, triggers: { left: 0, right: 0 }, rightStick: { x: 0.3, y: -0.1 },
 };
 const motionConfig = {
@@ -74,7 +74,7 @@ if (coordinator2.lifecycle.snapshot().phase !== 'released' && coordinator2.lifec
   }
 }
 
-const evidencePath = resolve(process.cwd(), '../../Build/Validation/HC-Parity/S-28-input-t8-host-loop-mock-trace.json');
+const evidencePath = resolve(process.env.YMCC_CONTRACTS_EVIDENCE_DIR ?? resolve(process.cwd(), '../../Build/Validation/HC-Parity'), 'S-28-input-t8-host-loop-mock-trace.json');
 mkdirSync(resolve(evidencePath, '..'), { recursive: true });
 writeFileSync(evidencePath, JSON.stringify({
   evidenceId: 'S-28-INPUT-T8-HOST-LOOP-MOCK-20260904',

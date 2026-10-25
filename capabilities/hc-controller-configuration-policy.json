@@ -1,0 +1,94 @@
+{
+  "schemaVersion": 1,
+  "scope": "Only the existing enabled MSI SD rear preparation consumer is bound. Native keyboard is inventory-only; registration grants no write permission.",
+  "sourceFiles": [
+    {
+      "file": "Devices/MSI/ClawA1M.cs",
+      "sha256": "3a67b506ab11b2236b046696b2055e6f6d95c1794672b15300b30314a7643821"
+    },
+    {
+      "file": "Devices/MSI/ClawA2VM.cs",
+      "sha256": "aa54ca29a82e9dbbe0fe23b98cb766e81a5e6558fd7c1221dcc8b8e900020d5e"
+    },
+    {
+      "file": "Devices/MSI/ClawBZ2EM.cs",
+      "sha256": "644e95ef21a6f191e92976026595ecf1e13153f7bcc877757baf2911079fb726"
+    },
+    {
+      "file": "Devices/MSI/ClawCG3EM.cs",
+      "sha256": "45518a1ef85f40d2427ca5259d1b1eb8538883618f99c6b2d39dbc4567e0bfbd"
+    },
+    {
+      "file": "Devices/MSI/DeviceVersion.cs",
+      "sha256": "d541ec68bbdeadad29ab621969e4e3bf4cb5b8f51c71fe5bd2ac7c1b9f924f22"
+    },
+    {
+      "file": "Devices/IDevice.cs",
+      "sha256": "fbaed1dfd329e3328376488b8ec70c3a7fdcf97d70dcb37f1525ee33aa169c20"
+    }
+  ],
+  "provider": {
+    "file": "native/msi_rear_protocol.h",
+    "sha256": "6d181c2e7c5222f5d2e11eb1e98d05b87a88e5b934c02a10fb747c6cadf8721b"
+  },
+  "models": [
+    {
+      "name": "ClawA1M",
+      "boards": [
+        "MS-1T41"
+      ]
+    },
+    {
+      "name": "ClawA2VM",
+      "boards": [
+        "MS-1T42",
+        "MS-1T52"
+      ]
+    },
+    {
+      "name": "ClawBZ2EM",
+      "boards": [
+        "MS-1T8K"
+      ]
+    },
+    {
+      "name": "ClawCG3EM",
+      "boards": [
+        "MS-1T91"
+      ]
+    }
+  ],
+  "firmware": [
+    355,
+    358,
+    359,
+    529,
+    535,
+    537,
+    776,
+    1041
+  ],
+  "routes": [
+    {
+      "name": "DInputButtons",
+      "id": "controller.configuration.msi.rear.dinput-buttons",
+      "consumer": "msiClawEnsureM12Remap",
+      "defaultAuthority": "existing virtual-start/release-quarantine gates only",
+      "productEnabled": true,
+      "currentConsumerWired": true
+    },
+    {
+      "name": "XInputKeyboard",
+      "id": "controller.configuration.msi.rear.xinput-keyboard",
+      "consumer": "msiNativeRearPrepareKeyboard",
+      "defaultAuthority": "buildWritesEnabled=false; experiment-only; not enabled by this catalog",
+      "productEnabled": false,
+      "currentConsumerWired": false,
+      "disposition": "record-only; original native consumer unchanged; unified binding refuses this route"
+    }
+  ],
+  "sharedProfileFields": true,
+  "physicalAcceptance": false,
+  "automaticRestoreEstablished": false,
+  "sourceFreshnessOwnedByConsumer": true
+}

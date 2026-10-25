@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';
+import { classify, definition, lex, queryVerdict } from './source-graph.mjs';
+export function runClassificationTests() {
+  const results=[]; const test=(name,fn)=>{fn();results.push({name,pass:true});};
+  const make=()=>({nodes:['open','physicalRead','decode','publish'].map((role,i)=>({id:`node${i}`,role,entry:i===0,realm:'ymcc',protocol:'neptune',origin:role==='physicalRead'?'physical':undefined,available:true,capabilities:['oem2keys','rearButtons','touchpads','imu']})),edges:[0,1,2].map(i=>({from:`node${i}`,to:`node${i+1}`,kind:i===1?'event':'data'}))});
+  test('connected physical path is a positive control',()=>assert.equal(classify(make(),'oem2keys').actualConsumer,true));
+  for(const cap of ['oem2keys','rearButtons','touchpads','imu'])test(`positive control: ${cap}`,()=>assert.equal(classify(make(),cap).actualConsumer,true));
+  for(let i=0;i<3;i++)test(`disconnect edge ${i}`,()=>{const g=make();g.edges.splice(i,1);assert.equal(classify(g,'imu').actualConsumer,false);});
+  for(const role of ['targetBuild','targetSubmit','declaration'])test(`source-shaped ${role} cannot supply a physical read`,()=>{const g=make();g.nodes[1].role=role;g.nodes[1].label='NeptuneController.Source.Input';assert.equal(classify(g,'oem2keys').actualConsumer,false);});
+  test('virtual origin with Neptune protocol rejected',()=>{const g=make();g.nodes[1].origin='virtual';assert.equal(classify(g,'oem2keys').actualConsumer,false);});
+  test('HC reference consumer not in executable closure',()=>{const g=make();g.nodes.forEach(n=>n.realm='hc-reference');assert.equal(classify(g,'imu').actualConsumer,false);});
+  test('missing dependency is not an available decoder',()=>{const g=make();g.nodes[2].available=false;assert.equal(classify(g,'imu').actualConsumer,false);});
+  test('XInput base decoder cannot claim Neptune protocol',()=>{const g=make();g.nodes[2].protocol='xinput';assert.equal(classify(g,'rearButtons').actualConsumer,false);});
+  test('motion path cannot imply OEM key publication',()=>{const g=make();g.nodes[3].capabilities=['imu'];assert.equal(classify(g,'oem2keys').actualConsumer,false);});
+  test('lifecycle and reference edges do not carry input',()=>{for(const kind of ['lifecycle','reference']){const g=make();g.edges[1].kind=kind;assert.equal(classify(g,'imu').actualConsumer,false);}});
+  test('decode before physical read does not establish a path',()=>{const g=make();[g.nodes[1].role,g.nodes[2].role]=[g.nodes[2].role,g.nodes[1].role];assert.equal(classify(g,'imu').actualConsumer,false);});
+  test('cycle without publication terminates',()=>{const g=make();g.edges[2]={from:'node2',to:'node0',kind:'data'};assert.equal(classify(g,'imu').actualConsumer,false);});
+  test('invalid dangling input rejected',()=>{const g=make();g.edges[0].to='absent';assert.throws(()=>classify(g,'imu'),/Invalid edge/);});
+  test('duplicate node rejected',()=>{const g=make();g.nodes.push(g.nodes[0]);assert.throws(()=>classify(g,'imu'),/duplicate/);});
+  test('unknown role rejected',()=>{const g=make();g.nodes[0].role='trustme';assert.throws(()=>classify(g,'imu'),/Invalid/);});
+  test('lexical fake calls in comments and strings ignored',()=>{const s='// Open(){ Fake(); }\nprivate void Open(){ var x="} NeptuneController()"; /* Read(); */ Real(); }';const f=definition(s,'Open');assert.deepEqual(f.calls.map(x=>x.callee),['Real']);assert.equal(lex(s).filter(t=>t.kind==='id'&&t.value==='NeptuneController').length,0);});
+  test('balanced nested scopes and escaped quotes',()=>{const f=definition('private void Read(){if(true){X("\\\"}");} Done();}','Read');assert.deepEqual(f.calls.map(x=>x.callee),['X','Done']);});
+  test('unbalanced and ambiguous definitions rejected',()=>{assert.throws(()=>definition('private void Open(){','Open'),/Unbalanced/);assert.throws(()=>definition('private void Open(){} private void Open(int x){}','Open'),/found 2/);});
+  const good=()=>({familyId:'valve-steam-deck',supported:true,keys:['special','special2'].map(keyId=>({keyId,physicalForm:'embedded',backIndex:0,captureImplemented:false,captureRoute:'physical-neptune-reader-unimplemented'}))});
+  test('explicit unimplemented query is valid',()=>assert.equal(queryVerdict(good()).pass,true));
+  test('legacy absent capture fields are not false',()=>{const q=good();delete q.keys[1].captureImplemented;assert.equal(queryVerdict(q).pass,false);});
+  test('target route masquerading as physical input rejected',()=>{const q=good();q.keys[0].captureRoute='BuildSteamDeckState';assert.equal(queryVerdict(q).pass,false);});
+  test('true capability, duplicate key and malformed result rejected',()=>{const q=good();q.keys[0].captureImplemented=true;assert.equal(queryVerdict(q).pass,false);q.keys[1].keyId='special';assert.equal(queryVerdict(q).pass,false);assert.equal(queryVerdict({}).pass,false);});
+  return {pass:true,tests:results.length,results,scope:'Algorithm tests with constructive and destructive graph cases; no source substring assertions'};
+}

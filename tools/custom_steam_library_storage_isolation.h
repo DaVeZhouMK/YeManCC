@@ -1,6 +1,9 @@
 #pragma once
 // Test-only isolation: never acquire an installed host/worker's data mutex.
 // This header is not included by any shipping translation unit.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
 #include <winsock2.h>
 #include <windows.h>
 #include <string>

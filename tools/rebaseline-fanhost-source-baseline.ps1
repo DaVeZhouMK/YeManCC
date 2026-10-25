@@ -191,7 +191,7 @@ $newBaseline = [ordered]@{
   rebaseline          = $newRebaseline
   policy              = $baseline.policy
 }
-$newBaselineText = ($newBaseline | ConvertTo-Json -Depth 12) + "`n"
+$newBaselineText = ($newBaseline | ConvertTo-Json -Depth 100) + "`n"
 
 # --- apply: backup, write index, write json, read back ------------------------
 Copy-Item -LiteralPath $baselinePath -Destination $backupPath -Force

@@ -1,0 +1,47 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-19",
+  "updatedAt": "2026-10-19T11:47:09.607Z",
+  "authority": "direct-human-user",
+  "scopeRule": "Only model/hardware capabilities and their necessary actual consumer/lifecycle dependencies belong in this total-library goal. Generic settings UI is not imported merely because HC or an old test contains it.",
+  "entries": [
+    {
+      "id": "settings.wake-password-ui",
+      "name": "唤醒密码 UI",
+      "status": "USER_EXCLUDED",
+      "meaning": "YemanCC不需要，用户明确不导入的能力",
+      "userWords": "如果是机型能力需要可以保留，如果只是单纯字面的唤醒密码UI感觉不需要，记录为YemanCC不需要的用户明确不导入的能力",
+      "requiredCapability": false,
+      "countsAsIntegrationGap": false,
+      "countsTowardsCompletionDenominator": false,
+      "automaticallyReimportOnUpgrade": false,
+      "excludedSimulationCase": "sleep.wake-password-ui-consumer",
+      "taskDisposition": "Stop further import/development and remove this newly added active simulation registration; retain raw historical evidence.",
+      "existingProductDisposition": "Preserve the pre-existing SleepGuardView/API/native setting. No installed settings or product function removal is requested.",
+      "machineDependencyException": "Retain a concrete underlying component only when a required machine capability actually depends on it; the generic password UI remains excluded.",
+      "originalSourceEvidence": {
+        "commit": "a98c296",
+        "date": "2026-10-10T00:28:32+08:00",
+        "existing": "Committed SleepGuardView label, wakePassword.set API and power.wakePassword.set native handler."
+      }
+    },
+    {
+      "id": "library.enabled-capabilities-only",
+      "status": "ACTIVE_SCOPE",
+      "authority": "direct-human-user",
+      "date": "2026-10-20",
+      "scopeFile": "capabilities/ACTIVE-INTEGRATION-SCOPE.json",
+      "userWords": "风扇、陀螺仪、手柄输入、机身灯光、背部按键、专用按键、震动、充电上限等已经启用的能力继续补全；未启用能力如副屏只记录缺口，准备收口不要无限扩大",
+      "doesNotActivateDormantSourceHooks": true,
+      "countsInactiveCapabilitiesAsCurrentIntegrationGap": false
+    }
+  ],
+  "futureAiRules": [
+    "Do not turn USER_EXCLUDED into missing wiring or re-run work.",
+    "Do not reintroduce it on HC update or solely to complete generic UI coverage.",
+    "Require specific hardware consumer/lifecycle dependency before adding generic settings UI candidates.",
+    "Continue fan, motion, controller/input/feedback and required release/recovery work.",
+    "CPU/GPU metadata and current independent CPU/TDP consumption stay unchanged."
+  ],
+  "installedApplicationChanged": false
+}

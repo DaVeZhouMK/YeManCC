@@ -1,0 +1,43 @@
+{
+  "reason": "Old CSS class selector incompatible with current real shared control; exact role+setting label proven on prior served bundle; recovery UI moved from SleepGuardView to Settings diagnostics shared SteamRecoveryDiagnostics; exact AppIcon mouse PNG import compiled as an inline data URL",
+  "priorOriginalSha256": "d2914227fba9f4e256585e896acbcb1be7aa0a5d00a1dd6d6b98377e9244906e",
+  "currentOriginalSha256": "b312b5615f255b77cebd4d341b47e4031ce08d108248c6b695ac6c6f269cae99",
+  "changes": [
+    {
+      "before": "panel.locator('button.switch')",
+      "after": "panel.getByRole('switch',{name:'睡眠唤醒 Steam 自动修复',exact:true})",
+      "count": 1
+    },
+    {
+      "before": "cleanPage.locator('.sleep-recovery-auto button.switch')",
+      "after": "cleanPage.locator('.sleep-recovery-auto').getByRole('switch',{name:'睡眠唤醒 Steam 自动修复',exact:true})",
+      "count": 2
+    },
+    {
+      "before": "const mocks={",
+      "after": "const mocks={'@/bridge/uiLifecycle':`export const isUiVisible=()=>true;export const onUiVisibilityChange=()=>()=>{};`,'@/bridge/steamGameLink':`export const getSteamGameLink=async()=>({schemaVersion:1,phase:'unavailable',fresh:false,readOnly:true});`,",
+      "count": 1
+    },
+    {
+      "before": "import Page from './src/views/SleepGuardView.vue'",
+      "after": "import Page from './src/components/SteamRecoveryDiagnostics.vue'",
+      "count": 1
+    },
+    {
+      "before": "platform:'browser',alias:",
+      "after": "platform:'browser',loader:{'.png':'dataurl'},alias:",
+      "count": 1
+    }
+  ],
+  "originalFailurePreserved": true,
+  "businessCaseNamesUnchanged": true,
+  "allOriginalLinesUnchangedExceptThreeSelectors": false,
+  "waitsTimeoutsAndExpectedTextUnchanged": true,
+  "authorizationThread": "01a14d5e-f558-77e0-bcd0-39e028ed43ed",
+  "preRelocationOriginalSha256": "f1172e111caa8e08c2f0f70d559774484c922d29b089da2cccf71d03f99710c5",
+  "businessAssertionsAndCaseOrderPreserved": true,
+  "relocationDate": "2026-10-20",
+  "preAssetOriginalSha256": "a2af1689755c4dcf6e7380804d31264a42d83350c8467f9f29b91455b9cbcdb9",
+  "assetMaintenanceDate": "2026-10-22",
+  "assetLoaderOnly": true
+}

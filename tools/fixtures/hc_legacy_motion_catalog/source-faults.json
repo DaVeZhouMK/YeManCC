@@ -1,0 +1,10 @@
+[
+  {"name":"unconditional-reset","declaration":"class Child : IDevice { public Child() { GyroMatrix = new() { Axis = new Vector3(-1,1,1) }; } }","reject":false},
+  {"name":"conditional-assignment","declaration":"class Child : IDevice { public Child() { if (DateTime.Now.Ticks > 0) GyroMatrix = new(); } }","reject":true},
+  {"name":"method-assignment","declaration":"class Child : IDevice { void Change() { GyroMatrix = new(); } }","reject":true},
+  {"name":"member-mutation","declaration":"class Child : IDevice { public Child() { GyroMatrix.Axis = new Vector3(1,1,-1); } }","reject":true},
+  {"name":"dictionary-mutation","declaration":"class Child : IDevice { public Child() { GyroMatrix.AxisSwap.Clear(); } }","reject":true},
+  {"name":"callback-assignment","declaration":"class Child : IDevice { public Child() { Action change = () => GyroMatrix = new(); } }","reject":true},
+  {"name":"constructor-overloads","declaration":"class Child : IDevice { public Child() : this(1) {} public Child(int x) { GyroMatrix = new(); } }","reject":true},
+  {"name":"early-return","declaration":"class Child : IDevice { public Child() { if(DateTime.Now.Ticks > 0) return; GyroMatrix = new(); } }","reject":true}
+]

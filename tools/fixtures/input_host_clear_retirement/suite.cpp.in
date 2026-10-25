@@ -1,0 +1,242 @@
+// Complete production functions are inserted by the runner. IO operations and
+// external physical/target facts are named memory ports; owned HANDLE leaves
+// and the pipe Runtime are real. Caller serializes with the actual mutex shape.
+@@PIPE_LEAVES@@
+#include "input_host_process_retirement.h"
+using json=nlohmann::json;
+namespace tr=ymcc::inputHost::pipeTransport;
+using InputHostMutex=std::mutex;
+static InputHostMutex g_inputHostMx;
+static unsigned checks=0,negativeOnlyRawSalvage=0;
+static json failures=json::array(),cases=json::array();
+static void check(bool value,const char* name){++checks;if(!value)failures.push_back(name);}
+static void require(bool value,const char* name){if(!value)throw std::runtime_error(name);}
+struct Ports {
+ bool msi=false,historySettled=false,endpointAbsent=true,restore=true,commit=true,confirm=true,explicitOn=false;
+ unsigned forget=0,revoke=0,rawInvalidations=0,restores=0,commits=0,confirmations=0,queued=0;
+ unsigned rearmCalls=0,rearmBeforeClear=0,rearmAdmitted=0;
+ unsigned durableHistoryWrites=0,createTargets=0;
+ std::string retiredRun;ULONGLONG retiredEpoch=0;
+ json logs=json::array();
+};static Ports ports;
+static HANDLE g_inputHostProcess=nullptr,g_inputHostServerPipe=nullptr;
+// Explicit unused primary-thread owner port for the original pipe-only cases.
+static HANDLE g_inputHostPrimaryThread=nullptr;
+static bool g_inputHostHello=false,g_inputHostPrepared=false,g_inputHostPrepareMayHaveReachedHost=false;
+static bool g_inputHostNeutralized=false,g_inputHostActive=false,g_inputHostTransportFault=false;
+static bool g_inputHostReleaseQuarantined=false,g_inputHostStartBlocked=false,g_inputHostPipeConnected=false;
+static bool g_inputHostPipeRetired=false,g_inputHostMsiStageRequested=false,g_inputHostHidHideStateQuery=false;
+static std::string g_inputHostRunId,g_inputHostHostInstanceId,g_inputHostStartupNonce,g_inputHostBoundPersona,g_inputHostLifecycle;
+static std::wstring g_inputHostPipeName;
+static ULONGLONG g_inputHostEpoch=0,g_inputHostBoundPowerGeneration=0,g_inputHostSequence=0,g_inputHostSampleSequence=0;
+static ULONGLONG g_inputHostLastKeepAliveTick=0,g_inputHostLastPhysicalIdentityCheckTick=0,g_inputHostLastQuarantineProbeTick=0;
+static std::atomic<ULONGLONG> g_inputHostHealthySinceTick{0},g_inputHostEpochMirror{0},g_inputHostLastKeepAliveRequestTick{0};
+static std::atomic<bool> g_wakeHoldPhysicalUnhide{false},g_msiDinputReturnOwed{false},g_msiVirtualReleaseRearmEligible{false};
+static bool g_inputHostFreshNeutralAdmitted=false,g_inputHostAnalogAnchorInitialized=false,g_inputHostSourceCandidateLogged=false;
+static unsigned g_inputHostFreshNeutralFrames=0,g_inputHostFreshNeutralMask=0,g_inputHostAnalogStableFrames=0;
+static int g_inputHostAnalogAnchor=0,g_inputHostRecreatedWakePowerProof=0;
+static bool g_xinputPhysicalSourceLocked=false,g_xinputReconfirmRejectLogged=false;
+static unsigned g_xinputPhysicalSourceMask=0,g_xinputPreTargetSlots=0,g_xinputAdmittedMask=0,g_xinputLoggedAdmittedMask=0;
+static unsigned g_xinputReconfirmMsiGeneration=0,g_xinputConnectedMask=0;
+static std::atomic<unsigned> g_xinputSourceReconfirmMask{0};
+static std::atomic<bool> g_xinputPreTargetBoundaryScanned{false};
+static std::string g_xinputReconfirmIdentity;
+static struct {bool active=false;} g_hidHideVisibilityJournal;
+struct Debt {
+ bool owed=false;void clear(){owed=false;}bool required()const{return owed;}
+ bool verified(const std::string&,ULONGLONG)const{return ports.endpointAbsent;}
+ std::string run()const{return g_inputHostRunId;}ULONGLONG epoch()const{return g_inputHostEpoch;}
+};static Debt g_msiSteamDeckReleaseDebt,g_msiSteamDeckReleaseFence;
+struct PsDebt {
+ bool owed=false;bool retirementRequired()const{return owed;}int retirement()const{return 1;}
+ bool confirmRetirement(const std::string&,ULONGLONG){++ports.confirmations;if(!ports.confirm)return false;owed=false;return true;}
+ void clear(){owed=false;}
+};static PsDebt g_psEndpointOwnership;
+static struct {bool virtualTargetEnabled=false;} g_realStickTest;
+static struct {void revoke(){++ports.revoke;}} g_inputHostGameMotorInbox;
+static std::atomic<unsigned> g_inputHostGameMotorBindingGeneration{0};
+static bool msiClawKnownBoardAuthority(){return ports.msi;}
+static bool inputHostTargetReturnHistorySettledLocked(){return ports.historySettled;}
+static void inputHostSwitchVerificationForgetAcceptedLocked(){++ports.forget;}
+static void gamepadSerialRevokeGameFeedback(){}
+namespace ymcc::screenpads {inline void observeNativeTransport(ULONGLONG,bool){}}
+static void hidHideInvalidateRawInputIdentityCache(){++ports.rawInvalidations;}
+static void inputHostClearBoundPersona(){g_inputHostBoundPersona.clear();}
+static void appendNativeLifecycleLog(const char* event,const json& data){ports.logs.push_back({{"event",event},{"data",data}});}
+static bool hidHideRestorePhysicalTransaction(const char*){++ports.restores;if(!ports.restore)return false;g_hidHideVisibilityJournal.active=false;return true;}
+static bool inputHostTargetReturnAfterPsQuarantineLocked(int,bool){++ports.commits;return ports.commit;}
+static bool psRetiredReturnProvenLocked(){return ports.endpointAbsent;}
+static bool msiSteamDeckRecheckOwnedRemovalDebt(){return ports.endpointAbsent;}
+static bool inputHostQueueLifecycleWork(const char*){++ports.queued;return true;}
+static bool cleared(){return g_inputHostRunId.empty()&&g_inputHostEpoch==0&&!g_inputHostHello&&!g_inputHostPrepared&&!g_inputHostPrepareMayHaveReachedHost&&!g_inputHostTransportFault;}
+static bool msiExplicitRearmRestoredLocked(){
+ ++ports.rearmCalls;const bool ready=cleared();if(!ready)++ports.rearmBeforeClear;
+ if(ports.explicitOn&&ready){g_inputHostStartBlocked=false;++ports.rearmAdmitted;return true;}return false;
+}
+static bool inputHostSwitchExecutionReturnedLocked(ULONGLONG epoch,const std::string& run){ports.retiredEpoch=epoch;ports.retiredRun=run;++ports.rearmCalls;if(!cleared())++ports.rearmBeforeClear;return false;}
+static bool inputHostSwitchExecutionPreserveMsiIntentLocked(std::uint64_t,ULONGLONG,const std::string&,bool){++ports.rearmCalls;if(!cleared())++ports.rearmBeforeClear;return false;}
+static bool inputHostSwitchRecoveryReturnedLocked(ULONGLONG,const std::string&){++ports.rearmCalls;if(!cleared())++ports.rearmBeforeClear;return false;}
+static bool inputHostWakeReturnedLocked(ULONGLONG,const std::string&){++ports.rearmCalls;if(!cleared())++ports.rearmBeforeClear;return false;}
+static ULONGLONG inputHostStartProtectionNow(){return GetTickCount64();}
+static struct {struct View{std::uint64_t requestId=7;};View view(ULONGLONG)const{return {};}} g_virtualStartProtection;
+enum class InputHostPublicationStage{Unknown};
+static void inputHostNotePublicationStage(InputHostPublicationStage){}
+@@PIPE_CLOSE@@
+#define CloseHandle memoryApi::close
+@@PIPE_WRAPPER@@
+#undef CloseHandle
+@@PRIMARY_HELPER@@
+@@CLEAR@@
+@@OWNED@@
+@@DISABLED@@
+@@PIPE_ONLY_HELPER@@
+@@BUS_QUARANTINE@@
+@@LIFECYCLE_QUARANTINE@@
+static json pipeState(){auto* owner=tr::existingProcessRuntime();if(!owner)return {{"owner",false}};
+ const auto s=owner->snapshot();return {{"owner",true},{"available",s.available},{"pending",s.pending},{"active",s.activeLeases},
+ {"cached",s.cachedOperations},{"originals",s.ownedOriginals},{"duplicates",s.ownedDuplicates},{"events",s.ownedEvents},
+ {"failedCloseDebt",s.failedCloseDebt},{"stopped",s.stopped}};}
+static void clearCall(){std::lock_guard<InputHostMutex> lock(g_inputHostMx);inputHostClearLocked();}
+static void seed(){
+ require(memoryApi::live.empty(),"prior case kernel handles remain");memoryApi::clear();ports=Ports{};
+ require(g_inputHostPrimaryThread==nullptr,"previous primary-thread owner not returned");
+ g_inputHostProcess=nullptr;g_inputHostServerPipe=nullptr;g_inputHostUnadoptedPipe=nullptr;
+ g_inputHostHello=true;g_inputHostPrepared=true;g_inputHostPrepareMayHaveReachedHost=true;
+ g_inputHostNeutralized=true;g_inputHostActive=true;g_inputHostTransportFault=false;
+ g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;g_inputHostPipeConnected=true;
+ g_inputHostPipeRetired=false;g_inputHostMsiStageRequested=true;g_inputHostHidHideStateQuery=true;
+ g_inputHostRunId="old-run";g_inputHostHostInstanceId="old-host";g_inputHostStartupNonce="old-nonce";
+ g_inputHostBoundPersona="steamdeck";g_inputHostPipeName=L"old-pipe";g_inputHostEpoch=17;g_inputHostEpochMirror=17;
+ g_inputHostBoundPowerGeneration=9;g_inputHostLifecycle="active";
+ g_hidHideVisibilityJournal.active=true;g_msiSteamDeckReleaseDebt.owed=false;g_psEndpointOwnership.owed=false;
+ g_msiDinputReturnOwed=false;g_msiVirtualReleaseRearmEligible=false;g_realStickTest.virtualTargetEnabled=false;
+ g_wakeHoldPhysicalUnhide=false;g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;
+ g_xinputConnectedMask=1;g_inputHostLastQuarantineProbeTick=0;
+}
+static void retained(const char* reason){
+ check(g_inputHostRunId=="old-run"&&g_inputHostEpoch==17,reason);
+ check(g_inputHostHello&&g_inputHostPrepared&&g_inputHostPrepareMayHaveReachedHost,"unsettled Clear retains HELLO PREPARE and creation history");
+ check(g_inputHostHostInstanceId=="old-host"&&g_inputHostStartupNonce=="old-nonce"&&g_inputHostBoundPersona=="steamdeck","unsettled Clear retains exact session identity");
+ check(g_inputHostReleaseQuarantined&&g_inputHostStartBlocked,"unsettled Clear closes future writer gate");
+ check(!g_inputHostNeutralized&&!g_inputHostActive&&g_inputHostTransportFault,"unsettled Clear revokes publish health");
+ check(g_inputHostLifecycle=="release-pending","unsettled lifecycle remains release-pending");
+ check(ports.durableHistoryWrites==0,"local Clear never deletes independent persisted history");
+}
+static void noEarlyRestore(const char* reason){
+ const auto before=ports.restores;const auto rearm=ports.rearmCalls;
+ inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.restores==before,reason);check(ports.rearmCalls==rearm,"unsettled pipe cannot call downstream rearm");
+}
+static void cleanPrivateOwner(){
+ // A deliberately broken Clear can leave this known owner parked without a
+ // lifecycle continuation. Count that before explicit negative-only salvage;
+ // no current positive may need it or use process exit as cleanup.
+ if(g_inputHostUnadoptedPipe){++negativeOnlyRawSalvage;require(memoryApi::close(g_inputHostUnadoptedPipe)!=FALSE,"negative-only raw salvage");g_inputHostUnadoptedPipe=nullptr;}
+ if(auto* owner=tr::existingProcessRuntime())for(unsigned i=0;i<6&&!owner->stopped();++i)owner->maintenance();
+ require(memoryApi::live.empty(),"case real handles not returned before exit");
+ if(auto* owner=tr::existingProcessRuntime())require(owner->stopped(),"Runtime did not retire case resources");
+ memoryApi::clear();
+}
+static void reconciled(bool explicitOn){
+ check(cleared(),"same-owner retirement permits clearing old tuple");
+ check(!g_inputHostReleaseQuarantined,"proved session exits quarantine");
+ check(ports.restores>=1,"physical memory restore occurs after pipe retirement");
+ check(ports.rearmBeforeClear==0,"all rearm gates run only after Clear closes old tuple");
+ check(ports.retiredRun=="old-run"&&ports.retiredEpoch==17,"return gates receive original retired tuple");
+ check(ports.createTargets==0,"Clear and reconciliation never create a target");
+ check(g_inputHostStartBlocked!=explicitOn,"fault stays blocked unless explicit existing intent gate accepts");
+ check(ports.rearmAdmitted==(explicitOn?1u:0u),"explicit requested rearm is distinct from target creation");
+ check(!ports.historySettled&&!inputHostOwnedCleanupProvenLocked(),"independent durable debt still blocks Owned after local Clear");
+ ports.historySettled=true;check(inputHostOwnedCleanupProvenLocked(),"all separately proven obligations finally settle Owned");
+ const auto calls=ports.rearmCalls,restores=ports.restores;inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.rearmCalls==calls&&ports.restores==restores,"late repeated lifecycle callback cannot rearm or restore again");
+}
+static HANDLE adopt(tr::Runtime& owner,const wchar_t* name){auto h=memoryApi::source();DWORD error=0;bool taken=false;
+ require(owner.adopt(h,name,error,&taken)&&taken,"private lease admitted");g_inputHostServerPipe=h;return h;}
+static void rawSlot(){seed();const auto h=memoryApi::source();g_inputHostUnadoptedPipe=h;
+ memoryApi::failRoles=memoryApi::Original;clearCall();retained("raw Close failure keeps run and epoch");
+ check(g_inputHostUnadoptedPipe==h&&memoryApi::live.count(h)==1,"failed pre-adoption close preserves sole owner");
+ noEarlyRestore("raw close debt blocks lifecycle physical restore");
+ memoryApi::failRoles=0;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);
+ check(!g_inputHostUnadoptedPipe,"successful raw close clears owner once");cleanPrivateOwner();
+ cases.push_back({{"case","raw-slot-close-failure-then-actual-lifecycle-resume"}});
+}
+static void originalClose(tr::Runtime& owner){seed();adopt(owner,L"clear-original");memoryApi::failRoles=memoryApi::Original;
+ clearCall();const auto debt=pipeState();retained("failed original Close keeps old tuple");
+ check(g_inputHostServerPipe==nullptr&&debt["pending"]==0&&debt["failedCloseDebt"]==1,"borrowed pointer null does not retire original owner");
+ const auto before=ports.restores;inputHostReconcileQuarantine();check(ports.queued==1,"actual BUS queues source-only quarantine continuation");
+ check(ports.restores==before,"BUS observation does not perform physical restore");
+ noEarlyRestore("failed original Close prevents physical restore");retained("failed Close lifecycle keeps same tuple");
+ clearCall();retained("repeated Clear does not consume unpaid tuple");
+ memoryApi::failRoles=0;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ cases.push_back({{"case","original-close-debt-source-only-quarantine-resumes"},{"debt",debt}});
+}
+static void terminalEventClose(tr::Runtime& owner){seed();const auto h=adopt(owner,L"clear-event");unsigned char bytes[8]{};
+ const auto r=owner.run(h,tr::Kind::Read,bytes,sizeof(bytes),1,0);require(r.ok,"controlled complete operation");
+ memoryApi::failRoles=memoryApi::Event;clearCall();const auto debt=pipeState();retained("terminal event failure keeps old tuple");
+ check(debt["pending"]==0&&debt["events"]==1&&debt["failedCloseDebt"]==1,"terminal event with zero pending remains owned");
+ noEarlyRestore("terminal event failure blocks physical restore");
+ memoryApi::failRoles=0;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ cases.push_back({{"case","cached-event-close-failure-actual-clear"},{"debt",debt}});
+}
+static void pendingIo(tr::Runtime& owner){seed();const auto h=adopt(owner,L"clear-pending");memoryApi::startPending=true;
+ unsigned char bytes[8];std::memset(bytes,0xA5,sizeof(bytes));const auto original=owner.run(h,tr::Kind::Read,bytes,sizeof(bytes),1,0);
+ require(original.retired&&!original.terminal,"controlled pending operation");clearCall();const auto debt=pipeState();
+ retained("pending query keeps old tuple");check(debt["pending"]==1&&debt["duplicates"]==1,"unproved pending IO retains issuing duplicate");
+ noEarlyRestore("cancel failure and pending IO block lifecycle physical restore");
+ memoryApi::complete();inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);
+ check(original.error==WAIT_TIMEOUT&&!original.terminal&&bytes[0]==0xA5,"late completion cannot rewrite old caller evidence or data");
+ cleanPrivateOwner();cases.push_back({{"case","pending-io-late-terminal-clear-resumes"},{"debt",debt}});
+}
+static void busySnapshot(tr::Runtime& owner){seed();const auto h=adopt(owner,L"clear-busy");
+ // The previous request still owns Runtime. The global pointer is only a
+ // borrowed view and is already absent; no blind direct close is fabricated.
+ g_inputHostServerPipe=nullptr;
+ memoryApi::entered=::CreateEventW(nullptr,TRUE,FALSE,nullptr);memoryApi::release=::CreateEventW(nullptr,TRUE,FALSE,nullptr);
+ require(memoryApi::entered&&memoryApi::release,"contention control events");
+ tr::Result result;std::thread worker([&]{unsigned char bytes[8]{};result=owner.run(h,tr::Kind::Read,bytes,8,1,0);});
+ if(::WaitForSingleObject(memoryApi::entered,2000)!=WAIT_OBJECT_0){::SetEvent(memoryApi::release);worker.join();throw std::runtime_error("issue helper did not enter");}
+ const auto began=std::chrono::steady_clock::now();clearCall();retained("busy snapshot never means tuple may clear");
+ noEarlyRestore("busy pipe snapshot blocks restore and rearm");
+ check(std::chrono::steady_clock::now()-began<std::chrono::milliseconds(500),"Clear and lifecycle do not wait for busy Runtime observation");
+ ::SetEvent(memoryApi::release);worker.join();require(result.ok,"real private issue helper completed");
+ require(::CloseHandle(memoryApi::entered)&&::CloseHandle(memoryApi::release),"contention controls returned");memoryApi::entered=memoryApi::release=nullptr;
+ inputHostPipeCloseOwned(h);inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ cases.push_back({{"case","unknown-busy-snapshot-retains-and-resumes"}});
+}
+static void externalGates(tr::Runtime& owner){seed();adopt(owner,L"clear-external-gates");memoryApi::failRoles=memoryApi::Original;clearCall();
+ memoryApi::failRoles=0;g_xinputConnectedMask=3;inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.restores==0&&g_inputHostReleaseQuarantined,"pipe retired still requires independent endpoint absence");
+ g_xinputConnectedMask=1;g_wakeHoldPhysicalUnhide=true;inputHostReconcileQuarantineOnLifecycleThread();
+ check(ports.restores==0&&g_inputHostReleaseQuarantined,"wake hold still prevents independent physical restore");
+ g_wakeHoldPhysicalUnhide=false;ports.restore=false;inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostReleaseQuarantined&&g_inputHostRunId=="old-run"&&ports.rearmCalls==0,"failed restore retains tuple and rearm gate");
+ ports.restore=true;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ cases.push_back({{"case","endpoint-wake-and-restore-gates-remain-independent"}});
+}
+static void psCommit(tr::Runtime& owner){seed();adopt(owner,L"clear-ps");g_psEndpointOwnership.owed=true;
+ memoryApi::failRoles=memoryApi::Original;clearCall();memoryApi::failRoles=0;ports.commit=false;
+ inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostReleaseQuarantined&&g_inputHostRunId=="old-run"&&ports.confirmations==0,"PS durable commit failure cannot consume owner tuple");
+ ports.commit=true;ports.confirm=false;inputHostReconcileQuarantineOnLifecycleThread();
+ check(g_inputHostReleaseQuarantined&&g_psEndpointOwnership.owed&&ports.rearmCalls==0,"PS readback confirmation failure cannot permit rearm");
+ ports.confirm=true;inputHostReconcileQuarantineOnLifecycleThread();reconciled(false);cleanPrivateOwner();
+ cases.push_back({{"case","PS-commit-and-confirm-separate-from-pipe-close"}});
+}
+static void explicitIntent(tr::Runtime& owner){seed();adopt(owner,L"clear-rearm");ports.explicitOn=true;g_realStickTest.virtualTargetEnabled=true;
+ memoryApi::failRoles=memoryApi::Original;clearCall();retained("explicit ON does not waive pipe return debt");
+ noEarlyRestore("explicit ON cannot overtake unfinished pipe");memoryApi::failRoles=0;
+ inputHostReconcileQuarantineOnLifecycleThread();reconciled(true);
+ check(!inputHostDisabledCleanupProvenLocked(),"ON intent remains distinct from Disabled completion");cleanPrivateOwner();
+ cases.push_back({{"case","explicit-intent-rearm-only-after-actual-Clear"}});
+}
+int main(){try{
+ DWORD before=0,after=0;require(::GetProcessHandleCount(::GetCurrentProcess(),&before)!=FALSE,"initial kernel census");
+ rawSlot();auto& owner=tr::processRuntime();originalClose(owner);terminalEventClose(owner);pendingIo(owner);
+ busySnapshot(owner);externalGates(owner);psCommit(owner);explicitIntent(owner);
+ cleanPrivateOwner();require(::GetProcessHandleCount(::GetCurrentProcess(),&after)!=FALSE,"final kernel census");
+ check(before==after,"all private handles returned before process exit");
+ const bool pass=failures.empty();std::cout<<json({{"pass",pass},{"checks",checks},{"failures",failures},{"cases",cases},
+ {"negativeOnlyRawSalvage",negativeOnlyRawSalvage},{"oracleLiveBeforeExit",memoryApi::live.size()},{"handlesBefore",before},{"handlesAfter",after},
+ {"productOrSdkOrDeviceExecuted",false},{"physicalEndpointFacts","named memory ports only"}}).dump(2)<<'\n';return pass?0:2;
+ }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 3;}}

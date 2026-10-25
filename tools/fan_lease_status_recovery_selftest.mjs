@@ -1,0 +1,13 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import {build} from 'esbuild';
+import {spawnSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const root=process.cwd(),out=path.resolve(process.argv[2]||'../../Build/Validation/fan-lease-status-recovery-20261017'),override=process.argv[3];
+fs.mkdirSync(out,{recursive:true});let overrideLoads=0;
+await build({entryPoints:['tools/fan_lease_status_recovery_selftest.ts'],bundle:true,platform:'node',format:'esm',alias:{'@':path.join(root,'src')},outfile:path.join(out,'test.mjs'),plugins:override?[{name:'scratch-bridge-override',setup(b){b.onLoad({filter:/src[\\/]bridge[\\/]fanHost\.ts$/},a=>{overrideLoads++;return{contents:fs.readFileSync(override,'utf8'),loader:'ts',resolveDir:path.dirname(a.path)};});}}]:[]});
+if(override&&overrideLoads!==1)throw Error('bridge override must load exactly once, got '+overrideLoads);
+const run=spawnSync(process.execPath,[path.join(out,'test.mjs')],{encoding:'utf8',windowsHide:true,timeout:45000});fs.writeFileSync(path.join(out,'output.txt'),(run.stdout??'')+(run.stderr??''));
+const line=run.stdout?.trim().split(/\r?\n/).findLast(l=>l.startsWith('{"ok"'));if(!line)throw Error('lease recovery report missing: '+run.stdout+run.stderr);
+const r=JSON.parse(line),sha=f=>createHash('sha256').update(fs.readFileSync(f)).digest('hex');r.bridgeSha256=sha(override||'src/bridge/fanHost.ts');r.testSha256=sha('tools/fan_lease_status_recovery_selftest.ts');r.fixtureSha256=sha('tools/fixtures/fan_registered_route_domain_20261017.json');r.overrideLoads=overrideLoads;
+fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(r,null,2));console.log(JSON.stringify({ok:r.ok,models:r.models,checks:r.checks,failedCases:r.cases.filter(c=>!c.ok).length,failedModels:new Set(r.cases.filter(c=>!c.ok).map(c=>c.model)).size,overrideLoads}));process.exitCode=run.status??1;

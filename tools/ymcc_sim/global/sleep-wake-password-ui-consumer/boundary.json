@@ -1,0 +1,117 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-19T11:22:02.364Z",
+  "originalScript": "tools/sleep_wake_password_ui_browser_selftest.mjs",
+  "originalSha256": "7e65a713b014cf955f4e20a49d5965f45c8e698c99af679f5e50e584df15f274",
+  "reviewedSources": [
+    {
+      "path": "native/main.cpp",
+      "sha256": "d67f013f22569828cd64360e9460f568f0cbbd5eaa415918cbe243f7825ebd9d"
+    },
+    {
+      "path": "native/sleep_wake_password.h",
+      "sha256": "fa470dedcba15bafde072fd5ad263d676589ddfa1323c9851616167aeef7777c"
+    },
+    {
+      "path": "src/bridge/api.ts",
+      "sha256": "9c810d29a8e33d0665d9435694bdc8ef3c92af08526fde9ba24f1267d149a21d"
+    },
+    {
+      "path": "src/components/AppIcon.vue",
+      "sha256": "e65cf67cd652d4fe72c812c57931e307177b455fa464698f2a2a99e1f3723639"
+    },
+    {
+      "path": "src/components/Dropdown.vue",
+      "sha256": "c41504c0db1ff9ca6095478ba536e332d67314f0c85e49971f7a924fb027e820"
+    },
+    {
+      "path": "src/components/InlineIcon.vue",
+      "sha256": "bf3f94052bd2774dc9e2d3f684bd049f025f32d83b4eb4c25bbcd089890a8af5"
+    },
+    {
+      "path": "src/components/IntegratedPage.vue",
+      "sha256": "8e4ce2e528eddebb59c41f9d906b8d1e1a0a5a74e392dc574cfd87b18a82f96c"
+    },
+    {
+      "path": "src/components/SettingsSectionIcon.vue",
+      "sha256": "170d9fcea7209a849e889c1084411892c3fb3b8738ff04dbd82ec9505a34ac89"
+    },
+    {
+      "path": "src/components/SettingsSections.vue",
+      "sha256": "f181e4dc83c22f24cdb7478558e3a7c9b2ba170e4a5431fdfec4d2d1acc7d14c"
+    },
+    {
+      "path": "src/components/SleepRecoveryPanel.vue",
+      "sha256": "61f1b186549cb6622ba51f3ab6a0c3482e51d5e1175e7209cac140562450f49b"
+    },
+    {
+      "path": "src/components/Slider.vue",
+      "sha256": "ca57d2db9bd8175c7fbf13c166b10bce8a4d10466137579f89135dd86a9075c8"
+    },
+    {
+      "path": "src/components/SwitchControl.vue",
+      "sha256": "4e3f4e5d244486dceb03c471aeef6b9cdf132a36b6ff9b1d49c448d8c574c080"
+    },
+    {
+      "path": "src/components/Toggle.vue",
+      "sha256": "7dbd393653dc2175593ae7c1993f15dbbdfd6ba0436e23be51040c91b9efdfee"
+    },
+    {
+      "path": "src/icons.json",
+      "sha256": "f0ab4c673721c56b7fff3293ab5cffa8a8fe91eca0fcaec8e1bd3b6621372d07"
+    },
+    {
+      "path": "src/icons.ts",
+      "sha256": "e9d76c604ab5deefe6048ccea91be6952a969c6ce258d025062f36a174e0b86c"
+    },
+    {
+      "path": "src/styles/tokens.css",
+      "sha256": "4909488c688e5230c67e3a86bbc1b6ddd89133a54187e67fd593527993bbd0d7"
+    },
+    {
+      "path": "src/views/SleepGuardView.vue",
+      "sha256": "c729cdf756e137dc22cb7b71546893135976e67a87fe92a540e25a1c97a2a6bc"
+    },
+    {
+      "path": "tools/sleep_wake_password_ui_browser_selftest.mjs",
+      "sha256": "7e65a713b014cf955f4e20a49d5965f45c8e698c99af679f5e50e584df15f274"
+    }
+  ],
+  "compilerOnly": {
+    "inputs": 24,
+    "actualRuntimeModules": 69,
+    "unpinnedRuntime": 0,
+    "businessExecuted": false
+  },
+  "nativeBoundary": {
+    "realApi": "api.wakePassword.set",
+    "actualCommand": "power.wakePassword.set",
+    "arguments": "one boolean enabled, original timeout15000",
+    "replacedTerminals": [
+      "@/bridge/ipc",
+      "./ipc from api.ts/sleepRecovery.ts",
+      "@/bridge/yeman",
+      "@/bridge/sleepRecovery",
+      "@/gamepad/focus"
+    ],
+    "onlyMemoryIpc": true,
+    "nativeSourceReadNotExecuted": true,
+    "sessionStorageKey": "wake-password-preference",
+    "noRealSettingsOrPowerWrites": true
+  },
+  "runtime": {
+    "existingBrowserControllerReused": true,
+    "ownedWindowsJob": true,
+    "ownedShortScratch": true,
+    "loopbackRandomOwnedOrigin": true,
+    "actualServedBytes": true,
+    "pages": 1,
+    "pageErrorsExpected": 0,
+    "explicitOutput": "YMCC_WAKE_PASSWORD_BROWSER_OUT",
+    "explicitModules": "YMCC_UI_BROWSER_MODULE_DIR",
+    "explicitBrowser": "YMCC_UI_BROWSER_EXE",
+    "cleanupLeaf": "Frozen sleep-recovery-ui-consumer/cleanup.mjs (read only)"
+  },
+  "claimBoundary": "Actual wake-password UI/API settings ACK behavior with memory power replies; no power-plan native execution, OS wake/sleep, Steam, installed settings or physical operations",
+  "productChanges": 0
+}

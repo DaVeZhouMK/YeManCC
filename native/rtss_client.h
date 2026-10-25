@@ -8,6 +8,7 @@ static json nativeRtssReloadProfiles(const std::wstring& dllPath) {
     if (!path.is_absolute() || ascii_lower(W2U(path.filename().wstring())) != "rtsshooks64.dll" ||
         !file_exists(dllPath) || !file_exists((path.parent_path() / L"RTSS.exe").wstring()))
         return json{{"ok", false}, {"error", "RTSSHooks64.dll 路径或配套 RTSS.exe 无效"}};
+    ymcc::monitorrtss::registerDirectory(path.parent_path().wstring());
     const auto helper = exe_dir() + L"\\YMCCRtssProfileHelper.exe";
     if (!file_exists(helper))
         return json{{"ok", false}, {"error", "RTSS 安全配置助手缺失，请使用完整的新版本程序"}};
@@ -67,6 +68,7 @@ static json nativeRtssPrepareOverlay(const std::wstring& dir, const std::wstring
         !file_exists((root / L"RTSS.exe").wstring()) ||
         !file_exists((root / L"Plugins/Client/OverlayEditor.dll").wstring()))
         return json{{"ok", false}, {"error", "RTSS OverlayEditor 安装路径无效"}};
+    ymcc::monitorrtss::registerDirectory(root.wstring());
     RtssBridgeSearch search{dir};
     EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
     const bool live = search.window != nullptr;
@@ -150,6 +152,8 @@ static json nativeRtssLoadOverlay(const std::wstring& dir, const std::string& la
     Packet packet{};
     std::memcpy(packet.layout, layout.c_str(), layout.size() + 1);
     if (!allowedLayout(packet.layout)) return json{{"ok", false}, {"error", "不支持的 RTSS 模板"}};
+    if (fspath::path(dir).is_absolute() && file_exists((fspath::path(dir) / L"RTSS.exe").wstring()))
+        ymcc::monitorrtss::registerDirectory(dir);
     RtssBridgeSearch search{dir};
     EnumWindows(nativeRtssFindBridge, reinterpret_cast<LPARAM>(&search));
     if (!search.window) return nativeRtssMissingBridge(dir);

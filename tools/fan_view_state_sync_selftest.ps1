@@ -10,10 +10,10 @@ function Assert-Absent([string]$Text, [string]$Needle, [string]$Label) {
 }
 
 Assert-Contains $source 'async function adoptResidentControlState()' 'resident adoption function exists'
-Assert-Contains $source 'await fanHostLifecycle.getState()' 'adoption is read-only state polling'
-Assert-Contains $source "remote.hardwareWritesEnabled === true" 'adoption requires live write telemetry'
-Assert-Contains $source "remote.oemRestoreConfirmed !== true" 'adoption rejects restored OEM state'
-Assert-Contains $source "remote.hcCloseCleanupPending !== true" 'adoption rejects pending HC cleanup'
+Assert-Contains $source 'await fanHostLifecycle.getState({ discardSuperseded: true })' 'adoption is read-only state polling'
+Assert-Contains $source "state.hardwareWritesEnabled === true" 'adoption requires live write telemetry'
+Assert-Contains $source "state.oemRestoreConfirmed !== true" 'adoption rejects restored OEM state'
+Assert-Contains $source "state.hcCloseCleanupPending !== true" 'adoption rejects pending HC cleanup'
 Assert-Contains $source "fanDiagnosticLog('ui.resident-control-adopted'" 'adoption is logged'
 # FAN-926R §2.1: entering the page starts nothing. The decision comes from the
 # shared lifecycle policy; a resident session is adopted read-only, otherwise the
@@ -64,3 +64,5 @@ Assert-Absent $mirrorBody 'fanHostLifecycle.apply' 'the mirror must not apply a 
 Assert-Absent $mirrorBody 'fanHostLifecycle.disable' 'the mirror must not close the Fan Host'
 
 Write-Output 'fan view state-sync self-test: PASS (read-only Ready adoption; no duplicate Open/Enable/Close; page entry starts nothing and is not a second start path; the boot/wake preference mirror only reads/writes the setting)'
+
+

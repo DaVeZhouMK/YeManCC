@@ -1,6 +1,20 @@
 // Semantic wrappers around the native shell IPC commands.
 // Names mirror exactly what native/main.cpp registers (fs.*, shell.*, app.*, os.*, dialog.*, window.*, registry.*).
 import { invoke } from './ipc';
+import type { VirtualStartProtectionState } from './virtualOutputStatus';
+import type { TdpObservationContext } from './tdpStaticDiagnostics';
+
+// Optional correlation metadata for the top game menu's one-shot handover.
+// It is diagnostic provenance, not authorization or a human-gesture receipt.
+export interface WindowActionEvidence {
+  diagnosticAction: 'game-recognition-switch-program';
+  diagnosticActionId: string;
+  requestedAtUnixMs: number;
+  diagnosticActivation?: 'gamepad-engine' | 'trusted-touch' | 'trusted-pen' | 'trusted-mouse' | 'trusted-other' | 'scripted' | 'unknown';
+  diagnosticEventTrusted?: boolean;
+  // Finite integer clamped to 0..3 by the activation evidence reader.
+  diagnosticClickDetail?: number;
+}
 
 export interface RunResult {
   exitCode: number;
@@ -12,22 +26,35 @@ export const fs = {
   // Read-only file/shortcut icon; native returns a bounded grayscale PNG data URL.
   getFileIcon: (path: string) =>
     invoke<string | null>('fs.getFileIcon', { path }, { timeoutMs: 6000 }),
-  readTextFile: (path: string, maxBytes = 1 << 20) =>
-    invoke<string>('fs.readTextFile', { path, maxBytes }),
+  // Fan small-file reads opt into a complete, size-bounded native range receipt.
+  // Other consumers retain the existing command and default waiting behavior.
+  readTextFile: (path: string, maxBytes = 1 << 20, options?: { timeoutMs?: number; bounded?: boolean }): Promise<string> => {
+    if (!options?.bounded) return invoke<string>('fs.readTextFile', { path, maxBytes }, options);
+    if (!Number.isSafeInteger(maxBytes) || maxBytes <= 0) return Promise.reject(new Error('FILE_READ_LIMIT_INVALID'));
+    return invoke<{ content: string; offset: number; size: number }>('fs.readTextRange',
+      { path, offset: 0, maxBytes }, { timeoutMs: options.timeoutMs }).then(receipt => {
+      if (!receipt || typeof receipt.content !== 'string' || receipt.offset !== 0 || !Number.isSafeInteger(receipt.size) || receipt.size < 0)
+        throw new Error('FILE_READ_RECEIPT_INVALID');
+      if (receipt.size > maxBytes) throw new Error('FILE_READ_LIMIT_EXCEEDED');
+      if (new TextEncoder().encode(receipt.content).byteLength !== receipt.size)
+        throw new Error('FILE_READ_RECEIPT_INVALID');
+      return receipt.content;
+    });
+  },
   writeTextFile: (path: string, content: string) =>
     invoke<boolean>('fs.writeTextFile', { path, content }),
   // 原子写：native 端先写临时文件再 MoveFileEx 替换；替换失败必须 reject，禁止 UI 将未落盘状态视为成功。
-  writeTextFileAtomic: async (path: string, content: string): Promise<void> => {
-    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content });
+  writeTextFileAtomic: async (path: string, content: string, timeoutMs?: number): Promise<void> => {
+    const ok = await invoke<boolean>('fs.writeTextFileAtomic', { path, content }, { timeoutMs });
     if (!ok) throw new Error(`原子写入失败: ${path}`);
   },
-  exists: (path: string) => invoke<boolean>('fs.exists', { path }),
+  exists: (path: string, timeoutMs?: number) => invoke<boolean>('fs.exists', { path }, { timeoutMs }),
   // FAN-927 §2.2：部署边界只需要对**少量清单文件**取摘要。复用 native 进程内 SHA-256，
   // 不再为每个依赖文件起一次 certutil 子进程；正常开启不遍历依赖目录。
   sha256File: (path: string) => invoke<string>('fs.sha256File', { path }, { timeoutMs: 15000 }),
   readDir: (path: string) => invoke<any[]>('fs.readDir', { path }),
   stat: (path: string) => invoke<any>('fs.stat', { path }),
-  mkdir: (path: string) => invoke<boolean>('fs.mkdir', { path }),
+  mkdir: (path: string, timeoutMs?: number) => invoke<boolean>('fs.mkdir', { path }, { timeoutMs }),
   remove: (path: string) => invoke<boolean>('fs.remove', { path }),
   rename: (from: string, to: string) => invoke<boolean>('fs.rename', { from, to }),
 };
@@ -40,7 +67,7 @@ export const settingsStore = {
   reset: (path: string, defaults: Record<string, unknown>) => invoke<{ ok: boolean; backups: string[]; protectedDataRecovered: boolean }>('settings.reset', { path, defaults, confirm: 'reset-application-settings' }, { timeoutMs: 15000 }),
   read: (path: string, stamp: string | null) => invoke<{ stamp: string; unchanged: boolean; content?: string }>('settings.read', { path, stamp }),
   write: (path: string, content: string, transaction?: { baseline: Record<string, any>; initialize?: boolean; expectedInputRevision?: number }) =>
-    invoke<boolean | { ok: boolean; content: string; reason?: string }>('settings.write', { path, content, ...transaction }),
+    invoke<boolean | { ok: boolean; content: string; reason?: string; startProtection?: VirtualStartProtectionState }>('settings.write', { path, content, ...transaction }),
 };
 
 export interface WakePasswordState {
@@ -67,23 +94,41 @@ export const keyboard = {
   open: () => invoke<boolean>('keyboard.open'),
 };
 
+export interface LosslessRuntimeIdentity { exe:string;pid:number;processCreated:string; }
+export interface LosslessRuntimeReceipt {known:boolean;running:boolean;readable:boolean;pid:number;processCreated:string;path:string;button:string;status:string;reason:string;configRevision:number;observedAt?:number;}
+export interface LosslessActivation { ok:boolean;enabled:boolean|null;invoked:boolean;pending:boolean;cancelled:boolean;reason:string;stopInvoked?:boolean;restarted?:boolean;refreshAttempted?:boolean;windowRefreshed?:boolean;refreshReason?:string;refreshMethod?:number;refreshMethodName?:string;refreshApiAccepted?:boolean;refreshFrameAccepted?:boolean;refreshRedrawAccepted?:boolean;refreshTopAccepted?:boolean;refreshForegroundAccepted?:boolean;failureResetRequested?:boolean;failureResetAttempted?:boolean;failureResetTerminated?:boolean;failureResetClosed?:boolean;failureResetReason?:string;failureResetError?:number;retryCount?:number;scalingTimedOut?:boolean; }
+// LS launch and UIA share exact process identity. No generic focus/input fallback.
+export const losslessRuntime = {
+  detect: () => invoke<LosslessRuntimeReceipt>('lossless.detect', {}, {timeoutMs:4000}),
+  watch: (active:boolean,detailed:boolean) => invoke<boolean>('lossless.watch', {active,detailed}, {timeoutMs:3000}),
+  ensureRunning: (exe: string) => invoke<{ok:boolean;started:boolean;reused:boolean;pid:number;processCreated:string;path:string;reason:string;win32Error:number}>(
+    'lossless.ensureRunning', {exe}, {timeoutMs:5000}),
+  observe: (identity:LosslessRuntimeIdentity) => invoke<{ok:boolean;button:string;status:string}>(
+    'lossless.getState', identity, {timeoutMs:4000}),
+  resetFailed: (request:LosslessRuntimeIdentity & {retryAttempt:number}) => invoke<LosslessActivation>(
+    'lossless.resetFailed', {...request,trigger:'scaling-ipc-timeout'}, {timeoutMs:2500}),
+  ensureScaling: (request:LosslessRuntimeIdentity & {gamePath:string;gamePid?:number;gameProcessCreated?:string;profileTitle:string;reapply?:boolean;refreshWindow?:boolean;resetOnFailure?:boolean;retryAttempt?:number}) => invoke<LosslessActivation>(
+    'lossless.ensureScaling', request, {timeoutMs:13000}),
+};
+
 export const shell = {
-  run: (program: string, args: string[] = [], timeoutMs = 30000) => {
+  run: (program: string, args: string[] = [], timeoutMs = 30000, tdpObservation?: TdpObservationContext) => {
     const nativeTimeout = Math.max(100, Math.min(600000, Math.round(timeoutMs)));
     // Native 负责终止超时进程树；前端只提供稍晚的保险超时，避免响应链异常时 Promise 永久悬挂。
     return invoke<RunResult>(
       'shell.run',
-      { program, args, timeoutMs: nativeTimeout },
+      { program, args, timeoutMs: nativeTimeout, ...(tdpObservation ? { tdpObservation } : {}) },
       { timeoutMs: nativeTimeout + 5000 },
     );
   },
   open: (url: string) => invoke<boolean>('shell.open', { url }),
   execute: (program: string, args: string[] = []) =>
     invoke<boolean>('shell.execute', { program, args }),
-  // Windows 任务视图：native 注入真实 Win+Tab（虚拟/物理手柄同一路径）。
-  taskView: () => invoke<boolean>('shell.taskView'),
-  hidden: (program: string, args: string[] = []) =>
-    invoke<{ ok: boolean; pid?: number }>('shell.hidden', { program, args }),
+  // Windows 程序切换：native 在受超时监管的独立进程中调用系统 Shell API。
+  taskView: () => invoke<boolean>('shell.taskView', { requestedAtUnixMs: Date.now() }, { timeoutMs: 6000 }),
+  taskViewWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('shell.taskView', evidence, { timeoutMs: 6000 }),
+  hidden: (program: string, args: string[] = [], timeoutMs?: number) =>
+    invoke<{ ok: boolean; pid?: number }>('shell.hidden', { program, args }, { timeoutMs }),
 };
 
 export interface RtssReloadResult {
@@ -117,9 +162,9 @@ export interface TdpDaemonResponse {
 }
 
 export const tdpDaemon = {
-  start: () => invoke<{ ok: boolean }>('tdpDaemon.start'),
-  request: (op: 'ping' | 'set' | 'resume' | 'quit', args: Record<string, unknown> = {}, timeoutMs = 3000) =>
-    invoke<TdpDaemonResponse>('tdpDaemon.request', { op, args, timeoutMs }, { timeoutMs: timeoutMs + 1000 }),
+  start: (tdpObservation?: TdpObservationContext) => invoke<{ ok: boolean }>('tdpDaemon.start', tdpObservation ? { tdpObservation } : {}),
+  request: (op: 'ping' | 'set' | 'resume' | 'quit', args: Record<string, unknown> = {}, timeoutMs = 3000, tdpObservation?: TdpObservationContext) =>
+    invoke<TdpDaemonResponse>('tdpDaemon.request', { op, args, timeoutMs, ...(tdpObservation ? { tdpObservation } : {}) }, { timeoutMs: timeoutMs + 1000 }),
 };
 
 export type PowerLifecyclePhase = 'ready' | 'suspending' | 'suspended' | 'resuming';
@@ -150,14 +195,17 @@ export const powerLifecycle = {
   // Lifecycle reads must not leave callers waiting forever while native is
   // recovering from a power transition.
   get: (timeoutMs = 3000) => invoke<PowerLifecycleState>('power.lifecycle', {}, { timeoutMs }),
+  /** Actual OS wake for Fan only; does not commit shared input/game recovery. */
+  getForFan: (timeoutMs = 3000) => invoke<PowerLifecycleState>('power.fanLifecycle', {}, { timeoutMs }),
   completeResume: (generation: number, meta: PowerResumeCompleteMeta = { daemonRequired: false, daemonReady: false }) =>
     invoke<{ ok: boolean; reason?: string; generation: number; inputReady?: boolean; daemonRequired?: boolean; daemonReady?: boolean }>(
       'power.resumeComplete',
       { generation, ...meta },
     ),
-  /** Fan-only explicit rescue for a stale native Suspended phase after the UI is interactive. */
+  /** Fan-only rescue. A lost acknowledgement must release the manual owner;
+   * timeout retires this observer only and never cancels/repeats native work. */
   manualFanWake: (generation?: number) =>
-    invoke<FanManualWakeResult>('power.fanManualWake', generation === undefined ? {} : { generation }),
+    invoke<FanManualWakeResult>('power.fanManualWake', generation === undefined ? {} : { generation }, { timeoutMs: 3000 }),
 };
 
 export interface HibernateState {
@@ -178,6 +226,10 @@ export interface LedFeedbackCapabilities {
   ledAvailable: boolean;
   brightnessAvailable: boolean;
   ledEffects: string[];
+  ledPresets?: { id: string; label: string }[];
+  presetDeclared?: boolean;
+  presetImplemented?: boolean;
+  presetReason?: string;
   /** HC DeviceCapabilities.DynamicLightingSecondLEDColor（ROG 无此位，隐藏副颜色）。 */
   supportsSecondColor?: boolean;
   vibrationAvailable: boolean;
@@ -227,7 +279,7 @@ export interface VibrateResult {
 
 export const gamepadFeedback = {
   capabilities: () => invoke<LedFeedbackCapabilities>('gamepad.feedbackCapabilities', {}, { timeoutMs: 2000 }),
-  setLed: (args: { enabled?: boolean; mode?: string; color?: string; color2?: string; speed?: number; brightness?: number }) =>
+  setLed: (args: { enabled?: boolean; mode?: string; presetId?: string; color?: string; color2?: string; speed?: number; brightness?: number }) =>
     // native 侧非 ROG 后端经 YeManLightSetter 子进程直驱 HC：dll 加载 + SHA-256
     // 校验 + IsReady 轮询（≤15s）+ HC Open（≥2.4s），native 等待上限 30s。原 3s
     // 会在成功前抢先超时，故对齐为 35s（略高于 native 上限）。
@@ -254,7 +306,7 @@ export interface FanActivitySnapshot {
 
 export const app = {
   exit: (code = 0) => invoke<boolean>('app.exit', { code }),
-  dataDir: () => invoke<string>('app.dataDir'),
+  dataDir: (timeoutMs?: number) => invoke<string>('app.dataDir', {}, { timeoutMs }),
   // The mutable Fan Host session capability must not follow the configurable
   // window-title data directory. Native emergency/sleep/exit cleanup and the
   // renderer therefore share this stable per-user location.
@@ -267,7 +319,7 @@ export const app = {
   // JS 状态为空，只有 native 仍知道"本次运行是否已确认活动控制意图"以及崩溃前仍有效的记录。
   fanActivity: () => invoke<FanActivitySnapshot>('app.fanActivity', {}, { timeoutMs: 5000 }),
   exeDir: () => invoke<string>('app.exeDir'),
-  pid: () => invoke<number>('app.pid'),
+  pid: (timeoutMs?: number) => invoke<number>('app.pid', {}, { timeoutMs }),
   // Native resolves the sibling PowerControl directory once at process start.
   // Frontend modules must use that exact value for unified settings writes.
   powerControlDir: () => invoke<string>('app.powerControlDir'),
@@ -336,9 +388,15 @@ export const music = {
 };
 
 export const windowApi = {
+  losslessReturnTarget: (target: {pid:number;processCreated:string;path:string}, enabled: boolean) =>
+    invoke<{ok:boolean;reason?:string}>('game.losslessReturnTarget', { ...target, enabled }, { timeoutMs: 1500 }),
+  controllerEditorWidth: (owner: string, enabled: boolean, scale = 2) =>
+    invoke<{ ok: boolean; active?: boolean; edge?: 'left' | 'right'; width?: number; baseWidth?: number; maxWidth?: number }>(
+      'window.controllerEditorWidth', { owner, enabled, scale }, { timeoutMs: 3000 }),
   startDrag: () => invoke<boolean>('window.startDrag'),
   startResize: (edge: string) => invoke<boolean>('window.startResize', { edge }),
   minimize: () => invoke<boolean>('window.minimize'),
+  minimizeWithEvidence: (evidence: WindowActionEvidence) => invoke<boolean>('window.minimize', evidence, { timeoutMs: 1500 }),
   maximize: () => invoke<boolean>('window.maximize'),
   show: () => invoke<boolean>('window.show'),
   getState: () => invoke<{ visible: boolean; minimized: boolean }>('window.getState'),
@@ -399,25 +457,27 @@ export const tray = {
 export const proc = {
   running: (names: string[]) => invoke<Record<string, boolean>>('proc.running', { names }),
   findExact: (path: string) => invoke<{ found: boolean; pid: number }>('proc.findExact', { path }, { timeoutMs: 5000 }),
-  terminateTree: (pid: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }),
-  terminateExact: (pid: number, processCreated: string, path: string) => invoke<{
+  terminateTree: (pid: number, timeoutMs?: number) => invoke<{ ok: boolean; attempted: number; terminated: number }>('process.terminateTree', { pid }, { timeoutMs }),
+  terminateExact: (pid: number, processCreated: string, path: string, timeoutMs?: number) => invoke<{
     ok: boolean;
     matched: boolean;
     exited: boolean;
     reason?: string;
-  }>('process.terminateExact', { pid, processCreated, path }),
-  identity: (pid: number) => invoke<{
+  }>('process.terminateExact', { pid, processCreated, path }, { timeoutMs }),
+  identity: (pid: number, timeoutMs?: number) => invoke<{
     valid: boolean;
     pid: number;
     processCreated?: string;
     path?: string;
-  }>('process.identity', { pid }),
+  }>('process.identity', { pid }, { timeoutMs }),
 };
 
 export interface HttpResponse {
   status: number;
   headers: string;
   body: string;
+  /** Fan-only native body receipt; absent on older native or other HTTP callers. */
+  bodyComplete?: boolean;
 }
 
 export const http = {
@@ -427,7 +487,8 @@ export const http = {
   ) => {
     // Fan Host calls use explicit short deadlines so a dead loopback listener
     // cannot occupy the IPC queue during exit; other callers retain 30s.
-    const timeoutMs = Math.max(250, Math.min(120000, Math.round(options.timeoutMs ?? 30000)));
+    const requested = options.timeoutMs ?? 30000;
+    const timeoutMs = Number.isFinite(requested) ? Math.max(250, Math.min(120000, Math.round(requested))) : 30000;
     const { timeoutMs: _ignored, ...requestOptions } = options;
     return invoke<HttpResponse>(
       'http.request',

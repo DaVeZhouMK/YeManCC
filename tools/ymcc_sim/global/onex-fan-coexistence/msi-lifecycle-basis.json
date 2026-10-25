@@ -1,0 +1,2289 @@
+{
+  "schemaVersion": 1,
+  "profile": "msi-original-lifecycle23-from-accepted-onex92",
+  "roles": [
+    "positive",
+    "narrow-open",
+    "usable",
+    "firmware",
+    "release-dispatch",
+    "settlement",
+    "binding"
+  ],
+  "ids": [
+    "msi-original-public-cycle:ClawA1M",
+    "msi-original-public-cycle:ClawA2VM",
+    "msi-original-public-cycle:ClawBZ2EM",
+    "msi-original-public-cycle:ClawCG3EM",
+    "msi-original-public-reopen:ClawA1M",
+    "msi-original-public-reopen:ClawA2VM",
+    "msi-original-public-reopen:ClawBZ2EM",
+    "msi-original-public-reopen:ClawCG3EM",
+    "msi-original-disconnected-hid-rebind",
+    "msi-original-unknown-firmware-honest",
+    "msi-original-open-read-failure:TransportFailed",
+    "msi-original-open-read-failure:ShortPayload",
+    "msi-original-open-read-failure:FlagNotSuccessful",
+    "msi-original-open-superseded",
+    "msi-original-release-read-unavailable:Get_Data",
+    "msi-original-release-read-unavailable:Get_AP",
+    "msi-original-release-write-transport-failed",
+    "msi-original-release-readback-mismatch",
+    "msi-original-release-readback-unavailable",
+    "msi-original-already-automatic-no-write",
+    "msi-original-foreign-release-receipt:OperationToken",
+    "msi-original-foreign-release-receipt:BootIdentity",
+    "msi-original-foreign-open-marker"
+  ],
+  "models": [
+    {
+      "product": "MS-1T41",
+      "name": "ClawA1M",
+      "firmware": "0x167"
+    },
+    {
+      "product": "MS-1T52",
+      "name": "ClawA2VM",
+      "firmware": "0x219"
+    },
+    {
+      "product": "MS-1T8K",
+      "name": "ClawBZ2EM",
+      "firmware": "0x308"
+    },
+    {
+      "product": "MS-1T91",
+      "name": "ClawCG3EM",
+      "firmware": "0x411"
+    }
+  ],
+  "types": [
+    "HandheldCompanion.Devices.ClawA1M",
+    "HandheldCompanion.Devices.ClawA2VM",
+    "HandheldCompanion.Devices.ClawBZ2EM",
+    "HandheldCompanion.Devices.MSI.ClawCG3EM"
+  ],
+  "failureMasks": {
+    "narrow-open": [
+      "msi-original-public-cycle:ClawA1M",
+      "msi-original-public-cycle:ClawA2VM",
+      "msi-original-public-cycle:ClawBZ2EM",
+      "msi-original-public-cycle:ClawCG3EM",
+      "msi-original-public-reopen:ClawA1M",
+      "msi-original-public-reopen:ClawA2VM",
+      "msi-original-public-reopen:ClawBZ2EM",
+      "msi-original-public-reopen:ClawCG3EM",
+      "msi-original-disconnected-hid-rebind",
+      "msi-original-unknown-firmware-honest",
+      "msi-original-open-read-failure:TransportFailed",
+      "msi-original-open-read-failure:ShortPayload",
+      "msi-original-open-read-failure:FlagNotSuccessful",
+      "msi-original-open-superseded",
+      "msi-original-release-read-unavailable:Get_Data",
+      "msi-original-release-read-unavailable:Get_AP",
+      "msi-original-release-write-transport-failed",
+      "msi-original-release-readback-mismatch",
+      "msi-original-release-readback-unavailable",
+      "msi-original-already-automatic-no-write",
+      "msi-original-foreign-release-receipt:OperationToken",
+      "msi-original-foreign-release-receipt:BootIdentity",
+      "msi-original-foreign-open-marker"
+    ],
+    "usable": [
+      "msi-original-open-read-failure:ShortPayload",
+      "msi-original-open-read-failure:FlagNotSuccessful"
+    ],
+    "firmware": [
+      "msi-original-public-cycle:ClawA1M",
+      "msi-original-public-cycle:ClawA2VM",
+      "msi-original-public-cycle:ClawBZ2EM",
+      "msi-original-public-cycle:ClawCG3EM",
+      "msi-original-disconnected-hid-rebind"
+    ],
+    "release-dispatch": [
+      "msi-original-public-cycle:ClawA1M",
+      "msi-original-public-cycle:ClawA2VM",
+      "msi-original-public-cycle:ClawBZ2EM",
+      "msi-original-public-cycle:ClawCG3EM",
+      "msi-original-public-reopen:ClawA1M",
+      "msi-original-public-reopen:ClawA2VM",
+      "msi-original-public-reopen:ClawBZ2EM",
+      "msi-original-public-reopen:ClawCG3EM",
+      "msi-original-unknown-firmware-honest",
+      "msi-original-release-read-unavailable:Get_Data",
+      "msi-original-release-read-unavailable:Get_AP",
+      "msi-original-release-write-transport-failed",
+      "msi-original-release-readback-mismatch",
+      "msi-original-release-readback-unavailable",
+      "msi-original-already-automatic-no-write",
+      "msi-original-foreign-release-receipt:OperationToken",
+      "msi-original-foreign-release-receipt:BootIdentity"
+    ],
+    "settlement": [
+      "msi-original-release-read-unavailable:Get_Data",
+      "msi-original-release-read-unavailable:Get_AP",
+      "msi-original-release-write-transport-failed",
+      "msi-original-release-readback-mismatch",
+      "msi-original-release-readback-unavailable"
+    ],
+    "binding": [
+      "msi-original-foreign-release-receipt:OperationToken",
+      "msi-original-foreign-release-receipt:BootIdentity"
+    ]
+  },
+  "markers": {
+    "narrow-open": [
+      "LIFE_FORBIDDEN:general-msi-Open"
+    ],
+    "usable": [
+      "Joined consumer must refuse WMI readiness read failed or truncated"
+    ],
+    "firmware": [
+      "Original HID readiness must supply",
+      "Disconnected original HID must rebind"
+    ],
+    "release-dispatch": [
+      "Original MSI close must enter release",
+      "Each reopened original session returns once",
+      "Unavailable original release read",
+      "Original failed write",
+      "Accepted WMI transport without changed original readback",
+      "Actual unreadable post-write verification",
+      "Original already-target result"
+    ],
+    "settlement": [
+      "Original MSI close must enter release",
+      "Each reopened original session returns once",
+      "Unavailable original release read",
+      "Original failed write",
+      "Accepted WMI transport without changed original readback",
+      "Actual unreadable post-write verification",
+      "Original already-target result"
+    ],
+    "binding": [
+      "Original successful release from another operation/boot must be refused"
+    ]
+  },
+  "budgets": {
+    "business": 60000,
+    "parent": 360000,
+    "generation": 30000,
+    "compile": 120000
+  },
+  "acceptedOneX92": {
+    "summaryPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/SUMMARY.json",
+      "sha256": "bc53dc914731a6ae380a2da7c8949aaa3cac698455afe65c9309864372a26c7f"
+    },
+    "preparedPin": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\onex-four-frameworks\\PREPARED-PLAN.json",
+      "sha256": "e7fea6722ce27167b57333817265cd42a98a5aad5326f04cbd3a36249cc82260"
+    },
+    "graphPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-exact92-seven-actual-r1/positive/LOADED-GRAPH.json",
+      "sha256": "a7377291a21860b089ce8bd27136c20267c7707536aa44c49e7ec6713ec3bae9"
+    },
+    "jointReviewPin": {
+      "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-onex-seven-independent-joint/SUMMARY.json",
+      "sha256": "db5fc82bebb2a3c2314c77220dd39f024b43d53e7126b1b994294a2824b813fb"
+    }
+  },
+  "canonicalParentOwnedRoot": "D:/Codex/2026-10-18/kai-s/work/onex65-92-positive-r1",
+  "canonicalParentContext": {
+    "id": "Default",
+    "kind": "default",
+    "registrationType": null,
+    "registrationAssembly": null,
+    "managed": [
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.dll",
+        "sha256": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+        "bytes": 148480,
+        "identity": "JoinedFactoryProbe, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "tool"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\ScopedLoadAuthority.dll",
+        "sha256": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+        "identity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "infrastructure"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ConstructorIoPorts.dll",
+        "sha256": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+        "role": "infrastructure",
+        "identity": "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null"
+        ],
+        "declaredTypes": 22
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.dll",
+        "sha256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+        "role": "target",
+        "identity": "YeManFanHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+        ],
+        "declaredTypes": 715
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.dll",
+        "sha256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+        "role": "target",
+        "identity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "PresentationFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "PresentationCore, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "LibreHardwareMonitorLib, Version=0.9.6.0, Culture=neutral, PublicKeyToken=null",
+          "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "System.Xaml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+          "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Drawing.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "HelixToolkit.Core.Wpf, Version=2.27.3.0, Culture=neutral, PublicKeyToken=52aa3500039caf0d",
+          "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.FileVersionInfo, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "iNKORE.UI.WPF.Modern.Controls, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+          "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ServiceProcess.ServiceController, Version=10.0.0.9, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Sentry, Version=6.6.0.0, Culture=neutral, PublicKeyToken=fba2ec45388e2af0",
+          "System.Configuration.ConfigurationManager, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Xml.ReaderWriter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.NetworkInformation, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Numerics.Vectors, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Windows.Forms, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+          "Nefarius.Drivers.HidHide, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+          "WindowsInput, Version=6.4.1.0, Culture=neutral, PublicKeyToken=null",
+          "System.Management, Version=10.0.0.3, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Nefarius.Utilities.DeviceManagement, Version=5.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "WpfScreenHelper, Version=2.1.1.0, Culture=neutral, PublicKeyToken=null",
+          "System.ObjectModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Drawing.Common, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "PInvoke.Kernel32, Version=0.7.0.0, Culture=neutral, PublicKeyToken=9e300f9f87f04a7a",
+          "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.Registry, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.TypeConverter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.TaskScheduler, Version=2.10.1.0, Culture=neutral, PublicKeyToken=e25603a88b3aa7da",
+          "iNKORE.UI.WPF.Modern, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+          "iNKORE.UI.WPF, Version=1.2.8.0, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+          "LiveCharts.Wpf, Version=0.9.7.0, Culture=neutral, PublicKeyToken=0bc1f845d1ebb8df",
+          "ColorPicker, Version=3.4.2.3, Culture=neutral, PublicKeyToken=1c61eec504ce2276",
+          "LiveCharts, Version=0.9.7.0, Culture=neutral, PublicKeyToken=0bc1f845d1ebb8df",
+          "SDL3-CS, Version=3.4.10.0, Culture=neutral, PublicKeyToken=null",
+          "GregsStack.InputSimulatorStandard, Version=1.3.5.0, Culture=neutral, PublicKeyToken=null",
+          "craftersmine.SteamGridDB.Net, Version=1.1.7.0, Culture=neutral, PublicKeyToken=null",
+          "IGDB, Version=6.1.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "Microsoft.WindowsAPICodePack.Shell, Version=8.0.15.2, Culture=neutral, PublicKeyToken=8afb38e9204fc0a9",
+          "GongSolutions.WPF.DragDrop, Version=4.0.0.0, Culture=neutral, PublicKeyToken=91f1945125b7a587",
+          "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Interop.IWshRuntimeLibrary, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "NAudio.Vorbis, Version=1.5.0.0, Culture=neutral, PublicKeyToken=null",
+          "NAudio.WinMM, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+          "Gma.System.MouseKeyHook, Version=5.6.1.0, Culture=neutral, PublicKeyToken=null",
+          "System.IO.Ports, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Threading.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.FileSystem.Watcher, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "RTSSSharedMemoryNET, Version=1.0.9481.42931, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.BattleNet, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.EA, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.Epic, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.Gog, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameFinder.StoreHandlers.Xbox, Version=4.9.0.0, Culture=neutral, PublicKeyToken=null",
+          "OneOf, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameFinder.Common, Version=4.9.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Xml.XDocument, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "NexusMods.Paths, Version=0.19.1.0, Culture=neutral, PublicKeyToken=null",
+          "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "GameLib.Plugin.Origin, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.RiotGames, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.Steam, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "GameLib.Plugin.Ubisoft, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "UIAutomationClient, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "UIAutomationTypes, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "SharpDX.XInput, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+          "SharpDX.Direct3D9, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+          "SharpDX, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+          "PrecisionTimer.NET, Version=3.0.0.7, Culture=neutral, PublicKeyToken=4c843feb8daceeca",
+          "System.Net.Ping, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Http, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "NAudio.Wasapi, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+          "WindowsDisplayAPI, Version=1.3.0.13, Culture=neutral, PublicKeyToken=null",
+          "System.Diagnostics.EventLog, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Microsoft.Toolkit.Uwp.Notifications, Version=7.1.0.0, Culture=neutral, PublicKeyToken=4aff67a105548ee2",
+          "System.Net.Requests, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+          "hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "SharpDX.DirectInput, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+          "controller-hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Collections.Immutable, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "steam-hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "Shared, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.Compression.ZipFile, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Crc32.NET, Version=1.0.0.0, Culture=neutral, PublicKeyToken=dc0b95cf99bf4e99",
+          "ColorPicker.Models, Version=1.0.11.0, Culture=neutral, PublicKeyToken=bb95a4442a9c0731",
+          "GameLib.Plugin.Rockstar, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Claims, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Fastenshtein, Version=1.0.12.0, Culture=neutral, PublicKeyToken=null",
+          "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.CompilerServices.VisualC, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Windows.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Threading.Tasks.Parallel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "iNKORE.UI.WPF.Emojis, Version=0.3.6.3, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+          "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "NAudio.Core, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+          "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+        ],
+        "declaredTypes": 1769
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanBackend.dll",
+        "sha256": "2a3ae2d1fa99c382841dfa6ee690ac3c3c9baf429b726b76a9c67c2d6fcfe236",
+        "identity": "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 34
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Sentry.dll",
+        "sha256": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+        "identity": "Sentry, Version=6.6.0.0, Culture=neutral, PublicKeyToken=fba2ec45388e2af0",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.StackTrace, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Immutable, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Http, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.Compression, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+          "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Runtime.Serialization.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ObjectModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.TypeConverter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.NetworkInformation, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Ping, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.DiagnosticSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.Tracing, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Security, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.FileSystem.DriveInfo, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Requests, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.TraceSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Net.Quic, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 668
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Windows.SDK.NET.dll",
+        "sha256": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+        "identity": "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e",
+          "WinRT.Runtime, Version=2.2.0.0, Culture=neutral, PublicKeyToken=99ea127f02d97709",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Private.Uri, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 1892
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WinRT.Runtime.dll",
+        "sha256": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+        "identity": "WinRT.Runtime, Version=2.2.0.0, Culture=neutral, PublicKeyToken=99ea127f02d97709",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ObjectModel, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Numerics.Vectors, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Cryptography, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=8.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "System.Linq, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq.Expressions, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 603
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HidLibrary.dll",
+        "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+        "identity": "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Overlapped, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Thread, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 70
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GregsStack.InputSimulatorStandard.dll",
+        "sha256": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+        "identity": "GregsStack.InputSimulatorStandard, Version=1.3.5.0, Culture=neutral, PublicKeyToken=null",
+        "role": "target",
+        "assemblyRefs": [
+          "netstandard, Version=2.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51"
+        ],
+        "declaredTypes": 26
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Newtonsoft.Json.dll",
+        "sha256": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+        "identity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.Numerics, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Xml.ReaderWriter, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Xml.XDocument, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.Serialization.Formatters, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.TypeConverter, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq.Expressions, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Emit.Lightweight, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Emit.ILGeneration, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Reflection.Primitives, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.Serialization.Primitives, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.RegularExpressions, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections.Concurrent, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.TraceSource, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ObjectModel, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Data.Common, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.Primitives, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Encoding.Extensions, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 501
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WindowsInput.dll",
+        "sha256": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+        "identity": "WindowsInput, Version=6.4.1.0, Culture=neutral, PublicKeyToken=null",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Collections, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "WindowsBase, Version=6.0.2.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+          "System.Threading.Thread, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Linq, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.Registry, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.Primitives, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Diagnostics.Process, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 198
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\System.IO.Ports.dll",
+        "sha256": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+        "identity": "System.IO.Ports, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "target",
+        "assemblyRefs": [
+          "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Overlapped, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Win32.Registry, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+          "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 51
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Shared.dll",
+        "sha256": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1",
+        "role": "target",
+        "identity": "Shared, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "assemblyRefs": [
+          "System.Runtime, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "ricaun.NamedPipeWrapper.Json.1.8.0, Version=1.8.0.0, Culture=neutral, PublicKeyToken=null",
+          "System.Collections.Concurrent, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.ComponentModel.TypeConverter, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.Pipes.AccessControl, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Extensions.Logging.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+          "Microsoft.Extensions.Configuration.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+          "System.Threading, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.Principal.Windows, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.IO.Pipes, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "System.Security.AccessControl, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+          "Microsoft.Extensions.Configuration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+          "Microsoft.Extensions.Configuration.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+          "Serilog, Version=4.3.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+          "Serilog.Settings.Configuration, Version=10.0.1.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+          "Serilog.Extensions.Logging, Version=10.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+          "System.Diagnostics.TraceSource, Version=9.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+        ],
+        "declaredTypes": 13
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Abstractions.dll",
+        "sha256": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33",
+        "identity": "Microsoft.Extensions.Configuration.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Primitives.dll",
+        "sha256": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8",
+        "identity": "Microsoft.Extensions.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.dll",
+        "sha256": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121",
+        "identity": "Microsoft.Extensions.Configuration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Json.dll",
+        "sha256": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb",
+        "identity": "Microsoft.Extensions.Configuration.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.FileExtensions.dll",
+        "sha256": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7",
+        "identity": "Microsoft.Extensions.Configuration.FileExtensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Abstractions.dll",
+        "sha256": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970",
+        "identity": "Microsoft.Extensions.FileProviders.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Physical.dll",
+        "sha256": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980",
+        "identity": "Microsoft.Extensions.FileProviders.Physical, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.DependencyModel.dll",
+        "sha256": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8",
+        "identity": "Microsoft.Extensions.DependencyModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Settings.Configuration.dll",
+        "sha256": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0",
+        "identity": "Serilog.Settings.Configuration, Version=10.0.1.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.dll",
+        "sha256": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505",
+        "identity": "Serilog, Version=4.3.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Extensions.Logging.dll",
+        "sha256": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507",
+        "identity": "Serilog.Extensions.Logging, Version=10.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.File.dll",
+        "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+        "identity": "Serilog.Sinks.File, Version=7.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "role": "target"
+      },
+      {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Microsoft.Extensions.Logging.Abstractions.dll",
+        "sha256": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+        "identity": "Microsoft.Extensions.Logging.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "role": "target"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.StackTrace.dll",
+        "sha256": "6578cef25cba5dcd0f7c34f2bbe6fad5c2cb59b601ab708c5f3e8d1dbfc60a95",
+        "identity": "System.Diagnostics.StackTrace, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.DiagnosticSource.dll",
+        "sha256": "3e8ff9bb002715f5ab50263f6fe7c340355a5a963c03821c3a240ffa36b9f223",
+        "identity": "System.Diagnostics.DiagnosticSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.TraceSource.dll",
+        "sha256": "63e22e512f3db18ab51d57663364479ce56fcd924085fd0d6bd136f299106fa6",
+        "identity": "System.Diagnostics.TraceSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Tracing.dll",
+        "sha256": "3275b203f9ec3d62c6a6c57b0771513f99f5c3d81cb4505b77ee679165fed800",
+        "identity": "System.Diagnostics.Tracing, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\DirectWriteForwarder.dll",
+        "sha256": "2526dcb41392b1756fd8fdb517fdca1c852b774b957e6e6c66715f616e5fc027",
+        "identity": "DirectWriteForwarder, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Extensions.dll",
+        "sha256": "633f210388e326f0a2fba3148312fb2900a9e0ba32f08015bb606abc44a3d634",
+        "identity": "System.Runtime.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Debug.dll",
+        "sha256": "44b71cb2bc82e2e93c99c095a0e493f3c4afc0e50aafe8e91849629da295e6dc",
+        "identity": "System.Diagnostics.Debug, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.CompilerServices.VisualC.dll",
+        "sha256": "67483e224e8019d1d725876485a6fca81dd977d5254cf26d79a26f2a73207fa9",
+        "identity": "System.Runtime.CompilerServices.VisualC, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Resources.Extensions.dll",
+        "sha256": "bde0bbbe8210ce184e34f95995af65dbd42b0d526fe1ab27d9c40c825e07a83a",
+        "identity": "System.Resources.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.dll",
+        "identity": "System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "615f1d4f821d25f46e61bc70dd879b4129daa754f42f427a23fa68c4dc74f09a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll",
+        "sha256": "ef6d37d9334fcdf7c7e4b9590b730eb5ba623192d47f0cbe4ec478962625e586",
+        "identity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.dll",
+        "sha256": "5aea9c285f011d1e83f05834e12632ee5ebf65da1d546e696f525af47101a3b0",
+        "identity": "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Concurrent.dll",
+        "sha256": "569667e92dda0af323a9f289c6bbe7a046bab7354f9fa0d37fc97404a0499ed3",
+        "identity": "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.Thread.dll",
+        "sha256": "7b451de5e88adfdb49765bc0745a12e377318534d02e6bf81660c285a7aa6664",
+        "identity": "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.dll",
+        "sha256": "cadf13029ac996abaceccfd7c242e55888b669246163342a3b335eee9851b531",
+        "identity": "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Linq.dll",
+        "sha256": "139264775432faf15a813e607e1919ea869d3321079ba134ffa36b350577c271",
+        "identity": "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Memory.dll",
+        "sha256": "58a4dc8a9efac1fe0ee67138b0dda35b2b812addc14c5d8251cc222b278a5c2d",
+        "identity": "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Loader.dll",
+        "sha256": "c858230d105ec1225cd58ec22623bf59bddee9dfc7077d7f93957d3321ec55f7",
+        "identity": "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.Cryptography.dll",
+        "sha256": "bee61e6bdeff9fb0c4f3cbf9d48e9d1d97d12a8bb85d1eeab9178e818b582eee",
+        "identity": "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.Primitives.dll",
+        "sha256": "b671ae0e9463f65d2ad08366c890043fd570f7d3149bb57bc16b8d427d9684f5",
+        "identity": "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.RegularExpressions.dll",
+        "sha256": "b8494ba41da52018409cccd851753717c6bd035fccdf5e4d5ac83e420d4678f4",
+        "identity": "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.InteropServices.dll",
+        "sha256": "9d0621f1e573bd20525287533bea24ec7824813eada7820a0c82252ede072ab9",
+        "identity": "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Linq.Expressions.dll",
+        "sha256": "f5d05f16c2f31ae822bca8db63019067c8d83b09376b0a60c38b9c98fa0e088f",
+        "identity": "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Emit.Lightweight.dll",
+        "sha256": "c15be07e2131fdc8806d47e222b58e545981c2a3e7dc9c069a6c6076271a291f",
+        "identity": "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Emit.ILGeneration.dll",
+        "sha256": "5e38d9d71ce8fbab210a590f20543b19a2bf0cf1265f3ed78d63519e3b73b979",
+        "identity": "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Primitives.dll",
+        "sha256": "d1ba728fab43e22821a1b19c508667995c0df10ee98d1f19e63aac94098ca8f5",
+        "identity": "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Encoding.Extensions.dll",
+        "sha256": "2b63801416706c7817193a742fc8648c4afd6697ca342d4a2deb30450b99218d",
+        "identity": "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\WindowsBase.dll",
+        "sha256": "42e05225d944bde54e4f2cbe0142105fce822c574267b6f8e305ee8c45c664e8",
+        "identity": "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Json.dll",
+        "sha256": "ed5f0f3773c89948471e3691f31963ea00d3577e17296ac4dfb97772e78b6fa3",
+        "identity": "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.Principal.Windows.dll",
+        "sha256": "ed56739aabc1fb6f81e8f71db89531beea985550f654d4d0e6c9a64c67e4e349",
+        "identity": "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.IO.FileSystem.AccessControl.dll",
+        "sha256": "1d5f0b64af1920709aa26d5b38991787b458eaa6da8bb8d86b4bb46ca0434026",
+        "identity": "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Console.dll",
+        "sha256": "a50d6f54e509342c49b6b7c8d72684f68701fc97fade19956d4618a4a30e84fa",
+        "identity": "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.AccessControl.dll",
+        "sha256": "5fda871ac0ab09ba62884ba4160b5c84f8d9513d16c773b7d01e3b82dae905b4",
+        "identity": "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Metadata.dll",
+        "sha256": "97152d5c07e1e5d7f080f871eff211ccdbecb2496e4eb1b086005cbd3656d431",
+        "identity": "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Process.dll",
+        "sha256": "2b4871e02b366113c6ccf3b1436fadde5e69fc0a3e3ac421e2fa0f7af8c2bc3b",
+        "identity": "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.DispatchProxy.dll",
+        "sha256": "a08a235c45e6944b3a086f3df03e55b38a5958e7126948847eb33261fe1ca10b",
+        "identity": "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.IO.MemoryMappedFiles.dll",
+        "sha256": "21b24bb967a254328e2644e2dbfe00e1205463663504819bbfcae6f6b43d426d",
+        "identity": "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.HttpListener.dll",
+        "sha256": "c3bbbb42561e9de67da6accd846fa710944d38b4bde88ee111943ea4afb5b82f",
+        "identity": "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.Channels.dll",
+        "sha256": "ff8dcb281d2d35f01dbdf72e766e431c397f9db063f22f61a9a85f7bd173f5e8",
+        "identity": "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\Microsoft.Win32.SystemEvents.dll",
+        "sha256": "4c2b3c4a44fa0ff1dd288d2fd0b2d4c8a5f713c149a4b2d37a26e03a7da261fa",
+        "identity": "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\Microsoft.Win32.Primitives.dll",
+        "sha256": "07ee7d2780a74c523af5ca4babdc63d006fa896b3a1463c2e638c5bb2843f9b9",
+        "identity": "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.Sockets.dll",
+        "sha256": "b4bf19b0c8e412b9d0f479fc5268bf44e04ca656cd121044ca51f2652595af6c",
+        "identity": "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Encodings.Web.dll",
+        "sha256": "2c459f175331339b8580dec1842879b3f0532100fa426b97a1b74e1b5dee95d7",
+        "identity": "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.NonGeneric.dll",
+        "sha256": "8cf296b4868c0dea441c452c50ed5c322837bf736a7c173f46dda4ebdfeb4c0b",
+        "identity": "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Specialized.dll",
+        "sha256": "61702e1173c49f32e7b1804667a249f8709680f01859d46cf30e74197fedc1c5",
+        "identity": "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.Primitives.dll",
+        "sha256": "e678e0129a87751c624cbe2e3ab83d55055a091a5b77d8138f02255deda4b6c4",
+        "identity": "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.WebHeaderCollection.dll",
+        "sha256": "7abfc26269a95cec0d93ca2a6b8148aa45d504c8f50a62fbbbad72408966d45a",
+        "identity": "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.ThreadPool.dll",
+        "sha256": "9e3bf9838ff48525e4f2fd1c7646956ba00183977c7e4762d999670aa901e101",
+        "identity": "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationFramework.dll",
+        "sha256": "fa9aa188f9c92dc95b4e56f303b1875244bf45786733948c79034fe95fb0cd86",
+        "identity": "PresentationFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationCore.dll",
+        "sha256": "c2ac0752b0a3018331519b8aec6fa085346bfc59609ea29954821a0ab19ee839",
+        "identity": "PresentationCore, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Xaml.dll",
+        "sha256": "8f5eeaedc35f82a9b457d5562b688b6e1892732ecf6c0c18dd3159b976458d27",
+        "identity": "System.Xaml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+        "role": "framework"
+      },
+      {
+        "path": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Numerics.Vectors.dll",
+        "sha256": "6beaf983fa8c33d25160c7a77e185967e8f113a5c02e6dc27f05f26e1b34763c",
+        "identity": "System.Numerics.Vectors, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/System.ObjectModel.dll",
+        "sha256": "16d9a18630f1d33ec7a709ab2f31652c91ebdfbc7a5a481378aebe2e1102ffc2",
+        "identity": "System.ObjectModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/netstandard.dll",
+        "sha256": "ce09cef0d758196f2467f320d840c03202453efe9fb1920dddd24ea8277bbbb3",
+        "identity": "netstandard, Version=2.1.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework",
+        "assemblyName": "netstandard",
+        "selectors": [
+          {
+            "type": "<Module>",
+            "methods": [
+              ".cctor"
+            ]
+          }
+        ]
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.TypeConverter.dll",
+        "sha256": "d24ca7be9b39ff4117edb0d207ff5ab1a0e1587557a3daaa44391f0b04d93816",
+        "identity": "System.ComponentModel.TypeConverter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Configuration.ConfigurationManager.dll",
+        "identity": "System.Configuration.ConfigurationManager, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "sha256": "bd36ea6b9d4cb140d6f2b88b30678d9e2559a4ecde7ac5956828a84ae1f7a6d3",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Xml.ReaderWriter.dll",
+        "identity": "System.Xml.ReaderWriter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "9ed86fcb4a068f56c61ce4d595d91b57df12999820bb11659e9a4b45103305ed",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Private.Xml.dll",
+        "identity": "System.Private.Xml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "sha256": "d570b8cb9507f2fcac88f80a2fe7597d3e2331a84f337820a7d794632a67ed5d",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.WebClient.dll",
+        "identity": "System.Net.WebClient, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "sha256": "ab06cb5eaff5ca00045dd847e167f0107a53114aca47d26ed3500adf38bd142b",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\Microsoft.Win32.Registry.dll",
+        "identity": "Microsoft.Win32.Registry, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "5f7623b92c1ef07c98546f63c83613f5f5f7af6513dc52e2e9e11447b6c1c7f6",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Serialization.Formatters.dll",
+        "identity": "System.Runtime.Serialization.Formatters, Version=8.1.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "ae2d71a1c6231a7e4c9f0264666acf90f743460ae7983d5331e9ad0271e7ad88",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Serialization.Primitives.dll",
+        "identity": "System.Runtime.Serialization.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "e15940836e5b22e89a0b7febfa0de2f158855563d9cca0ac36a84e4be9e3e683",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Numerics.dll",
+        "identity": "System.Runtime.Numerics, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "cadca5367aec4fb54df4a81cd033c62228f3e100736ef9701aafcd13123a5ef4",
+        "role": "framework"
+      },
+      {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Data.Common.dll",
+        "identity": "System.Data.Common, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "sha256": "951bc9ff57eea7c382eb75cc595a9598afde341db853291b937be37da6ca3e81",
+        "role": "framework"
+      }
+    ],
+    "requests": [
+      {
+        "requestedIdentity": "JoinedFactoryProbe, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.dll"
+      },
+      {
+        "requestedIdentity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\ScopedLoadAuthority.dll"
+      },
+      {
+        "requestedIdentity": "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ConstructorIoPorts.dll"
+      },
+      {
+        "requestedIdentity": "YeManFanHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.dll"
+      },
+      {
+        "requestedIdentity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.dll"
+      },
+      {
+        "requestedIdentity": "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanBackend.dll"
+      },
+      {
+        "requestedIdentity": "Sentry, Version=6.6.0.0, Culture=neutral, PublicKeyToken=fba2ec45388e2af0",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Sentry.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Windows.SDK.NET.dll"
+      },
+      {
+        "requestedIdentity": "WinRT.Runtime, Version=2.2.0.0, Culture=neutral, PublicKeyToken=99ea127f02d97709",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WinRT.Runtime.dll"
+      },
+      {
+        "requestedIdentity": "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HidLibrary.dll"
+      },
+      {
+        "requestedIdentity": "GregsStack.InputSimulatorStandard, Version=1.3.5.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GregsStack.InputSimulatorStandard.dll"
+      },
+      {
+        "requestedIdentity": "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Newtonsoft.Json.dll"
+      },
+      {
+        "requestedIdentity": "WindowsInput, Version=6.4.1.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WindowsInput.dll"
+      },
+      {
+        "requestedIdentity": "System.IO.Ports, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\System.IO.Ports.dll"
+      },
+      {
+        "requestedIdentity": "Shared, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Shared.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Configuration.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Abstractions.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Primitives.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Configuration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Configuration.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Json.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Configuration.FileExtensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.FileExtensions.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.FileProviders.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Abstractions.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.FileProviders.Physical, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Physical.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.DependencyModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.DependencyModel.dll"
+      },
+      {
+        "requestedIdentity": "Serilog.Settings.Configuration, Version=10.0.1.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Settings.Configuration.dll"
+      },
+      {
+        "requestedIdentity": "Serilog, Version=4.3.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.dll"
+      },
+      {
+        "requestedIdentity": "Serilog.Extensions.Logging, Version=10.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Extensions.Logging.dll"
+      },
+      {
+        "requestedIdentity": "Serilog.Sinks.File, Version=7.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.File.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Extensions.Logging.Abstractions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=adb9793829ddae60",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Microsoft.Extensions.Logging.Abstractions.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.StackTrace, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.StackTrace.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.DiagnosticSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.DiagnosticSource.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.TraceSource, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.TraceSource.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.Tracing, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Tracing.dll"
+      },
+      {
+        "requestedIdentity": "DirectWriteForwarder, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\DirectWriteForwarder.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Extensions.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.Debug, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Debug.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.CompilerServices.VisualC, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.CompilerServices.VisualC.dll"
+      },
+      {
+        "requestedIdentity": "System.Resources.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Resources.Extensions.dll"
+      },
+      {
+        "requestedIdentity": "System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Concurrent.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.Thread.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.dll"
+      },
+      {
+        "requestedIdentity": "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Linq.dll"
+      },
+      {
+        "requestedIdentity": "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Memory.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.Loader.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.Cryptography.dll"
+      },
+      {
+        "requestedIdentity": "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.Primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.RegularExpressions.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.InteropServices.dll"
+      },
+      {
+        "requestedIdentity": "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Linq.Expressions.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Emit.Lightweight.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Emit.ILGeneration.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Encoding.Extensions.dll"
+      },
+      {
+        "requestedIdentity": "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\WindowsBase.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Json.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.Principal.Windows.dll"
+      },
+      {
+        "requestedIdentity": "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.IO.FileSystem.AccessControl.dll"
+      },
+      {
+        "requestedIdentity": "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Console.dll"
+      },
+      {
+        "requestedIdentity": "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Security.AccessControl.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.Metadata.dll"
+      },
+      {
+        "requestedIdentity": "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Diagnostics.Process.dll"
+      },
+      {
+        "requestedIdentity": "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Reflection.DispatchProxy.dll"
+      },
+      {
+        "requestedIdentity": "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.IO.MemoryMappedFiles.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.HttpListener.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.Channels.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\Microsoft.Win32.SystemEvents.dll"
+      },
+      {
+        "requestedIdentity": "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\Microsoft.Win32.Primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.Sockets.dll"
+      },
+      {
+        "requestedIdentity": "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Text.Encodings.Web.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.NonGeneric.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Specialized.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.Primitives.dll"
+      },
+      {
+        "requestedIdentity": "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Net.WebHeaderCollection.dll"
+      },
+      {
+        "requestedIdentity": "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Threading.ThreadPool.dll"
+      },
+      {
+        "requestedIdentity": "PresentationFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationFramework.dll"
+      },
+      {
+        "requestedIdentity": "PresentationCore, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\PresentationCore.dll"
+      },
+      {
+        "requestedIdentity": "System.Xaml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.WindowsDesktop.App\\10.0.11\\System.Xaml.dll"
+      },
+      {
+        "requestedIdentity": "System.Numerics.Vectors, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/System.Numerics.Vectors.dll"
+      },
+      {
+        "requestedIdentity": "System.ObjectModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/System.ObjectModel.dll"
+      },
+      {
+        "requestedIdentity": "netstandard, Version=2.1.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/netstandard.dll"
+      },
+      {
+        "requestedIdentity": "System.ComponentModel.TypeConverter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.ComponentModel.TypeConverter.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime.InteropServices, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.InteropServices.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll"
+      },
+      {
+        "requestedIdentity": "System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Concurrent.dll"
+      },
+      {
+        "requestedIdentity": "System.Runtime, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "targetContext": "Default",
+        "targetPath": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll"
+      },
+      {
+        "requestedIdentity": "netstandard, Version=2.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "targetContext": "Default",
+        "targetPath": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/netstandard.dll"
+      },
+      {
+        "requestedIdentity": "Serilog.Sinks.File, Culture=neutral, PublicKeyToken=null",
+        "targetContext": "Default",
+        "targetPath": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.File.dll"
+      }
+    ]
+  },
+  "canonicalParentAliases": [
+    {
+      "requestedIdentity": "System.Runtime.InteropServices, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "targetContext": "Default",
+      "provider": {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.InteropServices.dll",
+        "sha256": "9d0621f1e573bd20525287533bea24ec7824813eada7820a0c82252ede072ab9",
+        "identity": "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    },
+    {
+      "requestedIdentity": "System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "targetContext": "Default",
+      "provider": {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll",
+        "sha256": "ef6d37d9334fcdf7c7e4b9590b730eb5ba623192d47f0cbe4ec478962625e586",
+        "identity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    },
+    {
+      "requestedIdentity": "System.Collections.Concurrent, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "targetContext": "Default",
+      "provider": {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Collections.Concurrent.dll",
+        "sha256": "569667e92dda0af323a9f289c6bbe7a046bab7354f9fa0d37fc97404a0499ed3",
+        "identity": "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    },
+    {
+      "requestedIdentity": "System.Runtime, Version=6.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "targetContext": "Default",
+      "provider": {
+        "path": "C:\\Program Files\\dotnet\\shared\\Microsoft.NETCore.App\\10.0.11\\System.Runtime.dll",
+        "sha256": "ef6d37d9334fcdf7c7e4b9590b730eb5ba623192d47f0cbe4ec478962625e586",
+        "identity": "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "role": "framework"
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    },
+    {
+      "requestedIdentity": "netstandard, Version=2.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "targetContext": "Default",
+      "provider": {
+        "path": "C:/Program Files/dotnet/shared/Microsoft.NETCore.App/10.0.11/netstandard.dll",
+        "sha256": "ce09cef0d758196f2467f320d840c03202453efe9fb1920dddd24ea8277bbbb3",
+        "identity": "netstandard, Version=2.1.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "role": "framework",
+        "assemblyName": "netstandard",
+        "selectors": [
+          {
+            "type": "<Module>",
+            "methods": [
+              ".cctor"
+            ]
+          }
+        ]
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    },
+    {
+      "requestedIdentity": "Serilog.Sinks.File, Culture=neutral, PublicKeyToken=null",
+      "targetContext": "Default",
+      "provider": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.File.dll",
+        "sha256": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+        "identity": "Serilog.Sinks.File, Version=7.0.0.0, Culture=neutral, PublicKeyToken=24c2f752a8e58a10",
+        "role": "target"
+      },
+      "requestingContexts": [
+        "Default"
+      ]
+    }
+  ],
+  "canonicalParentArtifacts": {
+    "producer": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.dll",
+      "sha256": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+      "bytes": 148480,
+      "identity": "JoinedFactoryProbe, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+    },
+    "deps": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.deps.json",
+      "sha256": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+      "bytes": 1317
+    },
+    "runtimeconfig": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+      "bytes": 495
+    },
+    "ports": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ConstructorIoPorts.dll",
+      "sha256": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+      "role": "infrastructure",
+      "identity": "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "assemblyRefs": [
+        "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+        "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+        "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null"
+      ],
+      "declaredTypes": 22
+    },
+    "authority": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\ScopedLoadAuthority.dll",
+      "sha256": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+      "identity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null"
+    },
+    "launcher": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\STA.dll",
+      "sha256": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+      "identity": "STA, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null"
+    },
+    "launcherRuntimeconfig": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\STA.runtimeconfig.json",
+      "sha256": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff"
+    },
+    "producerAuthority": {
+      "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ScopedLoadAuthority.dll",
+      "sha256": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+      "identity": "ScopedLoadAuthority, Version=0.0.0.0, Culture=neutral, PublicKeyToken=null"
+    }
+  },
+  "canonicalParentManifest": {
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.dll": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.deps.json": "834921c271459c0901bae1706d24bd9c154047bd4ac6934b61a46a336b183276",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\JoinedFactoryProbe.runtimeconfig.json": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ConstructorIoPorts.dll": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\ScopedLoadAuthority.dll": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\STA.dll": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\STA\\STA.runtimeconfig.json": "322caf357685db1d64e9da73f772f3246b24b036e496a19d9f68db7ee11454ff",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\tools\\JoinedFactoryProbe\\ScopedLoadAuthority.dll": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\install-fan-host-payload.ps1": "0e4f60c33f7ca7e67dd505d749668ddd5c73911e4ac7117d51710d44901e71ed",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\Microsoft.Windows.SDK.NET.dll": "0ec371d93798852e36461c8adddbeadce0f963a04752f0b64e54fe19c1c834a7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\run-emergency-fan-restore.ps1": "06084c19ac912056b6f190a77486021ea33ab517a5f482b8c8f09ec258a600b6",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\WinRT.Runtime.dll": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanBackend.dll": "2a3ae2d1fa99c382841dfa6ee690ac3c3c9baf429b726b76a9c67c2d6fcfe236",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanBackend.pdb": "320b93f963fa2aa797183deb430cf980e934c4c3fa6f2e93b38e39ba661f7d1f",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.authorization.md": "68d515be999f6d70614ca2a388fc425fe4d3a4d4c2d7d4f119c2a6317296a327",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.deps.json": "63e2749627e9f623ab0864483c231588e593e41d5637389a4f5c30e8fcd03fec",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.exe": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.json": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.payload.json": "b9cc75b90ed8e486f3f000f9f449d3cc56c1e60e01bb1cabc16fce64a8aa6b11",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.pdb": "8fd82e2c22ed4729fe24f7721e93aa27e871fe90673e3928b71d65311a7b1857",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.runtimeconfig.json": "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.dll": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.runtime.json": "6389f7a22b1e294ebaf6c75b05b28bb9839abc7459be0d8898985de27dfe47b8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\BlackSharp.Core.dll": "acf0f822fb41ee99c3583c1fec3791e464623ee5badaf11272b65a6768b4ad96",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GameLib.Core.dll": "1946b5f67a272a9f0ba25962e091a331c19261e747cc138ef31051b66ce111d8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GamepadMotion.dll": "e11d59f84b4a4a12e99b15ea998e79de06c6dfb8f1e9c637e973abd4d3d088a9",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Gma.System.MouseKeyHook.dll": "fa9fec4dfc02c80d262e2e61abce31d9358ca84e36c9794ba5cb30f912940485",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GongSolutions.WPF.DragDrop.dll": "1672736512ddbb8608795c25a54d3c040ebc570c46e3a332ce52727a19d2140e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\GregsStack.InputSimulatorStandard.dll": "453e8a4b4cf7241954e9aad060409c24f076ee0c9f742345fc36a1ea8dd8c6ee",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.deps.json": "2a98bbaa3579f43355c76a61fdfe652d6486cb651bbb63001d4a1d71ba66c60e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.dll": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.json": "9b3d259a9db00f6331ce598c5c7001e73e4454c7d973730848ed3596c25935f9",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HidLibrary.dll": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\IGDB.dll": "001fb017e2cb017e1fb39b5b0318432ef9c4274064b29ac707bd206a1a0e5ce2",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Interop.IWshRuntimeLibrary.dll": "3884afc4d3e1af4d1fbe8e1859b41ed69560db8fe4141501ccc4d16c8e254275",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Abstractions.dll": "a7ae16937ad2931ec036cefde5bc230f6a29e4bcb4a0aca10a29a699a0a51b33",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Binder.dll": "0637a0ab2b5a77b000c0d96c46573dae8c04fa86ae1374b5a1f00855a712d6f9",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.FileExtensions.dll": "3529842524c5afa84fd91c97f489257af1fadf254f46b69f9244cc40a8c202f7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.Json.dll": "7d84d4eb997b3edd38b5841589b1263cc5e88993792329212fdcc1ce065f01fb",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Configuration.dll": "997b6440cff60fc5e4cc38fa7bddff453937b6f1c9bb349c923c08f278f8b121",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.DependencyInjection.dll": "660201ba6898f047c273a611306e4ea6750f5bbe1f6d6c4702ab301dbb16a869",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.DependencyModel.dll": "0d7fae30684654fa9173ad248ab41b713a48d81df0ef446ee4e40c8d380893e8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Diagnostics.Abstractions.dll": "c2391bad19098c60cf8211cde11169adccc681866ffda172190794ca8b0d4a32",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Diagnostics.dll": "5f8eff8b08ee7be0b94c43f8001f1012fc07600baf6739460b47a217244d74ab",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Abstractions.dll": "718ba4fbad76976e6bc2b4f16f2465e6f8216bf973f8d447b218c7847cb64970",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileProviders.Physical.dll": "4445cc46bedada8d5f8b0847bfe386ed590ac3343307b7ab66e6db95b88a6980",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.FileSystemGlobbing.dll": "e12418e357464967af8dd8f7e32a3b2076127a829c661695ad65f98e22be388c",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Http.Polly.dll": "c281ce33380995f9adcd5d8e4eaeb9a58ec4fcb5de5a737b79e189832c4298fe",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Http.dll": "845db0ef0cd571c1ed07883bbc854510441da90629dcf387bc1ceb337ff42cd6",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Logging.dll": "c012df727dcb65440fbb1b9924744a96932b617a3d058cc9b9b91c855ebd760f",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Options.ConfigurationExtensions.dll": "db2e2abbbdaf7d12f30adb8feb38fb65797c5f3b5a9cf2f4c954e2a8cda29732",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Options.dll": "a5a6cd30705512cc512a12d4086c07b7a76243174299aaef6b0dee61832fb0d3",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Extensions.Primitives.dll": "d85aa4a5e5acabb4a96798e2d280153ceb073ba924d0c5d6b5d63fa3f7bfceb8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Win32.TaskScheduler.dll": "3ef8d978dfb0a2611436de1872ef76abbb0f3ab1368bcd2bcd0bb584dbf9d60d",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.Windows.SDK.NET.dll": "c37d2e6b66889551d7de218aa726e90de6e6dd5b794069485f3b23524028e102",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.WindowsAPICodePack.Core.dll": "f4eec0a30b31fefad68cf67c86cf7fd0cfcae23a6b103c6aa9d48eeae49d52e8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Microsoft.WindowsAPICodePack.Shell.dll": "542ef75fb0056d8793e43f27a34b0f0d4245d2331a757ea534916d2310478039",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\NAudio.Core.dll": "4f8d8c4140146674b103c8a3c46fbc4c768a86c0012a167168e3f7da2b3e5c09",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\NAudio.Vorbis.dll": "0ae4de203ffeb14cc5f10859402d3f56e9fe6689c58587d52ba4aa731ef3e8c0",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\NAudio.Wasapi.dll": "a05e371abf96195770ac4f84653d987d63731fed528e98c7fe0d10ce66e37d7e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\NAudio.WinMM.dll": "80807335ee64d5bb26a9de0d1f966a902b5adf32c53b853c8b871937d12b437b",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\NVorbis.dll": "55e7477deeb341058d5543515ed371575a415d8edcf9d0e933a41ca2dee54ad4",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Nefarius.Utilities.Bluetooth.dll": "010b46997f2bea44a9e95b063e106be3e662a93a7a7fab5e5d485644cc48b433",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Nefarius.ViGEm.Client.dll": "59dc888e2cd2542f9fd4a2b85432e81f8014ba4d9ed813d01d0968912cfda036",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\PInvoke.Kernel32.dll": "3122b9c2ccd89b0ff915f4669d60f9ffa1a4d4a8608f61f5df1b29d6298c4c44",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\PInvoke.Windows.Core.dll": "28dc91c7027ba45b07be564a4564cf9e4606b96b01f4b431056e7d77ab25b81c",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Polly.dll": "4fb8ff4f77b031f4ed51aadb0e494ef62c9f4f0a8382b972d34a9999707073dc",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\PrecisionTimer.NET.dll": "62d42848fe362a66ffc4be399b1d8d361458a5cbcc416f8b01ec0f7c65bc3331",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\RestEase.dll": "b767b34c113f4c2bf7a6b852947512728e4987b4f389748d68bb7500c8a720b7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SDL3-CS.dll": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SapientiaUsb.dll": "0b7c5845b94b9caf1c45f7555e54918020eb046e83fd4bd625781bcf7acae9f5",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Sentry.dll": "d55ec4e68438fd515ae059f36c5fea4c5f5db3e610d042c7fcee318b2e0b1ee0",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Extensions.Logging.File.dll": "bde4c4259d58539795864b8879aa0a9bbd917fbce58ad57e821f35952ce269f7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Extensions.Logging.dll": "80d3edbe3e3ac0b4c5bc764474220e7da11df8d285e0098f3dc1b65a734c8507",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Formatting.Compact.dll": "355e3be9137603e9406af1b3997df90c37792223758a0296e3e1d445eee50130",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Settings.Configuration.dll": "de6fb7b6ee3229e0b0b9356ecdbbd05767d6490aaf0c34e9e49dbd7fe1e974a0",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.Async.dll": "f0b3d9b22a74d84b36f424884fa337e0e281a8731d6ac176831348776a5cb083",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.Console.dll": "dc88002ddd9f5fd0ffec9a6568ef89954671f60f2c9161593ee78932538c1e3e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.File.dll": "4f4282671c2ac68284b4dc99f7a76eac9cbd4e659978cef642cff9e6c01b676d",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.Sinks.RollingFile.dll": "7facba54a4c3c0ea9c349d6d0cc29ec2c25b390c9c42056cc1c1aba691cff67e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Serilog.dll": "e6b551a75ff7fff20dd0024670d5c42dfb74afa16d54aa0201106dea400a9505",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Shared.dll": "90c0bb32040d49f1327f77d50514e5fcaccce2ab2e24c8dc0f2105d4cb8039c1",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SharpDX.Direct3D9.dll": "69701eda7433ac0010aba416b9d9c245cd78694770d4bb6b7541b83bace41d55",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SharpDX.DirectInput.dll": "35d9ae6b98c5b68fdc1fcaf6e03c95c82f9305c7355dd911f8841880b42e945f",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SharpDX.XInput.dll": "350195201205840b38aee094bcead4c78b1661f3570a7caa5c36b86ce6d03ff3",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\SharpDX.dll": "518d45a5aaec84cb37e83ee2cf58c503ab6a25febb8c48b53316340c967e84bd",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\System.IO.Ports.dll": "bf486068a47b18358313791b78aca74f4de61d1d9e2e08b58e3bfbf68bf15a2b",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\System.Management.dll": "01f9360d110863f810431c4d29ada0fca89f267343d030e98aa823ea4c0c0ebb",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\System.ServiceProcess.ServiceController.dll": "3274c2553c736435064e398f879404e8944f39790caee6632e6966046b3440e8",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\UEFIVaribleDll.dll": "0ee2a7c74dae5429fa71c6dce191231df40d000b1f1e9b480da4884a169aac13",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WinRT.Runtime.dll": "bcf3a14e8712a90837fc5c0d8c8a24696af2bd7f74e9767597ec81ededfb23db",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WindowsInput.dll": "5567cea4661389a7fdcc51ef222e67b13c2176c9be46e61a88a100188a77c711",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\WpfScreenHelper.dll": "727c1669a6094285f0ed771263a35847b6305b13a59562265aa955cc2e07b76f",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\Xinput1_4.dll": "c89a11166acd59aa27dada45b9c64494221c04acb0b0886ea393c5d36f9071ec",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\controller-hidapi.net.dll": "cd47d72903dbcba4e8c68cd5cc424b8648c12aa8a5c00cf2a30050aa28e4d0ca",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\craftersmine.SteamGridDB.Net.dll": "7c6f9616c49ea8083d5800ccf258a8cf4a35c0f4084fa0a4c7e7cd48dd440564",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\hidapi.dll": "ebeb835e2b4530ed68843f19d6a2604c51772e3c26e7f542fde194075f82d9b4",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\hidapi.net.dll": "5553f2487424b325f750c0fe83bd7961943cc97f2e0d1c24285506374b298f17",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\iNKORE.UI.WPF.Modern.Controls.dll": "44bd61ff288213edcc089b45d7775ce67dec8e5250d50adccc02ef93a4875b19",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\iNKORE.UI.WPF.Modern.dll": "12bc0a3e060d57b24fcfb2c9c17660929ec903eb993d943051a8a849c83bd331",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\protobuf-net.Core.dll": "a7d69d06337d0c32b854cbe862f7a6e4b97e30e785b13ab0d68c1b0e51d5ace1",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\protobuf-net.dll": "78d95efd88bce208a2aa412f193ed534e4b6337f8c15ff9171b8696946200edf",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\ricaun.NamedPipeWrapper.Json.1.8.0.dll": "c3135749f7582710c0db0f01f858adee327df41cd63018eca76e24f7ab96eef9",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\steam-hidapi.net.dll": "2d1d03847ff4f90b6ca7059d55cf7f9cae40eafd31f01cc9974d514de76c52f9",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\manifest.json": "4bd622f2aed6cc045f14e11844208b0f081cdce8c9d1af495b3ad8af15c81362",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Newtonsoft.Json.dll": "a28c251dfe36d881e9e2462e171441b8b0ec156fe3f452602c9149b1b9efe05b",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Nefarius.Utilities.DeviceManagement.dll": "b5eaf086634438f2774f6b65dd14254aaa078bf1ebfeb004f997314b61272b7c",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Nefarius.Drivers.HidHide.dll": "0a59c8a7c5d921a8561b47b2d9d2657a998676efe1a3e8e31991e9721ab0d88f",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\LibreHardwareMonitorLib.dll": "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\RAMSPDToolkit-NDD.dll": "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Nefarius.Vicius.Abstractions.dll": "51f380a12a82e925308e5d6255218df283b692f37b9e991c6ce5e63f3e11d8fa",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Microsoft.Extensions.DependencyInjection.Abstractions.dll": "621f220163119dfb08c8d1dd5bc0df6c038bd9baab0662050042acd7f906b7b7",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\shared\\Microsoft.Extensions.Logging.Abstractions.dll": "5dcb4934cb0dcc5547aeaebebc5bb687cc2522390b7032d68713b29af64f7fd5",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\inputs\\YeManFanHost.json": "b2316017b344c11ed08556a0f6932a2ae6ac6f5e04bbe188d9a89f7596be362e",
+    "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\inputs\\inventory.json": "3b97a5e9c808215cfc521aca023c7c876268d35cf30fdf50dccff4d8bdf89b5d",
+    "C:/Program Files/dotnet/dotnet.exe": "ab1b71fd3dd71062e074c9fab8312081a81b7f2b3e0327c48c4d249c8d1a3135"
+  },
+  "parentIds": [
+    "onex-mini-original-constructed-narrow-open",
+    "onex-mini-original-public-open-skips-led-hid",
+    "onex-original-public-cycle:OneXPlayerX1AMD",
+    "onex-original-public-reopen:OneXPlayerX1AMD",
+    "onex-original-public-cycle:OneXPlayerX1Intel",
+    "onex-original-public-reopen:OneXPlayerX1Intel",
+    "onex-original-public-cycle:OneXPlayerX1Pro",
+    "onex-original-public-reopen:OneXPlayerX1Pro",
+    "onex-original-public-cycle:OneXPlayerApex",
+    "onex-original-public-reopen:OneXPlayerApex",
+    "onex-original-public-cycle:OneXPlayerX1Mini",
+    "onex-original-public-reopen:OneXPlayerX1Mini",
+    "onex-original-unauthorized-open",
+    "onex-original-init-false-retry",
+    "onex-original-init-throw-retry",
+    "onex-original-public-open-cleans-first-dispose-failure",
+    "onex-original-init-cleanup-debt",
+    "onex-original-false-ec-result:duty",
+    "onex-original-false-ec-result:control",
+    "onex-original-release-rejection-retry",
+    "onex-original-dispose-failure-no-repeat-release",
+    "onex-original-foreign-transport",
+    "onex-original-metadata-drift",
+    "onex-original-write-superseded",
+    "onex-original-init-superseded",
+    "onex-original-invalid-duty",
+    "onex-original-foreign-open-marker",
+    "onex-original-manager-busy-close-pending",
+    "onex-original-duty-golden-rounding"
+  ],
+  "parentHc": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HandheldCompanion.dll",
+    "sha256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd",
+    "role": "target",
+    "identity": "HandheldCompanion, Version=0.32.4.0, Culture=neutral, PublicKeyToken=null",
+    "assemblyRefs": [
+      "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "PresentationFramework, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "PresentationCore, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "LibreHardwareMonitorLib, Version=0.9.6.0, Culture=neutral, PublicKeyToken=null",
+      "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "System.Xaml, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+      "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.ComponentModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Drawing.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "HelixToolkit.Core.Wpf, Version=2.27.3.0, Culture=neutral, PublicKeyToken=52aa3500039caf0d",
+      "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Diagnostics.FileVersionInfo, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Microsoft.Windows.SDK.NET, Version=10.0.19041.38, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "iNKORE.UI.WPF.Modern.Controls, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+      "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.ServiceProcess.ServiceController, Version=10.0.0.9, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Sentry, Version=6.6.0.0, Culture=neutral, PublicKeyToken=fba2ec45388e2af0",
+      "System.Configuration.ConfigurationManager, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Xml.ReaderWriter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.NetworkInformation, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Numerics.Vectors, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Windows.Forms, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+      "Nefarius.Drivers.HidHide, Version=3.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "Newtonsoft.Json, Version=13.0.0.0, Culture=neutral, PublicKeyToken=30ad4fe6b2a6aeed",
+      "WindowsInput, Version=6.4.1.0, Culture=neutral, PublicKeyToken=null",
+      "System.Management, Version=10.0.0.3, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Nefarius.Utilities.DeviceManagement, Version=5.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "WpfScreenHelper, Version=2.1.1.0, Culture=neutral, PublicKeyToken=null",
+      "System.ObjectModel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Drawing.Common, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "PInvoke.Kernel32, Version=0.7.0.0, Culture=neutral, PublicKeyToken=9e300f9f87f04a7a",
+      "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Microsoft.Win32.Registry, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.ComponentModel.TypeConverter, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Microsoft.Win32.TaskScheduler, Version=2.10.1.0, Culture=neutral, PublicKeyToken=e25603a88b3aa7da",
+      "iNKORE.UI.WPF.Modern, Version=0.10.2.0, Culture=neutral, PublicKeyToken=538ea1f68f629a04",
+      "iNKORE.UI.WPF, Version=1.2.8.0, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+      "LiveCharts.Wpf, Version=0.9.7.0, Culture=neutral, PublicKeyToken=0bc1f845d1ebb8df",
+      "ColorPicker, Version=3.4.2.3, Culture=neutral, PublicKeyToken=1c61eec504ce2276",
+      "LiveCharts, Version=0.9.7.0, Culture=neutral, PublicKeyToken=0bc1f845d1ebb8df",
+      "SDL3-CS, Version=3.4.10.0, Culture=neutral, PublicKeyToken=null",
+      "GregsStack.InputSimulatorStandard, Version=1.3.5.0, Culture=neutral, PublicKeyToken=null",
+      "craftersmine.SteamGridDB.Net, Version=1.1.7.0, Culture=neutral, PublicKeyToken=null",
+      "IGDB, Version=6.1.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Core, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "Microsoft.WindowsAPICodePack.Shell, Version=8.0.15.2, Culture=neutral, PublicKeyToken=8afb38e9204fc0a9",
+      "GongSolutions.WPF.DragDrop, Version=4.0.0.0, Culture=neutral, PublicKeyToken=91f1945125b7a587",
+      "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Interop.IWshRuntimeLibrary, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "NAudio.Vorbis, Version=1.5.0.0, Culture=neutral, PublicKeyToken=null",
+      "NAudio.WinMM, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+      "Gma.System.MouseKeyHook, Version=5.6.1.0, Culture=neutral, PublicKeyToken=null",
+      "System.IO.Ports, Version=10.0.0.9, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Threading.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.IO.FileSystem.Watcher, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "RTSSSharedMemoryNET, Version=1.0.9481.42931, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.BattleNet, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.EA, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.Epic, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.Gog, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameFinder.StoreHandlers.Xbox, Version=4.9.0.0, Culture=neutral, PublicKeyToken=null",
+      "OneOf, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameFinder.Common, Version=4.9.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Xml.XDocument, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "NexusMods.Paths, Version=0.19.1.0, Culture=neutral, PublicKeyToken=null",
+      "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "GameLib.Plugin.Origin, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.RiotGames, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.Steam, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "GameLib.Plugin.Ubisoft, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "UIAutomationClient, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "UIAutomationTypes, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "SharpDX.XInput, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+      "SharpDX.Direct3D9, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+      "SharpDX, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+      "PrecisionTimer.NET, Version=3.0.0.7, Culture=neutral, PublicKeyToken=4c843feb8daceeca",
+      "System.Net.Ping, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.Http, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "NAudio.Wasapi, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+      "WindowsDisplayAPI, Version=1.3.0.13, Culture=neutral, PublicKeyToken=null",
+      "System.Diagnostics.EventLog, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "Microsoft.Toolkit.Uwp.Notifications, Version=7.1.0.0, Culture=neutral, PublicKeyToken=4aff67a105548ee2",
+      "System.Net.Requests, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+      "hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "SharpDX.DirectInput, Version=4.2.0.0, Culture=neutral, PublicKeyToken=b4dcf0f35e5521f1",
+      "controller-hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Collections.Immutable, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "steam-hidapi.net, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "Shared, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.IO.Compression.ZipFile, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b77a5c561934e089",
+      "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "Crc32.NET, Version=1.0.0.0, Culture=neutral, PublicKeyToken=dc0b95cf99bf4e99",
+      "ColorPicker.Models, Version=1.0.11.0, Culture=neutral, PublicKeyToken=bb95a4442a9c0731",
+      "GameLib.Plugin.Rockstar, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Security.Claims, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "Fastenshtein, Version=1.0.12.0, Culture=neutral, PublicKeyToken=null",
+      "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Runtime.CompilerServices.VisualC, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Windows.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Threading.Tasks.Parallel, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "iNKORE.UI.WPF.Emojis, Version=0.3.6.3, Culture=neutral, PublicKeyToken=cd19e634b9706635",
+      "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading.ThreadPool, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "NAudio.Core, Version=2.3.0.0, Culture=neutral, PublicKeyToken=e279aa5131008a41",
+      "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+    ],
+    "declaredTypes": 1769
+  },
+  "parentHost": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\host\\YeManFanHost.dll",
+    "sha256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+    "role": "target",
+    "identity": "YeManFanHost, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+    "assemblyRefs": [
+      "System.Runtime, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Collections.Concurrent, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Collections, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Text.Json, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Runtime.Loader, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Reflection.Metadata, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Diagnostics.Process, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.IO.FileSystem.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Security.Principal.Windows, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Reflection.Emit.Lightweight, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Text.RegularExpressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Console, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Memory, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "YeManFanBackend, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Threading.Thread, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "WindowsBase, Version=10.0.0.0, Culture=neutral, PublicKeyToken=31bf3856ad364e35",
+      "System.Linq.Expressions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Reflection.DispatchProxy, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.IO.MemoryMappedFiles, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.HttpListener, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Threading.Channels, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "Microsoft.Win32.SystemEvents, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "Microsoft.Win32.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Linq, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.Sockets, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Security.Cryptography, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Security.AccessControl, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Text.Encoding.Extensions, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Reflection.Emit.ILGeneration, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Reflection.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Text.Encodings.Web, Version=10.0.0.0, Culture=neutral, PublicKeyToken=cc7b13ffcd2ddd51",
+      "System.Collections.NonGeneric, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Runtime.InteropServices, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.ComponentModel.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Collections.Specialized, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.Primitives, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Net.WebHeaderCollection, Version=10.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "ConstructorIoPorts, Version=1.0.0.0, Culture=neutral, PublicKeyToken=null",
+      "System.Private.CoreLib, Version=10.0.0.0, Culture=neutral, PublicKeyToken=7cec85d7bea7798e"
+    ],
+    "declaredTypes": 715
+  },
+  "identities": {
+    "authority": "4962fe0496f05b98768b3848d1b812f2a5ea0e51d2bf2109aab005a3d420d4e7",
+    "producer": "c9d62f5ee034930905a33b3285004e564877d1274ae10c7ee6dce958e60fad78",
+    "ports": "3990636701793fe759d8506a99c1bcff2d31043df114c70632f53c9e6aa11630",
+    "STA": "8e5167754aec060fbf92bafd0e2c0e626fb4ebd17cde7f2ed0aedd80ad076800",
+    "HC": "551ce659cb0bba7a503048d90cca7f34cc68078fbe85c20098d64d9f2dca8d2e",
+    "innerHost": "b40f475eeae4e0f0f7aee8a57ffb2ef20979efd9176d07cc11a280eaa87b4d74",
+    "publicHost": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c",
+    "cleanHost": "2b59965fce6909b1a85058e1cf670477090ed858d64eda5484a2fda38eec484a",
+    "Harness": "30d765316ab33b6e2a71f5b0b4ea47449ba389dfa44b0c1c5a13760452efea53"
+  },
+  "hidLibrary": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\onex65-92-positive-r1\\runtime\\HidLibrary.dll",
+    "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa",
+    "identity": "HidLibrary, Version=3.2.49.0, Culture=neutral, PublicKeyToken=null",
+    "role": "target",
+    "assemblyRefs": [
+      "System.Runtime, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Runtime.InteropServices, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading.Overlapped, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Collections, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading.Thread, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Threading, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a",
+      "System.Linq, Version=8.0.0.0, Culture=neutral, PublicKeyToken=b03f5f7f11d50a3a"
+    ],
+    "declaredTypes": 70
+  },
+  "inventoryOriginalHcSHA256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+  "inventoryTypeNames": [
+    "HandheldCompanion.Devices.ClawA1M",
+    "HandheldCompanion.Devices.ClawA2VM",
+    "HandheldCompanion.Devices.ClawBZ2EM",
+    "HandheldCompanion.Devices.MSI.ClawCG3EM",
+    "HandheldCompanion.WMI",
+    "HandheldCompanion.Devices.IDevice",
+    "HandheldCompanion.OpenLibSys"
+  ],
+  "inventoryHidTypes": [
+    "HidLibrary.HidDevice",
+    "HidLibrary.HidDeviceAttributes",
+    "HidLibrary.HidDeviceCapabilities"
+  ],
+  "hcGenerationPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-lifecycle-hc-ten-leaf-generation/SUMMARY.json",
+    "sha256": "8cc3a28680126ed4af8f00a0495963181fd4106e9307125db049bb52f8b2dd9a"
+  },
+  "hostGenerationPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-lifecycle-host-three-leaf-generation/SUMMARY.json",
+    "sha256": "5d0fe20925887548fba93127ea6d3d2bdff475a2acf3e8a9fd9edd91d19c5c8d"
+  },
+  "hcSource": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-onex-lifecycle-hc-ten-leaf-generation-r2\\onex-lifecycle-hc\\owned-stage\\lifecycle-hc\\HandheldCompanion.dll",
+    "sha256": "826d5aa9f678c5a33041038c0b588f1a2d6d32593dae5aa3c8e79638ecf047fd"
+  },
+  "hcTarget": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-hc-ten-leaf-generation\\msi-lifecycle-hc\\owned-stage\\lifecycle-hc\\HandheldCompanion.dll",
+    "sha256": "1827c3e763c0b74fddb2bae6d8b42778d4917d03bfe8a35536c78c23f95d50e1"
+  },
+  "hcChangedMethods": [
+    "HandheldCompanion.WMI/WmiIoResult HandheldCompanion.WMI::GetStructured(System.String,System.String,System.String,System.Byte,System.Int32,System.Int32)",
+    "HandheldCompanion.WMI/WmiIoResult HandheldCompanion.WMI::SetStructured(System.String,System.String,System.String,System.Byte[])",
+    "System.Boolean HandheldCompanion.Devices.ClawA1M::CheckAndFixRegistry()",
+    "System.Boolean HandheldCompanion.Devices.ClawA1M::IsReady()",
+    "System.Boolean HandheldCompanion.Devices.ClawA1M::Open()",
+    "System.Boolean HandheldCompanion.PnPUtil::RestartDevice(System.String)",
+    "System.Byte[] HandheldCompanion.WMI::Get(System.String,System.String,System.String,System.Byte,System.Int32,System.Boolean&)",
+    "System.Collections.Generic.IEnumerable`1<HidLibrary.HidDevice> HandheldCompanion.Devices.IDevice::GetHidDevices(System.Int32,System.Int32[],System.Int32)",
+    "System.Management.ManagementBaseObject HandheldCompanion.WMI::Set(System.String,System.String,System.String,System.Byte[])",
+    "System.Void HandheldCompanion.Devices.ClawA1M::Close()"
+  ],
+  "hostSource": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r64-public-host-five-leaf-generation\\public-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+    "sha256": "9cc049f4eb32dfabc620d539b6f48b21eb0050623989a667f6ae3e8e3fd1aa2c"
+  },
+  "hostTarget": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-lifecycle-host-three-leaf-generation\\msi-host\\owned-stage\\fault-host\\YeManFanHost.dll",
+    "sha256": "4a461bee291d72b083d93736301ffddfb71846068bbc086ee0163e53696f97d5"
+  },
+  "hostChangedMethods": [
+    "System.Collections.Generic.IReadOnlyList`1<System.String> YeManFanHost.RealHcBackend::EnumerateMsiPnpDeviceIds()",
+    "System.Void YeManFanHost.RealHcBackend::PrepareMsiWmiPayloadBeforeOpen()",
+    "YeManFanHost.MsiWmiMetadataProbe YeManFanHost.RealHcBackend::ProbeMsiWmiInstance(System.String)"
+  ],
+  "faultSelectors": {
+    "narrow-open": {
+      "type": "YeManFanHost.RealHcBackend",
+      "name": "OpenHcDevice"
+    },
+    "usable": {
+      "type": "YeManFanHost.MsiFanDeviceLifecycle",
+      "name": "Open"
+    },
+    "firmware": {
+      "type": "YeManFanHost.MsiFanDeviceLifecycle",
+      "name": "Open"
+    },
+    "release-dispatch": {
+      "type": "YeManFanHost.MsiFanDeviceLifecycle",
+      "name": "Close"
+    },
+    "settlement": {
+      "type": "YeManFanHost.RealHcBackend",
+      "name": "SettleMsiCloseRelease"
+    },
+    "binding": {
+      "type": "YeManFanHost.RealHcBackend",
+      "name": "ReadMsiStructuredRelease"
+    }
+  },
+  "sourcePins": [
+    {
+      "relative": "msi-lifecycle-proof.mjs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/msi-lifecycle-proof.mjs",
+      "sha256": "77274fdcb849b84f6fe83b5e372376e47ef884e2ecfb98ebfdb6d7300272fee1"
+    },
+    {
+      "relative": "MsiLifecycleInstrumentation.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiLifecycleInstrumentation.cs",
+      "sha256": "27e339f417b364837b0f0b5801a005e7b62a674434b3c9f6acf674d44add7db9"
+    },
+    {
+      "relative": "JoinedMsiLifecycleCases.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedMsiLifecycleCases.cs",
+      "sha256": "6e502397f3d8da2aeb6b91ea8e60b3e00295b1e273bf2f52679149dbe7fcab3f"
+    },
+    {
+      "relative": "MsiLifecycleIoPorts.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiLifecycleIoPorts.cs",
+      "sha256": "318b3cfa4d37f85923d7b2f887bd59cc0105dc460e5482b505e88dd132c65d27"
+    },
+    {
+      "relative": "MsiHidLoad.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/MsiHidLoad.cs",
+      "sha256": "b9de0032c36ffbe1e157360c5c45c20c083690e0c33ae8409e4c910b19a8a88d"
+    },
+    {
+      "relative": "JoinedFactoryEntry.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryEntry.cs",
+      "sha256": "39e302e7937f9e3acfd1bfccbd23dcceea7a4dddfa6797127a337a6288a70f3d"
+    },
+    {
+      "relative": "JoinedFactoryProbe.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/JoinedFactoryProbe.cs",
+      "sha256": "da6fe877d16abc596d7d9ec9d7430a6f5c6727fe317e24b51f646140aadc3a1c"
+    },
+    {
+      "relative": "ConstructorIoPorts.cs",
+      "path": "G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/ymcc_sim/global/onex-fan-coexistence/ConstructorIoPorts.cs",
+      "sha256": "e57d37ccdc3db699517ee670f1f7bd9f8ccc2a10cd9fa008690dcc1bd4cf3a0f"
+    }
+  ],
+  "inventoryGenerationPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-original-hc-hid-inventory-generation/SUMMARY.json",
+    "sha256": "868c96fd947408b9a02f1e0c30225f87b6f97251c16e49a2a4c06e4d9b32e622"
+  },
+  "inventorySummaryPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-original-hc-hid-inventory-generation/msi-original-metadata-inventory/SUMMARY.json",
+    "sha256": "7a765e7d0c86ba7c4308dcd973177192740fc4b2f35703ef0c8a882ec56fa4e6"
+  },
+  "inventoryResultPin": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-original-hc-hid-inventory-generation\\msi-original-metadata-inventory\\owned-stage\\msi-original-hc-hid-inventory.json",
+    "sha256": "070ccd7ecc4294684d28e51d7729e1d7d00175e9a265e7d09bb89694ec4a0927"
+  },
+  "inventoryProcessPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-original-hc-hid-inventory-generation/msi-original-metadata-inventory/GENERATION-PROCESS.json",
+    "sha256": "531c0d450985246fef58b4161095033d61dd3d36854fded0b033cc3e7b8fde90"
+  },
+  "inventoryOriginalHcPin": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-fan-current-source-candidate-build-20261021-r1\\actual-build-r3\\candidate\\PowerControl\\handheldcompanion-runtime\\YMCC-DEVICECORE-20261018-v1\\HandheldCompanion.dll",
+    "sha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583"
+  },
+  "faultGenerationPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/SUMMARY.json",
+    "sha256": "537c13f8b38877fcb73f9a58309ac56b2f45d332703b7eaa572481ebada95d7c"
+  },
+  "faultProofs": {
+    "narrow-open": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\narrow-open\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "b9c7dd29aaca835886018e0b616ebaf1223c984a738f8a84db45fa6b754be281"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\narrow-open\\owned-stage\\fault-proof.json",
+        "sha256": "af26dafe78354893e0b3184cdcb25f2f40234d12154056a564372e4121189516"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/narrow-open/SUMMARY.json",
+        "sha256": "5b96ab06040acf5df2db10f7e25cb740617d211c1fd8fbc1246a19d704d8aa47"
+      }
+    },
+    "usable": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\usable\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "e67c7acda23244977150c7c58821759c3f55b4d50586ed0cd449252780eaa1cf"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\usable\\owned-stage\\fault-proof.json",
+        "sha256": "1f51ea3c64f97159ef4d79d2816a3ca1232766849bd41b463284a3841b85cd78"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/usable/SUMMARY.json",
+        "sha256": "d29f999caadcb396b4f20f720c02c284d2e65f346692397484569e5b77afb05f"
+      }
+    },
+    "firmware": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\firmware\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "ad34a1892910955e51f2dc676ae07192eed1e8648fd3aa0acfae1d4fb8f40d1a"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\firmware\\owned-stage\\fault-proof.json",
+        "sha256": "86fe6119effeb837d0d5368e74bbb7901965c6c0f9ce69a766d9e161e83edbca"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/firmware/SUMMARY.json",
+        "sha256": "c2b620de129d9d53d9b701f32337f37d03d30e31c75c1cb05709de2d7ece64e1"
+      }
+    },
+    "release-dispatch": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\release-dispatch\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "99c0636edd74cdddd77f51eaa0eced66f87e8ca5be1bf2fe8ee8115213b42e98"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\release-dispatch\\owned-stage\\fault-proof.json",
+        "sha256": "77de35aa0d897706d96cf7c0b65cba6cbf0f8fd5f8f1613bda3a8ed19b114ed9"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/release-dispatch/SUMMARY.json",
+        "sha256": "6986d8065506ea0872ddb1facf9eff5edba3cc8839962ba92522138c1d3de6ad"
+      }
+    },
+    "settlement": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\settlement\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "032bedffb57c60eb34f081dead7678c2f9d6ca3a4d3666fe57cd1ce0e86ce58e"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\settlement\\owned-stage\\fault-proof.json",
+        "sha256": "e95729a30a8fead1052ca8d5119fffcf2e03234d0cea98b0abe34d906a854db5"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/settlement/SUMMARY.json",
+        "sha256": "d7fdd41a8ee7e9f35eaacd5e4446a8aa39098971984c1d2e84695c32f1437854"
+      }
+    },
+    "binding": {
+      "target": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\binding\\owned-stage\\fault-host\\YeManFanHost.dll",
+        "sha256": "b3d7f28e03ee08428c4270f4c75c61f8de899ac0b6775055b0d0b62bd4dc3202"
+      },
+      "proof": {
+        "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\global-simulator-20261018\\phase32\\r65-msi-six-original-lifecycle-fault-generation\\binding\\owned-stage\\fault-proof.json",
+        "sha256": "404259282827461954d9344debae5878349d2f2ca995339469d01c0c89db9a0c"
+      },
+      "summary": {
+        "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-original-lifecycle-fault-generation/binding/SUMMARY.json",
+        "sha256": "40647a9fb3d55c03d529725b049cb4f53f5927eba078e37232d3a06c60b46445"
+      }
+    }
+  },
+  "faultRawReviewPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-six-lifecycle-fault-raw-review-r2/SUMMARY.json",
+    "sha256": "a4d64dccfe8aceb588ce429bfccd98bc07707225cb202c357e49de057c83451b"
+  },
+  "reportScopeErratumPin": {
+    "path": "D:/Codex/2026-10-18/kai-s/work/global-simulator-20261018/phase32/r65-msi-generation-template-scope-erratum.json",
+    "sha256": "78fd56f2159fc35de4d827e67900204bb899583f2f9942e3ad3ab4631c41ae73"
+  }
+}

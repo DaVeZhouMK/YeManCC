@@ -7,7 +7,7 @@ import InlineIcon from './InlineIcon.vue';
     <div class="tb-brand">
       <span class="tb-bolt"><InlineIcon name="yeman" /></span>
       <div class="tb-titles">
-        <span class="tb-title">YeMan Control Center</span>
+        <span class="tb-title">YeManCC野蛮系统控制中心</span>
         <span class="tb-sub">野蛮系统控制中心</span>
       </div>
     </div>

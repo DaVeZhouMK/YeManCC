@@ -1,0 +1,16 @@
+{
+  "schema": 1,
+  "historicalCommit": "06c0b9544db2b1f39abf9cd3796225ccfb096103",
+  "gamepad": {
+    "path": "HandheldCompanion/Helpers/GamepadMotion.cs",
+    "sha256": "7ba36f0dcb0e280d526e5b09e95888af58b98927b3c83001858817ec12fb23ed",
+    "gitBlob": "b936bc6ac5ab3282dd4d439b8822a59ab11c5407"
+  },
+  "madgwick": {
+    "path": "HandheldCompanion/Misc/MadgwickAHRS.cs",
+    "archive": "Archives/HC/pre-candidate-20260902-1535/active-hc-source/Misc/MadgwickAHRS.cs",
+    "sha256": "c17583ba5963be5e9c29a203911a63bc3a2c8ce197b4c0b6baa9459188dd1741",
+    "gitBlob": "6ec68719dcaa3603763b188940ff80af21b9d013"
+  },
+  "oracleScope": "nonzero-gradient current main.cpp ymccMadgwickUpdate including dt<=0 return; HC wrapper axes mapping; controller-only exact-zero-gradient correction omitted while continuing gyro integration; not full HC bit equivalence"
+}

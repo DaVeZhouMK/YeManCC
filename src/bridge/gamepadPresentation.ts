@@ -4,6 +4,7 @@ export interface GamepadPresentation {
   readonly name: string;
   readonly buttons: readonly boolean[];
   readonly axes: readonly number[];
+  readonly oemPressedKeys: readonly string[];
 }
 
 export const EMPTY_GAMEPAD_PRESENTATION: GamepadPresentation = Object.freeze({
@@ -11,9 +12,10 @@ export const EMPTY_GAMEPAD_PRESENTATION: GamepadPresentation = Object.freeze({
   name: '',
   buttons: Object.freeze([] as boolean[]),
   axes: Object.freeze([] as number[]),
+  oemPressedKeys: Object.freeze([] as string[]),
 });
 
-type Snapshot = { connected?: unknown; name?: unknown; buttons?: unknown; axes?: unknown };
+type Snapshot = { connected?: unknown; name?: unknown; buttons?: unknown; axes?: unknown; oemPressedKeys?: unknown };
 
 function axis(value: unknown): number {
   const n = Number(value);
@@ -38,10 +40,11 @@ export function reduceGamepadPresentation(previous: GamepadPresentation, payload
   const name = String(raw.name || '手柄');
   const buttons = updateValues(previous.buttons, raw.buttons, Boolean);
   const axes = updateValues(previous.axes, raw.axes, axis);
-  if (connected === previous.connected && name === previous.name && buttons === previous.buttons && axes === previous.axes) {
+  const oemPressedKeys = updateValues(previous.oemPressedKeys, raw.oemPressedKeys, (v) => typeof v === 'string' ? v : '');
+  if (connected === previous.connected && name === previous.name && buttons === previous.buttons && axes === previous.axes && oemPressedKeys === previous.oemPressedKeys) {
     return previous;
   }
-  return { connected, name, buttons, axes };
+  return { connected, name, buttons, axes, oemPressedKeys };
 }
 
 /**

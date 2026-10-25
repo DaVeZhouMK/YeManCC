@@ -1,0 +1,33 @@
+namespace sdk_native_cases {
+using Reader=ymcc::sensors::sensorapi::PrivateReader;namespace tf=typed_fixture;namespace transport=private_sdk_transport;
+static GUID guid(unsigned v){GUID id{};id.Data1=v;return id;}
+static ss::PairChoice ids(unsigned gyro=3){return{ymcc::sensors::sensorapi::sourceId(guid(gyro)),ymcc::sensors::sensorapi::sourceId(guid(2))};}
+static void install(const std::shared_ptr<transport::Shared>& state){Reader::factoryForTest()=[state](ISensorManager** out){if(!out)return E_POINTER;*out=new transport::Manager(state);return S_OK;};}
+static void reset(){tf::resetSdk();tf::fakeNow=::GetTickCount64();tf::failOpenKind=0;}
+static void drain(const std::shared_ptr<transport::Shared>& state){Reader::factoryForTest()={};tf::check(transport::await([&]{return Reader::quarantined()==0&&state->managers==0;}),"actual SDK owner exits and quarantine is reclaimed");tf::check(!state->writes&&!state->permissions&&!state->managers&&!state->sensors&&!state->reports,"read-only SDK capture leaves no live COM objects or device changes");}
+static void run(){
+ {reset();tf::Backend b;const auto saved=b.active;const auto parent=b.parent();auto state=std::make_shared<transport::Shared>();state->ambiguous=true;install(state);
+  ss::SelectionTransaction transaction;auto proposal=tf::request(1);proposal.pair=ids();const auto result=transaction.apply(proposal,b.ops());
+  tf::check(result.outcome==ss::Outcome::Committed&&result.currentInputObserved,"actual native SensorAPI prepare plus actual transaction forms a committed source");
+  tf::check(b.active.api==std::array<std::string,2>{"sensorapi","sensorapi"},"native adoption retains actual SDK API provenance");
+  tf::check(tf::opened==0&&tf::handlers.empty(),"SDK-only selection never opens a typed WinRT source");
+  tf::check(ymcc::windows_motion::current(parent.scope.binding)&&!ymcc::windows_motion::current(saved.scope.binding),"default capture survives independent choice retirement");
+  auto active=tf::Backend::current(&b);tf::check(ss::frameCurrent(active,tf::GetTickCount64()),"actual decoded SDK private-cache frame is current after adoption");
+  if(active.frame){for(unsigned kind=0;kind<2;++kind){const auto& value=active.frame->values[kind];const auto expected=kind?std::array<double,3>{.25,-.5,1}:std::array<double,3>{31,32,33};tf::check(std::array<double,3>{value.sample.x,value.sample.y,value.sample.z}==expected,"exact source raw numbers survive native lease");tf::check(value.api=="sensorapi"&&!value.readingTransform&&value.standardSdkLayout==ss::standardSdkLayout(kind),"actual standard layout does not manufacture WinRT coordinates");tf::check(value.sample.timestamp100ns>0&&value.sample.receipt>0&&value.sequence>=2,"original progressing SDK timing reaches native private cache");}}
+  tf::check(b.active.calibrationKey.ends_with("SENSORAPI-DPS-G-NATIVE")&&b.active.calibrationKey!=saved.calibrationKey,"actual native source owns its API-qualified calibration key");
+  const auto old=active;const auto returned=transaction.returnDefault(2,saved,b.ops());tf::check(returned.outcome==ss::Outcome::Committed&&ss::sameRoute(saved,b.active),"return-default restores original route and calibration identity under fresh authority");tf::check(!ss::frameCurrent(old,tf::GetTickCount64()),"prior explicit SDK frame cannot be revived after return-default");tf::check(old.captureLease&&!old.captureLease->load(),"native close revokes capture lifetime separately from retired choice");b.cleanup();drain(state);
+ }
+ for(const std::string failure:{"missing-id","duplicate-id","missing-provider","different-provider","denied"}){reset();tf::Backend b;const auto original=b.active;auto state=std::make_shared<transport::Shared>();state->ambiguous=true;state->duplicateIds=failure=="duplicate-id";state->missingProvider=failure=="missing-provider";state->differentProvider=failure=="different-provider";state->denied=failure=="denied";install(state);
+  auto proposal=tf::request(1);proposal.pair=ids(failure=="missing-id"?999:failure=="duplicate-id"?1:3);ss::SelectionTransaction transaction;const auto result=transaction.apply(proposal,b.ops());
+  tf::check(result.outcome==ss::Outcome::Rejected&&b.adopts==0,"unqualified SDK candidate cannot change route: "+failure);tf::check(ss::unchanged(original,b.active),"default source and calibration remain owned after candidate failure: "+failure);tf::check(tf::opened==0,"no implicit WinRT retry for failed explicit SDK pair");b.cleanup();drain(state);
+ }
+ for(const bool enumeration:{false,true}){reset();tf::Backend b;const auto original=b.active;auto state=std::make_shared<transport::Shared>();state->ambiguous=true;state->block=!enumeration;state->blockEnumeration=enumeration;install(state);
+  tf::onPump=[&]{if(WaitForSingleObject(state->readEntered,0)==WAIT_OBJECT_0)b.cancel=true;};auto proposal=tf::request(1);proposal.pair=ids();ss::SelectionTransaction transaction;const auto started=::GetTickCount64();const auto result=transaction.apply(proposal,b.ops());
+  tf::check(result.outcome!=ss::Outcome::Committed&&b.adopts==0&&ss::unchanged(original,b.active),"cancellation of actual blocked SDK prepare preserves working default");tf::check(::GetTickCount64()-started<1200,"cancellation does not wait for a blocked device to finish");tf::check(Reader::quarantined()>=1,"cancelled blocking native candidate remains quarantined");
+  Reader next;auto other=std::make_shared<transport::Shared>();other->ambiguous=true;const bool stacked=next.start(ids(),701,[other](ISensorManager** out){*out=new transport::Manager(other);return S_OK;});tf::check(!stacked&&other->managers==0,"a new native reader cannot stack on an unfinished blocked sensor");if(stacked)next.close();SetEvent(state->release);tf::onPump={};b.cleanup();drain(state);
+ }
+}
+}
+int main(int argc,char**argv){if(argc!=2)return 2;try{sdk_native_cases::run();}catch(const std::exception& e){typed_fixture::failures.push_back(std::string("fixture exception: ")+e.what());}
+const json report={{"status",typed_fixture::failures.empty()?"pass":"fail"},{"checks",typed_fixture::checks},{"failures",typed_fixture::failures},{"actualSdkProvider",true},{"actualNativePrivatePreparation",true},{"actualPrivateCache",true},{"actualSelectionCore",true},{"adoptionAndDefaultSourceControlled",true},{"typedWinrtSourceOpened",typed_fixture::opened!=0},{"processingOwnerExecuted",false},{"normalHostStarted",false},{"hardwareIo",false},{"newProductDlls",json::array()}};
+std::ofstream(argv[1])<<report.dump(2);std::cout<<typed_fixture::checks<<" checks / "<<typed_fixture::failures.size()<<" failures\n";return typed_fixture::failures.empty()?0:1;}

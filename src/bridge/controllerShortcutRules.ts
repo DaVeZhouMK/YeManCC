@@ -1,3 +1,5 @@
+import { CONTROLLER_PERSONA_OPTIONS, migrateControllerPersona } from './controllerPersona';
+import { isRadialTestingEnabled } from '../radial/testingState';
 /**
  * Persisted controller shortcut schema. It contains no device reads; native
  * owns admission and executes the supported keyboard.* actions from it.
@@ -17,8 +19,8 @@ export type ControllerShortcutRecordMode = 'controller' | 'keyboard-mouse' | 'oe
 
 /**
  * 本机专用键（掌机背部/专用按键）清单，由 native oem.keys.get 提供。
- * 排序遵循 HC ButtonFlags 数值序（背部键 L4(46)<L5(47)<R4(48)<R5(49)；
- * 专用键 OEM1(30)<OEM2(31)<OEM3(32)<OEM4(33)），由机型库在生成时排定。
+ * 机型库提供界面顺序和正面透视图背键位置；物理排列可与 HC OEM 编号序不同。
+ * keyId 保持来源语义，不能按界面左右重编号或改写已保存的规则。
  */
 export type OemTriggerCapability = 'full' | 'click-only'; // click-only：WMI 一次性事件（MSI CLAW/QS），仅 press/double
 export type OemKeyPhysicalForm = 'keyboard-vk' | 'hid-button' | 'wmi-event' | 'embedded';
@@ -28,11 +30,13 @@ export interface OemSpecialKey {
   backIndex: number | null;      // 1-4 背部键位（背部键才有；非背部如 CLAW/QS 为 null）
   triggerCapability: OemTriggerCapability;
   physicalForm?: OemKeyPhysicalForm; // 采集形态（键盘 VK / HID 按钮 / WMI 事件 / 嵌入式）
+  captureImplemented?: boolean; // 缺省沿用旧机型行为；false 仅保留目录展示
+  captureReason?: string; // 内部能力原因，不直接展示给用户
 }
 export interface OemKeysSnapshot {
   familyId: string;
   supported: boolean;            // 本机是否有机型库适配
-  keys: OemSpecialKey[];         // 已按 HC 排序
+  keys: OemSpecialKey[];         // 机型库的界面顺序，非输入/输出位编号
 }
 export const OEM_EMPTY_SNAPSHOT: OemKeysSnapshot = { familyId: 'unknown', supported: false, keys: [] };
 
@@ -40,6 +44,7 @@ export const OEM_EMPTY_SNAPSHOT: OemKeysSnapshot = { familyId: 'unknown', suppor
  * 规范化 native oem.keys.get 的原始 JSON（纯函数，无 ipc 依赖，可单测）。
  * 未知/损坏字段 fail-closed：键缺少 keyId/label 丢弃；supported 仅在清单非空且
  * 声明 supported=true 时成立；triggerCapability 非 click-only 一律按 full 处理。
+ * captureImplemented 缺省不补字段，存在但非 boolean 时按 false；reason 只保留 string。
  */
 export function normalizeOemKeysSnapshot(raw: unknown): OemKeysSnapshot {
   if (!raw || typeof raw !== 'object') return OEM_EMPTY_SNAPSHOT;
@@ -51,6 +56,10 @@ export function normalizeOemKeysSnapshot(raw: unknown): OemKeysSnapshot {
         .map((k) => ({
           keyId: String(k.keyId),
           label: String(k.label),
+          ...(Object.prototype.hasOwnProperty.call(k, 'captureImplemented')
+            ? { captureImplemented: typeof k.captureImplemented === 'boolean' ? k.captureImplemented : false }
+            : {}),
+          ...(typeof k.captureReason === 'string' ? { captureReason: k.captureReason } : {}),
           // native 用 0 表示非背部；统一归一为 null（背部卡牌仅认 1-4）
           backIndex: Number.isFinite(k.backIndex) && Number(k.backIndex) >= 1 && Number(k.backIndex) <= 4 ? Number(k.backIndex) : null,
           triggerCapability: k.triggerCapability === 'click-only' ? 'click-only' as const : 'full' as const,
@@ -69,7 +78,7 @@ export type ControllerShortcutRuleOrigin = 'native-default' | 'custom';
 
 /**
  * Actions already owned by the original YMCC shortcut route.
- * 2026-09-28 用户裁决：这 9 条默认定义保持不变，但退居为**隐藏模板**——
+ * 2026-09-28 用户裁决：默认定义由此表维护，作为**隐藏模板**——
  *   · 无配置时自动生成初始规则（自动配置）；
  *   · “恢复默认快捷键”用它整体复写当前配置；
  *   · 不再作为占用预留拦截自定义规则（自定义可以改一切）。
@@ -77,12 +86,11 @@ export type ControllerShortcutRuleOrigin = 'native-default' | 'custom';
  * keyboard.* 规则由规则表执行。
  */
 export const NATIVE_DEFAULT_SHORTCUTS: ReadonlyArray<{
-  defaultKey: 'enabled' | 'bDoubleMinimize' | 'startDoubleF7' | 'tdpShortcut' | 'fpsShortcut' | 'killGame' | 'openKeyboard' | 'returnDesktop' | 'mouseToggle';
+  defaultKey: 'enabled' | 'bDoubleMinimize' | 'tdpShortcut' | 'fpsShortcut' | 'killGame' | 'openKeyboard' | 'returnDesktop' | 'mouseToggle';
   actionId: string;
 }> = [
   { defaultKey: 'enabled', actionId: 'window.summon' },
   { defaultKey: 'bDoubleMinimize', actionId: 'window.hideToTray' },
-  { defaultKey: 'startDoubleF7', actionId: 'keyboard.numeric' },
   { defaultKey: 'tdpShortcut', actionId: 'power.tdpAdjust' },
   { defaultKey: 'fpsShortcut', actionId: 'display.brightnessAdjust' },
   { defaultKey: 'killGame', actionId: 'game.killCurrent' },
@@ -146,7 +154,9 @@ export const CONTROLLER_TRIGGER_OPTIONS = [
 const amountOptions = (unit: string) => Array.from({ length: 20 }, (_, index) => ({ value: String(index + 1), label: `${index + 1}${unit}` }));
 const numberKeyboardOptions = [
   ...Array.from({ length: 10 }, (_, index) => ({ value: `Digit${index}`, label: String(index) })),
-  ...Array.from({ length: 12 }, (_, index) => ({ value: `F${index + 1}`, label: `F${index + 1}` })),
+  ...Array.from({ length: 24 }, (_, index) => ({ value: `F${index + 1}`, label: `F${index + 1}` })),
+  ...Array.from({ length: 10 }, (_, index) => ({ value: `Numpad${index}`, label: `数字区 ${index}` })),
+  ...[{ value: 'NumLock', label: 'Num' }, { value: 'NumpadDivide', label: '数字区 /' }, { value: 'NumpadMultiply', label: '数字区 *' }, { value: 'NumpadSubtract', label: '数字区 -' }, { value: 'NumpadAdd', label: '数字区 +' }, { value: 'NumpadDecimal', label: '数字区 .' }, { value: 'NumpadEnter', label: '数字区 Enter' }],
 ];
 const symbolKeyboardOptions = [
   { value: 'Backquote', label: '~' }, { value: 'Digit1', label: '!' }, { value: 'Digit2', label: '@' },
@@ -154,36 +164,55 @@ const symbolKeyboardOptions = [
   { value: 'Digit6', label: '^' }, { value: 'Digit7', label: '&' }, { value: 'Digit8', label: '*' },
   { value: 'Digit9', label: '(' }, { value: 'Digit0', label: ')' }, { value: 'Minus', label: '_' },
   { value: 'Equal', label: '+' },
+  { value: 'BracketLeft', label: '{' }, { value: 'BracketRight', label: '}' }, { value: 'Backslash', label: '|' }, { value: 'Semicolon', label: ':' }, { value: 'Quote', label: '"' }, { value: 'Comma', label: '<' }, { value: 'Period', label: '>' }, { value: 'Slash', label: '?' },
 ];
 const letterKeyboardOptions = Array.from({ length: 26 }, (_, index) => {
   const letter = String.fromCharCode(65 + index);
   return { value: `Key${letter}`, label: letter };
 });
 const leftKeyboardFunctionOptions = [
+  { value: 'Tab', label: 'Tab' }, { value: 'Space', label: 'Space' },
+  { value: 'Backquote', label: '`' }, { value: 'Minus', label: '-' }, { value: 'Equal', label: '=' }, { value: 'BracketLeft', label: '[' }, { value: 'BracketRight', label: ']' }, { value: 'Backslash', label: '\\' }, { value: 'Semicolon', label: ';' }, { value: 'Quote', label: "'" }, { value: 'Comma', label: ',' }, { value: 'Period', label: '.' }, { value: 'Slash', label: '/' },
   { value: 'ShiftLeft', label: 'Shift' }, { value: 'AltLeft', label: 'Alt' },
   { value: 'Enter', label: 'Enter' }, { value: 'MetaLeft', label: 'Win' },
   { value: 'CapsLock', label: 'Caps' }, { value: 'Escape', label: 'Esc' },
   { value: 'ControlLeft', label: 'Ctrl' }, { value: 'Backspace', label: '退格' },
 ];
 const rightKeyboardFunctionOptions = [
+  { value: 'ShiftRight', label: '右 Shift' }, { value: 'AltRight', label: '右 Alt' }, { value: 'ControlRight', label: '右 Ctrl' }, { value: 'MetaRight', label: '右 Win' }, { value: 'ContextMenu', label: '菜单' },
+  { value: 'ArrowUp', label: '↑' }, { value: 'ArrowDown', label: '↓' }, { value: 'ArrowLeft', label: '←' }, { value: 'ArrowRight', label: '→' },
   { value: 'PrintScreen', label: '截图' }, { value: 'ScrollLock', label: 'Scroll' }, { value: 'Pause', label: 'Pause' },
   { value: 'Insert', label: 'Insert' }, { value: 'Home', label: 'Home' }, { value: 'PageUp', label: 'PgUp' },
   { value: 'Delete', label: 'Delete' }, { value: 'End', label: 'End' }, { value: 'PageDown', label: 'PgDn' },
 ];
 
 export const CONTROLLER_SHORTCUT_ACTIONS: ControllerShortcutAction[] = [
+  { id: 'radial.summon', label: '呼出触摸轮盘', category: '窗口', scope: 'native-global', get available() { return isRadialTestingEnabled(); } },
   { id: 'window.summon', label: '呼出 YMCC', category: '窗口', scope: 'native-global', available: true },
-  { id: 'window.hideToTray', label: '隐藏到托盘', category: '窗口', scope: 'native-global', available: true },
+  { id: 'window.hideToTray', label: '隐藏 YMCC', category: '窗口', scope: 'native-global', available: true },
+  { id: 'os.switchProgram', label: '切换程序', category: '系统', scope: 'hybrid', available: true },
+  { id: 'monitor.toggle', label: '监控显示开关', category: '系统', scope: 'hybrid', available: true,
+    parameters: [{ id: 'operation', label: '操作', type: 'select', default: 'toggle', options: [{value:'toggle',label:'显示 / 隐藏切换'},{value:'show',label:'显示监控'},{value:'hide',label:'隐藏监控'}] }] },
+  { id: 'display.frameRateControl', label: '锁帧控制', category: '性能', scope: 'hybrid', available: true,
+    description: '沿用当前供电侧与现有游戏专属配置的独立锁帧，不改变性能调度档位。',
+    parameters: [{ id:'operation',label:'操作',type:'select',default:'toggle',options:[{value:'toggle',label:'关闭锁帧 / 指定帧率切换'},{value:'set',label:'设置指定帧率'}]},
+      {id:'fps',label:'指定帧率',type:'select',default:'60',options:[15,20,25,30,40,45,50,60,72,90,120,144,165,200,240,300].map(fps=>({value:String(fps),label:fps+' FPS'}))}] },
+  { id: 'fan.switchPreset', label: '风扇预设切换', category: '性能', scope: 'hybrid', available: true,
+    description: '选择已有预设曲线；风扇控制关闭时只保存选择，不自动开启控制。',
+    parameters: [{id:'preset',label:'预设',type:'select',default:'next',options:[{value:'next',label:'循环切换已有预设'},{value:'soft',label:'轻柔转速'},{value:'balanced',label:'均衡转速'},{value:'aggressive',label:'暴力转速'}]}] },
+  { id: 'app.launchQuickApp', label: '启动快捷应用', category: '系统', scope: 'hybrid', available: true,
+    description: '选择当前快捷应用列表中的项目，按保存路径识别，不因列表重新排序启动其他应用。',
+    parameters: [{id:'appPath',label:'快捷应用',type:'select',default:'',options:[]}] },
   { id: 'app.exit', label: '退出软件', category: '窗口', scope: 'native-global', available: false },
   { id: 'os.returnDesktop', label: '返回桌面', category: '系统', scope: 'native-global', available: true },
   { id: 'game.killCurrent', label: '结束当前游戏', category: '游戏', scope: 'native-global', available: true },
   { id: 'os.openTouchKeyboard', label: '打开触控键盘', category: '系统', scope: 'native-global', available: true },
-  { id: 'mouse.toggle', label: '切换鼠标模式', category: '输入', scope: 'native-global', available: true },
+  { id: 'mouse.toggle', label: '模拟鼠标', category: '输入', scope: 'native-global', available: true },
   {
     id: 'input.frontendButton', label: '前端呼出按钮', category: '输入', scope: 'native-global', available: true,
-    description: 'Steam / PS / Xbox 发送对应虚拟手柄的菜单键，需对应虚拟手柄已开启；Gamebar 发送 Win+G。不切换预设、不记忆按键状态。',
+    description: 'Steam 键和三点键根据实际虚拟手柄路由：运行中的 Steam Deck 分别发送对应专用键；无虚拟手柄时按 Ctrl+1 回退。PS / Xbox 需对应虚拟手柄；Gamebar 发送 Win+G。不切换预设。',
     parameters: [{ id: 'button', label: '呼出按钮', type: 'select', default: 'steam', options: [
-      { value: 'steam', label: 'Steam' }, { value: 'ps', label: 'PS' },
+      { value: 'steam', label: 'Steam 键' }, { value: 'steamQuickAccess', label: 'Steam 三点键' }, { value: 'ps', label: 'PS' },
       { value: 'xbox', label: 'Xbox' }, { value: 'gamebar', label: 'Gamebar【Win+G】' },
     ] }],
   },
@@ -199,7 +228,7 @@ export const CONTROLLER_SHORTCUT_ACTIONS: ControllerShortcutAction[] = [
     id: 'input.virtualGamepadToggle', label: '虚拟手柄开关', category: '输入', scope: 'native-global', available: true,
     description: '已开启则关闭，已关闭则按所选预设开启。仅本次运行生效，不记忆开关或改写全局/游戏专用配置。',
     parameters: [{ id: 'preset', label: '开启预设', type: 'select', default: 'steamdeck', options: [
-      { value: 'steamdeck', label: 'SteamDeck' }, { value: 'dualsense-edge', label: 'PS5' }, { value: 'elite', label: 'Xbox' },
+      ...CONTROLLER_PERSONA_OPTIONS.filter(option => option.value !== 'disabled'),
     ] }],
   },
   {
@@ -208,7 +237,7 @@ export const CONTROLLER_SHORTCUT_ACTIONS: ControllerShortcutAction[] = [
   },
   {
     id: 'keyboard.symbol', label: '符号键盘', category: '键盘', scope: 'native-global', available: true,
-    parameters: [{ id: 'key', label: '按键', type: 'select', presentation: 'key-grid', gridColumns: 7, default: 'Tilde', options: symbolKeyboardOptions }],
+    parameters: [{ id: 'key', label: '按键', type: 'select', presentation: 'key-grid', gridColumns: 7, default: 'Backquote', options: symbolKeyboardOptions }],
   },
   {
     id: 'keyboard.letter', label: '字母键盘', category: '键盘', scope: 'native-global', available: true,
@@ -249,7 +278,7 @@ export const CONTROLLER_SHORTCUT_ACTIONS: ControllerShortcutAction[] = [
 const buttonSet = new Set(CONTROLLER_BUTTONS.map((item) => item.value));
 const triggerSet = new Set(CONTROLLER_TRIGGER_OPTIONS.map((item) => item.value));
 const actionMap = new Map(CONTROLLER_SHORTCUT_ACTIONS.map((item) => [item.id, item]));
-const keyboardCodePattern = /^(?:Key[A-Z]|Digit[0-9]|F(?:[1-9]|1[0-2])|Backquote|Minus|Equal|Arrow(?:Up|Down|Left|Right)|(?:Control|Shift|Alt|Meta)(?:Left|Right)?|Tab|Enter|Escape|Space|Backspace|Delete|Insert|Home|End|PageUp|PageDown|CapsLock|NumLock|ScrollLock|PrintScreen|Pause)$/;
+export const keyboardCodePattern = /^(?:Key[A-Z]|Digit[0-9]|F(?:[1-9]|1[0-9]|2[0-4])|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash|Numpad(?:[0-9]|Add|Subtract|Multiply|Divide|Decimal|Enter)|Backquote|Minus|Equal|Arrow(?:Up|Down|Left|Right)|(?:Control|Shift|Alt|Meta)(?:Left|Right)?|Tab|Enter|Escape|Space|Backspace|Delete|Insert|Home|End|PageUp|PageDown|CapsLock|NumLock|ScrollLock|PrintScreen|Pause|ContextMenu)$/;
 const mouseCodeSet = new Set(['MouseLeft', 'MouseMiddle', 'MouseRight', 'MouseBack', 'MouseForward']);
 function finite(value: unknown, fallback: number, min: number, max: number): number {
   const number = Number(value);
@@ -273,9 +302,15 @@ export function formatControllerShortcutInputs(inputs: readonly ControllerShortc
   return inputs.map(formatControllerShortcutInput).join(' + ');
 }
 
+/** Presentation only: extended function codes retain their real keyboard identity. */
+export function isHandheldExtendedKey(input: ControllerShortcutInput): boolean {
+  return input.source === 'keyboard' && /^F(?:1[3-9]|2[0-4])$/.test(input.code);
+}
+export function shortcutPreviewKind(inputs: readonly ControllerShortcutInput[]): 'controller' | 'keyboard' {
+  return !inputs.length || inputs.some(input => input.source === 'controller' || input.source === 'oem' || isHandheldExtendedKey(input)) ? 'controller' : 'keyboard';
+}
 export function shortcutRecordMode(inputs: readonly ControllerShortcutInput[]): ControllerShortcutRecordMode {
-  if (inputs.some((input) => input.source === 'oem')) return 'oem';
-  return inputs.some((input) => input.source === 'keyboard' || input.source === 'mouse') ? 'keyboard-mouse' : 'controller';
+  return shortcutPreviewKind(inputs) === 'keyboard' ? 'keyboard-mouse' : 'controller';
 }
 
 function normalizeInput(value: unknown): ControllerShortcutInput | null {
@@ -304,7 +339,6 @@ export function nativeDefaultRule(defaultKey: (typeof NATIVE_DEFAULT_SHORTCUTS)[
   const byKey: Record<string, { inputs: ControllerShortcutInput[]; trigger: ControllerTrigger; holdMs?: number; doubleWindowMs?: number; intervalMs?: number; params?: Record<string, string | number | boolean> }> = {
     enabled: { inputs: [controllerInput('lb'), controllerInput('rb')], trigger: 'hold', holdMs: 500 },
     bDoubleMinimize: { inputs: [controllerInput('b')], trigger: 'double', doubleWindowMs: 500 },
-    startDoubleF7: { inputs: [controllerInput('start')], trigger: 'double', doubleWindowMs: 500, params: { key: 'F7' } },
     tdpShortcut: { inputs: [controllerInput('start'), controllerInput('dpadUp')], trigger: 'repeat', holdMs: 0, intervalMs: 150, params: { direction: 'up', amount: '1', linearAcceleration: true } },
     fpsShortcut: { inputs: [controllerInput('start'), controllerInput('dpadRight')], trigger: 'repeat', holdMs: 0, intervalMs: 150, params: { direction: 'right', amount: '5', linearAcceleration: true } },
     killGame: { inputs: [controllerInput('back'), controllerInput('b')], trigger: 'hold', holdMs: 500 },
@@ -346,12 +380,21 @@ export function newControllerShortcutRule(seed = `${Date.now()}`, actionId = 'wi
 export function normalizeControllerShortcutRule(value: unknown, index: number): ControllerShortcutRule | null {
   if (!value || typeof value !== 'object') return null;
   const raw = value as Partial<ControllerShortcutRule>;
-  const actionId = typeof raw.actionId === 'string' && actionMap.has(raw.actionId) ? raw.actionId : 'window.summon';
+  const actionId = typeof raw.actionId === 'string' && raw.actionId ? raw.actionId : 'window.summon';
   const inputs = Array.isArray(raw.inputs)
     ? raw.inputs.map(normalizeInput).filter((item): item is ControllerShortcutInput => item !== null).filter((item, position, all) => all.findIndex((candidate) => inputKey(candidate) === inputKey(item)) === position).slice(0, CONTROLLER_SHORTCUT_MAX_INPUTS)
     : [];
   const trigger = triggerSet.has(raw.trigger as ControllerTrigger) ? raw.trigger as ControllerTrigger : 'press';
+  const { defaultKey: _storedDefaultKey, ...preserved } = raw;
+  const params = { ...defaultParameters(actionId),
+    ...(raw.params && typeof raw.params === 'object' ? raw.params as Record<string, string | number | boolean> : {}),
+  };
+  if (actionId === 'input.virtualGamepadToggle') {
+    const persona = migrateControllerPersona(params.preset);
+    if (persona !== 'disabled') params.preset = persona;
+  }
   return {
+    ...preserved,
     id: typeof raw.id === 'string' && raw.id ? raw.id : `rule-import-${index}`,
     origin: raw.origin === 'native-default' ? 'native-default' : 'custom',
     // Optional JSON fields must be absent, not undefined: durable input hashes are strict.
@@ -363,10 +406,7 @@ export function normalizeControllerShortcutRule(value: unknown, index: number): 
     holdMs: finite(raw.holdMs, 500, trigger === 'repeat' ? 0 : 100, 10000),
     doubleWindowMs: finite(raw.doubleWindowMs, 500, 200, 2000),
     intervalMs: finite(raw.intervalMs, 150, 40, 2000),
-    params: {
-      ...defaultParameters(actionId),
-      ...(raw.params && typeof raw.params === 'object' ? raw.params as Record<string, string | number | boolean> : {}),
-    },
+    params,
   };
 }
 export function readControllerShortcutRules(value: unknown): ControllerShortcutRule[] {
@@ -377,6 +417,8 @@ export function readControllerShortcutRules(value: unknown): ControllerShortcutR
 
 /**
  * Merge the persisted rules with the hidden default template.
+ * Start → F7 retired on 2026-10-19: never seed it; tagged old defaults are
+ * excluded by the current template list. User-created F7 rules remain custom.
  * 2026-09-28 用户裁决（默认模板化）：
  *   · 空配置 → 用默认模板自动生成全部默认项（首次运行自动配置）；
  *   · 已有配置 → 已保存的默认项原样保留（enabled 以原生开关为准），
@@ -471,41 +513,42 @@ export function validateControllerShortcutRules(rules: ControllerShortcutRule[],
   const oemKnown = oemKeys && oemKeys.supported
     ? new Set(oemKeys.keys.map((key) => key.keyId))
     : null; // 无机型库上下文时不校验存在性（保持可编辑），运行时 fail-closed
+  const oemUnavailable = new Set(oemKeys?.keys.filter((key) => key.captureImplemented === false).map((key) => key.keyId));
   for (const rule of rules) {
-    if (seenIds.has(rule.id)) problems.push(`“${rule.id}”的规则编号重复。`);
+    if (seenIds.has(rule.id)) problems.push('动作编号重复，请重新新建动作。');
     seenIds.add(rule.id);
     const action = actionMap.get(rule.actionId);
-    if (!action) problems.push(`“${rule.id}”使用了未知动作。`);
+    if (!action) problems.push('请选择一个有效的输出动作。');
     else {
       for (const parameter of action.parameters || []) {
         const inputToggle = action.id === 'input.gyroToggle' || action.id === 'input.virtualGamepadToggle' || action.id === 'input.frontendButton';
-        if (parameter.presentation !== 'key-grid' && !(inputToggle && parameter.type === 'select')) continue;
+        const shortcutControl = ['monitor.toggle','display.frameRateControl','fan.switchPreset'].includes(action.id);
+        if (parameter.presentation !== 'key-grid' && !((inputToggle || shortcutControl) && parameter.type === 'select')) continue;
         const value = rule.params[parameter.id] ?? parameter.default;
         if (typeof value !== 'string' || !parameter.options?.some((option) => option.value === value)) {
-          problems.push(`“${rule.id}”的“${parameter.label}”不是可用的${inputToggle ? '预设' : '键位'}。`);
+          problems.push(inputToggle ? '请重新选择有效的输出预设。' : '请重新选择有效的输出按键。');
         }
       }
     }
     // Native defaults mirror existing routes; custom rules require at least
     // one input and may use up to four ordered inputs.
-    if (rule.origin !== 'native-default' && (rule.inputs.length < CONTROLLER_SHORTCUT_MIN_INPUTS || rule.inputs.length > CONTROLLER_SHORTCUT_MAX_INPUTS)) problems.push(`“${rule.id}”需要录入至少 ${CONTROLLER_SHORTCUT_MIN_INPUTS} 个、最多 ${CONTROLLER_SHORTCUT_MAX_INPUTS} 个按键；第 3 和第 4 个槽位可以留空。`);
-    if (new Set(rule.inputs.map(inputKey)).size !== rule.inputs.length) problems.push(`“${rule.id}”包含重复按键。`);
-    if (rule.inputs.some((input) => input.source === 'controller') && rule.inputs.some((input) => input.source !== 'controller')) problems.push(`“${rule.id}”不能混用手柄与键盘/鼠标录制源。`);
-    // OEM keys form their own input class: they must not mix with controller
-    // or keyboard/mouse sources, and (when the machine library is known) the
-    // key must belong to this machine.
-    if (rule.inputs.some((input) => input.source === 'oem') && rule.inputs.some((input) => input.source !== 'oem')) problems.push(`“${rule.id}”不能混用专用键与手柄/键盘/鼠标输入。`);
-    if (oemKnown) {
-      for (const input of rule.inputs) {
-        if (input.source === 'oem' && !oemKnown.has(input.code)) {
-          problems.push(`“${rule.id}”的专用键“${input.code}”不属于本机机型库。`);
-        }
+    if (rule.origin !== 'native-default' && (rule.inputs.length < CONTROLLER_SHORTCUT_MIN_INPUTS || rule.inputs.length > CONTROLLER_SHORTCUT_MAX_INPUTS)) problems.push('请录制 1 至 4 个输入按键。');
+    if (action?.id === 'app.launchQuickApp' && (typeof rule.params.appPath !== 'string' || !rule.params.appPath || rule.params.appPath.length > 2048)) problems.push('请选择要启动的快捷应用。');
+    if (new Set(rule.inputs.map(inputKey)).size !== rule.inputs.length) problems.push('输入中有重复按键，请重新录制。');
+    // Mixed physical controller/OEM/keyboard/mouse chords are intentional.
+    // Persist real source/code pairs; only the preview classifies F13–F24 as handheld.
+    for (const input of rule.inputs) {
+      if (input.source !== 'oem') continue;
+      if (oemUnavailable.has(input.code)) {
+        problems.push('此专用按键的输入暂不可用，请更换输入。');
+      } else if (oemKnown && !oemKnown.has(input.code)) {
+        problems.push('未识别此专用按键，请在当前设备上重新录制。');
       }
     }
   }
   // 只保留结构性校验（组合数量、重复按键、录制源混用、未知动作/键位）；
   // 动作不独占、组合可重复由用户自行负责（同一组按键可绑定多个动作）。
-  return problems;
+  return [...new Set(problems)];
 }
 export function highlightedGamepadButtons(rule: ControllerShortcutRule | null): number[] {
   if (!rule) return [];

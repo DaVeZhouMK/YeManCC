@@ -1,0 +1,520 @@
+{
+  "schemaVersion": 1,
+  "caseId": "sleep.single-pid-freeze-consumer",
+  "fixture": {
+    "path": "tools/ymcc_sim/global/sleep-single-pid-freeze-consumer/fixture.cpp.in",
+    "sha256": "775f2a86ff8efc4c5f98813a059b981e076f4c7cba28b3980e6d0e62e4e2b878",
+    "positiveGroups": 26
+  },
+  "productSources": [
+    "native/main.cpp",
+    "deps/json/json.hpp"
+  ],
+  "sharedLeaves": [
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+    "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+    "tools/ymcc_sim/global/host-process.ps1",
+    "tools/sleep_game_pause_selftest.py",
+    "tools/sleep_non_user_wake_selftest.py",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/boundary.h",
+    "tools/ymcc_sim/global/sleep-native-recovery-consumer/sitecustomize.py",
+    "native/sleep_request_fallback.h",
+    "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
+    "tools/ymcc_sim/global/consumer/fan-global/runtime-guard.mjs",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.test.mjs"
+  ],
+  "reviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "98710c204a6cffd4b277f86429e57d397d5b57ff1f3faa7858f28cdbc2106d6e"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    }
+  ],
+  "reviewedFunctions": [
+    {
+      "name": "sgMarkerCreated",
+      "sha256": "dcdff96f5c687b8a4cffe5e39569f5f16697f2acfdd65f6158188952f5e83cb9"
+    },
+    {
+      "name": "sgMarkerIsSuspended",
+      "sha256": "bdb68c36b3da240f81c9dfd75e8b0444685f73e6b71008531d75ce6740ebb8d1"
+    },
+    {
+      "name": "sgMarkerGeneration",
+      "sha256": "3ae66df4f84d86af09bf15a51dbb2ca18ebc2835e6233602476b0d0de6a21837"
+    },
+    {
+      "name": "sgSuspendGameByPidUnlocked",
+      "sha256": "990a30a256b07b0b5f604b9269193dbcc0f775a7b230f815f65390537b2a96d3"
+    }
+  ],
+  "externalPorts": 17,
+  "portScope": "17 analyzed direct helper callouts:14 explicit memory fixture ports and3 exact pure production marker parsers. Parsers read the fixture memory sgReadFile leaf. Actual sgSuspendGameByPidUnlocked executes with countedNativeSuspend pointer only; no real NT, process,Host,Steam or device operation.",
+  "faults": [
+    {
+      "label": "fault-opened-identity",
+      "path": "native/main.cpp",
+      "before": "nativeProcessCreatedFromHandle(h) == valveTarget.processCreated;",
+      "after": "(nativeProcessCreatedFromHandle(h) == valveTarget.processCreated || true);",
+      "expectedAssertion": "failed(r)&&suspendedPids.empty()&&markers.empty()&&closedHandles==std::vector<DWORD>{100}&&r.at(\"failCount\")==1",
+      "expectedContextMarker": "openedBirthRace=true"
+    },
+    {
+      "label": "fault-expanded-pids",
+      "path": "native/main.cpp",
+      "before": "const std::vector<DWORD> targets{rootPid};",
+      "after": "const std::vector<DWORD> targets{rootPid, rootPid + 1};",
+      "expectedAssertion": "r.at(\"paused\")==true&&r.at(\"okCount\")==0&&r.at(\"failCount\")==0&&openedPids.empty()&&suspendedPids.empty()&&writeCalls==1",
+      "expectedContextMarker": "marker();r=pause()"
+    },
+    {
+      "label": "fault-marker-admission",
+      "path": "native/main.cpp",
+      "before": "!sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration)",
+      "after": "(sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration), false)",
+      "expectedAssertion": "failed(r)&&openedPids.empty()&&markers.empty()&&r.at(\"failCount\")==1",
+      "expectedContextMarker": "writeFailAt=1"
+    },
+    {
+      "label": "fault-session-admission",
+      "path": "native/main.cpp",
+      "before": "!ProcessIdToSessionId(rootPid, &rootSession) || rootSession != currentSession",
+      "after": "!ProcessIdToSessionId(rootPid, &rootSession) || (rootSession != currentSession && false)",
+      "expectedAssertion": "failed(r)&&openedPids.empty()",
+      "expectedContextMarker": "rootSession=2"
+    },
+    {
+      "label": "fault-native-failure-status",
+      "path": "native/main.cpp",
+      "before": "if (h) CloseHandle(h);\n            if (status >= 0) {",
+      "after": "if (h) CloseHandle(h);\n            if (status >= 0 || (identityMatches && fnNtSuspend)) {",
+      "expectedAssertion": "!r.at(\"paused\").get<bool>()&&r.at(\"okCount\")==0&&r.at(\"failCount\")==1&&suspendedPids==std::vector<DWORD>{100}&&markers.empty()&&closedHandles==std::vector<DWORD>{100}",
+      "expectedContextMarker": "nativeOk=false"
+    }
+  ],
+  "initialNoIoEvidence": {
+    "reviewSha256": "25cfc0d983e066cd10343dd9a1c399fef68fc513959463ac8054551d037dc604",
+    "status": "PRIVATE_PROTOTYPE_VERIFIED",
+    "checks": 10,
+    "comparisons": 1524,
+    "publicAccepted": false
+  },
+  "directDependencyCallouts": 17,
+  "dependencyBoundary": [
+    {
+      "name": "nativeValveValidateCurrentTarget",
+      "role": "initial/rechecked valve target admission",
+      "safeTestBoundary": "memory admission response; actual helper not proved here",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgInitNt",
+      "role": "resolves native suspension entry point in product",
+      "safeTestBoundary": "no-op; own counted function pointer only",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "GetCurrentProcessId",
+      "role": "reject self/system/zero PID",
+      "safeTestBoundary": "fixture constant",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "ProcessIdToSessionId",
+      "role": "same-session gate",
+      "safeTestBoundary": "memory session lookup/refusal",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgPrepareWakeRecoveryForPauseUnlocked",
+      "role": "reconcile previous wake before a new pause",
+      "safeTestBoundary": "already separately executed by wake-header suite; bounded memory port for this helper",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgReleaseConflictingPauseLeaseUnlocked",
+      "role": "release prior conflicting lease",
+      "safeTestBoundary": "explicit memory result; previous wake owner separately covered",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "focusQueryProcessIdentity",
+      "role": "recheck prevalidated PID birth after reconciliation",
+      "safeTestBoundary": "memory immutable PID-birth table/race hook",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "fspath::exists",
+      "role": "marker duplicate/stale ownership",
+      "safeTestBoundary": "memory marker store; no std::filesystem alias",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "fspath::remove",
+      "role": "remove stale/failing markers",
+      "safeTestBoundary": "memory marker store; no real file deletion",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "sgMarkerCreated",
+      "role": "stored marker birth",
+      "safeTestBoundary": "exact production body compiled; input from fixture memory sgReadFile",
+      "implementation": "exact production parser using memory sgReadFile"
+    },
+    {
+      "name": "sgMarkerIsSuspended",
+      "role": "stored final suspended state",
+      "safeTestBoundary": "exact production body compiled; input from fixture memory sgReadFile",
+      "implementation": "exact production parser using memory sgReadFile"
+    },
+    {
+      "name": "sgMarkerGeneration",
+      "role": "power generation ownership",
+      "safeTestBoundary": "exact production body compiled; input from fixture memory sgReadFile",
+      "implementation": "exact production parser using memory sgReadFile"
+    },
+    {
+      "name": "sgWriteProcessMarker",
+      "role": "final marker required before native suspension",
+      "safeTestBoundary": "memory write with ordered observations and injected failures",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "OpenProcess",
+      "role": "opens exact root PID handle",
+      "safeTestBoundary": "same original portable memory HANDLE design, never Win32 OpenProcess",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "nativeProcessCreatedFromHandle",
+      "role": "birth identity on opened handle",
+      "safeTestBoundary": "memory handle identity table",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "fnNtSuspend",
+      "role": "actual native suspend endpoint",
+      "safeTestBoundary": "own pure function pointer count only; never real NT/API import",
+      "implementation": "explicit fixture memory port"
+    },
+    {
+      "name": "CloseHandle",
+      "role": "release owned opened handle",
+      "safeTestBoundary": "memory handle bookkeeping",
+      "implementation": "explicit fixture memory port"
+    }
+  ],
+  "parserInputLeaf": {
+    "name": "sgReadFile",
+    "implementation": "fixture marker map lookup; no filesystem access"
+  },
+  "positiveCases": [
+    {
+      "name": "prevalidated-target-pid-mismatch",
+      "assertion": "returns error before session/marker/suspend"
+    },
+    {
+      "name": "prevalidated-target-created-mismatch",
+      "assertion": "returns error without any native count"
+    },
+    {
+      "name": "ordinary-valve-refusal",
+      "assertion": "returns original valve error"
+    },
+    {
+      "name": "zero-system-self-pid",
+      "assertion": "all rejected before suspension"
+    },
+    {
+      "name": "missing-native-function",
+      "assertion": "no native count"
+    },
+    {
+      "name": "current-session-query-failed",
+      "assertion": "no native count"
+    },
+    {
+      "name": "root-session-query-failed",
+      "assertion": "no native count"
+    },
+    {
+      "name": "different-session",
+      "assertion": "no native count"
+    },
+    {
+      "name": "manual-lease-receipt",
+      "assertion": "serial increments only for manual marker directory"
+    },
+    {
+      "name": "wake-reconciliation-refusal",
+      "assertion": "failure count1 and no marker/native count"
+    },
+    {
+      "name": "conflicting-lease-refusal",
+      "assertion": "failure count1 and no native count"
+    },
+    {
+      "name": "conflict-release-disabled",
+      "assertion": "not invoked when releaseConflictingLease=false"
+    },
+    {
+      "name": "birth-changed-after-reconciliation",
+      "assertion": "original sleep-target-instance error"
+    },
+    {
+      "name": "ordinary-valve-changed-after-release",
+      "assertion": "original valve-changed error"
+    },
+    {
+      "name": "stale-marker-created",
+      "assertion": "removes stale marker before final marker and native count"
+    },
+    {
+      "name": "stale-marker-state",
+      "assertion": "removes non-suspended marker before final marker"
+    },
+    {
+      "name": "wrong-generation-existing-lease",
+      "assertion": "returns failure; preserves old ownership and no native count"
+    },
+    {
+      "name": "valid-existing-lease",
+      "assertion": "reports paused without adding suspend depth"
+    },
+    {
+      "name": "pre-native-marker-write-failure",
+      "assertion": "does not call OpenProcess or native function"
+    },
+    {
+      "name": "opened-handle-missing",
+      "assertion": "removes failed marker and reports failure"
+    },
+    {
+      "name": "opened-handle-birth-race",
+      "assertion": "does not call native function and removes marker"
+    },
+    {
+      "name": "native-failure",
+      "assertion": "removes marker and reports failure"
+    },
+    {
+      "name": "native-success",
+      "assertion": "marker precedes native call; exactly rootPid once; okCount1"
+    },
+    {
+      "name": "second-duplicate-call",
+      "assertion": "does not stack suspension"
+    },
+    {
+      "name": "no-marker-directory",
+      "assertion": "identity/session protections still apply; no marker IO"
+    },
+    {
+      "name": "exception-boundary",
+      "assertion": "returns original initialized/partial result; never expands targets"
+    }
+  ],
+  "reviewedSharedLeafMaintenance": {
+    "schemaVersion": 2,
+    "kind": "exact-current-source-reverse-deltas",
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "compilerAndEnvironmentTextUnchanged": true,
+    "oldIdentities": "priorReviewedSharedLeafIdentities",
+    "sourceApproval": false
+  },
+  "sourceCompatibilityReview": {
+    "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
+    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "oldIdentitiesRetained": true,
+    "fullReverseDeltaRequired": true,
+    "sourceApproval": false
+  },
+  "priorReviewedSharedLeafIdentities": [
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
+      "sha256": "fa14c05237d57815fd843894d35b9a6ff3df7292e1fdd6424065b2c297d1ea01"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+      "sha256": "0d33843d479ec1d9fea6c75042d433039acd8c1ecb77144f3e92b2ad613ca344"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/adapter.mjs",
+      "sha256": "f123502bc5e84d28bbe1ad1ee56d8674569a1c845ca27d5bd74c41fec12af16b"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.mjs",
+      "sha256": "5eb04d6fb3b7e6aa09ee617b6a536815bd850deedbe4cfb0a47e6b41d61e94b1"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/worker.ps1",
+      "sha256": "a6b4dcf63540249366e265919529f8ba0ae6b647e0aceea4359dd60cde366547"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/toolchain-inputs.json",
+      "sha256": "1425bafcf316ae86bab586efff5e70d18a1e94fe099c2621a85acecd028ccab7"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/compiler-leaf.mjs",
+      "sha256": "013ff6b883408d4ccad959f6db91b8c021a51b59444a6e2e957e7a5c8430f3fa"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/adapter.mjs",
+      "sha256": "600ad7b427845fe2236622e8325b0a70ab554ebd8b78e14c621adb233a83090d"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/toolchain-inputs.json",
+      "sha256": "d48fc6578e770e6e365b380bd47b1d94b225bc1a825e8e24ad351beb2be23004"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/adapter.mjs",
+      "sha256": "570ee6b49050c091cd8712517bea57e1bcff82bcd87b92c7b05522b28993dfcf"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/toolchain-inputs.json",
+      "sha256": "a8fd883aff2b994108e902f7efafec4af665e42967f9866a07e318f9047133d0"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/portable-boundary.h",
+      "sha256": "5e14b29cac8216cc974396dd20394b7f1d811f2c1e02db05f2f9c22dbb3af22a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/sleep-game-pause-consumer/boundary-probe.cpp",
+      "sha256": "058f41db464dfdfd4d423ab6e14ba34e9aaa5a9395483b9581bba1ba816d602a"
+    },
+    {
+      "path": "tools/ymcc_sim/global/host-process.ps1",
+      "sha256": "9b7aa176d81ece81798d0dde27817c05dabf29a898caae8282d9ef335aca1c74"
+    }
+  ],
+  "priorFaults": [
+    {
+      "label": "fault-opened-identity",
+      "path": "native/main.cpp",
+      "before": "nativeProcessCreatedFromHandle(h) == valveTarget.processCreated;",
+      "after": "(nativeProcessCreatedFromHandle(h) == valveTarget.processCreated || true);",
+      "expectedAssertion": "failed(r)&&suspendedPids.empty()&&markers.empty()&&closedHandles==std::vector<DWORD>{100}&&r.at(\"failCount\")==1",
+      "expectedContextMarker": "openedBirthRace=true"
+    },
+    {
+      "label": "fault-expanded-pids",
+      "path": "native/main.cpp",
+      "before": "const std::vector<DWORD> targets{rootPid};",
+      "after": "const std::vector<DWORD> targets{rootPid, rootPid + 1};",
+      "expectedAssertion": "r.at(\"paused\")==true&&r.at(\"okCount\")==0&&r.at(\"failCount\")==0&&openedPids.empty()&&suspendedPids.empty()&&writeCalls==1",
+      "expectedContextMarker": "marker();r=pause()"
+    },
+    {
+      "label": "fault-marker-admission",
+      "path": "native/main.cpp",
+      "before": "!sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration)",
+      "after": "(sgWriteProcessMarker(markerDir, pid, \"suspended\", leaseGeneration), false)",
+      "expectedAssertion": "failed(r)&&openedPids.empty()&&markers.empty()&&r.at(\"failCount\")==1",
+      "expectedContextMarker": "writeFailAt=1"
+    },
+    {
+      "label": "fault-session-admission",
+      "path": "native/main.cpp",
+      "before": "!ProcessIdToSessionId(rootPid, &rootSession) || rootSession != currentSession",
+      "after": "!ProcessIdToSessionId(rootPid, &rootSession) || (rootSession != currentSession && false)",
+      "expectedAssertion": "failed(r)&&openedPids.empty()",
+      "expectedContextMarker": "rootSession=2"
+    },
+    {
+      "label": "fault-native-failure-status",
+      "path": "native/main.cpp",
+      "before": "if (h) CloseHandle(h);\r\n            if (status >= 0) {",
+      "after": "if (h) CloseHandle(h);\r\n            if (status >= 0 || (identityMatches && fnNtSuspend)) {",
+      "expectedAssertion": "!r.at(\"paused\").get<bool>()&&r.at(\"okCount\")==0&&r.at(\"failCount\")==1&&suspendedPids==std::vector<DWORD>{100}&&markers.empty()&&closedHandles==std::vector<DWORD>{100}",
+      "expectedContextMarker": "nativeOk=false"
+    }
+  ],
+  "faultSourceMaintenance": {
+    "kind": "exact-LF-source-selector",
+    "labels": [
+      "fault-native-failure-status"
+    ],
+    "assertionsAndMutationsUnchanged": true,
+    "oldSelectorsRetained": "priorFaults",
+    "noWhitespaceInsensitiveExecution": true
+  },
+  "priorReviewedSharedLeafMaintenance": {
+    "schemaVersion": 1,
+    "kind": "exact-shared-evidence-path-preserved",
+    "path": "tools/ymcc_sim/global/sleep-native-recovery-consumer/run.mjs",
+    "historicalSha256": "8ca35ae41e391694dc37619b1879775e6c986ce3783c760871529d98ef024d46",
+    "reviewedSha256": "05c06a8f2a13074f8ecb489cb71977cbc1e3cf9394cce74963249e247afc05aa",
+    "consumedExport": "evidencePath",
+    "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
+    "historicalRemainderTextIdenticalAfterCrLfNormalization": true,
+    "addedFunction": "verifyReviewedOriginalScripts",
+    "changedOtherEntry": "runNativeRecovery script-review call and receipt field only; not invoked by this consumer",
+    "sourceCasesFaultsAndBoundariesUnchanged": true
+  }
+}

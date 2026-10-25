@@ -1,0 +1,47 @@
+{
+  "sdkBytes": 63076352,
+  "sdkSha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+  "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+  "assemblyVersion": "2.0.0.0",
+  "officialTagCommit": "30b8faf0f7de746f249edc5f1520eaa0440965cf",
+  "decompiler": "ilspycmd 11.0.0.9375",
+  "members": {
+    "HMController.Dispose.cs": {
+      "signature": "public void Dispose()",
+      "sha256": "e7bc724fb505505db5e65cc38942ccfebd25bb7936864ccfd62073ae25d47c0c"
+    },
+    "HMController.StopThreads.cs": {
+      "signature": "internal void StopThreads()",
+      "sha256": "1f279487d6fca1f23628e3124bd80ff20348b5c06dde888354dbb51810619e87"
+    },
+    "HMController.StopWorkers.cs": {
+      "signature": "private void StopWorkers()",
+      "sha256": "2746158a5c0b53ecbfd969913ce70324f6267d16e25fb8833a63e35001d3fabb"
+    },
+    "HMController.CloseOutputCts.cs": {
+      "signature": "private void CloseOutputCts()",
+      "sha256": "7b6f041fe877e58c1eafb1e11d75d3d87fc05059bbfc6b6a0663fbb886218820"
+    },
+    "HMController.OutputPollLoop.cs": {
+      "signature": "private void OutputPollLoop()",
+      "sha256": "db587d58d1fccfde712f8db92743f1a6b7d358d3be2ff452f6f8d882f6798fc0"
+    },
+    "DeviceClock.Stop.cs": {
+      "signature": "public void Stop(int joinMs)",
+      "sha256": "bd784a62b1c0097aaeace28311bfbd774ac670e5a601c7469402ed29908b38d5"
+    },
+    "DeviceClock.Wake.cs": {
+      "signature": "public void Wake()",
+      "sha256": "e9a89b2f9da31db25d38d7bb48b8b8edf21e42e34f08e7a669b330ea3cfa90ae"
+    },
+    "DeviceClock.Close.cs": {
+      "signature": "private void Close()",
+      "sha256": "37aa30dce5fd1bcfcf3deb783b99fd3b5ee301c1cee17979b096807999bc4835"
+    },
+    "DeviceClock.Loop.cs": {
+      "signature": "private void Loop()",
+      "sha256": "12aae3fad24eccf8cf1088a05fdf9abab34b4bf342dffdee277ee42812010a89",
+      "compile": false
+    }
+  }
+}

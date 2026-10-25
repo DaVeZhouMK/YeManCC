@@ -1,121 +1,23 @@
 <script setup lang="ts">
-const props = withDefaults(
-  defineProps<{
-    modelValue: boolean;
-    label?: string;
-    description?: string;
-    color?: 'ac' | 'dc' | 'accent' | 'danger';
-    disabled?: boolean;
-    compact?: boolean; // 紧凑模式：用于标题行内（隐藏描述、更小间距）
-    gpRow?: number;
-    gpCol?: number;
-  }>(),
-  { color: 'accent', disabled: false, compact: false }
-);
-const emit = defineEmits<{ (e: 'update:modelValue', v: boolean): void }>();
-function toggle() {
-  if (props.disabled) return;
-  emit('update:modelValue', !props.modelValue);
-}
-const onColor = props.color === 'dc' ? 'var(--dc-accent)' : props.color === 'danger' ? 'var(--danger)' : 'var(--accent)';
+import { computed, useAttrs } from 'vue';
+import SwitchControl from './SwitchControl.vue';
+defineOptions({inheritAttrs:false});
+const props=withDefaults(defineProps<{ modelValue:boolean;label?:string;description?:string;color?:'ac'|'dc'|'accent'|'danger';disabled?:boolean;compact?:boolean;gpRow?:number|string;gpCol?:number|string }>(),{color:'accent',disabled:false,compact:false});
+const emit=defineEmits<{(event:'update:modelValue',value:boolean):void}>();
+const attrs=useAttrs();
+const accessibleLabel=computed(()=>String(attrs['aria-label']||props.label||props.description||''));
+const rootAttrs=computed(()=>Object.fromEntries(Object.entries(attrs).filter(([key])=>!['aria-label','aria-describedby','title'].includes(key))));
+function toggle(){if(!props.disabled)emit('update:modelValue',!props.modelValue)}
 </script>
-
 <template>
-  <div class="toggle-row" :class="{ disabled, compact }" @click="toggle" role="switch" :aria-checked="modelValue">
-    <div class="toggle-text" v-if="!compact || label">
-      <div class="toggle-label" v-if="label">{{ label }}</div>
-      <div class="toggle-desc muted" v-if="description">{{ description }}</div>
-    </div>
-    <button
-      type="button"
-      class="switch"
-      :class="{ on: modelValue, compact }"
-      :disabled="disabled"
-      :data-gp-row="gpRow"
-      :data-gp-col="gpCol"
-      :style="modelValue ? { background: onColor, borderColor: onColor } : {}"
-      @click.stop="toggle"
-    >
-      <span class="knob"></span>
-    </button>
+  <div v-bind="rootAttrs" class="toggle-row" :class="{disabled,compact,standalone:!label&&!description}" @click="toggle">
+    <div v-if="label||description" class="toggle-text"><div v-if="label" class="toggle-label">{{label}}</div><div v-if="description" class="toggle-desc muted">{{description}}</div></div>
+    <SwitchControl :model-value="modelValue" :label="accessibleLabel" :disabled="disabled" :color="color" :gp-row="gpRow" :gp-col="gpCol" :aria-describedby="attrs['aria-describedby']" :title="attrs.title" @update:model-value="value=>emit('update:modelValue',value)" />
   </div>
 </template>
-
 <style scoped>
-.toggle-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 8px 0;
-  cursor: pointer;
-}
-.toggle-row.disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-.toggle-row.compact {
-  padding: 0;
-  gap: 6px;
-}
-.toggle-text {
-  text-align: left;
-  flex: 1;
-}
-.toggle-label {
-  font-size: 13px;
-}
-.toggle-row.compact .toggle-label {
-  font-size: 11px;
-}
-.toggle-desc {
-  font-size: 11px;
-  margin-top: 2px;
-}
-.switch {
-  flex: 0 0 auto;
-  width: 40px;
-  height: 22px;
-  border-radius: 11px;
-  border: 1px solid #2a3342;
-  background: var(--bg-input);
-  position: relative;
-  cursor: pointer;
-  transition: background 0.15s, border-color 0.15s, box-shadow 0.15s;
-}
-.switch:focus-visible {
-  box-shadow: var(--focus-ring);
-}
-/* 手柄选中且已开启：保留蓝色焦点提示，并在轨道内增加纯白内圈。 */
-.switch.on.focused {
-  box-shadow: inset 0 0 0 2px #fff, 0 0 0 2px rgba(46, 166, 255, 0.35);
-}
-.knob {
-  position: absolute;
-  top: 2px;
-  left: 2px;
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  background: #cfd8e3;
-  transition: transform 0.15s;
-}
-.switch.on .knob {
-  transform: translateX(18px);
-  background: #fff;
-}
-.switch.compact {
-  width: 32px;
-  height: 18px;
-  border-radius: 9px;
-}
-.switch.compact .knob {
-  width: 12px;
-  height: 12px;
-  top: 2px;
-  left: 2px;
-}
-.switch.compact.on .knob {
-  transform: translateX(14px);
-}
+.toggle-row{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0;min-height:40px;padding:5px 0;box-sizing:border-box;cursor:pointer;border-radius:8px}.toggle-row.compact{padding:2px 0}.toggle-row.standalone{display:inline-flex;flex:0 0 auto;min-height:36px;padding:0}.toggle-text{flex:1;min-width:0;text-align:left}.toggle-label{font-size:14px;line-height:1.4;overflow-wrap:anywhere}.toggle-desc{font-size:12px;line-height:1.5;margin-top:3px;color:var(--text-dim)}.toggle-row.disabled{cursor:default}.toggle-row.disabled .toggle-text{opacity:.45}.toggle-row:has(.ymcc-switch.focused),.toggle-row:has(.ymcc-switch:focus-visible){background:color-mix(in srgb,var(--accent) 7%,transparent)}
+/* Keep the existing row density; compact changes spacing, never switch size. */
+:global(.app-root) .toggle-row:not(.standalone){padding:3px 0}
+:global(.app-root) .toggle-row.compact,:global(.app-root) .toggle-row.standalone{padding:0}
 </style>

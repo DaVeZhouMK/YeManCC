@@ -45,3 +45,23 @@
 - 状态与证据：G:\YeManCC-Work\Build\Tasks\YMCC-Decky-ExportIcon33\validation\CURRENT-STATE33.json
 
 本批包在隔离发行目录内，**没有覆盖旧正式发行目录，也没有安装到本机**。远端 Steam 的实际 CSS/截图以及新用户冷安装仍需单独验收，不凭静态/模拟检查宣称已通过。长期安装验收 goal 保持暂停。
+
+
+## 当前 Decky 源码与最终 ZIP 对拍（2026-10-14）
+
+新增导出门 `Assert-DeckyCurrentSourceExport`：在 `PACKAGE_OK` 前，将当前 Decky、共享 HUD 与 vendored SDK 输入重新编译到内存，使用真实编译结果和四个插件元数据/许可证逐件对拍已发布 ZIP，同时验证 Loader 和许可证，共七件。此检查不使用 source dist、已安装插件或旧回执作为最新源码的证明，不刷新缓存，不修改程序运行规则。末尾仍保留完整源码/构建身份校验；任何失败沿原发布事务回滚。
+
+`node tools/build-decky-sidebar-plugin.mjs --describe` 只计算当前五件插件资产的字节数与 SHA256，不写构建目录。最终证据位于当前输出工作区的 `Build/Validation/DeckyExport/CURRENT-SOURCE-ZIP.json`。
+
+检查任意已有 ZIP，可在主线源码目录执行：
+
+```powershell
+. .\tools\decky-release-identity.ps1
+Assert-DeckyCurrentSourceExport -ProjectRoot (Get-Location).Path -ReleaseZip '完整ZIP路径'
+```
+
+这个命令仅证明所选 ZIP 的七件 Decky 资产对应当前源码；完整应用的发布仍必须走 `pnpm run release` 的 Native/Web/所有资源身份与优化继承门。
+
+本次调查发现最新 UI 的完整包先前只在隔离任务 `YMCC-Decky-SectionPolish-20261014/FullRelease` 中；主线工作区的共享 ZIP 生成于 2026-10-14 07:46，早于该 UI 包的 07:53；根工作区 `Release/Packages/YeManCC.zip` 更停留在 2026-10-13。对旧共享构建执行现有身份门，实测 `EXPORT_SOURCE_CHANGED`，不会将其当作新构建重新导出。问题是旧输出路径尚未刷新，不能把隔离任务通过误写成共享发布已更新。
+
+默认入口 `pnpm run release` 的输出工作区为源码目录的 `../..`，本机即 `G:\YeManCC-Work\Mainline`；正式完整包为其 `Release/Packages/YeManCC.zip`。设置 `YEMAN_WORKSPACE_ROOT` 会改变整套 Build/Release 路径，隔离输出不会自动更新其他工作区。

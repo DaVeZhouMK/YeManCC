@@ -1,0 +1,11 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import vm from 'node:vm';
+import {build} from 'esbuild';
+const corpus=JSON.parse(fs.readFileSync(process.argv[2]||'../../Build/Validation/TrainerCyberpunkTitleFix-20261015/title-policy-corpus.json','utf8').replace(/^\uFEFF/,''));
+const bundle=await build({entryPoints:['src/bridge/gamedetect.ts'],bundle:true,write:false,format:'cjs',platform:'node',plugins:[{name:'pure-title-boundary',setup(b){b.onLoad({filter:/[\\/]bridge[\\/]ipc\.ts$/},()=>({contents:'export const invoke=()=>{throw Error("No native actions in title policy test")};',loader:'ts'}));b.onLoad({filter:/[\\/]scheduler(?:[\\/]index)?\.ts$/},()=>({contents:'export const registerScheduledTask=()=>()=>{};',loader:'ts'}));}}]});
+const module={exports:{}};vm.runInNewContext(bundle.outputFiles[0].text,{module,exports:module.exports,console,setTimeout,clearTimeout,performance});
+for(const row of corpus)assert.equal(module.exports.cleanGameTitle(row.input),row.cleaned,row.input);
+assert.equal(module.exports.detectedGameName({name:'cyberpunk2077',title:'Cyberpunk 2077 (C) 2020 by CD Projekt RED'}),'Cyberpunk 2077');
+assert.equal(module.exports.cleanGameTitle('Dead by Daylight'),'Dead by Daylight');
+console.log(`Shared top/backend title policy: ${corpus.length+2}/${corpus.length+2} passed`);

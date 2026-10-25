@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "kind": "pinned-node-independent-assert-equal-representation",
+  "nodeExecutable": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+  "nodeVersion": "v22.14.0",
+  "nodeSha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b",
+  "generator": "tools/ymcc_sim/global/fan-failed-read-identity-consumer/assert-format.mjs",
+  "generatorSha256": "44691dff6f15038e029bcfd60b6b068e4e24e3357419dd6f142937243181ffb3",
+  "message": "already-retired failure still queried Host",
+  "actual": 1,
+  "expected": 0,
+  "renderedString": "AssertionError [ERR_ASSERTION]: already-retired failure still queried Host\n\n1 !== 0\n",
+  "renderedStringSha256": "e05a9128859d7e68deac4132ba509c44b49cc81dfc323913c8dcc224c56c5bb0",
+  "preRunPredictionCases": 12,
+  "preRunPredictionAssertionLine": 49,
+  "onlyPostRunCorrection": "Full Node error representation suffix; semantic message/cases/actual counter/expected counter unchanged",
+  "originalToolFailPreserved": true,
+  "businessReexecuted": false
+}

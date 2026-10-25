@@ -1,0 +1,71 @@
+{
+  "schemaVersion": 1,
+  "id": "lifecycle.tray-resident-consumer",
+  "sourceInputs": [
+    "tools/tray_resident_selftest.mjs",
+    "src/bridge/trayResident.ts",
+    "native/main.cpp",
+    "package.json"
+  ],
+  "sourcePins": [
+    {
+      "path": "tools/tray_resident_selftest.mjs",
+      "sha256": "ebed5c9a23b0368cfc28d7ea7cf20e59f2e9eeb73ddc995955f4b5713fa00e62"
+    },
+    {
+      "path": "src/bridge/trayResident.ts",
+      "sha256": "d689cf27eb4d853ff6ef704a3680b61b4222fe9d0491c657245de71ac7f43258"
+    },
+    {
+      "path": "native/main.cpp",
+      "sha256": "290e28550291d6bdbe37488296492652839dbb606bdc96b7d439407d49fd2367"
+    },
+    {
+      "path": "package.json",
+      "sha256": "d674fca2e2699011912e086ece46af6b8aafd44e43d8d11d6b8a5ee50de985e7"
+    }
+  ],
+  "caseNames": [
+    "disable accepts the native false state and persists off without rollback",
+    "enable accepts the native true state and persists on",
+    "opposite returned states are genuine failures and restore the saved preference",
+    "undefined, null and non-boolean IPC replies are not accepted as success",
+    "IPC rejection rolls back preference, and later disable can still succeed",
+    "preference save failure never calls the native interface",
+    "rollback save failure is reported instead of claiming the previous state persisted",
+    "queued enable then disable preserves native false and finishes off",
+    "stale settings generation aborts before save or native mutation",
+    "startup applies saved off as native false without rewriting preference",
+    "contract check: native tray.setResident returns requested resident state, not a success flag"
+  ],
+  "positiveVmCount": 17,
+  "negativeVmCount": 3,
+  "timeoutMs": 15000,
+  "fault": {
+    "id": "opposite-state-guard-removed",
+    "source": "src/bridge/trayResident.ts",
+    "before": "if (applied !== v)",
+    "after": "if(false)",
+    "expectedAssertion": "Missing expected rejection.",
+    "method": "rejects",
+    "producerLine": 51
+  },
+  "node": {
+    "version": "v22.14.0",
+    "path": "G:\\YeManCC-Work\\Environment\\Toolchains\\nodejs\\node-v22.14.0-win-x64\\node.exe",
+    "sha256": "33b1bc1a8aca11fd5a4f2699e51019c63c0af30cf437701d07af69be7706771b"
+  },
+  "sourceReviewHistory": [
+    {
+      "atUtc": "2026-10-20T17:47:42.093Z",
+      "path": "native/main.cpp",
+      "beforeSha256": "5ce0d8854cc7c3a357023152b4603152dbaf43b18f21f942e3d3499a179cc2b7",
+      "afterSha256": "290e28550291d6bdbe37488296492652839dbb606bdc96b7d439407d49fd2367",
+      "consumedScope": "Text only: the unchanged original final tray selftest regex and its two native return-state string assertions; native/main.cpp is not compiled, imported or executed by this leaf.",
+      "handlerSha256": "7fd942eb826bfcd08d6ed6d481502ee63972fd57de0bfae8a737b8a6655a2360",
+      "handlerByteEqualOriginalB48": true,
+      "otherThreeInputsExact": true,
+      "originalPublicFailure": "D:/GlobalPrimaryTrayConsumerR1/2026-10-20T17-42-20-091Z-6c920686/cases/lifecycle.tray-resident-consumer/result.json"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "serverClosed": 1,
+  "pageErrors": [],
+  "snapshotErrors": [],
+  "snapshots": [
+    {
+      "page": 0,
+      "reason": "before-original-browser-close",
+      "calls": [
+        {
+          "cmd": "sleepRecovery.autoGet",
+          "args": {}
+        }
+      ],
+      "opened": [],
+      "sessionStorageKeys": [
+        "sleep-auto"
+      ],
+      "localStorageKeys": []
+    }
+  ],
+  "served": [
+    {
+      "url": "/",
+      "file": "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\served-0.html",
+      "sha256": "1d26c49856f05d6850ceac432be5b5e6d817540eb267e956caf4ceed98cae400",
+      "bytes": 40847,
+      "finished": true
+    },
+    {
+      "url": "/fixture.js",
+      "file": "D:\\Codex\\2026-10-19\\wo-z\\work\\b0su1\\positive-original\\served-1.js",
+      "sha256": "aabe8b1898234139ac8e6ff4455e615cd7a48e5bba9254b7cdf5f0af2d9398fa",
+      "bytes": 391000,
+      "finished": true
+    }
+  ]
+}

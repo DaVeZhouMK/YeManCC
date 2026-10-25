@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-20T04:14:03.874Z",
+  "status": "SOURCE_DIFFERENCE_QUALIFIED_FOR_EXISTING_MOCK_PENDING_COMPILE_AND_GLOBAL",
+  "path": "FanLab/real-host/Program.cs",
+  "previousSha256": "6643edb07d80cf723d0be8835c6405c01c0d2ec24ad59689c8d97ce342c9f7cc",
+  "reviewedSha256": "8c5f198cb047a55a3e6a3a10b44239f195f1ce08c321d354320e2119ebfc06f6",
+  "normalizedOutsideRealHcBackendSha256": "6b9b077d297ab8d92d9aa84d8e62b4f10b3900ffd8d56f729562c798ebf53411",
+  "allOtherProgramHostEngineHttpCodeIdentical": true,
+  "realBackendBodyChanged": true,
+  "mockBoundary": "The existing explicit-off fixture constructs FanHostEngine with realBackend=null. This source review approves the exact mock-consumed bodies for execution; full Program compilation and original public leaf must still pass.",
+  "originalFiveModesAnd412ChecksRetained": true,
+  "originalOneFailureAnd81OtherFaultAssertionsRetained": true,
+  "sourceAndToolBeforeAfterGatesRetained": true,
+  "newPhysicalBackendApproved": false,
+  "fullProductAcceptance": false
+}

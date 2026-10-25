@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "sourceRuntimeId": "YMCC-DEVICECORE-20261018-v1",
+  "sourceManifestSha256": "65a3ed817b38ba36ef974d9c005bd4ca7057b222efa920d25a4fa16e74b2eb18",
+  "hcSha256": "08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583",
+  "sdlInputSha256": "23cc2258b6f5229c20ff631f518c23f8736e8f4d8bfa388601672d12299a20a9",
+  "sdlInputBytes": 1300480,
+  "candidateSha256": "12920248a03c280ec83f2bcef1b5adf758568ed64c1800e37db127ddfd8770b4",
+  "candidateBytes": 47616,
+  "candidateIdentity": "SDL3-CS, Version=3.4.10.0, Culture=neutral, PublicKeyToken=null",
+  "conservativeSha256": "d57dd9e15da60453a904f13406d777ef40a6456d0a0d632eb68fd9488b4561bf",
+  "conservativeBytes": 792064,
+  "cecilSha256": "6346621d998fe428b4b97bb365e5090537be5074861d726cead5767d3b2a7cf2"
+}

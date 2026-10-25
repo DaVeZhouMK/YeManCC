@@ -60,7 +60,7 @@ if ([string]::IsNullOrWhiteSpace($WorkspaceRoot)) {
 $hostProject = Join-Path $projectRoot 'FanLab\real-host\YeManFanHost.csproj'
 $hostOutput = Join-Path $projectRoot 'FanLab\real-host\bin\Release\net10.0-windows10.0.19041.0\win-x64'
 $hcRuntimeSourceRoot = if ([string]::IsNullOrWhiteSpace($HcRuntimeSourceRoot)) {
-  Join-Path $projectRoot 'FanLab\build\batch11-runtime-09'
+  Join-Path $projectRoot 'PowerControl\handheldcompanion-runtime\YMCC-DEVICECORE-20261018-v1'
 } else {
   Get-FullPath $HcRuntimeSourceRoot
 }
@@ -77,10 +77,18 @@ $hcRuntimeManifest = Join-Path $hcRuntimeSourceRoot 'HandheldCompanion.runtime.j
 if (-not (Test-Path -LiteralPath $hcRuntimeManifest -PathType Leaf)) { throw "Pinned HC runtime manifest missing: $hcRuntimeManifest" }
 $hcRuntimeMetadata = Get-Content -LiteralPath $hcRuntimeManifest -Raw -Encoding UTF8 | ConvertFrom-Json
 $hcRuntimeId = [string]$hcRuntimeMetadata.runtimeId
-if ($hcRuntimeMetadata.schemaVersion -ne 1 -or $hcRuntimeId -notmatch '^HC-CANDIDATE-0\.32\.4\.0-[0-9a-f]{8}-[0-9]{8}$') {
+if ($hcRuntimeMetadata.schemaVersion -ne 1 -or $hcRuntimeId -notmatch '^(?:HC-CANDIDATE-0\.32\.4\.0-[0-9a-f]{8}-[0-9]{8}|YMCC-DEVICECORE-20261018-v1)$') {
   throw "Pinned HC runtime manifest identity is invalid: $hcRuntimeManifest"
 }
 $runtimeManifestRelative = "..\handheldcompanion-runtime\$([IO.Path]::GetFileName($hcRuntimeSourceRoot))\HandheldCompanion.runtime.json"
+$hcDeviceReplacementHashes = @{}
+if ($hcRuntimeId -ceq 'YMCC-DEVICECORE-20261018-v1') {
+  . (Join-Path $PSScriptRoot 'hc-device-runtime\verify-runtime.ps1')
+  Assert-YmccDeviceCoreRuntime -ProjectRoot $projectRoot -RuntimeRoot $hcRuntimeSourceRoot | Out-Null
+  $deviceProfile = Get-Content -LiteralPath (Join-Path $projectRoot 'deps\ymcc-device-core-runtime\profile.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+  foreach ($replacement in @($deviceProfile.replacements)) { $hcDeviceReplacementHashes[[string]$replacement.path] = [string]$replacement.sha256 }
+}
+
 
 & dotnet build $hostProject -c Release --no-restore
 if ($LASTEXITCODE -ne 0) { throw "Fan Host build failed: exit=$LASTEXITCODE" }
@@ -236,9 +244,19 @@ foreach ($name in $hcDeviceNativeFiles) {
   }
   $hcRuntimeSources[$name] = $source
 }
+. (Join-Path $PSScriptRoot 'ymcc-shared-runtime\shared-runtime.ps1')
+$hcSharedDeviceLibraries = @(Get-YmccSharedRuntimeRecords $projectRoot | Where-Object { $_.kind -eq 'binary' })
 foreach ($name in $hcFactoryBootstrapFiles) {
   $source = Join-Path $hcRuntimeSourceRoot $name
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
+    # Exact original bytes are supplied once by the independent shared runtime.
+    # Both device consumers use their pinned resolver. Do not duplicate these
+    # libraries back into the HC or Host payload.
+    $shared = @($hcSharedDeviceLibraries | Where-Object { $_.relative -ceq $name })
+    if ($hcRuntimeId -ceq 'YMCC-DEVICECORE-20261018-v1' -and $shared.Count -eq 1 -and
+        $shared[0].sha256.ToLowerInvariant() -ceq $hcFactoryBootstrapHashes[$name]) {
+      continue
+    }
     throw "Pinned HC factory bootstrap dependency missing: $name"
   }
   $hcRuntimeSources[$name] = $source
@@ -297,7 +315,8 @@ foreach ($name in $hostFiles) {
 # ASCII-only for new text - PS 5.1 decodes a BOM-less script as ANSI and can drop the next
 # statement, which is exactly how an added non-ASCII comment broke this gate mid-batch.
 $pinnedHcAssembly = Join-Path $hcRuntimeSourceRoot 'HandheldCompanion.dll'
-if ((Get-Sha256 $pinnedHcAssembly) -ne '0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49') {
+$approvedHcHash = if ($hcRuntimeId -eq 'YMCC-DEVICECORE-20261018-v1') { '08a386607a0e5e72c5fcaa98d3a6c0b3b256eb0fca7d6547f6f124c1f1f33583' } else { '0c5132a9d13aebfc5add2aa7c9ac54e8daaa8ebc816a0c68d099bb9685dc2e49' }
+if ((Get-Sha256 $pinnedHcAssembly) -ne $approvedHcHash) {
   throw "Pinned HC runtime source has an unexpected HandheldCompanion.dll hash: $pinnedHcAssembly"
 }
 foreach ($name in $hcRuntimeFiles) {
@@ -305,7 +324,10 @@ foreach ($name in $hcRuntimeFiles) {
   if (-not (Test-Path -LiteralPath $source -PathType Leaf)) {
     throw "Pinned HC runtime dependency missing: $source"
   }
-  $expectedHash = if ($hcFactoryBootstrapHashes.Contains($name)) {
+  $expectedHash = if ($hcDeviceReplacementHashes.ContainsKey($name)) {
+    # The complete derivative closure was verified before reading this map.
+    $hcDeviceReplacementHashes[$name]
+  } elseif ($hcFactoryBootstrapHashes.Contains($name)) {
     $hcFactoryBootstrapHashes[$name]
   } elseif ($hcWindowsRuntimeOverrides.Contains($name)) {
     $hcWindowsRuntimeOverrides[$name].Sha256
@@ -370,7 +392,7 @@ if ($null -eq $metadataPowerShell) {
   # PE 元数据 API，5.1 完全兼容；回退 powershell.exe 保持重基可执行。
   $metadataPowerShell = Get-Command powershell.exe -ErrorAction Stop
 }
-& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -RuntimeRoot $hcRuntimeSourceRoot -PayloadRoot $payloadRoot -ExcludedRuntimeFiles ($fanHostV2ExcludedFiles -join ',')
+& $metadataPowerShell.Source -NoLogo -NoProfile -ExecutionPolicy Bypass -File $closureAudit -HcRuntimeRoot $hcRuntimeSourceRoot -RuntimeRoot $hcRuntimeSourceRoot -SharedRuntimeRoot (Join-Path $projectRoot 'deps\ymcc-shared-runtime\bin') -PayloadRoot $payloadRoot -ExcludedRuntimeFiles ($fanHostV2ExcludedFiles -join ',')
 if ($LASTEXITCODE -ne 0) { throw "Fan Host HC device closure audit failed: exit=$LASTEXITCODE" }
 
 Write-Output "FAN_HOST_PAYLOAD_OK"

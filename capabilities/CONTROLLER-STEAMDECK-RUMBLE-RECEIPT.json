@@ -1,0 +1,78 @@
+{
+  "schemaVersion": 1,
+  "scope": "Steam Deck composite USB classical independent-motor rumble only; source-connected candidate with software certification and physical acceptance separate",
+  "capabilityId": "controller.feedback.game.steam-deck-usb-classic-rumble",
+  "profileIdentity": "steam-deck-composite",
+  "protocol": "steam-deck-usb-classic-rumble-v1",
+  "protocolToken": 2,
+  "compatibilityToken": 3,
+  "lockedSdk": {
+    "file": "deps/hidmaestro/HIDMaestro.Core.dll",
+    "sha256": "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c",
+    "mvid": "86aed9a3-c024-4596-b02c-650082ffb852",
+    "commit": "30b8faf0f7de746f249edc5f1520eaa0440965cf"
+  },
+  "lockedProfile": {
+    "resource": "HIDMaestro.Profiles.valve\\steam-deck-composite.json",
+    "sha256": "14e67ac749c3802e035a3909a27912188b3f878655b590c683c4382bc6882ab2"
+  },
+  "frozenTarget": {
+    "file": "Targets/SteamDeckTarget.cs",
+    "sha256": "e3f9b6fdbb8d5439ce9908235c7214250495169ddeec0c76fa7ca80571c0043d"
+  },
+  "wire": {
+    "reportSource": 1,
+    "reportId": 235,
+    "bodyBytes": 63,
+    "fullReportBytes": 64,
+    "lengthBodyOffset": 0,
+    "acceptedCommandPayloadLengths": [
+      0,
+      9
+    ],
+    "rumbleTypeBodyOffset": 1,
+    "rumbleType": 0,
+    "intensityBodyOffset": 2,
+    "intensityBytes": 2,
+    "leftBodyOffset": 4,
+    "rightBodyOffset": 6,
+    "motorWordBytes": 2,
+    "byteOrder": "little-endian",
+    "motorNormalization": "upper byte of each unsigned16; frozen ToMotorByte(speed / 256)",
+    "gainBodyOffsets": [
+      8,
+      9
+    ],
+    "gainMeaning": "Retained raw protocol; frozen classic motor adaptation ignores intensity and gain",
+    "zeroPairMeansStop": true
+  },
+  "primaryProtocolEvidence": {
+    "sdkSourceCommit": "30b8faf0f7de746f249edc5f1520eaa0440965cf",
+    "sdkSourceFiles": [
+      "sdk/HIDMaestro.Core/HMOutputPacket.cs",
+      "sdk/HIDMaestro.Core/Internal/Usbip/UsbipEmulatedDevice.cs"
+    ],
+    "sdlTag": "release-3.2.0",
+    "sdlFiles": [
+      "src/joystick/hidapi/SDL_hidapi_steamdeck.c",
+      "src/joystick/hidapi/steam/controller_structs.h"
+    ],
+    "implementationCopied": false
+  },
+  "supportedPhysicalSources": [
+    "controller.feedback.xinput.physical",
+    "controller.feedback.msi-dinput.physical"
+  ],
+  "consumerPolicy": "Reuse original frame SourceToken, live source/epoch/power/target fences, serial coalescing and game/manual/touch ownership and existing stop/retry. Profile metadata does not grant physical source authority.",
+  "softwareAcceptanceEvidenceRecordedSeparately": true,
+  "physicalAcceptance": false,
+  "wholeProcessCpuReduction": null,
+  "remaining": [
+    "Steam Deck haptic command0xea",
+    "Steam Deck timed pulse command0x8f with owned cancellation/deadline",
+    "Xbox HID/BT or other layouts outside separately declared source2 classical raw4/flagged5",
+    "independent runtime frontend receipts",
+    "current-source formal combined consumer acceptance",
+    "hardware motor effect"
+  ]
+}

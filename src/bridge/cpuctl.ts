@@ -6,6 +6,7 @@
 
 import { shell } from './api';
 import { invoke } from './ipc';
+import { LEGACY_CCD_UNDERVOLT_ACTIVE } from './legacyCpuFeaturePolicy';
 
 const TDPCTL_EXE = 'C:\\SOFT\\YeMan\\PowerControl\\pawnio\\YeManTdpCtl.exe';
 
@@ -25,6 +26,7 @@ export interface UvProbe {
 }
 
 export async function probeCcd(): Promise<CcdProbe> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return { supported: false, l3Domains: 0, ccdMasks: [], physicalCores: 0, logical: 0 };
   try {
     const r = await invoke<any>('cpu.topology', {});
     const l3 = Number(r.l3Domains ?? 0);
@@ -41,6 +43,7 @@ export async function probeCcd(): Promise<CcdProbe> {
 }
 
 export async function probeUndervolt(): Promise<UvProbe> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return { supported: false, vendor: '', current: 0, reason: 'feature_inactive' };
   try {
     const r = await shell.run(TDPCTL_EXE, ['uv', 'probe'], 30000);
     if (r.exitCode !== 0) {
@@ -65,6 +68,7 @@ export async function probeUndervolt(): Promise<UvProbe> {
 // 0=全核；1..N=仅第 N-1 个 CCD。N 由 native 拓扑动态决定。
 export type CcdMode = number;
 export async function setCcdMode(mode: CcdMode): Promise<{ ok: boolean; msg: string }> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return { ok: false, msg: 'CCD 功能未激活' };
   try {
     if (!Number.isInteger(mode) || mode < 0) {
       return { ok: false, msg: 'CCD 模式参数无效' };
@@ -90,6 +94,7 @@ export function uvPresetValue(vendor: 'amd' | 'intel' | '', key: string): number
 }
 
 export async function setUndervolt(v: number): Promise<{ ok: boolean; msg: string }> {
+  if (!LEGACY_CCD_UNDERVOLT_ACTIVE) return { ok: false, msg: 'CPU 降压功能未激活' };
   const r = await shell
     .run(TDPCTL_EXE, ['uv', 'set', String(v)], 20000)
     .catch(() => ({ exitCode: 1, stdout: '', stderr: '' }));

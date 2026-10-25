@@ -1,0 +1,65 @@
+﻿{
+    "schema":  1,
+    "component":  "YeManBatteryHost",
+    "frameworkDependent":  true,
+    "hardwareValidated":  false,
+    "contract":  {
+                     "schema":  1,
+                     "protocol":  2,
+                     "component":  "YeManBatteryHost",
+                     "implementation":  "msi-cg3em-ap-unknown-v2",
+                     "sourceId":  "fc13ff0d2de77c84d9f3671b81f08900b9766ce90ec37d38013006b2579b2232"
+                 },
+    "files":  [
+                  {
+                      "path":  "YeManBatteryHost.exe",
+                      "sha256":  "45eef9a92654b5a28423d9edba3506fa49fca7155586b7bbaa43ee1eb793a40b",
+                      "bytes":  162304
+                  },
+                  {
+                      "path":  "YeManBatteryHost.dll",
+                      "sha256":  "fa12df250fed1adaf2354181fedb35a165d66ce7334f7d4af9eef22441233c0c",
+                      "bytes":  206336
+                  },
+                  {
+                      "path":  "YeManBatteryHost.deps.json",
+                      "sha256":  "9e24803f27e42a647fc39c9c26212d5a993e50ed5cc7f3046b2e42828ba62f5b",
+                      "bytes":  1914
+                  },
+                  {
+                      "path":  "YeManBatteryHost.runtimeconfig.json",
+                      "sha256":  "96bc2946dff8790400d652ec7f8de7bb043e954980d59470c112788b68a1fbd3",
+                      "bytes":  519
+                  },
+                  {
+                      "path":  "LibreHardwareMonitorLib.dll",
+                      "sha256":  "f7ed30f07ea636c0ddcc5764c15c0a25ae8a0aca02ded77e4af24439955487cf",
+                      "bytes":  1204224
+                  },
+                  {
+                      "path":  "RAMSPDToolkit-NDD.dll",
+                      "sha256":  "607e2f3fc56f2313a503f29a9c6c6f4d1a70b926a821b13148ce70567e886501",
+                      "bytes":  253952
+                  },
+                  {
+                      "path":  "System.Management.dll",
+                      "sha256":  "fb53e5b0f3b4d5cccb2bb509be6eedd5896ca4037bbc413b315fb916710bb381",
+                      "bytes":  314192
+                  },
+                  {
+                      "path":  "THIRD-PARTY-NOTICES.md",
+                      "sha256":  "c929d75306e12c59f6d09edbd3d19140e55c38cbb6a6ef6554330ea9b0852ab0",
+                      "bytes":  2466
+                  },
+                  {
+                      "path":  "LICENSE.LibreHardwareMonitor.txt",
+                      "sha256":  "1f256ecad192880510e84ad60474eab7589218784b9a50bc7ceee34c2b91f1d5",
+                      "bytes":  16725
+                  },
+                  {
+                      "path":  "LICENSE.System.Management.txt",
+                      "sha256":  "cfc21f5e8bd655ae997eec916138b707b1d290b83272c02a95c9f821b8c87310",
+                      "bytes":  1116
+                  }
+              ]
+}

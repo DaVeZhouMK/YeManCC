@@ -11,8 +11,13 @@ export function onFanMirrorDisplay(listener: (value: FanMirrorDisplay) => void):
   listeners.add(listener); return () => { listeners.delete(listener); };
 }
 export function observeFanMirrorDisplay(value: FanMirrorDisplay): void {
-  latest={...value};
-  for (const listener of listeners) { try { listener({ ...value }); } catch {} }
+  if(latest && latest.preset===value.preset && latest.active===value.active && latest.pending===value.pending && latest.notice===value.notice)return;
+  const delivery=latest={...value};
+  for (const listener of listeners) {
+    // A nested publication owns the remaining display deliveries.
+    if(latest!==delivery)break;
+    try { listener({ ...delivery }); } catch {}
+  }
 }
 export function registerFanMirrorUiBlocker(blocked: () => boolean): () => void {
   blockers.add(blocked); notifyFanMirrorUiGate();

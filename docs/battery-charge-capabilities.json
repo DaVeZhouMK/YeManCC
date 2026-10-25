@@ -1,0 +1,2498 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-10-13",
+  "timezone": "Asia/Hong_Kong",
+  "purpose": "Research capability catalog; never sufficient to enable a hardware write",
+  "runtimeImplemented": false,
+  "hardwareValidated": false,
+  "writeEnabled": false,
+  "sources": {
+    "ghelper": {
+      "repo": "seerge/g-helper",
+      "commit": "bf64c632db4b9dd680b6edde11f64fdd167be3c0",
+      "committedAt": "2026-10-11T11:26:27Z",
+      "path": "app/Battery/BatteryControl.cs",
+      "url": "https://raw.githubusercontent.com/seerge/g-helper/bf64c632db4b9dd680b6edde11f64fdd167be3c0/app/Battery/BatteryControl.cs",
+      "sha256": "f0f68ba92c56d7f396b3a2fd8b9dd358cf1a9fbc410a69512eea80f3e6123ffc",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/seerge_g-helper/app/Battery/BatteryControl.cs"
+    },
+    "ghelper-acpi": {
+      "repo": "seerge/g-helper",
+      "commit": "bf64c632db4b9dd680b6edde11f64fdd167be3c0",
+      "committedAt": "2026-10-11T11:26:27Z",
+      "path": "app/AsusACPI.cs",
+      "url": "https://raw.githubusercontent.com/seerge/g-helper/bf64c632db4b9dd680b6edde11f64fdd167be3c0/app/AsusACPI.cs",
+      "sha256": "c4d9273b43543ada9e79f811293ef54961c88f48e81817c13e8a6e0609adbafe",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/seerge_g-helper/app/AsusACPI.cs"
+    },
+    "hc-identity": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/IDevice.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/IDevice.cs",
+      "sha256": "55c788ed61ad59e6f43b62d0f658fd74aa14e3b3d8c26dee3f8db9c0193c32d3",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/IDevice.cs"
+    },
+    "hc-asus": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/ASUS/ROGAlly.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/ASUS/ROGAlly.cs",
+      "sha256": "6ecc1473757550f49b05de608583fe5a2810fa72ca1e46ce14e56f013356ab93",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/ASUS/ROGAlly.cs"
+    },
+    "hc-asus-acpi": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/ASUS/AsusACPI.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/ASUS/AsusACPI.cs",
+      "sha256": "4ead4003484097801ab6591e2043465de4d80ffb970f9f0fa03bfe57c0c7b23e",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/ASUS/AsusACPI.cs"
+    },
+    "hc-lenovo": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/Lenovo/LegionGo.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/Lenovo/LegionGo.cs",
+      "sha256": "1cec038b150e1eba63497a87482a740503bf77ce709f387dbc7cb562eca73d08",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/Lenovo/LegionGo.cs"
+    },
+    "hc-msi": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/MSI/ClawA1M.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/MSI/ClawA1M.cs",
+      "sha256": "bf73ff12364d162175b365e15f89c4c55b1c8744b7f845b065ff1645beeaf3f2",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/MSI/ClawA1M.cs"
+    },
+    "hc-cec": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEc.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/AYANEO/AYANEODeviceCEc.cs",
+      "sha256": "ff3d6bb410edbf024ae8d419093cb15f744008ccaff3b97db4c69325fd0b07da",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/AYANEO/AYANEODeviceCEc.cs"
+    },
+    "hc-ceii": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/AYANEO/AYANEODeviceCEii.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/AYANEO/AYANEODeviceCEii.cs",
+      "sha256": "2811934f613caf24157b9ba6ef43f8289ee3180c7619c71070827ea909e4a821",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/AYANEO/AYANEODeviceCEii.cs"
+    },
+    "hc-oxp-x1": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs",
+      "sha256": "6de9c1f8190cdca14a051a61ff024bc618c2e5ed3f00e16fdf9ad8c7465d856c",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1.cs"
+    },
+    "hc-oxp-mini": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs",
+      "sha256": "93feaddb6b0387e110e92265d000d08c9242968939a36f69d1653bab70630121",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX1Mini.cs"
+    },
+    "hc-oxp-x2": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs",
+      "sha256": "b768e820d307c78edf7126e3068ba8331cc0784343c2a06340a99ac397ba6d49",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/OneXPlayer/OneXPlayerX2.cs"
+    },
+    "hc-oxp-3": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs",
+      "sha256": "009b582a4e6616a014a2eab542b088bbcb64fac9eb2f89c62f20d146df211166",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/OneXPlayer/OneXPlayer3.cs"
+    },
+    "hc-deck": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/Valve/SteamDeck.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/Valve/SteamDeck.cs",
+      "sha256": "d58b3287f576efa338d45e068f804ecd1b3e6f5e0475d22af127d38c9e655c63",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/Valve/SteamDeck.cs"
+    },
+    "hc-suiplay": {
+      "repo": "Valkirie/HandheldCompanion",
+      "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+      "committedAt": "2026-10-04T08:49:10Z",
+      "path": "HandheldCompanion/Devices/SuiPlay/SuiPlay0X1.cs",
+      "url": "https://raw.githubusercontent.com/Valkirie/HandheldCompanion/a250b19a4b7e29dac3b383f2d1ac517d1af43e4e/HandheldCompanion/Devices/SuiPlay/SuiPlay0X1.cs",
+      "sha256": "c45be6746dab9b3d7a3f0b1edf17141d373e4fec13aed41da687a91d7ef6dfa7",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/Valkirie_HandheldCompanion/HandheldCompanion/Devices/SuiPlay/SuiPlay0X1.cs"
+    },
+    "linux-oxpec": {
+      "repo": "torvalds/linux",
+      "commit": "24a19b953e2a3d0ea5a8c4951a0ab8f32720c907",
+      "committedAt": "2026-10-12T03:04:55Z",
+      "path": "drivers/platform/x86/oxpec.c",
+      "url": "https://github.com/torvalds/linux/blob/24a19b953e2a3d0ea5a8c4951a0ab8f32720c907/drivers/platform/x86/oxpec.c",
+      "sha256": "254499952d4b2383b0cee42e3349323023e3e9624aa269628de92835568e20f7",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/torvalds_linux/drivers/platform/x86/oxpec.c"
+    },
+    "gpd-mini-driver": {
+      "repo": "cvcore/gpd-charge-limit",
+      "commit": "044e4591b2ac98b4289d2efd6b88a78dbc9ee5a6",
+      "committedAt": "2026-09-20T16:20:19Z",
+      "path": "gpd_charge_limit.c",
+      "url": "https://raw.githubusercontent.com/cvcore/gpd-charge-limit/044e4591b2ac98b4289d2efd6b88a78dbc9ee5a6/gpd_charge_limit.c",
+      "sha256": "87e8a3b60e81ba4a868b6bceffa4e4a20dd2ee64bb2ccc61a8d0a1d45089268a",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/cvcore_gpd-charge-limit/gpd_charge_limit.c"
+    },
+    "gpd-mini-readme": {
+      "repo": "cvcore/gpd-charge-limit",
+      "commit": "044e4591b2ac98b4289d2efd6b88a78dbc9ee5a6",
+      "committedAt": "2026-09-20T16:20:19Z",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/cvcore/gpd-charge-limit/044e4591b2ac98b4289d2efd6b88a78dbc9ee5a6/README.md",
+      "sha256": "789f545c22348b928512718873a08418f92be74b257751fb8202b2bf1ab75640",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/cvcore_gpd-charge-limit/README.md"
+    },
+    "aya-linux": {
+      "repo": "ShadowBlip/ayaneo-platform",
+      "commit": "eb849d5deabe70fde004f67349fa281af322a499",
+      "committedAt": "2026-02-09T03:50:11Z",
+      "path": "ayaneo-platform.c",
+      "url": "https://raw.githubusercontent.com/ShadowBlip/ayaneo-platform/eb849d5deabe70fde004f67349fa281af322a499/ayaneo-platform.c",
+      "sha256": "86da6d57233eeb7e415645c047c0b4a7b96db9b7645812b149d67e4e68f8c9c7",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/ShadowBlip_ayaneo-platform/ayaneo-platform.c"
+    },
+    "hhd-battery": {
+      "repo": "hhd-dev/hhd",
+      "commit": "226922531f140d8904c802e404e6fb6f21eb95a6",
+      "committedAt": "2026-10-10T14:48:10Z",
+      "path": "src/adjustor/drivers/battery/__init__.py",
+      "url": "https://raw.githubusercontent.com/hhd-dev/hhd/226922531f140d8904c802e404e6fb6f21eb95a6/src/adjustor/drivers/battery/__init__.py",
+      "sha256": "512f02952eefa4446fc47d0e825ceb7986b317b49ea340249c1c6205370bc403",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/hhd-dev_hhd/src/adjustor/drivers/battery/__init__.py"
+    },
+    "legion-independent": {
+      "repo": "terrornoize/LegionGoControl",
+      "commit": "33ef5679415eddaed15e952f0189d8cba482710c",
+      "committedAt": "2026-08-12T18:33:28Z",
+      "path": "README.md",
+      "url": "https://raw.githubusercontent.com/terrornoize/LegionGoControl/33ef5679415eddaed15e952f0189d8cba482710c/README.md",
+      "sha256": "19895ebd8e541821c839c32d791f957d14a0bd859f6d87fc4a56cba87b9eab5b",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/sources/terrornoize_LegionGoControl/README.md"
+    },
+    "ctw-charge": {
+      "path": "G:/YeManCC-Work/Docs/Research/ClawTweaks/Devices/CTW-FAN-LED-CHARGE.md",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/local-library-snapshots/CTW-FAN-LED-CHARGE.md",
+      "sha256": "cdf9324ef8d8d8d39c934cacf37396a60c8495d5730cd0f181bdaa3242464732",
+      "evidence": "local-prior-research"
+    },
+    "hc-model-library": {
+      "path": "G:/YeManCC-Work/Docs/Research/HC/Models/HC-MODEL-LIBRARY-MASTER.md",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/local-library-snapshots/HC-MODEL-LIBRARY-MASTER.md",
+      "sha256": "fbc1a7268cab063094de72e9a9640e993c706a2b1e98108fba38847fb6956022",
+      "evidence": "local-prior-research"
+    },
+    "official-asus": {
+      "path": "official\\asus-official.html",
+      "url": "https://rog.asus.com/articles/guides/how-to-extend-the-battery-life-of-your-rog-ally/",
+      "reviewedAt": "2026-10-13",
+      "sha256": "a4294cbf4bfb3d64080dbacdc7911ad7fc3dbaf3d567aad45574840b421a1c65",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/asus-official.html",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    },
+    "official-lenovo": {
+      "path": "official\\lenovo-official.html",
+      "url": "https://iknow.lenovo.com.cn/detail/431336",
+      "reviewedAt": "2026-10-13",
+      "sha256": "3abf84e2355a2b84d755c5a8537c8c592313cc8343ead9e0b1464400f99b2f8f",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/lenovo-official.html",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    },
+    "official-ayaneo": {
+      "path": "official\\ayaneo-official.html",
+      "url": "https://ayaneo.com/article/844",
+      "reviewedAt": "2026-10-13",
+      "sha256": "5c2e7995ddc14283d2081e8af8e01a90b56c0a8399e3ddc95e062176c30231f9",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/ayaneo-official.html",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    },
+    "official-ayaneo3": {
+      "path": "official\\ayaneo3-official.html",
+      "url": "https://www.ayaneo.com/article/870",
+      "reviewedAt": "2026-10-13",
+      "sha256": "414764ad12c772ccfc644f413c1358dc6340d01e45761865b462dbc37b799027",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/ayaneo3-official.html",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    },
+    "official-gpd": {
+      "path": "official\\gpd-official.html",
+      "url": "https://www.gpd.hk/gpdwinmini2025firmwaredriver",
+      "reviewedAt": "2026-10-13",
+      "sha256": "c9d70cca5f68fd34b233c9d77d8e95d57c0a43a64c18196089e5396191ab2d26",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/gpd-official.html",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    },
+    "official-gpd-body": {
+      "path": "official/gpd-official-body.js",
+      "url": "https://img.website.xin/pubsf/18006/18006016/cdn-static-pages/pages/pc/332992_en-us.html.Body.js?version=20261013152736",
+      "reviewedAt": "2026-10-13",
+      "sha256": "b21167554a2cfa79d4989b391573e65775427a72aebcabaae27a46abe69512ee",
+      "snapshot": "../../../../Docs/Research/BatteryChargeLimit/20261013/official/gpd-official-body.js",
+      "evidence": "official-product-description-not-Windows-API-proof"
+    }
+  },
+  "routes": [
+    {
+      "id": "asus-ally-acpi",
+      "family": "ASUS ROG Ally",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "ROGAlly",
+        "ROGAllyX",
+        "XboxROGAlly",
+        "XboxROGAllyX"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "ghelper",
+        "ghelper-acpi",
+        "hc-asus",
+        "hc-asus-acpi",
+        "hc-identity",
+        "official-asus"
+      ],
+      "protocol": {
+        "transport": "ASUS System Control Interface / ATKACPI",
+        "deviceId": "0x00120057",
+        "readback": "DSTS support/current-value semantics must be verified; DEVS receipt alone is not validation"
+      },
+      "limits": {
+        "min": 40,
+        "max": 100,
+        "step": 1,
+        "origin": "G-Helper input range; OEM Battery Care 80% is a separate preset"
+      },
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "All four Ally classes share the upstream route; do not match arbitrary ASUS machines.",
+        "Some ASUS platforms clamp to presets; record observed value, not the requested slider value.",
+        "Do not start a whole HC device just to set battery: Open/QuerySettings also touch unrelated hardware."
+      ],
+      "priority": 1,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC71L"
+          ],
+          "deviceClass": "ROGAlly"
+        },
+        {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC72LA"
+          ],
+          "deviceClass": "ROGAllyX"
+        },
+        {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC73YA"
+          ],
+          "deviceClass": "XboxROGAlly"
+        },
+        {
+          "manufacturers": [
+            "ASUSTEK COMPUTER INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "RC73XA"
+          ],
+          "deviceClass": "XboxROGAllyX"
+        }
+      ]
+    },
+    {
+      "id": "lenovo-go-conservation",
+      "family": "Lenovo Legion Go",
+      "kind": "firmware-fixed",
+      "deviceClasses": [
+        "LegionGoSZ1",
+        "LegionGoSZ2",
+        "LegionGoTablet",
+        "LegionGoTablet2"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-lenovo",
+        "legion-independent",
+        "hc-identity",
+        "official-lenovo"
+      ],
+      "protocol": {
+        "transport": "root\\WMI / LENOVO_OTHER_METHOD",
+        "setMethod": "SetFeatureValue",
+        "featureId": "0x03010001",
+        "parameters": {
+          "IDs": "featureId",
+          "value": "0 or 1"
+        },
+        "readMethod": "GetFeatureValue (verify method metadata and output on target)"
+      },
+      "limits": {
+        "presets": [
+          80,
+          100
+        ],
+        "origin": "80% conservation or off/full; per-model firmware verification required"
+      },
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "HC calls the constant InstantBootAc although this method uses it for charge limiting.",
+        "Upstream inheritance covers Go, Go 2, Go S Z1/Z2. Independent readback evidence is Go 1 83E1/N3CN37WW only.",
+        "Never turn this Boolean feature into an arbitrary percentage slider."
+      ],
+      "priority": 1,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83N6",
+            "83Q2",
+            "83Q3"
+          ],
+          "deviceClass": "LegionGoSZ1"
+        },
+        {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83L3"
+          ],
+          "deviceClass": "LegionGoSZ2"
+        },
+        {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83E1"
+          ],
+          "deviceClass": "LegionGoTablet"
+        },
+        {
+          "manufacturers": [
+            "LENOVO"
+          ],
+          "field": "systemProduct",
+          "values": [
+            "83N0",
+            "83N1"
+          ],
+          "deviceClass": "LegionGoTablet2"
+        }
+      ]
+    },
+    {
+      "id": "msi-claw-wmi",
+      "family": "MSI Claw",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "ClawA1M",
+        "ClawA2VM",
+        "ClawBZ2EM",
+        "ClawCG3EM"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-msi",
+        "ctw-charge",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "root\\WMI / MSI_ACPI",
+        "referenceInstance": "ACPI\\PNP0C14\\0_0",
+        "readMethod": "Get_Data",
+        "setMethod": "Set_Data",
+        "block": 215,
+        "packetBytes": 32,
+        "enabledBit": 7,
+        "percentageMask": 127,
+        "readback": "Read D7 successfully before preserving bits, and read D7 after write"
+      },
+      "limits": {
+        "min": 20,
+        "max": 100,
+        "step": 1,
+        "origin": "CTW UI range; each firmware needs range/readback confirmation"
+      },
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "A1M/A2VM/BZ2EM/CG3EM inherit the same upstream method.",
+        "HC may continue a write after a failed read; do not carry this behavior into YMCC.",
+        "Enumerate the WMI instance; do not hardcode a single instance path as proof of support."
+      ],
+      "priority": 1,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T41"
+          ],
+          "deviceClass": "ClawA1M"
+        },
+        {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T42",
+            "MS-1T52"
+          ],
+          "deviceClass": "ClawA2VM"
+        },
+        {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T8K"
+          ],
+          "deviceClass": "ClawBZ2EM"
+        },
+        {
+          "manufacturers": [
+            "MICRO-STAR INTERNATIONAL CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "MS-1T91"
+          ],
+          "deviceClass": "ClawCG3EM"
+        }
+      ]
+    },
+    {
+      "id": "ayaneo-cec-bypass",
+      "family": "AYANEO CEc",
+      "kind": "software-bypass-threshold",
+      "deviceClasses": [
+        "AYANEO2",
+        "AYANEO2S",
+        "AYANEO3",
+        "AYANEOAIR",
+        "AYANEOAIR1S",
+        "AYANEOAIR2",
+        "AYANEOAIRLite",
+        "AYANEOAIRPro",
+        "AYANEOAIRPro1S",
+        "AYANEOFlip11",
+        "AYANEOFlip1SDS",
+        "AYANEOFlip1SKB",
+        "AYANEOFlipDS",
+        "AYANEOFlipKB",
+        "AYANEOKUN",
+        "AYANEONEXT2"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-cec",
+        "aya-linux",
+        "hc-identity",
+        "official-ayaneo",
+        "official-ayaneo3"
+      ],
+      "protocol": {
+        "transport": "EC logical byte",
+        "register": "0x1E",
+        "pause": "0x55",
+        "resume": "0xAA",
+        "readback": "bypass register plus AC/battery state"
+      },
+      "limits": {
+        "min": 40,
+        "max": 100,
+        "step": 1,
+        "origin": "proposed YMCC policy, not a firmware percentage register"
+      },
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "The percentage is enforced by a running policy using charge-bypass on/off.",
+        "Separate setting from observed charge state; add hysteresis and safe cleanup on disable/exit/suspend.",
+        "GEEK/GEEK 1S map to AYANEO2/2S in existing identity code; they are aliases, not extra protocol implementations."
+      ],
+      "priority": 3,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 2",
+            "GEEK"
+          ],
+          "deviceClass": "AYANEO2"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 2S",
+            "GEEK 1S"
+          ],
+          "deviceClass": "AYANEO2S"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AYANEO 3",
+            "AB07"
+          ],
+          "deviceClass": "AYANEO3"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR"
+          ],
+          "deviceClass": "AYANEOAIR"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR 1S",
+            "AIR 1S Limited"
+          ],
+          "deviceClass": "AYANEOAIR1S"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR 2",
+            "AIR2",
+            "AYANEO AIR 2",
+            "AB10"
+          ],
+          "deviceClass": "AYANEOAIR2"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Lite"
+          ],
+          "deviceClass": "AYANEOAIRLite"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Pro"
+          ],
+          "deviceClass": "AYANEOAIRPro"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AIR Pro 1S",
+            "AYANEO AIR Pro 1S"
+          ],
+          "deviceClass": "AYANEOAIRPro1S"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 11",
+            "AYANEO FLIP 11"
+          ],
+          "deviceClass": "AYANEOFlip11"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 1S DS"
+          ],
+          "deviceClass": "AYANEOFlip1SDS"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP 1S KB"
+          ],
+          "deviceClass": "AYANEOFlip1SKB"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP DS"
+          ],
+          "deviceClass": "AYANEOFlipDS"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "FLIP KB"
+          ],
+          "deviceClass": "AYANEOFlipKB"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "KUN"
+          ],
+          "deviceClass": "AYANEOKUN"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "NEXT II",
+            "NEXT 2",
+            "AYANEO NEXT II",
+            "AYANEO NEXT 2",
+            "AB09"
+          ],
+          "deviceClass": "AYANEONEXT2"
+        }
+      ]
+    },
+    {
+      "id": "ayaneo-ceii-bypass",
+      "family": "AYANEO CEii",
+      "kind": "software-bypass-threshold",
+      "deviceClasses": [
+        "AYANEOAIRPlus",
+        "AYANEOAIRPlusAMD",
+        "AYANEOAIRPlusAMDMendocino",
+        "AYANEOAIRPlusIntel",
+        "AYANEOAIRPlusNxx",
+        "AYANEOSlide"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-cec",
+        "hc-ceii",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "EC direct RAM byte",
+        "register": "0xD1",
+        "pause": "0x01",
+        "resume": "0x65",
+        "readback": "direct RAM byte; do not reuse CEc addressing"
+      },
+      "limits": {
+        "min": 40,
+        "max": 100,
+        "step": 1,
+        "origin": "proposed YMCC policy, not a firmware percentage register"
+      },
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "AIR Plus variants and Slide use a different EC access path from CEc.",
+        "Requires a recoverable owner/lease and fresh SOC before any bypass change."
+      ],
+      "priority": 3,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-AMD"
+          ],
+          "deviceClass": "AYANEOAIRPlusAMD"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-Mendocino"
+          ],
+          "deviceClass": "AYANEOAIRPlusAMDMendocino"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05-Intel"
+          ],
+          "deviceClass": "AYANEOAIRPlusIntel"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AB05N",
+            "AB05NXX",
+            "AIR Plus Nxx"
+          ],
+          "deviceClass": "AYANEOAIRPlusNxx"
+        },
+        {
+          "manufacturers": [
+            "AYADEVICE",
+            "AYANEO",
+            "AYA"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "AS01"
+          ],
+          "deviceClass": "AYANEOSlide"
+        }
+      ]
+    },
+    {
+      "id": "suiplay-cec-inheritance",
+      "family": "SuiPlay 0X1",
+      "kind": "software-bypass-threshold",
+      "deviceClasses": [
+        "SuiPlay0X1"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-cec",
+        "hc-suiplay",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "inherits AYANEO CEc; target EC has not been independently verified"
+      },
+      "limits": null,
+      "firmwareGate": {
+        "kind": "provider-probe-required"
+      },
+      "notes": [
+        "Source inheritance is a candidate only; do not claim AYANEO-equivalent hardware validation."
+      ],
+      "priority": 4,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "MYSTEN LABS, INC."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "SuiPlay0X1"
+          ],
+          "deviceClass": "SuiPlay0X1"
+        }
+      ]
+    },
+    {
+      "id": "oxp-x1-amd-ec",
+      "family": "OneXPlayer X1 AMD / Mini / Pro / Apex",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "OneXPlayerX1AMD",
+        "OneXPlayerX1Mini",
+        "OneXPlayerX1Pro",
+        "OneXPlayerApex"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-oxp-x1",
+        "hc-oxp-mini",
+        "linux-oxpec",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "HC direct EC RAM",
+        "register": "0x04A3",
+        "bypassRegister": "0x04A4",
+        "readback": "single-byte limit; separate access-space contract from Linux ACPI EC offset"
+      },
+      "limits": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "origin": "upstream accepted range, NOT product UI recommendation"
+      },
+      "firmwareGate": {
+        "kind": "hc-ec-components",
+        "majorMin": 1,
+        "minorMin": 3,
+        "unknownValue": 255
+      },
+      "notes": [
+        "Upstream predicate is major >= 1 AND minor >= 3; it is not a lexicographic >= 1.3 comparison.",
+        "Do not auto-accept EC 255.255 (SMBIOS unknown) or new major revisions.",
+        "Mainline ONE-NETBOOK fallback currently resolves unknown models to X1AMD; never authorize battery writes from that result alone."
+      ],
+      "priority": 2,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 A",
+            "ONEXPLAYER X1z"
+          ],
+          "deviceClass": "OneXPlayerX1AMD"
+        },
+        {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 mini"
+          ],
+          "deviceClass": "OneXPlayerX1Mini"
+        },
+        {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1Pro"
+          ],
+          "deviceClass": "OneXPlayerX1Pro"
+        },
+        {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER APEX",
+            "ONEXPLAYERAPEX"
+          ],
+          "deviceClass": "OneXPlayerApex"
+        }
+      ]
+    },
+    {
+      "id": "oxp-x1-intel-ec",
+      "family": "OneXPlayer X1 Intel",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "OneXPlayerX1Intel"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-oxp-x1",
+        "linux-oxpec",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "HC direct EC RAM",
+        "register": "0x04A3",
+        "bypassRegister": "0x04A4"
+      },
+      "limits": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "origin": "upstream accepted range, NOT product UI recommendation"
+      },
+      "firmwareGate": {
+        "kind": "hc-ec-components",
+        "majorMin": 0,
+        "minorMin": 67,
+        "unknownValue": 255
+      },
+      "notes": [
+        "Upstream predicate is major >= 0 AND minor >= 67; a later major with lower minor is unproven."
+      ],
+      "priority": 2,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "ONE-NETBOOK",
+            "ONE-NETBOOK TECHNOLOGY CO., LTD."
+          ],
+          "field": "boardProduct",
+          "values": [
+            "ONEXPLAYER X1 i"
+          ],
+          "deviceClass": "OneXPlayerX1Intel"
+        }
+      ]
+    },
+    {
+      "id": "oxp-linux-platform",
+      "family": "OneXPlayer / AOKZOE A1X Linux family",
+      "kind": "firmware-percent",
+      "deviceClasses": [],
+      "evidencePlatform": "linux-reference",
+      "sourceRefs": [
+        "linux-oxpec"
+      ],
+      "protocol": {
+        "transport": "Linux ACPI EC ec_read/ec_write with global ACPI lock",
+        "register": "0xA3",
+        "bypassRegister": "0xA4"
+      },
+      "limits": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "origin": "Linux driver accepted range"
+      },
+      "firmwareGate": {
+        "kind": "windows-transport-unverified"
+      },
+      "notes": [
+        "Covers exact board names in this source table; not the whole ONE-NETBOOK brand.",
+        "AOKZOE A1X maps to oxp_fly and inherits Linux charge control; A1/A1 Pro/A2 Pro and OrangePi do not.",
+        "Linux offsets 0xA3/0xA4 and HC direct RAM 0x04A3/0x04A4 are different address spaces.",
+        "X2Mini PRO appears in Linux but HC X2 inheritance explicitly disables battery protection: retain conflict and require device verification."
+      ],
+      "priority": 2,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "dmiCandidates": [
+        {
+          "manufacturer": "AOKZOE",
+          "boardProduct": "AOKZOE A1X",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER APEX",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1 EVA-01",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1 OLED",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1L",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1Pro",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER F1 EVA-02",
+          "linuxBoardClass": "oxp_fly"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER G1 A",
+          "linuxBoardClass": "oxp_g1_a"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER SUPER X",
+          "linuxBoardClass": "oxp_g1_a"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER G1 i",
+          "linuxBoardClass": "oxp_g1_i"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1z",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1 A",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1 i",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1Air",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1 mini",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1Mini Pro",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1Pro",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X1Pro EVA-02",
+          "linuxBoardClass": "oxp_x1"
+        },
+        {
+          "manufacturer": "ONE-NETBOOK",
+          "boardProduct": "ONEXPLAYER X2Mini PRO",
+          "linuxBoardClass": "oxp_fly"
+        }
+      ],
+      "exactIdentities": []
+    },
+    {
+      "id": "valve-deck-firmware",
+      "family": "Valve Steam Deck",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "SteamDeck"
+      ],
+      "evidencePlatform": "windows-reference",
+      "sourceRefs": [
+        "hc-deck",
+        "hc-identity"
+      ],
+      "protocol": {
+        "transport": "HC InpOut physical memory; Windows driver prerequisite unresolved",
+        "address": "0xFE700B9F",
+        "readBytes": 1,
+        "upstreamWriteBytes": 4,
+        "readback": "must define audited access width; do not copy four-byte WriteMemory of an int to a one-byte property"
+      },
+      "limits": {
+        "min": 0,
+        "max": 100,
+        "step": 1,
+        "origin": "upstream accepted range"
+      },
+      "firmwareGate": {
+        "kind": "exact-board-firmware",
+        "pairs": [
+          {
+            "boardId": 10,
+            "firmware": 45104
+          },
+          {
+            "boardId": 5,
+            "firmware": 4112
+          },
+          {
+            "boardId": 5,
+            "firmware": 4176
+          },
+          {
+            "boardId": 5,
+            "firmware": 4240
+          },
+          {
+            "boardId": 5,
+            "firmware": 4352
+          }
+        ]
+      },
+      "notes": [
+        "LCD board 0x06+B030 and OLED board 0x05+1030 do not advertise this capability in the table.",
+        "Never infer Windows access from a SteamOS feature."
+      ],
+      "priority": 3,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "VALVE"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "Jupiter",
+            "Galileo"
+          ],
+          "deviceClass": "SteamDeck"
+        }
+      ]
+    },
+    {
+      "id": "gpd-win-mini-2025",
+      "family": "GPD WIN Mini 2025 HX370",
+      "kind": "firmware-percent",
+      "deviceClasses": [
+        "GPDWinMini_HX370"
+      ],
+      "evidencePlatform": "linux-reference",
+      "sourceRefs": [
+        "gpd-mini-driver",
+        "gpd-mini-readme",
+        "hc-identity",
+        "official-gpd-body"
+      ],
+      "protocol": {
+        "transport": "Linux ACPI EC; Windows EC backend still required",
+        "register": "0x1D",
+        "readback": "EC byte",
+        "hysteresis": "source reports limit - 10; 95 when limit >= 96"
+      },
+      "limits": {
+        "min": 60,
+        "max": 100,
+        "step": 1,
+        "origin": "upstream module; BIOS menu exposes 60/70/80/90/100"
+      },
+      "firmwareGate": {
+        "kind": "exact-reviewed-firmware",
+        "bios": "2.10",
+        "ecMajor": 2,
+        "ecMinor": 7
+      },
+      "notes": [
+        "Known driver target G1617-02 / HX370; official firmware also mentions 365, but code/device evidence for 365 is separate.",
+        "Source author has not tested 8840U; no GPDWin4/5/Max inheritance.",
+        "BIOS rewrites value on boot; source reports possible EC flash persistence: avoid periodic writes."
+      ],
+      "priority": 2,
+      "runtimeImplemented": false,
+      "hardwareValidated": false,
+      "writeEnabled": false,
+      "identityGate": "exact-dmi-and-protocol-required",
+      "dmiCandidates": [
+        {
+          "manufacturer": "GPD",
+          "boardProduct": "G1617-02",
+          "processorContains": "HX 370"
+        }
+      ],
+      "exactIdentities": [
+        {
+          "manufacturers": [
+            "GPD"
+          ],
+          "field": "boardProduct",
+          "values": [
+            "G1617-02"
+          ],
+          "deviceClass": "GPDWinMini_HX370",
+          "processorPattern": "\\bHX\\s*370\\b"
+        }
+      ]
+    }
+  ],
+  "exclusions": [
+    {
+      "deviceClasses": [
+        "OneXPlayerX2",
+        "OneXPlayerX2MiniPro",
+        "OneXPlayer3"
+      ],
+      "sourceRefs": [
+        "hc-oxp-x2",
+        "hc-oxp-3",
+        "linux-oxpec"
+      ],
+      "reason": "HC explicitly returns false; X2Mini PRO has conflicting Linux evidence. No inherited X1 Windows writer."
+    },
+    {
+      "deviceClasses": [
+        "AYANEO2021",
+        "AYANEO2021Pro",
+        "AYANEONEXT",
+        "AYANEONEXTLite",
+        "AYANEONEXTLite4500U"
+      ],
+      "sourceRefs": [
+        "hc-cec"
+      ],
+      "reason": "No CEc/CEii battery inheritance in inspected upstream. This is absence of evidence, not proof that hardware cannot support it."
+    }
+  ],
+  "unestablishedFamilies": [
+    "GPD other models",
+    "AOKZOE except Linux A1X candidate",
+    "ZOTAC ZONE",
+    "AYN Loki",
+    "OrangePi NEO",
+    "AYANEO legacy / NEXT",
+    "OneXPlayer older Mini / 2"
+  ],
+  "mainlineIdentityHazards": [
+    "ONE-NETBOOK unknown products fall back to X1AMD; do not trust class alone.",
+    "AYANEO prefix matching can classify AIR2 as AIR, NEXT2 as NEXT, and AYANEO 2021 via a broader AYANEO 2 path depending order; new charge gate needs independent exact model evidence.",
+    "Unknown firmware/provider/readback must remain non-writable."
+  ],
+  "inventory": [
+    {
+      "deviceClass": "AOKZOEA1",
+      "sourcePath": "AOKZOE/AOKZOEA1.cs",
+      "ancestry": [
+        "AOKZOEA1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AOKZOEA1Pro",
+      "sourcePath": "AOKZOE/AOKZOEA1Pro.cs",
+      "ancestry": [
+        "AOKZOEA1Pro",
+        "AOKZOEA1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AOKZOEA1X",
+      "sourcePath": "AOKZOE/AOKZOEA1X.cs",
+      "ancestry": [
+        "AOKZOEA1X",
+        "AOKZOEA1Pro",
+        "AOKZOEA1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AOKZOEA2",
+      "sourcePath": "AOKZOE/AOKZOEA2.cs",
+      "ancestry": [
+        "AOKZOEA2",
+        "AOKZOEA1Pro",
+        "AOKZOEA1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEO2",
+      "sourcePath": "AYANEO/AYANEO2.cs",
+      "ancestry": [
+        "AYANEO2",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEO2021",
+      "sourcePath": "AYANEO/AYANEO2021.cs",
+      "ancestry": [
+        "AYANEO2021"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEO2021Pro",
+      "sourcePath": "AYANEO/AYANEO2021Pro.cs",
+      "ancestry": [
+        "AYANEO2021Pro",
+        "AYANEO2021"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEO2S",
+      "sourcePath": "AYANEO/AYANEO2S.cs",
+      "ancestry": [
+        "AYANEO2S",
+        "AYANEO2",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEO3",
+      "sourcePath": "AYANEO/AYANEO3.cs",
+      "ancestry": [
+        "AYANEO3",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOAIR",
+      "sourcePath": "AYANEO/AYANEOAIR.cs",
+      "ancestry": [
+        "AYANEOAIR",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIR1S",
+      "sourcePath": "AYANEO/AYANEOAIR1S.cs",
+      "ancestry": [
+        "AYANEOAIR1S",
+        "AYANEOAIR",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIR2",
+      "sourcePath": "AYANEO/AYANEOAIR2.cs",
+      "ancestry": [
+        "AYANEOAIR2",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOAIRLite",
+      "sourcePath": "AYANEO/AYANEOAIRLite.cs",
+      "ancestry": [
+        "AYANEOAIRLite",
+        "AYANEOAIR",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIRPlus",
+      "sourcePath": "AYANEO/AYANEOAIRPlus.cs",
+      "ancestry": [
+        "AYANEOAIRPlus",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOAIRPlusAMD",
+      "sourcePath": "AYANEO/AYANEOAIRPlusAMD.cs",
+      "ancestry": [
+        "AYANEOAIRPlusAMD",
+        "AYANEOAIRPlus",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIRPlusAMDMendocino",
+      "sourcePath": "AYANEO/AYANEOAIRPlusAMDMendocino.cs",
+      "ancestry": [
+        "AYANEOAIRPlusAMDMendocino",
+        "AYANEOAIRPlus",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIRPlusIntel",
+      "sourcePath": "AYANEO/AYANEOAIRPlusIntel.cs",
+      "ancestry": [
+        "AYANEOAIRPlusIntel",
+        "AYANEOAIRPlus",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIRPlusNxx",
+      "sourcePath": "AYANEO/AYANEOAIRPlusNxx.cs",
+      "ancestry": [
+        "AYANEOAIRPlusNxx",
+        "AYANEOAIRPlus",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOAIRPro",
+      "sourcePath": "AYANEO/AYANEOAIRPro.cs",
+      "ancestry": [
+        "AYANEOAIRPro",
+        "AYANEOAIR",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOAIRPro1S",
+      "sourcePath": "AYANEO/AYANEOAIRPro1S.cs",
+      "ancestry": [
+        "AYANEOAIRPro1S",
+        "AYANEOAIR1S",
+        "AYANEOAIR",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOFlip11",
+      "sourcePath": "AYANEO/AYANEOFlip11.cs",
+      "ancestry": [
+        "AYANEOFlip11",
+        "AYANEOFlip1SKB",
+        "AYANEOFlipKB",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOFlip1SDS",
+      "sourcePath": "AYANEO/AYANEOFlip1SDS.cs",
+      "ancestry": [
+        "AYANEOFlip1SDS",
+        "AYANEOFlipDS",
+        "AYANEOFlipKB",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOFlip1SKB",
+      "sourcePath": "AYANEO/AYANEOFlip1SKB.cs",
+      "ancestry": [
+        "AYANEOFlip1SKB",
+        "AYANEOFlipKB",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOFlipDS",
+      "sourcePath": "AYANEO/AYANEOFlipDS.cs",
+      "ancestry": [
+        "AYANEOFlipDS",
+        "AYANEOFlipKB",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOFlipKB",
+      "sourcePath": "AYANEO/AYANEOFlipKB.cs",
+      "ancestry": [
+        "AYANEOFlipKB",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEOKUN",
+      "sourcePath": "AYANEO/AYANEOKUN.cs",
+      "ancestry": [
+        "AYANEOKUN",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEONEXT",
+      "sourcePath": "AYANEO/AYANEONEXT.cs",
+      "ancestry": [
+        "AYANEONEXT"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEONEXT2",
+      "sourcePath": "AYANEO/AYANEONEXT2.cs",
+      "ancestry": [
+        "AYANEONEXT2",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-cec-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEONEXTLite",
+      "sourcePath": "AYANEO/AYANEONEXTLite.cs",
+      "ancestry": [
+        "AYANEONEXTLite",
+        "AYANEONEXT"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AYANEONEXTLite4500U",
+      "sourcePath": "AYANEO/AYANEONEXTLite4500U.cs",
+      "ancestry": [
+        "AYANEONEXTLite4500U",
+        "AYANEONEXTLite",
+        "AYANEONEXT"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "AYANEOSlide",
+      "sourcePath": "AYANEO/AYANEOSLIDE.cs",
+      "ancestry": [
+        "AYANEOSlide",
+        "AYANEODeviceCEii",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "ayaneo-ceii-bypass",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "AynLoki",
+      "sourcePath": "Ayn/AynLoki.cs",
+      "ancestry": [
+        "AynLoki"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "ClawA1M",
+      "sourcePath": "MSI/ClawA1M.cs",
+      "ancestry": [
+        "ClawA1M"
+      ],
+      "route": "msi-claw-wmi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "ClawA2VM",
+      "sourcePath": "MSI/ClawA2VM.cs",
+      "ancestry": [
+        "ClawA2VM",
+        "ClawA1M"
+      ],
+      "route": "msi-claw-wmi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "ClawBZ2EM",
+      "sourcePath": "MSI/ClawBZ2EM.cs",
+      "ancestry": [
+        "ClawBZ2EM",
+        "ClawA1M"
+      ],
+      "route": "msi-claw-wmi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "ClawCG3EM",
+      "sourcePath": "MSI/ClawCG3EM.cs",
+      "ancestry": [
+        "ClawCG3EM",
+        "ClawA1M"
+      ],
+      "route": "msi-claw-wmi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWin2",
+      "sourcePath": "GPD/GPDWin2.cs",
+      "ancestry": [
+        "GPDWin2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWin3",
+      "sourcePath": "GPD/GPDWin3.cs",
+      "ancestry": [
+        "GPDWin3"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWin4",
+      "sourcePath": "GPD/GPDWin4.cs",
+      "ancestry": [
+        "GPDWin4"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWin4_2023",
+      "sourcePath": "GPD/GPDWin4-2023.cs",
+      "ancestry": [
+        "GPDWin4_2023"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWin4_2023_7640U",
+      "sourcePath": "GPD/GPDWin4-2023-7640U.cs",
+      "ancestry": [
+        "GPDWin4_2023_7640U",
+        "GPDWin4_2023"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWin4_2024",
+      "sourcePath": "GPD/GPDWin4-2024.cs",
+      "ancestry": [
+        "GPDWin4_2024"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWin4_2024_8640U",
+      "sourcePath": "GPD/GPDWin4-2024-8640U.cs",
+      "ancestry": [
+        "GPDWin4_2024_8640U",
+        "GPDWin4_2024"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWin4_2024_HX370",
+      "sourcePath": "GPD/GPDWin4-2024-HX370.cs",
+      "ancestry": [
+        "GPDWin4_2024_HX370",
+        "GPDWin4_2024"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWin5",
+      "sourcePath": "GPD/GPDWin5.cs",
+      "ancestry": [
+        "GPDWin5"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWinMax2",
+      "sourcePath": "GPD/GPDWinMax2.cs",
+      "ancestry": [
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWinMax2Intel",
+      "sourcePath": "GPD/GPDWinMax2Intel.cs",
+      "ancestry": [
+        "GPDWinMax2Intel",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWinMax2_2022_6800U",
+      "sourcePath": "GPD/GPDWinMax2-2022-6800U.cs",
+      "ancestry": [
+        "GPDWinMax2_2022_6800U",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMax2_2023_7640U",
+      "sourcePath": "GPD/GPDWinMax2-2023-7640U.cs",
+      "ancestry": [
+        "GPDWinMax2_2023_7640U",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMax2_2023_7840U",
+      "sourcePath": "GPD/GPDWinMax2-2023-7840U.cs",
+      "ancestry": [
+        "GPDWinMax2_2023_7840U",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMax2_2024_8640U",
+      "sourcePath": "GPD/GPDWinMax2-2024-8640U.cs",
+      "ancestry": [
+        "GPDWinMax2_2024_8640U",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMax2_2024_8840U",
+      "sourcePath": "GPD/GPDWinMax2-2024-8840U.cs",
+      "ancestry": [
+        "GPDWinMax2_2024_8840U",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMax2_2024_HX370",
+      "sourcePath": "GPD/GPDWinMax2-2024-HX370.cs",
+      "ancestry": [
+        "GPDWinMax2_2024_HX370",
+        "GPDWinMax2"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMini",
+      "sourcePath": "GPD/GPDWinMini.cs",
+      "ancestry": [
+        "GPDWinMini"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "GPDWinMini_7640U",
+      "sourcePath": "GPD/GPDWinMini-7640U.cs",
+      "ancestry": [
+        "GPDWinMini_7640U",
+        "GPDWinMini"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMini_8840U",
+      "sourcePath": "GPD/GPDWinMini-8840U.cs",
+      "ancestry": [
+        "GPDWinMini_8840U",
+        "GPDWinMini"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GPDWinMini_HX370",
+      "sourcePath": "GPD/GPDWinMini-HX370.cs",
+      "ancestry": [
+        "GPDWinMini_HX370",
+        "GPDWinMini_8840U",
+        "GPDWinMini"
+      ],
+      "route": "gpd-win-mini-2025",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "GamingZone",
+      "sourcePath": "Zotac/GamingZone.cs",
+      "ancestry": [
+        "GamingZone"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LegionGoSZ1",
+      "sourcePath": "Lenovo/LegionGoSZ1.cs",
+      "ancestry": [
+        "LegionGoSZ1",
+        "LegionGo"
+      ],
+      "route": "lenovo-go-conservation",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LegionGoSZ2",
+      "sourcePath": "Lenovo/LegionGoSZ2.cs",
+      "ancestry": [
+        "LegionGoSZ2",
+        "LegionGoSZ1",
+        "LegionGo"
+      ],
+      "route": "lenovo-go-conservation",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LegionGoTablet",
+      "sourcePath": "Lenovo/LegionGoTablet.cs",
+      "ancestry": [
+        "LegionGoTablet",
+        "LegionGo"
+      ],
+      "route": "lenovo-go-conservation",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LegionGoTablet2",
+      "sourcePath": "Lenovo/LegionGoTablet2.cs",
+      "ancestry": [
+        "LegionGoTablet2",
+        "LegionGoTablet",
+        "LegionGo"
+      ],
+      "route": "lenovo-go-conservation",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LokiMax6600U",
+      "sourcePath": "Ayn/AynLokiMax6600U.cs",
+      "ancestry": [
+        "LokiMax6600U",
+        "AynLoki"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LokiMax6800U",
+      "sourcePath": "Ayn/AynLokiMax6800U.cs",
+      "ancestry": [
+        "LokiMax6800U",
+        "AynLoki"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LokiMiniPro",
+      "sourcePath": "Ayn/AynLokiMiniPro.cs",
+      "ancestry": [
+        "LokiMiniPro",
+        "AynLoki"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "LokiZero",
+      "sourcePath": "Ayn/AynLokiZero.cs",
+      "ancestry": [
+        "LokiZero",
+        "AynLoki"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "MinisforumV3",
+      "sourcePath": "Minisforum/MinisforumV3.cs",
+      "ancestry": [
+        "MinisforumV3"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayer2",
+      "sourcePath": "OneXPlayer/OneXPlayer2.cs",
+      "ancestry": [
+        "OneXPlayer2",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayer2Pro",
+      "sourcePath": "OneXPlayer/OneXPlayer2.cs",
+      "ancestry": [
+        "OneXPlayer2Pro",
+        "OneXPlayer2",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayer3",
+      "sourcePath": "OneXPlayer/OneXPlayer3.cs",
+      "ancestry": [
+        "OneXPlayer3",
+        "OneXPlayerX2",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "OneXPlayerApex",
+      "sourcePath": "OneXPlayer/OneXPlayerApex.cs",
+      "ancestry": [
+        "OneXPlayerApex",
+        "OneXPlayerX1AMD",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": "oxp-x1-amd-ec",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerG1",
+      "sourcePath": "OneXPlayer/OneXPlayerG1.cs",
+      "ancestry": [
+        "OneXPlayerG1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerG1AMD",
+      "sourcePath": "OneXPlayer/OneXPlayerG1.cs",
+      "ancestry": [
+        "OneXPlayerG1AMD",
+        "OneXPlayerG1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerG1Intel",
+      "sourcePath": "OneXPlayer/OneXPlayerG1.cs",
+      "ancestry": [
+        "OneXPlayerG1Intel",
+        "OneXPlayerG1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerMini",
+      "sourcePath": "OneXPlayer/OneXPlayerMini.cs",
+      "ancestry": [
+        "OneXPlayerMini",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "OneXPlayerMiniAMD",
+      "sourcePath": "OneXPlayer/OneXPlayerMini.cs",
+      "ancestry": [
+        "OneXPlayerMiniAMD",
+        "OneXPlayerMini",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerMiniIntel",
+      "sourcePath": "OneXPlayer/OneXPlayerMini.cs",
+      "ancestry": [
+        "OneXPlayerMiniIntel",
+        "OneXPlayerMini",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerMiniPro",
+      "sourcePath": "OneXPlayer/OneXPlayerMiniPro.cs",
+      "ancestry": [
+        "OneXPlayerMiniPro",
+        "OneXPlayerMini",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerOneXFly",
+      "sourcePath": "OneXPlayer/OneXPlayerOneXFly.cs",
+      "ancestry": [
+        "OneXPlayerOneXFly",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerOneXFlyF1Pro",
+      "sourcePath": "OneXPlayer/OneXPlayerOneXFly.cs",
+      "ancestry": [
+        "OneXPlayerOneXFlyF1Pro",
+        "OneXPlayerOneXFly",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerX1AMD",
+      "sourcePath": "OneXPlayer/OneXPlayerX1.cs",
+      "ancestry": [
+        "OneXPlayerX1AMD",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": "oxp-x1-amd-ec",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerX1Intel",
+      "sourcePath": "OneXPlayer/OneXPlayerX1.cs",
+      "ancestry": [
+        "OneXPlayerX1Intel",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": "oxp-x1-intel-ec",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerX1Mini",
+      "sourcePath": "OneXPlayer/OneXPlayerX1Mini.cs",
+      "ancestry": [
+        "OneXPlayerX1Mini",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": "oxp-x1-amd-ec",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerX1Pro",
+      "sourcePath": "OneXPlayer/OneXPlayerX1Pro.cs",
+      "ancestry": [
+        "OneXPlayerX1Pro",
+        "OneXPlayerX1AMD",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": "oxp-x1-amd-ec",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "OneXPlayerX2",
+      "sourcePath": "OneXPlayer/OneXPlayerX2.cs",
+      "ancestry": [
+        "OneXPlayerX2",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "OneXPlayerX2MiniPro",
+      "sourcePath": "OneXPlayer/OneXPlayerX2MiniPro.cs",
+      "ancestry": [
+        "OneXPlayerX2MiniPro",
+        "OneXPlayerX2",
+        "OneXPlayerX1",
+        "OneXAOKZOE"
+      ],
+      "route": null,
+      "evidence": "explicit-exclusion",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "ROGAlly",
+      "sourcePath": "ASUS/ROGAlly.cs",
+      "ancestry": [
+        "ROGAlly"
+      ],
+      "route": "asus-ally-acpi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "ROGAllyX",
+      "sourcePath": "ASUS/ROGAllyX.cs",
+      "ancestry": [
+        "ROGAllyX",
+        "ROGAlly"
+      ],
+      "route": "asus-ally-acpi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "RyzenSMU",
+      "sourcePath": "Valve/RyzenSMU.cs",
+      "ancestry": [
+        "RyzenSMU"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "SteamDeck",
+      "sourcePath": "Valve/SteamDeck.cs",
+      "ancestry": [
+        "SteamDeck"
+      ],
+      "route": "valve-deck-firmware",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "SteamMachine",
+      "sourcePath": "Valve/SteamMachine.cs",
+      "ancestry": [
+        "SteamMachine"
+      ],
+      "route": null,
+      "evidence": "not-established",
+      "mainlineClassMention": false
+    },
+    {
+      "deviceClass": "SuiPlay0X1",
+      "sourcePath": "SuiPlay/SuiPlay0X1.cs",
+      "ancestry": [
+        "SuiPlay0X1",
+        "AYANEODeviceCEc",
+        "AYANEODevice"
+      ],
+      "route": "suiplay-cec-inheritance",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "XboxROGAlly",
+      "sourcePath": "ASUS/XboxROGAlly.cs",
+      "ancestry": [
+        "XboxROGAlly",
+        "ROGAlly"
+      ],
+      "route": "asus-ally-acpi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    },
+    {
+      "deviceClass": "XboxROGAllyX",
+      "sourcePath": "ASUS/XboxROGAllyX.cs",
+      "ancestry": [
+        "XboxROGAllyX",
+        "ROGAllyX",
+        "ROGAlly"
+      ],
+      "route": "asus-ally-acpi",
+      "evidence": "upstream-candidate",
+      "mainlineClassMention": true
+    }
+  ]
+}

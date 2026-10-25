@@ -1,0 +1,413 @@
+{
+  "id": "ymcc-steam-appearance",
+  "version": 1,
+  "themes": [
+    {
+      "name": "Art Hero",
+      "author": "Metagawa",
+      "version": "v3.2.03"
+    },
+    {
+      "name": "Centered Game Text",
+      "author": "SuchMeme",
+      "version": "v1.1"
+    },
+    {
+      "name": "Darken Unfocused Games",
+      "author": "TheRensei",
+      "version": "v1.1-ymcc.1"
+    },
+    {
+      "name": "Game Cover Reflections",
+      "author": "TheRensei",
+      "version": "v1.0-ymcc.1"
+    },
+    {
+      "name": "Mini Carousel",
+      "author": "seagrot",
+      "version": "v1.0"
+    },
+    {
+      "name": "NEX-85 Keyboard",
+      "author": "bunaventure",
+      "version": "v2.1"
+    },
+    {
+      "name": "Round",
+      "author": "EMERALD#0874",
+      "version": "v2.7-ymcc.1"
+    },
+    {
+      "name": "YMCC Game Details",
+      "author": "YMCC",
+      "version": "v1.1.0"
+    }
+  ],
+  "files": [
+    {
+      "path": "Art Hero/config_USER.json",
+      "sha256": "70aaedeb7d54d22d050aad29eb2ade878060bcf472126b10130c0f83bc4ed903",
+      "bytes": 504
+    },
+    {
+      "path": "Art Hero/footer.css",
+      "sha256": "e22c9c05419f97b9d7505ac26a7089ebcf49e5f4b865a4442100a20707f3100c",
+      "bytes": 596,
+      "contentProperty": "--ymcc-content-1d9ee0bdeb9ebfe4"
+    },
+    {
+      "path": "Art Hero/FullBG.css",
+      "sha256": "9d5bc23a2052dc8fa0c6213c8e063e3e127bc45a4970c6b73b36d111620f9b60",
+      "bytes": 302,
+      "contentProperty": "--ymcc-content-1de201dae6de6c82"
+    },
+    {
+      "path": "Art Hero/invertedgradient.css",
+      "sha256": "ea84c3b44f739fc44b5d1dc4e36c42b7f5a60c0990c69719092fb373d996825e",
+      "bytes": 703,
+      "contentProperty": "--ymcc-content-76a1e151791d79a3"
+    },
+    {
+      "path": "Art Hero/LeakingBG.css",
+      "sha256": "ac0569db7312e55d6c6ccdfaf7895db9e43bea951e113559ebb72588e87ed4c1",
+      "bytes": 309,
+      "contentProperty": "--ymcc-content-dc81e34b0da11965"
+    },
+    {
+      "path": "Art Hero/lineargradient.css",
+      "sha256": "9fde5c87dfb94b531c2e57bfc053bc3dc54745f80bb11a6b1e75438e134b8ddf",
+      "bytes": 682,
+      "contentProperty": "--ymcc-content-db3ded3b52ce9798"
+    },
+    {
+      "path": "Art Hero/lineargradientinverted.css",
+      "sha256": "4b8afb1e69182b83ebee8f937318695f438bee885b67f242de455d0e97203600",
+      "bytes": 676,
+      "contentProperty": "--ymcc-content-f07e7793f8e4867e"
+    },
+    {
+      "path": "Art Hero/NoBG.css",
+      "sha256": "be7b56de9ea2909fc2901d8fbb2e7f2c690851c7cdf7a0be6f5714a064d2d9eb",
+      "bytes": 387,
+      "contentProperty": "--ymcc-content-5ee084dc5144d55a"
+    },
+    {
+      "path": "Art Hero/nofooter.css",
+      "sha256": "491b4b772075168b30d33a99887a857cd2ea53597cd7257bd19f0879e223e383",
+      "bytes": 272,
+      "contentProperty": "--ymcc-content-780fcbbc3c8916df"
+    },
+    {
+      "path": "Art Hero/noheader.css",
+      "sha256": "3d744ddb581d3fcc46b04c2bf7c0a127c825fea61d75b4ba99e3026c94a1c085",
+      "bytes": 257,
+      "contentProperty": "--ymcc-content-19588224e45a73fb"
+    },
+    {
+      "path": "Art Hero/noherogradient.css",
+      "sha256": "5c7a1c1baaf79755de89c3813cdcd30b69f39940f3987f922cac6bcd6e39dba9",
+      "bytes": 605,
+      "contentProperty": "--ymcc-content-466df711d60593dc"
+    },
+    {
+      "path": "Art Hero/shared.css",
+      "sha256": "ad79be1e0533b96ee962450b7d1ae87350216d7211140a0346a0bfa5b3e2f5a4",
+      "bytes": 4299,
+      "contentProperty": "--ymcc-content-9455d7d2e159312c"
+    },
+    {
+      "path": "Art Hero/StandardBG.css",
+      "sha256": "edc21e652f1ee2cd064a339eabf633dd6b0a916b1ad9a86f6ff85b61dfb50972",
+      "bytes": 297,
+      "contentProperty": "--ymcc-content-80a6c1664a22a5b6"
+    },
+    {
+      "path": "Art Hero/subtlegradient.css",
+      "sha256": "0ba8fd2168770e72ac0be434bbb238cba1f1d946b02188e2ceaeb0cd1d863a8b",
+      "bytes": 723,
+      "contentProperty": "--ymcc-content-16218961a4ec169a"
+    },
+    {
+      "path": "Art Hero/theme.json",
+      "sha256": "97a351c868803b486d999985bb61a862560845e04bb84920d636e168c1e54bac",
+      "bytes": 21257
+    },
+    {
+      "path": "Centered Game Text/config_USER.json",
+      "sha256": "89a174b4d9e4c94e26fa0173e4a5dcc341b1bb0d61171aa7de275eaa68ce6176",
+      "bytes": 16
+    },
+    {
+      "path": "Centered Game Text/LICENSE",
+      "sha256": "4f38814b0d43483a9ca91d86e3b46fd4921f172a243e98f01fb0ffaf8820f206",
+      "bytes": 1074
+    },
+    {
+      "path": "Centered Game Text/shared.css",
+      "sha256": "c59f1edb3eab39a48fc770309697bb8aed87412e5e7fca96df000012b4825f09",
+      "bytes": 922,
+      "contentProperty": "--ymcc-content-4f48d230935f33f4"
+    },
+    {
+      "path": "Centered Game Text/theme.json",
+      "sha256": "107fdc662515552c706abd108867409bc1288556af29e103c7533ae69917a4f0",
+      "bytes": 208
+    },
+    {
+      "path": "Darken Unfocused Games/config_USER.json",
+      "sha256": "1ebccfe9bb4ba20be4c0f2e91c621d863cd62eff120a327ee9085bd6ceaddc22",
+      "bytes": 79
+    },
+    {
+      "path": "Darken Unfocused Games/global.css",
+      "sha256": "f6555719d863b3c9b3077d06fce84e76d7b0c1afc39b28a74c6de093da63cbf4",
+      "bytes": 729,
+      "contentProperty": "--ymcc-content-b73e6c3345e2d4bd"
+    },
+    {
+      "path": "Darken Unfocused Games/LICENSE",
+      "sha256": "aa0d093e54888701390f332b53586bbc70174d35bccbb81ffa35213c298d9ed5",
+      "bytes": 1066
+    },
+    {
+      "path": "Darken Unfocused Games/recent-games.css",
+      "sha256": "450787a5b64a731902736dd941f26a6909f3fee5a76767a1a32b6162c6fad3bd",
+      "bytes": 796,
+      "contentProperty": "--ymcc-content-edb441b15360774d"
+    },
+    {
+      "path": "Darken Unfocused Games/shared.css",
+      "sha256": "f13b87857fa14440e78b8d0974ab9dd723bcf9a79d3409197da25b540aae273e",
+      "bytes": 418,
+      "contentProperty": "--ymcc-content-17a99962151898fe"
+    },
+    {
+      "path": "Darken Unfocused Games/theme.json",
+      "sha256": "1d05c29f0df64e1f07febf1ef2cee89f8ee1bd7c8226445c29f39aaa6ace4af4",
+      "bytes": 3160
+    },
+    {
+      "path": "Game Cover Reflections/config_USER.json",
+      "sha256": "0e8c48981f65a4607df2135727627dcb553047742a8ab90192838e0c55fd1fa0",
+      "bytes": 112
+    },
+    {
+      "path": "Game Cover Reflections/LICENSE",
+      "sha256": "aa0d093e54888701390f332b53586bbc70174d35bccbb81ffa35213c298d9ed5",
+      "bytes": 1066
+    },
+    {
+      "path": "Game Cover Reflections/shared.css",
+      "sha256": "64a8a6a363e2b4fd548070c45cae468c1dd5c290a067cb93ad6ac68203b81490",
+      "bytes": 1583,
+      "contentProperty": "--ymcc-content-18be56ebfc20d37e"
+    },
+    {
+      "path": "Game Cover Reflections/theme.json",
+      "sha256": "2fcf80580e38993ef9e5f98a33e67ce42ddd594213e6134a7333d69043174ac4",
+      "bytes": 5999
+    },
+    {
+      "path": "Mini Carousel/config_USER.json",
+      "sha256": "0acd08b9b83625b18ab6f46e11f4aacf0723a1142501d4d7fbe16811f56e7dc9",
+      "bytes": 31
+    },
+    {
+      "path": "Mini Carousel/eight.css",
+      "sha256": "8ac29e3bfb3413e5ea0bde9a6143cf988ad416b8d03ba52826fe82c4feee72b5",
+      "bytes": 282,
+      "contentProperty": "--ymcc-content-9a2d2d20985bf382"
+    },
+    {
+      "path": "Mini Carousel/five.css",
+      "sha256": "c5e4a1b9829ea796b30ca942f2f5a58ff8562538e637dd0fa4cdfdf092c6a128",
+      "bytes": 280,
+      "contentProperty": "--ymcc-content-e6d9abd345b8dc33"
+    },
+    {
+      "path": "Mini Carousel/nine.css",
+      "sha256": "042176bc93129f93e582fb2ad8bc1710f860edb6e2127718fc23db4397114950",
+      "bytes": 282,
+      "contentProperty": "--ymcc-content-f0c72837779812e5"
+    },
+    {
+      "path": "Mini Carousel/seven.css",
+      "sha256": "145f2f7f3d55398951d67eebddd111c2e63a6a173ba4870fb7698205b27d64c1",
+      "bytes": 282,
+      "contentProperty": "--ymcc-content-f01756e2e78c67e2"
+    },
+    {
+      "path": "Mini Carousel/shared.css",
+      "sha256": "41ceed6d8448503d2066dd3f3ae25427af0a6ae826757c8ee0c1fbe1ba24ac5b",
+      "bytes": 507,
+      "contentProperty": "--ymcc-content-1caac2267e91781c"
+    },
+    {
+      "path": "Mini Carousel/six.css",
+      "sha256": "9869ebe18e5dcb8fb1805e502a24d3562fac0e280bd5a30e1537b75b2b3cb0e7",
+      "bytes": 282,
+      "contentProperty": "--ymcc-content-e0e319c32b85380d"
+    },
+    {
+      "path": "Mini Carousel/theme.json",
+      "sha256": "9ea136dc9066843099193d2192f45ba8b08d5caed37502a068797d3e984a0eeb",
+      "bytes": 1111
+    },
+    {
+      "path": "NEX-85 Keyboard/config_USER.json",
+      "sha256": "0e35f9e090372758b9e4eff3ec6a865e4fcc28317c96c3ca835b9d802ba3490d",
+      "bytes": 63
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/blue.css",
+      "sha256": "664749449fa81fad2040d2739981f1bdbc987fa3344fec746283a47f0005c75e",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-2b670a70c0eb31c8"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/default.css",
+      "sha256": "d3adac14047b7d467f854c5d92284a57aae1ee43d2e784fb155c9866226a3f7d",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-a0113f235894255c"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/green.css",
+      "sha256": "74023081250051e6c05339674ad75e9f35e5bd07fd9551d81f088eecaf7ce0bb",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-a0f1242a4547118a"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/purple.css",
+      "sha256": "c53e3f63060aea76781f224252263259f29d832e5d7d54a193b3ed52ede8d3a6",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-2d5aa6f6f62fd1a4"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/red.css",
+      "sha256": "7c9e0919178409845797f74b80832466d54c17cdf8e0945b3b3d1a64f2278dd3",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-cb34a022838039fb"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/teal.css",
+      "sha256": "3e93de43ca118a5feb75ebdd20939b6b3285476b03c3750930b6e869f0f63072",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-7f7ba66a98120525"
+    },
+    {
+      "path": "NEX-85 Keyboard/focus/yellow.css",
+      "sha256": "bca010e9327c812937a5108fb551d0d0ea8fb66f59765d80fcaeb7789ea9f6be",
+      "bytes": 560,
+      "contentProperty": "--ymcc-content-235df522bba2450e"
+    },
+    {
+      "path": "NEX-85 Keyboard/mode/dark.css",
+      "sha256": "98c9aaabf4f398fcabe79e08e5d91518f854dd5276042f8556d90e73a40c7db9",
+      "bytes": 4092,
+      "contentProperty": "--ymcc-content-7d6549c2d4b57bcf"
+    },
+    {
+      "path": "NEX-85 Keyboard/mode/light.css",
+      "sha256": "1edfb106cac45ea846df1ab02d05d710d6b2c0ae06b3dcd5bebd2372f9158606",
+      "bytes": 4094,
+      "contentProperty": "--ymcc-content-9ad4d5cbca550e45"
+    },
+    {
+      "path": "NEX-85 Keyboard/shared.css",
+      "sha256": "b62bc99f67b1577e88d0a78def8571ffb30d2b81c683b3c46cd4f5daf8977936",
+      "bytes": 1865,
+      "contentProperty": "--ymcc-content-00d1d478f8907a75"
+    },
+    {
+      "path": "NEX-85 Keyboard/theme.json",
+      "sha256": "a6d0ccf7ca1b6da369a5e0f69f86fd228683c7bff57422328e74f7cba697d072",
+      "bytes": 1237
+    },
+    {
+      "path": "Round/config_USER.json",
+      "sha256": "aadb2d9265e10bd210fec4b0b85723c8baf7eef2fffdd8f4938185b3e3ef3959",
+      "bytes": 58
+    },
+    {
+      "path": "Round/hide-outline.css",
+      "sha256": "5d849be86d8bd99c47d18a540c17fc8389908d6cff6bd89c5ea087c94a8a58b0",
+      "bytes": 380,
+      "contentProperty": "--ymcc-content-dfae17a5b51279d1"
+    },
+    {
+      "path": "Round/intensity/10px.css",
+      "sha256": "ecdf6bb87758e09687d6202ae45889cfb0dd5be7875f973acf9c2c7ca3e386ee",
+      "bytes": 263,
+      "contentProperty": "--ymcc-content-8948cb6709416897"
+    },
+    {
+      "path": "Round/intensity/15px.css",
+      "sha256": "3769a29ba7bdf3bcfac90ebd4e7e43dcf2e8b78f95d03e33dcf65888eb092b4d",
+      "bytes": 263,
+      "contentProperty": "--ymcc-content-24a5da63cb43728f"
+    },
+    {
+      "path": "Round/intensity/20px.css",
+      "sha256": "7cd43f8b8a7da2cd5c036e34fdf461cfb61a1106e716bc0c5fa97cc8c867e767",
+      "bytes": 263,
+      "contentProperty": "--ymcc-content-9434f7aece0bf21c"
+    },
+    {
+      "path": "Round/intensity/30px.css",
+      "sha256": "1bb4f472aff223e75fdec5db2cc5fd73a5274ef56e9533d6d6c8ce626b0287a1",
+      "bytes": 263,
+      "contentProperty": "--ymcc-content-4f778c9b4172e1d0"
+    },
+    {
+      "path": "Round/intensity/3px.css",
+      "sha256": "5582aa06cda0b5107f42bcf0087d7ac55df6769a2bafd457168ab9d4a38f12b8",
+      "bytes": 262,
+      "contentProperty": "--ymcc-content-3dde5ad957c20930"
+    },
+    {
+      "path": "Round/intensity/5px.css",
+      "sha256": "be62971908083636b6e231ddd30b5421cf0101f2596222e9612921eff6fd22b8",
+      "bytes": 262,
+      "contentProperty": "--ymcc-content-5098d7875d847568"
+    },
+    {
+      "path": "Round/LICENSE",
+      "sha256": "5d8c347e4557305c4aff3531cf93258bae1b86205e5361c0abaec06764933b52",
+      "bytes": 1064
+    },
+    {
+      "path": "Round/round-outline.css",
+      "sha256": "012c582674aea9b7303b065cc8742462aaa2cb48ca7ec728cdebd12808b78336",
+      "bytes": 1676,
+      "contentProperty": "--ymcc-content-ec28d8f367e662e3"
+    },
+    {
+      "path": "Round/shared.css",
+      "sha256": "b62e160d276f5619092f1297c95ccd69d6e6e5cc18235f8934e7cf3929ef78de",
+      "bytes": 14672,
+      "contentProperty": "--ymcc-content-d98d86f8cb48e2fa"
+    },
+    {
+      "path": "Round/theme.json",
+      "sha256": "dccf52dee8852a67df7fd503d919f103fe0d8bc600a7408ac4e4863aa1c08c9f",
+      "bytes": 1629
+    },
+    {
+      "path": "YMCC Game Details/theme.json",
+      "sha256": "b48b20141c0ede627afe6912788ff8546ea1001834f70a9235686e676d4cf54d",
+      "bytes": 399
+    },
+    {
+      "path": "YMCC Game Details/config_USER.json",
+      "sha256": "4830d1ee11b28387a21e99d165457ca29347db801e5bb2d03af6411a96d56a77",
+      "bytes": 21
+    },
+    {
+      "path": "YMCC Game Details/shared.css",
+      "sha256": "8aa8318395a29af0739c803d1db6ac4def6053d5dc04124c42bbee5bfe6cc9ce",
+      "bytes": 1086,
+      "contentProperty": "--ymcc-content-c351629737ef4149"
+    }
+  ],
+  "renderContentProtocol": 1
+}

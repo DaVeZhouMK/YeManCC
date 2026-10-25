@@ -227,6 +227,64 @@ int wmain(int argc,wchar_t** argv) {
             json snapshot=json::object();attachResolvedIdentityCache(snapshot);
             check(snapshot["resolvedIdentities"].size()==1,"Tool cache leaked or valid game cache disappeared");
         });
+
+        for(const auto* name:{L"library_header.jpg",L"library_header_schinese.jpg",L"library_header_2x.png",L"header.jpg",L"header_schinese.jpg"}) {
+            const auto title="native-local-horizontal-"+toUtf8(name);
+            test(title.c_str(),[=](const auto& p){
+                const auto root=p/L"SteamFixture",source=root/L"appcache"/L"librarycache"/L"620"/L"hash"/name;
+                text(source,"local steam horizontal");const auto found=directNativeSteamLibraryCacheArtwork(root,"620","long");
+                check(found&&*found==source,"Native Steam header filename was ignored");
+            });
+        }
+        test("native-modern-header-preferred-over-legacy-header",[](const auto& p){
+            const auto root=p/L"SteamFixture",cache=root/L"appcache"/L"librarycache"/L"620";
+            text(cache/L"header.jpg","legacy header");text(cache/L"hash"/L"library_header.jpg","modern header");
+            const auto found=directNativeSteamLibraryCacheArtwork(root,"620","long");
+            check(found&&bytes(*found)=="modern header","Modern library header lost to legacy capsule");
+        });
+        test("native-horizontal-never-uses-hero-capsule-blur-or-other-app",[](const auto& p){
+            const auto root=p/L"SteamFixture",cache=root/L"appcache"/L"librarycache";
+            for(const auto* name:{L"library_hero.jpg",L"library_capsule.jpg",L"library_header_blur.jpg",L"headerFake.jpg"})text(cache/L"620"/name,"wrong artwork");
+            text(cache/L"621"/L"library_header.jpg","another game");
+            check(!directNativeSteamLibraryCacheArtwork(root,"620","long"),"Wrong native artwork was used as horizontal cover");
+        });
+        test("native-modern-horizontal-is-copied-persisted-and-reused-without-steam-read",[](const auto& p){
+            g_dataRoot=p/L"data";const auto root=p/L"SteamFixture",source=root/L"appcache"/L"librarycache"/L"620"/L"hash"/L"library_header_schinese.jpg";
+            text(source,"modern native header");
+            const json item={{"steamNative",true},{"nativeSteamAppId",620},{"steamStoreAppId",620},
+                {"gameDirectory",toUtf8((root/L"steamapps"/L"common"/L"Portal 2").wstring())},
+                {"nativeSteamManifestPath",toUtf8((root/L"steamapps"/L"appmanifest_620.acf").wstring())}};
+            json plan={{"items",json::array({item})}};attachNativeSteamArtwork(plan,json::object(),true);
+            const auto preview=plan["items"][0]["artworkPreview"]["long"];
+            check(preview["provider"]=="steam-librarycache-native"&&preview["file"]==toUtf8(source.wstring()),"Native horizontal did not reach plan");
+            check(bytes(fs::path(toWide(preview["portableFile"].get<std::string>())))=="modern native header","Cached native bytes changed");
+            check(plan["items"][0]["nativeSteamArtwork"]["longAvailable"]==true,"Native long availability not recorded");
+            fs::remove(source);json next={{"items",json::array({item})}};attachNativeSteamArtwork(next,json::object(),false);
+            check(next["items"][0]["artworkPreview"]["long"]["url"]==preview["url"],"Background snapshot dropped portable native horizontal");
+        });
+
+        wchar_t corpusBuffer[32768]{};
+        if(GetEnvironmentVariableW(L"YMCC_NATIVE_ARTWORK_EVIDENCE",corpusBuffer,32768)>0) {
+            const std::wstring corpusFile=corpusBuffer;
+            test("native-horizontal-real-steam-cache-corpus",[&](const auto& p){
+                const auto file=fs::absolute(fs::path(corpusFile));
+                check(normalizedPathKey(file).starts_with(normalizedPathKey(build)+L"\\"),"Corpus index must stay below Build");
+                const auto corpus=readJson(file,json::object());const auto steamRoot=fs::path(toWide(jsonStringOr(corpus,"steamRoot")));
+                check(normalizedPathKey(steamRoot).starts_with(normalizedPathKey(build)+L"\\"),"Steam corpus must be an isolated Build copy");
+                check(jsonArrayOr(corpus,"cases").size()>=1,"No actual Steam header evidence");g_dataRoot=p/L"data";
+                for(const auto& entry:jsonArrayOr(corpus,"cases")){
+                    const auto appId=jsonStringOr(entry,"appId");const auto found=directNativeSteamLibraryCacheArtwork(steamRoot,appId,"long");
+                    check(found.has_value(),"Actual Steam horizontal header ignored");
+                    const auto expected=fs::path(toWide(jsonStringOr(entry,"expectedSource")));
+                    check(normalizedPathKey(*found)==normalizedPathKey(expected)&&bytes(*found)==bytes(expected),"Actual Steam header selected another source");
+                    const json item={{"steamNative",true},{"nativeSteamAppId",std::stoi(appId)},{"steamStoreAppId",std::stoi(appId)},
+                        {"nativeSteamManifestPath",toUtf8((steamRoot/L"steamapps"/(L"appmanifest_"+toWide(appId)+L".acf")).wstring())}};
+                    json plan={{"items",json::array({item})}};attachNativeSteamArtwork(plan,json::object(),true);
+                    const auto preview=plan["items"][0]["artworkPreview"]["long"];
+                    check(bytes(fs::path(toWide(preview["portableFile"].get<std::string>())))==bytes(expected),"Actual Steam header was not copied to portable preview");
+                }
+            });
+        }
         size_t failures=0;for(const auto& t:cases)if(!t["passed"].get<bool>())++failures;
         json report={{"allPassed",failures==0},{"caseCount",cases.size()},{"failedCount",failures},{"cases",cases},{"realSteamFilesModified",false},{"steamStoppedOrLaunched",false}};
         g_labRoot=root;hostMoveFault={};writeJsonWithLocalBackup(root/L"summary.json",report,false);std::cout<<report.dump(2)<<"\n";return failures?1:0;

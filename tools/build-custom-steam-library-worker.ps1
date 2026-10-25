@@ -28,7 +28,7 @@ $buildExitCode = $LASTEXITCODE
 $buildLines = @($compilerOutput | ForEach-Object { [string]$_ })
 $buildLines | Set-Content -LiteralPath (Join-Path $compileDirectory 'compiler-output.log') -Encoding UTF8
 $expectedExecutables = @('SteamArtworkLab.exe')
-if ($RunSelfTests) { $expectedExecutables += @('custom_steam_library_localconfig_selftest.exe','custom_steam_library_datachain_selftest.exe','custom_steam_library_artwork_tier_selftest.exe','custom_steam_library_worker_lifecycle_selftest.exe') }
+if ($RunSelfTests) { $expectedExecutables += @('custom_steam_library_localconfig_selftest.exe','custom_steam_library_datachain_selftest.exe','custom_steam_library_artwork_tier_selftest.exe','custom_steam_library_worker_lifecycle_selftest.exe','custom_steam_library_http_transport_selftest.exe') }
 Assert-CustomSteamLibraryCompilation -ExitCode $buildExitCode -OutputLines $buildLines -CompilationDirectory $compileDirectory -ExpectedExecutables $expectedExecutables
 Assert-CustomSteamLibrarySourceIndex -ProjectRoot $projectRoot -Kind 'worker' -SourceIndex $sourceIndex
 foreach ($exe in $expectedExecutables) { Copy-Item -LiteralPath (Join-Path $compileDirectory $exe) -Destination (Join-Path $OutputDirectory $exe) -Force }
@@ -47,6 +47,9 @@ if ($RunSelfTests) {
   $lifecycleFixtures = Join-Path $OutputDirectory ('worker-lifecycle-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
   & (Join-Path $OutputDirectory 'custom_steam_library_worker_lifecycle_selftest.exe') $lifecycleFixtures
   if ($LASTEXITCODE -ne 0) { throw 'Custom Steam Library worker lifecycle regression failed' }
+  $httpFixtures = Join-Path $OutputDirectory ('http-transport-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+  & (Join-Path $OutputDirectory 'custom_steam_library_http_transport_selftest.exe') $httpFixtures
+  if ($LASTEXITCODE -ne 0) { throw 'Custom Steam Library raw HTTP transport regression failed' }
   & node (Join-Path $projectRoot 'tools\custom_steam_library_ui_datachain_selftest.mjs') (Join-Path $OutputDirectory 'ui-datachain-summary.json')
   if ($LASTEXITCODE -ne 0) { throw 'Custom Steam Library UI data-chain regression failed' }
   & (Join-Path $projectRoot 'tools\custom_steam_library_cli_datachain_selftest.ps1') -Worker (Join-Path $OutputDirectory 'SteamArtworkLab.exe') -OutputDirectory (Join-Path $OutputDirectory ('cli-' + [guid]::NewGuid().ToString('N').Substring(0, 8)))

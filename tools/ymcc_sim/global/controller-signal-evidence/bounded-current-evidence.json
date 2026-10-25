@@ -1,0 +1,263 @@
+{
+  "schemaVersion": 1,
+  "scope": "bounded-registration-test-evidence; managed remains unregistered signal child",
+  "parentWholeMainApproval": false,
+  "pins": [
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\DELIVERY.json",
+      "sha256": "0a7db4bf4b6408374f05b9a77cc152e6d18d2f262edf265c03647d7d877c7959"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\result.json",
+      "sha256": "6a22e099373da207afdf7945ddd3ec5c2e40a2af450033c89693edd2471b41fc"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\consumer-extractions.json",
+      "sha256": "6572a103dc6e6ae6ad87d00782fd2354b27286d8420dd150e261514455c4d429"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-SOURCE-IDENTITY-V2.json",
+      "sha256": "9bbaa3834966f5a494fb3dd948d514ee430410a747e90dc2e2c249185392f309"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-SOURCE-IDENTITY-V1.json",
+      "sha256": "f2b7d474a116c1663f6ca1409da2f070c028a1d452301bf0aa51d5725d184337"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-PARENT-DEPENDENCY-REVIEW.json",
+      "sha256": "40eec7e5789eec359f707da2aff4e3c9dd87cfa358042e6bd59d47652e73b236"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-independent\\EXECUTION.json",
+      "sha256": "c60864a3fba1113c47e4ec5f76953588806f6607ea1893f4640e4a07d61a02ff"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\legacy-adapted-003\\result.json",
+      "sha256": "31732bd7c97820cf5fc9da57e5d7edeb67be45d4ac0d0075c1e5e73268ff816d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\old-zero-false-replay-001\\result.json",
+      "sha256": "148378c19b158cae130c3656f74fe993e700355ebccfb88ef35f783a96a76d2d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-001\\result.json",
+      "sha256": "0b358b5a020a9a4a18cba79d511db6aef2b41020a495dc7537371a9cb7886f65"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\inputs-before.json",
+      "sha256": "4df3bc6703e98ac046d03156190bced49e0c9a91d4f84af421e061b296eecaae"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\toolchain.json",
+      "sha256": "d4caf311dd6b16432fc7bd15093da662ce38485e4d6cd1961232f0d4019fc7c2"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\commands.json",
+      "sha256": "62df050ed36dfb27890d75e0c4df2aeb84037684c6f6146e33c8cab8d9b513f9"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\production-build-003\\result.json",
+      "sha256": "c16b6756b20711f3e67a7900f45d13e9dded838e49074d4127bc9da16f916eae"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\result.json",
+      "sha256": "ee25e8b2930a881eb0367421762fc1f4f083c1abd77945daba099b0d48e75a77"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-suppress-003\\commands.json",
+      "sha256": "b1a757d7dd53dbb78df93422fe9094b2be8ac615995a44fea122fa756aa1c108"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\result.json",
+      "sha256": "6e6ea50001ecf2de60a2c4912033cdf6fb47ccc0ddc8c936e16d1b86904b56ba"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-no-retry-003\\commands.json",
+      "sha256": "8c8a4c7e5cecc74aefa63cf086e2c36b8a53b867836e61ada884d18152f45830"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\result.json",
+      "sha256": "53a4ab4e2a7c688e938ac07e62c345861342adeca839b3f2d2cec3507423ee14"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-retry-sdk-003\\commands.json",
+      "sha256": "4ae6de776edb7f272666503f75772d211548786d1e06539b5035ad2c3a39c6c9"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\result.json",
+      "sha256": "d85c766232227e4920787e789230dbf0b84d01e25390c4e266a6db87ff423676"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-repeat-shutdown-003\\commands.json",
+      "sha256": "6e3fd44585b9865a503a15b9d891f3d1711d44c24c3ad3e0a31f85c5c7716fa5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\result.json",
+      "sha256": "1f0012ec947d76074fa7b6957e4641a4454f18234e3b11b9c23b43e28d915616"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\negative-log-fatal-002\\commands.json",
+      "sha256": "5b5d21f2d06ad3da11b96991548fa96d10699bf84c636bbba02ea7f7a0898634"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\BaseCases.cs",
+      "sha256": "7e647372867845e24acb2e551b7b4a86d8f3afcbf0523771feba2c2e11d0629d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Boundary.cs",
+      "sha256": "eeeccc0197167a11a28b6cf0d7101bd3275fd619b42d4291f506d4194e6832d0"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\CanonicalFrameFingerprintMemo.cs",
+      "sha256": "0904b37545e7cdc31710c00bb16af5f0e91053af5c5dd286ce3abd0f7b23757c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Compatibility.cs",
+      "sha256": "06286d548f6114a9a1819bf86f7abca21ffa135e748b48ae99e54bfd88d3bd45"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ExtractedHost.cs",
+      "sha256": "bb490b957018761a10b28ae816e03e6797563df3083dde214871b9569ecf4366"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ExtraProduction.cs",
+      "sha256": "80b8b97809e2f59ae36adfca2bfc9c6bd73c81489c7a734c3ac661346b872514"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Fixture.csproj",
+      "sha256": "c79e6f492b417e57af021e9cdb2280480a86c018c9b272552e6be7d28099cc10"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\global.json",
+      "sha256": "2a02fd3b88b4639f51c7a2287596b366f0f8e766ab48e3f1b9919ba50b8beef8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostControllerIdleCtsRelease.cs",
+      "sha256": "7e52922cb602fabf87637d873acc876c7e5da3fcab48b7472a6bd3646747b7e4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostControllerOutputStop.cs",
+      "sha256": "fa36b42981725b22ad85a792d3e0eb49f2d4da55ea6f1dc908ba9835c733e7b8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostResponseFields.cs",
+      "sha256": "e8e7e7e87ddba6424026db1051655dc283078eb453e2ecf8331c63060974d4f4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\HostTerminalCleanup.cs",
+      "sha256": "5e42bfe9f888d5b10ef4b8cb8d38ab60a9ddbbc1ece49b18b5333da07e630891"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\LegacyDefinitions.cs",
+      "sha256": "03d469291d1d4a9c53b3ab2620d6981b5fdad3a5d42aa1a79d3f9cbc7316d541"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\MsiSteamDeckReleaseFence1726.cs",
+      "sha256": "09bcef7890e702ad9787f85917ba0d67787be3a27566f71452b43d3824f2e1ed"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\MsiVirtualReportChain1410.cs",
+      "sha256": "71eda9c6273a1c467575b122b3585a45e32b2bae846de2e9fca6948f8b38d90c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\NuGet.Config",
+      "sha256": "e497501960554d323eef45860c14474958accd1ae7f3ae6f95b10e4c1d340401"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\ParentProcessLifetime.cs",
+      "sha256": "939084fee00cd27364ec03fb4793035fd6cf8d67dd03c2cadfdfcba5654c47ba"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\TerminalCases.cs",
+      "sha256": "adf6b8cf8c07c13edb72f6bf0a9dd63fa67b4c5aa904a9547dba78ffc556a7a5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\TerminalPorts.cs",
+      "sha256": "3ff7a7625d56eb500dd2eb4e978c435535d37242fbc04ffc0d8c6d72a34253d4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostManaged23\\terminal-patch\\current-006\\integrated\\Workers.cs",
+      "sha256": "e69af302eccfa2b899861fca4c1e59e973e52f49a6184fdbb40abfa4f8bc11a5"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-current-parent-port\\EXECUTION.json",
+      "sha256": "3ea471984fcbaab65e85745f96c27c3d0c0ade633002abb4fe534b7fadd61af8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\managed22-current-parent-port\\managed-terminal\\RESULT.json",
+      "sha256": "b8714bd3a479fc893a6e792245a472c701e9d248f45a92ef7f06b5ee5be013d8"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\MANAGED-EXECUTED-SCHEMA.json",
+      "sha256": "1c6d81977f56821a1d3aebc05d5d2359d464360055a4a35d5ad3bb793d4485f4"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j00\\o\\result.json",
+      "sha256": "7490e48cd1642f9d36d9503029b288e2231385d09916713a4e9eae186165d1b7"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j00\\o\\registration-context.json",
+      "sha256": "60a81fcf34c79cd2582e43eeca9f0dff2001d47e92409cf1fdd1431e342cee70"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j01\\o\\result.json",
+      "sha256": "27e5aac7d1a8d2f60d7a2ea13842bb1c089441bb1880873fb144fad4f5a7f165"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j01\\o\\registration-context.json",
+      "sha256": "7729aded810b59b246e70365b6627d3475869a9e254d789ae5ef65af8b20cf74"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j02\\o\\result.json",
+      "sha256": "714d1eb41398ac980cc67e2468757bad20f3bf3df472c26eb8a9579543b92492"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j02\\o\\registration-context.json",
+      "sha256": "28b5c8e897969934ab0b9772739f748cab905f6166c84e0390d54b8be2073ee3"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j03\\o\\result.json",
+      "sha256": "8219376607f3948df340affa0147acd9b8ef9c99fd348184a7a67e4ab9a1ad8c"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j03\\o\\registration-context.json",
+      "sha256": "347429784512e197573205d637ef43681f9427ce430a6b61aeba3ba670d3112e"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j04\\o\\result.json",
+      "sha256": "0b9d6cc29d9bd83b353bdde59caf4d61292f563e02ca39c8bf0ffec913cc22ed"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j04\\o\\registration-context.json",
+      "sha256": "1579324d7c07495a0fc76516fb5c910628a4c91ff49b6a1e80a536c8ea10d4bc"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j05\\o\\result.json",
+      "sha256": "7c6f4dcd89ba5ebc2762ded3ec891344b66def4f252e8a15d47907dadf3e9760"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-CaptureReceipt23\\t\\r-BMU5pg\\j05\\o\\registration-context.json",
+      "sha256": "d47ab9990118095b9faf3dbfd93f31bf98ce1e2280b66f8c97ccf99f0bbf341b"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\host-parent-formal-entry\\result.json",
+      "sha256": "650f0abd505053be0df65e087cf228832419490be4bd2330ba80d54dab99f4aa"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-SignalCurrent23\\registration-113111-456729\\host-parent-formal-entry\\process-ledger.json",
+      "sha256": "ea65a85b835625e4128cb6b190516dcac9a736d2321e6cac9e5f3e350c4bd100"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostParentCurrent23\\positive-r1\\result.json",
+      "sha256": "548b721d129d0d54b889c59364fb8f598c0bc1f7b9256121740b643a950c860d"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostParentCurrent23\\negative-cancellation-r1\\result.json",
+      "sha256": "eaff0e8d440de64f3eff605167db19a0a0251a345a4b0bbc4761268df9426422"
+    },
+    {
+      "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-HostParentCurrent23\\OLD-CONSUMER-FAILURE.json",
+      "sha256": "d2f7703bf6edbcadea06798c95899361e0885d5c78eeacb9b45c769c049d2b95"
+    }
+  ]
+}

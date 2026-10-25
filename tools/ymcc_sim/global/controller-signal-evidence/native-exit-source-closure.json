@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "kind": "source-closure-only-native-exit-owned-current",
+  "executionGroupRegistered": false,
+  "wholeMainApproval": false,
+  "parentLifecycleAcceptance": "INCOMPLETE",
+  "delivery": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\DELIVERY.json",
+    "sha256": "69764daa14e0281e382e3c9b94e5ec7870083aba0dabf0712dae22986bba9e65"
+  },
+  "helperResult": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\retirement-helper\\r2\\RESULT.json",
+    "sha256": "8c5248d0c5be5efc45e5eb65c721a627c89dc4a0769625ed46a438cacf5ec10c"
+  },
+  "parentResult": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitOwned23\\parent\\r6\\RESULT.json",
+    "sha256": "4156b1022ed26d39c3e165185729ea09d38bc515840c4bcad737369de37b03f8"
+  },
+  "historicalFailure": {
+    "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-NativeExitParent23\\r4\\RESULT.json",
+    "sha256": "4b1130eec8a9f997b26447e007dfc28e21b9b3db8a997c1db18fd2fe1b4d69cd"
+  },
+  "sourceDependencies": [
+    {
+      "path": "tools/input_host_native_exit_parent_selftest.py",
+      "sha256": "4cb52039f86d6d15b6f7687c83a3dfec7998f8d1a7da67ae35c43a3a1ab311de"
+    },
+    {
+      "path": "tools/fixtures/input_host_native_exit_parent/suite.cpp.in",
+      "sha256": "952f0bd94179ab3c7289eb0296c57021544b58a58d7f35d189256513df92a00a"
+    },
+    {
+      "path": "tools/fixtures/input_host_native_exit_parent/README.md",
+      "sha256": "291e9a0577be17f1402a876206d85da077bf236087d913eb83a31e2aaf795476"
+    },
+    {
+      "path": "tools/input_host_exit_retirement_selftest.py",
+      "sha256": "add5b904e59a3c3a458ef84388a0f46a0ad51cf917c428059a68b41bf07af6d3"
+    },
+    {
+      "path": "tools/fixtures/input_host_exit_retirement/suite.cpp.in",
+      "sha256": "95a96f94e19af338db57afe89385033ad0c03220d4aa70233e8a0e5cead2e3f9"
+    },
+    {
+      "path": "tools/fixtures/input_host_exit_retirement/README.md",
+      "sha256": "b13e3c7d4794d9b5351c68135caa92c86d9d846a82c3432d9f63ab46531da790"
+    },
+    {
+      "path": "native/input_host_process_retirement.h",
+      "sha256": "8b8609980ebb7b23ddceef521bc061c1b0af4eba58276e43959b9105a6f69d39"
+    },
+    {
+      "path": "native/virtual_controller_stop_runtime.h",
+      "sha256": "de4d9c068b6c3b6bcce25a322c44f9f5f73776af7957a71238285426c1dc8240"
+    },
+    {
+      "path": "native/virtual_controller_runtime_contract.h",
+      "sha256": "9185033fb8e543b97e258d6ee21420688ae3dc1ebc7be9a2f7a7f7aa2c078d11"
+    },
+    {
+      "path": "native/virtual_start_protection.h",
+      "sha256": "320905c088e70033c1a1986a03e9fe9694c0306887d5b35c9c43c44b192a3170"
+    },
+    {
+      "path": "native/input_capture_completion.h",
+      "sha256": "7b26fca65ce522f88b57f4d4490833be1cad9a878f9bd21931b8804453706985"
+    },
+    {
+      "path": "native/exit_cleanup_wait.h",
+      "sha256": "b1ee8178e4771096ad435f3bff9ea3685d04f8bf007de2dcb9359e7e11dad0e6"
+    },
+    {
+      "path": "native/input_host_exit_retirement.h",
+      "sha256": "0a779bf12c4f6018d43a92b7e125d7090113d360636d9747fa0d3b3260891f3a"
+    },
+    {
+      "path": "native/input_host_exit_owner_runtime.h",
+      "sha256": "8ad4d83c7d26fe83d193e92629fc18c1138ce3d97e09f284b6c2878c8b969338"
+    },
+    {
+      "path": "native/input_host_pipe_transport.h",
+      "sha256": "5adf81b64b504448e515cb6211ce28e9eb55a26fa6e551b56991eb0103882297"
+    }
+  ],
+  "remaining": "Actual UI callsite/exit consumer registration remains a separate parent freeze integration; source inclusion does not claim execution in signal-evidence."
+}

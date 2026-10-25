@@ -1,0 +1,141 @@
+#include <windows.h>
+#include <atomic>
+#include <algorithm>
+#include <chrono>
+#include <memory>
+#include <mutex>
+#include <stdexcept>
+#include <string>
+#include <vector>
+#include "json.hpp"
+#include "sensor_thread_mailbox.h"
+using json=nlohmann::json;
+using SensorThreadRequest=ymcc::sensors::ThreadRequest;
+enum class PowerLifecycle:uint8_t{Ready,Suspending,Suspended,Resuming};
+static std::atomic<PowerLifecycle> g_powerLifecycle{PowerLifecycle::Ready};
+static std::atomic<int> g_idleSessionDisplayState{1},g_idleLegacyMonitorState{1};
+static std::atomic<bool> g_inputCaptureSensorsSuspended{false},g_sensorPowerPausePending{false},g_sensorSuspendCallbackActive{false};
+static std::atomic<bool> g_sensorWakePollActive{true},g_gyroJudgeTaskEnabled{true};
+static bool g_inputCaptureReady=true;
+static std::mutex g_sensorThreadMx,g_sensorMetaMx,fixtureLogMx;
+static ymcc::sensors::ThreadMailbox g_sensorThreadMailbox;
+static HANDLE g_sensorThread=nullptr,g_sensorThreadWake=nullptr,fixtureOwnerGate=nullptr;
+static HWND g_hwnd=nullptr;
+static UINT64 g_inputCaptureSensorGeneration=10;
+static constexpr UINT32 kInputCaptureWakeSensorPollIntervalMs=10,kInputCaptureSensorPumpCheckMs=10,kInputCaptureRequestedSensorIntervalMs=100;
+static std::atomic<unsigned> fixturePolls{0},fixtureKeepalive{0},fixtureSelections{0},fixtureColdStarts{0},fixtureRevokes{0};
+static std::vector<json> fixtureLogs;
+static void appendDomainLog(const char*,const char* event,const json& d){std::lock_guard<std::mutex> l(fixtureLogMx);auto o=d;o["event"]=event;fixtureLogs.push_back(o);}
+static void appendNativeLifecycleLog(const char* e,const json& d){appendDomainLog("native",e,d);}
+static void writeLog(const char*,const std::string& text){appendDomainLog("test","writeLog",{{"text",text}});}
+static void inputCaptureAppend(const json&){}
+static UINT64 currentPowerGeneration(){return 7;}
+static const char* powerLifecycleName(PowerLifecycle p){return p==PowerLifecycle::Ready?"ready":p==PowerLifecycle::Resuming?"resuming":"suspended";}
+enum class YmccFamily{Other,LenovoLegionGo};
+static struct{YmccFamily family=YmccFamily::Other;}g_machineIdentity;
+static void legionMotionRevoke(){++fixtureRevokes;}
+struct FixtureSink{
+ std::atomic<UINT64> activeBindingGeneration{10};std::mutex mx;
+ UINT64 gyroHighMotionEpisode=0,accelMotionEpisode=0;
+ void ResetSamples(){} void SetBindingGeneration(UINT64 g){activeBindingGeneration.store(g);}
+ void OnGyro(int,UINT64){} void OnAccel(int,UINT64){}
+};
+static auto g_inputCaptureSink=std::make_shared<FixtureSink>();
+struct FixtureSensor{
+ bool present=true,failRevoke=false;UINT32 interval=100;
+ explicit operator bool()const{return present;}
+ FixtureSensor& operator=(std::nullptr_t){present=false;return *this;}
+ UINT32 MinimumReportInterval()const{return 10;}
+ void ReportInterval(UINT32 v){interval=v;}
+ void ReadingChanged(int){if(failRevoke)throw std::runtime_error("fixture revoke failure");}
+ template<class F>int ReadingChanged(F){return 1;}
+};
+static FixtureSensor g_gyroSensor,g_accelSensor;
+static bool g_gyroReadingChangedSubscribed=true,g_accelReadingChangedSubscribed=true;
+static int g_gyroReadingChangedToken=1,g_accelReadingChangedToken=1;
+struct FixtureProvider{bool alive=true,blockStop=false;bool running()const{return alive;}bool stop(){if(blockStop)return false;alive=false;return true;}};
+static FixtureProvider g_msiSensorApiProvider,g_hcWindowsSensorApiProvider;
+static std::atomic<UINT64> g_msiSensorApiGeneration{10};
+struct InputCaptureSensorMeta{std::string gyroFamily="sensorapi",accelFamily="sensorapi";bool gyroPresent=true,accelPresent=true;};
+static InputCaptureSensorMeta g_sensorMeta;
+static bool inputCaptureStopHcWindowsSensorApi(){return g_hcWindowsSensorApiProvider.stop();}
+static bool inputCaptureStartMsiSensorApi(UINT64){if(g_msiSensorApiProvider.running())return false;g_msiSensorApiProvider.alive=true;return true;}
+static bool inputCaptureStartHcWindowsSensorApi(UINT64){if(g_hcWindowsSensorApiProvider.running())return false;g_hcWindowsSensorApiProvider.alive=true;return true;}
+static void inputCaptureArmWakeSensorPollIfAbsent(){}
+enum class GyroJudgeState{Idle,Sampling};static GyroJudgeState g_gyroJudgeState=GyroJudgeState::Idle;
+static UINT64 g_gyroJudgeArmTick=0,g_gyroJudgeDetectionStartTick=0,g_gyroJudgeSegStartTick=0,g_gyroJudgeSegAccum=0,g_gyroJudgeLastPumpSeq=0,g_gyroJudgeFirstFrameTick=0,g_gyroJudgeLastProgressTick=0,g_gyroJudgePeakSegmentSamples=0,g_gyroJudgeConsumedHighMotionEpisode=0,g_gyroJudgeConsumedAccelMotionEpisode=0;
+namespace ymcc::windows_motion{static int retain(const std::shared_ptr<FixtureSink>&,UINT64){return 0;}}
+namespace ymcc::sensors::inventory{struct Schedule{void reset(){}bool claim(int,UINT64){return false;}};}
+struct FixtureInventoryTicket{int binding;UINT64 power;};
+namespace ymcc::sensors::sensorapi_inventory{struct Census{static bool pending(){return false;}static void cancel(){}static void request(FixtureInventoryTicket){}};}
+static void ymccLogThreadRole(const char*){WaitForSingleObject(fixtureOwnerGate,3000);}
+static bool inputCaptureWindowsSelectionHasWork(){return false;}
+static void inputCaptureWindowsProbeSetStaOpen(bool){}static void inputCaptureWindowsSelectionSetStaOpen(bool){}
+static void inputCaptureWindowsSelectionLifecycle(){}
+static void inputCaptureObserveWindowsInventory(FixtureInventoryTicket){}
+static void inputCaptureRunWindowsSelection(){++fixtureSelections;}
+static void inputCaptureRunWindowsSourceProbe(bool=false){}
+static void inputCaptureSensorWakePollStep(){++fixturePolls;}
+static void inputCaptureSensorHighMagKeepaliveStep(){++fixtureKeepalive;}
+static void inputCaptureStartWinRtSensorsImpl(){++fixtureColdStarts;}
+// PRODUCTION_FUNCTIONS
+static json checks=json::array();
+static void check(const char* name,bool ok){checks.push_back({{"name",name},{"passed",ok}});}
+static size_t countLog(const char* event){std::lock_guard<std::mutex> l(fixtureLogMx);return std::count_if(fixtureLogs.begin(),fixtureLogs.end(),[&](const auto& o){return o.value("event","")==event;});}
+static json lastLog(const char* event){std::lock_guard<std::mutex> l(fixtureLogMx);for(auto i=fixtureLogs.rbegin();i!=fixtureLogs.rend();++i)if(i->value("event","")==event)return *i;return json::object();}
+static bool waitLog(const char* e,size_t n){const auto start=GetTickCount64();while(GetTickCount64()-start<2000){if(countLog(e)>=n)return true;Sleep(1);}return false;}
+int main(){
+ fixtureOwnerGate=CreateEventW(nullptr,TRUE,FALSE,nullptr);g_sensorThreadWake=CreateEventW(nullptr,FALSE,FALSE,nullptr);g_sensorThreadMailbox.open();
+ g_sensorThread=CreateThread(nullptr,0,inputCaptureSensorThreadProc,nullptr,0,nullptr);
+ const auto started=GetTickCount64();suspendResumeSubscriptionCallback(nullptr,PBT_APMSUSPEND,nullptr);
+ check("OS callback revokes admission before GUI exists",g_inputCaptureSensorsSuspended&&g_sensorPowerPausePending&&g_sensorSuspendCallbackActive);
+ check("OS callback does not wait for sensor STA",GetTickCount64()-started<1000&&countLog("gyro-power-early-pause-completed")==0);
+ check("OS callback does not change sleep generation or game lifecycle",currentPowerGeneration()==7&&g_powerLifecycle==PowerLifecycle::Ready);
+ inputCaptureResumeSensorsForPower(true);
+ check("stale Ready state cannot reopen an OS suspend callback",g_inputCaptureSensorsSuspended&&countLog("gyro-power-command-queued")==0);
+ SetEvent(fixtureOwnerGate);check("actual STA completes early pause",waitLog("gyro-power-early-pause-completed",1));
+ check("both readers and subscriptions stop on STA",lastLog("gyro-power-early-pause-completed").value("subscriptionsStopped",false));
+ check("retained WinRT objects release requested cadence",g_gyroSensor.interval==0&&g_accelSensor.interval==0&&bool(g_gyroSensor)&&bool(g_accelSensor));
+ check("stopped sensor binding rejects old provider generations",g_inputCaptureSink->activeBindingGeneration==0);
+ g_idleSessionDisplayState=0;g_powerLifecycle=PowerLifecycle::Resuming;
+ suspendResumeSubscriptionCallback(nullptr,PBT_APMRESUMEAUTOMATIC,nullptr);
+ check("generic OS resume clears callback fence without handheld force",!g_sensorSuspendCallbackActive);
+ inputCaptureResumeSensorsForPower();
+ check("automatic resume while display OFF stays paused",g_inputCaptureSensorsSuspended&&countLog("gyro-power-command-queued")==0);
+ const auto keep=fixtureKeepalive.load(),poll=fixturePolls.load();
+ for(int i=0;i<3;++i){SetEvent(g_sensorThreadWake);Sleep(15);}
+ check("OFF wakeups execute no sensor poll or high magnitude keepalive",fixtureKeepalive==keep&&fixturePolls==poll);
+ inputCaptureSessionDisplayPowerChanged(2);check("DIM does not resume a paused sensor",g_inputCaptureSensorsSuspended);
+ inputCaptureSessionDisplayPowerChanged(1);check("DIM to ON resumes through real helper",waitLog("gyro-power-command-completed",1));
+ check("same retained objects resubscribe at configured interval",g_gyroSensor.interval==100&&g_accelSensor.interval==100&&g_gyroReadingChangedSubscribed&&g_accelReadingChangedSubscribed);
+ check("sensor resume does not request a cold object rebind",fixtureColdStarts==0);
+ check("resume receipt does not claim physical sleep verification",lastLog("gyro-power-command-completed").value("physicalSleepVerified",true)==false);
+ g_powerLifecycle=PowerLifecycle::Ready;
+ const auto queued=countLog("gyro-power-command-queued"),completed=countLog("gyro-power-command-completed");
+ inputCaptureSessionDisplayPowerChanged(0);
+ check("display OFF immediately revokes binding",g_inputCaptureSink->activeBindingGeneration==0&&g_inputCaptureSensorsSuspended);
+ check("display OFF executes before any kernel event or generation change",g_powerLifecycle==PowerLifecycle::Ready&&currentPowerGeneration()==7);
+ check("display OFF cancels wake retries",!g_sensorWakePollActive);
+ inputCaptureSessionDisplayPowerChanged(0);
+ check("repeated OFF queues exactly one stop",countLog("gyro-power-command-queued")==queued+1);
+ check("display OFF has actual completion evidence",waitLog("gyro-power-command-completed",completed+1)&&lastLog("gyro-power-command-completed").value("subscriptionsStopped",false));
+ auto ticket=g_sensorThreadMailbox.submit(SensorThreadRequest::Resubscribe);SetEvent(g_sensorThreadWake);
+ check("old queued resubscribe is consumed without reopening while OFF",g_sensorThreadMailbox.wait(ticket,std::chrono::milliseconds(2000))==ymcc::sensors::ThreadMailbox::Result::Completed&&!g_gyroReadingChangedSubscribed&&!g_msiSensorApiProvider.running());
+ inputCaptureSessionDisplayPowerChanged(9);check("invalid display state is ignored",g_idleSessionDisplayState==0);
+ g_idleSessionDisplayState=-1;g_idleLegacyMonitorState=0;check("legacy OFF fallback blocks sensors",!inputCaptureSensorPowerMayRun());
+ g_idleSessionDisplayState=1;check("session display state takes precedence over legacy OFF",inputCaptureSensorPowerMayRun());
+ inputCaptureResumeSensorsForPower();check("valid ON restores reader",waitLog("gyro-power-command-completed",completed+2));
+ g_gyroSensor.failRevoke=true;g_msiSensorApiProvider.blockStop=true;
+ inputCaptureSessionDisplayPowerChanged(0);check("failed revoke and stuck provider do not report fully stopped",waitLog("gyro-power-command-completed",completed+3)&&!lastLog("gyro-power-command-completed").value("subscriptionsStopped",true)&&countLog("gyro-power-unsubscribe-failed")>0);
+ inputCaptureSessionDisplayPowerChanged(1);
+ check("resume with an unretired reader retains paused admission",waitLog("gyro-power-command-completed",completed+4)&&g_inputCaptureSensorsSuspended&&countLog("gyro-power-resubscribe-deferred")>0);
+ g_gyroSensor.failRevoke=false;g_msiSensorApiProvider.blockStop=false;
+ inputCaptureSessionDisplayPowerChanged(1);check("later valid resume can retry an unsuccessful revoke",waitLog("gyro-power-command-completed",completed+5)&&g_gyroReadingChangedSubscribed);
+ auto shutdown=g_sensorThreadMailbox.submit(SensorThreadRequest::Shutdown);SetEvent(g_sensorThreadWake);
+ check("actual STA shuts down normally",WaitForSingleObject(g_sensorThread,3000)==WAIT_OBJECT_0);
+ CloseHandle(g_sensorThread);CloseHandle(g_sensorThreadWake);CloseHandle(fixtureOwnerGate);g_sensorThread=nullptr;g_sensorThreadWake=nullptr;
+ inputCaptureSuspendSensorsForPower();check("missing owner reports rejection and retains paused admission",g_inputCaptureSensorsSuspended&&countLog("gyro-power-command-rejected")>0);
+ const bool ok=std::all_of(checks.begin(),checks.end(),[](const auto& c){return c.value("passed",false);});
+ json result={{"ok",ok},{"cases",checks},{"logs",fixtureLogs},{"hardwareIo",false},{"normalYmccStarted",false}};
+ printf("%s\n",result.dump().c_str());return ok?0:1;
+}

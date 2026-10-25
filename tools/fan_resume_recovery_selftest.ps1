@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$ExePath = "",
     [string]$EvidenceDir = "",
     [string]$DataRoot = ""
@@ -6,7 +6,7 @@ param(
 
 # 2026-09-23（FAN-204 s31 补充裁决 Q1 / 前身 P-2）：唤醒恢复**接受 + 有界观察**的动态夹具。
 # 只驱动**注入构建**（native/build_faultinject.bat 产出；生产 exe 编译期剔除全部夹具），
-# 对 12 次运行断言：
+# 对 13 次运行断言：
 #   · 接受有界（≤3 次传输重试；接受本身不等待重建）；
 #   · 有界观察（同一 generation 只读 /api/state，≤15 s）；只有 Ready 且 !unknownState 且
 #     !hcCloseCleanupPending 才算 recovered；
@@ -43,7 +43,7 @@ $dataDir = $DataRoot
 $faultFile = Join-Path $dataDir 'test-resume-recovery-fault.txt'
 $recordFile = Join-Path $dataDir 'fan-resume-recovery-selftest.json'
 
-$expectedRuns = 12
+$expectedRuns = 13
 $failures = New-Object System.Collections.Generic.List[string]
 $runIndex = 0
 
@@ -126,7 +126,7 @@ function Assert-Case {
 $null = Assert-Case -Name 'host-not-listening' -ResumeMode 'nohost' -StateMode 'unreachable' -Attempts 3 -Terminal 'exhausted' -Exhausted 1 -ExhaustReason 'host-unreachable'
 # ② 650 ms 超时（同一 native 判据：无状态码）→ 同上（两者在 native 层同形，分别跑并分别断言）
 $null = Assert-Case -Name 'accept-transport-timeout' -ResumeMode 'timeout' -StateMode 'unreachable' -Attempts 3 -Terminal 'exhausted' -Exhausted 1 -ExhaustReason 'host-unreachable'
-# ③ 带原因码的 409 属"处理中"⇒ 接受一次后进入观察，重建完成后 recovered（不得把 409 判死）
+# ③ POWER_RESUMING 是过渡态：接受一次后只读观察；明确恢复失败不能套用此口径。
 $null = Assert-Case -Name 'accept-409-transitional-then-ready' -ResumeMode 'accept409' -StateMode 'resuming-then-ready' -Attempts 1 -Terminal 'recovered' -Exhausted 0
 # ④ 真机 10.2 s 慢重建窗：接受快、观察窗内到 Ready ⇒ recovered（覆盖 ≥10 s，不是 3 s mock）
 $null = Assert-Case -Name 'slow-rebuild-10200ms-observed' -ResumeMode 'accepted' -StateMode 'slow-ready' -Attempts 1 -Terminal 'recovered' -Exhausted 0 -MinElapsedMs 10000
@@ -146,6 +146,10 @@ $null = Assert-Case -Name 'late-response-superseded' -ResumeMode 'supersede-befo
 $null = Assert-Case -Name 'retrigger-after-exhaustion' -ResumeMode 'nohost' -StateMode 'unreachable' -Attempts 3 -Terminal 'exhausted' -Exhausted 1 -ExhaustReason 'host-unreachable'
 # ⑫ 旧宿主（同步等待实现）的终态形状仍必须判 recovered（兼容不回退）
 $null = Assert-Case -Name 'legacy-host-terminal-ready' -ResumeMode 'ready-legacy' -Attempts 1 -Terminal 'recovered' -Exhausted 0
+
+# FAN955: the real Host throws HC_RESUME_REBUILD_FAILED on failed/unknown receipt.
+# A later fabricated Ready must not turn that explicit rejection into recovery.
+$null = Assert-Case -Name 'explicit-rebuild-failure-never-observes-ready' -ResumeMode '409' -StateMode 'ready' -Attempts 1 -Probes 0 -Terminal 'exhausted' -Exhausted 1 -ExhaustReason 'HC_RESUME_REBUILD_FAILED'
 
 if ($runIndex -ne $expectedRuns) { $failures.Add("run count=$runIndex expected=$expectedRuns (case-count self check)") }
 

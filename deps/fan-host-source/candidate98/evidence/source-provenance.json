@@ -1,0 +1,12 @@
+{
+  "sourceRootAtCapture": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\source-snapshot-fan-route-selftest-fix-7669c9cdb25e4ff1a83c60e7c585bfe4\\source",
+  "controlledInputCount": 39,
+  "candidateSnapshotSha256": "6976aa191729a91f0da6638e63bab6f42e993485aef2b21730ea4e6b83529eeb",
+  "origin": "Frozen completed first fan batch plus two recorded selftest identity repairs; not current whole live G",
+  "previousCandidate149SupersededByFailedFullSelftest": true,
+  "buildEvidence": {
+    "path": "D:\\Codex\\2026-10-18\\kai-s\\work\\catalog-host-admission-20261019\\fan-route-selftest-fixed-build\\build-result.json",
+    "sha256": "c33777964be80ea8f290ff134e44117f5400389d1018a41e3f677ef95959a396"
+  },
+  "reproducibleByteIdenticalBuildClaimed": false
+}

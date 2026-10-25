@@ -29,6 +29,13 @@
 // a helper, installs Node, or accepts JavaScript/URLs from the frontend.
 namespace ymcc::steamlive {
 using Json = nlohmann::json;
+// Only fixed, typed read-only operations participate in the running-link budget.
+inline bool isRunningLinkRead(const Json& request) {
+    const auto operation=request.find("operation"), flag=request.find("runningLinkRead");
+    return operation!=request.end()&&operation->is_string()&&
+        (operation->get<std::string>()=="sleep.inspect"||operation->get<std::string>()=="sleep.session.inspect")&&
+        flag!=request.end()&&flag->is_boolean()&&flag->get<bool>();
+}
 inline std::mutex transportMutex;
 struct HttpHandle {
     HINTERNET h = nullptr;
@@ -56,10 +63,14 @@ struct Endpoint {
     std::wstring host = L"127.0.0.1";
     bool operator==(const Endpoint&) const = default;
 };
-inline std::vector<Endpoint> listeners(const std::wstring& steam) {
+inline bool listenerProcessBound(const std::wstring& steam, const std::wstring& image, const std::wstring& parentImage, DWORD parentPid, DWORD expectedSteamPid) {
+    const auto root = normalizedPath(steam), child = normalizedPath(image);
+    return child.compare(0,root.size()+1,root+L"\\") == 0 && std::filesystem::path(child).filename() == L"steamwebhelper.exe" &&
+        normalizedPath(parentImage) == root+L"\\steam.exe" && (!expectedSteamPid || parentPid == expectedSteamPid);
+}
+inline std::vector<Endpoint> listeners(const std::wstring& steam, DWORD expectedSteamPid = 0) {
     // Only enumerate Steam's own listeners, not arbitrary localhost ports.
     const auto root = normalizedPath(steam);
-    const auto prefix = root + L"\\";
     HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
     if (snapshot == INVALID_HANDLE_VALUE) throw std::runtime_error("live-debug-unavailable");
     std::map<DWORD,DWORD> parents;
@@ -73,9 +84,8 @@ inline std::vector<Endpoint> listeners(const std::wstring& steam) {
         if (known != verified.end()) return known->second;
         const auto image = processImage(pid);
         const auto parent = parents.find(pid);
-        const bool valid = image.compare(0, prefix.size(), prefix) == 0 &&
-            std::filesystem::path(image).filename() == L"steamwebhelper.exe" && parent != parents.end() &&
-            processImage(parent->second) == root + L"\\steam.exe";
+        const bool valid = parent != parents.end() &&
+            listenerProcessBound(root,image,processImage(parent->second),parent->second,expectedSteamPid);
         verified[pid] = valid;
         return valid;
     };
@@ -122,8 +132,8 @@ inline std::vector<Endpoint> listeners(const std::wstring& steam) {
     if (result.size() > 16) throw std::runtime_error("live-context-ambiguous");
     return result;
 }
-inline bool stillOwned(const std::wstring& steam, const Endpoint& endpoint) {
-    const auto current = listeners(steam);
+inline bool stillOwned(const std::wstring& steam, const Endpoint& endpoint, DWORD expectedSteamPid = 0) {
+    const auto current = listeners(steam, expectedSteamPid);
     return std::find(current.begin(), current.end(), endpoint) != current.end();
 }
 inline std::wstring widenAscii(const std::string& s) { return std::wstring(s.begin(), s.end()); }
@@ -132,7 +142,7 @@ inline void requireStatus(HINTERNET request, DWORD expected) {
     if (!WinHttpQueryHeaders(request, WINHTTP_QUERY_STATUS_CODE | WINHTTP_QUERY_FLAG_NUMBER, nullptr, &code, &bytes, nullptr) || code != expected)
         throw std::runtime_error("live-transport-failed");
 }
-inline std::string getTargets(HINTERNET connection) {
+inline std::string getTargets(HINTERNET connection, ULONGLONG deadline = 0) {
     HttpHandle request(WinHttpOpenRequest(connection, L"GET", L"/json/list", nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0));
     DWORD noRedirect = WINHTTP_DISABLE_REDIRECTS;
     WinHttpSetOption(request.h, WINHTTP_OPTION_DISABLE_FEATURE, &noRedirect, sizeof(noRedirect));
@@ -141,7 +151,15 @@ inline std::string getTargets(HINTERNET connection) {
     requireStatus(request.h, 200);
     std::string result;
     char buffer[8192]; DWORD read = 0;
-    while (WinHttpReadData(request.h, buffer, sizeof(buffer), &read) && read) {
+    for (;;) {
+        if (deadline) {
+            const auto now = GetTickCount64();
+            if (now >= deadline) throw std::runtime_error("live-ui-read-timeout");
+            const auto slice = std::max<DWORD>(1, std::min<DWORD>(500, static_cast<DWORD>(deadline - now) / 4));
+            WinHttpSetTimeouts(request.h, slice, slice, slice, slice);
+        }
+        if (!WinHttpReadData(request.h, buffer, sizeof(buffer), &read)) throw std::runtime_error("live-debug-unavailable");
+        if (!read) break;
         result.append(buffer, read);
         if (result.size() > 1024 * 1024) throw std::runtime_error("live-targets-invalid");
     }
@@ -175,9 +193,9 @@ struct BoundedSocket {
     std::condition_variable cv;
     bool finished = false;
     std::thread watchdog;
-    explicit BoundedSocket(HINTERNET socket) : h(socket), watchdog([this] {
+    explicit BoundedSocket(HINTERNET socket, DWORD timeoutMs = 16000) : h(socket), watchdog([this, timeoutMs] {
         std::unique_lock<std::mutex> lock(mx);
-        if (!cv.wait_for(lock, std::chrono::seconds(16), [this] { return finished; }) && h) {
+        if (!cv.wait_for(lock, std::chrono::milliseconds(timeoutMs), [this] { return finished; }) && h) {
             WinHttpCloseHandle(h); h = nullptr;
         }
     }) {}
@@ -187,23 +205,49 @@ struct BoundedSocket {
         if (h) WinHttpCloseHandle(h);
     }
 };
-inline Json run(const std::wstring& steam, const Json& request, const std::function<bool()>& admitAction = {}) {
-    std::lock_guard<std::mutex> serial(transportMutex);
+inline Json run(const std::wstring& steam, const Json& request, const std::function<bool()>& admitAction = {}, DWORD shortReadMs = 0) {
+    // A short UI observation must never queue behind a settings mutation.
+    // Fixed read operations and click-bound QAM follow-ups use a short budget.
+    const auto readOperation = request.value("operation", std::string{});
+    const bool runningLinkRead = isRunningLinkRead(request);
+    const bool shortRead = shortReadMs && (readOperation.rfind("menu.qam.",0)==0 || readOperation == "ui.mode.get" || readOperation == "sleep.session.inspect" || runningLinkRead);
+    std::unique_lock<std::mutex> serial(transportMutex, std::defer_lock);
+    if (shortRead || readOperation == "desktopMouse.get" || readOperation == "desktopMouse.set") {
+        if (!serial.try_lock()) return {{"ok", false}, {"reason", "live-busy"}, {"mutated", false}};
+    } else serial.lock();
+    const ULONGLONG deadline = shortRead ? GetTickCount64() + std::min<DWORD>(shortReadMs, 4000) : 0;
+    const auto remaining = [&]() -> DWORD {
+        const auto now = GetTickCount64();
+        if (deadline && now >= deadline) throw std::runtime_error("live-ui-read-timeout");
+        return deadline ? static_cast<DWORD>(deadline - now) : 16000;
+    };
+    const auto shortTimeouts = [&](HINTERNET handle) {
+        if (shortRead) {
+            const auto slice = std::max<DWORD>(1, std::min<DWORD>(500, remaining() / 4));
+            WinHttpSetTimeouts(handle, slice, slice, slice, slice);
+        }
+    };
+    const auto operation = request.value("operation", std::string{});
+    const bool sleepOperation = operation == "sleep.session.inspect" || operation == "sleep.inspect" || operation == "sleep.reconcile" || operation == "sleep.input-resume";
+    const DWORD expectedSteamPid = sleepOperation ? request.value("sleepSessionProcess", Json::object()).value("pid", DWORD{0}) : 0;
     bool sent = false;
     try {
-        const auto candidates = listeners(steam);
+        const auto candidates = listeners(steam, expectedSteamPid);
         HttpHandle session(WinHttpOpen(L"YMCC-SteamLive/1", WINHTTP_ACCESS_TYPE_NO_PROXY, WINHTTP_NO_PROXY_NAME, WINHTTP_NO_PROXY_BYPASS, 0));
         WinHttpSetTimeouts(session.h, 1000, 1000, 1500, 1500);
+        shortTimeouts(session.h);
         std::optional<Endpoint> selected;
         std::string path, discoveryError = "live-context-unavailable";
         const auto started = GetTickCount64();
         for (const auto& candidate : candidates) {
+            if (shortRead) remaining();
             if (GetTickCount64() - started > 5000) throw std::runtime_error("live-discovery-timeout");
             // IPv4/IPv6 aliases of the same owning PID/port are one endpoint.
             if (selected && selected->pid == candidate.pid && selected->port == candidate.port) continue;
             try {
+                shortTimeouts(session.h);
                 HttpHandle probe(WinHttpConnect(session.h, candidate.host.c_str(), candidate.port, 0));
-                const auto found = targetPath(Json::parse(getTargets(probe.h)), candidate);
+                const auto found = targetPath(Json::parse(getTargets(probe.h, deadline)), candidate);
                 if (selected) throw std::runtime_error("live-context-ambiguous");
                 selected = candidate; path = found;
             } catch (const std::exception& e) {
@@ -214,8 +258,9 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
         }
         if (!selected) throw std::runtime_error(discoveryError);
         const auto endpoint = *selected;
-        if (!stillOwned(steam, endpoint)) throw std::runtime_error("live-debug-owner-mismatch");
+        if (!stillOwned(steam, endpoint, expectedSteamPid)) throw std::runtime_error("live-debug-owner-mismatch");
         WinHttpSetTimeouts(session.h, 1500, 1500, 2000, 3000);
+        shortTimeouts(session.h);
         HttpHandle connection(WinHttpConnect(session.h, endpoint.host.c_str(), endpoint.port, 0));
         HttpHandle upgrade(WinHttpOpenRequest(connection.h, L"GET", widenAscii(path).c_str(), nullptr, WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, 0));
         DWORD noRedirect = WINHTTP_DISABLE_REDIRECTS;
@@ -224,22 +269,25 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
             !WinHttpSendRequest(upgrade.h, WINHTTP_NO_ADDITIONAL_HEADERS, 0, WINHTTP_NO_REQUEST_DATA, 0, 0, 0) || !WinHttpReceiveResponse(upgrade.h, nullptr))
             throw std::runtime_error("live-transport-failed");
         requireStatus(upgrade.h, 101);
+        const auto socketBudget = remaining();
         HINTERNET socket = WinHttpWebSocketCompleteUpgrade(upgrade.h, 0);
         if (!socket) throw std::runtime_error("live-transport-failed");
-        BoundedSocket bounded(socket);
-        if (!stillOwned(steam, endpoint)) throw std::runtime_error("live-debug-owner-mismatch");
-        const std::string expression = std::string(kScript) + "(" + request.dump() + ")";
+        BoundedSocket bounded(socket, socketBudget);
+        if (!stillOwned(steam, endpoint, expectedSteamPid)) throw std::runtime_error("live-debug-owner-mismatch");
+        const std::string expression = std::string(operation == "ui.mode.get" ? kUiModeScript : kScript) + "(" + request.dump() + ")";
         const std::string message = Json{{"id", 1}, {"method", "Runtime.evaluate"}, {"params", {
-            {"expression", expression}, {"returnByValue", true}, {"awaitPromise", true}, {"timeout", 14000}}}}.dump();
+            {"expression", expression}, {"returnByValue", true}, {"awaitPromise", true}, {"timeout", shortRead ? remaining() : 14000}}}}.dump();
         // Recheck event/config/power admission after discovery and socket setup.
         // A cancelled action must not be sent merely because it entered the queue earlier.
-        if (admitAction && !admitAction()) return {{"ok", false}, {"reason", "live-action-cancelled"}, {"mutated", false}};
+        if (admitAction && !admitAction()) return {{"ok", false}, {"reason", "live-action-cancelled"}, {"mutated", false},
+            {"stage", "native-live-pre-dispatch"}, {"requestDispatched", false}};
         sent = true;
         if (WinHttpWebSocketSend(socket, WINHTTP_WEB_SOCKET_UTF8_MESSAGE_BUFFER_TYPE, const_cast<char*>(message.data()), static_cast<DWORD>(message.size())) != NO_ERROR)
             throw std::runtime_error("live-transport-uncertain");
         std::string response;
-        unsigned messages = 0;
+        unsigned messages = 0, fragments = 0;
         for (;;) {
+            if (shortRead && (++fragments > 256 || GetTickCount64() >= deadline)) throw std::runtime_error("live-ui-read-timeout");
             char buffer[16384]; DWORD read = 0; WINHTTP_WEB_SOCKET_BUFFER_TYPE kind;
             if (WinHttpWebSocketReceive(socket, buffer, sizeof(buffer), &read, &kind) != NO_ERROR || kind == WINHTTP_WEB_SOCKET_CLOSE_BUFFER_TYPE)
                 throw std::runtime_error("live-transport-uncertain");
@@ -258,7 +306,8 @@ inline Json run(const std::wstring& steam, const Json& request, const std::funct
             return remote["value"];
         }
     } catch (const std::exception& e) {
-        return {{"ok", false}, {"reason", sent ? "live-transport-uncertain" : e.what()}, {"mutated", sent}};
+        const bool uncertainMutation=sent&&(!shortRead||readOperation=="menu.qam.retry");
+        return {{"ok", false}, {"reason", uncertainMutation ? "live-transport-uncertain" : e.what()}, {"mutated", uncertainMutation}};
     }
 }
 inline bool canDefer(const Json& result) {

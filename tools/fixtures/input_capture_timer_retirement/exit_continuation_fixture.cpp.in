@@ -1,0 +1,479 @@
+// Complete production exit fragments, gate, background owner and Stop helper.
+// Other subsystems and child retirement are explicitly memory leaves.
+@KERNEL_PREFIX@
+#include <mutex>
+#include <thread>
+#include <map>
+#include "exit_cleanup_wait.h"
+#define FIXTURE_TYPED_EXIT @TYPED_EXIT@
+struct PassiveLeaf {void shutdown(){} void stop(){}};
+static PassiveLeaf g_fxSoundRecovery,g_gestureSummon,g_monitorNoticeCarrier,
+ g_radialRawTouchObserver,g_radialTouchObserver,g_radialOverlay,g_desktopMonitorHud,
+ g_deckySidebarRuntime,g_steamSettingsObserver,g_steamModeObserver,g_steamCssGuard,
+ g_steamCssUse,g_optiCatalogStartup;
+static std::atomic<bool> g_exitRequested{true};static std::atomic<WPARAM> g_exitCode{0};
+static bool g_summonQuit=false;static HANDLE g_autoCloseThread=nullptr;
+static std::mutex g_gameCorePolicyMutex;
+static void closeScreenTouchpadsForExit(const char*){}
+static void mousePolicyStop(){}static void msiNativeForegroundStopObserver(){}
+static void steamOriginalRecoveryRequestStop(){}static void steamGameLinkShutdown(){}
+static void rogEnsureXboxFaceEnabled(const char*){}static bool gameCoreRestoreLeaseLocked(){return true;}
+static void shutdownSplashGraphics(){}static void joinStartupResumeThread(unsigned){}
+static void sgStopWorkThread(unsigned){}static void steamOriginalRecoveryShutdown(){}
+static bool steamOriginalRecoveryStopped(){return true;} // unrelated memory recovery owner
+static void poolStop(unsigned){}static void stopTdpDaemonForExit(){}
+static void stopTopMonitorForExit(unsigned){}static bool sgCleanupBeforeExit(bool){return true;}
+static void closeWebViewsForExit(){}
+static std::atomic<unsigned> postQuitCalls{0},sealCalls{0},coUninitCalls{0};
+static DWORD quitProbe=WAIT_FAILED,sealProbe=WAIT_FAILED,uninitProbe=WAIT_FAILED;
+static std::atomic<bool> finalReturned{false},gateHeldProven{false};
+static HANDLE ownerPaused=nullptr,ownerResume=nullptr;
+static bool holdMemoryChild=false;static std::atomic<unsigned> childPolls{0};
+static std::atomic<unsigned> ownerPauseCount{0},cleanupCreated{0},cleanupClosed{0},cleanupJoinProofs{0};
+static std::atomic<ULONGLONG> memoryClock{100};
+static void fixturePostQuitMessage(int){++postQuitCalls;quitProbe=realWait(current->controller.value,0).result;}
+namespace ymcc::inputHost::pipeTransport {static void sealProcess(){++sealCalls;sealProbe=realWait(current->controller.value,0).result;}}
+static void fixtureCoUninitialize(){++coUninitCalls;uninitProbe=realWait(current->controller.value,0).result;}
+static unsigned childRetirement(){
+ ++childPolls;
+ return holdMemoryChild&&childPolls==1?unsigned(ymcc::captureLifecycle::Debt::SensorSta):0u;
+}
+#if FIXTURE_TYPED_EXIT
+static HANDLE g_exitCleanupThread=nullptr;static bool g_exitCleanupCompleted=false;
+static bool g_exitCleanupWorkerFailureReported=false;static HWND g_hwnd=nullptr;
+static ULONGLONG g_exitBeginTick=0;static std::string g_exitSessionId;
+static HANDLE g_recoveryExitEvent=nullptr;static std::atomic<const char*> g_exitCleanupStage{"none"};
+static void inputHostRaiseExitFence(const char*){}static void recoverySnapSetExitIntent(){}
+static void inputHostQuiesceForCaptureExit(){}static void inputCaptureClearExitConfiguration(){}
+// Explicit pre-returned Host leaf in this capture-only consumer. The separate
+// controller.host-exit-owned case executes actual Host/pipe retirement.
+static void inputHostNoteExitStopAttempted(){}
+static bool inputHostRetireLocalResourcesForExit(){return true;}
+static void inputHostAwaitLocalRetirementForExit(){}
+static bool inputHostExitLocalOwnershipReleased()noexcept{return true;}
+static void recoverySnapSetFanHandoffPending(bool){}static void fanLeaseKeepaliveShutdown(){}
+static int fanHostCleanupForAppExit(){return 0;}static const char* fanExitHandoffName(int){return "memory-only";}
+static void appendFanLifecycleLog(const char*,const json&){}
+static void oemVendorStackRestore(const char*){}static void msiNativeForegroundExitCleanup(){}
+static void externalControllerPriorityShutdown(){}static void oemBackMappingSetEnabled(bool){}
+static void msiWmiSetEnabled(bool){}static void msiDinputSetEnabled(bool){}
+static void hidHideSweepAllHiddenDevices(const char*){}
+static std::map<int,int*> g_watchers;static bool stopWatcher(int*,unsigned){return true;}
+static void postExitReadyOnce(HWND,int){}
+static constexpr DWORD COINIT_MULTITHREADED=0;
+static HRESULT memoryCoInitialize(LPVOID,DWORD){return S_OK;}static void memoryCoUninitialize(){}
+static ULONGLONG fixtureClock(){return memoryClock.fetch_add(31000);}
+static void passiveOwnerPause(DWORD budget){
+ if(budget!=250)throw std::runtime_error("unexpected passive-owner pause budget");
+ ++ownerPauseCount;memoryClock.fetch_add(31000);::SetEvent(ownerPaused);
+ if(::WaitForSingleObject(ownerResume,10000)!=WAIT_OBJECT_0)throw std::runtime_error("owned exit owner resume gate failed");
+}
+static HANDLE createCleanupThread(LPSECURITY_ATTRIBUTES a,SIZE_T n,LPTHREAD_START_ROUTINE fn,LPVOID arg,DWORD flags,LPDWORD id){
+ HANDLE result=::CreateThread(a,n,fn,arg,flags,id);if(result)++cleanupCreated;return result;
+}
+static BOOL closeCleanupHandle(HANDLE handle){
+ if(handle==g_exitCleanupThread){if(realWait(handle,0).result==WAIT_OBJECT_0)++cleanupJoinProofs;const BOOL result=::CloseHandle(handle);if(result)++cleanupClosed;return result;}
+ return ::CloseHandle(handle);
+}
+#define CoInitializeEx memoryCoInitialize
+#define CoUninitialize memoryCoUninitialize
+#define Sleep passiveOwnerPause
+#define GetTickCount64 fixtureClock
+#define CreateThread createCleanupThread
+#define CloseHandle closeCleanupHandle
+@ACTUAL_EXIT_OWNERS@
+#undef CloseHandle
+#undef CreateThread
+#undef GetTickCount64
+#undef Sleep
+#undef CoUninitialize
+#undef CoInitializeEx
+#endif
+static int executeDestroyExitPath(){
+#define PostQuitMessage fixturePostQuitMessage
+@DESTROY_EXIT_PATH@
+#undef PostQuitMessage
+ throw std::logic_error("This consumer admits only exitRequested=true");
+}
+static int executeMainFinally(){
+ HANDLE hMutex=nullptr;struct {WPARAM wParam=0;}msg;
+#define CoUninitialize fixtureCoUninitialize
+@MAIN_FINALLY@
+#undef CoUninitialize
+}
+static json replay(bool held,bool childHeld){
+ auto owner=std::make_unique<KernelCase>();KernelCase& state=*owner;current=&state;
+ const auto before=failures;resetCaptureFixture();g_inputCaptureThread=nullptr;g_inputCaptureStop=false;
+ postQuitCalls=sealCalls=coUninitCalls=0;quitProbe=sealProbe=uninitProbe=WAIT_FAILED;
+ finalReturned=false;gateHeldProven=false;childPolls=ownerPauseCount=cleanupCreated=cleanupClosed=cleanupJoinProofs=0;
+ holdMemoryChild=childHeld;memoryClock=100;g_exitRequested=true;
+ bool returned=false,finalDone=false;std::string error;std::thread controller;
+ bool retainedLogged=false;unsigned actualOwnerStops=0;
+#if FIXTURE_TYPED_EXIT
+ g_exitCleanupThread=nullptr;g_exitCleanupCompleted=false;g_exitCleanupWorkerFailureReported=false;
+#endif
+ {
+  CleanupGuard cleanup{state,owner};
+  try{
+   for(OwnedHandle* event:{&state.ready,&state.release,&state.completed}){event->value=::CreateEventW(nullptr,TRUE,FALSE,nullptr);requireSetup(event->value!=nullptr,"owned event creation");}
+   state.product.value=::CreateThread(nullptr,0,ownedWorker,&state,0,nullptr);requireSetup(state.product.value!=nullptr,"owned worker creation");
+   state.workerCreated=true;state.originalProduct=state.product.value;g_inputCaptureThread=state.product.value;
+   requireSetup(::DuplicateHandle(::GetCurrentProcess(),state.product.value,::GetCurrentProcess(),&state.controller.value,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"owned controller duplication");
+   state.controllerDuplicatedBeforeStop=true;requireSetup(realWait(state.ready.value,kReadyWaitMs).result==WAIT_OBJECT_0,"owned worker ready");
+   if(!held){state.releaseAndJoin();requireSetup(state.joined,"precompleted worker joined");}
+#if FIXTURE_TYPED_EXIT
+   ownerPaused=::CreateEventW(nullptr,FALSE,FALSE,nullptr);ownerResume=::CreateEventW(nullptr,FALSE,FALSE,nullptr);
+   requireSetup(ownerPaused&&ownerResume,"owner observation events created");
+   if(held||childHeld)controller=std::thread([&]{
+    const unsigned pauses=unsigned(held)+unsigned(childHeld);
+    for(unsigned i=0;i<pauses;++i){
+     if(::WaitForSingleObject(ownerPaused,10000)!=WAIT_OBJECT_0){::SetEvent(state.release.value);::SetEvent(ownerResume);return;}
+     const bool barrier=!finalReturned.load()&&sealCalls==0&&coUninitCalls==0&&!g_captureExitReleased.load();
+     if(barrier)gateHeldProven=true;
+     if(held&&i==0){if(state.host!=0)gateHeldProven=false;::SetEvent(state.release.value);(void)realWait(state.controller.value,5000);}
+     ::SetEvent(ownerResume);
+    }
+   });
+#else
+   ++state.stopCalls;
+#endif
+   returned=executeDestroyExitPath()==0;
+   finalDone=executeMainFinally()==0;finalReturned=true;
+   if(controller.joinable())controller.join();
+   check(returned&&finalDone,"both complete production exit fragments returned");
+   check(postQuitCalls==1&&sealCalls==1&&coUninitCalls==1,"actual quit and final cleanup leaves reached");
+#if FIXTURE_TYPED_EXIT
+   actualOwnerStops=state.waitCount;
+   check(g_captureExitReleased.load()&&g_exitCleanupCompleted&&!g_exitCleanupThread,"actual gate consumed actual background owner completion");
+   check(cleanupCreated==1&&cleanupClosed==1&&cleanupJoinProofs==1,"production cleanup owner created joined and closed once");
+   check(sealProbe==WAIT_OBJECT_0&&uninitProbe==WAIT_OBJECT_0,"final seal and COM teardown follow real capture thread completion");
+   check(!state.hostWhileWorkerLive,"actual Stop never runs Host leaf over live producer");
+   check(!(held||childHeld)||gateHeldProven.load(),"actual final gate remained blocked during retained debt");
+   check(!held||state.productWaits[0].result==WAIT_TIMEOUT,"held worker produced a genuine kernel timeout");
+   unsigned ownershipRows=0;
+   for(const auto& log:state.logs){
+    if(log.value("event","")=="input-capture-exit-ownership"){
+     ++ownershipRows;check(log.value("version",0)==1&&log.value("scope","")=="capture-resource-only;Host-return-separate"&&log.value("baseLane",false),"actual ownership row keeps capture-only scope version and ordinary log admission");
+    }
+    if(log.value("event","")=="input-capture-exit-retained"){retainedLogged=true;check(log.value("baseLane",false),"actual retained diagnostic belongs to ordinary logging");}
+   }
+   check(ownershipRows>0&&nativeLifecycleEventIsBase("input-host-exit-capture-neutral"),"actual default classifier includes all new bounded capture exit events");
+   check(!(held||childHeld)||retainedLogged,"actual 30s retained diagnostic executed on explicit memory clock");
+#else
+   check(state.waitCount==1&&state.productWaits[0].budget==2000,"historical destroy called complete production Stop");
+   check(sealProbe==(held?WAIT_TIMEOUT:WAIT_OBJECT_0)&&uninitProbe==sealProbe,"original quit-before-settlement failure preserved");
+#endif
+   state.releaseAndJoin();requireSetup(state.joined,"controller positively joined worker");
+   if(g_inputCaptureThread)invokeStop(state);
+  }catch(const std::exception& e){error=e.what();check(false,"exit consumer failure");}
+  if(controller.joinable()){::SetEvent(state.release.value);::SetEvent(ownerResume);controller.join();}
+#if FIXTURE_TYPED_EXIT
+  // Failure retains ownership; a process return can never be the cleanup proof.
+  if(g_exitCleanupThread){if(realWait(g_exitCleanupThread,5000).result==WAIT_OBJECT_0){closeCleanupHandle(g_exitCleanupThread);g_exitCleanupThread=nullptr;}else owner.release();}
+#endif
+ }
+ const bool workerJoined=state.joined&&state.workerDone.load();
+ check(workerJoined&&state.handlesRemaining()==0,"fixture product threads events and handles disposed after join");
+ bool observationEventsClosed=true;
+ for(HANDLE* h:{&ownerPaused,&ownerResume})if(*h){if(::CloseHandle(*h))*h=nullptr;else observationEventsClosed=false;}
+ check(observationEventsClosed,"owner observation events closed explicitly");
+ const bool gap=held&&sealProbe!=WAIT_OBJECT_0;
+ json row={{"held",held},{"memoryChildHeld",childHeld},{"actualDestroyExitPathExecuted",returned},{"actualMainFinallyExecuted",finalDone},
+ {"actualExitGateAndBackgroundOwnerExecuted",bool(FIXTURE_TYPED_EXIT)},{"gateBlockedWithRetainedDebt",gateHeldProven.load()},
+ {"quitBeforeThreadJoin",quitProbe!=WAIT_OBJECT_0},{"sealBeforeThreadJoin",sealProbe!=WAIT_OBJECT_0},{"coUninitializeBeforeThreadJoin",uninitProbe!=WAIT_OBJECT_0},
+ {"productionExitContinuationGapObserved",gap},{"postQuitIsMessageOnly",bool(FIXTURE_TYPED_EXIT)},{"actualOwnerWorkerWaits",actualOwnerStops},
+ {"cleanupCreated",cleanupCreated.load()},{"cleanupJoinedBeforeClose",cleanupJoinProofs.load()},{"cleanupClosed",cleanupClosed.load()},
+ {"lifecycleLogs",state.logs},{"retainedDiagnosticExecuted",retainedLogged},{"hostCleanupWhileWorkerLive",state.hostWhileWorkerLive},
+ {"ownedThreadJoined",workerJoined},{"ownedHandlesRemaining",state.handlesRemaining()+unsigned(!observationEventsClosed)},
+ {"ownedEventsRemaining",state.eventsRemaining()+unsigned(!observationEventsClosed)},{"processExitUsedAsCleanup",false},
+ {"wholeLifecycleAcceptance",false},{"realChildResourcesExecuted",false},{"error",error},{"fixturePass",failures==before}};
+ row["contextRetained"]=!owner;if(owner){current=nullptr;g_inputCaptureThread=nullptr;}return row;
+}
+int main(){json cases=json::array();cases.push_back(replay(false,false));if(!cases.back().value("contextRetained",true))cases.push_back(replay(true,false));
+#if FIXTURE_TYPED_EXIT
+ if(!cases.back().value("contextRetained",true))cases.push_back(replay(false,true));
+#endif
+ std::cout<<json({{"fixturePass",failures==0},{"checks",checks},{"failures",failures},{"cases",cases},
+ {"wholeLifecycleAcceptance",false},{"realPrivateKernelObjectsOnly",true},{"installedApplicationExecuted",false}}).dump()<<'\n';return failures?1:0;}
+
+// UI_LOOP_CONSUMER_BOUNDARY
+// Complete source-extracted normal main loop and WM_APP_EXIT_READY case.
+// Only fixture-owned kernel threads/events execute. Window/messages, unrelated
+// resource shutdown and the Steam permit are explicit memory leaves.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#define WIN32_LEAN_AND_MEAN
+#include <Windows.h>
+#include <json.hpp>
+#include <array>
+#include <atomic>
+#include <cstdint>
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <thread>
+#include <vector>
+#include "input_capture_completion.h"
+#include "exit_cleanup_wait.h"
+using json=nlohmann::json;
+static unsigned checks=0,failures=0;
+static void check(bool ok,const char* label){++checks;if(!ok){++failures;std::cerr<<"CHECK_FAILED "<<label<<'\n';}}
+@UI_CAPTURE_GLOBALS@
+@UI_CAPTURE_GATE@
+// Host resources are an independent explicit already-returned memory fact here.
+static bool inputHostExitLocalOwnershipReleased()noexcept{return true;}
+static HANDLE g_exitCleanupThread=nullptr;
+static bool g_exitCleanupCompleted=false;
+static std::atomic<bool> g_exitRequested{true},g_exitReadyPosted{true};
+static std::atomic<WPARAM> g_exitCode{47};
+static std::atomic<const char*> g_exitCleanupStage{"finished"};
+static const char* g_exitLastWaitingStage=nullptr;
+static ULONGLONG g_exitBeginTick=0;static std::string g_exitSessionId="owned-loop";
+static HWND g_hwnd=nullptr;
+struct LoopState{
+ HANDLE ownedCleanup=nullptr,controller=nullptr,parked=nullptr,wake=nullptr,stopController=nullptr;
+ std::atomic<bool> injectHelperWaitFailure{false};std::atomic<unsigned> forcedWaitFailures{0};
+ bool windowPresent=false,firstTimeout=false,joined=false;unsigned configuredCloseFailures=0,steps=0;
+ std::atomic<unsigned> ownerWaits{0},messageWaits{0},peeks{0},dispatches{0},readyCalls{0},closeAttempts{0},closeFailures{0},closeSuccesses{0};
+ std::atomic<bool> capturePermit{false},steamPermit{false},messagePending{false},controllerDone{false};
+ std::atomic<bool> parkedRetained{true},readyResetAfterRejected{true},completionBeforeClose{false},closeWithoutPermits{false};
+ std::atomic<bool> controllerGateFailed{false};bool budgetCaught=false,returned=false,salvaged=false;
+ json trace=json::array();
+};
+static LoopState* loop=nullptr;
+static bool steamOriginalRecoveryStopped(){return loop->steamPermit.load();} // explicit memory child
+static bool tryStartExitCleanupWorker(HWND){return g_exitCleanupThread!=nullptr;} // existing owned thread only
+static void appendNativeLifecycleLog(const char*,const json&){}
+static BOOL fixtureIsWindow(HWND hwnd){return hwnd&&loop->windowPresent;}
+static BOOL fixtureClose(HANDLE handle){
+ if(!handle||handle!=loop->ownedCleanup)throw std::runtime_error("invalid or stale fixture handle close");
+ ++loop->closeAttempts;
+ if(g_exitCleanupCompleted)loop->completionBeforeClose=true;
+ if(!inputCaptureExitOwnershipReleased()||!steamOriginalRecoveryStopped())loop->closeWithoutPermits=true;
+ if(::WaitForSingleObject(loop->controller,0)!=WAIT_OBJECT_0)throw std::runtime_error("close before cleanup thread signal");
+ if(loop->closeFailures.load()<loop->configuredCloseFailures){++loop->closeFailures;::SetLastError(ERROR_ACCESS_DENIED);return FALSE;}
+ const BOOL ok=::CloseHandle(handle);if(ok){++loop->closeSuccesses;loop->ownedCleanup=nullptr;}return ok;
+}
+static constexpr UINT WM_APP_EXIT_READY=WM_APP+7,kFixturePermit=WM_APP+77;
+@UI_TIMER_CONSTANTS@
+static HANDLE g_acdcNotify=nullptr,g_monitorNotify=nullptr,g_idleDisplayNotify=nullptr,g_schemeNotify=nullptr,g_suspendResumeNotify=nullptr,g_tdpDaemonJob=nullptr;
+static HICON g_memTrayIcon=nullptr;
+static bool g_monitorEntryFailureTimerArmed=false;static unsigned long long g_monitorEntryFailureGeneration=0;
+static BOOL memoryKillTimer(HWND,UINT_PTR){return TRUE;}
+static BOOL memoryUnregister(HANDLE){return TRUE;}
+static void sgStopKernelPowerSubscription(){}static void focusLosslessReturnCancel(){}
+static void cancelTaskbarLayoutRecheck(){}static void stopPowerResumeWatchdog(){}
+static BOOL memoryDestroyIcon(HICON){return TRUE;}
+static void gamepadSerialStop(unsigned){}static void closeWebViewsForExit(){}static void stopRecoveryService(){}
+static BOOL memoryDestroyWindow(HWND){loop->windowPresent=false;return TRUE;}
+static LRESULT executeReady(HWND h,UINT message,WPARAM w,LPARAM l){
+ (void)w;(void)l;
+#define WaitForSingleObject ::WaitForSingleObject
+#define CloseHandle fixtureClose
+#define KillTimer memoryKillTimer
+#define UnregisterPowerSettingNotification memoryUnregister
+#define PowerUnregisterSuspendResumeNotification memoryUnregister
+#define DestroyIcon memoryDestroyIcon
+#define DestroyWindow memoryDestroyWindow
+ switch(message){
+@UI_READY_CASE@
+ default:throw std::runtime_error("unexpected fixture READY message");
+ }
+#undef DestroyWindow
+#undef DestroyIcon
+#undef PowerUnregisterSuspendResumeNotification
+#undef UnregisterPowerSettingNotification
+#undef KillTimer
+#undef CloseHandle
+#undef WaitForSingleObject
+}
+static LRESULT fixtureSend(HWND h,UINT msg,WPARAM w,LPARAM l){++loop->readyCalls;return executeReady(h,msg,w,l);}
+namespace ymcc::exitLifecycle {
+static DWORD observedLoopWait(HANDLE handle){
+ if(handle){
+  if(++loop->ownerWaits>8){loop->budgetCaught=true;throw std::runtime_error("bounded immediate-handle wake observer caught spin");}
+  if(handle!=loop->ownedCleanup)throw std::runtime_error("loop wait lost owned cleanup handle");
+  if(loop->injectHelperWaitFailure){
+   if(::WaitForSingleObject(loop->controller,0)!=WAIT_OBJECT_0)throw std::runtime_error("failure injection requires positively signalled real owner");
+   ++loop->forcedWaitFailures;::SetLastError(ERROR_GEN_FAILURE);return WAIT_FAILED;
+  }
+  // The signalled wait uses the actual production header against our owned
+  // real thread object. No fabricated signalled WAIT_RESULT is admitted.
+  const DWORD result=waitForCleanupOrMessages(handle);
+  if(result!=WAIT_OBJECT_0)throw std::runtime_error("fixture cleanup thread must already be signalled");
+  return result;
+ }
+ ++loop->messageWaits;
+ const bool retained=loop->ownedCleanup&&g_exitCleanupThread==loop->ownedCleanup&&!g_exitCleanupCompleted;
+ if(!retained)loop->parkedRetained=false;
+ if(loop->windowPresent&&g_exitReadyPosted.load())loop->readyResetAfterRejected=false;
+ loop->trace.push_back({{"action","message-only-park"},{"ownerRetained",retained},{"ownerWaits",loop->ownerWaits.load()},
+  {"closeFailures",loop->closeFailures.load()},{"capturePermit",inputCaptureExitOwnershipReleased()},{"steamPermit",steamOriginalRecoveryStopped()}});
+ ::SetEvent(loop->parked);
+ // Memory message adapter: a controller must wake this private kernel event.
+ // No Sleep, real window, hardware, service or Game Bar operation is involved.
+ if(::WaitForSingleObject(loop->wake,5000)!=WAIT_OBJECT_0)throw std::runtime_error("private message wake failed");
+ if(loop->firstTimeout&&loop->messageWaits==1)return WAIT_TIMEOUT;
+ return WAIT_OBJECT_0;
+}
+}
+static BOOL fixturePeek(MSG* message,HWND,UINT,UINT,UINT){
+ ++loop->peeks;if(!loop->messagePending.exchange(false))return FALSE;
+ message->message=kFixturePermit;message->wParam=0;message->lParam=0;return TRUE;
+}
+static BOOL fixtureTranslate(const MSG*){return TRUE;}
+static LRESULT fixtureDispatch(const MSG* message){
+ if(message->message!=kFixturePermit)throw std::runtime_error("unexpected memory message");
+ ++loop->dispatches;
+ if(!inputCaptureExitOwnershipReleased())g_captureExitReleased=true;
+ else if(!steamOriginalRecoveryStopped())loop->steamPermit=true;
+ loop->trace.push_back({{"action","Peek-dispatch"},{"dispatches",loop->dispatches.load()}});
+ return 0;
+}
+static BOOL fixtureGetMessage(MSG*,HWND,UINT,UINT){throw std::runtime_error("exit-only consumer entered ordinary GetMessage");}
+static void beginAsyncExit(HWND,WPARAM,const char*){throw std::runtime_error("fixture cannot create another exit owner");}
+static WPARAM executeNormalLoop(){
+#define waitForCleanupOrMessages observedLoopWait
+#define IsWindow fixtureIsWindow
+#define SendMessageW fixtureSend
+#define CloseHandle fixtureClose
+#define PeekMessageW fixturePeek
+#define TranslateMessage fixtureTranslate
+#define DispatchMessageW fixtureDispatch
+#define GetMessageW fixtureGetMessage
+@UI_MAIN_LOOP@
+#undef GetMessageW
+#undef DispatchMessageW
+#undef TranslateMessage
+#undef PeekMessageW
+#undef CloseHandle
+#undef SendMessageW
+#undef IsWindow
+#undef waitForCleanupOrMessages
+ return msg.wParam;
+}
+static HANDLE g_recoveryExitEvent=nullptr;
+static void inputHostRaiseExitFence(const char*){}static void steamOriginalRecoveryRequestStop(){}static void recoverySnapSetExitIntent(){}
+#define waitForCleanupOrMessages observedLoopWait
+#define CloseHandle fixtureClose
+#define PeekMessageW fixturePeek
+#define TranslateMessage fixtureTranslate
+#define DispatchMessageW fixtureDispatch
+@UI_ENSURE_EXIT_OWNER@
+#undef DispatchMessageW
+#undef TranslateMessage
+#undef PeekMessageW
+#undef CloseHandle
+#undef waitForCleanupOrMessages
+static DWORD WINAPI privateCleanup(LPVOID){return 0;}
+static json runLoopCase(bool window,bool capture,bool steam,unsigned failedClose,bool firstTimeout){
+ LoopState state;loop=&state;state.windowPresent=window;state.configuredCloseFailures=failedClose;state.firstTimeout=firstTimeout;
+ state.steamPermit=steam;g_captureExitReleased=capture;g_exitCleanupCompleted=false;g_exitRequested=true;g_exitReadyPosted=true;
+ g_exitLastWaitingStage=nullptr;g_hwnd=window?reinterpret_cast<HWND>(std::uintptr_t{1}):nullptr;
+ const unsigned before=failures;std::thread controller;std::string error;WPARAM returnedCode=0;
+ try{
+  for(HANDLE* h:{&state.parked,&state.wake,&state.stopController}){*h=::CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!*h)throw std::runtime_error("owned loop event creation");}
+  state.ownedCleanup=::CreateThread(nullptr,0,privateCleanup,nullptr,0,nullptr);
+  if(!state.ownedCleanup||!::DuplicateHandle(::GetCurrentProcess(),state.ownedCleanup,::GetCurrentProcess(),&state.controller,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("owned cleanup duplication");
+  g_exitCleanupThread=state.ownedCleanup;
+  state.joined=::WaitForSingleObject(state.controller,5000)==WAIT_OBJECT_0;
+  if(!state.joined)throw std::runtime_error("owned cleanup thread join");
+  controller=std::thread([&]{
+   HANDLE handles[]={state.stopController,state.parked};
+   for(;;){
+    const auto observed=::WaitForMultipleObjects(2,handles,FALSE,5000);
+    if(observed==WAIT_OBJECT_0)break;
+    if(observed!=WAIT_OBJECT_0+1){state.controllerGateFailed=true;::SetEvent(state.wake);break;}
+    if(++state.steps>8){state.controllerGateFailed=true;::SetEvent(state.wake);break;}
+    // The production loop has parked on its private message event, while this
+    // independent thread holds the only wake. Permit changes require dispatch.
+    state.messagePending=true;::SetEvent(state.wake);
+   }
+   state.controllerDone=true;
+  });
+  try{returnedCode=executeNormalLoop();state.returned=true;}catch(const std::exception& e){error=e.what();}
+ }catch(const std::exception& e){error=e.what();}
+ if(state.stopController)::SetEvent(state.stopController);
+ if(controller.joinable())controller.join();
+ check(state.joined,"real cleanup thread positively joined before READY decisions");
+ check(!state.budgetCaught,"signalled rejected READY cannot repeatedly wake without message-only parking");
+ check(state.messageWaits>0&&state.steps>0,"pending gate or failed close reaches an owned blocking message wait");
+ check(state.dispatches>0,"message-only wake falls through actual Peek and dispatch");
+ check(state.parkedRetained&&!state.completionBeforeClose,"checked Close must precede complete and preserve owner on failure");
+ check(!state.closeWithoutPermits,"lost window requires both capture and Steam permit before Close");
+ check(state.closeFailures==failedClose,"configured valid-handle Close failure actually executed");
+ check(state.closeSuccesses==1&&state.ownedCleanup==nullptr&&g_exitCleanupThread==nullptr,"production path positively closes cleanup handle exactly once");
+ check(state.returned&&g_exitCleanupCompleted&&returnedCode==47,"actual main exit completes only after checked retirement");
+ check(!window||state.readyResetAfterRejected,"rejected READY clears posted marker while retaining owner");
+ check(!state.controllerGateFailed&&state.controllerDone,"fixture message controller positively joined");
+ // Failure cleanup never discards an unverified handle. Its result remains a
+ // failed contract, including the old Close-failure lost-owner reproduction.
+ if(state.ownedCleanup&&state.joined){state.salvaged=true;if(::CloseHandle(state.ownedCleanup))state.ownedCleanup=nullptr;}
+ unsigned remaining=unsigned(state.ownedCleanup!=nullptr);
+ for(HANDLE* h:{&state.controller,&state.parked,&state.wake,&state.stopController})if(*h){if(::CloseHandle(*h))*h=nullptr;else ++remaining;}
+ check(remaining==0,"all private loop kernel handles explicitly closed after join");
+ json row={{"windowPresent",window},{"initialCapturePermit",capture},{"initialSteamPermit",steam},{"injectedCloseFailures",failedClose},
+  {"firstMessageWaitTimeout",firstTimeout},{"fixturePass",failures==before},{"immediateWakeBudgetCaught",state.budgetCaught},
+  {"ownerWaits",state.ownerWaits.load()},{"messageOnlyWaits",state.messageWaits.load()},{"peekCalls",state.peeks.load()},
+  {"dispatches",state.dispatches.load()},{"readyCalls",state.readyCalls.load()},{"closeAttempts",state.closeAttempts.load()},
+  {"closeFailures",state.closeFailures.load()},{"productionCloseSuccesses",state.closeSuccesses.load()},
+  {"ownerRetainedAtMessagePark",state.parkedRetained.load()},{"completeBeforeClose",state.completionBeforeClose.load()},
+  {"closeWithoutBothPermits",state.closeWithoutPermits.load()},{"ownedCleanupThreadJoined",state.joined},
+  {"controllerJoined",state.controllerDone.load()},{"ownedHandlesRemaining",remaining},{"controllerSalvagedProductHandle",state.salvaged},
+  {"processExitUsedAsCleanup",false},{"actualMainLoopAndReadyExecuted",true},{"memoryMessageAdapter",true},{"trace",state.trace},{"error",error}};
+ g_exitCleanupThread=nullptr;loop=nullptr;return row;
+}
+static json runHelperWaitFailure(){
+ LoopState state;loop=&state;state.injectHelperWaitFailure=true;state.steamPermit=true;state.windowPresent=false;
+ g_captureExitReleased=true;g_exitCleanupCompleted=false;g_exitRequested=true;g_exitReadyPosted=false;g_hwnd=nullptr;
+ const unsigned before=failures;std::thread controller;std::string error;
+ try{
+  for(HANDLE* h:{&state.parked,&state.wake,&state.stopController}){*h=::CreateEventW(nullptr,FALSE,FALSE,nullptr);if(!*h)throw std::runtime_error("helper observer event creation");}
+  state.ownedCleanup=::CreateThread(nullptr,0,privateCleanup,nullptr,0,nullptr);
+  if(!state.ownedCleanup||!::DuplicateHandle(::GetCurrentProcess(),state.ownedCleanup,::GetCurrentProcess(),&state.controller,0,FALSE,DUPLICATE_SAME_ACCESS))throw std::runtime_error("helper owner creation");
+  g_exitCleanupThread=state.ownedCleanup;state.joined=::WaitForSingleObject(state.controller,5000)==WAIT_OBJECT_0;
+  if(!state.joined)throw std::runtime_error("helper owner join failed");
+  controller=std::thread([&]{
+   HANDLE handles[]={state.stopController,state.parked};
+   const auto value=::WaitForMultipleObjects(2,handles,FALSE,5000);
+   if(value==WAIT_OBJECT_0+1){
+    // A fixed helper reaches this owned blocking event, then can recover on
+    // the next real signalled wait. The current helper never reaches it.
+    ++state.steps;state.injectHelperWaitFailure=false;state.messagePending=true;::SetEvent(state.wake);
+   }else if(value!=WAIT_OBJECT_0){state.controllerGateFailed=true;::SetEvent(state.wake);}
+   state.controllerDone=true;
+  });
+  try{inputCaptureEnsureExitOwner(47);state.returned=true;}catch(const std::exception& e){error=e.what();}
+ }catch(const std::exception& e){error=e.what();}
+ if(state.stopController)::SetEvent(state.stopController);if(controller.joinable())controller.join();
+ const bool retainedAfterFailure=state.ownedCleanup&&g_exitCleanupThread==state.ownedCleanup&&!g_exitCleanupCompleted;
+ check(state.forcedWaitFailures>0,"actual EnsureExitOwner consumed injected WAIT_FAILED on a valid owned handle");
+ check(!state.budgetCaught,"EnsureExitOwner WAIT_FAILED cannot repeatedly wake without message-only parking");
+ check(state.messageWaits>0,"EnsureExitOwner WAIT_FAILED enters message-only blocking wait");
+ check(state.returned&&g_exitCleanupCompleted&&state.closeSuccesses==1,"helper retries successfully only after message wait and checked Close");
+ check(state.joined&&state.controllerDone&&!state.controllerGateFailed,"helper observer and cleanup threads positively joined");
+ if(state.ownedCleanup&&state.joined){state.salvaged=true;if(::CloseHandle(state.ownedCleanup))state.ownedCleanup=nullptr;}
+ unsigned remaining=unsigned(state.ownedCleanup!=nullptr);
+ for(HANDLE* h:{&state.controller,&state.parked,&state.wake,&state.stopController})if(*h){if(::CloseHandle(*h))*h=nullptr;else ++remaining;}
+ check(remaining==0,"helper failure observer explicitly closes all owned handles after joins");
+ json row={{"case","EnsureExitOwner-WAIT_FAILED"},{"fixturePass",failures==before},{"actualEnsureExitOwnerExecuted",true},
+  {"validOwnedHandleFailureInjection",true},{"forcedWaitFailures",state.forcedWaitFailures.load()},
+  {"immediateWakeBudgetCaught",state.budgetCaught},{"messageOnlyWaits",state.messageWaits.load()},
+  {"ownerRetainedAfterFailedWait",retainedAfterFailure},{"controllerSalvagedProductHandle",state.salvaged},
+  {"ownedCleanupThreadJoined",state.joined},{"controllerJoined",state.controllerDone.load()},
+  {"ownedHandlesRemaining",remaining},{"processExitUsedAsCleanup",false},{"error",error}};
+ g_exitCleanupThread=nullptr;loop=nullptr;return row;
+}
+int main(int argc,char**){json cases=json::array();
+ if(argc>1){cases.push_back(runHelperWaitFailure());std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"cases",cases}}).dump()<<'\n';return failures?1:0;}
+ for(const auto window:{true,false}){
+  cases.push_back(runLoopCase(window,false,true,0,false));
+  cases.push_back(runLoopCase(window,true,false,0,false));
+  cases.push_back(runLoopCase(window,true,true,1,false));
+ }
+ cases.push_back(runLoopCase(true,false,true,1,false));
+ cases.push_back(runLoopCase(true,false,true,0,true));
+ cases.push_back(runLoopCase(false,false,false,1,false));
+ std::cout<<json({{"pass",failures==0},{"checks",checks},{"failures",failures},{"cases",cases},
+ {"wholeLifecycleAcceptance",false},{"realWindowOrHardwareOrSleep",false},{"processExitUsedAsCleanup",false}}).dump()<<'\n';return failures?1:0;}

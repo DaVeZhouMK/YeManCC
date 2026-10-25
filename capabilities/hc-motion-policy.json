@@ -1,0 +1,60 @@
+{
+  "schemaVersion": 1,
+  "purpose": "Bind existing immutable native recipes to unified admission; never infer provider availability, external controller identity or physical acceptance.",
+  "tables": [
+    {
+      "kind": "Reviewed",
+      "file": "native/hc_model_motion_catalog.h",
+      "count": 27,
+      "sha256": "da5e2e3d2995137766e473fc64845d53e7270032b9c17913f9c6ada154e638d8"
+    },
+    {
+      "kind": "Legacy",
+      "file": "native/hc_legacy_motion_catalog.h",
+      "count": 57,
+      "sha256": "159462f724dde5e5e7656fcc049899915940d47057c009ea2091df562ce01150"
+    },
+    {
+      "kind": "Default",
+      "file": "native/hc_default_motion_catalog.h",
+      "count": 3,
+      "sha256": "de416c9823fb06e4519feac98fa810c81bfe46ac39e8728fe838c96249ad4d4d"
+    },
+    {
+      "kind": "Generic",
+      "file": "native/hc_generic_motion_catalog.h",
+      "count": 2,
+      "sha256": "05c32b98f731995dc9cfceec8327fe1a4fff151abd8756b68cba3eb55c0b021d"
+    },
+    {
+      "kind": "Private",
+      "file": "native/hc_oem_windows_motion_catalog.h",
+      "count": 6,
+      "sha256": "5619f1eeee1de7d4a97176e51c2574087c3837406482141eca1bc2709e6e36e8",
+      "sourceDependencies": [
+        {
+          "file": "native/msi_motion_capabilities.h",
+          "sha256": "8d4f970255afdfdb91c8f99a2d28f43f995521304a1a37c23000baf88db847bd"
+        }
+      ]
+    }
+  ],
+  "reviewedExtensionClasses": [
+    "HandheldCompanion.Devices.AYANEO3",
+    "HandheldCompanion.Devices.AYANEOAIR2",
+    "HandheldCompanion.Devices.AYANEOAIRPlusNxx",
+    "HandheldCompanion.Devices.AYANEOAIRPro1S",
+    "HandheldCompanion.Devices.AYANEOFlip11",
+    "HandheldCompanion.Devices.AYANEONEXT2",
+    "HandheldCompanion.Devices.OneXPlayer3",
+    "HandheldCompanion.Devices.OneXPlayerX2",
+    "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+    "HandheldCompanion.Devices.SteamMachine"
+  ],
+  "pendingRoutes": [
+    "controller-source-qualified recipe/submit/calibration binding"
+  ],
+  "admission": "Existing exact identity, paired-source, freshness, ownership and generation checks remain required. Controller-preferred source declarations never authorize Windows providers.",
+  "costInterpretation": "Record complete-path execution separately from local dispatch cost. No whole-process CPU reduction is claimed.",
+  "privateScope": "Six existing OEM Windows recipes retain original references; registration never substitutes private provider ownership, freshness, calibration or final publication checks."
+}

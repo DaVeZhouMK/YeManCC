@@ -1,8 +1,10 @@
 #pragma once
 // Event-driven lifetime of ONE already verified SharedJSContext CDP connection.
-// No timer, localhost scan, Page reload, Loader launch, persisted credential or settings write.
+// Watch worker has no timer, localhost scan, Page reload, Loader launch or settings write.
+// The injected version-update script owns only bounded failed-update/receipt timers.
 #include "decky_sidebar_async_http.h"
 #include "steam_live_cdp.h"
+#include "decky_sidebar_health.h"
 #include <deque>
 #include <functional>
 #include <future>
@@ -10,7 +12,7 @@
 namespace ymcc::deckymirror {
 inline std::string bootstrapSafeReason(const std::exception& error){
     const std::string value=error.what();
-    if(value.size()<=96&&(value.rfind("mirror-bootstrap-",0)==0||value.rfind("live-",0)==0)&&
+    if(value.size()<=96&&(value=="decky-context-already-loaded"||value=="mirror-retained-frontend-changed"||value.rfind("mirror-bootstrap-",0)==0||value.rfind("live-",0)==0)&&
        value.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-")==std::string::npos)return value;
     return "mirror-bootstrap-invalid-message";
 }
@@ -38,15 +40,16 @@ public:
             cancellation=std::move(cancellation),owned=std::move(owned),expression=std::move(expression),
             runId=std::move(runId),contextPid,diagnostic=std::move(diagnostic),readiness,startupDeadline]() mutable {
             using Json=nlohmann::json;
-            unsigned long long generation=0;unsigned nextId=8200;bool readyReported=false;
+            unsigned long long generation=0;unsigned nextId=8200;bool readyReported=false;int activeContext=0;
             std::deque<Json> events;
             const auto notify=[&](const char* stage,const std::string& reason={}){
                 try{if(diagnostic)diagnostic({{"bootstrapStage",stage},{"reason",reason},
-                    {"contextPid",contextPid},{"contextGeneration",generation}});}catch(...){}
+                    {"contextPid",contextPid},{"contextGeneration",generation},{"runId",runId}});}catch(...){}
             };
             const auto requireOwner=[&]{if(!owned())throw std::runtime_error("mirror-bootstrap-owner-mismatch");};
             const auto remember=[&](const Json& packet){
-                if(packet.value("method",std::string{})=="Runtime.executionContextCreated"){
+                const auto method=packet.value("method",std::string{});
+                if(method=="Runtime.executionContextCreated"||method=="Runtime.executionContextDestroyed"||method=="Runtime.executionContextsCleared"||(activeContext&&(method=="Runtime.bindingCalled"||method=="Runtime.exceptionThrown"))){
                     if(events.size()>=32)throw std::runtime_error("mirror-bootstrap-context-event-limit");
                     events.push_back(packet);
                 }
@@ -67,6 +70,8 @@ public:
             try{
                 const auto enabled=command("Runtime.enable",Json::object());
                 if(enabled.contains("error"))throw std::runtime_error("mirror-bootstrap-watch-enable-failed");
+                const auto binding=command("Runtime.addBinding",{{"name","__YMCC_DECKY_HEALTH_V1"}});
+                if(binding.contains("error"))throw std::runtime_error("mirror-bootstrap-health-binding-failed");
                 notify("watching");readiness->set_value({});readyReported=true;
                 for(;;){
                     Json packet;
@@ -74,13 +79,38 @@ public:
                         // Passive wait wakes only on the existing CDP socket or cancellation.
                         socket->setDeadline(0);packet=Json::parse(socket->receiveText(65536));
                     }else{packet=std::move(events.front());events.pop_front();}
-                    if(packet.value("method",std::string{})!="Runtime.executionContextCreated")continue;
+                    const auto method=packet.value("method",std::string{});
+                    if(method=="Runtime.executionContextsCleared"){activeContext=0;continue;}
+                    if(method=="Runtime.executionContextDestroyed"){if(packet.value("params",Json::object()).value("executionContextId",0)==activeContext)activeContext=0;continue;}
+                    std::string fatal=ymcc::deckyhealth::exception(packet,activeContext);
+                    if(ymcc::deckyhealth::boundarySignal(packet,activeContext,runId)){
+                        // Do not trust a marker alone. Re-read the actual visible official error boundary.
+                        const auto verified=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_HEALTH__?.read() || ''"},{"contextId",activeContext},{"returnByValue",true}});
+                        if(verified.value("result",Json::object()).value("result",Json::object()).value("value",std::string{})=="decky-render-failed")fatal="decky-render-failed";
+                    }
+                    if(!fatal.empty()){
+                        requireOwner();
+                        // A bundled entry also handles optional features. An uncaught exception alone
+                        // is insufficient: stop only if the upstream constructor never produced a loader.
+                        if(fatal=="decky-frontend-incompatible"){
+                            const auto boot=command("Runtime.evaluate",{{"expression","!window.DeckyPluginLoader"},{"contextId",activeContext},{"returnByValue",true}});
+                            if(boot.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)continue;
+                        }
+                        // An exception from a context already destroyed during navigation is stale.
+                        const auto current=command("Runtime.evaluate",{{"expression","window.__YMCC_DECKY_MIRROR__?.runId === "+Json(runId).dump()},{"contextId",activeContext},{"returnByValue",true}});
+                        if(current.value("result",Json::object()).value("result",Json::object()).value("value",Json())!=true)continue;
+                        // Upstream's Disable Decky button restarts Steam. Use lifecycle teardown only;
+                        // the YMCC owner thread then runs the normal off/settings/owned-Job path.
+                        try{command("Runtime.evaluate",{{"expression","(() => { window.dispatchEvent(new Event('ymcc-decky-health-stop')); const l=window.DeckyPluginLoader; for(const method of ['dismountAll','deinit']) { try { if(typeof l?.[method]==='function')l[method](); } catch {} } return true; })()"},{"contextId",activeContext},{"returnByValue",true}});}catch(...){}
+                        requireOwner();notify("terminal",fatal);break;
+                    }
+                    if(method!="Runtime.executionContextCreated")continue;
                     const auto value=packet.value("params",Json::object()).value("context",Json::object());
                     const auto auxiliary=value.value("auxData",Json::object());
                     if(!value.contains("id")||!value["id"].is_number_integer()||
                        value.value("origin",std::string{})!="https://steamloopback.host"||
                        !auxiliary.value("isDefault",false))continue;
-                    ++generation;
+                    ++generation;activeContext=value["id"].get<int>();
                     // Pinned process + listener/user/session revalidated on EACH actual context event.
                     const auto reply=command("Runtime.evaluate",{{"expression",expression},{"contextId",value["id"]},{"returnByValue",true}});
                     if(reply.contains("error")||!reply.contains("result")||reply["result"].contains("exceptionDetails")){
@@ -89,6 +119,7 @@ public:
                     }
                     const auto readback=reply["result"].value("result",Json::object()).value("value",std::string{});
                     if(readback.empty())continue; // Non-top-level frame: expression's origin/top guard refuses injection.
+                    if(readback=="ymcc-decky-retained-frontend-mismatch")throw std::runtime_error("mirror-retained-frontend-changed");
                     if(readback!=runId)throw std::runtime_error("mirror-bootstrap-readback-failed");
                     requireOwner();notify("context-attached");
                 }

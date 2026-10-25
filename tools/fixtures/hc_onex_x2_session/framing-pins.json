@@ -1,0 +1,23 @@
+{
+  "commit": "a250b19a4b7e29dac3b383f2d1ac517d1af43e4e",
+  "dll": {
+    "path": "hc-a250b19a/Resources/HidLibrary.dll",
+    "bytes": 46592,
+    "gitBlob": "ece00e08f469edcb79430370ce3edc7a2dcd51ee",
+    "sha256": "00ad68889764a8bea6377a01d738a3ebc1dd286691d2ac5bcf7b1d2b16bcd9fa"
+  },
+  "text": [
+    {
+      "path": "decompiled-a250-hidlibrary/HidLibrary/HidReport.cs",
+      "sha256": "1903ff06b82393f551281b22e5f97568ac3a4afc01942d44daaada877b9e8ad2"
+    },
+    {
+      "path": "HidReport.il.txt",
+      "sha256": "50fea573c254cd1c0d054fa9557d24b7ae41c2309b6ef273fb1d785c57cecc97"
+    },
+    {
+      "path": "official-hidlibrary-b86c6eaf/src/HidLibrary/HidReport.cs",
+      "sha256": "27316839da8c642f2befdeaa2d87de80a6f73bb0eb4b59d6f5584825fa17aac1"
+    }
+  ]
+}
