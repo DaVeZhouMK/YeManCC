@@ -95,9 +95,6 @@ Desktop.ini
 # Local investigation and simulation outputs are not publishable source.
 /work/
 /_scratch/
-/hud-output.html
-/notice-output.html
-/radial-output.html
 /tools/ymcc_sim/global/lighting-component-continuity/v4/fixture.zip
 /tools/ymcc_sim/global/radial-native-consumer/maintenance-evidence/
 

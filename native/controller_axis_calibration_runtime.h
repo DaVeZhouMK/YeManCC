@@ -20,7 +20,8 @@ static bool same(const Binding& a,const Binding& b) noexcept {
         a.ownership==b.ownership&&a.power==b.power&&a.identity==b.identity&&
         a.topology==b.topology&&std::strcmp(a.route,b.route)==0;
 }
-static Binding binding(const InputCaptureGamepadSnapshot& s,std::uint64_t now) noexcept {
+template<class Sample>
+static Binding binding(const Sample& s,std::uint64_t now) noexcept {
     if(!s.live||!s.axisCalibrationDeviceKey||!s.readContextStable||!s.readAttemptSequence||
        !s.readStartedTick||s.readCompletedTick<s.readStartedTick||s.readCompletedTick>now||
        now-s.readStartedTick>ymcc::kVirtualOutputSourceWindowMaxAgeMs||
@@ -139,16 +140,42 @@ static std::string inputHash(json input) {
     std::string text;canonical(text,json{{"schema","InputConfigHash.v1"},{"input",std::move(input)}});
     const auto digest=inputHostSha256(text);return digest.empty()?std::string{}:"sha256:"+digest;
 }
-struct Profile {Math config{};std::string deviceKey,hash;json document;long long revision=0;};
+struct Profile {Math config{};ymcc::axisCalibration::CompiledRaw plan{};
+    std::string deviceKey,hash;json document;long long revision=0;};
 // One immutable publication couples input/hash/profile; readers cannot mix revisions.
 struct Published {std::shared_ptr<const Profile> profile;json input;std::string hash;long long revision=0;};
 static std::shared_ptr<const Published> published;
+// Reject-only hint, NEVER dereferenced or used as ownership. refresh publishes
+// the owned immutable state before this pointer; an effective value retains a
+// shared owner, so a compared Profile address cannot be recycled underneath it.
+// Null makes the master-OFF/no-profile path skip the shared_ptr atomic lock.
+static std::atomic<const Profile*> virtualProfileHint{nullptr};
 static std::mutex refreshMx;
 static std::atomic<long long> inputRevision{0};
 static std::mutex mx;
+// Only scalars and an immutable key are retained from the actual accepted
+// read. No diagnostic strings/containers/IMU payloads are copied every frame.
+struct ReadWitness {
+    std::shared_ptr<const std::string> axisCalibrationDeviceKey;
+    ymcc::touchhaptic::SourceToken feedbackSource{};
+    std::uint64_t readAttemptSequence=0,readStartedTick=0,readCompletedTick=0,readPowerGeneration=0;
+    std::uint64_t readContinuityGeneration=0,readMsiSourceRevision=0,readMsiModeGeneration=0;
+    unsigned readTopologyGeneration=0,readIdentityGeneration=0;
+    bool live=false,readContextStable=false;
+};
+static ReadWitness witness(const InputCaptureGamepadSnapshot& s) noexcept {
+    return {s.axisCalibrationDeviceKey,s.feedbackSource,s.readAttemptSequence,s.readStartedTick,s.readCompletedTick,
+        s.readPowerGeneration,s.readContinuityGeneration,s.readMsiSourceRevision,s.readMsiModeGeneration,
+        s.readTopologyGeneration,s.readIdentityGeneration,s.live,s.readContextStable};
+}
 struct Accepted {std::shared_ptr<const Profile> config;Binding source;Raw raw{},output{};
-    InputCaptureGamepadSnapshot sample;std::uint64_t host=0,power=0,sequence=0;bool neutral=false;};
+    ReadWitness sample;std::uint64_t host=0,power=0,sequence=0;bool neutral=false;};
+// Existing g_inputHostMx owns this record. The sole production accepted caller
+// already holds that mutex around SUBMIT+ACK; no extra per-frame mutex is taken.
 static Accepted accepted;
+// stop invalidates eligibility before its nonblocking cleanup attempt. A busy
+// existing Host owner may retain one bounded record, never a usable old ACK.
+static std::atomic<bool> acceptedCurrent{false};
 static std::atomic<bool> centerActive{false},watchActive{false};
 static std::atomic<std::uint64_t> ordinal{0};
 struct Center {bool active=false;std::string id;Binding source;long long revision=0;bool right=false;
@@ -180,47 +207,57 @@ static void refresh(const json& input) {
         p->revision=rev;p->hash=fingerprint;
         p->document=publicConfig(*it);
         Math publicMath;if(!parse(p->document,publicMath))p->document=defaults();
+        p->plan=ymcc::axisCalibration::prepareRaw(p->config);
+        if(!p->plan.valid())return; // only validated immutable plans reach frames
         next=std::move(p);
     }
     auto state=std::make_shared<Published>();state->input=input;state->hash=fingerprint;state->revision=rev;state->profile=std::move(next);
+    const Profile* hint=state->profile&&state->profile->config.enabled&&state->profile->config.applyToVirtual
+        ? state->profile.get():nullptr;
     std::atomic_store_explicit(&published,std::shared_ptr<const Published>(std::move(state)),std::memory_order_release);
+    virtualProfileHint.store(hint,std::memory_order_release);
     inputRevision.store(rev,std::memory_order_release);
 }
 struct Effective {XINPUT_GAMEPAD pad{};std::shared_ptr<const Profile> config;Binding source;
     const InputCaptureGamepadSnapshot* sample=nullptr;bool applied=false,ltEdited=false,rtEdited=false;};
 static Effective effective(const XINPUT_GAMEPAD& original,bool sourceAdmitted) noexcept {
     Effective result;result.pad=original;
+    // No-profile/OFF/unrequested source does not acquire shared ownership,
+    // bind a source, normalize values, or execute correction math.
+    if(!sourceAdmitted||!t_commonFrameSource||!virtualProfileHint.load(std::memory_order_acquire))return result;
     const auto state=std::atomic_load_explicit(&published,std::memory_order_acquire);
-    const auto p=state?state->profile:nullptr;
-    // Absolute master gate: no source binding, axis decoding, normalization,
-    // capability lookup, or correction arithmetic on the OFF hot path.
-    if(!p||!p->config.enabled||!p->config.applyToVirtual||!sourceAdmitted||!t_commonFrameSource)return result;
-    const auto source=binding(*t_commonFrameSource,GetTickCount64());
+    if(!state||!state->profile)return result;
+    const auto& p=state->profile;
+    if(!p->config.enabled||!p->config.applyToVirtual)return result;
+    auto source=binding(*t_commonFrameSource,GetTickCount64());
     if(!source.valid()||*source.key!=p->deviceKey)return result;
-    if(p->config.triggersEnabled&&(((p->config.lt.startDeadzonePct||p->config.lt.fullScalePct!=100)&&!t_commonFrameSource->axisCalibrationLtAnalog)||
-       ((p->config.rt.startDeadzonePct||p->config.rt.fullScalePct!=100)&&!t_commonFrameSource->axisCalibrationRtAnalog)))return result;
-    const auto converted=ymcc::axisCalibration::applyRaw(raw(original),p->config);
+    if((p->plan.ltEdited()&&!t_commonFrameSource->axisCalibrationLtAnalog)||
+       (p->plan.rtEdited()&&!t_commonFrameSource->axisCalibrationRtAnalog))return result;
+    const auto converted=ymcc::axisCalibration::applyRaw(raw(original),p->plan);
     if(!converted.ok())return result;
     result.pad.sThumbLX=converted.value.lx;result.pad.sThumbLY=converted.value.ly;
     result.pad.sThumbRX=converted.value.rx;result.pad.sThumbRY=converted.value.ry;
     result.pad.bLeftTrigger=converted.value.lt;result.pad.bRightTrigger=converted.value.rt;
-    result.config=p;result.source=source;result.sample=t_commonFrameSource;result.applied=true;
-    result.ltEdited=p->config.triggersEnabled&&(p->config.lt.startDeadzonePct!=0||p->config.lt.fullScalePct!=100);
-    result.rtEdited=p->config.triggersEnabled&&(p->config.rt.startDeadzonePct!=0||p->config.rt.fullScalePct!=100);
+    result.config=p;result.source=std::move(source);result.sample=t_commonFrameSource;result.applied=true;
+    result.ltEdited=p->plan.ltEdited();
+    result.rtEdited=p->plan.rtEdited();
     return result;
 }
 static void noteAccepted(const Effective& value,const FocusFrameContent& content,std::uint64_t sequence,bool neutral) noexcept {
     if(!value.applied||!value.sample||!value.config)return;
-    try {const auto state=std::atomic_load_explicit(&published,std::memory_order_acquire);
-        if(!state||state->profile!=value.config)return;
+    // Caller holds g_inputHostMx: this receipt is for the frame just accepted
+    // by that exact Host. Keep current-profile/source checks; publication can
+    // revoke eligibility but cannot destroy value.config's retained owner.
+    try {
+        if(virtualProfileHint.load(std::memory_order_acquire)!=value.config.get())return;
         if(!same(value.source,binding(*value.sample,GetTickCount64())))return;
-        std::lock_guard<std::mutex> lock(mx);
         accepted.config=value.config;accepted.source=value.source;accepted.raw=raw(value.sample->pad);
         accepted.output={content.lxShort,content.lyShort,content.rxShort,content.ryShort,
             static_cast<std::uint8_t>(std::clamp(std::floor(content.ltRaw*255.0+0.5),0.0,255.0)),
             static_cast<std::uint8_t>(std::clamp(std::floor(content.rtRaw*255.0+0.5),0.0,255.0))};
-        accepted.sample=*value.sample;accepted.host=g_inputHostEpoch;accepted.power=currentPowerGeneration();
+        accepted.sample=witness(*value.sample);accepted.host=g_inputHostEpoch;accepted.power=currentPowerGeneration();
         accepted.sequence=sequence;accepted.neutral=neutral;
+        acceptedCurrent.store(true,std::memory_order_release);
     }catch(...){/* Evidence cannot alter actual frame acceptance or ownership. */}
 }
 static json snapshot(bool includeInput=false) {
@@ -228,12 +265,14 @@ static json snapshot(bool includeInput=false) {
     const auto p=state?state->profile:nullptr;
     InputCaptureGamepadSnapshot sample;{std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);sample=g_inputCaptureGamepadSnapshot;}
     const auto source=binding(sample,GetTickCount64());
-    const json input=state?state->input:json::object();const auto revision=state?state->revision:0LL;
+    const auto revision=state?state->revision:0LL;
     const auto hash=state?state->hash:std::string{};
-    json context;std::uint64_t host=0;bool hostCurrent=false;
+    json context;std::uint64_t host=0;bool hostCurrent=false;Accepted acceptedView;
     {std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);
         if(hostLock.owns_lock()&&g_inputHostEpoch&&!g_inputHostRunId.empty()){
             host=g_inputHostEpoch;hostCurrent=g_inputHostPrepared&&!g_inputHostTransportFault&&g_inputHostActive;
+            if(acceptedCurrent.load(std::memory_order_acquire))acceptedView=accepted;
+            // short cached receipt under the existing Host mutex
             context={{"requestId",std::to_string(g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId)},
                 {"runId",g_inputHostRunId},{"hostEpoch",std::to_string(host)},
                 {"requestedPersona",inputHostConfiguredPersona()},{"boundPersona",inputHostBoundPersonaValue()}};
@@ -250,16 +289,16 @@ static json snapshot(bool includeInput=false) {
     const bool enabled=config.value("enabled",false);
     json vr=route(!enabled||!config.value("applyToVirtual",true)?"bypass":"pending",!enabled?"master-disabled":!source.valid()?"physical-source-unconfirmed":"awaiting-current-accepted-output");
     json lr=route(enabled&&config.value("applyToLocal",false)?"unsupported":"bypass",enabled?"no-verified-local-axis-writer":"master-disabled");
-    json axisValues;InputCaptureGamepadSnapshot witness=sample;
+    json axisValues;auto readSequence=sample.readAttemptSequence,readStarted=sample.readStartedTick,readCompleted=sample.readCompletedTick;
     if(source.valid())axisValues={{"raw",axes(raw(sample.pad))},{"virtual",nullptr},{"local",nullptr}};
-    {std::lock_guard<std::mutex> lock(mx);
-        if(profileBound&&enabled&&config.value("applyToVirtual",true)&&accepted.config==p&&source.valid()&&
-           same(source,accepted.source)&&same(source,binding(accepted.sample,GetTickCount64()))&&
-           hostCurrent&&host==accepted.host&&accepted.power==currentPowerGeneration()){
-            vr=route("active",accepted.neutral?"current-local-submit-accepted-expected-neutral":"current-local-submit-accepted");
-            vr["appliedInputRevision"]=p->revision;vr["appliedConfigHash"]=p->hash;vr["source"]=bindingJson(source);
-            axisValues={{"raw",axes(accepted.raw)},{"virtual",axes(accepted.output)},{"local",nullptr}};witness=accepted.sample;
-        }}
+    if(profileBound&&enabled&&config.value("applyToVirtual",true)&&acceptedView.config==p&&source.valid()&&
+       same(source,acceptedView.source)&&same(source,binding(acceptedView.sample,GetTickCount64()))&&
+       hostCurrent&&host==acceptedView.host&&acceptedView.power==currentPowerGeneration()){
+        vr=route("active",acceptedView.neutral?"current-local-submit-accepted-expected-neutral":"current-local-submit-accepted");
+        vr["appliedInputRevision"]=p->revision;vr["appliedConfigHash"]=p->hash;vr["source"]=bindingJson(source);
+        axisValues={{"raw",axes(acceptedView.raw)},{"virtual",axes(acceptedView.output)},{"local",nullptr}};
+        readSequence=acceptedView.sample.readAttemptSequence;readStarted=acceptedView.sample.readStartedTick;readCompleted=acceptedView.sample.readCompletedTick;
+    }
     if(!profileBound&&config.value("applyToVirtual",true))vr=route("bypass",p?"profile-belongs-to-another-or-unconfirmed-source":"no-saved-source-bound-calibration");
     json result={{"protocol",protocol},{"inputRevision",revision},{"inputConfigHash",hash},{"config",config},
         {"source",bindingJson(source)},{"capabilities",{{"sticks",source.valid()?"standard-independent":"unavailable"},
@@ -269,8 +308,8 @@ static json snapshot(bool includeInput=false) {
         {"routes",{{"virtual",vr},{"local",lr}}}};
     if(!context.is_null())result["virtualContext"]=std::move(context);
     if(source.valid()){
-        result["sample"]={{"source",bindingJson(source)},{"readSequence",std::to_string(witness.readAttemptSequence)},
-            {"readStartedTick",std::to_string(witness.readStartedTick)},{"readCompletedTick",std::to_string(witness.readCompletedTick)}};
+        result["sample"]={{"source",bindingJson(source)},{"readSequence",std::to_string(readSequence)},
+            {"readStartedTick",std::to_string(readStarted)},{"readCompletedTick",std::to_string(readCompleted)}};
         result["axes"]=std::move(axisValues);
     }
     if(includeInput&&state)result["inputDocument"]=state->input;
@@ -424,8 +463,14 @@ static void tick(const InputCaptureGamepadSnapshot& sample) noexcept {
     }catch(...){/* Inspection is passive; it cannot skip normal input publication. */}
 }
 static void stop() noexcept {
+    // Shutdown drains the producer first. Never wait behind a long existing
+    // Host transaction just to retire diagnostic evidence. A later real ACK
+    // can republish eligibility; an old cached record cannot do so by itself.
+    acceptedCurrent.store(false,std::memory_order_release);
+    try {std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);
+        if(hostLock.owns_lock())accepted={};}catch(...){}
     try {std::lock_guard<std::mutex> lock(mx);center.active=false;centerActive.store(false,std::memory_order_release);
-        watchActive.store(false,std::memory_order_release);watchId.clear();accepted={};}catch(...){}
+        watchActive.store(false,std::memory_order_release);watchId.clear();}catch(...){}
 }
 } // namespace axisCalibrationRuntime
 static void axisCalibrationRefreshSettings(const json& input) {

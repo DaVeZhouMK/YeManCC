@@ -50,6 +50,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      - name: Select installed x64 MSVC toolchain
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
+        with:
+          arch: x64
+
       - name: Provide frozen-source Visual Studio compatibility entrypoints
         shell: pwsh
         run: |
@@ -58,8 +63,10 @@ jobs:
           # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
           $installation = $env:VSINSTALLDIR
           if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
-            $installation = (& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-            if ($LASTEXITCODE -ne 0) { throw 'Installed MSVC toolchain discovery failed.' }
+            $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+            $discoveryExit = $LASTEXITCODE
+            if ($discoveryExit -ne 0) { throw "Installed MSVC toolchain discovery failed: $discoveryExit" }
+            $installation = $locations | Select-Object -First 1
           }
           if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
           # MSVC exports Platform=x64. MSBuild treats it as a project property and
@@ -104,7 +111,9 @@ jobs:
         shell: pwsh
         run: |
           $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
-          $installation = (& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
+          $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 discovery failed' }
+          $installation = $locations | Select-Object -First 1
           if (!$installation) { throw 'MSVC x64 toolchain is missing' }
           $entry = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
           $batch = Join-Path $env:RUNNER_TEMP 'ymcc-x64-environment.cmd'

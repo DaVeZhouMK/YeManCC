@@ -299,19 +299,49 @@ inline std::uint8_t encodeTrigger(double value) noexcept {
     return result;
 }
 
-[[nodiscard]] inline RawResult applyRaw(const RawPad& raw, const Config& config) noexcept {
+// YMCC's durable Apply already validates an immutable config. Cache only that
+// validation and the active component flags; this is not source/device admission.
+// The private copy cannot be mutated into an unvalidated trusted configuration.
+class CompiledRaw {
+public:
+    CompiledRaw() noexcept = default; // Invalid until the checked factory runs.
+    [[nodiscard]] bool valid() const noexcept { return valid_; }
+    [[nodiscard]] bool identity() const noexcept { return valid_ && bypass_; }
+    [[nodiscard]] bool leftEdited() const noexcept { return left_; }
+    [[nodiscard]] bool rightEdited() const noexcept { return right_; }
+    [[nodiscard]] bool ltEdited() const noexcept { return lt_; }
+    [[nodiscard]] bool rtEdited() const noexcept { return rt_; }
+private:
+    Config config_{};
+    bool valid_=false,bypass_=false,left_=false,right_=false,lt_=false,rt_=false;
+    friend CompiledRaw prepareRaw(const Config&) noexcept;
+    friend RawResult applyRaw(const RawPad&, const CompiledRaw&) noexcept;
+};
+[[nodiscard]] inline CompiledRaw prepareRaw(const Config& config) noexcept {
+    CompiledRaw plan;
+    if (!valid(config)) return plan;
+    plan.config_=config;plan.valid_=true;
+    plan.bypass_=detail::bypass(config)||detail::identitySettings(config);
+    if (!plan.bypass_) {
+        plan.left_=config.sticksEnabled&&!detail::identityStick(config.left);
+        plan.right_=config.sticksEnabled&&!detail::identityStick(config.right);
+        plan.lt_=config.triggersEnabled&&!detail::identityTrigger(config.lt);
+        plan.rt_=config.triggersEnabled&&!detail::identityTrigger(config.rt);
+    }
+    return plan;
+}
+[[nodiscard]] inline RawResult applyRaw(const RawPad& raw, const CompiledRaw& plan) noexcept {
     RawResult result{raw, Error::None};
-    if (!valid(config)) {
+    if (!plan.valid_) {
         result.error = Error::InvalidConfig;
         return result;
     }
     // Master OFF, route bypass and effective identity return before ANY
     // normalization, mapping, shape conversion, or integer quantization.
-    if (detail::bypass(config) || detail::identitySettings(config)) return result;
-    const bool leftEdited = config.sticksEnabled && !detail::identityStick(config.left);
-    const bool rightEdited = config.sticksEnabled && !detail::identityStick(config.right);
-    const bool ltEdited = config.triggersEnabled && !detail::identityTrigger(config.lt);
-    const bool rtEdited = config.triggersEnabled && !detail::identityTrigger(config.rt);
+    if (plan.bypass_) return result;
+    const Config& config=plan.config_;
+    const bool leftEdited=plan.left_,rightEdited=plan.right_;
+    const bool ltEdited=plan.lt_,rtEdited=plan.rt_;
     // Only active, nonidentity components enter this numerical working copy.
     // Disabled/default components keep their original SHORT/BYTE in result;
     // their zero placeholders below are never mapped or written back.
@@ -322,7 +352,11 @@ inline std::uint8_t encodeTrigger(double value) noexcept {
         normalized.right = {detail::decodeAxis(raw.rx), detail::decodeAxis(raw.ry)};
     if (ltEdited) normalized.lt = static_cast<double>(raw.lt) / 255.0;
     if (rtEdited) normalized.rt = static_cast<double>(raw.rt) / 255.0;
-    const NormalizedPad mapped = detail::mapEnabled(normalized, config);
+    NormalizedPad mapped=normalized;
+    if (leftEdited) mapped.left=detail::mapStick(normalized.left,config.left);
+    if (rightEdited) mapped.right=detail::mapStick(normalized.right,config.right);
+    if (ltEdited) mapped.lt=detail::mapTrigger(normalized.lt,config.lt);
+    if (rtEdited) mapped.rt=detail::mapTrigger(normalized.rt,config.rt);
     if (!detail::finitePad(mapped)) {
         result.error = Error::InvalidSample;
         return result;
@@ -342,6 +376,11 @@ inline std::uint8_t encodeTrigger(double value) noexcept {
     if (rtEdited && mapped.rt != normalized.rt)
         result.value.rt = detail::encodeTrigger(mapped.rt);
     return result;
+}
+
+// The public arbitrary-config entry retains full finite/range/shape validation.
+[[nodiscard]] inline RawResult applyRaw(const RawPad& raw, const Config& config) noexcept {
+    return applyRaw(raw,prepareRaw(config));
 }
 
 } // namespace ymcc::axisCalibration

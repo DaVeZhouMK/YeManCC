@@ -44523,6 +44523,7 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
                 }
                 const bool currentSourceAccepted=ymcc::inputHost::switchVerificationRuntime::acceptCurrentSourceLocked(switchAcceptedSource,
                     physicalSourceAdmitted && (!semanticNeutral || expectedUiNeutral));
+                // Calibration receipt shares this existing SUBMIT/ACK Host lock; no second frame lock.
                 axisCalibrationRuntime::noteAccepted(axisCalibration,effectiveContent,tupleReportSequence,semanticNeutral);
                 inputHostTupleRecoveryAcceptedLocked(g_inputHostEpoch,tupleReportSequence,currentSourceAccepted);
                 const auto observedBoundTicket=g_inputHostStartProtectionBoundTicket.load(std::memory_order_acquire);

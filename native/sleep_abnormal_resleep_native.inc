@@ -24,6 +24,7 @@ static json sgAbnormalEvidenceSummary(const ymcc::abnormalsleep::Episode& episod
         {"generation",episode.generation},{"automaticRequests",g_sgAutomaticSleepBudget.requests()}};
 }
 struct SgAbnormalEvent {ULONGLONG origin=0,fileTime=0;unsigned id=0;std::string xml;};
+#include "sleep_abnormal_etw_native.inc"
 static void sgAbnormalStop(const char* reason) {
     const auto origin=g_sgAbnormalOrigin.exchange(0,std::memory_order_acq_rel);
     const auto humanIntent=g_sgAbnormalHumanIntent.load(std::memory_order_acquire);
@@ -35,6 +36,7 @@ static void sgAbnormalStop(const char* reason) {
     else if(had&&g_sgAbnormalDropped.load(std::memory_order_acquire))cause="live-source-gap";
     if(g_hwnd)KillTimer(g_hwnd,SG_ABNORMAL_TIMER_ID);
     if(g_sgAbnormalSubscription){EvtClose(g_sgAbnormalSubscription);g_sgAbnormalSubscription=nullptr;}
+    if(!sgAbnormalEtwStop())cause="live-source-cleanup-UNKNOWN";
     MSG message{};
     while(g_hwnd&&PeekMessageW(&message,g_hwnd,WM_SG_ABNORMAL_EVIDENCE,WM_SG_ABNORMAL_EVIDENCE,PM_REMOVE)) {
         if(message.lParam){delete reinterpret_cast<SgAbnormalEvent*>(message.lParam);g_sgAbnormalPending.fetch_sub(1);}
@@ -90,6 +92,7 @@ static void sgAbnormalTick() {
     const bool ownedRetry=g_sgAbnormalOwnedRetry;
     // The event callback high-water mark is checked again at the final boundary.
     if(!context||!sgAbnormalPermitted()){sgAbnormalStop("dispatch-canceled");return;}
+    if(!sgAbnormalEtwHealthy()){sgAbnormalStop("live-source-unhealthy");return;}
     if(decision.action==Action::PowerOff) {
         // Keep the success witness alive during privilege preparation, then end
         // the episode before the API. Every denial/veto/failure is terminal.
@@ -149,6 +152,17 @@ static DWORD WINAPI sgAbnormalEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action,P
     } catch(...) {g_sgAbnormalPending.fetch_sub(1);g_sgAbnormalDropped.store(true);}
     return ERROR_SUCCESS;
 }
+static void sgAbnormalEtwPublish(unsigned id,const std::string& xml,ULONGLONG at,ULONGLONG origin) {
+    if(!origin||origin!=g_sgAbnormalOrigin.load(std::memory_order_acquire))return;
+    if(ymcc::abnormalsleep::Episode::healthyForPhase(ymcc::abnormalsleep::decode(id,xml,at),origin,sgNowFileTime()))
+        g_sgAbnormalSuccessOrigin.store(origin,std::memory_order_release);
+    if(g_sgAbnormalPending.fetch_add(1)>=8){g_sgAbnormalPending.fetch_sub(1);sgAbnormalEtwGap("ui-queue-overflow",ERROR_NOT_ENOUGH_MEMORY);return;}
+    try {
+        auto item=std::make_unique<SgAbnormalEvent>();item->origin=origin;item->fileTime=at;item->id=id;item->xml=xml;
+        if(PostMessageW(g_hwnd,WM_SG_ABNORMAL_EVIDENCE,0,reinterpret_cast<LPARAM>(item.get())))item.release();
+        else {g_sgAbnormalPending.fetch_sub(1);sgAbnormalEtwGap("ui-post-failed",GetLastError());}
+    } catch(...) {g_sgAbnormalPending.fetch_sub(1);sgAbnormalEtwGap("event-allocation-failed",ERROR_NOT_ENOUGH_MEMORY);}
+}
 static void sgAbnormalPostCompleted(const std::string& xml,ULONGLONG at) {
     const auto origin=g_sgAbnormalOrigin.load(std::memory_order_acquire);
     if(!origin||at<origin)return;
@@ -206,6 +220,7 @@ static void sgAbnormalHandleEvent(LPARAM value) {
 // channel once on explicit scan/repair enable (including persisted ON at startup).
 // This helper neither writes configuration nor starts a persistent listener.
 static bool sgAbnormalSourceReady() {
+    if(g_sgAbnormalEtw.ready.load(std::memory_order_acquire))return true;
     const auto config=EvtOpenChannelConfig(nullptr,L"Microsoft-Windows-Kernel-Power/Diagnostic",0);
     EVT_VARIANT enabled{};DWORD used=0;
     const bool available=config&&EvtGetChannelConfigProperty(config,EvtChannelConfigEnabled,0,sizeof(enabled),&enabled,&used)&&(enabled.Type&EVT_VARIANT_TYPE_MASK)==EvtVarTypeBoolean&&enabled.BooleanVal;
@@ -220,17 +235,24 @@ static bool sgAbnormalStartPhase(ULONGLONG originalHumanIntent,ULONGLONG request
     g_sgAbnormalDropped.store(false,std::memory_order_release);
     g_sgAbnormalHumanIntent.store(originalHumanIntent,std::memory_order_release);
     g_sgAbnormalOrigin.store(requestFileTime,std::memory_order_release);
-    if(!sgAbnormalSourceReady()) {
-        sgRecordFact("abnormal-sleep-source-unavailable",{{"reason","diagnostic-channel-disabled-or-unreadable"},
-            {"sourcePreparation","static-wake-owner"},{"assessment","UNKNOWN"}});
+    if(g_sgAbnormalEtw.session||g_sgAbnormalEtw.worker||g_sgAbnormalEtw.consumer.load()!=INVALID_PROCESSTRACE_HANDLE) {
+        sgAbnormalStop("previous-live-source-not-released");return false;
+    }
+    if(sgAbnormalSourceReady())
+        g_sgAbnormalSubscription=EvtSubscribe(nullptr,nullptr,L"Microsoft-Windows-Kernel-Power/Diagnostic",
+            L"*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=161 or EventID=522 or EventID=554)]]",
+            nullptr,nullptr,sgAbnormalEventCallback,EvtSubscribeToFutureEvents);
+    // Some platforms enumerate Diagnostic metadata but expose no configurable
+    // EventLog channel. A preference-owned channel journal cannot fix that.
+    // Use only this episode's filtered real-time ETW source, never enable broad
+    // logging, consume completed accounting as failure, or infer success from PBT.
+    if(!g_sgAbnormalSubscription&&!sgAbnormalEtwStart(requestFileTime)) {
+        sgRecordFact("abnormal-sleep-source-unavailable",{{"reason","eventlog-and-episode-etw-unavailable"},
+            {"sourcePreparation","repair-preference-owner"},{"assessment","UNKNOWN"},{"mandatoryEvidence",true}});
         sgAbnormalStop("no-live-source");return false;
     }
-    g_sgAbnormalSubscription=EvtSubscribe(nullptr,nullptr,L"Microsoft-Windows-Kernel-Power/Diagnostic",
-        L"*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=161 or EventID=522 or EventID=554)]]",
-        nullptr,nullptr,sgAbnormalEventCallback,EvtSubscribeToFutureEvents);
-    if(!g_sgAbnormalSubscription){const auto error=GetLastError();sgRecordFact("abnormal-sleep-source-unavailable",{{"error",error},{"assessment","UNKNOWN"}});sgAbnormalStop("subscription-unavailable");return false;}
     sgRecordFact("abnormal-sleep-armed",{{"origin",sgFormatFactFileTime(requestFileTime)},
-        {"originalHumanIntent",sgFormatFactFileTime(originalHumanIntent)},{"ownedRetry",ownedRetry},{"sourceReady",true},
+        {"originalHumanIntent",sgFormatFactFileTime(originalHumanIntent)},{"ownedRetry",ownedRetry},{"sourceReady",true},{"source",g_sgAbnormalSubscription?"eventlog":"episode-etw"},{"mandatoryEvidence",true},
         {"deadlinesMs",ymcc::abnormalsleep::Episode::deadlines},{"detailLogsRequired",false},{"polling",false}});
     sgAbnormalSchedule();return g_sgAbnormalEpisode.active();
 }

@@ -71,7 +71,7 @@ class Policy {
     void scanError(const std::string& why) {
         auto next=j_;next["scanErrors"].push_back({{"error",why}});(void)save(std::move(next));
     }
-    Json result() const {auto s=status();return {{"ok",s["failed"].empty()&&s["restorePending"].empty()},{"status",s}};}
+    Json result() const {auto s=status();return {{"ok",s["failed"].get<std::size_t>()==0&&s["restorePending"].get<std::size_t>()==0},{"status",s}};}
 public:
     explicit Policy(Ports p):p_(std::move(p)) {
         try {
@@ -109,6 +109,15 @@ public:
         else if(!s["failed"].empty())s["phase"]="partial";
         else if(j_.value("enabled",false))s["phase"]="applied";
         if(s["lastError"].get<std::string>().empty()&&!s["failed"].empty())s["lastError"]=s["failed"].back().value("error",std::string{});
+        s["items"]={{"devices",s["devices"]},{"software",s["software"]},{"timers",s["timers"]}};
+        for(const auto* kind:{"devices","software","timers"}) {
+            std::size_t applied=0;
+            for(const auto& r:s[kind])if(r.value("stage",std::string{})=="applied"||r.value("stage",std::string{})=="preexisting")++applied;
+            s[kind]=applied;
+        }
+        s["failures"]=s["failed"];s["failed"]=s["failures"].size();
+        s["restorePendingItems"]=s["restorePending"];s["restorePending"]=s["restorePendingItems"].size();
+        s["protectedDeviceDetails"]=s["protectedDevices"];s["protectedDevices"]=s["protectedDeviceDetails"].size();
         return s;
     }
     Json scan(std::uint64_t budgetMs=180000) {

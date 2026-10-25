@@ -75,8 +75,10 @@ jobs:
           # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
           $installation = $env:VSINSTALLDIR
           if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
-            $installation = (& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
-            if ($LASTEXITCODE -ne 0) { throw 'Installed MSVC toolchain discovery failed.' }
+            $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+            $discoveryExit = $LASTEXITCODE
+            if ($discoveryExit -ne 0) { throw "Installed MSVC toolchain discovery failed: $discoveryExit" }
+            $installation = $locations | Select-Object -First 1
           }
           if (-not $installation) { throw 'No installed x86/x64 MSVC toolchain was found.' }
           # MSVC exports Platform=x64. MSBuild treats it as a project property and
