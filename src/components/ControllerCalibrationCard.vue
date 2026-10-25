@@ -88,7 +88,7 @@ function retireEdits(restore = false, focusMaster = false) {
 }
 let stopVisibility: (() => void) | null = null;
 function mount() {
-  if (!stopVisibility) stopVisibility = onUiVisibilityChange(value => { if (!value.visible) editor.cancelCenter(); });
+  if (!stopVisibility) stopVisibility = onUiVisibilityChange(value => editor.setObservationVisible(value.visible));
   void editor.mount();
 }
 function dispose() { retireEdits(); stopVisibility?.(); stopVisibility = null; editor.dispose(); }

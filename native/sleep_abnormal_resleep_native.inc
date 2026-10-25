@@ -3,7 +3,6 @@
 // bad-interval aggregates, deadline, request/result, stop. Never gate these on
 // g_sgFactMonitorEnabled or remove them as a logging-cost optimization. No raw spam.
 static ymcc::abnormalsleep::Episode g_sgAbnormalEpisode;
-static EVT_HANDLE g_sgAbnormalSubscription=nullptr;
 static std::atomic<ULONGLONG> g_sgAbnormalOrigin{0};
 static std::atomic<ULONGLONG> g_sgAbnormalHumanIntent{0};
 static ULONGLONG g_sgAbnormalLastHumanIntent=0,g_sgAbnormalLastOwnedRequest=0;
@@ -35,7 +34,6 @@ static void sgAbnormalStop(const char* reason) {
     else if(had&&g_sgAbnormalSuccessOrigin.load(std::memory_order_acquire)==origin)cause="windows-effective-low-power";
     else if(had&&g_sgAbnormalDropped.load(std::memory_order_acquire))cause="live-source-gap";
     if(g_hwnd)KillTimer(g_hwnd,SG_ABNORMAL_TIMER_ID);
-    if(g_sgAbnormalSubscription){EvtClose(g_sgAbnormalSubscription);g_sgAbnormalSubscription=nullptr;}
     if(!sgAbnormalEtwStop())cause="live-source-cleanup-UNKNOWN";
     MSG message{};
     while(g_hwnd&&PeekMessageW(&message,g_hwnd,WM_SG_ABNORMAL_EVIDENCE,WM_SG_ABNORMAL_EVIDENCE,PM_REMOVE)) {
@@ -132,26 +130,6 @@ static void sgAbnormalTick() {
     if(request.requestError==ERROR_CANCELLED){sgAbnormalStop("request-canceled");return;}
     sgAbnormalSchedule();
 }
-static DWORD WINAPI sgAbnormalEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION action,PVOID,EVT_HANDLE event) {
-    if(action==EvtSubscribeActionError){g_sgAbnormalDropped.store(true,std::memory_order_release);if(g_hwnd)PostMessageW(g_hwnd,WM_SG_ABNORMAL_EVIDENCE,0,0);return ERROR_SUCCESS;}
-    if(action!=EvtSubscribeActionDeliver||!event||!g_hwnd)return ERROR_SUCCESS;
-    const auto origin=g_sgAbnormalOrigin.load(std::memory_order_acquire);if(!origin)return ERROR_SUCCESS;
-    if(g_sgAbnormalPending.fetch_add(1)>=8){g_sgAbnormalPending.fetch_sub(1);g_sgAbnormalDropped.store(true);return ERROR_SUCCESS;}
-    try {
-        std::string xml;
-        if(!sgRenderKernelPowerEvent(event,xml)||xml.size()>65536){g_sgAbnormalPending.fetch_sub(1);g_sgAbnormalDropped.store(true,std::memory_order_release);return ERROR_SUCCESS;}
-        const auto id=static_cast<unsigned>(sgKernelPowerEventId(xml));
-        if(id!=161&&id!=522&&id!=554){g_sgAbnormalPending.fetch_sub(1);return ERROR_SUCCESS;}
-        const auto at=sgKernelPowerEventFileTime(xml);
-        const auto now=sgNowFileTime();
-        if(ymcc::abnormalsleep::Episode::healthyForPhase(ymcc::abnormalsleep::decode(id,xml,at),origin,now))
-            g_sgAbnormalSuccessOrigin.store(origin,std::memory_order_release);
-        auto payload=std::make_unique<SgAbnormalEvent>();payload->origin=origin;payload->fileTime=at;payload->id=id;payload->xml=std::move(xml);
-        if(PostMessageW(g_hwnd,WM_SG_ABNORMAL_EVIDENCE,0,reinterpret_cast<LPARAM>(payload.get())))payload.release();
-        else g_sgAbnormalPending.fetch_sub(1);
-    } catch(...) {g_sgAbnormalPending.fetch_sub(1);g_sgAbnormalDropped.store(true);}
-    return ERROR_SUCCESS;
-}
 static void sgAbnormalEtwPublish(unsigned id,const std::string& xml,ULONGLONG at,ULONGLONG origin) {
     if(!origin||origin!=g_sgAbnormalOrigin.load(std::memory_order_acquire))return;
     if(ymcc::abnormalsleep::Episode::healthyForPhase(ymcc::abnormalsleep::decode(id,xml,at),origin,sgNowFileTime()))
@@ -216,16 +194,13 @@ static void sgAbnormalHandleEvent(LPARAM value) {
     const auto delay=g_sgAbnormalEpisode.delay(GetTickCount64());
     if(delay&&GetTickCount64()-g_sgAbnormalEpisode.startTick>=ymcc::abnormalsleep::Episode::deadlines[g_sgAbnormalEpisode.next])sgAbnormalTick();
 }
-// Read-only and thread independent. The static-wake owner prepares/restores the
-// channel once on explicit scan/repair enable (including persisted ON at startup).
-// This helper neither writes configuration nor starts a persistent listener.
+// Read-only and thread independent: true only while this episode owns a
+// successfully created real-time ETW source. No channel/configuration probing.
+// Idle means no source; it does not authorize a persistent preflight listener.
 static bool sgAbnormalSourceReady() {
-    if(g_sgAbnormalEtw.ready.load(std::memory_order_acquire))return true;
-    const auto config=EvtOpenChannelConfig(nullptr,L"Microsoft-Windows-Kernel-Power/Diagnostic",0);
-    EVT_VARIANT enabled{};DWORD used=0;
-    const bool available=config&&EvtGetChannelConfigProperty(config,EvtChannelConfigEnabled,0,sizeof(enabled),&enabled,&used)&&(enabled.Type&EVT_VARIANT_TYPE_MASK)==EvtVarTypeBoolean&&enabled.BooleanVal;
-    if(config)EvtClose(config);
-    return available;
+    return g_sgAbnormalEtw.ready.load(std::memory_order_acquire)&&
+        !g_sgAbnormalDropped.load(std::memory_order_acquire)&&
+        g_sgAbnormalOrigin.load(std::memory_order_acquire)!=0;
 }
 static bool sgAbnormalStartPhase(ULONGLONG originalHumanIntent,ULONGLONG requestFileTime,bool ownedRetry) {
     sgAbnormalStop("new-bounded-phase");
@@ -238,21 +213,15 @@ static bool sgAbnormalStartPhase(ULONGLONG originalHumanIntent,ULONGLONG request
     if(g_sgAbnormalEtw.session||g_sgAbnormalEtw.worker||g_sgAbnormalEtw.consumer.load()!=INVALID_PROCESSTRACE_HANDLE) {
         sgAbnormalStop("previous-live-source-not-released");return false;
     }
-    if(sgAbnormalSourceReady())
-        g_sgAbnormalSubscription=EvtSubscribe(nullptr,nullptr,L"Microsoft-Windows-Kernel-Power/Diagnostic",
-            L"*[System[Provider[@Name='Microsoft-Windows-Kernel-Power'] and (EventID=161 or EventID=522 or EventID=554)]]",
-            nullptr,nullptr,sgAbnormalEventCallback,EvtSubscribeToFutureEvents);
-    // Some platforms enumerate Diagnostic metadata but expose no configurable
-    // EventLog channel. A preference-owned channel journal cannot fix that.
-    // Use only this episode's filtered real-time ETW source, never enable broad
-    // logging, consume completed accounting as failure, or infer success from PBT.
-    if(!g_sgAbnormalSubscription&&!sgAbnormalEtwStart(requestFileTime)) {
-        sgRecordFact("abnormal-sleep-source-unavailable",{{"reason","eventlog-and-episode-etw-unavailable"},
-            {"sourcePreparation","repair-preference-owner"},{"assessment","UNKNOWN"},{"mandatoryEvidence",true}});
+    // Metadata channel16 is not a subscribable EventLog channel. Only an owned,
+    // filtered real-time ETW session is a live source; no channel writes/replay.
+    if(!sgAbnormalEtwStart(requestFileTime)) {
+        sgRecordFact("abnormal-sleep-source-unavailable",{{"reason","episode-etw-unavailable"},
+            {"assessment","UNKNOWN"},{"mandatoryEvidence",true}});
         sgAbnormalStop("no-live-source");return false;
     }
     sgRecordFact("abnormal-sleep-armed",{{"origin",sgFormatFactFileTime(requestFileTime)},
-        {"originalHumanIntent",sgFormatFactFileTime(originalHumanIntent)},{"ownedRetry",ownedRetry},{"sourceReady",true},{"source",g_sgAbnormalSubscription?"eventlog":"episode-etw"},{"mandatoryEvidence",true},
+        {"originalHumanIntent",sgFormatFactFileTime(originalHumanIntent)},{"ownedRetry",ownedRetry},{"sourceReady",true},{"source","episode-etw"},{"mandatoryEvidence",true},
         {"deadlinesMs",ymcc::abnormalsleep::Episode::deadlines},{"detailLogsRequired",false},{"polling",false}});
     sgAbnormalSchedule();return g_sgAbnormalEpisode.active();
 }

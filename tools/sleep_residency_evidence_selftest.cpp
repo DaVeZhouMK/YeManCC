@@ -24,7 +24,6 @@ static void productionCapture(bool leaving, const std::string& xml) {
 }
 #include "abnormal_native_harness.inc"
 #include "static_wake_harness.inc"
-#include "diagnostic_source_harness.inc"
 int main(int argc, char** argv) {
     try {
         if (argc != 3) throw std::runtime_error("expected cases.json and result.json");
@@ -62,9 +61,7 @@ int main(int argc, char** argv) {
         const auto runtimeChecks=abnormalRuntimeTests(fixture);
         const auto staticWakeChecks=staticWakePolicyTests();
         check(staticWakeChecks>0,"static wake harness executes nonzero checks");
-        const auto diagnosticSourceChecks=diagnosticSourceTests();
-        check(diagnosticSourceChecks>0,"diagnostic source harness executes nonzero checks");
-        json result = {{"diagnosticSourceChecks",diagnosticSourceChecks},{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", checks}, {"cases", fixture.at("cases").size()},
+        json result = {{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", checks}, {"cases", fixture.at("cases").size()},
             {"caseResults", outcomes}, {"actualSleepCalls", 0}, {"hardwareCalls", 0},
             {"scope", "actual production accounting and abnormal runtime; 30 synthetic inputs plus archived ROG raw-field records and static-wake controls; Windows power boundaries mocked"}};
         std::ofstream output(argv[2]); output << result.dump(2) << '\n';

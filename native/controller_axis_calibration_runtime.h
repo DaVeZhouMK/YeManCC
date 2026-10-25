@@ -228,7 +228,8 @@ static Effective effective(const XINPUT_GAMEPAD& original,bool sourceAdmitted) n
     const auto state=std::atomic_load_explicit(&published,std::memory_order_acquire);
     if(!state||!state->profile)return result;
     const auto& p=state->profile;
-    if(!p->config.enabled||!p->config.applyToVirtual)return result;
+    if(!p->config.enabled||!p->config.applyToVirtual||
+       virtualProfileHint.load(std::memory_order_acquire)!=p.get())return result;
     auto source=binding(*t_commonFrameSource,GetTickCount64());
     if(!source.valid()||*source.key!=p->deviceKey)return result;
     if((p->plan.ltEdited()&&!t_commonFrameSource->axisCalibrationLtAnalog)||
@@ -406,7 +407,19 @@ static json observe(const json& request) {
     std::lock_guard<std::mutex> lock(mx);
     if(request.value("active",false)){
         if(g_exitRequested.load(std::memory_order_acquire)||g_inputCaptureStop.load(std::memory_order_acquire))return {{"watchId",""},{"reason","input-stopped"}};
-        watchId="axis-watch-"+std::to_string(++ordinal);lastWatchAt=0;watchActive.store(true,std::memory_order_release);return {{"watchId",watchId}};}
+        // Same WebView/UI IPC owner executes observe synchronously and in
+        // request order. A client-known token lets a local response timeout
+        // cancel the already-created watch without waiting for its lost ACK.
+        // Legacy clients may omit the token; late stop remains exact-match.
+        std::string requested;
+        if(request.contains("watchId")){
+            if(!request["watchId"].is_string())throw std::runtime_error("invalid-axis-watch-token");
+            requested=request["watchId"].get<std::string>();
+            if(requested.empty()||requested.size()>256||
+               !std::all_of(requested.begin(),requested.end(),[](unsigned char c){return c>=0x21&&c<=0x7e;}))
+                throw std::runtime_error("invalid-axis-watch-token");
+        }else requested="axis-watch-"+std::to_string(++ordinal);
+        watchId=std::move(requested);lastWatchAt=0;watchActive.store(true,std::memory_order_release);return {{"watchId",watchId}};}
     if(request.value("watchId",std::string{})==watchId){watchActive.store(false,std::memory_order_release);watchId.clear();}
     return {{"ok",true}};
 }

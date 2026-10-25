@@ -1,6 +1,9 @@
 // Compiles the actual runtime include; every event/timer/power boundary is inert.
 #include <windows.h>
-#include <winevt.h>
+#include <evntrace.h>
+#include <evntcons.h>
+#include <tdh.h>
+#include <cwchar>
 #include <atomic>
 #include <memory>
 #include <deque>
@@ -48,43 +51,125 @@ static void sgClearInternalSleepRequest(const char*){g_sgInternalSleepRequest={}
 static bool sgSleepRetryActive(){return testRetryBusy;}
 static bool sgModernStandbyRepairSupported(){return true;}
 static ULONGLONG sgNowFileTime(){return testFileTime;}
-static bool sgRenderKernelPowerEvent(EVT_HANDLE,std::string& xml){xml=testXml;return true;}
 static int sgKernelPowerEventId(const std::string& xml){return std::stoi(xml.substr(xml.find("<EventID>")+9));}
-static ULONGLONG sgKernelPowerEventFileTime(const std::string&){return testFileTime;}
 static ULONGLONG testGetTick(){return testTick;}
 static BOOL testKillTimer(HWND,UINT_PTR){testDue=0;return TRUE;}
 static UINT_PTR testSetTimer(HWND,UINT_PTR id,UINT ms,TIMERPROC){++testTimerWrites;if(!testTimerAvailable)return 0;testDue=testTick+ms;return id;}
-static EVT_HANDLE testOpenChannel(EVT_HANDLE,LPCWSTR,DWORD){return reinterpret_cast<EVT_HANDLE>(2);}
-static BOOL testGetChannel(EVT_HANDLE,EVT_CHANNEL_CONFIG_PROPERTY_ID,DWORD,DWORD,PEVT_VARIANT v,PDWORD used){v->Type=EvtVarTypeBoolean;v->BooleanVal=testChannel;*used=sizeof(*v);return TRUE;}
-static EVT_HANDLE testSubscribe(EVT_HANDLE,HANDLE,LPCWSTR,LPCWSTR,EVT_HANDLE,PVOID,EVT_SUBSCRIBE_CALLBACK,DWORD flags){
-    check(flags==EvtSubscribeToFutureEvents,"future events only; no replay");++testSubscriptions;return reinterpret_cast<EVT_HANDLE>(3);
-}
-static BOOL testClose(EVT_HANDLE){++testCloses;return TRUE;}
 static BOOL testPost(HWND h,UINT id,WPARAM w,LPARAM l){MSG m{};m.hwnd=h;m.message=id;m.wParam=w;m.lParam=l;testMessages.push_back(m);return TRUE;}
 static BOOL testPeek(LPMSG m,HWND,UINT,UINT,UINT){if(testMessages.empty())return FALSE;*m=testMessages.front();testMessages.pop_front();return TRUE;}
 static BOOL testPowerOff(UINT flags,DWORD){check(flags==EWX_POWEROFF,"normal shutdown never forces applications");++testPowerOffCalls;return testPowerOffAccepted;}
 static void testSetError(DWORD v){testError=v;}
 static DWORD testGetError(){return testError;}
+
+// All ETW/TDH/thread boundaries are inert. No OS source or worker is started.
+static EVENT_TRACE_LOGFILEW testEtwLog{};
+static DWORD testEtwStartError=ERROR_SUCCESS,testEtwEnableError=ERROR_SUCCESS,testEtwStatsError=ERROR_SUCCESS,testEtwStopError=ERROR_SUCCESS;
+static bool testEtwOpen=true,testEtwThread=true,testEtwJoin=true,testEtwSchema=true,testEtwProperty=true;
+static ULONG testEtwLoss=0;static unsigned testEtwStartCalls=0,testEtwStops=0,testEtwQueries=0,testEtwThreads=0,testEtwJoins=0,testEtwPropertyCalls=0;
+static bool testEtwWrongType=false;static unsigned testEtwDuplicate=0;
+static DWORD testPid(){return 731;}
+static ULONG testStartTrace(PTRACEHANDLE handle,LPCWSTR name,PEVENT_TRACE_PROPERTIES properties){
+    ++testEtwStartCalls;
+    check(name&&std::wstring(name).find(L"YMCC-AbnormalSleep-731-")==0,"ETW owns unique episode name without attaching another session");
+    check(properties->LogFileNameOffset==0&&(properties->LogFileMode&EVENT_TRACE_REAL_TIME_MODE)&&!(properties->LogFileMode&EVENT_TRACE_FILE_MODE_SEQUENTIAL),"ETW is real-time only with no ETL path");
+    check(properties->Wnode.ClientContext==2&&properties->MaximumBuffers<=4,"ETW uses original system FILETIME and bounded buffers");
+    if(!testChannel)return ERROR_ACCESS_DENIED;
+    if(testEtwStartError)return testEtwStartError;
+    ++testSubscriptions;*handle=41;return ERROR_SUCCESS;
+}
+static ULONG testEnableTrace(TRACEHANDLE handle,LPCGUID provider,ULONG control,UCHAR level,ULONGLONG any,ULONGLONG all,ULONG timeout,PENABLE_TRACE_PARAMETERS parameters){
+    const GUID expected{0x331c3b3a,0x2005,0x44c2,{0xac,0x5e,0x77,0x22,0x0c,0x37,0xd6,0xb4}};
+    check(handle==41&&provider&&IsEqualGUID(*provider,expected)&&control==EVENT_CONTROL_CODE_ENABLE_PROVIDER&&level==TRACE_LEVEL_INFORMATION&&any==0x404&&!all&&!timeout,"ETW enables only Kernel-Power diagnostic keywords");
+    check(parameters&&parameters->Version==ENABLE_TRACE_PARAMETERS_VERSION_2&&parameters->FilterDescCount==1&&parameters->EnableFilterDesc->Type==EVENT_FILTER_TYPE_EVENT_ID,"ETW requires supported ID filter without broad fallback");
+    const auto filter=reinterpret_cast<const EVENT_FILTER_EVENT_ID*>(parameters->EnableFilterDesc->Ptr);
+    check(filter->FilterIn&&filter->Count==3&&filter->Events[0]==161&&filter->Events[1]==522&&filter->Events[2]==554,"ETW provider event filter is exactly161/522/554");
+    return testEtwEnableError;
+}
+static TRACEHANDLE testOpenTrace(PEVENT_TRACE_LOGFILEW logfile){
+    check(logfile&&!logfile->LogFileName&&logfile->ProcessTraceMode==(PROCESS_TRACE_MODE_REAL_TIME|PROCESS_TRACE_MODE_EVENT_RECORD),"consumer converts event timestamps and never reads a log file");
+    testEtwLog=*logfile;return testEtwOpen?42:INVALID_PROCESSTRACE_HANDLE;
+}
+static ULONG testProcessTrace(PTRACEHANDLE,ULONG,const FILETIME*,const FILETIME*){return ERROR_SUCCESS;}
+static ULONG testControlTrace(TRACEHANDLE handle,LPCWSTR name,PEVENT_TRACE_PROPERTIES properties,ULONG control){
+    check(handle==41&&!name,"ETW control uses only the owned session handle");
+    if(control==EVENT_TRACE_CONTROL_STOP){++testEtwStops;++testCloses;return testEtwStopError;}
+    check(control==EVENT_TRACE_CONTROL_QUERY,"ETW source query never starts or rewrites a session");++testEtwQueries;
+    properties->EventsLost=testEtwLoss;return testEtwStatsError;
+}
+static ULONG testCloseTrace(TRACEHANDLE trace){check(trace==42,"consumer closes only owned trace");++testCloses;return ERROR_SUCCESS;}
+static HANDLE testCreateThread(LPSECURITY_ATTRIBUTES,SIZE_T,LPTHREAD_START_ROUTINE,LPVOID,DWORD,LPDWORD){++testEtwThreads;return testEtwThread?reinterpret_cast<HANDLE>(43):nullptr;}
+static DWORD testWait(HANDLE handle,DWORD ms){check(handle==reinterpret_cast<HANDLE>(43)&&ms<=1500,"ETW consumer join is bounded");++testEtwJoins;return testEtwJoin?WAIT_OBJECT_0:WAIT_TIMEOUT;}
+static BOOL testCloseHandle(HANDLE handle){check(handle==reinterpret_cast<HANDLE>(43),"only owned consumer worker handle closes");return TRUE;}
+static ULONG testEventInformation(PEVENT_RECORD event,ULONG,PTDH_CONTEXT,PTRACE_EVENT_INFO info,PULONG size){
+    if(!testEtwSchema)return ERROR_NOT_FOUND;
+    const wchar_t* names161[]={L"DurationThisPeriodMs",L"ResiliencyPhaseNonActivatedNoDripsMs",L"NonActivatedCpuTimeMs"};
+    const wchar_t* names522[]={L"HwDripsTotalTimeValid",L"DripsTotalTimeThisPeriodUs",L"HwDripsTotalTimeThisPeriodUs"};
+    const auto names=event->EventHeader.EventDescriptor.Id==161?names161:names522;
+    ULONG required=static_cast<ULONG>(offsetof(TRACE_EVENT_INFO,EventPropertyInfoArray)+3*sizeof(EVENT_PROPERTY_INFO));
+    for(unsigned i=0;i<3;++i)required+=static_cast<ULONG>((std::wcslen(names[i])+1)*sizeof(wchar_t));
+    if(!info||*size<required){*size=required;return ERROR_INSUFFICIENT_BUFFER;}
+    std::memset(info,0,required);info->PropertyCount=info->TopLevelPropertyCount=3;
+    ULONG offset=static_cast<ULONG>(offsetof(TRACE_EVENT_INFO,EventPropertyInfoArray)+3*sizeof(EVENT_PROPERTY_INFO));
+    for(unsigned i=0;i<3;++i){auto& property=info->EventPropertyInfoArray[i];property.NameOffset=offset;property.count=1;
+        property.nonStructType.InType=static_cast<USHORT>(event->EventHeader.EventDescriptor.Id==161?TDH_INTYPE_UINT32:i==0?TDH_INTYPE_BOOLEAN:TDH_INTYPE_UINT64);
+        if(testEtwWrongType&&i==0)property.nonStructType.InType=TDH_INTYPE_ANSISTRING;
+        const auto bytes=(std::wcslen(names[i])+1)*sizeof(wchar_t);std::memcpy(reinterpret_cast<BYTE*>(info)+offset,names[i],bytes);offset+=static_cast<ULONG>(bytes);
+    }
+    if(testEtwDuplicate)info->EventPropertyInfoArray[1].NameOffset=info->EventPropertyInfoArray[0].NameOffset;
+    *size=required;return ERROR_SUCCESS;
+}
+static std::optional<ULONGLONG> testEtwValue(PPROPERTY_DATA_DESCRIPTOR property){
+    const auto name=reinterpret_cast<const wchar_t*>(property->PropertyName);std::wstring wide(name);std::string key;for(const auto c:wide)key.push_back(static_cast<char>(c));
+    const auto data=ymcc::sleep_residency::readEventData(testXml);const auto value=data.values.find(key);
+    if(value==data.values.end()||data.duplicates.count(key))return {};
+    return ymcc::sleep_residency::unsignedValue(value->second);
+}
+static ULONG testPropertySize(PEVENT_RECORD event,ULONG,PTDH_CONTEXT,ULONG count,PPROPERTY_DATA_DESCRIPTOR property,PULONG size){
+    if(!testEtwProperty||count!=1||!testEtwValue(property))return ERROR_NOT_FOUND;
+    *size=event->EventHeader.EventDescriptor.Id==161||std::wcscmp(reinterpret_cast<const wchar_t*>(property->PropertyName),L"HwDripsTotalTimeValid")==0?4:8;return ERROR_SUCCESS;
+}
+static ULONG testProperty(PEVENT_RECORD,ULONG,PTDH_CONTEXT,ULONG,PPROPERTY_DATA_DESCRIPTOR property,ULONG size,PBYTE buffer){
+    ++testEtwPropertyCalls;const auto value=testEtwValue(property);if(!value||size>sizeof(*value))return ERROR_INVALID_DATA;std::memcpy(buffer,&*value,size);return ERROR_SUCCESS;
+}
+#define StartTraceW testStartTrace
+#define EnableTraceEx2 testEnableTrace
+#define OpenTraceW testOpenTrace
+#define ProcessTrace testProcessTrace
+#define ControlTraceW testControlTrace
+#define CloseTrace testCloseTrace
+#define CreateThread testCreateThread
+#define WaitForSingleObject testWait
+#define CloseHandle testCloseHandle
+#define GetCurrentProcessId testPid
+#define TdhGetEventInformation testEventInformation
+#define TdhGetPropertySize testPropertySize
+#define TdhGetProperty testProperty
+
 #define GetTickCount64 testGetTick
 #define KillTimer testKillTimer
 #define SetTimer testSetTimer
-#define EvtOpenChannelConfig testOpenChannel
-#define EvtGetChannelConfigProperty testGetChannel
-#define EvtSubscribe testSubscribe
-#define EvtClose testClose
 #define PostMessageW testPost
 #define PeekMessageW testPeek
 #define ExitWindowsEx testPowerOff
 #define SetLastError testSetError
 #define GetLastError testGetError
 #include "sleep_abnormal_resleep_native.inc"
+#undef StartTraceW
+#undef EnableTraceEx2
+#undef OpenTraceW
+#undef ProcessTrace
+#undef ControlTraceW
+#undef CloseTrace
+#undef CreateThread
+#undef WaitForSingleObject
+#undef CloseHandle
+#undef GetCurrentProcessId
+#undef TdhGetEventInformation
+#undef TdhGetPropertySize
+#undef TdhGetProperty
 #undef GetTickCount64
 #undef KillTimer
 #undef SetTimer
-#undef EvtOpenChannelConfig
-#undef EvtGetChannelConfigProperty
-#undef EvtSubscribe
-#undef EvtClose
 #undef PostMessageW
 #undef PeekMessageW
 #undef ExitWindowsEx
@@ -94,14 +179,18 @@ static void testAt(ULONGLONG ms){testTick=100000+ms;testFileTime=testEpoch+ms*10
 static void testPump(){while(!testMessages.empty()){const auto m=testMessages.front();testMessages.pop_front();sgAbnormalHandleEvent(m.lParam);}}
 static void testReset(){
     runtimeFactObserver=nullptr;
-    sgAbnormalStop("fixture-reset");g_sgAbnormalLastHumanIntent=g_sgAbnormalLastOwnedRequest=0;g_sgAbnormalHumanIntent=0;g_sgResleepEnabled=true;g_sgAbnormalSuccessOrigin=0;g_sgAbnormalDropped=false;testAt(0);testDue=0;testSubscriptions=testCloses=testSleepCalls=testPowerOffCalls=testTimerWrites=0;
+    testEtwJoin=true;testEtwStopError=ERROR_SUCCESS;sgAbnormalStop("fixture-reset");g_sgAbnormalLastHumanIntent=g_sgAbnormalLastOwnedRequest=0;g_sgAbnormalHumanIntent=0;g_sgResleepEnabled=true;g_sgAbnormalSuccessOrigin=0;g_sgAbnormalDropped=false;testAt(0);testDue=0;testSubscriptions=testCloses=testSleepCalls=testPowerOffCalls=testTimerWrites=0;
+    testEtwLog={};testEtwStartError=testEtwEnableError=testEtwStatsError=testEtwStopError=ERROR_SUCCESS;testEtwLoss=0;testEtwStartCalls=testEtwStops=testEtwQueries=testEtwThreads=testEtwJoins=testEtwPropertyCalls=0;testEtwOpen=testEtwThread=testEtwJoin=testEtwSchema=testEtwProperty=true;testEtwWrongType=false;testEtwDuplicate=0;
     testTimerAvailable=testChannel=testAccepted=testPowerOffAccepted=testPrivilege=true;testRetryBusy=testWakeDuringPrivilege=testSuspendOnHibernate=testSuccessDuringPrivilege=testReplaceMarkerDuringRequest=false;g_sgInternalSleepRequest={};
     g_sgLastPowerButtonWakeEventFileTime=0;g_guardEnabled=g_sgRetryEntryFailure=true;g_exitRequested=false;
     g_powerLifecycle=PowerLifecycle::Suspended;g_sgAutomaticSleepTarget=ymcc::sleeprequest::Mode::None;
     g_sgAutomaticSleepBudget.confirmedUserWake();testError=0;captured.clear();sgAbnormalDisplay(0);
 }
+static void testEtwDeliverQueued(){
+    EVENT_RECORD event{};event.EventHeader.ProviderId=SG_ABNORMAL_KERNEL_PROVIDER;event.EventHeader.EventDescriptor.Id=static_cast<USHORT>(sgKernelPowerEventId(testXml));event.EventHeader.TimeStamp.QuadPart=static_cast<LONGLONG>(testFileTime);event.UserContext=&g_sgAbnormalEtw;sgAbnormalEtwEvent(&event);
+}
 static std::string testEvent(unsigned id,const std::string& fields){return "<Event><System><EventID>"+std::to_string(id)+"</EventID></System><EventData>"+fields+"</EventData></Event>";}
-static void testDeliver(unsigned id,const std::string& fields){testXml=testEvent(id,fields);sgAbnormalEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(4));testPump();}
+static void testDeliver(unsigned id,const std::string& fields){testXml=testEvent(id,fields);testEtwDeliverQueued();testPump();}
 static void testBad(ULONGLONG end,ULONGLONG period){
     testAt(end);testDeliver(161,"<Data Name=\"DurationThisPeriodMs\">"+std::to_string(period)+"</Data><Data Name=\"ResiliencyPhaseNonActivatedNoDripsMs\">"+std::to_string(period)+"</Data><Data Name=\"NonActivatedCpuTimeMs\">0</Data>");
 }
@@ -141,12 +230,12 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     check(!g_sgAbnormalEpisode.active()&&!testDue&&!testSleepCalls,"valid Windows effective-low-power evidence ends every remaining action");
     testReset();sgAbnormalArm(1,testEpoch);testAt(20000);sgAbnormalDisplay(1);sgAbnormalTick();
     check(g_sgAbnormalEpisode.active()&&!testSleepCalls,"display change is not classified as manual power-button wake");
-    sgAbnormalStopAsync();check(!sgAbnormalPermitted(),"OFF revokes dispatch immediately before UI cancellation");testPump();check(!testDue&&!g_sgAbnormalSubscription,"OFF releases source and timer");
+    sgAbnormalStopAsync();check(!sgAbnormalPermitted(),"OFF revokes dispatch immediately before UI cancellation");testPump();check(!testDue&&!g_sgAbnormalEtw.session,"OFF releases source and timer");
     for(const bool accepted:{false,true}){
         testReset();sgAbnormalArm(1,testEpoch);testBad(30000,30000);testBad(230000,30000);
         testAccepted=false;testBad(330000,30000);check(testSleepCalls==3&&g_sgAutomaticSleepBudget.requests()==3,"two resleeps and S4 share existing three-call budget");
         testPowerOffAccepted=accepted;testBad(340000,10000);testBad(350000,10000);testBad(360000,10000);
-        check(testPowerOffCalls==1&&!g_sgAbnormalOrigin.load()&&!testDue&&!g_sgAbnormalSubscription,"shutdown success or failure is terminal with no source or timer");
+        check(testPowerOffCalls==1&&!g_sgAbnormalOrigin.load()&&!testDue&&!g_sgAbnormalEtw.session,"shutdown success or failure is terminal with no source or timer");
         sgAbnormalTick();testBad(361000,1000);check(testPowerOffCalls==1,"terminal shutdown never attempts twice");
     }
     testReset();sgAbnormalArm(1,testEpoch);testBad(30000,30000);testBad(230000,30000);testBad(330000,30000);
@@ -164,8 +253,8 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     check(!testSleepCalls,"cumulative or contradictory watchdog values never become a live failure period");
     testReset();sgAbnormalArm(1,testEpoch);testAt(30000);g_sgAbnormalEpisode.observe({ymcc::abnormalsleep::Quality::Bad,testEpoch,testEpoch+30000*10000ULL,161},testFileTime);
     testAt(36000);sgAbnormalTick();check(!testSleepCalls,"stale positive evidence cannot authorize action");
-    testReset();sgAbnormalArm(1,testEpoch);testAt(30000);testXml=testEvent(161,"<Data Name=\"DurationThisPeriodMs\">30000</Data>");
-    for(int i=0;i<20;++i)sgAbnormalEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(4));
+    testReset();sgAbnormalArm(1,testEpoch);testAt(30000);testXml=testEvent(161,"<Data Name=\"DurationThisPeriodMs\">30000</Data><Data Name=\"ResiliencyPhaseNonActivatedNoDripsMs\">30000</Data><Data Name=\"NonActivatedCpuTimeMs\">0</Data>");
+    for(int i=0;i<20;++i)testEtwDeliverQueued();
     check(g_sgAbnormalPending<=8&&testMessages.size()<=8,"source burst keeps a bounded event queue");sgAbnormalStop("test");check(g_sgAbnormalPending==0,"cancellation drains all owned queued observations");
     testReset();sgAbnormalArm(1,testEpoch);testAt(230000);
     g_sgAbnormalEpisode.observe({ymcc::abnormalsleep::Quality::Bad,testEpoch+200000*10000ULL,testFileTime,161},testFileTime);
@@ -179,20 +268,20 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     testReset();sgAbnormalArm(1,testEpoch);testAccepted=false;testReplaceMarkerDuringRequest=true;testBad(30000,30000);
     check(g_sgInternalSleepRequest.kind==SgRetryKind::UnexpectedWake,"rejected staged request preserves a newer repair owner's marker");
     testReset();testTimerAvailable=false;sgAbnormalArm(1,testEpoch);
-    check(!g_sgAbnormalEpisode.active()&&!g_sgAbnormalSubscription,"timer allocation failure releases subscription and episode");
+    check(!g_sgAbnormalEpisode.active()&&!g_sgAbnormalEtw.session,"timer allocation failure releases subscription and episode");
     testReset();sgAbnormalArm(1,testEpoch);testBad(30000,30000);testBad(230000,30000);testAccepted=false;testBad(330000,30000);
     testPrivilege=false;testBad(340000,10000);testBad(350000,10000);testBad(360000,10000);
-    check(!testPowerOffCalls&&!testDue&&!g_sgAbnormalOrigin.load()&&!g_sgAbnormalSubscription,"shutdown privilege denial ends flow with no second attempt");
+    check(!testPowerOffCalls&&!testDue&&!g_sgAbnormalOrigin.load()&&!g_sgAbnormalEtw.session,"shutdown privilege denial ends flow with no second attempt");
     // A successful OS event must veto a due timer before the UI queue is pumped.
     testReset();sgAbnormalArm(1,testEpoch);testAt(30000);
     g_sgAbnormalEpisode.observe({ymcc::abnormalsleep::Quality::Bad,testEpoch,testFileTime,161},testFileTime);
     testXml=testEvent(522,"<Data Name=\"HwDripsTotalTimeValid\">true</Data><Data Name=\"DripsTotalTimeThisPeriodUs\">9</Data><Data Name=\"HwDripsTotalTimeThisPeriodUs\">8</Data>");
-    sgAbnormalEventCallback(EvtSubscribeActionDeliver,nullptr,reinterpret_cast<EVT_HANDLE>(4));
+    testEtwDeliverQueued();
     check(!sgAbnormalPermitted(),"callback-side Windows success immediately revokes dispatch before UI queue");
     sgAbnormalTick();testPump();check(!testSleepCalls&&!testPowerOffCalls&&!testDue,"queued Windows success beats due timer");
     testReset();sgAbnormalArm(1,testEpoch);testAt(30000);
     g_sgAbnormalEpisode.observe({ymcc::abnormalsleep::Quality::Bad,testEpoch,testFileTime,161},testFileTime);
-    sgAbnormalEventCallback(EvtSubscribeActionError,nullptr,reinterpret_cast<EVT_HANDLE>(ERROR_EVT_QUERY_RESULT_STALE));
+    testEtwLog.EventsLost=1;sgAbnormalEtwBuffer(&testEtwLog);
     sgAbnormalTick();testPump();check(!testSleepCalls&&!testDue,"subscription error immediately vetoes due timer");
     testReset();sgAbnormalArm(1,testEpoch);testBad(30000,1);
     check(!testSleepCalls,"momentary no-DRIPS sample cannot authorize a thirty-second retry");
@@ -220,7 +309,7 @@ static unsigned abnormalRuntimeTests(const json& fixture){
         const auto end=ymcc::abnormalsleep::Episode::deadlines[stage];testAt(end);
         ymcc::abnormalsleep::publishConfirmedWake(g_sgLastPowerButtonWakeEventFileTime,testFileTime);
         testBad(end,stage==3?10000:30000);
-        check(!g_sgAbnormalEpisode.active()&&!testDue&&!g_sgAbnormalSubscription,"every30/230/330/360stage terminates on callback-side human wake");
+        check(!g_sgAbnormalEpisode.active()&&!testDue&&!g_sgAbnormalEtw.session,"every30/230/330/360stage terminates on callback-side human wake");
         testAt(900000);sgAbnormalTick();
         check(testSleepCalls==previousSleepCalls&&testPowerOffCalls==previousPowerOffCalls,"stale timers cannot dispatch any power action after human wake");
     }
@@ -243,9 +332,9 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     const auto health507=[](ULONGLONG duration){return testEvent(507,"<Data Name=\"DurationInUs\">"+std::to_string(duration)+"</Data><Data Name=\"DripsResidencyInUs\">1000</Data><Data Name=\"HwDripsResidencyInUs\">900</Data><Data Name=\"SleepEntered\">true</Data>");};
     testReset();testChannel=false;
     check(!sgAbnormalSourceReady()&&!g_sgAbnormalEpisode.active()&&!testDue&&!testSubscriptions,"read-only disabled source probe changes no episode or listener");
-    testChannel=true;check(sgAbnormalSourceReady()&&!testDue&&!testSubscriptions,"parent preparation exposes ready source without persistent subscription");
+    testChannel=true;check(!sgAbnormalSourceReady()&&!testDue&&!testSubscriptions,"idle source status never starts a session or pretends a prepared channel is ready");
     sgAbnormalArm(1,testEpoch);testBad(30000,30000);testBad(230000,30000);
-    check(testSleepCalls==2&&g_sgAbnormalEpisode.next==2,"log2 prepared source preserves original thirty and230second stages");
+    check(testSleepCalls==2&&g_sgAbnormalEpisode.next==2,"log2 episode ETW preserves original thirty and230second stages");
     testReset();testChannel=false;sgAbnormalArm(1,testEpoch);testChannel=true;
     check(ownRetry(2038),"log1 authorized UnexpectedWake establishes a fresh bounded observation");
     const auto requestTime=testFileTime,phaseDue=testDue;
@@ -262,7 +351,7 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     testBad(332038,30000);check(testSleepCalls==2&&!g_sgAbnormalEpisode.active()&&!testPowerOffCalls,"new owned phase never replenishes shared budget for S4");
     testReset();check(ownRetry(2038),"owned retry missing-evidence control arms");testAt(32038);sgAbnormalTick();
     check(!testSleepCalls&&g_sgAutomaticSleepBudget.requests()==1,"owned retry with missing161 cannot blindly sleep at thirtyseconds");
-    testAt(442038);sgAbnormalTick();check(!testDue&&!g_sgAbnormalSubscription,"owned observation expires with no resident timer or source");
+    testAt(442038);sgAbnormalTick();check(!testDue&&!g_sgAbnormalEtw.session,"owned observation expires with no resident timer or source");
     check(!sgAbnormalObserveOwnedRetry(testEpoch,testEpoch+2038*10000ULL),"expired owned request cannot resurrect on duplicate late delivery");
     testReset();testChannel=false;check(!ownRetry(2038)&&!testDue&&!g_sgAbnormalEpisode.active(),"owned retry without reliable source remains unknown and releases observation");
     testReset();testAt(2038);sgMarkInternalSleepRequest(SgRetryKind::UnexpectedWake);
@@ -277,12 +366,12 @@ static unsigned abnormalRuntimeTests(const json& fixture){
     testReset();check(ownRetry(2038),"owned health control arms");testAt(30000);
     sgAbnormalPostCompleted(health507(10000000),testFileTime);
     check(!sgAbnormalPermitted(),"new phase507 health immediately revokes dispatch before queue");testPump();
-    check(!testDue&&!g_sgAbnormalSubscription&&!g_sgAbnormalEpisode.active(),"new phase507 health closes all observation resources");
+    check(!testDue&&!g_sgAbnormalEtw.session&&!g_sgAbnormalEpisode.active(),"new phase507 health closes all observation resources");
     sgAbnormalOwnedRetryResult(testEpoch,testEpoch+2038*10000ULL,true);check(!testDue,"late accepted result cannot resurrect a healthy terminal phase");
     testReset();check(ownRetry(2038),"owned rejected result control arms");
     sgAbnormalOwnedRetryResult(testEpoch,testFileTime,false);check(!testDue&&!g_sgAbnormalEpisode.active()&&g_sgAutomaticSleepBudget.requests()==1,"owned API rejection terminates observation without refunding budget");
     testReset();check(ownRetry(2038),"owned OFF control arms");g_sgRetryEntryFailure=false;sgAbnormalStopAsync();
-    sgAbnormalOwnedRetryResult(testEpoch,testEpoch+2038*10000ULL,true);testPump();check(!testDue&&!testSleepCalls&&!g_sgAbnormalSubscription,"OFF and late API result cannot reactivate owned observation");
+    sgAbnormalOwnedRetryResult(testEpoch,testEpoch+2038*10000ULL,true);testPump();check(!testDue&&!testSleepCalls&&!g_sgAbnormalEtw.session,"OFF and late API result cannot reactivate owned observation");
     testReset();check(ownRetry(2038),"owned resleep setting control arms");g_sgResleepEnabled=false;testBad(32038,30000);
     check(!testSleepCalls&&!testDue,"owned resleep OFF immediately vetoes staged actions");
     testReset();check(ownRetry(2038),"owned stale result control arms");const auto previousRequest=testFileTime;

@@ -87,6 +87,8 @@ export class CalibrationEditor {
   private mounted = false;
   private life = 0;
   private observed = 0;
+  private observationVisible = true;
+  private observationLife = 0;
   private draftVersion = 0;
   private baseRevision = 0;
   private baseline = defaultAxisCalibration();
@@ -102,20 +104,38 @@ export class CalibrationEditor {
   private feedback(text: string): void { this.state.feedback = text; this.publish(); }
   async mount(): Promise<void> {
     if (this.mounted) return;
-    this.mounted = true; const life = ++this.life; this.state.loading = true; this.publish();
-    const observed = this.observed;
+    this.mounted = true; ++this.life;
+    if (this.observationVisible) await this.startObservation();
+    else this.publish();
+  }
+  /** Pause presentation work without discarding a draft or changing saved/output state. */
+  setObservationVisible(visible: boolean): void {
+    if (this.observationVisible === visible) return;
+    this.observationVisible = visible;
+    if (!this.mounted) return;
+    if (visible) { void this.startObservation(); return; }
+    ++this.observationLife;
+    this.unsubscribe?.(); this.unsubscribe = null;
+    this.cancelCenter();
+    this.state.loading = false; this.state.available = false; this.publish();
+  }
+  private async startObservation(): Promise<void> {
+    if (!this.mounted || !this.observationVisible || this.unsubscribe) return;
+    const life = this.life, observationLife = ++this.observationLife, observed = this.observed;
+    const current = () => this.mounted && this.observationVisible && life === this.life && observationLife === this.observationLife;
+    this.state.loading = true; this.state.available = false; this.publish();
     try {
       this.unsubscribe = this.port.subscribe(event => {
-        if (!this.mounted || life !== this.life) return;
+        if (!current()) return;
         try {
           if ('sessionId' in event) this.receiveCenter(event);
           else { ++this.observed; this.receiveSnapshot(parseCalibrationSnapshot(event)); }
         } catch { this.state.available = false; this.cancelCenter(); this.feedback('校对状态暂不可用，未更改已保存参数'); }
       });
       const snapshot = parseCalibrationSnapshot(await this.port.read());
-      if (this.mounted && life === this.life && observed === this.observed) this.receiveSnapshot(snapshot);
-    } catch (e) { if (this.mounted && life === this.life && observed === this.observed) { this.state.available = false; this.feedback(e instanceof Error ? e.message : '无法读取校对状态'); } }
-    finally { if (this.mounted && life === this.life) { this.state.loading = false; this.publish(); } }
+      if (current() && observed === this.observed) this.receiveSnapshot(snapshot);
+    } catch (e) { if (current() && observed === this.observed) { this.state.available = false; this.feedback(e instanceof Error ? e.message : '无法读取校对状态'); } }
+    finally { if (current()) { this.state.loading = false; this.publish(); } }
   }
   private receiveSnapshot(snapshot: ControllerCalibrationSnapshot): void {
     const previous = this.state.snapshot;
@@ -247,18 +267,25 @@ export function createControllerCalibrationPort(): ControllerCalibrationPort {
     startCenter: request => invoke(CONTROLLER_CALIBRATION_COMMANDS.startCenter, request, { timeoutMs: 3000 }),
     cancelCenter: async sessionId => { await invoke(CONTROLLER_CALIBRATION_COMMANDS.cancelCenter, { sessionId }, { timeoutMs: 3000 }); },
     subscribe: listener => {
-      let disposed = false, watchId: string | null = null;
+      // Known before the ACK: timeout/dispose can retire this exact watch even if the reply is lost.
+      const requestedWatchId = `axis-watch-client:${crypto.randomUUID()}`;
+      let disposed = false, failed = false, watchId: string | null = null;
       let earlySnapshot: ControllerCalibrationSnapshot | null = null;
-      const stopWatch = (id: string) => { void invoke(CONTROLLER_CALIBRATION_COMMANDS.observe, { active: false, watchId: id }, { timeoutMs: 3000 }).catch(() => {}); };
+      const stopped = new Set<string>();
+      const stopWatch = (id: string) => {
+        if (stopped.has(id)) return;
+        stopped.add(id);
+        void invoke(CONTROLLER_CALIBRATION_COMMANDS.observe, { active: false, watchId: id }, { timeoutMs: 3000 }).catch(() => {});
+      };
       const unsubscribe = on<ControllerCalibrationSnapshot | CenterReceipt>(CONTROLLER_CALIBRATION_COMMANDS.event, event => {
-        if (disposed || !object(event)) return;
+        if (disposed || failed || !object(event)) return;
         if ('sessionId' in event) { listener(event); return; }
         // Watched snapshots belong to this exact page token; a slot/source match is insufficient.
         if (typeof event.observerId !== 'string') return;
         if (!watchId) { earlySnapshot = event; return; }
         if (event.observerId === watchId) listener(event);
       });
-      void invoke<{ watchId: string }>(CONTROLLER_CALIBRATION_COMMANDS.observe, { active: true }, { timeoutMs: 3000 }).then(ack => {
+      void invoke<{ watchId: string }>(CONTROLLER_CALIBRATION_COMMANDS.observe, { active: true, watchId: requestedWatchId }, { timeoutMs: 3000 }).then(ack => {
         if (!ack || typeof ack.watchId !== 'string' || !ack.watchId) throw new Error('校对观测未建立');
         if (disposed) stopWatch(ack.watchId);
         else {
@@ -267,9 +294,10 @@ export function createControllerCalibrationPort(): ControllerCalibrationPort {
           earlySnapshot = null;
         }
       }).catch(() => {
+        failed = true; earlySnapshot = null; unsubscribe(); stopWatch(watchId || requestedWatchId);
         if (!disposed) listener({ observationUnavailable: true } as unknown as ControllerCalibrationSnapshot);
       });
-      return () => { if (disposed) return; disposed = true; earlySnapshot = null; unsubscribe(); if (watchId) stopWatch(watchId); };
+      return () => { if (disposed) return; disposed = true; earlySnapshot = null; unsubscribe(); stopWatch(watchId || requestedWatchId); };
     },
   };
 }

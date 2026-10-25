@@ -4,7 +4,7 @@
 // static RunOut runCapture(const std::wstring&, DWORD);
 // static std::wstring U2W(const std::string&); static std::string W2U(const std::wstring&);
 // Existing HardwareWriteLease(const char*) guards shared hardware write ownership.
-// Diagnostic configuration belongs exclusively to sleep_diagnostic_source_native.inc.
+// Evidence source configuration/lifetime belongs exclusively to the parent source owner.
 #include "sleep_static_wake_policy.h"
 #include <windows.h>
 #include <tlhelp32.h>
@@ -16,6 +16,7 @@
 #include <aclapi.h>
 #include <sddl.h>
 #include <chrono>
+#include <ctime>
 #include <mutex>
 #include <map>
 #include <set>
@@ -217,8 +218,10 @@ struct Native {
         std::string text;if(!command({L"/devicequery",L"wake_armed"},text,e))return false;
         const auto ls=lines(text);
         if(ls.size()==1&&ls.front()=="NONE")return true;
+        (void)inv; // The requested item's identity is validated by read()/write().
         for(const auto& name:ls) {
-            if(!resolve(inv,name)||!names.insert(keyName(name)).second){e="wake-armed-name-ambiguous-or-localized";return false;}
+            if(!argValid(name)||keyName(name).empty()){e="wake-armed-invalid-name";return false;}
+            names.insert(keyName(name)); // Unrelated duplicate names do not block a unique target.
         }
         return true;
     }
@@ -284,7 +287,7 @@ struct Native {
             if(!inv.protectionReady)problem("devices",deviceError.empty()?"human-power-button-path-unproven":deviceError);
         }
         // Prioritize the bounded AC/DC and device set before large software sets.
-        std::stable_sort(items.begin(),items.end(),[](const Json& a,const Json& b){return a["kind"].get<std::string>()>b["kind"].get<std::string>();});
+        std::stable_sort(items.begin(),items.end(),[](const Json& a,const Json& b){const auto rank=[](const Json& v){const auto k=v["kind"].get<std::string>();return k=="timers"?0:(k=="devices"?1:2);};return rank(a)<rank(b);});
         return time(e);
     }
     bool read(const Json& item,Json& value,std::string& e) {
@@ -439,9 +442,31 @@ inline Json run(bool restore) {
 // Parent IPC wrapper MUST retain default low-frequency scan start/end, bounded
 // failure summary and restore result logs. These are REQUIRED diagnostic records;
 // do not gate them on verbose/frequent logs or delete them for performance.
+static const std::wstring SW_STATIC_WAKE_JOURNAL_PATH = ymcc::staticwake::native::Native().path;
+static json swStatusSummary(const json& input) {
+    json out;
+    for(const auto* field:{"enabled","phase","lastScanEpoch","devices","software","timers","protectedDevices","failed","restorePending","diagnosticSourceReady","lastError"})out[field]=input.at(field);
+    auto error=out["lastError"].get<std::string>();
+    if(error.size()>512) {
+        error.resize(512);
+        while(!error.empty()&&(static_cast<unsigned char>(error.back())&0xc0)==0x80)error.pop_back();
+        if(!error.empty()&&static_cast<unsigned char>(error.back())>=0xc0)error.pop_back();
+    }
+    out["lastError"]=std::move(error);return out;
+}
 static json swGetStatus() {
     ymcc::staticwake::native::Native native;
-    return ymcc::staticwake::Policy(native.ports()).status();
+    return swStatusSummary(ymcc::staticwake::Policy(native.ports()).status());
 }
-static json swScan() {return ymcc::staticwake::native::run(false);}
-static json swRestore() {return ymcc::staticwake::native::run(true);}
+static json swPublicOperation(bool restore) {
+    try {auto result=ymcc::staticwake::native::run(restore);result["status"]=swStatusSummary(result["status"]);return result;}
+    catch(const std::exception& e) {
+        auto status=ymcc::staticwake::emptyJournal();
+        ymcc::staticwake::native::Native native;status=ymcc::staticwake::Policy(native.ports()).status();
+        status["lastError"]=std::string("static-wake-exception: ")+e.what();status["failed"]=status["failed"].get<std::size_t>()+1;
+        status["phase"]=restore?"restore-pending":"partial";
+        return {{"ok",false},{"status",swStatusSummary(status)}};
+    }
+}
+static json swScan() {return swPublicOperation(false);}
+static json swRestore() {return swPublicOperation(true);}

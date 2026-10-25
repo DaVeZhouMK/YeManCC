@@ -30,7 +30,6 @@
 #include "fan_resume_evidence.h"
 #include "sleep_residency_evidence.h"
 #include "sleep_abnormal_resleep.h"
-#include "sleep_diagnostic_source.h"
 #include "sleep_request_fallback.h"
 #include "fan_activity_identity.h"
 #include "fan_replay_curve.h"
@@ -1506,7 +1505,6 @@ static bool sgAbnormalPermitted();
 static bool sgAbnormalSourceReady();
 static bool sgAbnormalObserveOwnedRetry(ULONGLONG originalHumanIntent, ULONGLONG requestFileTime);
 static void sgAbnormalOwnedRetryResult(ULONGLONG originalHumanIntent, ULONGLONG requestFileTime, bool accepted);
-static void sgDiagnosticSync(bool wanted);
 static void sgAdvanceSleepRetry(const char* reason);
 static bool sgSleepRetryActive();
 static void sgStopMonitorEntryFailureTimer(const char* reason);
@@ -57390,11 +57388,13 @@ static json csRestoreUsb4Emergency() {
 
 #endif
 
-#include "sleep_diagnostic_source_native.inc"
 #include "sleep_static_wake_native.inc"
 
 // ── 异步白名单：只放「无 UI、无全局可变状态、纯本地计算/IO」的命令 ──
 static bool ipc_cmd_async(const std::string& cmd) {
+    // Memory-only observation/cancel must retain one ordered WebView owner,
+    // including timeout cleanup using the client-known exact watch token.
+    if (cmd == "controller.axisCalibration.observe" || cmd == "controller.axisCalibration.center.cancel") return false;
     if (cmd == "sleep.staticWake.get" || cmd == "sleep.staticWake.scan" || cmd == "sleep.staticWake.restore") return true; // Explicit bounded IO; never block the UI, including legacy mode.
     if (cmd == "gpu.fsr.page") return false; // Metadata-only cancellation must never queue behind AMD driver IO.
     if (cmd == "gamepad.driverSetup.get") return true; // On-demand USB/IP read-only helper must never block the UI.
@@ -60492,6 +60492,10 @@ static void reg_fs() {
                 manifest << "monitorExportSummaryMaxBytes=32768;metadataOnly=true;customImageBytesIncluded=false\n";
                 manifest << "fanDiagnosticEnabled=" << (g_fanLogEnabled.load() ? "1" : "0") << "\n";
                 manifest << "snapshotReceipt=log-export-snapshot.json actualStagedBytes=true partialTailRetained=true\n";
+                // REQUIRED ordinary sleep evidence; export must not start a source or scan.
+                manifest << "sleepEvidenceFile=sleep-facts.log;detailLoggingRequired=0;mandatoryEvidence=true\n";
+                manifest << "sleepEvidenceScope=human-intent;source-start-stop-loss;bounded-low-power-intervals;deadline;request-result;cancel-reason;static-scan-restore-summary\n";
+                manifest << "sleepEvidenceMissingPolicy=UNKNOWN;no-event-is-not-success;completed507-is-not-live-retry-authority\n";
                 manifest << "virtualReturnEvidence=target-return.json;hidhide-cli-writer.json;existingHistoricalBytesOnly=true;noRepairOrDeviceQuery=true;notCurrentInputProof=true\n";
                 manifest << "availabilityReceipt=log-export-availability.json missingIsNotError=true\n";
                 manifest << "controllerSensorBanks=controller-sensor-banks-evidence.json;readOnly=true;rawDataOnly=true;selectionAndProcessingUnchanged=true\n";
@@ -62450,7 +62454,6 @@ static void reg_shell_app() {
     ipc_on("sleepGuard.set", [](const json& a) -> json {
         bool on = a.value("on", false);
         g_guardEnabled = on;
-        sgDiagnosticSync(g_guardEnabled && g_sgRetryEntryFailure && sgModernStandbyRepairSupported());
         sgSyncEnableMirror();
         return true;
     });
@@ -62572,7 +62575,6 @@ static void reg_shell_app() {
         }
         sgSaveConfig();
         g_guardEnabled = sgConfigWantsGuard();
-        sgDiagnosticSync(g_guardEnabled && g_sgRetryEntryFailure && sgModernStandbyRepairSupported());
         if (!sgNonUserWakeGuardEnabled()) {
             sgClearUnexpectedWake("non-user-wake-setting-disabled", true);
             if (sgSleepRetryActive() && g_sgTask.retryKind == SgRetryKind::UnexpectedWake)
@@ -85218,7 +85220,6 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
             sgSaveConfig();
             sgSyncEnableMirror();
         }
-        sgDiagnosticSync(g_guardEnabled && g_sgRetryEntryFailure && sgModernStandbyRepairSupported());
         // 启动只恢复本程序自己留下的两类身份标记：睡眠冻结和手动暂停。
         // 两个目录分离，任何一类都不会按名称/内存扫描其他进程。
         // 恢复标记只影响本程序自己留下的 PID 文件。放到独立线程，让
