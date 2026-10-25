@@ -146,7 +146,7 @@ jobs:
       - name: Check updater failure recovery before packaging
         shell: pwsh
         run: |
-          $evidence = Join-Path $env:GITHUB_WORKSPACE 'Build/Validation/UpdaterPreparation'
+          $evidence = Join-Path $env:RUNNER_TEMP 'UpdaterPreparation'
           New-Item -ItemType Directory -Path $evidence -Force | Out-Null
           node tools/ymcc_sim/global/update-download-signals/index.mjs --evidence-dir (Join-Path $evidence 'signals')
           if ($LASTEXITCODE -ne 0) { throw 'Updater background recovery scenarios failed' }
@@ -179,6 +179,7 @@ jobs:
             Release/Packages/SHA256SUMS.txt
             Release/Packages/PREPARATION.json
             Build/Validation/**/*.json
+            ${{ runner.temp }}/UpdaterPreparation/**
             ${{ runner.temp }}/release-runner-compatibility.json
           if-no-files-found: warn
           retention-days: 14
