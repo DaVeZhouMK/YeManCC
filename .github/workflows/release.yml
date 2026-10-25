@@ -160,22 +160,8 @@ jobs:
       - name: Build and assemble Release
         shell: pwsh
         run: |
-          # Tag release explicitly requests full acceptance; ordinary exports do not.
-          # 2026-09-23 裁定：legacy 信封退役，唯一产物 = 完整包 YeManCC.zip。
-          $releaseEnvelope = 'full'
-          $env:YEMAN_RELEASE_ENVELOPE = $releaseEnvelope
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/build-workspace.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
-          if ($LASTEXITCODE -ne 0) { throw 'Frozen source build failed.' }
-          foreach ($test in @('test:updater', 'test:updater-manager-resume', 'test:updater-resume', 'test:updater-retry', 'test:updater-rollback', 'test:fan-host-paths', 'test:fan-payload')) {
-            pnpm run $test
-            if ($LASTEXITCODE -ne 0) { throw "Release regression failed: $test" }
-          }
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/package-release.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -ReleaseEnvelope $releaseEnvelope -FullAcceptance
-          if ($LASTEXITCODE -ne 0) { throw 'Full package assembly failed.' }
-          # This regression consumes the actual archive; never run it before assembly.
-          pnpm run test:updater-install-chain
-          if ($LASTEXITCODE -ne 0) { throw 'Release install-chain regression failed.' }
-
+          # FullAcceptance executes as an ordinary user on this disposable runner.
+          & tools/invoke-hosted-release-gate.ps1 -Mode FullAcceptance
       - name: Verify release outputs
         shell: pwsh
         run: |

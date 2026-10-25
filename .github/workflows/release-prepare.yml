@@ -157,51 +157,10 @@ jobs:
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed' }
 
-      - name: Check original formal gate input declaration
+      - name: Check original consumers as a standard hosted user
         shell: pwsh
         run: |
-          $out = Join-Path $env:YMCC_SIM_CORE_ROOT 'Evidence/DeckyParentGlobal-20261023/host-environment'
-          node tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-global.mjs --mode plan --evidence-dir $out
-          if ($LASTEXITCODE -ne 0) { throw 'Original formal gate input declaration failed' }
-
-      - name: Check hosted native compiler with original runtime consumer
-        shell: pwsh
-        run: |
-          $out = Join-Path $env:YMCC_SIM_CORE_ROOT 'Evidence/native-runtime'
-          node tools/decky_binding_runtime_selftest.mjs $out
-          if ($LASTEXITCODE -ne 0) { throw 'Original native runtime consumer failed' }
-
-      - name: Check original inert owner controls
-        shell: pwsh
-        run: |
-          $script = Join-Path $env:RUNNER_TEMP 'release-owner-controls.mjs'
-          $source = @'          import fs from 'node:fs';
-          import path from 'node:path';
-          import assert from 'node:assert/strict';
-          import {pathToFileURL} from 'node:url';
-          const repo=process.cwd(),core=process.env.YMCC_SIM_CORE_ROOT;
-          assert(core,'Owned release check core required');
-          const rows=[];
-          for(const [name,entry,exportName] of [
-           ['native','native-launch-worker.mjs','startNativeLaunchWorkerControl'],
-           ['appearance','css-appearance-worker.mjs','startCssAppearanceWorkerControl']
-          ]){
-           const module=await import(pathToFileURL(path.join(repo,'tools/ymcc_sim/global/decky-update-recovery',entry)));
-           const callerEvidence=path.join(core,'Evidence','release-host-controls',name+'-'+Date.now());
-           fs.mkdirSync(callerEvidence,{recursive:true});
-           const worker=module[exportName]({repo,callerEvidence,behavior:'normal',deadlineMs:Date.now()+45000});
-           const result=await worker.finish();
-           rows.push({name,status:result.status,resourcesDestroyed:result.resourcesDestroyed,evidence:worker.evidence});
-           fs.writeFileSync(path.join(core,'Evidence','RELEASE-HOST-CONTROLS.json'),JSON.stringify({scope:'Original inert owner controls only; full Decky suites not executed',rows},null,2));
-           assert.equal(result.status,'CONTROL_PASS',JSON.stringify(result));
-           assert.equal(result.resourcesDestroyed,true);
-           console.log(JSON.stringify(rows.at(-1)));
-          }
-          '@
-          [IO.File]::WriteAllText($script, $source, [Text.UTF8Encoding]::new($false))
-          node $script
-          if ($LASTEXITCODE -ne 0) { throw 'Original owner control environment check failed' }
-
+          & tools/invoke-hosted-release-gate.ps1 -Mode EnvironmentCheck
       - name: Type check candidate
         if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh

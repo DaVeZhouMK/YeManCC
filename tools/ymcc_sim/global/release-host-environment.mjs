@@ -7,7 +7,7 @@ const hash=file=>crypto.createHash('sha256').update(fs.readFileSync(file)).diges
 const read=file=>JSON.parse(fs.readFileSync(file,'utf8').replace(/^\uFEFF/,''));
 const key=file=>path.resolve(file).toLowerCase();
 const inside=(parent,child)=>key(child).startsWith(key(parent)+path.sep);
-export const HOST_ENVIRONMENT_SOURCE_INPUTS=Object.freeze(['tools/ymcc_sim/global/release-host-environment.mjs','tools/ymcc_sim/global/release-host-environment.ps1','tools/ymcc_sim/global/hosted-release-tools.json','tools/initialize-release-check-host.ps1','tools/capture-release-host-tools.ps1','tools/release-check-host/package.json','tools/release-check-host/package-lock.json']);
+export const HOST_ENVIRONMENT_SOURCE_INPUTS=Object.freeze(['tools/ymcc_sim/global/release-host-environment.mjs','tools/ymcc_sim/global/release-host-environment.ps1','tools/ymcc_sim/global/hosted-release-tools.json','tools/initialize-release-check-host.ps1','tools/capture-release-host-tools.ps1','tools/release-check-host/package.json','tools/release-check-host/package-lock.json','tools/invoke-hosted-release-gate.ps1']);
 export function hostedReleaseProfile(){
  if(process.env.YMCC_RELEASE_HOSTED_ENVIRONMENT!=='1')return null;
  if(process.env.GITHUB_ACTIONS!=='true')throw Error('HOSTED_RELEASE_REQUIRES_GITHUB_RUNNER');
