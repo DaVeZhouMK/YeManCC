@@ -19,6 +19,8 @@ jobs:
     timeout-minutes: 45
     env:
       pnpm_config_verify_deps_before_run: 'false'
+      # User requested gate-only checks; do not create/upload another test package.
+      YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
       # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
@@ -48,7 +50,7 @@ jobs:
       - name: Setup Node 22
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '22.14.0'
 
       - name: Setup locked pnpm
         uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
@@ -139,13 +141,21 @@ jobs:
           }
           'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
+      - name: Capture formal release gate host dependencies
+        shell: pwsh
+        run: |
+          & tools/capture-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'release-gate-host-tools.json')
+          if ($LASTEXITCODE -ne 0) { throw 'Release gate environment capture failed' }
+
       - name: Restore locked dependencies
+        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh
         run: |
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed' }
 
       - name: Type check candidate
+        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh
         run: |
           node scripts/write-version.mjs
@@ -154,6 +164,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Candidate type check failed' }
 
       - name: Check updater failure recovery before packaging
+        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP 'UpdaterPreparation'
@@ -165,6 +176,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Updater native download/cache scenarios failed' }
 
       - name: Build complete candidate with original exporter
+        if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh
         run: |
           $env:Platform = $null
@@ -181,19 +193,13 @@ jobs:
           $rows | Set-Content (Join-Path $packageDir 'SHA256SUMS.txt') -Encoding UTF8
           [ordered]@{ version='0.0.36'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content (Join-Path $packageDir 'PREPARATION.json') -Encoding UTF8
 
-      - name: Save candidate package and environment evidence
+      - name: Save release gate environment diagnostics
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ymcc-0.0.36-preparation-${{ github.run_id }}
+          name: release-gate-environment-${{ github.run_id }}
           path: |
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC.zip
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC-source-v0.0.36.zip
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/SHA256SUMS.txt
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/PREPARATION.json
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.json
-            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**
-            ${{ runner.temp }}/UpdaterPreparation/**
+            ${{ runner.temp }}/release-gate-host-tools.json
             ${{ runner.temp }}/release-runner-compatibility.json
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 14
