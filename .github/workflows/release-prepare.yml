@@ -148,7 +148,8 @@ jobs:
         run: |
           $evidence = Join-Path $env:RUNNER_TEMP 'UpdaterPreparation'
           New-Item -ItemType Directory -Path $evidence -Force | Out-Null
-          node tools/ymcc_sim/global/update-download-signals/index.mjs --evidence-dir (Join-Path $evidence 'signals')
+          $pwshPath = (Get-Command pwsh -CommandType Application -ErrorAction Stop).Source
+          node tools/ymcc_sim/global/update-download-signals/index.mjs --repo-root $env:GITHUB_WORKSPACE --evidence-dir (Join-Path $evidence 'signals') --pwsh-path $pwshPath
           if ($LASTEXITCODE -ne 0) { throw 'Updater background recovery scenarios failed' }
           & powershell -NoProfile -ExecutionPolicy Bypass -File tools/updater_resume_native_selftest.ps1 -OutputRoot (Join-Path $evidence 'native')
           if ($LASTEXITCODE -ne 0) { throw 'Updater native download/cache scenarios failed' }
