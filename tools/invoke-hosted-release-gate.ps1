@@ -23,6 +23,17 @@ if($Worker){
  $env:PSModulePath=$null
  $env:WinPSModulePath=$null
  $env:PATH=(Join-Path $env:YMCC_RELEASE_NODE_MODULES '.bin')+';'+$env:PATH
+ # The checkout belongs to runneradmin. Trust only this exact checkout for this
+ # worker process; do not change global Git settings or wildcard safe.directory.
+ $configCount=if($env:GIT_CONFIG_COUNT){[int]$env:GIT_CONFIG_COUNT}else{0}
+ [Environment]::SetEnvironmentVariable(('GIT_CONFIG_KEY_'+$configCount),'safe.directory','Process')
+ [Environment]::SetEnvironmentVariable(('GIT_CONFIG_VALUE_'+$configCount),$repo,'Process')
+ $env:GIT_CONFIG_COUNT=[string]($configCount+1)
+ $sourceCommit=[string](& git -C $repo rev-parse HEAD)
+ if($LASTEXITCODE -ne 0){throw 'Standard-user Git source identity failed'}
+ $pnpmVersion=[string](& pnpm.cmd --version)
+ if($LASTEXITCODE -ne 0 -or $pnpmVersion.Trim() -cne '11.16.0'){throw 'Standard-user locked pnpm identity failed'}
+ Save-Record 'worker-source-tools.json' @{sourceCommit=$sourceCommit.Trim();pnpmVersion=$pnpmVersion.Trim();gitTrustScope=$repo;globalGitSettingsChanged=$false}
  if($Mode -eq 'EnvironmentCheck'){
   & node tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-global.mjs --mode plan --evidence-dir (Join-Path $core 'Evidence/DeckyParentGlobal-20261023/standard-user-environment')
   if($LASTEXITCODE -ne 0){throw 'Original hosted gate input declaration failed'}

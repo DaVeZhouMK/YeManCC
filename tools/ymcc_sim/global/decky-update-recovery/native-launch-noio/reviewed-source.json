@@ -8,11 +8,11 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d1cc99816e436d2085b3428c7fe67f378c921aa3107dd62ea0bdf629a1e45897"
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa"
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f"
     },
     {
       "path": "native/process_efficiency.h",
@@ -27,5 +27,11 @@
       "sha256": "853b2eb3bf7632c949f4a2dd6fb8a629c5ff25cc0059d29c7d21915dc719487f"
     }
   ],
-  "reviewNote": "2026-10-24 manual-only fixed Steam Shell fallback, no cooldown for explicit action, unchanged logon grant/fence. Reviewed restricted memory ports; no real Steam/BAT/registry calls."
+  "reviewNote": "2026-10-24 manual-only fixed Steam Shell fallback, no cooldown for explicit action, unchanged logon grant/fence. Reviewed restricted memory ports; no real Steam/BAT/registry calls.",
+  "releaseReview": {
+    "date": "2026-10-25",
+    "scope": "Actual current producer headers; original consumers, negative cases, budgets and production files unchanged",
+    "sourceApprovalGranted": false,
+    "unexecutedStartupRepair": "CopyFileW is an explicit deny terminal; startup repair success is outside this fixture coverage"
+  }
 }

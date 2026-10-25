@@ -1,60 +1,71 @@
 {
   "kind": "reviewed-memory-native-launch-terminals",
   "status": "STATIC_TERMINAL_REVIEW_COMPLETE",
-  "adapterSha256": "c7878cf831d1e7c0b293156b7a550bc200dff54a1d477ade8f0cd3b0caa45fb1",
+  "adapterSha256": "d754ee739ea8cc88cdd0099ae74990428e872dfa1e5fe80237c41e466f49db67",
   "inventory": [
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "CloseHandle",
       "lines": [
         29,
         39,
-        87,
-        113,
-        122,
-        128,
-        137
+        110,
+        136,
+        145,
+        151,
+        187,
+        216
       ],
       "terminal": "ymcc_noio::close",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "CommandLineToArgvW",
       "lines": [
-        145
+        227
       ],
       "terminal": "ymcc_noio::commandArgs",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "CopyFileW",
+      "lines": [
+        68
+      ],
+      "terminal": "ymcc_noio::copyFileDenied",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "CreateFileW",
       "lines": [
         27,
         38,
-        83
+        106
       ],
       "terminal": "ymcc_noio::createFile",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "CreateToolhelp32Snapshot",
       "lines": [
-        112,
-        125
+        135,
+        148
       ],
       "terminal": "ymcc_noio::snapshot",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "DeleteFileW",
       "lines": [
         40
@@ -64,85 +75,89 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "FlushFileBuffers",
       "lines": [
         39,
-        93
+        116
       ],
       "terminal": "ymcc_noio::flush",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetCurrentProcess",
       "lines": [
-        71
+        94
       ],
       "terminal": "ymcc_noio::current",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetCurrentProcessId",
       "lines": [
-        37
+        37,
+        67
       ],
       "terminal": "ymcc_noio::pid",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetFileAttributesW",
       "lines": [
         24,
         45,
-        82,
-        101
+        105,
+        124
       ],
       "terminal": "ymcc_noio::attributes",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetFileInformationByHandle",
       "lines": [
-        85
+        108
       ],
       "terminal": "ymcc_noio::fileInfo",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetFileSizeEx",
       "lines": [
         29,
-        89
+        112
       ],
       "terminal": "ymcc_noio::fileSize",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetLastError",
       "lines": [
         25,
-        113,
-        122,
-        127
+        136,
+        145,
+        150,
+        173,
+        181,
+        215
       ],
       "terminal": "REAL_PURE_ERROR_OR_UNICODE_UTILITY",
       "classification": "NON_IDENTITY_UTILITY"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetModuleFileNameW",
       "lines": [
         22
@@ -152,40 +167,51 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetTickCount64",
       "lines": [
         37,
-        94
+        67,
+        117
       ],
       "terminal": "ymcc_noio::tick",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "GetTokenInformation",
       "lines": [
-        76,
-        77,
-        78
+        99,
+        100,
+        101
       ],
       "terminal": "ymcc_noio::tokenInfo",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "InterlockedIncrement",
+      "lines": [
+        67
+      ],
+      "terminal": "REAL_LOCAL_MEMORY_ATOMIC",
+      "classification": "NON_IDENTITY_UTILITY"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "LocalFree",
       "lines": [
-        146
+        228
       ],
       "terminal": "ymcc_noio::localFree",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "MoveFileExW",
       "lines": [
         40
@@ -195,7 +221,7 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "MultiByteToWideChar",
       "lines": [
         32
@@ -205,91 +231,122 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "OpenProcess",
       "lines": [
-        117
+        140
       ],
       "terminal": "ymcc_noio::openProcess",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "OpenProcessToken",
       "lines": [
-        71,
-        118
+        94,
+        141
       ],
       "terminal": "ymcc_noio::openToken",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "Process32FirstW",
       "lines": [
-        113,
-        127
+        136,
+        150
       ],
       "terminal": "ymcc_noio::first",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "Process32NextW",
       "lines": [
-        122,
-        127
+        145,
+        150
       ],
       "terminal": "ymcc_noio::next",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "QueryFullProcessImageNameW",
       "lines": [
-        120
+        143
       ],
       "terminal": "ymcc_noio::image",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "ReadFile",
       "lines": [
         29,
-        90
+        113
       ],
       "terminal": "ymcc_noio::readFile",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "RegGetValueW",
       "lines": [
-        63
+        75
       ],
       "terminal": "ymcc_noio::registry",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "ResumeThread",
       "lines": [
-        136
+        170
       ],
       "terminal": "ymcc_noio::resume",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "SetEndOfFile",
+      "lines": [
+        116
+      ],
+      "terminal": "ymcc_noio::end",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "SetFilePointerEx",
+      "lines": [
+        112,
+        116
+      ],
+      "terminal": "ymcc_noio::seek",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "ShellExecuteExW",
+      "lines": [
+        213
+      ],
+      "terminal": "ymcc_noio::shellExecute",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "SHGetFolderPathW",
       "lines": [
         21
@@ -299,38 +356,28 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
-      "api": "SetEndOfFile",
-      "lines": [
-        93
-      ],
-      "terminal": "ymcc_noio::end",
-      "classification": "EXPLICIT_ADAPTER"
-    },
-    {
-      "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
-      "api": "SetFilePointerEx",
-      "lines": [
-        89,
-        93
-      ],
-      "terminal": "ymcc_noio::seek",
-      "classification": "EXPLICIT_ADAPTER"
-    },
-    {
-      "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "TerminateProcess",
       "lines": [
-        136
+        180
       ],
       "terminal": "ymcc_noio::terminate",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
+      "api": "WaitForSingleObject",
+      "lines": [
+        178,
+        182
+      ],
+      "terminal": "ymcc_noio::wait",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/steam_native_launch_windows.h",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "WideCharToMultiByte",
       "lines": [
         35,
@@ -341,49 +388,49 @@
     },
     {
       "path": "native/steam_native_launch_windows.h",
-      "sha256": "d093f1d14c83072480cb4d2e4bd24d7d916016ff9d31e8f3179e25878dd376c7",
+      "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce",
       "api": "WriteFile",
       "lines": [
         39,
-        93
+        116
       ],
       "terminal": "ymcc_noio::writeFile",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "CloseHandle",
       "lines": [
         13,
-        101
+        122
       ],
       "terminal": "ymcc_noio::close",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "CreateProcessWithTokenW",
       "lines": [
-        93
+        114
       ],
       "terminal": "ymcc_noio::withToken",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "DuplicateTokenEx",
       "lines": [
-        84
+        105
       ],
       "terminal": "ymcc_noio::duplicate",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "EqualSid",
       "lines": [
         26
@@ -393,7 +440,7 @@
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetCurrentProcess",
       "lines": [
         49
@@ -403,36 +450,38 @@
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetLastError",
       "lines": [
         49,
         51,
         59,
         63,
-        69,
-        71,
-        77,
+        70,
         85,
-        94
+        87,
+        93,
+        98,
+        106,
+        115
       ],
       "terminal": "REAL_PURE_ERROR_OR_UNICODE_UTILITY",
       "classification": "NON_IDENTITY_UTILITY"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetShellWindow",
       "lines": [
-        66,
-        89
+        82,
+        110
       ],
       "terminal": "ymcc_noio::shell",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetSidSubAuthority",
       "lines": [
         43
@@ -442,7 +491,7 @@
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetSidSubAuthorityCount",
       "lines": [
         42
@@ -452,7 +501,7 @@
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetTokenInformation",
       "lines": [
         18,
@@ -462,35 +511,37 @@
         39,
         51,
         63,
-        79
+        66,
+        95,
+        98
       ],
       "terminal": "ymcc_noio::tokenInfo",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
-      "api": "GetWindowThreadProcessId",
-      "lines": [
-        67,
-        89
-      ],
-      "terminal": "ymcc_noio::shellPid",
-      "classification": "EXPLICIT_ADAPTER"
-    },
-    {
-      "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "GetWindowsDirectoryW",
       "lines": [
-        72
+        88
       ],
       "terminal": "ymcc_noio::windowsDir",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
+      "api": "GetWindowThreadProcessId",
+      "lines": [
+        83,
+        110
+      ],
+      "terminal": "ymcc_noio::shellPid",
+      "classification": "EXPLICIT_ADAPTER"
+    },
+    {
+      "path": "native/decky_sidebar_launch.h",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "IsValidSid",
       "lines": [
         42
@@ -500,53 +551,53 @@
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "OpenProcess",
       "lines": [
-        68
+        84
       ],
       "terminal": "ymcc_noio::openProcess",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "OpenProcessToken",
       "lines": [
         49,
-        77,
-        97
+        93,
+        118
       ],
       "terminal": "ymcc_noio::openToken",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "QueryFullProcessImageNameW",
       "lines": [
-        71
+        87
       ],
       "terminal": "ymcc_noio::image",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "TerminateProcess",
       "lines": [
-        100
+        121
       ],
       "terminal": "ymcc_noio::terminate",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "native/decky_sidebar_launch.h",
-      "sha256": "99fe906b6c23bbdd748c9078bdb36a9dcb09b6d3aed533a115f264b9d73e23aa",
+      "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f",
       "api": "WaitForSingleObject",
       "lines": [
-        89,
-        100
+        110,
+        121
       ],
       "terminal": "ymcc_noio::wait",
       "classification": "EXPLICIT_ADAPTER"
@@ -712,52 +763,52 @@
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "d18e664486e3f0d6263a62186ee67ea29d7c54c455014c403231955d87739b89",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49",
       "api": "GetConsoleWindow",
       "lines": [
-        13
+        24
       ],
       "terminal": "ymcc_noio::console",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "d18e664486e3f0d6263a62186ee67ea29d7c54c455014c403231955d87739b89",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49",
       "api": "GetCurrentProcessId",
       "lines": [
-        37
+        62
       ],
       "terminal": "ymcc_noio::pid",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "d18e664486e3f0d6263a62186ee67ea29d7c54c455014c403231955d87739b89",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49",
       "api": "GetTickCount64",
       "lines": [
-        37,
-        49
+        62,
+        86
       ],
       "terminal": "ymcc_noio::tick",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "d18e664486e3f0d6263a62186ee67ea29d7c54c455014c403231955d87739b89",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49",
       "api": "IsWindowVisible",
       "lines": [
-        13
+        24
       ],
       "terminal": "ymcc_noio::visible",
       "classification": "EXPLICIT_ADAPTER"
     },
     {
       "path": "tools/steam_native_launch_selftest.cpp",
-      "sha256": "d18e664486e3f0d6263a62186ee67ea29d7c54c455014c403231955d87739b89",
+      "sha256": "e3f3b89b4fc6942129ba36f74a07a0a59db9a6bfa9eef3882e1701547b7a4f49",
       "api": "Sleep",
       "lines": [
-        13,
-        49
+        24,
+        86
       ],
       "terminal": "ymcc_noio::sleep",
       "classification": "EXPLICIT_ADAPTER"
@@ -814,5 +865,31 @@
     "realSteamOperations": 0,
     "allowRealShellExecute": false,
     "existingOwnedInertAddonAndOriginalBudgetsUnchanged": true
+  },
+  "releaseReview": {
+    "date": "2026-10-25",
+    "kind": "Current-source terminal and compiled-import review",
+    "currentSourcePins": [
+      {
+        "path": "native/steam_native_launch.h",
+        "sha256": "55d25e3a9095cf73ddcbe998f0b004d31cebe63367afbc8c0cca96f48eedde42"
+      },
+      {
+        "path": "native/steam_native_launch_windows.h",
+        "sha256": "bd51f98b1509059dc5285861b9cf484bccf8f8e7087a678201a3cbcd4e70d8ce"
+      },
+      {
+        "path": "native/decky_sidebar_launch.h",
+        "sha256": "2e9acbe96b87b4b744a4b04e78b3ad784737a0d56aef12a2b85d35dc895b375f"
+      },
+      {
+        "path": "native/process_efficiency.h",
+        "sha256": "3e48125292aa52b16bf363672e0c8907c700062bd0cf0d8a87438c3ed15af681"
+      }
+    ],
+    "copyFileW": "Production CopyFileW is an explicit macro deny terminal. The original std::filesystem::copy_file in tools/steam_native_launch_selftest.cpp:86 still copies only its exact self image to owned inert-addon.exe; the original compiled-import assertions remain byte-for-byte unchanged. No startup backup-copy success coverage is claimed.",
+    "interlockedIncrement": "Atomic update of a source-local static LONG only; no process, identity, filesystem or device action",
+    "productionLaunchPolicy": "All token/shell/session/logon/child APIs remain memory terminals; no real Steam, shell launch, UAC or input changes permitted",
+    "originalAssertionsAndBudgetsChanged": false
   }
 }

@@ -28,7 +28,8 @@ try{
   const exit=await new Promise(resolve=>{driver.once('error',error=>resolve({code:null,error:error.message}));driver.once('close',(code,signal)=>resolve({code,signal,exitObserved:true}));});
   need(exit.code===0&&!exit.signal&&!exit.error,'ORIGINAL_DRIVER_NONZERO:'+JSON.stringify(exit));need(Date.now()<request.runDeadlineMs,'SHARED_DEADLINE');
   const rawFile=path.join(request.work,'noio/native-manual-launch/result.json'),result=JSON.parse(fs.readFileSync(rawFile,'utf8'));
-  need(result.ok===true&&result.positiveCases===36&&result.negative.length===4&&result.negative.every(r=>r.detected),'ORIGINAL_36_AND_4_RESULT');
+  need(result.ok===true&&result.positiveCases===55&&result.negative.length===7&&result.negative.every(r=>r.detected),'CURRENT_ORIGINAL_55_AND_7_RESULT');
+  need(JSON.stringify(result.negative.map(r=>r.name))===JSON.stringify(['replayed-boot','running-reopened','early-second-start','manual-timed-ban','ambiguous-primary-replayed','fallback-ignores-absence','css-linked-twice']),'CURRENT_ORIGINAL_NEGATIVE_IDENTITIES');
   const js=['steam_launch_admission_selftest.mjs.json','steam_linked_launch_selftest.mjs.json'].map(name=>{const file=path.join(path.dirname(rawFile),name);need(fs.existsSync(file),'ORIGINAL_JS_RAW_REQUIRED');return{path:file,sha256:hash(file)};});
   const changed=checked();need(changed.length===0,'SOURCE_OR_TOOL_CHANGED_AFTER_EXECUTION');
   save(path.join(request.work,'bootstrap-result.json'),{status:'COMPLETED',suiteExecuted:driverStarted,driverStarted,pid:process.pid,startedAt,elapsedMs:Date.now()-started,driver:{pid:driver.pid,exit},originalResult:result,raw:{result:{path:rawFile,sha256:hash(rawFile)},js,stdout:{path:stdout,sha256:hash(stdout)},stderr:{path:stderr,sha256:hash(stderr)}},sourceChanges:changed});

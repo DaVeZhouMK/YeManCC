@@ -117,7 +117,9 @@ inline void finish(){auto& s=state();const auto file=caseRoot()/(isChild()?L"ter
 inline struct Lifecycle{Lifecycle(){std::atexit(finish);}} lifecycle;
 }
 namespace std::filesystem {inline path ymcc_noio_temp(){return ymcc_noio::runtimeRoot();}}
+namespace ymcc_noio {inline BOOL copyFileDenied(LPCWSTR,LPCWSTR,BOOL){denied("CopyFileW:startup-repair-not-executed-by-this-fixture");return FALSE;}}
 #define temp_directory_path ymcc_noio_temp
+#define CopyFileW ymcc_noio::copyFileDenied
 #define GetCurrentProcess ymcc_noio::current
 #define GetCurrentProcessId ymcc_noio::pid
 #define GetTickCount64 ymcc_noio::tick
