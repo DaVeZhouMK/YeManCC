@@ -20,7 +20,7 @@ jobs:
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
       - name: Normalize release workspace paths
         shell: pwsh
@@ -58,23 +58,23 @@ jobs:
           }
 
       - name: Setup pnpm 11.16.0
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
           version: 11.16.0
 
       - name: Setup Node 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
-          node-version: '22'
+          node-version: '22.14.0'
           cache: 'pnpm'
 
       - name: Setup .NET 10 SDK
-        uses: actions/setup-dotnet@v4
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68 # v6.0.0
         with:
           dotnet-version: '10.0.400'
 
       - name: Setup MSVC and Windows SDK
-        uses: ilammy/msvc-dev-cmd@v1
+        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
         with:
           arch: x64
 
@@ -129,6 +129,31 @@ jobs:
           $record = [ordered]@{ tag = '${{ github.ref_name }}'; tagCommit = (git rev-parse HEAD); tagTree = (git rev-parse 'HEAD^{tree}'); installedVisualStudio = $installation; compatibilityEntrypoints = $entries; trackedSourceChanged = $false; scope = 'Hosted runner toolchain provisioning only; tagged source unchanged.' }
           $record | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $env:RUNNER_TEMP 'release-runner-compatibility.json') -Encoding utf8
 
+      - name: Activate x64 compiler and Windows SDK
+        shell: pwsh
+        run: |
+          $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio/Installer/vswhere.exe'
+          $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 discovery failed' }
+          $installation = $locations | Select-Object -First 1
+          if (!$installation) { throw 'MSVC x64 toolchain is missing' }
+          $entry = Join-Path $installation 'VC/Auxiliary/Build/vcvars64.bat'
+          $batch = Join-Path $env:RUNNER_TEMP 'ymcc-x64-environment.cmd'
+          [IO.File]::WriteAllText($batch, "@echo off`r`ncall `"$entry`" >nul`r`nif errorlevel 1 exit /b 1`r`nset`r`n", [Text.Encoding]::ASCII)
+          $rows = & cmd.exe /d /c $batch
+          if ($LASTEXITCODE -ne 0) { throw 'MSVC x64 environment failed' }
+          foreach ($row in $rows) {
+            $i = $row.IndexOf('=')
+            if ($i -le 0) { continue }
+            $name = $row.Substring(0, $i)
+            if ($name -match '^(PATH|INCLUDE|LIB|LIBPATH|VCToolsInstallDir|WindowsSdkDir|WindowsSDKVersion|VSINSTALLDIR|VSCMD_ARG_TGT_ARCH)$') { $row | Out-File $env:GITHUB_ENV -Encoding utf8 -Append }
+          }
+          'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Initialize formal release gate environment
+        shell: pwsh
+        run: |
+          & tools/initialize-release-check-host.ps1
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
@@ -261,7 +286,7 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified; refusing to publish.' }
 
       - name: Save required Decky update evidence
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: decky-update-release-evidence
           path: ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyUpdate
@@ -395,7 +420,7 @@ jobs:
 
       - name: Preserve release provenance and checksums
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-provenance-${{ github.ref_name }}
           path: |
