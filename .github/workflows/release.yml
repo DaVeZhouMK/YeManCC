@@ -157,6 +157,11 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare pinned lighting host dependencies
+        shell: pwsh
+        run: |
+          & tools/capture-lighting-release-host-tools.ps1 -PrepareOnly
+
       - name: Build and assemble Release
         shell: pwsh
         run: |

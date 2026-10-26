@@ -19,6 +19,14 @@ Push-Location $toolRoot
 try{& $npm ci --ignore-scripts --no-audit --no-fund;if($LASTEXITCODE -ne 0){throw 'Locked release browser tools restore failed'}}finally{Pop-Location}
 $modules=Join-Path $toolRoot 'node_modules'
 $settings=[ordered]@{YMCC_SIM_CORE_ROOT=$core;YMCC_RELEASE_NODE_MODULES=$modules;YMCC_UI_BROWSER_MODULE_DIR=$modules;YMCC_UI_TEST_REQUIRE_ANCHOR=(Join-Path $modules '_release.cjs')}
+$lightingManifest=Join-Path $repo 'tools/ymcc_sim/global/lighting-signals/hosted-tool-inputs.json'
+if(Test-Path -LiteralPath $lightingManifest -PathType Leaf){
+ $lighting=Get-Content -LiteralPath $lightingManifest -Raw|ConvertFrom-Json
+ $baseline=Join-Path $repo 'tools/ymcc_sim/global/lighting-signals/tool-inputs.json'
+ if($lighting.selectionStatus -cne 'REVIEWED_HOST_DECLARATION' -or $lighting.originalManifestSha256 -cne (Get-FileHash -LiteralPath $baseline).Hash.ToLowerInvariant()){throw 'Reviewed lighting host declaration required'}
+ $settings['YMCC_LIGHTING_TOOLS_MANIFEST']=$lightingManifest
+ $settings['YMCC_LIGHTING_TOOLS_SHA256']=(Get-FileHash -LiteralPath $lightingManifest).Hash.ToLowerInvariant()
+}
 if(-not $CaptureOnly){$settings['YMCC_RELEASE_HOSTED_ENVIRONMENT']='1'}
 foreach($entry in $settings.GetEnumerator()){[Environment]::SetEnvironmentVariable($entry.Key,$entry.Value,'Process');($entry.Key+'='+$entry.Value)|Out-File -LiteralPath $env:GITHUB_ENV -Encoding utf8 -Append}
 Write-Output ('HOSTED_RELEASE_CHECK_ENVIRONMENT_READY captureOnly='+[bool]$CaptureOnly)

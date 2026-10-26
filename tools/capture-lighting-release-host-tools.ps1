@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param([Parameter(Mandatory=$true)][string]$OutputPath)
+param([string]$OutputPath,[switch]$PrepareOnly)
 $ErrorActionPreference='Stop'
 if($env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted'){throw 'Disposable hosted capture required'}
 $repo=[IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd('\')
@@ -31,6 +31,8 @@ $oldNuget='C:\Users\DaVe\.nuget\packages'
 if($LASTEXITCODE -ne 0){throw 'Pinned Python startup dependency restore failed'}
 & $python -c 'import encodings.gbk; import _distutils_hack'
 if($LASTEXITCODE -ne 0){throw 'Declared Python startup cache preparation failed'}
+if($PrepareOnly){Write-Output 'PINNED_LIGHTING_HOST_DEPENDENCIES_READY';return}
+if(-not $OutputPath){throw 'Capture output required'}
 $missing=[Collections.Generic.List[object]]::new();$mappings=[Collections.Generic.List[object]]::new();$rows=[Collections.Generic.List[object]]::new()
 function Map-Path([string]$Path){
  $p=$Path.Replace('/','\')
