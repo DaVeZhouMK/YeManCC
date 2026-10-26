@@ -18,11 +18,6 @@
       "version": "v1.1-ymcc.1"
     },
     {
-      "name": "Game Cover Reflections",
-      "author": "TheRensei",
-      "version": "v1.0-ymcc.1"
-    },
-    {
       "name": "Mini Carousel",
       "author": "seagrot",
       "version": "v1.0"
@@ -185,27 +180,6 @@
       "path": "Darken Unfocused Games/theme.json",
       "sha256": "1d05c29f0df64e1f07febf1ef2cee89f8ee1bd7c8226445c29f39aaa6ace4af4",
       "bytes": 3160
-    },
-    {
-      "path": "Game Cover Reflections/config_USER.json",
-      "sha256": "0e8c48981f65a4607df2135727627dcb553047742a8ab90192838e0c55fd1fa0",
-      "bytes": 112
-    },
-    {
-      "path": "Game Cover Reflections/LICENSE",
-      "sha256": "aa0d093e54888701390f332b53586bbc70174d35bccbb81ffa35213c298d9ed5",
-      "bytes": 1066
-    },
-    {
-      "path": "Game Cover Reflections/shared.css",
-      "sha256": "64a8a6a363e2b4fd548070c45cae468c1dd5c290a067cb93ad6ac68203b81490",
-      "bytes": 1583,
-      "contentProperty": "--ymcc-content-18be56ebfc20d37e"
-    },
-    {
-      "path": "Game Cover Reflections/theme.json",
-      "sha256": "2fcf80580e38993ef9e5f98a33e67ce42ddd594213e6134a7333d69043174ac4",
-      "bytes": 5999
     },
     {
       "path": "Mini Carousel/config_USER.json",

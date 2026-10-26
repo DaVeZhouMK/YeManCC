@@ -17,5 +17,5 @@ for(const item of manifest.files){
  }
  const digest=hash(after);if(item.sha256!==digest||item.bytes!==after.length){if(!write)throw Error('Stale asset hash/size: '+item.path);Object.assign(item,{sha256:digest,bytes:after.length});if(!updates.includes(item.path))updates.push(item.path)}
 }
-if(cssCount!==44)throw Error('Expected exactly 44 bundled CSS assets');if(manifest.renderContentProtocol!==1){if(!write)throw Error('Missing content protocol');manifest.renderContentProtocol=1;}
+if(cssCount!==43)throw Error('Expected exactly 43 bundled CSS assets');if(manifest.renderContentProtocol!==1){if(!write)throw Error('Missing content protocol');manifest.renderContentProtocol=1;}
 if(write)fs.writeFileSync(manifestFile,JSON.stringify(manifest,null,2)+'\n');console.log(JSON.stringify({ok:true,cssFiles:cssCount,assets:seen.size,mode:write?'write':'verify',updated:updates},null,2));

@@ -55,9 +55,10 @@ function Get-SteamAppearanceExportFiles([string]$PowerControl) {
     $readDefaults=[scriptblock]::Create($defaultFunction.Extent.Text+"
 Get-AppearanceVariableDefaults @args")
     $manifest=Get-Content -LiteralPath (Join-Path $root 'steam-appearance\manifest.json') -Raw -Encoding UTF8|ConvertFrom-Json
-    $names=@('Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
+    $names=@('Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
     if($manifest.id -ne 'ymcc-steam-appearance' -or $manifest.version -ne 1 -or @($manifest.themes).Count -ne $names.Count){throw 'Steam appearance manifest invalid'}
     if($manifest.renderContentProtocol -ne 1){throw 'Steam appearance content protocol missing'}
+    if(Test-Path -LiteralPath (Join-Path $root 'steam-appearance\themes\Game Cover Reflections')){throw 'Retired reflection payload must not ship'}
     $seen=@{};$result=@($required)
     foreach($item in $manifest.files){
         $relative=([string]$item.path).Replace('/','\')
@@ -95,6 +96,7 @@ Get-AppearanceVariableDefaults @args")
     return $result
 }
 function Assert-SteamAppearanceExport([string]$SourcePowerControl,[string]$DestinationPowerControl) {
+    if(Test-Path -LiteralPath (Join-Path $DestinationPowerControl 'steam-appearance\themes\Game Cover Reflections')){throw 'Retired reflection payload remains in export destination'}
     $files=@(Get-SteamAppearanceExportFiles $SourcePowerControl)
     foreach($relative in $files){
         $source=Join-Path $SourcePowerControl $relative;$destination=Join-Path $DestinationPowerControl $relative

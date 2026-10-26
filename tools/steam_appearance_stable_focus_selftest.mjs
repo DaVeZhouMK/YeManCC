@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import crypto from 'node:crypto';import {createRequire} from 'node:module';
 const root=path.resolve(import.meta.dirname,'..'),out=path.resolve(process.argv[2]||'G:/YeManCC-Work/Testing/YMCC/Evidence/SteamThemeReconcile-20261023/stable-focus');fs.mkdirSync(out,{recursive:true});
 const pack=process.env.YMCC_STABLE_FOCUS_PACK||path.join(root,'PowerControl/steam-appearance/themes');
-const read=p=>fs.readFileSync(path.join(pack,p),'utf8');const files=['Round/round-outline.css','Game Cover Reflections/shared.css'];
+const read=p=>fs.readFileSync(path.join(pack,p),'utf8');const files=['Round/round-outline.css'];
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
 const browser=await chromium.launch({headless:true,executablePath:'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});const cases=[];
 try{
@@ -11,7 +11,7 @@ try{
  await page.addStyleTag({content:files.map(read).join('\n')});
  const measure=()=>page.evaluate(()=>Object.fromEntries(['ring','exception','cover','reflection'].map(id=>{const e=document.getElementById(id),s=getComputedStyle(e),r=e.getBoundingClientRect();return[id,{rect:[r.x,r.y,r.width,r.height],transform:s.transform,animation:s.animationName,transition:s.transitionProperty,border:s.borderWidth,outline:s.outlineWidth,margin:s.margin}]})));
  const base=await measure();assert.equal(base.ring.animation,'none');assert.equal(base.exception.animation,'none');cases.push('Round normal and exception focus borders have no repeating growth/fade/blink animation');
- assert.equal(base.reflection.transition,'opacity');cases.push('reflection only transitions opacity, with no animated filter/transform');
+ assert.equal(fs.existsSync(path.join(pack,'Game Cover Reflections')),false);assert.equal(base.reflection.transform,'none');assert.equal(base.reflection.transition,'all');cases.push('retired reflection payload is absent and no reflection transform or opacity transition is installed');
  for(const state of ['gpfocuswithin','gpfocus','gpfocus-within']){
   await page.locator('#tile').evaluate((el,state)=>el.classList.add(state),state);await page.locator('#cover').focus();const current=await measure();assert.equal(current.cover.animation,'none');assert.equal(current.reflection.transform,base.reflection.transform);assert.deepEqual(current.reflection.rect,base.reflection.rect);assert.deepEqual(current.ring,base.ring);await page.locator('#tile').evaluate((el,state)=>el.classList.remove(state),state);await page.locator('#outside').focus();
  }

@@ -54,7 +54,7 @@ function Reject([scriptblock]$Work){try{& $Work|Out-Null;return $false}catch{ret
 Invoke-PresetPrepare|Out-Null;$script:Live=$true;$script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}});Complete-PresetReload
 $before=@{};foreach($name in $script:ThemeNames){$before[$name]=Get-ConfigHash (Join-Path $script:ThemeRoot ($name+'\config_USER.json'))}
 $result=Invoke-AutomaticAppearanceRefresh
-Assert ($result.ok -and $script:Applied -eq 8 -and $script:Rendered) 'Already running CSS with 8/8 matching flags executes the same eight theme submissions as manual Refresh'
+Assert ($result.ok -and $script:Applied -eq 7 -and $script:Rendered) 'Already running CSS with 7/7 matching flags executes the same seven theme submissions as manual Refresh'
 Assert ($script:Starts -eq 0 -and $script:Resets -eq 0) 'Matching resources never start Steam/CSS, reset the JS context or globally reload the CSS engine'
 foreach($name in $script:ThemeNames){Assert ((Get-ConfigHash (Join-Path $script:ThemeRoot ($name+'\config_USER.json'))) -eq $before[$name]) ('Automatic refresh preserves exact config and parameter bytes: '+$name)}
 $script:Applied=0;$result=Invoke-AutomaticAppearanceRefresh
@@ -100,7 +100,7 @@ function Get-Process {param($Name,$Id) if($Name -eq 'steam'){[pscustomobject]@{I
 function Test-CurrentUserProcess($Process){$Process -and $Process.SessionId -eq 99}
 $script:MissingStyles=@('Mini Carousel');$script:KeepMissing=$true;$script:Applied=0
 $manual=Invoke-AppearanceControl 'Refresh'
-Assert (!$manual.ok -and $manual.saved -and !$manual.renderConfirmed -and $script:Applied -eq 8) 'Manual Refresh preserves configuration and reports unconfirmed when the engine succeeds but a theme is still missing'
+Assert (!$manual.ok -and $manual.saved -and !$manual.renderConfirmed -and $script:Applied -eq 7) 'Manual Refresh preserves configuration and reports unconfirmed when the engine succeeds but a theme is still missing'
 $baseline=Get-AppearanceStatus
 $Payload=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(([pscustomobject]@{expectedRevision=$baseline.revision;states=[pscustomobject]@{Round=$true}}|ConvertTo-Json -Depth 5 -Compress)))
 $manual=Invoke-AppearanceControl 'Apply'

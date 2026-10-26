@@ -108,7 +108,7 @@ function Get-AppearanceContentIndex {
         if($result.ContainsKey($entry.path) -or $entry.contentProperty -cnotmatch '^--ymcc-content-[0-9a-f]{16}$' -or $properties.ContainsKey($entry.contentProperty)){throw 'render-content-index-duplicate-or-invalid'}
         $result[$entry.path]=[string]$entry.contentProperty;$properties[$entry.contentProperty]=$true
     }
-    if($result.Count -ne 44){throw 'render-content-index-incomplete'}
+    if($result.Count -ne 43){throw 'render-content-index-incomplete'}
     $after=Get-Item -LiteralPath $item.FullName -Force -ErrorAction Stop
     if(([string]$after.Length+':'+$after.LastWriteTimeUtc.Ticks+':'+$after.CreationTimeUtc.Ticks) -cne $stamp){throw 'render-content-index-changed'}
     $script:AppearanceContentIndex=$result;$script:AppearanceContentIndexStamp=$stamp
@@ -116,7 +116,7 @@ function Get-AppearanceContentIndex {
 }
 function Get-AppearanceFileReceipt([string]$Name,[string]$Relative) {
     $relativePath=$Relative.Replace('\','/')
-    if($Name -notin @('Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details') -or
+    if($Name -notin @('Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details') -or
        $relativePath -notmatch '^[A-Za-z0-9][A-Za-z0-9_./ -]{0,127}\.css$' -or
        @($relativePath.Split('/')|Where-Object {$_ -in @('','..','.')}).Count){throw 'render-file-path-invalid'}
     $sha=[Security.Cryptography.SHA256]::Create()
@@ -145,12 +145,6 @@ function Get-AppearanceVariableDefaults([string]$Name) {
         'Darken Unfocused Games'=@{
             '--ren-game-tile-brightness'='0.5'
             '--ren-game-tile-saturate'='0.5'
-        }
-        'Game Cover Reflections'=@{
-            '--ren-reflection-blur'='2px'
-            '--ren-reflection-focused-opacity'='.5'
-            '--ren-reflection-gradient'='#ffffff00 30%'
-            '--ren-reflection-unfocused-opacity'='.3'
         }
         'Mini Carousel'=@{
             '--scale-value'='0.7'
@@ -237,7 +231,7 @@ function Get-AppearanceThemeRenderPlan([string]$Name,$Manifest,$Config,$ContentI
 }
 function Get-AppearanceRenderExpectation($Status,[string]$Target='SP') {
     if($Target -cnotin @('SP','MainMenu','QuickAccess')){throw 'render-expectation-target-invalid'}
-    $names=@('Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
+    $names=@('Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
     $contentIndex=Get-AppearanceContentIndex
     $rows=@($Status.themes);$count=0;$properties=@{}
     if($rows.Count -ne $names.Count){throw 'render-snapshot-incomplete'}

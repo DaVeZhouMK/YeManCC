@@ -5,7 +5,6 @@ export const STEAM_APPEARANCE_THEMES = [
   { name: 'Art Hero', label: '首页布局', description: '宽幅背景与游戏轮播布局', group: '首页' },
   { name: 'Centered Game Text', label: '文字居中', description: '让游戏标题保持居中', group: '首页' },
   { name: 'Darken Unfocused Games', label: '焦点突出', description: '暗化未选中的游戏封面', group: '首页' },
-  { name: 'Game Cover Reflections', label: '封面倒影', description: '在游戏封面下显示柔和倒影', group: '首页' },
   { name: 'Mini Carousel', label: '紧凑轮播', description: '使用你设定的迷你轮播尺寸', group: '首页' },
   { name: 'NEX-85 Keyboard', label: '定制键盘', description: '使用 NEX-85 键盘外观', group: '界面' },
   { name: 'Round', label: '界面圆角', description: '沿用你的圆角与描边设置', group: '界面' },
