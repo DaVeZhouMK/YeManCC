@@ -1,5 +1,6 @@
 #define WIN32_LEAN_AND_MEAN
 #include <winsock2.h>
+#include <functional>
 // Only the fixture's WinSock terminal selects an ephemeral loopback port.
 // Keep production PortLease and all real ownership/busy checks unchanged.
 static int WSAAPI resourceFixtureBind(SOCKET socket,const sockaddr* value,int length){
