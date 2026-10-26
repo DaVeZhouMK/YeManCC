@@ -21,6 +21,8 @@ jobs:
       pnpm_config_verify_deps_before_run: 'false'
       # User requested gate-only checks; do not create/upload another test package.
       YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
+      YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: '1'
+      YMCC_CAPTURE_LIGHTING_ONLY: '1'
       # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
@@ -163,9 +165,11 @@ jobs:
           & tools/capture-lighting-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'lighting-release-host-tools.json')
 
       - name: Check original consumers as a standard hosted user
+        if: env.YMCC_CAPTURE_LIGHTING_ONLY != '1'
         shell: pwsh
         run: |
-          & tools/invoke-hosted-release-gate.ps1 -Mode EnvironmentCheck
+          $mode = if ($env:YMCC_FORMAL_ACCEPTANCE_PREFLIGHT -eq '1') { 'FullAcceptance' } else { 'EnvironmentCheck' }
+          & tools/invoke-hosted-release-gate.ps1 -Mode $mode
       - name: Type check candidate
         if: env.YMCC_RELEASE_ENVIRONMENT_ONLY != '1'
         shell: pwsh
@@ -216,5 +220,9 @@ jobs:
             ${{ runner.temp }}/release-runner-compatibility.json
             ${{ runner.temp }}/yc/Evidence/**/*.json
             ${{ runner.temp }}/yc/Evidence/**/*.log
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.log
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.json
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.log
           if-no-files-found: error
           retention-days: 14

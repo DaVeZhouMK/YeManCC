@@ -29,7 +29,7 @@ $oldPython='C:\Users\DaVe\.cache\codex-runtimes\codex-primary-runtime\dependenci
 $oldNuget='C:\Users\DaVe\.nuget\packages'
 & $python -m pip install --disable-pip-version-check --no-deps setuptools==84.0.0
 if($LASTEXITCODE -ne 0){throw 'Pinned Python startup dependency restore failed'}
-& $python -c 'import encodings.gbk; import _distutils_hack'
+& $python -c 'import encodings.gbk, _distutils_hack, py_compile; [py_compile.compile(m.__file__, doraise=True, invalidation_mode=py_compile.PycInvalidationMode.CHECKED_HASH) for m in (encodings.gbk, _distutils_hack)]'
 if($LASTEXITCODE -ne 0){throw 'Declared Python startup cache preparation failed'}
 if($PrepareOnly){Write-Output 'PINNED_LIGHTING_HOST_DEPENDENCIES_READY';return}
 if(-not $OutputPath){throw 'Capture output required'}
