@@ -157,6 +157,11 @@ jobs:
           pnpm install --frozen-lockfile
           if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed' }
 
+      - name: Capture lighting host tool declarations
+        shell: pwsh
+        run: |
+          & tools/capture-lighting-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'lighting-release-host-tools.json')
+
       - name: Check original consumers as a standard hosted user
         shell: pwsh
         run: |
@@ -207,6 +212,7 @@ jobs:
           name: release-gate-environment-${{ github.run_id }}
           path: |
             ${{ runner.temp }}/release-gate-host-tools.json
+            ${{ runner.temp }}/lighting-release-host-tools.json
             ${{ runner.temp }}/release-runner-compatibility.json
             ${{ runner.temp }}/yc/Evidence/**/*.json
             ${{ runner.temp }}/yc/Evidence/**/*.log
