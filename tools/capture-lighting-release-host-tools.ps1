@@ -27,6 +27,10 @@ $oldSdk='C:\Program Files (x86)\Windows Kits\10'
 $oldModules='C:\Users\DaVe\.cache\codex-runtimes\codex-primary-runtime\dependencies\node\node_modules'
 $oldPython='C:\Users\DaVe\.cache\codex-runtimes\codex-primary-runtime\dependencies\python'
 $oldNuget='C:\Users\DaVe\.nuget\packages'
+& $python -m pip install --disable-pip-version-check --no-deps setuptools==84.0.0
+if($LASTEXITCODE -ne 0){throw 'Pinned Python startup dependency restore failed'}
+& $python -c 'import encodings.gbk; import _distutils_hack'
+if($LASTEXITCODE -ne 0){throw 'Declared Python startup cache preparation failed'}
 $missing=[Collections.Generic.List[object]]::new();$mappings=[Collections.Generic.List[object]]::new();$rows=[Collections.Generic.List[object]]::new()
 function Map-Path([string]$Path){
  $p=$Path.Replace('/','\')
@@ -39,6 +43,7 @@ function Map-Path([string]$Path){
  return $p
 }
 foreach($row in $baseline.files){
+ if($row.path -and $row.path.StartsWith($oldTools+'\bin\Hostx64\x64\',[StringComparison]::OrdinalIgnoreCase)){continue}
  if($row.path -and $row.path.StartsWith($edgeRoot+'\',[StringComparison]::OrdinalIgnoreCase)){continue}
  $file=if($row.repoRelative){Join-Path $repo $row.repoRelative}else{Map-Path $row.path}
  if(-not (Test-Path -LiteralPath $file -PathType Leaf) -and $file.Contains('\2052\')){$file=$file.Replace('\2052\','\1033\')}
@@ -48,6 +53,10 @@ foreach($row in $baseline.files){
  if($row.repoRelative){$pin.repoRelative=$row.repoRelative}else{$pin.path=[IO.Path]::GetFullPath($file)}
  $rows.Add($pin);$mappings.Add(@{originalPath=$row.path;repoRelative=$row.repoRelative;originalSha256=$row.sha256;selectedPath=$file;selectedSha256=$sha;sameBytes=($sha -ceq $row.sha256)})
 }
+# The newer compiler owns a different complete bin inventory; preserve all actual
+# files rather than demanding removed optional analysis DLLs from the old MSVC.
+$compilerFiles=@(Get-ChildItem -LiteralPath (Split-Path -Parent $compiler) -Recurse -File)
+foreach($file in $compilerFiles){$rows.Add(@{path=$file.FullName;sha256=(Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant();roles=@('Complete selected x64 compiler bin inventory')})}
 $edgeFiles=@(Get-ChildItem -LiteralPath $edgeRoot -File)+@(Get-ChildItem -LiteralPath (Join-Path $edgeRoot $edgeVersion) -Recurse -File)
 foreach($file in $edgeFiles){$rows.Add(@{path=$file.FullName;sha256=(Get-FileHash -LiteralPath $file.FullName).Hash.ToLowerInvariant();roles=@('Selected Microsoft Edge browser inventory')})}
 $signatures=@(foreach($file in @($edge,(Join-Path $edgeRoot ($edgeVersion+'/msedge.dll')),$compiler,$python)){Get-AuthenticodeSignature -LiteralPath $file|Select-Object Path,@{n='status';e={[string]$_.Status}},@{n='signer';e={$_.SignerCertificate.Subject}}})
