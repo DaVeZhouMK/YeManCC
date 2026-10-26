@@ -1,3 +1,4 @@
+import {selectedNativeTools,selectedOwnedTools,simulationCorePath,HOST_ENVIRONMENT_SOURCE_INPUTS} from './ymcc_sim/global/release-host-environment.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
@@ -33,7 +34,7 @@ function resourceSession(root, out, config) {
   root = path.resolve(root); out = path.resolve(out); canonical(root);
   assert(!fs.existsSync(out), 'Fresh ' + config.name + ' evidence required');
   mkdirPlain(out);
-  const workspace = path.resolve('G:/YeManCC-Work/Testing/YMCC/Workspace');
+  const workspace = simulationCorePath('Workspace');
   assert(canonical(workspace).isDirectory());
   const parent = path.join(workspace, config.short);
   if (!fs.existsSync(parent)) fs.mkdirSync(parent);
@@ -69,7 +70,7 @@ function resourceSession(root, out, config) {
       if(child)freeze(child);
     }
   }
-  for(const relative of ['tools/'+config.cpp,'tools/'+config.module,'decky-plugin/vendor/decky-loader.lock.json',
+  for(const relative of [...HOST_ENVIRONMENT_SOURCE_INPUTS,'tools/'+config.cpp,'tools/'+config.module,'decky-plugin/vendor/decky-loader.lock.json',
     'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json',
     'tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json',
     'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.json','tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.mjs']) freeze(path.join(root,relative));
@@ -77,9 +78,9 @@ function resourceSession(root, out, config) {
   const lock=JSON.parse(fs.readFileSync(path.join(frozen,'decky-plugin/vendor/decky-loader.lock.json'),'utf8'));
   const loader=path.join(root,'PowerControl/decky/PluginLoader_noconsole.exe'); canonical(loader);
   assert.equal(hash(fs.readFileSync(loader)),lock.asset.sha256,'Official data file changed');
-  const manifest=JSON.parse(fs.readFileSync(path.join(frozen,'tools/ymcc_sim/global/decky-update-recovery/native-launch-noio/native-tools.json'),'utf8'));
+  const manifest=selectedNativeTools();
   const tools=manifest.native, declared=new Map(),reviewed=new Map();
-  const reviewedManifest=JSON.parse(fs.readFileSync(path.join(frozen,'tools/ymcc_sim/global/decky-persistent-lifecycle/owned-tools.json'),'utf8'));
+  const reviewedManifest=selectedOwnedTools();
   const resourceManifestFile=path.join(frozen,'tools/ymcc_sim/global/decky-update-recovery/resource-fixture-tools.json');
   assert.equal(hash(fs.readFileSync(resourceManifestFile)),'a4b691bbf95cdbdfcfa5ca593d5bff955c95b8b75bf0b2ca4596f9a7ebb7acda','Resource fixed declaration changed before compile');
   const resourceManifest=JSON.parse(fs.readFileSync(resourceManifestFile,'utf8'));

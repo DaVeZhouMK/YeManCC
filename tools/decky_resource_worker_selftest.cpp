@@ -1,6 +1,21 @@
 #define WIN32_LEAN_AND_MEAN
+#include <winsock2.h>
+// Only the fixture's WinSock terminal selects an ephemeral loopback port.
+// Keep production PortLease and all real ownership/busy checks unchanged.
+static int WSAAPI resourceFixtureBind(SOCKET socket,const sockaddr* value,int length){
+ if(value&&length==sizeof(sockaddr_in)&&value->sa_family==AF_INET){
+  auto address=*reinterpret_cast<const sockaddr_in*>(value);
+  if(ntohs(address.sin_port)==1337&&address.sin_addr.s_addr==htonl(INADDR_ANY)){
+   address.sin_addr.s_addr=htonl(INADDR_LOOPBACK);address.sin_port=0;
+   return ::bind(socket,reinterpret_cast<const sockaddr*>(&address),sizeof(address));
+  }
+ }
+ return ::bind(socket,value,length);
+}
+#define bind resourceFixtureBind
 #include "../native/decky_binding_worker_entry.h"
 #include "../native/decky_sidebar_runtime.h"
+#undef bind
 #include <condition_variable>
 #include <iostream>
 #include <thread>

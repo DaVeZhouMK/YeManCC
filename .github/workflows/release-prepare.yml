@@ -22,7 +22,7 @@ jobs:
       # User requested gate-only checks; do not create/upload another test package.
       YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
       YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: '1'
-      YMCC_CAPTURE_LIGHTING_ONLY: '1'
+      YMCC_CAPTURE_LIGHTING_ONLY: '0'
       # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
