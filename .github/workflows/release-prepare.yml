@@ -22,7 +22,8 @@ jobs:
       # User requested gate-only checks; do not create/upload another test package.
       YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
       YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: '1'
-      YMCC_CAPTURE_LIGHTING_ONLY: '0'
+      YMCC_CAPTURE_LIGHTING_ONLY: '1'
+      YMCC_CAPTURE_ROUTING_ONLY: '1'
       # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
@@ -148,6 +149,7 @@ jobs:
         run: |
           & tools/initialize-release-check-host.ps1
       - name: Capture formal release gate host dependencies
+        if: env.YMCC_CAPTURE_ROUTING_ONLY != '1'
         shell: pwsh
         run: |
           & tools/capture-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'release-gate-host-tools.json')
@@ -160,10 +162,16 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Locked dependency restore failed' }
 
       - name: Capture lighting host tool declarations
+        if: env.YMCC_CAPTURE_ROUTING_ONLY != '1'
         shell: pwsh
         run: |
           & tools/capture-lighting-release-host-tools.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'lighting-release-host-tools.json')
 
+      - name: Capture source-bound routing identities
+        if: env.YMCC_CAPTURE_ROUTING_ONLY == '1'
+        shell: pwsh
+        run: |
+          & tools/capture-release-routing.ps1 -OutputPath (Join-Path $env:RUNNER_TEMP 'release-host-routing.json')
       - name: Check original consumers as a standard hosted user
         if: env.YMCC_CAPTURE_LIGHTING_ONLY != '1'
         shell: pwsh
@@ -217,6 +225,7 @@ jobs:
           path: |
             ${{ runner.temp }}/release-gate-host-tools.json
             ${{ runner.temp }}/lighting-release-host-tools.json
+            ${{ runner.temp }}/release-host-routing.json
             ${{ runner.temp }}/release-runner-compatibility.json
             ${{ runner.temp }}/yc/Evidence/**/*.json
             ${{ runner.temp }}/yc/Evidence/**/*.log
