@@ -33,6 +33,7 @@ struct InputCaptureGamepadSnapshot {
     unsigned readTopologyGeneration=1,readIdentityGeneration=1;bool readContextStable=true;ymcc::touchhaptic::SourceToken feedbackSource{};bool specialXbox=false;
 };
 static InputCaptureGamepadSnapshot g_inputCaptureGamepadSnapshot;
+static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;
 static void captureReadSnapshot(const std::string& inputSource="xinput",DWORD admittedMask=1){
  const bool live=true;const XINPUT_GAMEPAD pad{};
 @@SNAPSHOT_GUIDE@@
@@ -79,8 +80,9 @@ static Result submit(const InputCaptureGamepadSnapshot* sample,bool semanticNeut
 @@POWER@@
  if(!powerAdmitted){t_commonFrameSource=nullptr;return {};}
  if(afterTicket)afterTicket();
+ bool suppressPublication=false;
 @@NORMALIZE@@
- if(!inputHostPhysicalPublicationSourceAdmitted(physicalSourceAdmitted,semanticNeutral)){t_commonFrameSource=nullptr;return {};}
+ if(suppressPublication){t_commonFrameSource=nullptr;return {};}
  const bool msiNeutralCleanup=msiControllerNeutralCleanupAllowed(semanticNeutral);const XINPUT_GAMEPAD pad{0x1001};
 @@GUIDE_ASSEMBLY@@
 @@FRESH_WAIT@@
@@ -111,7 +113,7 @@ static Result submit(const InputCaptureGamepadSnapshot* sample,bool semanticNeut
  t_commonFrameSource=nullptr;return {accepted,publishedSemanticNeutral,frameSubmission.rejected,fault,receipt};
 }
 static InputCaptureGamepadSnapshot sample;
-static void reset(){g_realStickTest={true,true};g_inputHostRequestedPersonaMatchesBound=true;logThrows=false;freshNeutralReady=true;freshNeutralCalls=0;now=100;power=1;g_inputHostVirtualIntentRevision=0;g_msiMainSourceRevision=1;g_inputHostVirtualIntentWriters=0;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;g_msiDinputRouteDinputArmed=false;g_inputHostEpoch=7;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=g_inputHostActive=true;g_inputHostTransportFault=exitFence=knownMsi=false;writerAllowed=msiEligible=true;logs.clear();sample={};sample.specialXbox=true;g_xinputSpecialButton=true;g_xinputConnectedMask=1;g_inputCaptureGamepadSnapshot={};t_commonFrameSource=nullptr;t_inputFrameSubmission=nullptr;pipeWrites=commandSequence=failuresFromHost=0;wire=json::object();connectHook=afterAssemblyHook={};connectFails=false;}
+static void reset(){g_inputHostReadProgress={};g_realStickTest={true,true};g_inputHostRequestedPersonaMatchesBound=true;logThrows=false;freshNeutralReady=true;freshNeutralCalls=0;now=100;power=1;g_inputHostVirtualIntentRevision=0;g_msiMainSourceRevision=1;g_inputHostVirtualIntentWriters=0;g_xinputTopologyEpoch=g_xinputSlotIdentityEpoch=1;g_inputReady=true;g_inputHostPowerAdmissionRevoked=false;g_inputHostFaultHoldsStart=false;g_msiDinputRouteDinputArmed=false;g_inputHostEpoch=7;g_inputHostProcess=g_inputHostPrepared=g_inputHostNeutralized=g_inputHostActive=true;g_inputHostTransportFault=exitFence=knownMsi=false;writerAllowed=msiEligible=true;logs.clear();sample={};sample.specialXbox=true;g_xinputSpecialButton=true;g_xinputConnectedMask=1;g_inputCaptureGamepadSnapshot={};t_commonFrameSource=nullptr;t_inputFrameSubmission=nullptr;pipeWrites=commandSequence=failuresFromHost=0;wire=json::object();connectHook=afterAssemblyHook={};connectFails=false;}
 static json cases=json::array(),failures=json::array();static unsigned assertions=0;static std::string caseName;
 static void require(bool value,const char* message){++assertions;if(!value)failures.push_back({{"case",caseName},{"message",message}});}
 template<class F>static void run(const std::string& name,F fn){reset();caseName=name;const auto before=failures.size();const auto checks=assertions;fn();require(t_inputFrameSubmission==nullptr&&t_commonFrameSource==nullptr,"thread-local scopes unwind after every path");cases.push_back({{"name",name},{"passed",before==failures.size()},{"assertions",assertions-checks},{"pipeWrites",pipeWrites},{"commandSequence",commandSequence}});}
@@ -147,11 +149,32 @@ int main(){
   run(prefix+"MSI-revoke-during-connect",[&]{knownMsi=true;g_msiDinputRouteDinputArmed=true;sample.inputSource="msi-dinput";sample.connectedMask=0;connectHook=[]{++g_msiMainSourceRevision;};const auto r=submit(&sample,false,fast);require(r.rejected&&!r.fault&&pipeWrites==0,"old MSI source generation cannot be relabeled current");});
   run(prefix+"semantic-neutral-survives-source-loss",[&]{sample.live=false;sample.inputSource="none";sample.connectedMask=0;connectHook=[]{++g_xinputTopologyEpoch;++g_xinputSlotIdentityEpoch;};const auto r=submit(&sample,true,fast);require(r.accepted&&r.neutral&&pipeWrites==1,"same-target full neutral releases old input despite source absence/replacement");require(wire==focusIsolationAssembleFrame(focusIsolationNeutralContent()),"cleanup remains fully neutral");});
   run(prefix+"neutral-does-not-cross-target-replacement",[&]{connectHook=[]{++g_inputHostEpoch;};const auto r=submit(&sample,true,fast);require(r.rejected&&!r.fault&&pipeWrites==0,"neutral source exception cannot bypass original Host target");});
-  run(prefix+"late-context-rejection-next-tick-releases-old-report",[&]{const auto first=submit(&sample,false,fast);require(first.accepted&&wire["buttons"]!=0,"a real old report was accepted first");connectHook=[]{++g_xinputTopologyEpoch;};const auto blocked=submit(&sample,false,fast);require(blocked.rejected&&!blocked.fault&&pipeWrites==1,"interleaved retirement does not write over prior accepted report");const auto cleanup=submit(&sample,false,fast);require(cleanup.accepted&&cleanup.neutral&&pipeWrites==2,"next tick sees retired snapshot and sends same-target neutral cleanup");require(wire==focusIsolationAssembleFrame(focusIsolationNeutralContent()),"prior pressed state is cleared even while no new canonical read arrives");});
+  run(prefix+"late-context-rejection-next-tick-releases-old-report",[&]{const auto first=submit(&sample,false,fast);require(first.accepted&&wire["buttons"]!=0,"a real old report was accepted first");++sample.readAttemptSequence;connectHook=[]{++g_xinputTopologyEpoch;};const auto blocked=submit(&sample,false,fast);require(blocked.rejected&&!blocked.fault&&pipeWrites==1,"interleaved retirement does not write over prior accepted report");const auto cleanup=submit(&sample,false,fast);require(cleanup.accepted&&cleanup.neutral&&pipeWrites==2,"next tick sees retired snapshot and sends same-target neutral cleanup");require(wire==focusIsolationAssembleFrame(focusIsolationNeutralContent()),"prior pressed state is cleared even while no new canonical read arrives");});
+  for(const std::string route:{"xinput","xinput-any-connected","msi-dinput"})run(prefix+"stalled-read-immediate-neutral/"+route,[&]{
+   sample.inputSource=route;if(route=="msi-dinput"){knownMsi=true;g_msiDinputRouteDinputArmed=true;sample.connectedMask=0;}
+   const auto first=submit(&sample,false,fast);require(first.accepted&&!first.neutral,"first valid canonical read remains admitted");
+   const auto oldSequence=sample.readAttemptSequence;
+   for(unsigned i=0;i<4;++i){const auto repeated=submit(&sample,false,fast);require(repeated.accepted&&repeated.neutral&&!repeated.fault,"repeated live read is neutral immediately even at age zero");require(wire==focusIsolationAssembleFrame(focusIsolationNeutralContent()),"all old controls released; no gyro/Guide/back/touch composition survives");}
+   require(sample.readAttemptSequence==oldSequence&&sample.live,"neutralization must not forge producer/disconnect evidence");
+   sample.readAttemptSequence++;const auto resumed=submit(&sample,false,fast);require(resumed.accepted&&!resumed.neutral&&!resumed.fault,"next actual API read resumes same target even when values and clock are identical");
+  });
+  run(prefix+"stalled-read-backwards-and-provider-revisit",[&]{
+   sample.readAttemptSequence=50;require(submit(&sample,false,fast).accepted,"initial valid read");
+   sample.readAttemptSequence=49;require(submit(&sample,false,fast).neutral,"backwards proof cannot replay old state");
+   sample.inputSource="msi-dinput";sample.connectedMask=0;knownMsi=true;g_msiDinputRouteDinputArmed=true;sample.readAttemptSequence=7;require(!submit(&sample,false,fast).neutral,"separate valid provider has its own proof");
+   sample.inputSource="xinput";sample.connectedMask=1;knownMsi=false;g_msiDinputRouteDinputArmed=false;sample.readAttemptSequence=50;require(submit(&sample,false,fast).neutral,"provider round trip cannot erase old XInput read history");
+   sample.readAttemptSequence=51;require(!submit(&sample,false,fast).neutral,"fresh same-value API read restores output");
+  });
+  run(prefix+"invalid-generation-cannot-reset-read-history",[&]{
+   sample.readAttemptSequence=80;require(!submit(&sample,false,fast).neutral,"initial valid read");
+   sample.readPowerGeneration=2;sample.readAttemptSequence=1;require(submit(&sample,false,fast).neutral,"invalid power source is neutral");
+   sample.readPowerGeneration=1;sample.readAttemptSequence=80;require(submit(&sample,false,fast).neutral,"invalid source cannot erase current read history");
+   sample.readAttemptSequence=81;require(!submit(&sample,false,fast).neutral,"fresh valid read recovers without target rebuild");
+  });
   run(prefix+"fresh-next-read-resumes-without-rearm",[&]{afterAssemblyHook=[]{++g_xinputSlotIdentityEpoch;};const auto old=submit(&sample,false,fast);require(old.rejected&&!old.fault,"old read was skipped");sample.readIdentityGeneration=g_xinputSlotIdentityEpoch;sample.readAttemptSequence++;const auto fresh=submit(&sample,false,fast);require(fresh.accepted&&!fresh.neutral&&!fresh.fault&&pipeWrites==1,"next current sample resumes same target without recreate or retry counter");});
   run(prefix+"unbound-lifecycle-contract-preserved",[&]{const auto r=submit(nullptr,true,fast);require(r.accepted&&pipeWrites==1,"unbound lifecycle-neutral path preserves existing transport contract");});
   run(prefix+"stale-cleanup-does-not-fabricate-opening-neutral-evidence",[&]{freshNeutralReady=false;now=2000;const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&freshNeutralCalls==0,"full stale-source release bypasses opening wait without supplying fake physical-neutral samples");sample.readAttemptSequence++;sample.readStartedTick=sample.readCompletedTick=now;const auto fresh=submit(&sample,false,fast);require(!fresh.accepted&&freshNeutralCalls==1&&pipeWrites==1,"fresh live input still needs original physical-neutral admission");});
-  run(prefix+"persistent-connect-rejection-is-event-bounded",[&]{const auto before=submit(&sample,false,fast);require(before.accepted,"normal frame establishes recovery logging baseline");const auto baselineLogs=logs.size();for(unsigned i=0;i<1000;++i){afterAssemblyHook=[]{++g_inputHostVirtualIntentRevision;};const auto r=submit(&sample,false,fast);require(r.rejected&&!r.fault,"each changed intent still rejects before pipe");}require(logs.size()-baselineLogs<=1,"a normal assembly cannot emit a fake recovery before every persistent pre-write rejection");const auto resumed=submit(&sample,false,fast);require(resumed.accepted&&logs.size()-baselineLogs<=2,"one actual accepted current frame emits at most one recovery transition");});
+  run(prefix+"persistent-connect-rejection-is-event-bounded",[&]{const auto before=submit(&sample,false,fast);require(before.accepted,"normal frame establishes recovery logging baseline");const auto baselineLogs=logs.size();for(unsigned i=0;i<1000;++i){++sample.readAttemptSequence;afterAssemblyHook=[]{++g_inputHostVirtualIntentRevision;};const auto r=submit(&sample,false,fast);require(r.rejected&&!r.fault,"each changed intent still rejects before pipe");}require(logs.size()-baselineLogs<=1,"a normal assembly cannot emit a fake recovery before every persistent pre-write rejection");++sample.readAttemptSequence;const auto resumed=submit(&sample,false,fast);require(resumed.accepted&&logs.size()-baselineLogs<=2,"one actual accepted current frame emits at most one recovery transition");});
   run(prefix+"evidence-failure-never-admits-stale-live-or-breaks-cleanup",[&]{logThrows=true;now=2000;const auto r=submit(&sample,false,fast);require(r.accepted&&r.neutral&&pipeWrites==1,"throwing log sink does not change actual neutralization/admission");});
   run(prefix+"true-transport-failure-stays-fault",[&]{connectFails=true;const auto r=submit(&sample,false,fast);require(!r.accepted&&!r.rejected&&r.fault&&failuresFromHost==1,"a genuine current-context transport failure is not hidden as a transient skip");});
  }

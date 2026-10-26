@@ -15,6 +15,10 @@
 //    HELLO/PREPARE/中性预备成功不代表已有可用物理输入，必须继续核验当前样本与提交回执。
 //    MSI延迟源停在同epoch的HELLO阶段：原票重发可执行；当前主源与隐藏证明通过才PREPARE。
 //    等源时只让出Host锁供BUS，保留串行owner并逐次复核原意图；路线耗尽先退虚拟再归还实体。
+//    GPD原生前台→虚拟接管：原helper在途仍保留自有隐藏，virtual hide/readback接手归还责任；
+//    未接手即Start早拒/退出时由原native owner归还，不通过先解隐再重隐打开实体入口。
+//    供体已隐藏整组先一次持盘，再逐项幂等重隐；部分执行强退时不得遗失未访问尾项责任。
+//    VC-GPD-NATIVE-VIRTUAL-HANDOFF-20261025-R1是T1内的子步骤，不续30秒/10秒、不改ROG/MSI。
 // T2 可用输出：inputCaptureOnGamepad -> focusIsolationPlanTick -> *UiOwnsInput。
 //    YMCC/已有自有子窗口/轮盘接管 => 同一目标的最终完整中性帧；物理采集和YMCC导航保留。
 //    失焦/收起 => 用最新有效样本恢复真实输出；不补播历史，不调用Stop/Start，不重置请求锁。

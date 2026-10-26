@@ -148,8 +148,9 @@ static std::shared_ptr<const Published> published;
 // Reject-only hint, NEVER dereferenced or used as ownership. refresh publishes
 // the owned immutable state before this pointer; an effective value retains a
 // shared owner, so a compared Profile address cannot be recycled underneath it.
+// The same static reject-only hint also fences actual SUBMIT before pipe issue.
 // Null makes the master-OFF/no-profile path skip the shared_ptr atomic lock.
-static std::atomic<const Profile*> virtualProfileHint{nullptr};
+static std::atomic<const void*> virtualProfileHint{nullptr};
 static std::mutex refreshMx;
 static std::atomic<long long> inputRevision{0};
 static std::mutex mx;
@@ -245,7 +246,12 @@ static Effective effective(const XINPUT_GAMEPAD& original,bool sourceAdmitted) n
     return result;
 }
 static void noteAccepted(const Effective& value,const FocusFrameContent& content,std::uint64_t sequence,bool neutral) noexcept {
-    if(!value.applied||!value.sample||!value.config)return;
+    if(!value.applied||!value.sample||!value.config){
+        // An accepted source-loss neutral supersedes the old correction ACK.
+        // Expected focus-neutral WITH an applied/current plan keeps its receipt.
+        if(neutral)acceptedCurrent.store(false,std::memory_order_release);
+        return;
+    }
     // Caller holds g_inputHostMx: this receipt is for the frame just accepted
     // by that exact Host. Keep current-profile/source checks; publication can
     // revoke eligibility but cannot destroy value.config's retained owner.
@@ -313,9 +319,93 @@ static json snapshot(bool includeInput=false) {
             {"readStartedTick",std::to_string(readStarted)},{"readCompletedTick",std::to_string(readCompleted)}};
         result["axes"]=std::move(axisValues);
     }
+    // A lost terminal event must not strand the Editor in sampling. This is
+    // exact owner state, never a fabricated successful measurement result.
+    {std::lock_guard<std::mutex> lock(mx);
+        result["centerSession"]={{"sessionId",center.id},{"active",center.active}};}
     if(includeInput&&state)result["inputDocument"]=state->input;
     return result;
 }
+// Explicit logs.exportAll only. One attempt per existing owner, no source or
+// settings refresh. This is a cached local receipt, never a hardware release proof.
+static json exportEvidence() {
+    const auto started=GetTickCount64(),power=currentPowerGeneration();
+    std::shared_ptr<const Published> state;ReadWitness sample;Raw currentRaw{};Accepted acceptedView;
+    std::uint64_t host=0,centerStarted=0;bool hostCurrent=false,centerRunning=false,watchRunning=false;
+    std::size_t centerCount=0;std::string run,centerId,observerId;const char* unavailable=nullptr;
+    {
+        std::unique_lock<std::mutex> publicationLock(refreshMx,std::try_to_lock);
+        if(!publicationLock.owns_lock())unavailable="publication-lock-busy";
+        else {
+            std::unique_lock<std::mutex> sourceLock(g_inputCaptureGamepadSnapshotMx,std::try_to_lock);
+            if(!sourceLock.owns_lock())unavailable="source-lock-busy";
+            else {
+                std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);
+                if(!hostLock.owns_lock())unavailable="host-lock-busy";
+                else {
+                    std::unique_lock<std::mutex> controlLock(mx,std::try_to_lock);
+                    if(!controlLock.owns_lock())unavailable="calibration-control-lock-busy";
+                    else {
+                        state=std::atomic_load_explicit(&published,std::memory_order_acquire);
+                        sample=witness(g_inputCaptureGamepadSnapshot);currentRaw=raw(g_inputCaptureGamepadSnapshot.pad);
+                        host=g_inputHostEpoch;run=g_inputHostRunId;
+                        hostCurrent=host&&!run.empty()&&g_inputHostPrepared&&!g_inputHostTransportFault&&g_inputHostActive;
+                        if(acceptedCurrent.load(std::memory_order_acquire))acceptedView=accepted;
+                        centerId=center.id;centerRunning=center.active;centerStarted=center.started;centerCount=center.count;
+                        observerId=watchId;watchRunning=watchActive.load(std::memory_order_acquire);
+                    }
+                }
+            }
+        }
+    }
+    // No JSON/file work occurs under an input/control owner lock. All locks
+    // above are single try attempts; allocator, shared_ptr and OS I/O are not
+    // claimed to have an absolute wall-clock deadline.
+    json result={{"schemaVersion",1},{"policy","YMCC-AXIS-CALIBRATION-EVIDENCE-20261025-R1"},
+        {"protocol",protocol},{"captureKnown",unavailable==nullptr},{"unavailableReason",unavailable?json(unavailable):json(nullptr)},
+        {"captureStartedTick",std::to_string(started)},{"captureCompletedTick",std::to_string(GetTickCount64())},
+        {"atomicWithOtherExportFiles",false},{"sourceReadPerformed",false},{"settingsRefreshPerformed",false},
+        {"settingsWritePerformed",false},{"scope","cached-calibration-memory;local-submit-only;not-device-or-game-consumption"}};
+    if(unavailable){result["localSubmit"]={{"state","unknown"},{"reason",unavailable}};return result;}
+    const auto p=state?state->profile:nullptr;const auto source=binding(sample,GetTickCount64());
+    result["publishedKnown"]=state!=nullptr;
+    result["inputRevision"]=state?json(state->revision):json(nullptr);
+    result["inputConfigHash"]=state?json(state->hash):json(nullptr);
+    result["config"]=state?(p?p->document:defaults()):json(nullptr);
+    result["source"]=bindingJson(source);
+    result["readWitness"]={{"sourceEligible",source.valid()},{"readSequence",std::to_string(sample.readAttemptSequence)},
+        {"readStartedTick",std::to_string(sample.readStartedTick)},{"readCompletedTick",std::to_string(sample.readCompletedTick)}};
+    result["hostContext"]={{"hostEpoch",std::to_string(host)},{"runId",run},{"activeAtCapture",hostCurrent}};
+    result["centerOwner"]={{"sessionId",centerId},{"active",centerRunning},{"sampleCount",centerCount},{"startedTick",std::to_string(centerStarted)},
+        {"scope","current-owner-state;inactive-is-not-a-historical-cancel-receipt"}};
+    result["observerOwner"]={{"watchId",observerId},{"active",watchRunning},
+        {"scope","current-owner-state;inactive-is-not-a-historical-stop-receipt"}};
+    json local={{"state","unknown"},{"reason","profile-unpublished"},{"appliedInputRevision",nullptr},{"appliedConfigHash",nullptr},
+        {"reportSequence",nullptr},{"expectedNeutral",nullptr},{"scope","local-submit-accepted-only;not-device-or-game-consumption"}};
+    json values={{"raw",source.valid()?axes(currentRaw):json(nullptr)},{"finalAccepted",nullptr},{"calibrationOnly",nullptr},
+        {"calibrationOnlyReason","not-retained-by-current-runtime"},{"finalAcceptedMeaning","after-existing-composition-or-neutralization"}};
+    if(state){
+        if(!p||!p->config.enabled||!p->config.applyToVirtual){local["state"]="bypass";local["reason"]=!p?"no-saved-calibration":!p->config.enabled?"master-disabled":"virtual-calibration-not-requested";}
+        else if(!source.valid()){local["state"]="pending";local["reason"]="physical-source-unconfirmed";}
+        else if(p->deviceKey!=*source.key){local["state"]="bypass";local["reason"]="profile-source-mismatch";}
+        else {
+            local["state"]="pending";local["reason"]="awaiting-current-accepted-output";
+            const bool acceptedSourceCurrent=source.valid()&&same(source,acceptedView.source)&&same(source,binding(acceptedView.sample,GetTickCount64()));
+            if(acceptedView.config==p&&acceptedSourceCurrent&&hostCurrent&&host==acceptedView.host&&
+               acceptedView.power==power&&power==currentPowerGeneration()&&virtualProfileHint.load(std::memory_order_acquire)==p.get()){
+                local["state"]="active";local["reason"]=acceptedView.neutral?"captured-local-submit-accepted-expected-neutral":"captured-local-submit-accepted";
+                local["appliedInputRevision"]=p->revision;local["appliedConfigHash"]=p->hash;
+                local["reportSequence"]=std::to_string(acceptedView.sequence);local["expectedNeutral"]=acceptedView.neutral;
+                values["raw"]=axes(acceptedView.raw);values["finalAccepted"]=axes(acceptedView.output);
+                result["acceptedReadWitness"]={{"readSequence",std::to_string(acceptedView.sample.readAttemptSequence)},
+                    {"readStartedTick",std::to_string(acceptedView.sample.readStartedTick)},{"readCompletedTick",std::to_string(acceptedView.sample.readCompletedTick)}};
+            }
+        }
+    }
+    result["localSubmit"]=std::move(local);result["axes"]=std::move(values);
+    return result;
+}
+
 static json read(const json&) {refresh(ymSettingsSection("input"));return snapshot(true);}
 static json failure(const json& request,const char* reason) {
     return {{"ok",false},{"saved",false},{"requestId",request.value("requestId",std::string{})},
@@ -386,15 +476,29 @@ static json apply(const json& request) {
     return {{"ok",true},{"saved",true},{"requestId",request["requestId"]},{"snapshot",result}};
 }
 static json startCenter(const json& request) {
-    refresh(ymSettingsSection("input"));
+    // Memory-only admission shares the ordered WebView owner with cancel.
+    // get/Apply/settings events publish the durable revision; no file IO here.
     if(request.value("protocol",std::string{})!=protocol||!request.contains("source")||
        !request.contains("expectedInputRevision")||!request["expectedInputRevision"].is_number_integer())throw std::runtime_error("invalid-center-request");
     const auto side=request.value("side",std::string{});if(side!="left"&&side!="right")throw std::runtime_error("invalid-center-side");
     InputCaptureGamepadSnapshot sample;{std::lock_guard<std::mutex> lock(g_inputCaptureGamepadSnapshotMx);sample=g_inputCaptureGamepadSnapshot;}
     const auto b=binding(sample,GetTickCount64());if(!matches(request["source"],b))throw std::runtime_error("center-source-changed");
     const auto rev=request["expectedInputRevision"].get<long long>();if(rev!=inputRevision.load(std::memory_order_acquire))throw std::runtime_error("center-revision-conflict");
-    std::lock_guard<std::mutex> lock(mx);if(center.active)throw std::runtime_error("center-session-busy");
-    center={};center.active=true;center.id="axis-center-"+std::to_string(GetTickCount64())+"-"+std::to_string(++ordinal);
+    std::string requested;
+    if(request.contains("sessionId")){
+        if(!request["sessionId"].is_string())throw std::runtime_error("invalid-axis-center-token");
+        requested=request["sessionId"].get<std::string>();
+        if(requested.empty()||requested.size()>256||
+           !std::all_of(requested.begin(),requested.end(),[](unsigned char c){return c>=0x21&&c<=0x7e;}))
+            throw std::runtime_error("invalid-axis-center-token");
+    }else requested="axis-center-"+std::to_string(GetTickCount64())+"-"+std::to_string(++ordinal);
+    std::lock_guard<std::mutex> lock(mx);
+    if(g_exitRequested.load(std::memory_order_acquire)||g_inputCaptureStop.load(std::memory_order_acquire))
+        throw std::runtime_error("center-input-stopped");
+    if(!std::atomic_load_explicit(&published,std::memory_order_acquire)||
+       rev!=inputRevision.load(std::memory_order_acquire))throw std::runtime_error("center-revision-conflict");
+    if(center.active)throw std::runtime_error("center-session-busy");
+    center={};center.active=true;center.id=std::move(requested);
     center.source=b;center.revision=rev;center.right=side=="right";center.started=GetTickCount64();
     centerActive.store(true,std::memory_order_release);return {{"sessionId",center.id}};
 }

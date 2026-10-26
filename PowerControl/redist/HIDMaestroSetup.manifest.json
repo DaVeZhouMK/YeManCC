@@ -8,7 +8,7 @@
                    },
                    {
                        "name":  "AutoSetup.cs",
-                       "sha256":  "CD366D136A320E750752AADEDF3BA4964E3382B5DD52887E27D203FE734D537F"
+                       "sha256":  "EE14FCE58D52EA0AD792CCEE5D013B545150465EA3230A02F9CD9FD41E2BE3C3"
                    },
                    {
                        "name":  "ModulePayloadBootstrap.cs",
@@ -20,11 +20,11 @@
                    },
                    {
                        "name":  "UsbipUpgrade.cs",
-                       "sha256":  "4368CBE6A39DA9BC0E1EC241E53371B601CFAAD713E4CCF6CD5769C1F923952B"
+                       "sha256":  "7F13EAE9E48E04F3175A5BCA7A6FFE9ACDD9E88777535690600B3614DB1D45ED"
                    },
                    {
                        "name":  "UsbipUpgradeSelfTest.cs",
-                       "sha256":  "D866D65A05D691FC51B332BA86145D2E388F4A4F9F40201D5C25CFDEDA5F5A3D"
+                       "sha256":  "5BB6270A4CEA599A9B98C1A5D83827EB4CF777B8029A0E9E88E4DC1B6CCDC087"
                    },
                    {
                        "name":  "YeManGamepadPrerequisites.csproj",
@@ -36,7 +36,7 @@
                    },
                    {
                        "name":  "native/UsbipMaintenanceState.cs",
-                       "sha256":  "6A1798E1092B8CD68EE2A5A351D8055425E9BE6728A92A1591DAB15729255BED"
+                       "sha256":  "BCA29F1E3B8C3658EEDA496B9E95345BE54FA34847404499549D67E74FEB16EA"
                    },
                    {
                        "name":  "native/ModuleMaintenanceGate.cs",
@@ -51,8 +51,8 @@
                   },
                   {
                       "name":  "HIDMaestroSetup.dll",
-                      "bytes":  200704,
-                      "sha256":  "D9A8700DBB45E132FE092C2995503F570754C1FF1E02A740E65EFB240751386F"
+                      "bytes":  225792,
+                      "sha256":  "60F0D2F58D09745F44992CC63E1CEBAFB232CECAE0D02A5E3FB044866A30E79C"
                   },
                   {
                       "name":  "HIDMaestroSetup.deps.json",

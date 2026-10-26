@@ -10,12 +10,59 @@
 namespace ymcc::inputHost::switchVerificationRuntime {
 using View = ymcc::VirtualStartProtection::View;
 static std::atomic<std::uint64_t> lastFinalRequestId{0}; // Monotonic final observations across admission and worker.
+// Stable diagnostic bits only; none grants recovery or changes a deadline.
+enum PauseReason : std::uint32_t {
+    Recording=1u<<0, PhysicalRelease=1u<<1, ExternalPriority=1u<<2,
+    PowerNotReady=1u<<3, InputNotReady=1u<<4, SgWriterBlocked=1u<<5,
+    AdmissionRevoked=1u<<6, ExitFence=1u<<7, ExitRequested=1u<<8, CaptureStop=1u<<9,
+    AllPauseReasons=(1u<<10)-1
+};
+struct InspectionPoint {
+    std::uint64_t elapsedMs=0,powerGeneration=0;
+};
+static constexpr std::uint32_t pauseMaskOnlyLogLimit=8;
 struct Observation {
     std::uint64_t requestId=0,checks=0,healthyChecks=0,excludedChecks=0,knownFaultChecks=0;
+    std::uint32_t pauseReasonMask=0,pauseReasonMaskSeen=0,pauseReasonObservedMask=0;
+    std::uint32_t pauseMaskOnlyLogAttempts=0;
+    std::uint64_t pauseMaskOnlyChangesOmitted=0;
+    std::uint32_t firstExcludedPauseReasonMask=0,lastExcludedPauseReasonMask=0;
+    std::uint32_t firstExcludedPauseReasonObservedMask=0,lastExcludedPauseReasonObservedMask=0;
+    InspectionPoint lastInspection{},firstExcluded{},lastExcluded{},firstHealthy{},lastHealthy{};
     const char* lastState="unobserved";
     const char* lastEvidence="unobserved";
 };
 static Observation observation; // Existing Host mutex; no per-frame timer or allocation.
+// The caller passes nullptr for an unobserved/foreign request. In particular,
+// admission-timeout logging must not touch any Host-mutex-protected state.
+static void appendInspectionFacts(json& detail,const Observation* observed) {
+    const bool checked=observed && observed->checks;
+    const bool excluded=observed && observed->excludedChecks;
+    const bool healthy=observed && observed->healthyChecks;
+    detail.update({
+        {"paused",checked?json(observed->pauseReasonMask!=0):json(nullptr)},
+        {"pauseReasonMask",checked?json(observed->pauseReasonMask):json(nullptr)},
+        {"pauseReasonMaskSeen",checked?json(observed->pauseReasonMaskSeen):json(nullptr)},
+        {"pauseMaskOnlyLogLimit",pauseMaskOnlyLogLimit},
+        {"pauseMaskOnlyLogAttempts",checked?json(observed->pauseMaskOnlyLogAttempts):json(nullptr)},
+        {"pauseMaskOnlyChangesOmitted",checked?json(observed->pauseMaskOnlyChangesOmitted):json(nullptr)},
+        {"pauseReasonObservedMask",checked?json(observed->pauseReasonObservedMask):json(nullptr)},
+        {"sgWriterBlocked",checked && (observed->pauseReasonObservedMask&SgWriterBlocked)?json((observed->pauseReasonMask&SgWriterBlocked)!=0):json(nullptr)},
+        {"lastInspectionElapsedMs",checked?json(observed->lastInspection.elapsedMs):json(nullptr)},
+        {"lastInspectionPowerGeneration",checked?json(observed->lastInspection.powerGeneration):json(nullptr)},
+        {"firstExcludedElapsedMs",excluded?json(observed->firstExcluded.elapsedMs):json(nullptr)},
+        {"firstExcludedPowerGeneration",excluded?json(observed->firstExcluded.powerGeneration):json(nullptr)},
+        {"firstExcludedPauseReasonMask",excluded?json(observed->firstExcludedPauseReasonMask):json(nullptr)},
+        {"firstExcludedPauseReasonObservedMask",excluded?json(observed->firstExcludedPauseReasonObservedMask):json(nullptr)},
+        {"lastExcludedElapsedMs",excluded?json(observed->lastExcluded.elapsedMs):json(nullptr)},
+        {"lastExcludedPowerGeneration",excluded?json(observed->lastExcluded.powerGeneration):json(nullptr)},
+        {"lastExcludedPauseReasonMask",excluded?json(observed->lastExcludedPauseReasonMask):json(nullptr)},
+        {"lastExcludedPauseReasonObservedMask",excluded?json(observed->lastExcludedPauseReasonObservedMask):json(nullptr)},
+        {"firstHealthyElapsedMs",healthy?json(observed->firstHealthy.elapsedMs):json(nullptr)},
+        {"firstHealthyPowerGeneration",healthy?json(observed->firstHealthy.powerGeneration):json(nullptr)},
+        {"lastHealthyElapsedMs",healthy?json(observed->lastHealthy.elapsedMs):json(nullptr)},
+        {"lastHealthyPowerGeneration",healthy?json(observed->lastHealthy.powerGeneration):json(nullptr)}});
+}
 static bool psEndpointFaultCurrentLocked(const View& view) {
     const auto& fault=g_inputHostPsEndpointFault;
     return fault.requestId && fault.requestId==view.requestId && view.persona=="dualsense-edge" &&
@@ -228,7 +275,7 @@ static void finalLogLocked(const View& view, const char* outcome, const char* re
     while(!lastFinalRequestId.compare_exchange_weak(previous,view.requestId,std::memory_order_acq_rel));
     try {
         const bool observed=hostFacts && observation.requestId==view.requestId;
-        appendNativeLifecycleLog("input-host-switch-verification", {
+        json detail={
             {"stage","final"},{"requestId",view.requestId},{"persona",view.persona},
             {"lifecycleVersion",ymcc::VirtualStartProtection::lifecycleVersion},
             {"fallbackAttempts",view.fallbackAttempts},
@@ -236,11 +283,12 @@ static void finalLogLocked(const View& view, const char* outcome, const char* re
             {"executionInspectionDeadlineElapsedMs",view.inspectionDeadlineElapsedMs},
             {"candidateOutcome",view.candidateOutcome},{"candidateIsFinal",false},{"inspectionFactsAvailable",hostFacts},
             {"outcome",outcome},{"finalReason",reason},{"elapsedMs",view.elapsedMs},
-            {"hostEpoch",hostFacts?json(g_inputHostEpoch):json(nullptr)},{"powerGeneration",currentPowerGeneration()},
+            {"hostEpoch",hostFacts?json(g_inputHostEpoch):json(nullptr)},{"powerGeneration",hostFacts?json(currentPowerGeneration()):json(nullptr)},
             {"inspectionChecks",hostFacts?json(observed?observation.checks:0):json(nullptr)},
             {"healthyChecks",hostFacts?json(observed?observation.healthyChecks:0):json(nullptr)},
             {"excludedChecks",hostFacts?json(observed?observation.excludedChecks:0):json(nullptr)},
             {"knownFaultChecks",hostFacts?json(observed?observation.knownFaultChecks:0):json(nullptr)},
+            {"cleanupEvidence",hostFacts && view.persona=="disabled"?inputHostCleanupEvidenceLocked():json(nullptr)},
             {"lastInspectionState",observed?observation.lastState:"unobserved"},
             {"lastInspectionEvidence",observed?observation.lastEvidence:"unobserved"},
             {"acceptedSourceRequestId",hostFacts?json(acceptedSource.requestId):json(nullptr)},
@@ -262,9 +310,11 @@ static void finalLogLocked(const View& view, const char* outcome, const char* re
             {"offSignalBaselineRequestId",hostFacts && rogOffSignal.requestId==view.requestId?json(rogOffSignal.baseline.requestId):json(nullptr)},
             {"offSignalBaselineSequence",hostFacts && rogOffSignal.requestId==view.requestId?json(rogOffSignal.baseline.sequence):json(nullptr)},
             {"offSignalReturnDutyPending",hostFacts?json(rogReturnBaseline.returnPending):json(nullptr)},
-            {"offSignalCheckRequired",hostFacts && rogOffSignal.requestId==view.requestId},
+            {"offSignalCheckRequired",hostFacts?json(rogOffSignal.requestId==view.requestId):json(nullptr)},
             {"offSignalStableSince",hostFacts && rogOffSignal.requestId==view.requestId?json(rogOffSignal.since):json(nullptr)},
-            {"physicalReturnVerified",false},{"gameInputVerified",false},{"resultScope","local-switch-verification"}});
+            {"physicalReturnVerified",false},{"gameInputVerified",false},{"resultScope","local-switch-verification"}};
+        appendInspectionFacts(detail,observed?&observation:nullptr);
+        appendNativeLifecycleLog("input-host-switch-verification",detail);
     } catch (...) { /* Optional diagnostics never repeat or change the result. */ }
 }
 
@@ -273,7 +323,11 @@ static bool busyLocked() {
     // may outlast local Host cleanup; OFF cannot finalize while it can still
     // mutate the source. Polling/retirement remains with its original owner,
     // and the original R3 hard deadline is never renewed here.
-    if(inputHostConfiguredPersona()=="disabled" && rogXboxSignalScope() &&
+    // Win5 field 2026-10-26: OFF finalized before its exact native restore
+    // helper became terminal. Extend the existing writer-lifetime fence only
+    // to GPD; this is not physical-return or single-controller proof.
+    if(inputHostConfiguredPersona()=="disabled" &&
+            (rogXboxSignalScope() || nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd) &&
             g_msiNativeForegroundCyclePending.load(std::memory_order_acquire))return true;
     if(inputHostWakeExecutionPending(g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId))return true;
     if(g_inputHostPsEndpointFault.waitingForAdmission &&
@@ -295,18 +349,30 @@ static bool busyLocked() {
     return !g_inputHostLifecycleWorkQueue.empty();
 }
 
+static std::uint32_t pauseReasonMaskLocked(std::uint32_t* observedMask=nullptr) {
+    // Sample cached gates once; pause and classification use the same mask.
+    // The writer predicate can query OS capabilities, so preserve its original
+    // short-circuit eligibility and mark it unobserved behind an earlier gate.
+    // Focus-neutral output remains eligible; no power policy is duplicated.
+    std::uint32_t reasons=0;
+    if(g_shortcutRecordingActive.load(std::memory_order_acquire))reasons|=Recording;
+    if(physicalReleaseWindowActive())reasons|=PhysicalRelease;
+    if(g_externalPriorityVirtualSuspended.load(std::memory_order_acquire))reasons|=ExternalPriority;
+    if(g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready)reasons|=PowerNotReady;
+    if(!g_inputReady.load(std::memory_order_acquire))reasons|=InputNotReady;
+    const bool writerObserved=reasons==0;
+    if(writerObserved && !sgVirtualWriterAllowedNow())reasons|=SgWriterBlocked;
+    if(g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire))reasons|=AdmissionRevoked;
+    if(inputHostExitFenceRaised())reasons|=ExitFence;
+    if(g_exitRequested.load(std::memory_order_acquire))reasons|=ExitRequested;
+    if(g_inputCaptureStop.load(std::memory_order_acquire))reasons|=CaptureStop;
+    if(observedMask)*observedMask=writerObserved?AllPauseReasons:(AllPauseReasons&~SgWriterBlocked);
+    return reasons;
+}
 static bool pausedLocked() {
     // Expected suppression is neither a fault nor permission to retry. Keep
     // the original deadline during recording, handoff or power pauses.
-    // YMCC focus owns legitimate neutral output; its absence of game actions
-    // is neither a fault nor a reason to block cached-source verification.
-    return g_shortcutRecordingActive.load(std::memory_order_acquire) ||
-        physicalReleaseWindowActive() || g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
-        g_powerLifecycle.load(std::memory_order_acquire) != PowerLifecycle::Ready ||
-        !g_inputReady.load(std::memory_order_acquire) || !sgVirtualWriterAllowedNow() ||
-        g_inputHostPowerAdmissionRevoked.load(std::memory_order_acquire) ||
-        inputHostExitFenceRaised() || g_exitRequested.load(std::memory_order_acquire) ||
-        g_inputCaptureStop.load(std::memory_order_acquire);
+    return pauseReasonMaskLocked()!=0;
 }
 
 static bool disabledCleanLocked() {
@@ -438,14 +504,29 @@ static void inputHostSwitchVerificationMaintenanceLocked() {
             rogOffSignal.requestId!=view.requestId) rememberRogOffSignalLocked();
     if (observation.requestId!=view.requestId) observation={view.requestId};
     ++observation.checks;
-    const bool expectedPause=pausedLocked();
+    const auto previousPauseReasonMask=observation.pauseReasonMask;
+    const auto previousPauseReasonObservedMask=observation.pauseReasonObservedMask;
+    observation.pauseReasonMask=pauseReasonMaskLocked(&observation.pauseReasonObservedMask);
+    observation.pauseReasonMaskSeen|=observation.pauseReasonMask;
+    observation.lastInspection={view.elapsedMs,currentPowerGeneration()};
+    const bool expectedPause=observation.pauseReasonMask!=0;
     bool healthy=false;
     const bool knownFault=!expectedPause && view.persona=="steamdeck" &&
         g_inputHostTransportFault &&
         ymcc::inputHost::switchRecoveryRuntime::retryable(g_inputHostSwitchRecoveryTransportError);
     const char* observedState="evidence-unknown";
     const char* observedEvidence="expected-pause";
-    if (expectedPause) { ++observation.excludedChecks;observedState="expected-paused"; }
+    if (expectedPause) {
+        if(!observation.excludedChecks) {
+            observation.firstExcluded=observation.lastInspection;
+            observation.firstExcludedPauseReasonMask=observation.pauseReasonMask;
+            observation.firstExcludedPauseReasonObservedMask=observation.pauseReasonObservedMask;
+        }
+        observation.lastExcluded=observation.lastInspection;
+        observation.lastExcludedPauseReasonMask=observation.pauseReasonMask;
+        observation.lastExcludedPauseReasonObservedMask=observation.pauseReasonObservedMask;
+        ++observation.excludedChecks;observedState="expected-paused";
+    }
     else if (knownFault) {
         ++observation.knownFaultChecks;observedState="classified-transport-fault";observedEvidence="actual-retryable-pipe-error";
         // This is a diagnosed fault, never a timer/idle-triggered rebuild.
@@ -465,15 +546,34 @@ static void inputHostSwitchVerificationMaintenanceLocked() {
             healthy=clean && rogOffSignalObservedLocked(view,&observedEvidence);
             if (!clean) observedEvidence="disabled-cleanup-pending";
         } else healthy=currentOutputProvenLocked(view,&observedEvidence);
-        if (healthy) { ++observation.healthyChecks;observedState="current-local-chain-healthy"; }
+        if (healthy) {
+            if(!observation.healthyChecks)observation.firstHealthy=observation.lastInspection;
+            observation.lastHealthy=observation.lastInspection;
+            ++observation.healthyChecks;observedState="current-local-chain-healthy";
+        }
     }
-    if (std::strcmp(observation.lastState,observedState)!=0 || std::strcmp(observation.lastEvidence,observedEvidence)!=0) {
+    const bool stateOrEvidenceChanged=std::strcmp(observation.lastState,observedState)!=0 ||
+        std::strcmp(observation.lastEvidence,observedEvidence)!=0;
+    const bool pauseDetailsChanged=previousPauseReasonMask!=observation.pauseReasonMask ||
+        previousPauseReasonObservedMask!=observation.pauseReasonObservedMask;
+    bool emitMaskOnly=false;
+    // Keep all original state/evidence rows. Only the newly added mask-only
+    // rows spend this request's small diagnostic budget; sampling continues.
+    // This bounds emission attempts, not durable writes or complete coverage.
+    if(!stateOrEvidenceChanged && pauseDetailsChanged) {
+        if(observation.pauseMaskOnlyLogAttempts<pauseMaskOnlyLogLimit) {
+            ++observation.pauseMaskOnlyLogAttempts;emitMaskOnly=true;
+        } else ++observation.pauseMaskOnlyChangesOmitted;
+    }
+    if (stateOrEvidenceChanged || emitMaskOnly) {
         observation.lastState=observedState;observation.lastEvidence=observedEvidence;
-        try {appendNativeLifecycleLog("input-host-switch-verification",{
+        try {json detail={
             {"stage","inspection"},{"requestId",view.requestId},{"state",observedState},{"evidence",observedEvidence},
             {"lifecycleVersion",ymcc::VirtualStartProtection::lifecycleVersion},{"fallbackAttempts",view.fallbackAttempts},
             {"checks",observation.checks},{"verificationRemainingMs",view.verificationRemainingMs},
-            {"remainingMs",view.remainingMs},{"candidateIsFinal",false},{"replay",false}});}catch(...){}
+            {"remainingMs",view.remainingMs},{"candidateIsFinal",false},{"replay",false}};
+            appendInspectionFacts(detail,&observation);
+            appendNativeLifecycleLog("input-host-switch-verification",detail);}catch(...){}
     }
     // Time passing never substitutes for actual inspection or completed cleanup.
     if (view.verificationRemainingMs || expectedPause || busyLocked()) return;

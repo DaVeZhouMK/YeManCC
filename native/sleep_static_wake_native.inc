@@ -1,11 +1,12 @@
 // Include once after the retired #if 0 block, before ipc_cmd_async.
 // Existing main.cpp dependencies (no new worker/background hooks):
 // struct RunOut { std::string out; DWORD exitCode; bool ran; };
-// static RunOut runCapture(const std::wstring&, DWORD);
+// static RunOut runCapture(const std::wstring&, DWORD, const std::function<bool()>& = {});
 // static std::wstring U2W(const std::string&); static std::string W2U(const std::wstring&);
 // Existing HardwareWriteLease(const char*) guards shared hardware write ownership.
 // Evidence source configuration/lifetime belongs exclusively to the parent source owner.
 #include "sleep_static_wake_policy.h"
+#include "sleep_static_wake_receipt.h"
 #include <windows.h>
 #include <tlhelp32.h>
 #include <winsvc.h>
@@ -82,7 +83,8 @@ inline bool decode(const std::string& bytes,std::string& out) {
 }
 // Never decode undocumented registry bit masks. Token listing must be complete,
 // including all three invariant section names, or software mutation fails closed.
-inline bool parseOverrides(const std::string& text,std::map<std::string,Json>& out,std::string& error) {
+inline bool parseOverrides(const std::string& text,std::map<std::string,Json>& out,std::string& error,const std::map<std::string,std::string>* callerNames=nullptr) {
+    if(!callerNames){error="override-caller-name-evidence-required";return false;}
     std::string section;std::set<std::string> sections;
     for(const auto& line:lines(text)) {
         if(line.front()=='['&&line.back()==']') {
@@ -91,25 +93,50 @@ inline bool parseOverrides(const std::string& text,std::map<std::string,Json>& o
             continue;
         }
         if(section.empty()){error="override-preamble-unrecognized";return false;}
-        std::string name=line;std::set<std::string> flags;
-        while(true) {
-            const auto last=name.find_last_of(" \t");
-            if(last==std::string::npos)break;
-            const auto word=name.substr(last+1);
-            if(word!="SYSTEM"&&word!="DISPLAY"&&word!="AWAYMODE")break;
-            if(!flags.insert(word).second){error="override-duplicate-request-token";return false;}
-            name=trim(name.substr(0,last));
+        // At most three possible token splits, resolved against independent
+        // registry NAME evidence. A caller ending in SYSTEM is never guessed.
+        std::string remaining=line,match;std::set<std::string> flags;Json matchedFlags;unsigned matches=0;
+        for(unsigned split=0;split<3;++split) {
+            const auto last=remaining.find_last_of(" \t");if(last==std::string::npos)break;
+            const auto token=remaining.substr(last+1);
+            if((token!="SYSTEM"&&token!="DISPLAY"&&token!="AWAYMODE")||!flags.insert(token).second)break;
+            remaining=trim(remaining.substr(0,last));
+            const auto key=section+"\n"+keyName(remaining);
+            if(!callerNames->count(key))continue;
+            ++matches;match=key;matchedFlags=Json::array();for(const auto& flag:flags)matchedFlags.push_back(flag);
         }
-        if(flags.empty()||!argValid(name)){error="override-line-unrecognized";return false;}
-        const auto key=section+"\n"+keyName(name);
-        if(keyName(name).empty()||out.count(key)){error="override-caller-ambiguous";return false;}
-        out[key]=Json::array();for(const auto& f:flags)out[key].push_back(f);
+        if(matches!=1||out.count(match)){error="override-name-evidence-ambiguous-or-mismatched";return false;}
+        out[match]=std::move(matchedFlags);
     }
     if(sections!=std::set<std::string>{"PROCESS","SERVICE","DRIVER"}){error="override-snapshot-incomplete-or-localized";return false;}
+    if(out.size()!=callerNames->size()){error="override-registry-name-and-CLI-snapshot-differ";return false;}
     return true;
 }
 struct Node {DEVINST dn=0;std::wstring id,service,hardware;std::set<std::wstring> labels;};
-struct Inventory {std::vector<Node> nodes;std::set<DEVINST> protectedNodes;bool protectionReady=false;};
+struct Inventory {std::vector<Node> nodes;std::set<DEVINST> protectedNodes;DEVINST root=0;bool protectionReady=false;};
+// Only a successful command may supply this snapshot. A real inventory label
+// always wins over a supported localized empty-list marker; no other locale is guessed.
+inline bool emptyArmedList(const std::vector<std::string>& ls,const Inventory& inv) {
+    if(ls.size()!=1)return false;
+    const bool supported=ls.front()=="NONE"||ls.front()=="\xE6\x97\xA0";
+    if(!supported)return false;
+    const auto label=lower(U2W(ls.front()));
+    return std::none_of(inv.nodes.begin(),inv.nodes.end(),[&](const Node& node){return node.labels.count(label)!=0;});
+}
+inline bool parseArmed(const std::string& text,const Inventory& inv,std::set<std::string>& names,std::string& e) {
+    const auto ls=lines(text);
+    if(ls.empty()){e="wake-armed-empty-output-unproven";return false;}
+    if(text.find('\0')!=std::string::npos){e="wake-armed-unrecognized-output";return false;}
+    if(emptyArmedList(ls,inv)){names.clear();return true;}
+    std::set<std::string> parsed;
+    for(const auto& name:ls) {
+        const auto key=keyName(name);const auto label=lower(U2W(name));
+        const bool known=std::any_of(inv.nodes.begin(),inv.nodes.end(),[&](const Node& node){return node.labels.count(label)!=0;});
+        if(!argValid(name)||key.empty()||!known||!MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,name.data(),static_cast<int>(name.size()),nullptr,0)){e="wake-armed-unrecognized-output";return false;}
+        parsed.insert(key); // Unrelated duplicate labels are harmless; target resolution is unique.
+    }
+    names=std::move(parsed);return true;
+}
 inline std::wstring property(HDEVINFO list,SP_DEVINFO_DATA& dev,DWORD prop) {
     DWORD type=0,bytes=0;
     SetupDiGetDeviceRegistryPropertyW(list,&dev,prop,&type,nullptr,0,&bytes);
@@ -122,15 +149,45 @@ inline std::wstring property(HDEVINFO list,SP_DEVINFO_DATA& dev,DWORD prop) {
     for(std::size_t i=0;i<bytes/sizeof(wchar_t)&&w[i];) {const std::wstring v=w+i;all+=v+L";";i+=v.size()+1;}
     return all;
 }
+inline bool virtualOrFan(const Node& n) {
+    const auto h=lower(n.hardware),s=lower(n.service);
+    return s==L"vigembus"||s==L"vjoy"||s==L"hidhide"||h.find(L"vigem")!=std::wstring::npos||h.find(L"pnp0c0b")!=std::wstring::npos;
+}
 inline bool excluded(const Node& n) {
-    const auto h=lower(n.hardware),s=lower(n.service),id=lower(n.id);
-    return s.find(L"usb4")!=std::wstring::npos||s==L"vigembus"||s==L"vjoy"||s==L"hidhide"||
-        h.find(L"vigem")!=std::wstring::npos||h.find(L"pnp0c0b")!=std::wstring::npos||
-        id.rfind(L"root\\",0)==0||id.rfind(L"swd\\",0)==0;
+    const auto id=lower(n.id);
+    return virtualOrFan(n)||id.rfind(L"root\\",0)==0||id.rfind(L"swd\\",0)==0;
 }
 inline std::string winError(const char* operation) {return std::string(operation)+":"+std::to_string(GetLastError());}
+// Both directory and journal file require a protected, administrator/SYSTEM-only
+// owner and DACL. Directory traversal privilege cannot substitute for file ACLs.
+static constexpr const wchar_t* journalSecuritySddl=L"O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)";
+inline bool trustedJournalSecurity(PSECURITY_DESCRIPTOR sd) {
+    if(!sd||!IsValidSecurityDescriptor(sd))return false;
+    PSID owner=nullptr;BOOL defaulted=FALSE,present=FALSE;PACL acl=nullptr;
+    BYTE admin[SECURITY_MAX_SID_SIZE]{},system[SECURITY_MAX_SID_SIZE]{};DWORD adminSize=sizeof(admin),systemSize=sizeof(system);
+    if(!CreateWellKnownSid(WinBuiltinAdministratorsSid,nullptr,admin,&adminSize)||!CreateWellKnownSid(WinLocalSystemSid,nullptr,system,&systemSize)||
+        !GetSecurityDescriptorOwner(sd,&owner,&defaulted)||!owner||!IsValidSid(owner)||
+        (!EqualSid(owner,admin)&&!EqualSid(owner,system))||!GetSecurityDescriptorDacl(sd,&present,&acl,&defaulted)||!present||!acl||!IsValidAcl(acl)||!acl->AceCount)return false;
+    SECURITY_DESCRIPTOR_CONTROL control=0;DWORD revision=0;
+    if(!GetSecurityDescriptorControl(sd,&control,&revision)||!(control&SE_DACL_PROTECTED))return false;
+    for(DWORD index=0;index<acl->AceCount;++index) {
+        void* ace=nullptr;if(!GetAce(acl,index,&ace))return false;
+        const auto* header=static_cast<const ACE_HEADER*>(ace);
+        if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE||header->AceSize<sizeof(ACCESS_ALLOWED_ACE))return false;
+        const auto* allowed=static_cast<const ACCESS_ALLOWED_ACE*>(ace);PSID sid=const_cast<DWORD*>(&allowed->SidStart);
+        if(!IsValidSid(sid)||(!EqualSid(sid,admin)&&!EqualSid(sid,system)))return false;
+    }
+    return true;
+}
+struct DeviceObservation {Inventory inventory;std::set<std::string> armedNames;};
 struct Native {
+    using Overrides=std::map<std::string,Json>;
+    ObservationCache<Overrides> softwareObservation;
+    SoftwareSnapshotCircuit softwareCircuit; // reset ONLY at independent operation boundary
+    ObservationCache<DeviceObservation> deviceObservation;
+    void invalidateObservations() {softwareObservation.invalidate();deviceObservation.invalidate();}
     std::uint64_t deadline=GetTickCount64()+180000;
+    std::function<bool()> canceled;
     std::wstring directory,path;
     Native() {
         PWSTR base=nullptr;
@@ -139,7 +196,11 @@ struct Native {
         }
         if(base)CoTaskMemFree(base);
     }
-    bool time(std::string& e) const {if(GetTickCount64()<deadline)return true;e="operation-deadline-180s";return false;}
+    bool isCanceled() const noexcept {try{return canceled&&canceled();}catch(...){return true;}}
+    bool time(std::string& e) const {
+        if(isCanceled()){e="operation-canceled";return false;}
+        if(GetTickCount64()<deadline)return true;e="operation-deadline-180s";return false;
+    }
     bool command(const std::vector<std::wstring>& args,std::string& out,std::string& e) {
         if(!time(e))return false;
         wchar_t sys[32768]{};const UINT n=GetSystemDirectoryW(sys,32768);
@@ -149,14 +210,62 @@ struct Native {
         std::wstring cmd=quote(exe);
         for(const auto& a:args){if(a.find(L'\0')!=std::wstring::npos){e="command-NUL-rejected";return false;}cmd+=L" "+quote(a);}
         const auto now=GetTickCount64();if(now>=deadline){e="operation-deadline-180s";return false;}
-        // Short per-command cap allows a large scan to finish partially in 180s.
-        const DWORD timeout=static_cast<DWORD>((std::min)(std::uint64_t{2500},deadline-now));
-        const auto run=runCapture(cmd,timeout);
-        if(!run.ran||run.exitCode!=0){e="powercfg-failed:"+std::to_string(run.exitCode);return false;}
-        if(!decode(run.out,out)){e="powercfg-output-encoding-unrecognized";return false;}return true;
+        // Only the read-only global overrides snapshot gets compatibility headroom.
+        // Writes and other queries stay short; both share the existing 180s deadline.
+        const DWORD timeout=static_cast<DWORD>((std::min)(
+            std::uint64_t{args.size()==1&&args.front()==L"/requestsoverride"?5000u:2500u},deadline-now));
+        if(!time(e))return false;
+        const auto run=runCapture(cmd,timeout,[this]{return isCanceled()||GetTickCount64()>=deadline;});
+        if(!time(e))return false;
+        // REQUIRED low-frequency failure evidence. Keep in the ordinary journal/error
+        // path; never gate it on verbose logging or remove it as a cost optimization.
+        const auto failureDetail=[&]() {
+            const auto phase=args.empty()?"unspecified":(args.front()==L"/requestsoverride"?(args.size()==1?"overrides-snapshot":"override-write"):
+                (args.front()==L"/devicequery"?"wake-armed":(args.front()==L"/devicedisablewake"?"wake-disable":(args.front()==L"/deviceenablewake"?"wake-enable":
+                (args.front()==L"/setacvalueindex"?"timer-ac":(args.front()==L"/setdcvalueindex"?"timer-dc":(args.front()==L"/setactive"?"scheme-activate":"other")))))));
+            return ";ran="+std::to_string(run.ran?1:0)+";elapsedMs="+std::to_string(GetTickCount64()-now)+";timeoutMs="+std::to_string(timeout)+";phase="+phase+";completion="+run.completion+";win32Error="+std::to_string(run.win32Error);
+        };
+        if(!run.ran||run.exitCode!=0){e="powercfg-failed:"+std::to_string(run.exitCode)+failureDetail();return false;}
+        if(!decode(run.out,out)){e="powercfg-output-encoding-unrecognized"+failureDetail();return false;}return true;
+    }
+    bool overrideCallerNames(std::map<std::string,std::string>& names,std::string& e) {
+        if(!time(e))return false;
+        // Observed namespace used ONLY as corroborating caller-name evidence.
+        // A changed/missing layout cannot grant permission: complete CLI/name
+        // agreement is mandatory. No registry value is decoded or modified.
+        HKEY root=nullptr;
+        const auto code=RegOpenKeyExW(HKEY_LOCAL_MACHINE,L"SYSTEM\\CurrentControlSet\\Control\\Power\\PowerRequestOverride",0,KEY_READ|KEY_WOW64_64KEY,&root);
+        if(code==ERROR_FILE_NOT_FOUND||code==ERROR_PATH_NOT_FOUND)return true;
+        if(code!=ERROR_SUCCESS){e="override-name-registry-open:"+std::to_string(code);return false;}
+        bool ok=true;
+        for(DWORD index=0;;++index) {
+            if(!time(e)){ok=false;break;}
+            wchar_t category[256]{};DWORD count=256;
+            const auto next=RegEnumKeyExW(root,index,category,&count,nullptr,nullptr,nullptr,nullptr);
+            if(next==ERROR_NO_MORE_ITEMS)break;
+            if(next!=ERROR_SUCCESS){e="override-name-category-enumeration:"+std::to_string(next);ok=false;break;}
+            const auto cat=lower(category);
+            const std::string type=cat==L"process"?"PROCESS":(cat==L"service"?"SERVICE":(cat==L"driver"?"DRIVER":""));
+            if(type.empty()){e="override-name-registry-class-unsupported";ok=false;break;}
+            HKEY child=nullptr;
+            const auto opened=RegOpenKeyExW(root,category,0,KEY_QUERY_VALUE|KEY_WOW64_64KEY,&child);
+            if(opened!=ERROR_SUCCESS){e="override-name-class-open:"+std::to_string(opened);ok=false;break;}
+            for(DWORD valueIndex=0;;++valueIndex) {
+                if(!time(e)){ok=false;break;}
+                std::vector<wchar_t> name(32768,0);DWORD length=static_cast<DWORD>(name.size()),kind=0,bytes=0;
+                const auto value=RegEnumValueW(child,valueIndex,name.data(),&length,nullptr,&kind,nullptr,&bytes);
+                if(value==ERROR_NO_MORE_ITEMS)break;
+                if(value!=ERROR_SUCCESS||kind!=REG_DWORD||bytes!=sizeof(DWORD)){e="override-name-value-layout-unsupported";ok=false;break;}
+                const auto caller=W2U(std::wstring(name.data(),length));
+                if(!argValid(caller)||keyName(caller).empty()||!names.emplace(type+"\n"+keyName(caller),caller).second){e="override-registry-caller-ambiguous";ok=false;break;}
+            }
+            RegCloseKey(child);if(!ok)break;
+        }
+        RegCloseKey(root);return ok;
     }
     bool overrides(std::map<std::string,Json>& map,std::string& e) {
-        std::string text;return command({L"/requestsoverride"},text,e)&&parseOverrides(text,map,e);
+        std::map<std::string,std::string> callers;std::string text;
+        return overrideCallerNames(callers,e)&&command({L"/requestsoverride"},text,e)&&parseOverrides(text,map,e,&callers);
     }
     bool inventory(Inventory& out,std::string& e) {
         if(!time(e))return false;
@@ -197,9 +306,11 @@ struct Native {
         if(!buttonsOk||seeds.empty()){if(e.empty())e="human-power-button-path-unproven";return true;}
         DEVINST root=0;
         if(CM_Locate_DevNodeW(&root,nullptr,CM_LOCATE_DEVNODE_NORMAL)!=CR_SUCCESS){e="pnp-root-unavailable";return true;}
+        out.root=root;
         for(const auto seed:seeds) {
             DEVINST current=seed;std::set<DEVINST> chain;bool rooted=false;
             for(unsigned depth=0;depth<128;++depth) {
+                if(!time(e))return false;
                 if(!chain.insert(current).second)break;
                 out.protectedNodes.insert(current);
                 if(current==root){rooted=true;break;}
@@ -214,18 +325,27 @@ struct Native {
         for(const auto& n:inv.nodes)if(n.labels.count(label)){if(match)return nullptr;match=&n;}
         return match;
     }
-    bool armed(const Inventory& inv,std::set<std::string>& names,std::string& e) {
-        std::string text;if(!command({L"/devicequery",L"wake_armed"},text,e))return false;
-        const auto ls=lines(text);
-        if(ls.size()==1&&ls.front()=="NONE")return true;
-        (void)inv; // The requested item's identity is validated by read()/write().
-        for(const auto& name:ls) {
-            if(!argValid(name)||keyName(name).empty()){e="wake-armed-invalid-name";return false;}
-            names.insert(keyName(name)); // Unrelated duplicate names do not block a unique target.
+    bool excludedPath(const Inventory& inv,const Node& node,std::string& e) const {
+        if(excluded(node))return true;
+        if(!inv.root){e="device-ancestor-root-unproven";return true;}
+        DEVINST current=node.dn;std::set<DEVINST> visited;
+        for(unsigned depth=0;depth<128;++depth) {
+            if(!time(e))return true;
+            if(current==inv.root)return false;
+            if(!visited.insert(current).second)break;
+            DEVINST parent=0;if(CM_Get_Parent(&parent,current,0)!=CR_SUCCESS)break;
+            const auto found=std::find_if(inv.nodes.begin(),inv.nodes.end(),[&](const Node& n){return n.dn==parent;});
+            if(found==inv.nodes.end())break;
+            if(virtualOrFan(*found))return true;
+            current=parent;
         }
-        return true;
+        e="device-ancestor-chain-incomplete";return true; // Never guess a virtual/fan ancestor is absent.
+    }
+    bool armed(const Inventory& inv,std::set<std::string>& names,std::string& e) {
+        std::string text;return command({L"/devicequery",L"wake_armed"},text,e)&&parseArmed(text,inv,names,e);
     }
     bool active(GUID& guid,std::string& e) const {
+        if(!time(e))return false;
         GUID* value=nullptr;const auto code=PowerGetActiveScheme(nullptr,&value);
         if(code!=ERROR_SUCCESS||!value){if(value)LocalFree(value);e="active-power-scheme:"+std::to_string(code);return false;}
         guid=*value;LocalFree(value);return true;
@@ -234,11 +354,15 @@ struct Native {
     static bool guidParse(const std::string& text,GUID& guid) {return text.size()==38&&SUCCEEDED(CLSIDFromString(U2W(text).c_str(),&guid));}
     bool collect(Json& items,Json& protect,Json& failures,std::string& e) {
         const auto problem=[&](const char* kind,const std::string& why){failures.push_back({{"kind",kind},{"error",why}});};
-        // Current running process snapshot, not just the few active /requests callers.
-        std::set<std::string> callers;
-        const auto add=[&](const std::string& type,const std::wstring& wide) {
+        // Running process snapshot plus ALL installed service names (including stopped).
+        // This cannot enumerate arbitrary future executable names.
+        std::set<std::string> callers;std::set<DWORD> fanPids;
+        const auto add=[&](const std::string& type,const std::wstring& wide,bool fanService=false) {
             const auto name=W2U(wide);if(!argValid(name)||keyName(name).empty()){problem("software","invalid-caller-name");return;}
             const auto key=type+"\n"+keyName(name);if(!callers.insert(key).second)return;
+            if((type=="PROCESS"&&fanHostProcessName(name))||fanService) {
+                protect.push_back({{"kind","software"},{"name",name},{"type",type},{"reason",fanService?"ymcc-fanhost-service-pid-owner":"ymcc-fanhost-owner"}});return;
+            }
             items.push_back({{"key",key},{"kind","software"},{"name",name},{"target",{{"type",type},{"name",name}}},{"expected",Json::array({"AWAYMODE","DISPLAY","SYSTEM"})}});
         };
         HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS,0);
@@ -246,7 +370,7 @@ struct Native {
         else {
             PROCESSENTRY32W process{};process.dwSize=sizeof(process);
             if(!Process32FirstW(snapshot,&process))problem("software",winError("process-first"));
-            else do {if(!time(e))break;if(process.th32ProcessID)add("PROCESS",process.szExeFile);}while(Process32NextW(snapshot,&process));
+            else do {if(!time(e))break;if(process.th32ProcessID){if(fanHostProcessName(W2U(process.szExeFile)))fanPids.insert(process.th32ProcessID);add("PROCESS",process.szExeFile);}}while(Process32NextW(snapshot,&process));
             if(GetLastError()!=ERROR_NO_MORE_FILES&&time(e))problem("software",winError("process-next"));CloseHandle(snapshot);
         }
         SC_HANDLE manager=OpenSCManagerW(nullptr,nullptr,SC_MANAGER_ENUMERATE_SERVICE);
@@ -256,11 +380,11 @@ struct Native {
             do {
                 if(!time(e))break;
                 std::vector<BYTE> buffer(256*1024);DWORD needed=0,count=0;
-                const BOOL done=EnumServicesStatusExW(manager,SC_ENUM_PROCESS_INFO,SERVICE_TYPE_ALL,SERVICE_ACTIVE,buffer.data(),static_cast<DWORD>(buffer.size()),&needed,&count,&resume,nullptr);
+                const BOOL done=EnumServicesStatusExW(manager,SC_ENUM_PROCESS_INFO,SERVICE_TYPE_ALL,SERVICE_STATE_ALL,buffer.data(),static_cast<DWORD>(buffer.size()),&needed,&count,&resume,nullptr);
                 const DWORD code=done?ERROR_SUCCESS:GetLastError();
                 if(!done&&code!=ERROR_MORE_DATA){problem("software","service-enumeration:"+std::to_string(code));break;}
                 const auto* values=reinterpret_cast<ENUM_SERVICE_STATUS_PROCESSW*>(buffer.data());
-                for(DWORD i=0;i<count;++i)if(values[i].ServiceStatusProcess.dwCurrentState!=SERVICE_STOPPED)add("SERVICE",values[i].lpServiceName);
+                for(DWORD i=0;i<count;++i)add("SERVICE",values[i].lpServiceName,fanPids.count(values[i].ServiceStatusProcess.dwProcessId)!=0);
                 if(done)break;
                 if(!count){problem("software","service-enumeration-no-progress");break;}
             }while(resume);
@@ -277,26 +401,38 @@ struct Native {
         else {
             std::string text;
             if(!command({L"/devicequery",L"wake_armed"},text,deviceError))problem("devices",deviceError);
-            else for(const auto& name:lines(text)) {
-                if(name=="NONE")continue;
+            else {
+                std::set<std::string> armedNames;
+                if(!parseArmed(text,inv,armedNames,deviceError))problem("devices",deviceError);
+                else if(!armedNames.empty())for(const auto& name:lines(text)) {
                 const auto* node=resolve(inv,name);
-                const auto reason=!inv.protectionReady?"human-power-button-path-unproven":(!node?"ambiguous-device-name":(inv.protectedNodes.count(node->dn)?"human-power-button-or-ancestor":(excluded(*node)?"excluded-router-fan-or-virtual-device":"")));
+                const auto reason=!inv.protectionReady?"human-power-button-path-unproven":(!node?"ambiguous-device-name":(inv.protectedNodes.count(node->dn)?"human-power-button-or-ancestor":(excludedPath(inv,*node,deviceError)?"excluded-fan-or-virtual-device":"")));
                 if(*reason){protect.push_back({{"name",name},{"reason",reason}});continue;}
                 items.push_back({{"key","device\n"+W2U(lower(node->id))},{"kind","devices"},{"name",name},{"target",{{"instanceId",W2U(node->id)},{"name",name}}},{"expected",false}});
+                }
             }
             if(!inv.protectionReady)problem("devices",deviceError.empty()?"human-power-button-path-unproven":deviceError);
         }
-        // Prioritize the bounded AC/DC and device set before large software sets.
-        std::stable_sort(items.begin(),items.end(),[](const Json& a,const Json& b){const auto rank=[](const Json& v){const auto k=v["kind"].get<std::string>();return k=="timers"?0:(k=="devices"?1:2);};return rank(a)<rank(b);});
+        // Same one-shot candidates/budget: AC/DC and devices lead, then Steam.
+        orderScanCandidates(items);
         return time(e);
     }
-    bool read(const Json& item,Json& value,std::string& e) {
+    bool sample(const Json& item,Json& value,std::string& e,bool observation) {
         if(!time(e))return false;
         const auto kind=item.value("kind",std::string{});const auto& target=item["target"];
         if(kind=="software") {
             const auto type=target.value("type",std::string{}),name=target.value("name",std::string{});
-            if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)){e="invalid-software-target";return false;}
-            std::map<std::string,Json> map;if(!overrides(map,e))return false;
+            if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)||item["key"]!=type+"\n"+keyName(name)){e="invalid-software-target";return false;}
+            if(type=="PROCESS"&&fanHostProcessName(name)){e="protected-ymcc-fanhost-owner";return false;}
+            SoftwareSnapshotFailure failure;
+            if(softwareCircuit.failure(failure)){e=failure.error;return false;}
+            const auto load=[this](Overrides& map,std::string& error) {
+                return softwareCircuit.query([&](std::string& why){return overrides(map,why);},error);
+            };
+            const auto now=GetTickCount64();
+            const bool ok=observation?softwareObservation.observe(now,load,e):softwareObservation.refresh(now,load,e);
+            if(!ok||!time(e))return false;
+            const auto& map=softwareObservation.value();
             const auto it=map.find(type+"\n"+keyName(name));value=it==map.end()?Json::array():it->second;return true;
         }
         if(kind=="timers") {
@@ -306,37 +442,51 @@ struct Native {
             if(code!=ERROR_SUCCESS){e="timer-read:"+std::to_string(code);return false;}value=index;return true;
         }
         if(kind=="devices") {
-            Inventory inv;if(!inventory(inv,e))return false;
-            const auto* node=resolve(inv,target.value("name",std::string{}));
+            const auto load=[this](DeviceObservation& snapshot,std::string& error){return inventory(snapshot.inventory,error)&&armed(snapshot.inventory,snapshot.armedNames,error);};
+            const auto now=GetTickCount64();
+            const bool ok=observation?deviceObservation.observe(now,load,e):deviceObservation.refresh(now,load,e);
+            if(!ok||!time(e))return false;
+            const auto& snapshot=deviceObservation.value();
+            const auto* node=resolve(snapshot.inventory,target.value("name",std::string{}));
             if(!node||lower(node->id)!=lower(U2W(target.value("instanceId",std::string{})))){e="device-name-or-instance-identity-changed";return false;}
-            std::set<std::string> names;if(!armed(inv,names,e))return false;
-            value=names.count(keyName(target["name"].get<std::string>()))!=0;return true;
+            value=snapshot.armedNames.count(keyName(target["name"].get<std::string>()))!=0;return true;
         }
         e="invalid-item-kind";return false;
     }
+    bool read(const Json& item,Json& value,std::string& e) {return sample(item,value,e,false);}
+    bool observe(const Json& item,Json& value,std::string& e) {return sample(item,value,e,true);}
     bool write(const Json& item,const Json& value,std::string& e) {
+        // Every attempt invalidates observations, including a failed lease or a
+        // command that fails after changing a setting. Write/readback stay fresh.
+        invalidateObservations();
         if(!time(e)||!valueValid(item,value))return false;
         try {
+            if(!time(e))return false;
             HardwareWriteLease lease("sleep-static-wake.one-shot");
+            if(!time(e))return false;
             const auto kind=item.value("kind",std::string{});const auto& t=item["target"];std::string out;
             if(kind=="software") {
                 const auto type=t.value("type",std::string{}),name=t.value("name",std::string{});
-                if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)){e="invalid-software-target";return false;}
+                if((type!="PROCESS"&&type!="SERVICE")||!argValid(name)||item["key"]!=type+"\n"+keyName(name)){e="invalid-software-target";return false;}
+            if(type=="PROCESS"&&fanHostProcessName(name)){e="protected-ymcc-fanhost-owner";return false;}
                 std::vector<std::wstring> args={L"/requestsoverride",U2W(type),U2W(name)};
                 for(const auto& flag:value)args.push_back(U2W(flag.get<std::string>()));
-                return command(args,out,e); // Empty flags removes only this caller override.
+                // No-flags removal is attempted only for our saved empty baseline;
+                // Policy must confirm the result, otherwise OFF stays pending.
+                return command(args,out,e);
             }
             if(kind=="devices") {
                 Inventory inv;if(!inventory(inv,e))return false;
                 const auto* node=resolve(inv,t.value("name",std::string{}));
                 if(!node||lower(node->id)!=lower(U2W(t.value("instanceId",std::string{})))){e="device-identity-ambiguous";return false;}
-                if(!value.get<bool>()&&(!inv.protectionReady||inv.protectedNodes.count(node->dn)||excluded(*node))){e="protected-device-fail-safe";return false;}
+                if(excludedPath(inv,*node,e)||(!value.get<bool>()&&(!inv.protectionReady||inv.protectedNodes.count(node->dn)))){e="protected-device-fail-safe";return false;}
                 // This changes wake permission ONLY. Never disable a devnode/router.
                 return command({value.get<bool>()?L"/deviceenablewake":L"/devicedisablewake",U2W(t["name"].get<std::string>())},out,e);
             }
             if(kind=="timers") {
                 GUID scheme{},current{};const auto mode=t.value("mode",std::string{}),text=t.value("scheme",std::string{});
                 if(!guidParse(text,scheme)||(mode!="AC"&&mode!="DC")){e="invalid-timer-target";return false;}
+                if(value==item["expected"]&&(!active(current,e)||!IsEqualGUID(scheme,current))){e="active-scheme-changed-before-apply";return false;}
                 if(!command({mode=="AC"?L"/setacvalueindex":L"/setdcvalueindex",U2W(text),U2W(guidText(sleepGroup)),U2W(guidText(rtcWake)),std::to_wstring(value.get<DWORD>())},out,e))return false;
                 // Apply only if it is STILL current. Never switch an external plan.
                 if(!active(current,e))return false;
@@ -347,10 +497,11 @@ struct Native {
         e="invalid-item-kind";return false;
     }
     bool secureDirectory(bool create,std::string& e) {
+        if(!time(e))return false;
         if(directory.empty()){e="ProgramData-unavailable";return false;}
         if(create) {
             PSECURITY_DESCRIPTOR sd=nullptr;
-            if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(L"O:BAG:BAD:P(A;;FA;;;SY)(A;;FA;;;BA)",SDDL_REVISION_1,&sd,nullptr)){e=winError("journal-security");return false;}
+            if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(journalSecuritySddl,SDDL_REVISION_1,&sd,nullptr)){e=winError("journal-security");return false;}
             SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};const BOOL made=CreateDirectoryW(directory.c_str(),&sa);const DWORD code=made?ERROR_SUCCESS:GetLastError();LocalFree(sd);
             if(!made&&code!=ERROR_ALREADY_EXISTS){e="journal-directory:"+std::to_string(code);return false;}
         }
@@ -359,31 +510,27 @@ struct Native {
         if(!(attrs&FILE_ATTRIBUTE_DIRECTORY)||(attrs&FILE_ATTRIBUTE_REPARSE_POINT)){e="journal-directory-unsafe";return false;}
         PSECURITY_DESCRIPTOR sd=nullptr;PSID owner=nullptr;PACL acl=nullptr;
         const DWORD code=GetNamedSecurityInfoW(const_cast<LPWSTR>(directory.c_str()),SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,&owner,nullptr,&acl,nullptr,&sd);
-        BYTE admin[SECURITY_MAX_SID_SIZE]{},system[SECURITY_MAX_SID_SIZE]{};DWORD adminSize=sizeof(admin),systemSize=sizeof(system);
-        bool ok=code==ERROR_SUCCESS&&sd&&acl&&acl->AceCount&&CreateWellKnownSid(WinBuiltinAdministratorsSid,nullptr,admin,&adminSize)&&CreateWellKnownSid(WinLocalSystemSid,nullptr,system,&systemSize);
-        const auto trusted=[&](PSID sid){return sid&&(EqualSid(sid,admin)||EqualSid(sid,system));};
-        SECURITY_DESCRIPTOR_CONTROL control=0;DWORD revision=0;
-        ok=ok&&trusted(owner)&&GetSecurityDescriptorControl(sd,&control,&revision)&&(control&SE_DACL_PROTECTED);
-        if(ok)for(DWORD i=0;i<acl->AceCount;++i) {
-            void* ace=nullptr;
-            if(!GetAce(acl,i,&ace)){ok=false;break;}
-            const auto* header=static_cast<const ACE_HEADER*>(ace);
-            if(header->AceType!=ACCESS_ALLOWED_ACE_TYPE){ok=false;break;}
-            auto* allowed=static_cast<ACCESS_ALLOWED_ACE*>(ace);
-            if(!trusted(&allowed->SidStart)){ok=false;break;}
-        }
+        const bool ok=code==ERROR_SUCCESS&&trustedJournalSecurity(sd);
         if(sd)LocalFree(sd);
         if(!ok)e="journal-directory-owner-or-ACL-untrusted";return ok;
     }
+    bool fileSecurity(HANDLE file,std::string& e) const {
+        PSECURITY_DESCRIPTOR sd=nullptr;
+        const auto code=GetSecurityInfo(file,SE_FILE_OBJECT,OWNER_SECURITY_INFORMATION|DACL_SECURITY_INFORMATION,nullptr,nullptr,nullptr,nullptr,&sd);
+        const bool ok=code==ERROR_SUCCESS&&trustedJournalSecurity(sd);if(sd)LocalFree(sd);
+        if(!ok)e="journal-file-owner-or-ACL-untrusted";return ok;
+    }
     bool load(Json& value,std::string& e) {
+        if(!time(e))return false;
         if(path.empty()){e="ProgramData-unavailable";return false;}
         const auto attr=GetFileAttributesW(directory.c_str());
         if(attr==INVALID_FILE_ATTRIBUTES&&(GetLastError()==ERROR_FILE_NOT_FOUND||GetLastError()==ERROR_PATH_NOT_FOUND)){value=nullptr;return true;}
         if(!secureDirectory(false,e))return false;
-        HANDLE file=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
+        HANDLE file=CreateFileW(path.c_str(),GENERIC_READ|READ_CONTROL,FILE_SHARE_READ|FILE_SHARE_DELETE,nullptr,OPEN_EXISTING,FILE_FLAG_OPEN_REPARSE_POINT,nullptr);
         if(file==INVALID_HANDLE_VALUE){if(GetLastError()==ERROR_FILE_NOT_FOUND){value=nullptr;return true;}e=winError("journal-open");return false;}
+        if(!fileSecurity(file,e)){CloseHandle(file);return false;}
         BY_HANDLE_FILE_INFORMATION info{};LARGE_INTEGER size{};
-        if(!GetFileInformationByHandle(file,&info)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)||!GetFileSizeEx(file,&size)||size.QuadPart<=0||size.QuadPart>32*1024*1024){CloseHandle(file);e="journal-file-invalid-or-too-large";return false;}
+        if(!GetFileInformationByHandle(file,&info)||(info.dwFileAttributes&FILE_ATTRIBUTE_REPARSE_POINT)||info.nNumberOfLinks!=1||!GetFileSizeEx(file,&size)||size.QuadPart<=0||size.QuadPart>32*1024*1024){CloseHandle(file);e="journal-file-invalid-or-too-large";return false;}
         std::string bytes(static_cast<std::size_t>(size.QuadPart),'\0');DWORD got=0;
         const BOOL read=ReadFile(file,bytes.data(),static_cast<DWORD>(bytes.size()),&got,nullptr);CloseHandle(file);
         if(!read||got!=bytes.size()){e="journal-short-read";return false;}
@@ -395,8 +542,13 @@ struct Native {
         // intentionally independent of all high-frequency logging preferences.
         const auto bytes=value.dump();if(bytes.size()>32*1024*1024){e="journal-size-budget";return false;}
         const auto temp=path+L".tmp-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64());
-        HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE,0,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
-        if(file==INVALID_HANDLE_VALUE){e=winError("journal-temp-create");return false;}
+        PSECURITY_DESCRIPTOR sd=nullptr;
+        if(!ConvertStringSecurityDescriptorToSecurityDescriptorW(journalSecuritySddl,SDDL_REVISION_1,&sd,nullptr)){e=winError("journal-file-security");return false;}
+        SECURITY_ATTRIBUTES sa{sizeof(sa),sd,FALSE};
+        HANDLE file=CreateFileW(temp.c_str(),GENERIC_WRITE|READ_CONTROL,0,&sa,CREATE_NEW,FILE_ATTRIBUTE_NORMAL|FILE_FLAG_WRITE_THROUGH,nullptr);
+        const auto openError=file==INVALID_HANDLE_VALUE?GetLastError():ERROR_SUCCESS;LocalFree(sd);
+        if(file==INVALID_HANDLE_VALUE){e="journal-temp-create:"+std::to_string(openError);return false;}
+        if(!fileSecurity(file,e)){CloseHandle(file);DeleteFileW(temp.c_str());return false;}
         DWORD wrote=0;bool ok=WriteFile(file,bytes.data(),static_cast<DWORD>(bytes.size()),&wrote,nullptr)&&wrote==bytes.size()&&FlushFileBuffers(file);
         const auto code=ok?ERROR_SUCCESS:GetLastError();CloseHandle(file);
         if(ok)ok=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=FALSE;
@@ -408,7 +560,11 @@ struct Native {
         p.collect=[this](Json& a,Json& b,Json& c,std::string& e){return collect(a,b,c,e);};
         p.read=[this](const Json& a,Json& b,std::string& e){return read(a,b,e);};p.write=[this](const Json& a,const Json& b,std::string& e){return write(a,b,e);};
         p.monotonicMs=[](){return static_cast<std::uint64_t>(GetTickCount64());};p.epoch=[](){return static_cast<std::uint64_t>(std::time(nullptr));};
-        p.sourceReady=[](){return sgAbnormalSourceReady();};return p;
+        p.sourceReady=[this](){return !isCanceled()&&sgAbnormalSourceReady();};
+        p.canceled=[this](){return isCanceled();};
+        p.observe=[this](const Json& a,Json& b,std::string& e){return observe(a,b,e);};
+        p.beginOperation=[this](){invalidateObservations();softwareCircuit.reset();};
+        p.softwareSnapshotFailure=[this](SoftwareSnapshotFailure& failure){return softwareCircuit.failure(failure);};return p;
     }
 };
 static std::timed_mutex inProcess;
@@ -423,19 +579,35 @@ struct MachineLock {
     ~MachineLock(){if(acquired)ReleaseMutex(handle);if(handle)CloseHandle(handle);}
     MachineLock(const MachineLock&)=delete;MachineLock& operator=(const MachineLock&)=delete;
 };
-inline Json run(bool restore) {
-    Native native;
+inline Json run(bool restore,std::function<bool()> canceled) {
+    const auto started=GetTickCount64();
+    Native native;native.canceled=std::move(canceled);
+    // REQUIRED low-frequency receipt. Reuses existing counters; no new queries,
+    // timers or per-item records. Elapsed includes sleep and is not CPU time.
+    const auto completed=[&](Json result) {
+        result["operationEvidence"]={{"action",restore?"restore":"scan"},
+            {"elapsedMs",GetTickCount64()-started},
+            {"elapsedScope","operation-uptime;may-include-suspension;not-CPU-time"},
+            {"softwareSnapshot",native.softwareCircuit.evidence()},
+            {"diagnosticOnly",true},{"mandatoryEvidence",true},{"detailLogsRequired",false}};
+        return result;
+    };
+    // Worker only: OFF may wait for the canceled scan's bounded child command.
+    // This wait shares the operation deadline; the UI never waits on this lock.
+    const auto lockDeadline=GetTickCount64()+(restore?5000:1);
     std::unique_lock<std::timed_mutex> local(inProcess,std::defer_lock);
-    if(!local.try_lock_for(std::chrono::milliseconds(1))) {
-        Policy policy(native.ports());auto status=policy.status();status["lastError"]="static-wake-operation-busy";status["failed"]=status["failed"].get<std::size_t>()+1;return {{"ok",false},{"status",status}};
+    if(!local.try_lock_for(std::chrono::milliseconds(restore?5000:1))) {
+        Policy policy(native.ports());auto status=policy.status();status["lastError"]="static-wake-operation-busy";status["failed"]=status["failed"].get<std::size_t>()+1;return completed({{"ok",false},{"status",status}});
     }
-    MachineLock machine(1);
+    const auto lockNow=GetTickCount64();
+    const DWORD lockRemaining=lockNow<lockDeadline?static_cast<DWORD>(lockDeadline-lockNow):0;
+    MachineLock machine(lockRemaining);
     if(!machine.acquired) {
-        Policy policy(native.ports());auto status=policy.status();status["lastError"]="machine-journal-owner-lock-unavailable";status["failed"]=status["failed"].get<std::size_t>()+1;return {{"ok",false},{"status",status}};
+        Policy policy(native.ports());auto status=policy.status();status["lastError"]="machine-journal-owner-lock-unavailable";status["failed"]=status["failed"].get<std::size_t>()+1;return completed({{"ok",false},{"status",status}});
     }
     Policy policy(native.ports());const auto now=GetTickCount64();
-    if(now>=native.deadline){auto status=policy.status();status["lastError"]="operation-deadline-180s";status["failed"]=status["failed"].get<std::size_t>()+1;return {{"ok",false},{"status",status}};}
-    return restore?policy.restore(native.deadline-now):policy.scan(native.deadline-now);
+    if(now>=native.deadline){auto status=policy.status();status["lastError"]="operation-deadline-180s";status["failed"]=status["failed"].get<std::size_t>()+1;return completed({{"ok",false},{"status",status}});}
+    return completed(restore?policy.restore(native.deadline-now):policy.scan(native.deadline-now));
 }
 }}} // namespace ymcc::staticwake::native
 
@@ -443,6 +615,8 @@ inline Json run(bool restore) {
 // failure summary and restore result logs. These are REQUIRED diagnostic records;
 // do not gate them on verbose/frequent logs or delete them for performance.
 static const std::wstring SW_STATIC_WAKE_JOURNAL_PATH = ymcc::staticwake::native::Native().path;
+// Ordinary export copies this existing file only. No rescan, mkdir or config reads.
+static std::wstring swExportJournalPath() {return SW_STATIC_WAKE_JOURNAL_PATH;}
 static json swStatusSummary(const json& input) {
     json out;
     for(const auto* field:{"enabled","phase","lastScanEpoch","devices","software","timers","protectedDevices","failed","restorePending","diagnosticSourceReady","lastError"})out[field]=input.at(field);
@@ -454,12 +628,36 @@ static json swStatusSummary(const json& input) {
     }
     out["lastError"]=std::move(error);return out;
 }
-static json swGetStatus() {
+static ymcc::staticwake::OperationReceipts g_swOperationReceipts;
+static json swGetStatus(const std::string& requestId = {}) {
     ymcc::staticwake::native::Native native;
-    return swStatusSummary(ymcc::staticwake::Policy(native.ports()).status());
+    auto status=swStatusSummary(ymcc::staticwake::Policy(native.ports()).status());
+    if(!requestId.empty())status["operation"]=g_swOperationReceipts.get(requestId);
+    return status;
 }
-static json swPublicOperation(bool restore) {
-    try {auto result=ymcc::staticwake::native::run(restore);result["status"]=swStatusSummary(result["status"]);return result;}
+// Correlate completion only; the existing machine/process locks still own all
+// writes. A timed-out frontend can read this receipt without reissuing a write.
+static json swManualOperation(bool restore,const std::string& requestId,const std::function<json()>& work) {
+    if(requestId.empty())return work(); // Older callers keep their original contract.
+    const std::string action=restore?"restore":"scan";
+    if(!g_swOperationReceipts.begin(requestId,action)) {
+        const auto receipt=g_swOperationReceipts.get(requestId);
+        const bool same=receipt.value("action",std::string{})==action;
+        const bool completed=same&&receipt.value("state",std::string{})=="completed";
+        return {{"ok",completed&&receipt.value("ok",false)},{"status",swGetStatus(requestId)}};
+    }
+    try {
+        auto result=work();
+        g_swOperationReceipts.complete(requestId,action,result.value("ok",false));
+        result["status"]["operation"]=g_swOperationReceipts.get(requestId);
+        return result;
+    }catch(...) {
+        g_swOperationReceipts.complete(requestId,action,false);
+        throw;
+    }
+}
+static json swPublicOperation(bool restore,std::function<bool()> canceled) {
+    try {auto result=ymcc::staticwake::native::run(restore,std::move(canceled));result["status"]=swStatusSummary(result["status"]);return result;}
     catch(const std::exception& e) {
         auto status=ymcc::staticwake::emptyJournal();
         ymcc::staticwake::native::Native native;status=ymcc::staticwake::Policy(native.ports()).status();
@@ -468,5 +666,5 @@ static json swPublicOperation(bool restore) {
         return {{"ok",false},{"status",swStatusSummary(status)}};
     }
 }
-static json swScan() {return swPublicOperation(false);}
-static json swRestore() {return swPublicOperation(true);}
+static json swScan(std::function<bool()> canceled = {}) {return swPublicOperation(false,std::move(canceled));}
+static json swRestore(std::function<bool()> canceled = {}) {return swPublicOperation(true,std::move(canceled));}

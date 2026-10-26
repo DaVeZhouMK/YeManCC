@@ -112,7 +112,7 @@ static std::wstring exportCurrentSnapshot() {
     const auto path=SG_DIR+L"\\wake-recovery-current.json";
     return sgEnsureMarkerDir(SG_DIR)&&sgWriteFileAtomic(path,bytes)?path:std::wstring();
 }
-static void notify() {ipc_emit("sleep.recovery-auto",get());}
+static void notify() {sgNotifyWork();ipc_emit("sleep.recovery-auto",get());}
 static bool current(unsigned long long gen,unsigned long long epoch,const char* phase) {
     std::lock_guard<std::mutex> lock(mx);
     return sleepSteamRecoveryAllows(gen,epoch)&&state.generation==gen&&state.configEpoch==epoch&&state.phase==phase&&!proofSupersededLocked()&&wakeOperationAllowedLocked(gen,epoch)&&GetTickCount64()>=state.armed&&GetTickCount64()-state.armed<ymcc::sleepsteam::kWakeObserveLimitMs;
@@ -178,7 +178,7 @@ static json set(const json& a) {
             g_sleepRecoveryAutoPending.store(false,std::memory_order_release);
         }
         sgRecordFact("sleep-recovery-automatic-preference",{{"enabled",enabled},{"trigger","future-explicit-wake-only"}});
-        g_sgWorkCv.notify_one();notify();
+        notify();
     }
     return get();
 }
@@ -194,6 +194,7 @@ static void recordKernelWake(unsigned long long gen,int eventId,int reason,int t
         {std::lock_guard<std::mutex> lock(mx);if(sleepSteamRecoveryAllows(gen,epochNow)&&
             (kernelSleepEntry.configEpoch!=epochNow||eventFileTime>kernelSleepEntry.eventFileTime)){
             kernelSleepEntry={epochNow,gen,eventFileTime};changed=true;}}
+        if(changed)sgNotifyWork();
         if(changed)sgRecordFact("sleep-steam-kernel-entry-witness",{{"generation",gen},{"eventFileTime",std::to_string(eventFileTime)},
             {"candidateOnly",true},{"repairTriggered",false},{"healthVerified",false}});
         return;
@@ -223,6 +224,7 @@ static void recordKernelWake(unsigned long long gen,int eventId,int reason,int t
         // candidate, not authority; only arm() can bind it to a real boundary.
         kernelWake={gen,epoch,original.powerBoundaryFileTime,eventFileTime,eventId,!captured,false,0};
     }
+    sgNotifyWork();
     sgRecordFact(captured?"sleep-steam-wake-proof-recorded":"sleep-steam-wake-proof-await-capture",{{"generation",gen},{"source",source},
         {"boundaryFileTime",std::to_string(original.powerBoundaryFileTime)},{"eventFileTime",std::to_string(eventFileTime)},
         {"captureMatched",captured},{"candidateOnly",!captured},{"repairTriggered",false},{"healthVerified",false}});
@@ -292,7 +294,7 @@ static void arm(unsigned long long gen) {
     if(!changed)return;
     sgRecordFact(deferred?"sleep-steam-wake-await-kernel":"sleep-recovery-automatic-armed",
         {{"generation",gen},{"trigger",admission["source"]},{"wakeAdmission",admission},{"repairTriggered",!deferred},{"healthVerified",false}});
-    if(!deferred)g_sgWorkCv.notify_one();notify();
+    notify();
 }
 // Record RELIABLE native overview transitions, including while the original
 // sleep lease or a protected UI delays RETURN. This is historical evidence,
@@ -589,6 +591,29 @@ static void run(unsigned long long gen,unsigned long long epoch,bool verify) {
         finish(gen,epoch,"blocked","automatic-check-exception",{{"error",std::string(e.what()).substr(0,256)}});
     } catch(...) {finish(gen,epoch,"blocked","automatic-check-exception",json::object());}
 }
+// Worker completion publishes notify(); only a real next observation or the
+// unchanged watchdog deadline wakes an in-flight operation. No 50ms heartbeat.
+static ULONGLONG waitMs(ULONGLONG now) {
+    if(!g_sleepRecoveryAutoPending.load(std::memory_order_acquire))return ~ULONGLONG{0};
+    std::lock_guard<std::mutex> lock(mx);
+    if(!g_sleepRecoveryAutoPending.load(std::memory_order_acquire))return ~ULONGLONG{0};
+    if(now<state.armed||now<state.stageSince)return 0;
+    const auto total=now-state.armed,stage=now-state.stageSince;
+    if(total>=ymcc::sleepsteam::kWakeObserveLimitMs||stage>45000)return 0;
+    auto delay=(std::min)(ULONGLONG{ymcc::sleepsteam::kWakeObserveLimitMs}-total,ULONGLONG{45001}-stage);
+    if(state.phase=="waiting") {
+        if(total>=30000||wakeOperationAllowedLocked(state.generation,state.configEpoch))return 0;
+        delay=(std::min)(delay,(std::min)(ULONGLONG{250},ULONGLONG{30000}-total));
+    } else if(state.phase=="game-wait"||state.phase=="confirm-wait"||state.phase=="interaction-wait"||state.phase=="settle-wait"||state.phase=="session-wait") {
+        if(state.phase=="game-wait") {
+            if(total>=30000)return 0;
+            delay=(std::min)(delay,ULONGLONG{30000}-total);
+        }
+        if(now>=state.due)return 0;
+        delay=(std::min)(delay,state.due-now);
+    }
+    return delay;
+}
 static void tick() {
     if(!g_sleepRecoveryAutoPending.load(std::memory_order_acquire))return;
     unsigned long long gen=0,epoch=0;bool verify=false,submit=false,revokedProofOnly=false;json readinessNotice;std::string failure;
@@ -630,7 +655,7 @@ static void tick() {
                 else if(flag(pause,"waitForSleepRelease"))state.due=now+750;
                 else if(steamWakeUsable){
                     state.phase="inspecting";state.stageSince=now;state.reason.clear();submit=true;
-                }
+                } else state.due=now+250; // Short readiness wait, never an overdue busy loop.
             }
         } else if(state.phase=="settle-wait"&&now-state.armed>=ymcc::sleepsteam::kWakeObserveLimitMs) {
             failure=state.settling.reason.empty()?"steam-wake-stability-not-confirmed":state.settling.reason;
@@ -664,3 +689,4 @@ static void sleepRecoveryAutoGameReleased(unsigned long long generation){
         state.due=GetTickCount64(); // Scheduling hint only; tick rereads the original lease.
 }
 static void sleepRecoveryAutoTick(){SleepRecoveryAuto::tick();}
+static ULONGLONG sleepRecoveryAutoWaitMs(ULONGLONG now){return SleepRecoveryAuto::waitMs(now);}

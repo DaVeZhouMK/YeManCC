@@ -206,5 +206,49 @@ int main() {
         const auto next=ymcc::initializeBootModeInputStartup(doc,"actual-next-boot","windows-volatile-v2|after");
         expect(next["input"]["outputTarget"]["persona"]=="steamdeck");
     });
+    check("Win5 boot marker without a mode document identifies legacy OFF, not a selected Steam scene", [&] {
+        auto doc = bootDocument();
+        doc["extensions"] = {{"bootModesAppliedBoot", "windows-boot-1"}};
+        doc["startupDesired"] = {{"virtualGamepadPersona", "disabled"}, {"gyroPreset", "off"}};
+        doc["input"]["outputTarget"]["persona"] = "steamdeck";
+        json facts;
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "win5-next-process", "windows-boot-2", &facts);
+        expect(next == ymcc::initializeBootModeInputStartup(doc, "win5-next-process", "windows-boot-2"));
+        expect(facts["configured"] == false && facts["selectedMode"].is_null());
+        expect(facts["source"] == "legacy-startupDesired" && facts["requestedPersona"] == "disabled");
+        expect(facts["action"] == "apply-startup-preferences");
+        expect(next["input"]["outputTarget"]["persona"] == "disabled");
+    });
+    for (const auto* mode : {"global", "xbox", "steam", "xbox-steam"}) {
+        const std::string caseName = std::string("mode startup decision follows exact prepared boundary: ") + mode;
+        check(caseName.c_str(), [&] {
+            auto doc = bootDocument();
+            doc["extensions"]["bootModes"]["boot"] = mode;
+            doc["extensions"]["bootModes"]["bootEnabled"] = true;
+            doc["extensions"]["bootModes"]["revision"] = 4;
+            doc["extensions"]["bootModesAppliedBoot"] = "windows-boot-1";
+            doc["input"]["startupAppliedBoot"] = "windows-boot-1";
+            doc["startupDesired"]["virtualGamepadPersona"] = std::string(mode) == "steam" || std::string(mode) == "xbox-steam" ? "steamdeck" : "elite";
+            json sameFacts, nextFacts, repeatedFacts;
+            const auto same = ymcc::initializeBootModeInputStartup(doc, "same-boot-other-process", "windows-boot-1", &sameFacts);
+            expect(same["input"]["outputTarget"] == doc["input"]["outputTarget"]);
+            expect(sameFacts["selectedMode"] == mode && sameFacts["source"] == "four-mode-startup");
+            expect(sameFacts["action"] == "preserve-current-input" && sameFacts["selectionBootMatchesObserved"] == true);
+            const auto next = ymcc::initializeBootModeInputStartup(doc, "next-boot-process", "windows-boot-2", &nextFacts);
+            expect(next == ymcc::initializeBootModeInputStartup(doc, "next-boot-process", "windows-boot-2"));
+            expect(nextFacts["action"] == "apply-startup-preferences" && nextFacts["revision"] == 4);
+            expect(nextFacts["requestedPersona"] == next["input"]["outputTarget"]["persona"]);
+            expect(nextFacts["selectionBootMatchesObserved"] == false && nextFacts["inputBootMatchesObserved"] == false);
+            const auto repeated = ymcc::initializeBootModeInputStartup(next, "next-boot-process", "windows-boot-2", &repeatedFacts);
+            expect(repeated == next && repeatedFacts["action"] == "preserve-same-process");
+        });
+    }
+    check("missing Windows boot identity is reported as preserve for a selected scene", [&] {
+        auto doc = bootDocument(); json facts;
+        const auto next = ymcc::initializeBootModeInputStartup(doc, "unknown-boot-process", "", &facts);
+        expect(next == ymcc::initializeBootModeInputStartup(doc, "unknown-boot-process", ""));
+        expect(facts["configured"] == true && facts["action"] == "preserve-current-input");
+        expect(facts["selectionBootMatchesObserved"] == false && facts["inputBootMatchesObserved"] == false);
+    });
     std::cout << json{{"suite", "Input startup native JSON policy"}, {"passed", cases.size()}, {"cases", cases}, {"hardwareOperations", 0}}.dump(2) << std::endl;
 }

@@ -38,7 +38,7 @@ static const InputCaptureGamepadSnapshot* t_commonFrameSource=nullptr;
 extern "C" {void dsu_publish(const ds::Frame&);void dsu_feed(bool,float,float,float,float,float,float,uint16_t,float,float,float,float,uint8_t,uint8_t);
 size_t dsu_encode_pad_data_for_test(uint8_t*,size_t,int,uint64_t);void dsu_fixture_init();
 #ifndef YMCC_DSU_BEFORE
-bool dsu_start_test();uint16_t dsu_test_port();void dsu_stop();
+bool dsu_start_test();uint16_t dsu_test_port();void dsu_stop();bool dsu_stopped() noexcept;
 #endif
 }
 struct Sensor {std::atomic<uint64_t> activeBindingGeneration{11};};
@@ -160,7 +160,9 @@ static void udp(const json& cases){
         check(all0.size()==100&&all1.size()==100&&all2.size()==100&&all0[20]==0&&all1[20]==1&&all2[20]==2,"udp-all-logical-slots");check(receive().empty(),"udp-all-no-fourth-slot");
         if(round==0){std::this_thread::sleep_for(std::chrono::milliseconds(5050));produce(input);check(receive().empty(),"udp-five-second-expiry");
             send(request(0x100002,{1,0,0,0,0,0,0,0}));check(receive().size()==100,"udp-expired-client-renews");}
-        closesocket(client);const auto start=GetTickCount64();dsu_stop();check(GetTickCount64()-start<1000,"udp-stop-joins-idle-worker");
+        closesocket(client);const auto start=GetTickCount64();
+        do{dsu_stop();if(dsu_stopped())break;std::this_thread::sleep_for(std::chrono::milliseconds(1));}while(GetTickCount64()-start<1000);
+        check(dsu_stopped()&&GetTickCount64()-start<1000,"udp-stop-joins-idle-worker");
     }
     WSACleanup();
 }

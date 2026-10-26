@@ -93,6 +93,66 @@ static void fixtureColdBeforeCreate(){
  check(loaded.record&&!oldOriginRemains(*loaded.record),"actual create wire cannot run before archived duty settlement is durable");
  if(!loaded.record||oldOriginRemains(*loaded.record))throw std::runtime_error("create crossed unfinished old return");
 }
+// Bounded OFF selector reuses the original archive, Stop, queue, verifier and
+// durable cold consumer. Native mode/OS samples are controlled fixture leaves;
+// no real reboot, controller or game consumption is claimed.
+static void coldOffCarryCases(){
+ using namespace coldArchive;loadArchive();
+ for(const bool owed:{true,false}){
+  prepare(owed?"OFF-late-mode-debt-carries-history":"OFF-late-armed-route-carries-history","disabled");
+  g_msiDinputReturnOwed=owed;g_msiDinputRouteDinputArmed=!owed;
+  {std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+   check(ymcc::inputHost::targetReturnRuntime::open()&&!inputHostTargetReturnHistorySettledLocked(),"late OFF starts with the exact archived durable history and a current native predecessor");}
+  // Same production bootstrap admission function, not a fabricated ticket or
+  // a new admission after Stop has already emitted its verification candidate.
+  const auto admitted=inputHostStartProtectionConsume("disabled");
+  const auto before=g_virtualStartProtection.view(startProtectionClock);
+  const auto spawns=fullPipeSpawnCount;
+  check(admitted.accepted&&admitted.requestId==before.requestId&&before.phase=="pending","late OFF consumes one original disabled request before normal Stop");
+  check(!inputHostPerformColdStartupReturn()&&bytes()==original&&censusCalls==0,"bootstrap history consumer defers to current native mode responsibility");
+  check(inputHostQueueLifecycleWork("virtual-target-disabled"),"late OFF queues its original serialized Stop through production work admission");fullPipeDrainQueuedLifecycle();
+  const auto oldNativeIo=g_msiNativeForegroundTestIo;
+  const bool oldObserver=g_msiNativeForegroundObserverActive.load();
+  unsigned nativeQueues=0,nativeDiscoveries=0;
+  g_msiNativeForegroundTestIo={};g_msiNativeForegroundTestIo.ui=[](){return true;};
+  g_msiNativeForegroundTestIo.queue=[&](){++nativeQueues;};
+  g_msiNativeForegroundTestIo.candidates=[&](){++nativeDiscoveries;return std::vector<HidHidePhysicalIdentity>{};};
+  g_msiNativeForegroundObserverActive=true;g_msiNativeForegroundPowerHold=false;
+  msiNativeForegroundUiEvent(true);const auto queuesBeforeCold=nativeQueues;
+  msiNativeForegroundHandleWork();
+  check(!g_msiNativeForegroundLease.active&&nativeDiscoveries==0,"foreground native re-entry cannot discover or hide through unfinished cold OFF history");
+  const auto stopped=g_virtualStartProtection.view(startProtectionClock);
+  const auto& continuation=ymcc::inputHost::switchExecutionReturnRuntime::state;
+  check(stopped.requestId==admitted.requestId&&stopped.phase=="verifying"&&stopped.candidateOutcome=="failure"&&continuation.pending&&continuation.cold&&continuation.requestId==admitted.requestId,"actual Stop carries historical return on the same already-verifying OFF ticket");
+  const bool nativeDebtPending=g_msiDinputReturnOwed.load();
+  check(!g_msiDinputRouteDinputArmed.load()&&(!owed||nativeDebtPending)&&censusCalls==0&&bytes()==original,"Stop disarms the source and preserves actual owed-mode responsibility without inventing debt from armed-only state");
+  retry();
+  if(nativeDebtPending){
+  check(censusCalls==0&&bytes()==original&&fullPipeOffFinalCounts(admitted.requestId)==std::make_pair(0u,0u),"pending native return blocks cold observation and early OFF final without erasing history");
+  // NEW current-power physical sample after normal Stop disarmed its source.
+  // As in original OFF consumers, only the real durable discharge function
+  // clears mode debt; the fixture does not assign its cleared flags.
+  g_xinputPhysicalSourceLocked=true;g_xinputPhysicalSourceMask=1;g_xinputConnectedMask=1;
+  const auto sample=personaLifecycle140::fresh(1);const auto physical=xinputPhysicalConnectedMask();
+  g_xinputAdmittedMask=physical&g_xinputPhysicalSourceMask;
+  const bool qualified=msiXInputReAdmissionQualified(!g_msiDinputRouteDinputArmed.load(),msiClawKnownBoardAuthority(),physical!=0)&&msiCrashPhysicalXinputSnapshotEligible(currentPowerGeneration(),g_xinputTopologyEpoch.load());
+  bool discharged=false;
+  if(qualified){struct Restore{bool active;~Restore(){g_startEntrySeam.active=active;}} restore{g_startEntrySeam.active};g_startEntrySeam.active=false;msiCrashRecoveryInitialize();discharged=msiDinputTryDischargeReturnDebt(false,true,g_xinputAdmittedMask,"fixture-cold-OFF-new-physical-return");}
+  check(qualified&&discharged&&!g_msiDinputReturnOwed.load()&&sample.readPowerGeneration==currentPowerGeneration(),"late native physical observation discharges mode debt through the original durable production consumer");
+  retry();
+  }else check(!owed&&!g_msiDinputReturnOwed.load(),"armed-only initial state is not fabricated into a proven mode-write debt");
+  observeClean();
+  check(nativeQueues==queuesBeforeCold+1,"durable cold OFF settlement replays exactly one deferred foreground intent");
+  msiNativeForegroundHandleWork();
+  check(nativeDiscoveries==1,"settled history restores original foreground native admission without a new UI edge");
+  g_msiNativeForegroundTestIo=oldNativeIo;g_msiNativeForegroundObserverActive=oldObserver;
+  check(g_virtualStartProtection.view(startProtectionClock).requestId==admitted.requestId&&fullPipeSpawnCount==spawns&&!g_inputHostProcess,"cold continuation settles the original history without a new request or Host");
+  finishOff();
+  check(g_virtualStartProtection.view(startProtectionClock).fallbackAttempts==0,"normal late return consumes no classified fallback attempt");
+  fullPipeCheckUniqueOffFinal(admitted.requestId,true);
+  cases.back()["nativeEvents"]=fixtureEvents;fixtureColdArchive=false;
+ }
+}
 static void coldArchiveCases(){
  using namespace coldArchive;loadArchive();
  for(const bool owed:{true,false}){

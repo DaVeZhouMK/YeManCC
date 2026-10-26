@@ -26,7 +26,7 @@ JSONL = {
     'webview-failures.log', 'fan-api.log', 'fan-lifecycle.log', 'gyro-motion.log', 'virtual-gamepad.log',
     'focus-trace.log', 'hardware-coordinator.log', 'input-host-fatal.log', 'input-host-rejects.log',
     'input-host-cost.log', 'input-host-signal.log', 'input-host-report-chain.log', 'input-host-xbox-sdk.log',
-    'recovery-service.log', 'fan-host-fault.log', 'yeman-fan-host-runtime.log', 'sleep-facts.log',
+    'recovery-service.log', 'steam-original-recovery.jsonl', 'fan-host-fault.log', 'yeman-fan-host-runtime.log', 'sleep-facts.log',
     'battery-charge-client.log', 'battery-charge-host.log', 'msi-controller-visibility.log', 'ai-log-index.jsonl',
 }
 
@@ -103,7 +103,7 @@ def format_for(name):
     base = canonical_name(name)
     if base in JSONL or re.fullmatch(r'msi-controller-visibility-wake-\d+\.log', base):
         return 'json-lines'
-    if name.endswith('.json'):
+    if base.endswith('.json'):
         return 'json-document'
     return 'text-or-opaque'
 
@@ -199,7 +199,9 @@ def iter_ai_records(path, *, index_only=False):
                 files += 1
                 fmt = 'zip-volume' if metadata.get('containerOnly') else format_for(name)
                 yield {'record': 'file_begin', 'fileId': file_id, 'entry': name, 'format': fmt,
-                       'bytes': len(data), 'sha256': digest, 'indexMatched': indexed is not None, **metadata}
+                       'bytes': len(data), 'sha256': digest, 'indexMatched': indexed is not None,
+                       'indexDeclaredFormat': indexed.get('format') if indexed else None,
+                       'formatDiffersFromIndex': bool(indexed and indexed.get('format') and indexed['format'] != fmt), **metadata}
                 counts = collections.Counter()
                 if not index_only and not metadata.get('containerOnly'):
                     for row in payload_records(name, data, file_id, fmt):

@@ -16,11 +16,44 @@ internal static class HostTerminalCleanup
         bool ManagedReleaseComplete, string ResourceDisposition, int ReleaseAttempts,
         int DirectReleaseAttempts, bool Retried, string FirstDetail, string FinalDetail);
 
-    internal static bool CanRetryStopBarrier(string detail) => detail is
+    internal static bool CanRetryStopBarrier(string detail)
+    {
+        if (detail is "steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout" ||
+            IsAccumulatedStopTimeout(detail)) return true;
+        if (string.IsNullOrEmpty(detail)) return false;
+        var fields = detail.Split(';');
+        if (fields.Length is < 2 or > 3 || !IsAccumulatedStopTimeout(fields[^1])) return false;
+
+        // ReleaseLocalLocked accumulates only Detach, then neutral, before
+        // these barriers return without reaching any Dispose or reconcile.
+        // The earlier SteamDeck clock barrier never has accumulated details.
+        var index = 0;
+        if (IsExceptionDetail(fields[index], "game-output-detach:")) index++;
+        if (index < fields.Length - 1 && IsNeutralFailure(fields[index])) index++;
+        return index == fields.Length - 1;
+    }
+
+    private static bool IsAccumulatedStopTimeout(string detail) => detail is
         "controller-output-stop:sdk-output-stop-timeout" or
         "controller-output-stop:sdk-output-stop-lock-timeout" or
-        "steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout" or
         "controller-idle-cts-capture:sdk-idle-clock-timeout";
+
+    private static bool IsNeutralFailure(string detail) => detail is
+        "neutral:failed" or "neutral:persona-not-admitted" or "neutral:target-not-ready" ||
+        IsExceptionDetail(detail, "neutral:neutral-exception:") || IsExceptionDetail(detail, "neutral:");
+
+    private static bool IsExceptionDetail(string detail, string prefix)
+    {
+        // Only a simple exception type name is emitted here, never Message.
+        // Reject separators, whitespace and embedded cleanup/detail grammar.
+        if (!detail.StartsWith(prefix, StringComparison.Ordinal)) return false;
+        var name = detail.AsSpan(prefix.Length);
+        if (!name.EndsWith("Exception", StringComparison.Ordinal) || name.Length == 0 ||
+            !(char.IsAsciiLetter(name[0]) || name[0] == '_')) return false;
+        foreach (var c in name)
+            if (!(char.IsAsciiLetterOrDigit(c) || c == '_')) return false;
+        return true;
+    }
 
     internal static bool IsFailedShutdownResponse(string response)
     {

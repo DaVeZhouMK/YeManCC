@@ -1,5 +1,7 @@
 # YMCC unified HC model capability catalog
 
+虚拟手柄修复（2026-10-25）：[能力总库适配支持](CONTROLLER-REPAIR-SUPPORT.md) · [机器可读支持信息](CONTROLLER-REPAIR-SUPPORT.json) · [全部102条源码/扩展覆盖](CONTROLLER-MODEL-COVERAGE.md)。先区分机型声明、实体来源、虚拟后端与屏蔽证据。
+
 <!-- FAN-COLD-WAKE-FAN-ONLY-INITIALIZATION-20261023 -->
 
 > **2026-10-23 风扇初始化与完整组件候选：** 公共装配已移除直接PullSensors（陀螺仪／加速度计／串口IMU），监听先就绪，认证握手按需初始化，保留机型／风扇许可与共享手柄能力。当前Host53项、完整safe自测428项、Factory24／Bootstrap56、构造器89／Joined123及原变异、候选25项原出包检查均通过；33编译输入的PE／PDB／源码绑定已实证。**正式载荷未晋级／未安装，不能用旧包验证；真机仍分列。** 后续OpenEvents内部枚举未全局移除。见 [现势回报](G:/YeManCC-Work/Docs/Tasks/Fan/FAN-920/FAN-ROGX-COLD-AFTER-WAKE-INITIALIZATION-REPAIR-20261023.md)。

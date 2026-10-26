@@ -39,7 +39,20 @@ function evaluate(source, imports = {}, globals = {}) {
 const bridgeSlice = slice(bridgeSource, 'export interface MsiControllerShieldState', '// ── 更新加速器');
 const stateSlice = slice(settingsSource, '// ── 微星可选前端屏蔽', '// ── 更新加速器');
 const toggleSlice = slice(settingsSource, 'async function onMsiControllerShieldToggle(', 'async function onUpdateAccelToggle(');
-const cardSlice = slice(settingsSource, '    <section v-if="msiControllerShield.supported"', '    <section class="card fan-log-card"');
+const settingsParsed = parse(settingsSource, { filename: 'SettingsView.vue' });
+assert.equal(settingsParsed.errors.length, 0);
+function templateEntries(node, ancestors = []) {
+  return [{ node, ancestors }, ...(node.children || []).flatMap(child => templateEntries(child, [...ancestors, node]))];
+}
+const cardEntries = templateEntries(settingsParsed.descriptor.template.ast).filter(({ node }) =>
+  node.type === 1 && node.tag === 'section' && node.props.some(prop => prop.name === 'class' && prop.value?.content.split(/\s+/).includes('msi-controller-shield-card')));
+assert.equal(cardEntries.length, 1, 'Settings must mount exactly one real MSI shield card');
+const cardEntry = cardEntries[0];
+assert.ok(cardEntry.ancestors.some(node => node.tag === 'template' && node.props?.some(prop => prop.type === 7 && prop.name === 'slot' && prop.arg?.content === 'device')),
+  'MSI shield card must remain in the actual settings device slot');
+assert.ok(cardEntry.node.props.some(prop => prop.type === 7 && prop.name === 'if' && prop.exp?.content === 'msiControllerShield.supported'),
+  'The native supported capability must gate the real card');
+const cardSlice = cardEntry.node.loc.source;
 
 function snapshot(patch = {}) {
   return {
@@ -192,6 +205,30 @@ await check('loading makes no enabled assumption; only a supported MSI card is v
   await h.read(snapshot());
   assert.ok(h.shieldToggle());
   assert.match(h.text(), /微星屏蔽 关闭/);
+  h.app.unmount();
+});
+await check('known native admission keeps the initial failed read recoverable without claiming execution', async () => {
+  const h = harness();
+  await h.read({ ok: false, supported: true, reason: 'snapshot-unavailable' });
+  assert.ok(h.shieldToggle());
+  assert.equal(h.ui.msiShieldSnapshotCurrent, false);
+  assert.equal(h.ui.msiShieldExecutionStatus, '总体 待确认');
+  assert.match(h.text(), /读取失败，请重新进入设置/);
+  assert.doesNotMatch(h.text(), /总体 OK/);
+  await h.read(snapshot({ enabled: true, applied: true }));
+  assert.equal(h.ui.msiShieldExecutionStatus, '总体 OK（屏蔽已执行）');
+  assert.equal(h.ui.msiShieldStatus, '');
+  assert.deepEqual(h.p.calls.map(call => call.command), ['msiControllerShield.get', 'msiControllerShield.get']);
+  h.app.unmount();
+});
+await check('unknown initial transport failure never invents MSI support and a later entry can recover', async () => {
+  const h = harness();
+  await h.read(new Error('initial-offline'));
+  assert.equal(h.shieldToggle(), undefined);
+  await h.read(snapshot());
+  assert.ok(h.shieldToggle());
+  await h.read(snapshot({ supported: false, family: 'MsiClaw', deviceClass: 'desktop' }));
+  assert.equal(h.shieldToggle(), undefined);
   h.app.unmount();
 });
 await check('pending, retrying and mismatched epochs stay in progress', async () => {

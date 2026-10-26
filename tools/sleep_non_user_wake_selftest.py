@@ -101,6 +101,14 @@ names = [
     'sgKernelPowerEventFileTime',
 ]
 functions = '\n\n'.join(function(name) for name in names)
+# Only the added source callback gets a fake window post; restore the original
+# boundary macro before compiling every existing wake/retry handler.
+notification_callback = function('suspendResumeSubscriptionCallback')
+functions += '\n#pragma push_macro("PostMessageW")\n#undef PostMessageW\n#define PostMessageW notificationPostMessage\n' + notification_callback + '\n#pragma pop_macro("PostMessageW")\n'
+assert 'availability["sleepPowerNotifications"]=g_sleepNotificationEvidence.snapshot();' in source
+assert 'g_sleepNotificationEvidence.registered(rc);' in source
+assert 'g_sleepNotificationEvidence.handled(static_cast<ULONG>(w),GetTickCount64());' in case_body('case WM_POWERBROADCAST:', 'case WM_TRAYICON:')
+
 handlers = '\n'.join([
     'int handle506(WPARAM w, LPARAM l) {\n' + case_body('case WM_SG_S0_INTENT:', 'case WM_SG_S0_WAKE:') + '\n}',
     'int handle507(WPARAM w, LPARAM l) {\n' + case_body('case WM_SG_S0_WAKE:', 'case WM_SG_S4_WAKE:') + '\n}',
@@ -135,6 +143,7 @@ preamble = r'''
 #include "json.hpp"
 #include "sleep_retry_budget.h"
 #include "sleep_request_fallback.h"
+#include "sleep_notification_evidence.h"
 #include "fan_physical_wake.h"
 #include <new>
 using json = nlohmann::json;
@@ -184,6 +193,15 @@ int requestCount=0,resumeCount=0,beginCount=0,abortCount=0;
 std::vector<std::pair<std::string,json>> facts;
 const std::wstring SG_SLEEP_TRIGGER_MARKER=L"mock";
 ULONGLONG fakeGetTickCount64(){return nowTick;}
+ymcc::sleepnotifications::Evidence g_sleepNotificationEvidence;
+static bool notificationPostSucceeds=true;
+static unsigned notificationPostCalls=0;
+void inputCaptureSignalSensorPowerPause(){g_sensorSuspendCallbackActive.store(true);}
+BOOL notificationPostMessage(HWND hwnd,UINT message,WPARAM type,LPARAM value){
+ assert(hwnd==g_hwnd&&message==WM_POWERBROADCAST&&value==0&&ymcc::sleepnotifications::Evidence::index(static_cast<ULONG>(type))>=0);
+ ++notificationPostCalls;SetLastError(ERROR_INVALID_WINDOW_HANDLE);return notificationPostSucceeds?TRUE:FALSE;
+}
+
 ULONGLONG sgNowFileTime(){return nowFile;}
 double sgNowEpoch(){return double(nowFile)/10000000;}
 ULONGLONG currentPowerGeneration(){return generation;}
@@ -211,6 +229,15 @@ SgResumeResult sgResumeSleepTarget(ULONGLONG g,bool){assert(g==generation);if(fr
 static void sgAbnormalArm(int,ULONGLONG){}
 static void sgAbnormalStop(const char*){}
 static void sgAbnormalInternalEntry(){}
+// Companion runtime consumes the real implementation. Here unavailable observation
+// must never authorize/block an already authorized parent request or reset its budget.
+static bool sgAbnormalObserveOwnedRetry(ULONGLONG human,ULONGLONG request){
+ assert(human && human<=request && request==g_sgInternalSleepRequest.dispatchFileTime);
+ assert(g_sgInternalSleepRequest.kind==SgRetryKind::UnexpectedWake && g_sgAutomaticSleepBudget.requests()>0);
+ return false;
+}
+static void sgAbnormalOwnedRetryResult(ULONGLONG human,ULONGLONG request,bool){assert(human && request>=human);}
+
 static void sleepRecoveryAutoArm(unsigned long long){} // automatic owner separately tested; this fixture keeps opt-in off
 void sgBeginWakeGameRecovery(ULONGLONG g){(void)sgResumeSleepTarget(g,true);}
 SgSystemSleepRequestResult sgRequestSystemSleep(){++requestCount;if(requestAccepted)timerDue=0;return {requestAccepted,true,0,requestAccepted?0UL:5UL};}
@@ -334,8 +361,46 @@ void verifyActualFanRetryBoundary(){
  std::cout<<"PASS actual fan pure-state retry boundary clears wake only for the matching shared generation; no hardware terminal\n";
 }
 
+void verifyPowerNotificationEvidence(){
+ unsigned checks=0;
+ const auto require=[&](bool value){++checks;assert(value);};
+ auto row=g_sleepNotificationEvidence.snapshot();
+ require(row["registrationAttempted"]==false&&row["registrationError"].is_null());
+ require(row["forwarding"]["lastFailureWin32Error"].is_null()&&row["powerActionAuthorized"]==false&&row["userWakeProven"]==false);
+ g_sleepNotificationEvidence.registered(ERROR_ACCESS_DENIED);row=g_sleepNotificationEvidence.snapshot();
+ require(row["registrationAttempted"]==true&&row["registrationError"]==ERROR_ACCESS_DENIED);
+ g_sleepNotificationEvidence.registered(ERROR_SUCCESS);
+ const auto phase=g_powerLifecycle.load();const auto gen=generation;
+ const auto savedHwnd=g_hwnd;const auto requests=requestCount;const auto resumes=resumeCount;
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMPOWERSTATUSCHANGE,nullptr)==ERROR_SUCCESS&&notificationPostCalls==0);
+ g_hwnd=nullptr;
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMSUSPEND,nullptr)==ERROR_SUCCESS&&g_sensorSuspendCallbackActive.load());
+ row=g_sleepNotificationEvidence.snapshot();require(row["callbackEntries"]["suspend"]==1&&row["forwarding"]["noWindow"]==1&&row["forwarding"]["posted"]==0);
+ g_hwnd=savedHwnd;notificationPostSucceeds=true;
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMSUSPEND,nullptr)==ERROR_SUCCESS&&notificationPostCalls==1);
+ notificationPostSucceeds=false;
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMRESUMEAUTOMATIC,nullptr)==ERROR_SUCCESS&&!g_sensorSuspendCallbackActive.load());
+ row=g_sleepNotificationEvidence.snapshot();require(row["forwarding"]["failed"]==1&&row["forwarding"]["lastFailureWin32Error"]==ERROR_INVALID_WINDOW_HANDLE);
+ notificationPostSucceeds=true;
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMRESUMESUSPEND,nullptr)==ERROR_SUCCESS);
+ require(suspendResumeSubscriptionCallback(nullptr,PBT_APMRESUMECRITICAL,nullptr)==ERROR_SUCCESS);
+ row=g_sleepNotificationEvidence.snapshot();
+ require(row["callbackEntries"]==json({{"suspend",2},{"resumeAutomatic",1},{"resumeSuspend",1},{"resumeCritical",1}}));
+ require(row["forwarding"]["posted"]==3&&row["forwarding"]["failed"]==1&&row["forwarding"]["lastFailureWin32Error"]==ERROR_INVALID_WINDOW_HANDLE&&notificationPostCalls==4);
+ for(const ULONG type:{PBT_APMSUSPEND,PBT_APMRESUMEAUTOMATIC,PBT_APMRESUMESUSPEND,PBT_APMRESUMECRITICAL})g_sleepNotificationEvidence.handled(type,nowTick);
+ g_sleepNotificationEvidence.handled(PBT_APMPOWERSTATUSCHANGE,nowTick);
+ row=g_sleepNotificationEvidence.snapshot();
+ require(row["windowHandlerEntries"]==json({{"suspend",1},{"resumeAutomatic",1},{"resumeSuspend",1},{"resumeCritical",1}}));
+ require(row["registrationError"]==ERROR_SUCCESS&&row["lastCallbackTickMs"]==nowTick&&row["lastWindowHandlerTickMs"]==nowTick);
+ require(row["mandatoryEvidence"]==true&&row["detailLogsRequired"]==false&&row["snapshotAtomic"]==false&&row["callbackDiskWrites"]==false);
+ require(row["powerActionAuthorized"]==false&&row["sleepSuccessProven"]==false&&row["userWakeProven"]==false);
+ require(g_powerLifecycle.load()==phase&&generation==gen&&requestCount==requests&&resumeCount==resumes);
+ std::cout<<"POWER_NOTIFICATION_EVIDENCE "<<json({{"checks",checks},{"actualCallbackBound",true},{"realWindowPosts",0},{"newPowerActions",0}}).dump()<<"\n";
+}
+
 int main(int argc,char** argv){
  std::cout<<std::unitbuf;
+ verifyPowerNotificationEvidence();
  if(argc>1&&(strcmp(argv[1],"--s3")==0||strcmp(argv[1],"--caps-unknown")==0)){
   platformAoAc=false;platformCapsKnown=strcmp(argv[1],"--caps-unknown")!=0;
   for(bool pause:{false,true})for(bool keep:{false,true})for(ULONGLONG age:{0ULL,119999ULL,120000ULL,600000ULL}){
@@ -664,6 +729,7 @@ int main(int argc,char** argv){
 assert 'WM_FAN_KERNEL_POWER_FACT' not in handlers and 'fanHostQueueSuspend' not in handlers
 (out/'actual-production-source-bindings.json').write_text(json.dumps({
  'schemaVersion':1,'source':str(args.source.resolve()),'sourceSha256':hashlib.sha256(args.source.read_bytes()).hexdigest(),
+ 'notificationCallbackSha256':hashlib.sha256(notification_callback.encode()).hexdigest(),'notificationCallback':notification_callback,
  'functions':[{'name':name,'sha256':hashlib.sha256(function(name).encode()).hexdigest(),'text':function(name)} for name in names],
  'handlersSha256':hashlib.sha256(handlers.encode()).hexdigest(),'handlers':handlers,
  'functionBodiesUniqueAndComplete':True,'neighborHardwareCaseExcluded':True,

@@ -62,7 +62,10 @@ const staticWakeStatus = ref<StaticWakeStatus | null>(null);
 const staticWakeLoading = ref(false);
 const staticWakeAction = ref<'scan' | 'restore' | null>(null);
 const staticWakeError = ref('');
+const staticWakePendingRequest = ref<{ requestId: string; action: 'scan' | 'restore' } | null>(null);
 let staticWakeRevision = 0;
+let staticWakeViewActive = true;
+let staticWakeRefreshPending = false;
 const staticWakeNeedsRestore = computed(() => !sleepPowerPlanOptimizationEnabled.value &&
   (staticWakeStatus.value?.enabled || (staticWakeStatus.value?.restorePending ?? 0) > 0 ||
     staticWakeStatus.value?.phase === 'restore-pending' || staticWakeError.value !== ''));
@@ -212,11 +215,17 @@ onBeforeUnmount(() => {
   if (pwrActivateTimer !== null) window.clearTimeout(pwrActivateTimer);
   window.removeEventListener('ipc:gamepad-back', onTimeoutGamepadBack);
   window.removeEventListener('ipc:gamepad-back', onHibernateConfirmBack);
+  window.removeEventListener('ipc:sleep.staticWake.updated', onStaticWakeUpdated);
+  staticWakeViewActive = false;
+  staticWakeRefreshPending = false;
+  ++staticWakeRevision;
+  ++sleepPlanRevision;
 });
 
 onMounted(() => {
   window.addEventListener('ipc:gamepad-back', onTimeoutGamepadBack);
   window.addEventListener('ipc:gamepad-back', onHibernateConfirmBack);
+  window.addEventListener('ipc:sleep.staticWake.updated', onStaticWakeUpdated);
 });
 
 async function refreshHibernateState() {
@@ -279,20 +288,33 @@ async function onWakePassword(enabled: boolean) {
   }
 }
 
+// Native owns the delayed scan; completion events only refresh its status.
+function onStaticWakeUpdated(): void {
+  void refreshStaticWakeStatus();
+}
+
 async function refreshStaticWakeStatus() {
-  if (staticWakeAction.value) return;
+  if (!staticWakeViewActive) return;
+  // A late manual ACK can precede a newer completion; read once after it settles.
+  if (staticWakeAction.value) { staticWakeRefreshPending = true; return; }
   const revision = ++staticWakeRevision;
   staticWakeLoading.value = true;
   try {
-    const status = await getStaticWakeStatus();
-    if (revision !== staticWakeRevision) return;
+    const pending = staticWakePendingRequest.value;
+    const status = await getStaticWakeStatus(pending?.requestId);
+    if (!staticWakeViewActive || revision !== staticWakeRevision) return;
     staticWakeStatus.value = status;
-    // A memory snapshot cannot prove a timed-out write has stopped.
-    if (!staticWakeError.value.includes('结果未确认')) staticWakeError.value = '';
+    const operation = status.operation;
+    // Only this exact native completion retires an uncertain write. A later
+    // inventory snapshot or another request's event cannot authorize a retry.
+    if (pending && operation?.requestId === pending.requestId && operation.action === pending.action && operation.state === 'completed') {
+      staticWakePendingRequest.value = null;
+      staticWakeError.value = operation.ok ? '' : staticWakeFailure(pending.action, status);
+    } else if (!pending && staticWakeError.value === '屏蔽状态读取失败') staticWakeError.value = '';
   } catch {
-    if (revision === staticWakeRevision && !staticWakeError.value) staticWakeError.value = '屏蔽状态读取失败';
+    if (staticWakeViewActive && revision === staticWakeRevision && !staticWakeError.value) staticWakeError.value = '屏蔽状态读取失败';
   } finally {
-    if (revision === staticWakeRevision) staticWakeLoading.value = false;
+    if (staticWakeViewActive && revision === staticWakeRevision) staticWakeLoading.value = false;
   }
 }
 
@@ -317,7 +339,7 @@ async function refresh() {
   }
   try {
     const enabled = await getSleepPowerPlanOptimizationEnabled();
-    if (planRevision === sleepPlanRevision) sleepPowerPlanOptimizationEnabled.value = enabled;
+    if (staticWakeViewActive && planRevision === sleepPlanRevision) sleepPowerPlanOptimizationEnabled.value = enabled;
   } catch {
     /* 配置读取失败保持现状，绝不假定关闭 */
   }
@@ -400,51 +422,75 @@ async function onNonUserWake(v: boolean) {
   }
 }
 
+function staticWakeFailure(action: 'scan' | 'restore', status: StaticWakeStatus): string {
+  return (action === 'scan' ? '屏蔽未完成' : '恢复未完成') +
+    ' · 失败 ' + status.failed + ' · 待恢复 ' + status.restorePending +
+    ' · 设备 ' + status.devices + ' · 软件 ' + status.software + ' · 定时器 ' + status.timers +
+    (status.lastError ? ' · ' + status.lastError : '');
+}
+
 async function applyStaticWake(action: 'scan' | 'restore') {
-  ++staticWakeRevision; // Invalidate reads started before this explicit action.
-  staticWakeLoading.value = false;
-  staticWakeAction.value = action;
-  staticWakeError.value = '';
+  const requestId = crypto.randomUUID();
+  if (staticWakePendingRequest.value) return;
+  staticWakePendingRequest.value = { requestId, action };
+  if (staticWakeViewActive) {
+    ++staticWakeRevision; // Invalidate reads started before this explicit action.
+    staticWakeLoading.value = false;
+    staticWakeAction.value = action;
+    staticWakeError.value = '';
+  }
   try {
-    const result = await (action === 'scan' ? scanStaticWakeSources() : restoreStaticWakeSources());
+    const result = await (action === 'scan' ? scanStaticWakeSources(requestId) : restoreStaticWakeSources(requestId));
+    if (!staticWakeViewActive) return;
     staticWakeStatus.value = result.status;
-    if (!result.ok) staticWakeError.value = (action === 'scan' ? '屏蔽未完成' : '恢复未完成') +
-      ' · 失败 ' + result.status.failed + ' · 待恢复 ' + result.status.restorePending +
-      ' · 设备 ' + result.status.devices + ' · 软件 ' + result.status.software + ' · 定时器 ' + result.status.timers +
-      (result.status.lastError ? ' · ' + result.status.lastError : '');
+    staticWakePendingRequest.value = null;
+    if (!result.ok) staticWakeError.value = staticWakeFailure(action, result.status);
   } catch {
+    if (!staticWakeViewActive) return;
     // A local IPC timeout does not cancel native. Never retry/scan in the background.
     staticWakeError.value = action === 'scan' ? '扫描结果未确认，请查看普通日志' : '恢复结果未确认，请查看普通日志';
+    staticWakeRefreshPending = true; // One read also catches completion delivered before the local timeout.
   } finally {
-    staticWakeAction.value = null;
+    if (staticWakeViewActive) {
+      ++staticWakeRevision; // Retire reads started before this action's final receipt.
+      staticWakeLoading.value = false;
+      staticWakeAction.value = null;
+      if (staticWakeRefreshPending) {
+        staticWakeRefreshPending = false;
+        void refreshStaticWakeStatus();
+      }
+    }
   }
 }
 
 async function onStaticWakeAction() {
-  if (busy.value || staticWakeLoading.value || staticWakeError.value.includes('结果未确认')) return;
+  if (!staticWakeViewActive || busy.value || staticWakeLoading.value || staticWakePendingRequest.value) return;
   const action = staticWakeNeedsRestore.value ? 'restore' : 'scan';
   if (action === 'scan' && !sleepPowerPlanOptimizationEnabled.value) return;
   busy.value = true;
   try { await applyStaticWake(action); }
-  finally { busy.value = false; }
+  finally { if (staticWakeViewActive) busy.value = false; }
 }
 
 async function onSleepPowerPlanOptimization(v: boolean) {
-  if (busy.value || staticWakeError.value.includes('结果未确认')) return;
+  if (!staticWakeViewActive || busy.value || staticWakePendingRequest.value) return;
   ++sleepPlanRevision;
   busy.value = true;
   try {
     await setSleepPowerPlanOptimizationEnabled(v);
-    sleepPowerPlanOptimizationEnabled.value = v;
-    msg.value = '';
+    if (staticWakeViewActive) {
+      sleepPowerPlanOptimizationEnabled.value = v;
+      msg.value = '';
+    }
     // Keep the original preference/boot/power-change repair path. Enabling it
     // never scans; disabling it also restores only native-owned static changes.
+    // Finish the user's committed OFF even after navigation; never replay ON.
     if (!v) await applyStaticWake('restore');
   } catch {
-    msg.value = '设置保存失败';
+    if (staticWakeViewActive) msg.value = '设置保存失败';
   } finally {
     ++sleepPlanRevision;
-    busy.value = false;
+    if (staticWakeViewActive) busy.value = false;
   }
 }
 
@@ -587,12 +633,12 @@ refresh();
      <div class="sleep-group">
       <div class="sleep-group-head"><h3><InlineIcon name="sleep"/>系统保护</h3><span>按需开启</span></div>
       <Toggle :model-value="wakePasswordOn" label="唤醒需要密码" description="唤醒后验证登录身份" :disabled="busy" @update:model-value="onWakePassword" />
-      <Toggle :model-value="sleepPowerPlanOptimizationEnabled" label="睡眠电源修复" description="启动及电源变动时修正睡眠设置" :disabled="busy||staticWakeError.includes('结果未确认')" @update:model-value="onSleepPowerPlanOptimization" />
+      <Toggle :model-value="sleepPowerPlanOptimizationEnabled" label="睡眠电源修复" description="启动及电源变动时修正睡眠设置" :disabled="busy||!!staticWakePendingRequest" @update:model-value="onSleepPowerPlanOptimization" />
       <div class="sleep-static-wake">
-       <div class="sleep-static-action"><button :disabled="busy||staticWakeLoading||staticWakeError.includes('结果未确认')||(!sleepPowerPlanOptimizationEnabled&&!staticWakeNeedsRestore)" @click="onStaticWakeAction">{{staticWakeAction==='scan'?'扫描中…':staticWakeAction==='restore'?'恢复中…':staticWakeNeedsRestore?'重试恢复':'扫描并屏蔽'}}</button><span>Windows 支持项，人工电源键优先</span></div>
+       <div class="sleep-static-action"><button :disabled="busy||staticWakeLoading||!!staticWakePendingRequest||(!sleepPowerPlanOptimizationEnabled&&!staticWakeNeedsRestore)" @click="onStaticWakeAction">{{staticWakeAction==='scan'?'扫描中…':staticWakeAction==='restore'?'恢复中…':staticWakeNeedsRestore?'重试恢复':'扫描并屏蔽'}}</button><span title="仅屏蔽 Windows 支持项，人工电源键优先">开机及唤醒1分钟后单次扫描</span></div>
        <p role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
       </div>
-      <Toggle :model-value="cfg.retryOnEntryFailure" label="睡眠异常重睡" description="持续异常时重睡，超时休眠或关机" :disabled="busy" @update:model-value="onEntryFailure" />
+      <Toggle :model-value="cfg.retryOnEntryFailure" label="入睡失败重试" description="明确入睡失败时重试，电源键唤醒优先" :disabled="busy" @update:model-value="onEntryFailure" />
       <Toggle :model-value="cfg.retryOnNonUserWake" label="意外唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
      </div>
     </template>

@@ -651,7 +651,19 @@ static void oemVendorStackSchedule() {
             current = epoch == g_oemVendorStackRequested &&
                 (!wakePass || oemVendorStackShieldWakeAliveLocked(GetTickCount64())); }
           if (current) {
-              if (!g_oemVendorStackStartupRecovered) g_oemVendorStackStartupRecovered = oemVendorStackRestoreLocked("startup-recovery");
+              if (!g_oemVendorStackStartupRecovered) {
+                  // A current MSI ON intent continues validated task-only leases.
+                  // Restoring them first would enable/run the official frontend
+                  // in between startup recovery and the immediately following apply.
+                  // Legacy service debt, OFF, and other families keep full recovery.
+                  const bool retainMsiTasks = wanted && g_machineIdentity.family == YmccFamily::MsiClaw &&
+                      oemVendorStackMachineSupported() && oemVendorStackLoadJournal() &&
+                      g_oemVendorServiceLeases.empty();
+                  g_oemVendorStackStartupRecovered = retainMsiTasks || oemVendorStackRestoreLocked("startup-recovery");
+                  if (retainMsiTasks && !g_oemVendorTaskLeases.empty())
+                      appendNativeLifecycleLog("oem-vendor-stack", {{"state", "startup-task-leases-retained"},
+                          {"requestedEpoch", epoch}, {"taskCount", g_oemVendorTaskLeases.size()}, {"restoredBeforeApply", false}});
+              }
               if (g_oemVendorStackStartupRecovered) {
                   if (wanted && !g_exitRequested.load(std::memory_order_acquire))
                       ok = oemVendorStackApplyIfNeeded(wakePass ? "msi-wake-guard" : "configured-oem-rule", epoch);

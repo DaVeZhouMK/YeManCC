@@ -11,11 +11,15 @@ internal static class Boundary
     internal static Scenario Case=new("initial");
     internal static int Proofs,Disabled,Enabled,Opened,Preparsed,Freed,AliveReads,InterfaceQueries;
     internal static readonly List<string> Calls=[];
+    internal static bool Timing;
+    internal static long ClockMs;
+    internal static int ObservationLocates;
+    internal static string ClockFault="";
     internal static string Root=>Case.Family=="rog"?@"USB\VID_0B05&PID_1B4C\ROG":Case.Family=="rog-original"?@"USB\VID_0B05&PID_1ABE\ROG":Case.Family=="gpd"?@"USB\VID_045E&PID_028E\GPD":@"USB\VID_0DB0&PID_1901\00006F64096B22E7";
     internal static string Target=>Case.Xusb?((Case.Name.Contains("field-hid-xusb",StringComparison.Ordinal)?"HID":"USB")+Root[3..21]+@"&MI_00\XUSB"):Case.Family=="msi"?@"HID\VID_0DB0&PID_1901&IG_02\8&3E27176&0&0000":"HID"+Root[3..21]+@"&IG_02\GAME";
     internal const string Position="PCIROOT(0)#USBROOT(0)#USB(4)";
     internal static bool Fault(string name)=>Case.Fault==name && Proofs>=Case.FailProof;
-    internal static void Reset(Scenario scenario){Case=scenario;Proofs=Disabled=Enabled=Opened=Preparsed=Freed=AliveReads=InterfaceQueries=0;Calls.Clear();}
+    internal static void Reset(Scenario scenario){Case=scenario;Proofs=Disabled=Enabled=Opened=Preparsed=Freed=AliveReads=InterfaceQueries=0;Calls.Clear();Timing=false;ClockMs=0;ObservationLocates=0;ClockFault="";}
 }
 
 internal static class Fixture
@@ -64,6 +68,17 @@ internal static class Fixture
                 Check(d.GetProperty("Xusb").GetBoolean()==scenario.Xusb,scenario.Name+" exact input route");
                 Check(d.GetProperty("PrepareLocateResult").GetUInt32()==0 && d.GetProperty("CurrentLocateResult").GetUInt32()==0 && d.GetProperty("SameNode").GetBoolean(),scenario.Name+" exact current-node facts");
                 Check(d.GetProperty("DisableCallEntered").GetBoolean() && d.GetProperty("EnableCallEntered").GetBoolean()==!disableFault,scenario.Name+" exact entered calls");
+                Check(d.GetProperty("TimingClock").GetString()=="monotonic" && d.GetProperty("DisableCallElapsedMs").GetInt64()>=0,scenario.Name+" entered disable monotonic milliseconds retained including throw");
+                if(scenario.Fault=="disable-result"){
+                    var observation=d.GetProperty("DisableFailureStatus");
+                    Check(d.GetProperty("DisableFailureObservationElapsedMs").GetInt64()>=0 && observation.GetProperty("State").GetString()=="observed",scenario.Name+" failed disable observation timed");
+                    foreach(var key in new[]{"LocateElapsedMs","StatusElapsedMs","PostLocateElapsedMs"})Check(observation.GetProperty(key).GetInt64()>=0,scenario.Name+" "+key+" entered");
+                    var call=Boundary.Calls.IndexOf("disable:10:4");
+                    Check(Boundary.Calls.Skip(call).SequenceEqual(new[]{"disable:10:4","locate:"+Boundary.Target,"status:10:0","locate:"+Boundary.Target}),scenario.Name+" exactly original failure-only three reads in order");
+                }else{
+                    Check(d.GetProperty("DisableFailureObservationElapsedMs").ValueKind==JsonValueKind.Null && !d.TryGetProperty("DisableFailureStatus",out _),scenario.Name+" unentered observation remains null and adds no read");
+                    Check(!Boundary.Calls.Any(call=>call.StartsWith("status:",StringComparison.Ordinal)),scenario.Name+" no failure-only status outside nonzero disable return");
+                }
                 Check(Boundary.Disabled==1 && Boundary.Enabled==(disableFault?0:compensation?2:1),scenario.Name+" bounded exact enable compensation");
                 Check(d.GetProperty("CompensationChecked").GetBoolean()==(compensationScope && !disableFault),scenario.Name+" compensation only after acknowledged disable");
                 Check(d.GetProperty("CompensationAttempted").GetBoolean()==compensation,scenario.Name+" no retry on changed or unknown identity");
@@ -84,6 +99,61 @@ internal static class Fixture
             }
         }
         Results.Add(new{scenario,result,expected=expectedResult,Boundary.Proofs,Boundary.Disabled,Boundary.Enabled,Boundary.Opened,Boundary.Preparsed,Boundary.Freed,Boundary.InterfaceQueries,diagnostic,calls=Boundary.Calls.ToArray()});
+    }
+    private static void RunTiming(string fault,string clockFault="")
+    {
+        var label="timing-"+fault+"-"+clockFault;
+        Boundary.Reset(new(label,Fault:fault,FailProof:0));Boundary.Timing=true;Boundary.ClockMs=1000;Boundary.ClockFault=clockFault;
+        var facts=new MsiNativePortCycle.GameRefreshFacts();
+        var previous=Console.Out;using var capture=new StringWriter();Console.SetOut(capture);
+        Exception? error=null;
+        try{MsiNativePortCycle.PrepareTimingRefresh(facts,()=>fault=="admission-throw"?throw new ApplicationException("inert admission exception"):fault!="admission-false")!();}
+        catch(Exception caught){error=caught;facts.WriteFailure(caught);facts.WriteFailure(caught);}
+        finally{Console.SetOut(previous);}
+        var unentered=fault.StartsWith("admission-",StringComparison.Ordinal);
+        var success=fault=="success";
+        var observed=!unentered && !success && fault!="disable-throw";
+        var preOnly=fault is "locate-error" or "locate-mismatch" or "locate-throw";
+        var statusEntered=observed && !preOnly;
+        var postEntered=statusEntered && fault!="status-throw";
+        var expectedCalls=new List<string>{"locate:"+Boundary.Target,"locate:"+Boundary.Target};
+        if(!unentered)expectedCalls.Add("disable:10:4");
+        if(observed)expectedCalls.Add("locate:"+Boundary.Target);
+        if(statusEntered)expectedCalls.Add("status:10:0");
+        if(postEntered)expectedCalls.Add("locate:"+Boundary.Target);
+        if(success)expectedCalls.Add("enable:10:0");
+        Check(Boundary.Calls.SequenceEqual(expectedCalls),label+" exact original calls and order");
+        Check(Boundary.Disabled==(unentered?0:1) && Boundary.Enabled==(success?1:0),label+" original mutation counts");
+        Check(success?error is null:error?.GetType().Name==(fault=="admission-throw"?"ApplicationException":fault=="admission-false"?"HidAuthorityChangedException":"InvalidOperationException"),label+" original success or exception preserved");
+        Check(facts.DisableCallEntered==!unentered && facts.EnableCallEntered==success,label+" original entered flags");
+        void Duration(long? actual,long? expected,string name)=>Check(actual==(clockFault.Length==0?expected:null),label+" "+name+" exact monotonic ms or null");
+        Duration(facts.DisableCallElapsedMs,unentered?null:17,"disable excludes observation");
+        Duration(facts.DisableFailureObservationElapsedMs,observed?7+(statusEntered?11:0)+(postEntered?13:0):null,"whole observation");
+        if(observed){
+            var observation=facts.DisableFailureStatus!;
+            Duration(observation.LocateElapsedMs,7,"first locate including throw");
+            Duration(observation.StatusElapsedMs,statusEntered?11:null,"status including throw");
+            Duration(observation.PostLocateElapsedMs,postEntered?13:null,"post locate including throw");
+            var state=fault.EndsWith("throw",StringComparison.Ordinal)?"unknown-diagnostic-throw":fault switch{
+                "locate-error"=>"unknown-locate-error","locate-mismatch"=>"unknown-node-mismatch",
+                "status-error"=>"unknown-status-error","post-locate-error"=>"unknown-post-locate-error",
+                "post-locate-mismatch"=>"unknown-post-node-mismatch",_=>"observed"};
+            Check(observation.State==state,label+" observation facts preserve UNKNOWN");
+            Check(facts.DisableResult==23 && !facts.CompensationChecked,label+" nonzero result never authorizes enable");
+        }else Check(facts.DisableFailureStatus is null,label+" unentered observation omitted");
+        var output=capture.ToString();JsonElement? diagnostic=null;
+        if(success)Check(output.Length==0,label+" successful path emits no record");
+        else{
+            const string prefix="YMCC_MSI_GAME_AUTHORITY_DIAGNOSTIC ";
+            Check(output.StartsWith(prefix,StringComparison.Ordinal) && output.Split(prefix,StringSplitOptions.None).Length==2,label+" one original failure record");
+            Check(Encoding.UTF8.GetByteCount(output)<=2048,label+" unchanged failure byte cap");
+            if(output.StartsWith(prefix,StringComparison.Ordinal)){
+                using var parsed=JsonDocument.Parse(output[prefix.Length..]);diagnostic=parsed.RootElement.Clone();
+                Check(diagnostic.Value.GetProperty("TimingClock").GetString()=="monotonic" && diagnostic.Value.GetProperty("DisableCallElapsedMs").ValueKind==(unentered || clockFault.Length>0?JsonValueKind.Null:JsonValueKind.Number),label+" serialized timing presence");
+            }
+        }
+        Results.Add(new{scenario=label,clockFault,refreshSucceeded=error is null,exception=error?.GetType().FullName,Boundary.Disabled,Boundary.Enabled,diagnostic,calls=Boundary.Calls.ToArray()});
+        Boundary.Timing=false;Boundary.ClockFault="";
     }
     public static int Main(string[] args)
     {
@@ -129,6 +199,8 @@ internal static class Fixture
             disableCalls=enableCalls=returnChecks=0;
             clean=MsiNativePortCycle.RefreshGameNode(()=>true,_=>{disableCalls++;return 0;},()=>{enableCalls++;return 0;},null,()=>{returnChecks++;return true;});
             Check(clean && disableCalls==1 && enableCalls==1 && returnChecks==0,"healthy refresh adds no return discovery or extra enable");
+            foreach(var fault in new[]{"admission-false","admission-throw","success","disable-throw","observe-ok","locate-error","locate-mismatch","locate-throw","status-error","status-throw","post-locate-error","post-locate-mismatch","post-locate-throw"})RunTiming(fault);
+            foreach(var clockFault in new[]{"timestamp","elapsed"})foreach(var fault in new[]{"success","disable-throw","observe-ok"})RunTiming(fault,clockFault);
         }
         var report=new{productionCompensationScope="rog-pid1b4c-exact-owned-node",passed=Failures.Count==0,assertions,cases=Results.Count,failures=Failures,results=Results,baseline,realHardwareAccess=false,realSdkLoaded=false,productMainExecuted=false};
         File.WriteAllText(args[0],JsonSerializer.Serialize(report,new JsonSerializerOptions{WriteIndented=true}));
@@ -170,7 +242,33 @@ namespace Nefarius.Utilities.DeviceManagement.Extensions
 
 internal static partial class MsiNativePortCycle
 {
-    private static uint Locate(ref uint node,string instance,uint flags){Boundary.Calls.Add("locate:"+instance);node=instance==Boundary.Root?1u:Boundary.Fault("node-retired") || Boundary.Enabled>0 && Boundary.Fault("enable-node-replaced")?99u:10u;if(instance!=Boundary.Root && Boundary.Enabled>0){if(Boundary.Fault("enable-authority-throws"))throw new ApplicationException("inert return identity exception");if(Boundary.Fault("enable-identity-retired"))return 13;}return 0;}
+    // Optional lifecycle import: no OS wait; an unexpected call refuses execution.
+    private static uint WaitForCycleCancellation(SafeWaitHandle handle,uint milliseconds)
+    { Boundary.Calls.Add("cancel-wait-inert"); return uint.MaxValue; }
+    // Fixture-only lexical replacement: normal cases use the real monotonic clock;
+    // explicit timing cases advance only at inert device boundaries, without waits.
+    private static class Stopwatch
+    {
+        internal static long GetTimestamp()
+        {
+            if(Boundary.ClockFault=="timestamp")throw new ArithmeticException("inert timestamp failure");
+            return Boundary.Timing?Boundary.ClockMs:System.Diagnostics.Stopwatch.GetTimestamp();
+        }
+        internal static TimeSpan GetElapsedTime(long started)
+        {
+            if(Boundary.ClockFault=="elapsed")throw new ArithmeticException("inert elapsed calculation failure");
+            return Boundary.Timing?TimeSpan.FromMilliseconds(Boundary.ClockMs-started):System.Diagnostics.Stopwatch.GetElapsedTime(started);
+        }
+    }
+    internal static Action? PrepareTimingRefresh(GameRefreshFacts facts,Func<bool> current)=>PrepareGameRefresh(Boundary.Target,current,facts);
+    private static uint Locate(ref uint node,string instance,uint flags){Boundary.Calls.Add("locate:"+instance);
+        if(Boundary.Timing && Boundary.Disabled>0){
+            var first=++Boundary.ObservationLocates==1;Boundary.ClockMs+=first?7:13;
+            var part=first?"locate":"post-locate";node=Boundary.Case.Fault==part+"-mismatch"?99u:10u;
+            if(Boundary.Case.Fault==part+"-throw")throw new ApplicationException("inert observation locate exception");
+            return Boundary.Case.Fault==part+"-error"?13u:0;
+        }
+        node=instance==Boundary.Root?1u:Boundary.Fault("node-retired") || Boundary.Enabled>0 && Boundary.Fault("enable-node-replaced")?99u:10u;if(instance!=Boundary.Root && Boundary.Enabled>0){if(Boundary.Fault("enable-authority-throws"))throw new ApplicationException("inert return identity exception");if(Boundary.Fault("enable-identity-retired"))return 13;}return 0;}
     private static uint Property(uint node,ref PropertyKey key,out uint type,byte[]? buffer,ref uint bytes,uint flags)
     {
         type=0x2012;
@@ -186,7 +284,13 @@ internal static partial class MsiNativePortCycle
     }
     private static uint Parent(out uint parent,uint node,uint flags){parent=node==10?11u:1u;return node==1?13u:0;}
     private static uint DeviceId(uint node,StringBuilder identifier,int length,uint flags){identifier.Append(node==1?Boundary.Fault("foreign-root")?Boundary.Root+"OTHER":Boundary.Root:node==11?Boundary.Fault("virtual-parent")?@"ROOT\HIDMAESTRO\VIRTUAL":@"USB\MI_00\PARENT":Boundary.Target);return 0;}
-    private static uint Disable(uint node,uint flags){Boundary.Disabled++;Boundary.Calls.Add("disable:"+node+":"+flags);if(Boundary.Fault("disable-throw"))throw new InvalidOperationException("inert disable exception");return Boundary.Fault("disable-result")?uint.MaxValue:0;}
+    private static uint DevNodeStatus(out uint status,out uint problem,uint node,uint flags)
+    {
+        Boundary.Calls.Add("status:"+node+":"+flags);status=8;problem=0;
+        if(Boundary.Timing){Boundary.ClockMs+=11;if(Boundary.Case.Fault=="status-throw")throw new ApplicationException("inert observation status exception");}
+        return Boundary.Case.Fault=="status-error"?13u:0;
+    }
+    private static uint Disable(uint node,uint flags){Boundary.Disabled++;Boundary.Calls.Add("disable:"+node+":"+flags);if(Boundary.Timing)Boundary.ClockMs+=17;if(Boundary.Fault("disable-throw"))throw new InvalidOperationException("inert disable exception");return Boundary.Timing && Boundary.Case.Fault!="success"?23u:Boundary.Fault("disable-result")?uint.MaxValue:0;}
     private static uint Enable(uint node,uint flags){
         Boundary.Enabled++;Boundary.Calls.Add("enable:"+node+":"+flags);
         if(Boundary.Enabled==1 && Boundary.Case.Fault.StartsWith("enable-",StringComparison.Ordinal)){

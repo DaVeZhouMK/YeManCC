@@ -70,6 +70,70 @@ static void msiDinputStopForLifecycle(const char* reason,bool retainPhysicalMode
 // Pipe retirement must additionally include the transport owner's pending work;
 // the native wrapper integrates that proof, not merely a successful close call.
 // inputHostPipeRetirementProvenLocked must be declared before this header.
+// Evidence at existing Stop/final boundaries only. Do not call the cleanup
+// predicate here: it may retire pipe resources. This snapshot performs no
+// maintenance, handle close, store/device read, lifecycle dispatch or retry.
+// Null means no Host mutex ownership or a failed diagnostic, never clean.
+static json inputHostCleanupEvidenceLocked() noexcept {
+    if(!g_inputHostMx.ownedByCurrentThread())return nullptr;
+    try {
+        json checks=json::object(),blockers=json::array(),unknown=json::array();
+        const auto check=[&](const char* name,bool proven){
+            checks[name]=proven;if(!proven)blockers.push_back(name);
+        };
+        check("configuredOff",!g_realStickTest.virtualTargetEnabled);
+        check("hostProcessAbsent",!g_inputHostProcess);
+        check("primaryThreadHandleAbsent",!g_inputHostPrimaryThread);
+        check("serverPipeHandleAbsent",!g_inputHostServerPipe);
+        check("unadoptedPipeHandleAbsent",!g_inputHostUnadoptedPipe);
+        check("helloCleared",!g_inputHostHello);
+        check("preparedCleared",!g_inputHostPrepared);
+        check("prepareMayHaveReachedHostCleared",!g_inputHostPrepareMayHaveReachedHost);
+        check("neutralizedCleared",!g_inputHostNeutralized);
+        check("activeCleared",!g_inputHostActive);
+        check("visibilityJournalInactive",!g_hidHideVisibilityJournal.active);
+        check("releaseQuarantineCleared",!g_inputHostReleaseQuarantined);
+        check("msiSteamDeckDebtCleared",!g_msiSteamDeckReleaseDebt.required());
+        check("psRetirementDutyCleared",!g_psEndpointOwnership.retirementRequired());
+        const bool msi=msiClawKnownBoardAuthority();
+        const bool msiOwed=g_msiDinputReturnOwed.load(std::memory_order_acquire);
+        check("msiPhysicalReturnDutyCleared",!msi || !msiOwed);
+        const auto& history=ymcc::inputHost::targetReturnRuntime::state;
+        check("coldReturnHistorySettledCached",!history.coldHistoryPending);
+        auto* pipe=ymcc::inputHost::pipeTransport::existingProcessRuntime();
+        json pipeEvidence={{"runtimePresent",pipe!=nullptr},{"snapshotAvailable",false},
+            {"scope","existing-runtime-try-lock;no-maintenance-or-retirement"}};
+        if(!pipe){checks["pipeRetirementSnapshot"]=true;pipeEvidence["stopped"]=true;}
+        else {
+            const auto snap=pipe->snapshot();pipeEvidence["snapshotAvailable"]=snap.available;
+            if(!snap.available){checks["pipeRetirementSnapshot"]=nullptr;unknown.push_back("pipeRetirementSnapshot");}
+            else {
+                check("pipeRetirementSnapshot",snap.stopped);
+                pipeEvidence.update({{"stopped",snap.stopped},{"sealed",snap.sealed},
+                    {"pending",snap.pending},{"activeLeases",snap.activeLeases},{"retainedLeases",snap.retainedLeases},
+                    {"cachedOperations",snap.cachedOperations},{"retainedOperations",snap.retainedOperations},
+                    {"ownedOriginals",snap.ownedOriginals},{"ownedDuplicates",snap.ownedDuplicates},
+                    {"ownedEvents",snap.ownedEvents},{"failedCloseDebt",snap.failedCloseDebt}});
+            }
+        }
+        const auto* record=history.session?history.session->record():nullptr;
+        return {{"schemaVersion",1},{"observedTick",GetTickCount64()},
+            {"hostEpoch",g_inputHostEpoch},{"runIdPresent",!g_inputHostRunId.empty()},
+            {"powerGeneration",currentPowerGeneration()},
+            {"scope","cached-owned-cleanup-inputs;not-physical-return-or-game-delivery-proof"},
+            {"atomicAcrossSources",false},{"predicateReexecuted",false},
+            {"checks",std::move(checks)},{"blockers",std::move(blockers)},{"unknown",std::move(unknown)},
+            {"pipe",std::move(pipeEvidence)},{"msiReturnOwedSampled",msiOwed},{"msiReturnDutyApplies",msi},
+            {"msiReturnDebtEpisode",g_msiDinputReturnDebtEpisode.load(std::memory_order_acquire)},
+            {"nativeReturnRecord",msiCrashCleanupEvidenceLocked()},
+            {"journalOwnedTargetCount",g_hidHideVisibilityJournal.hiddenByUs.size()},
+            {"historySessionReady",history.session && history.session->ready()},
+            {"historyObligations",record?json(record->obligations.size()):json(nullptr)},
+            {"historyErrorCached",history.lastError.substr(0,256)},
+            {"physicalReturnVerified",false},{"gameInputVerified",false}};
+    }catch(...){return nullptr;}
+}
+
 static bool inputHostOwnedCleanupProvenLocked() {
     const bool msiReturnProven = !msiClawKnownBoardAuthority() ||
         !g_msiDinputReturnOwed.load(std::memory_order_acquire);
@@ -86,6 +150,19 @@ static bool inputHostDisabledCleanupProvenLocked() {
 }
 
 static void inputHostStopLocked(const char* reason) {
+    // Recheck at the final Host lock throat; the earlier dispatch check cannot
+    // authorize cleanup of a different or already-published target.
+    const std::string_view postHideCleanupReason=reason?std::string_view(reason):std::string_view{};
+    if(!msiPostHideCleanupWorkCurrentLocked(postHideCleanupReason)){
+        msiPostHideCleanupWorkRetiredLocked(postHideCleanupReason,"stop-throat");return;
+    }
+    // The post-hide helper precedes PREPARE. A canceled Start cannot unhide or
+    // retire its HELLO owner while that same physical writer can still run.
+    if(!msiPostHideCancelForStop(reason)){
+        g_inputHostStartBlocked=true;g_inputHostFaultHoldsStart.store(true,std::memory_order_release);
+        return; // original native owner queues one cleanup after exact retirement
+    }
+
     const auto closingTicket = inputHostConfiguredPersona() == "disabled"
         ? g_virtualStartProtection.pendingTicket("disabled",inputHostStartProtectionNow()) : 0;
     // OFF borrows only its existing closing ticket's original deadline.
@@ -542,6 +619,14 @@ static void inputHostStopLocked(const char* reason) {
     inputHostClearLocked();
     // Local cleanup completion is distinct from real game/device consumption.
     closeReceipt.outcome = inputHostDisabledCleanupProvenLocked() ? "success" : "failure";
+    const bool coldReturnContinuationArmed=inputHostSwitchExecutionCarryColdOffLocked(closingTicket);
+    try {appendNativeLifecycleLog("input-host-cleanup-evidence",{
+        {"reason",reason?reason:"unspecified"},{"stopHostPid",stopHostPid},
+        {"closingRequestId",closingTicket},{"localCleanupResult",closeReceipt.outcome},
+        {"coldReturnContinuationArmed",coldReturnContinuationArmed},
+        {"cleanupEvidence",inputHostCleanupEvidenceLocked()},
+        {"scope","post-Clear-owned-state;not-external-input-acceptance"}});}catch(...){}
+
     // The durable journal (or native recovery) owns the actual driver restore.
 }
 

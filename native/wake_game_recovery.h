@@ -254,7 +254,7 @@ static void sgBeginWakeGameRecovery(unsigned long long generation) {
         {"attemptOffsetsMs", std::vector<ULONGLONG>(WakeGameResume::attemptOffsetsMs,
             WakeGameResume::attemptOffsetsMs + WakeGameResume::attemptCount)}, {"includesPreWakeManual", true}
     });
-    g_sgWorkCv.notify_one();
+    sgNotifyWork();
 }
 // Caller holds g_sgOpMtx and supplies only its native inspection snapshot.
 // No manual-pause directory, orphan discovery, Steam restart or game launch.
@@ -294,7 +294,28 @@ static bool sgBeginUserSleepGameRecoveryUnlocked(unsigned long long generation,
     g_sgWakeRecoveryPending.store(true,std::memory_order_release);
     sgRecordFact("sleep-game-user-recovery-queued",{{"generation",generation},{"requestId",requestId},
         {"targets",expected.size()},{"scope","sleep-markers-only"},{"healthVerified",false}});
-    g_sgWorkCv.notify_one();return true;
+    sgNotifyWork();return true;
+}
+// The same five attempt offsets own scheduling. Readiness alone has a bounded
+// 250ms fallback while this short wake batch exists; idle never polls.
+static ULONGLONG sgWakeGameRecoveryWaitMs(ULONGLONG now) {
+    if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire)) return ~ULONGLONG{0};
+    std::lock_guard<std::mutex> lock(g_sgOpMtx);
+    if (!g_sgWakeRecoveryPending.load(std::memory_order_acquire)) return ~ULONGLONG{0};
+    const auto phase = g_powerLifecycle.load(std::memory_order_acquire);
+    if (g_exitRequested.load() || g_sgWakeRecovery.generation != currentPowerGeneration() ||
+        phase == PowerLifecycle::Suspending || phase == PowerLifecycle::Suspended || sgSleepRetryActive() ||
+        (g_sgWakeRecovery.autoConfigEpoch && !sleepRecoveryAutoAllows(g_sgWakeRecovery.generation,g_sgWakeRecovery.autoConfigEpoch)) ||
+        now < g_sgWakeRecovery.started) return 0;
+    const auto elapsed = now - g_sgWakeRecovery.started;
+    const auto attempt = g_sgWakeRecovery.nextAttempt;
+    if (attempt >= WakeGameResume::attemptCount) return 0;
+    const auto due = WakeGameResume::attemptOffsetsMs[attempt];
+    if (elapsed < due) return due - elapsed;
+    const auto last = WakeGameResume::attemptOffsetsMs[WakeGameResume::attemptCount - 1];
+    if (elapsed < last && (phase != PowerLifecycle::Ready || !g_inputReady.load(std::memory_order_acquire)))
+        return (std::min)(ULONGLONG{250}, last - elapsed);
+    return 0;
 }
 static void sgWakeGameRecoveryTick() {
     std::lock_guard<std::mutex> opLock(g_sgOpMtx);

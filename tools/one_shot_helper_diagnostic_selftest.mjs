@@ -6,6 +6,7 @@ import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -23,12 +24,26 @@ const fixture = path.join(repo, 'tools/fixtures/one_shot_helper_diagnostic/fixtu
 const header = path.join(repo, 'native/one_shot_helper_diagnostic.h');
 const runtime = path.join(repo, 'native/msi_native_foreground_isolation_runtime.h');
 const jsonHeader = path.join(repo, 'deps/json/json.hpp');
+// The explicit current-refresh adapter consumes completed R114 current-status
+// receipts only. Default legacy producer gates and native fixture stay intact.
+const producerMode = option('--producer-mode', 'legacy');
+assert(['legacy', 'current-refresh'].includes(producerMode), '--producer-mode must be legacy or current-refresh');
+const currentValidationOption = option('--current-refresh-validation', '');
+const currentValidation = currentValidationOption ? path.resolve(currentValidationOption) : null;
+const currentValidationSha256 = option('--current-refresh-validation-sha256', '').toLowerCase();
+if (producerMode === 'current-refresh') {
+  assert(currentValidation && /^[a-f0-9]{64}$/.test(currentValidationSha256), 'explicit current-refresh validation and SHA256 required');
+  assert(!fs.existsSync(output), 'current-refresh requires a fresh evidence directory');
+} else assert(!currentValidation, 'current-refresh validation requires explicit current-refresh mode');
+const currentSourceBindings = currentValidation ? path.join(path.dirname(currentValidation), 'source-bindings.json') : null;
+const producerCoverage = {mode: producerMode, legacyAuthorityReplay: producerMode === 'legacy' ? 'requested' : 'NOT_RUN', currentStatusRecords: 0};
 const refreshProducerOption = option('--refresh-producer-results', '');
 const refreshProducerResults = refreshProducerOption ? path.resolve(refreshProducerOption) : null;
 const producerResults = path.resolve(option('--producer-results', 'G:/YeManCC-Work/Build/Validation/VirtualInput-OwnedExtensions-R114-20261016/helper-diagnostics/offline/candidate/results.json'));
 const hash = bytes => crypto.createHash('sha256').update(bytes).digest('hex');
 const write = (file, bytes) => { fs.mkdirSync(path.dirname(file), {recursive: true}); fs.writeFileSync(file, bytes); };
-const inputs = [header, runtime, jsonHeader, fixture, fileURLToPath(import.meta.url), producerResults, ...(refreshProducerResults ? [refreshProducerResults] : [])];
+const trackingHeaders = ['native_refresh_writer_runtime.h', 'native_refresh_writer_store.h', 'native_refresh_writer_record.h', 'virtual_target_return_store.h', 'virtual_target_return_record.h', 'virtual_target_return_process.h', 'hidhide_cli_job_guard.h'].map(name => path.join(repo, 'native', name));
+const inputs = [header, runtime, jsonHeader, fixture, ...trackingHeaders, fileURLToPath(import.meta.url), path.join(repo, 'tools/fixtures/hc_reviewed_calibration/toolchain.mjs'), producerResults, ...(refreshProducerResults ? [refreshProducerResults] : []), ...(currentValidation ? [currentValidation, currentSourceBindings] : [])];
 const before = new Map(inputs.map(file => [file, fs.readFileSync(file)]));
 const binding = inputs.map(file => ({path: file, sha256: hash(before.get(file)), bytes: before.get(file).length}));
 const runtimeText = before.get(runtime).toString('utf8');
@@ -40,7 +55,7 @@ function mask(code) {
 function block(name, kind = 'function') {
   const masked = mask(runtimeText);
   const expression = kind === 'struct' ? new RegExp(`^struct ${name}\\s*\\{`, 'm') :
-    new RegExp(`^static [^\\n]*\\b${name}\\(`, 'm');
+    new RegExp(`^static [^\\n;]*\\b${name}\\([^;{}]*\\)[^;{}]*\\{`, 'm');
   const found = expression.exec(masked);
   assert(found, `bound actual ${name}`);
   let position = masked.indexOf('{', found.index), depth = 0;
@@ -60,7 +75,9 @@ const poll = block('msiNativeForegroundPollCycleLocked');
 const receipt = block('msiNativeForegroundReceipt');
 const cycle = block('msiNativeForegroundCycleLocked');
 const optionalStart = cycle.text.indexOf('    std::unique_ptr<ymcc::input::OneShotHelperDiagnostic> capture;');
-const optionalEnd = cycle.text.indexOf('    const DWORD launchFlags=', optionalStart);
+const optionalLaunch = cycle.text.indexOf('    const DWORD launchFlags=', optionalStart);
+const optionalTrackedBranch = cycle.text.indexOf('    if(s.profile==ymcc::nativeForeground::Profile::Gpd){', optionalStart);
+const optionalEnd = optionalTrackedBranch >= 0 ? Math.min(optionalLaunch, optionalTrackedBranch) : optionalLaunch;
 assert(optionalStart >= 0 && optionalEnd > optionalStart, 'exact optional capture allocation block');
 const optional = cycle.text.slice(optionalStart, optionalEnd);
 const assertions = [];
@@ -88,11 +105,13 @@ write(path.join(output, 'runtime-consumer.actual.h'), consumer);
 const producerDocument = JSON.parse(before.get(producerResults).toString('utf8'));
 assert.equal(producerDocument.realHardwareAccess, false, 'producer is the completed no-device C# fixture');
 const selectedProducer = [];
+if (producerMode === 'legacy') {
 for (const stage of ['first', 'after-prepare']) {
   const row = producerDocument.results.find(row => row.Facts?.Stage === stage && row.Facts?.LocateResult === 4294967295 && row.DiagnosticCount === 1);
   if (row) selectedProducer.push(row);
 }
 assert(selectedProducer.length >= 1, 'actual C# facts with LocateResult uint32 max');
+}
 const producerBindings = selectedProducer.map(row => {
   const wire = 'YMCC_MSI_GAME_AUTHORITY_DIAGNOSTIC ' + JSON.stringify(row.Facts) + '\r\n';
   assert(Buffer.byteLength(wire) <= 2048, row.Id + ' byte cap');
@@ -101,7 +120,63 @@ const producerBindings = selectedProducer.map(row => {
     sha256: hash(wire), wire, replay: 'C# deserialized Facts in original property order + fixed prefix/CRLF; C++ fixture child replay, no product C# process'};
 });
 const refreshProducerBindings = [];
-if (refreshProducerResults) {
+if (producerMode === 'current-refresh') {
+  assert(refreshProducerResults, 'current-refresh requires the actual candidate producer results');
+  assert.equal(hash(before.get(currentValidation)), currentValidationSha256, 'current-refresh validation SHA256');
+  const validation = JSON.parse(before.get(currentValidation).toString('utf8'));
+  assert.equal(validation.mode, 'current-status');
+  assert.equal(validation.success, true); assert.equal(validation.executedThisRun, true);
+  assert.equal(validation.failures, 0); assert.equal(validation.realHardwareAccess, false);
+  assert.equal(validation.productHostOrSdkRun, false);
+  const samePath = (a, b) => path.resolve(a).toLowerCase() === path.resolve(b).toLowerCase();
+  const actual = path.dirname(currentValidation);
+  assert(samePath(producerResults, path.join(actual, 'offline/baseline/results.json')), 'exact completed baseline receipt');
+  assert(samePath(refreshProducerResults, path.join(actual, 'offline/candidate/results.json')), 'exact completed candidate receipt');
+  function bindExpected(file, expected) {
+    file = path.resolve(file);
+    const bytes = before.has(file) ? before.get(file) : fs.readFileSync(file);
+    assert.equal(hash(bytes), expected, 'bound completed helper input ' + file);
+    if (!before.has(file)) { inputs.push(file); before.set(file, bytes); binding.push({path: file, sha256: hash(bytes), bytes: bytes.length}); }
+  }
+  for (const row of validation.fixtureBindings) bindExpected(path.join(repo, row.file), row.sha256);
+  const sourceBindings = JSON.parse(before.get(currentSourceBindings).toString('utf8'));
+  assert.equal(sourceBindings.completeSourceCompiled, true);
+  const candidate = sourceBindings.bindings.find(row => row.variant === 'candidate');
+  const baseline = sourceBindings.bindings.find(row => row.variant === 'baseline');
+  assert(candidate && baseline, 'actual baseline/candidate source bindings required');
+  assert.equal(candidate.sourceSha256, validation.candidateSha256);
+  assert.equal(baseline.sourceSha256, validation.baselineSha256);
+  assert(samePath(candidate.sourcePath, path.join(repo, 'InputHost/MsiNativePortCycle.cs')), 'current product helper source binding');
+  for (const row of sourceBindings.bindings) {
+    bindExpected(row.sourcePath, row.sourceSha256); bindExpected(row.offlineSourcePath, row.offlineSourceSha256);
+  }
+  const document = JSON.parse(before.get(refreshProducerResults).toString('utf8'));
+  for (const completed of [producerDocument, document]) {
+    assert.equal(completed.realHardwareAccess, false); assert.equal(completed.realSdkLinked, false);
+    assert(Array.isArray(completed.failures) && completed.failures.length === 0, 'completed helper contains no failed assertions');
+    assert.equal(completed.results.length, validation.scenarios, 'actual completed helper scenario count');
+  }
+  const rows = document.results.filter(row => row.Facts?.Kind === 'ymcc.gameRefresh.failure' && row.DiagnosticCount === 1);
+  assert(rows.length > 0, 'actual current Result6 Facts required');
+  const statusRows = rows.filter(row => row.Facts.DisableFailureStatus);
+  const states = new Set(statusRows.map(row => row.Facts.DisableFailureStatus.State));
+  for (const state of ['observed', 'unknown-locate-error', 'unknown-node-mismatch', 'unknown-status-error',
+    'unknown-post-locate-error', 'unknown-post-node-mismatch', 'unknown-diagnostic-throw'])
+    assert(states.has(state), 'actual current status/UNKNOWN producer coverage ' + state);
+  for (const row of rows) {
+    const facts = row.Facts;
+    assert.equal(row.Result, 6); assert.equal(facts.Schema, 1); assert.equal(facts.Result, 6);
+    assert(['admission', 'prepare', 'prepare-locate', 'revalidate', 'current-locate', 'current-authority', 'disable', 'enable'].includes(facts.Stage));
+    const wire = 'YMCC_MSI_GAME_AUTHORITY_DIAGNOSTIC ' + JSON.stringify(facts) + '\r\n';
+    assert(Buffer.byteLength(wire) <= 2048, row.Id + ' current refresh byte cap');
+    refreshProducerBindings.push({id: row.Id, facts, bytes: Buffer.byteLength(wire), sha256: hash(wire), wire,
+      exitCode: 6, refresh: true, originalProducerUtf8Bytes: row.Utf8Bytes,
+      replay: 'actual completed current-status C# Facts, property-order reserialization, original native C++ private child; not product C# execution'});
+  }
+  producerCoverage.currentStatusRecords = statusRows.length;
+  producerCoverage.currentRefreshRecords = rows.length;
+  producerCoverage.legacyHidRefreshMatrix = 'NOT_RUN_CURRENT_REFRESH_ONLY';
+} else if (refreshProducerResults) {
   const document = JSON.parse(before.get(refreshProducerResults).toString('utf8'));
   assert.equal(document.passed, true, 'refresh producer is a completed passing test');
   assert(Array.isArray(document.failures) && document.failures.length === 0, 'refresh producer contains no failures');
@@ -147,12 +222,12 @@ const producerCpp = combinedProducerBindings.map((row, index) => 'static const u
 write(path.join(output, 'producer-replay.actual.h'), producerCpp);
 write(path.join(output, 'producer-replay-binding.json'), JSON.stringify({producerResults, producerResultsSha256: hash(before.get(producerResults)), records: producerBindings, refreshProducerResults, refreshProducerResultsSha256: refreshProducerResults ? hash(before.get(refreshProducerResults)) : null, refreshRecords: refreshProducerBindings}, null, 2) + '\n');
 
-for (const file of [header, runtime, fixture, fileURLToPath(import.meta.url)]) write(path.join(output, 'tested-source', path.relative(repo, file)), before.get(file));
+for (const file of [header, runtime, fixture, ...trackingHeaders, fileURLToPath(import.meta.url)]) write(path.join(output, 'tested-source', path.relative(repo, file)), before.get(file));
 write(path.join(output, 'source-checks.json'), JSON.stringify(assertions, null, 2) + '\n');
-const sourceBinding = {schema: 1, directProductionHeaderInclude: true, inputs: binding,
+const sourceBinding = {schema: 1, producerMode, producerCoverage, directProductionHeaderInclude: true, inputs: binding,
   extractedRuntimeSpans: extracted.map(({text, ...entry}) => entry), cycleFunction: (({text, ...entry}) => entry)(cycle),
   optionalCaptureExactSpanSha256: hash(optional), generatedConsumerSha256: hash(consumer), producerReplayHeaderSha256: hash(producerCpp), producerReplayIds: combinedProducerBindings.map(row => row.id),
-  substitutions: [], inertDependencies: ['nativeForeground Profile/name', 'gameNodeRefreshMutationAllowed is an explicitly inert true transport leaf; production mutation policy NOT exercised', 'device data type declarations', 'W2U for fixture strings', 'ordinary lifecycle memory sink', 'Cycle image selection limited to fixture/nonexistent own path', 'Cycle hash function inert', 'Cycle CreateProcessW forwards real Win32 except explicit failure injection'],
+  substitutions: [], inertDependencies: ['GPD tracked-writer branch is not executed; its path/machine/evidence endpoints throw and their total calls must stay zero', 'nativeForeground Profile/name', 'gameNodeRefreshMutationAllowed is an explicitly inert true transport leaf; production mutation policy NOT exercised', 'device data type declarations', 'W2U for fixture strings', 'ordinary lifecycle memory sink', 'Cycle image selection limited to fixture/nonexistent own path', 'Cycle hash function inert', 'Cycle CreateProcessW forwards real Win32 except explicit failure injection'],
   mutationPolicy: {entry: 'ymcc::nativeForeground::gameNodeRefreshMutationAllowed', fixtureValue: true, inert: true, productionPolicyExecuted: false, actualPolicyOracle: 'separate full native TU owned by main task'},
   boundary: 'Capture and all Win32 process, standard handle, spool and wait APIs are real; mutation policy is inert true and untested here; no device/product/Steam/driver operation is linked.'};
 write(path.join(output, 'source-binding.json'), JSON.stringify(sourceBinding, null, 2) + '\n');
@@ -176,7 +251,7 @@ for (const variant of ['Release', 'Checked']) {
   fs.mkdirSync(directory, {recursive: true});
   const executable = path.join(directory, 'one_shot_helper_diagnostic.fixture.exe');
   const switches = variant === 'Release' ? '/O2 /DNDEBUG /MT' : `/Od /RTC1 /Zi /MTd /D_DEBUG /D_ITERATOR_DEBUG_LEVEL=2 /Fd"${path.join(directory, 'fixture.compile.pdb')}"`;
-  const batch = `@echo off\r\ncall "${vcvars}" >nul\r\nif errorlevel 1 exit /b %errorlevel%\r\n` +
+  const batch = calibrationToolchainPreamble(vcvars) + 'chcp 65001 >nul\r\n' +
     `cl /nologo /std:c++20 /utf-8 /EHsc /W4 /permissive- /Zc:__cplusplus ${switches} ` +
     `/I"${path.join(repo, 'native')}" /I"${path.join(repo, 'deps/json')}" /I"${output}" "${fixture}" ` +
     `/Fo"${path.join(directory, 'fixture.obj')}" /Fe"${executable}" /link /INCREMENTAL:NO ${variant === 'Checked' ? '/DEBUG' : ''}\r\nexit /b %errorlevel%\r\n`;
@@ -215,7 +290,7 @@ const after = unchanged();
 const sourceStable = after.every(item => item.unchanged);
 const success = sourceStable && assertions.every(item => item.passed) && variants.length === 2 &&
   variants.every(item => item.buildExitCode === 0 && item.runExitCode === 0 && item.success);
-const result = {schema: 1, success, sourceStable, sourceChecks: assertions, sourceBinding: 'source-binding.json',
+const result = {schema: 1, success, sourceStable, producerMode, producerCoverage, sourceChecks: assertions, sourceBinding: 'source-binding.json',
   auditExitCode: audit.status, variants, sourceAfter: after,
   boundary: {privateFixtureOnly: true, productBuild: false, productOrHostStarted: false, deviceAccess: false,
     steamAccess: false, driverAccess: false, packagesOrDeployment: false, recursiveDelete: false,

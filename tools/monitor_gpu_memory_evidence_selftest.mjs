@@ -72,6 +72,25 @@ int main(int argc,char**argv){assert(argc==2);json checks=json::array(),examples
  check("diagnostic gate does not change any published monitoring values",rawTop(off)==rawTop(hw));
  auto only=capture({{"GPU D3D Memory Dedicated","MB",4096,2},{"GPU D3D Memory Dynamic","MB",12288,2}});
  check("D3D-only rows never create or select a GPU",only.gpuReadings.size()==0&&ymcc::monitordetail::gpuMemoryEvidence(only.gpuReadings.best(),true,only.gpuReadings)["selected"]==false);
+ // AMD effective D3D tuples must also drive the diagnostic classification.
+ // Original raw/generic counters remain visible without claiming their capacity.
+ {
+  auto probe=[&](std::vector<Row> rows){auto data=buffer(rows);constexpr size_t at=48+268+8;
+   const char* name="iGPU [#0]: AMD Radeon 8060S";memset(data.data()+at,0,128);memcpy(data.data()+at,name,strlen(name));
+   NativeMonitorHw value;bool unstable=false;check("actual AMD diagnostic parser",monitorParseHWiNFOView(data.data(),data.size(),value,unstable,true)&&!unstable);return value;};
+  auto value=probe({{"GPU Clock","MHz",900,1},{"GPU D3D Memory Dedicated","MB",906,1},{"GPU D3D Memory Dynamic","MB",253,1}});
+  auto evidence=ymcc::monitordetail::gpuMemoryEvidence(value.gpuReadings.best(),true,value.gpuReadings);
+  check("D3D-only diagnostics follow effective used data",evidence["rawUsedMb"].is_null()&&evidence["effectiveUsedMb"]==906&&evidence["status"]=="used-without-capacity");
+  value=probe({{"GPU Clock","MHz",900,1},{"GPU D3D Memory Dedicated","MB",0,1},{"GPU Memory Allocated","MB",1024,1},{"GPU Memory Available","MB",3072,1}});
+  evidence=ymcc::monitordetail::gpuMemoryEvidence(value.gpuReadings.best(),true,value.gpuReadings);
+  check("D3D zero cannot claim generic physical capacity",evidence["effectiveUsedMb"]==0&&evidence["normalizedTotalMb"]==4096&&evidence["effectiveTotalMb"].is_null()&&evidence["status"]=="used-without-capacity");
+  value=probe({{"GPU Clock","MHz",900,1},{"GPU D3D Memory Dynamic","MB",253,1}});
+  evidence=ymcc::monitordetail::gpuMemoryEvidence(value.gpuReadings.best(),true,value.gpuReadings);
+  check("shared-only diagnostics follow published fallback",evidence["effectiveSource"]=="hwinfo-d3d-shared"&&evidence["status"]=="used-without-capacity");
+  value=probe({{"GPU Clock","MHz",900,1},{"GPU Memory Usage","MB",3282,1}});
+  evidence=ymcc::monitordetail::gpuMemoryEvidence(value.gpuReadings.best(),true,value.gpuReadings);
+  check("unusable generic AMD amount does not claim effective data",evidence["rawUsedMb"]==3282&&evidence["effectiveUsedMb"].is_null()&&evidence["status"]=="no-coherent-memory-tuple");
+ }
  auto both=amd;both.insert(both.end(),{{"GPU Memory Allocated","MB",4096,2},{"GPU Memory Available","MB",12288,2},{"GPU D3D Memory Dedicated","MB",3500,2},{"GPU D3D Memory Dynamic","MB",50,2},{"GPU Power","W",50,2},{"GPU Memory Usage","%",25,2}});auto two=capture(both);
  auto n=ymcc::monitordetail::gpuMemoryEvidence(two.gpuReadings.best(),true,two.gpuReadings);examples["NVIDIA-coherent-pattern"]=n;
  check("selected dedicated GPU keeps its own complete memory tuple",n["sensorIndex"]==2&&n["rawUsedMb"]==4096&&n["normalizedTotalMb"]==16384&&n["normalizedLoadPct"]==25&&n["usedReading"]=="GPU Memory Allocated");

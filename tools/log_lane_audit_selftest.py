@@ -6,7 +6,7 @@ import tempfile
 import unittest
 import zipfile
 from pathlib import Path
-from ai_log_reader import iter_ai_records, iter_log_members
+from ai_log_reader import iter_ai_records, iter_log_members, format_for
 from log_lane_audit import audit_zip, source_policy, pid, process_identity, stamp, repeated_guard_successes, late_hide_episodes, repeated_frame_observations, canonical_log_name, native_process_cost_summary
 
 
@@ -241,6 +241,41 @@ class AuditTests(unittest.TestCase):
 
 
 class AiReaderTests(unittest.TestCase):
+    def test_recovery_rotations_are_structured_and_keep_original_identity(self):
+        row={'event':'state','writerPid':17,'time':'2026-10-25T23:20:00','target':{'pid':999}}
+        for name in ('steam-original-recovery.jsonl','steam-original-recovery.jsonl.1','steam-original-recovery.jsonl.previous'):
+            self.assertEqual(format_for(name),'json-lines')
+            records=self.read([(name,json.dumps(row)+'\n')])
+            values=[r['value'] for r in records if r['record']=='json_record']
+            self.assertEqual(values,[row]);self.assertTrue(records[-1]['coverageComplete'])
+        for name in ('gamepad-driver-setup.json.previous','wake-recovery-last.json.12'):
+            self.assertEqual(format_for(name),'json-document')
+            self.assertEqual(sum(r['record']=='json_document' for r in self.read([(name,'{\n "ok":false\n}')])) ,1)
+        self.assertEqual(format_for('steam/logs/steam-original-recovery.jsonl'),'text-or-opaque')
+
+    def test_legacy_wrong_format_index_is_preserved_and_reclassification_explicit(self):
+        data=b'{"event":"state","writerPid":17}\n'
+        begin=dict(record='file_begin',fileId='f0',entry='steam-original-recovery.jsonl',archiveEntryOccurrence=0,
+                   bytes=len(data),sha256=hashlib.sha256(data).hexdigest(),format='text-or-opaque')
+        end=dict(begin,record='file_end')
+        frames=[dict(record='bundle_begin'),begin,end,dict(record='bundle_end',indexComplete=True,indexedFiles=1)]
+        records=self.read([('steam-original-recovery.jsonl',data),('ai-log-index.jsonl','\n'.join(json.dumps(r) for r in frames))])
+        row=next(r for r in records if r['record']=='file_begin')
+        self.assertTrue(records[-1]['coverageComplete']);self.assertEqual(row['format'],'json-lines')
+        self.assertEqual(row['indexDeclaredFormat'],'text-or-opaque');self.assertTrue(row['formatDiffersFromIndex'])
+        self.assertEqual(sum(r['record']=='json_record' and r.get('value',{}).get('event')=='state' for r in records),1)
+
+    def test_new_sleep_clock_prefers_absolute_time_and_legacy_identity_stays_unknown(self):
+        old={'time':'2026-10-25 23:20:00.000','event':'static-wake-scan-result','details':{'pid':999,'ok':False}}
+        self.assertEqual(pid(old,'sleep-facts.log'),'unknown')
+        new={**old,'writerPid':17,'writerInstanceId':'native:17:100','timestampUtc':'2026-10-25T15:20:00.001Z',
+             'timestampLocal':'2026-10-25T23:20:00.001+08:00','observedTickMs':75,'writerSequence':1}
+        self.assertEqual(pid(new,'sleep-facts.log'),'17')
+        self.assertEqual(stamp(new,'sleep-facts.log'),'2026-10-25T15:20:00.001Z')
+        self.assertEqual(stamp(old,'sleep-facts.log'),old['time'])
+        records=self.read([('sleep-facts.log',json.dumps(old)+'\n'+json.dumps(new)+'\n')])
+        self.assertEqual([r['value'] for r in records if r['record']=='json_record'],[old,new])
+
     def volume(self, payload=b'{"writerPid":12,"t":1,"seq":1}\n', *, bad_digest=False):
         digest = hashlib.sha256(payload).hexdigest()
         name = 'input-host-cost.log.archive.0639283912345678901.' + digest[:24] + '.zip'

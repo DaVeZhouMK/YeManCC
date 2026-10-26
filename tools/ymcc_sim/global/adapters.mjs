@@ -1611,6 +1611,7 @@ export function getAdapters(_repoRoot) {
 
 
         "PowerControl/settings-defaults-v1.json",
+        "tools/boot_modes_fixture/fixtures/win5-unconfigured-20261025.json",
 
 
         "deps/json/json.hpp",

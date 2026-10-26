@@ -36,6 +36,8 @@ foreach($header in Get-ChildItem -LiteralPath "$root\native" -File -Recurse){
 Copy-Item -LiteralPath "$root\tools\msi_native_foreground_regression.h" -Destination "$snapshot\tools\msi_native_foreground_regression.h"
 Copy-Item -LiteralPath "$root\deps\json\json.hpp" -Destination "$snapshot\deps\json\json.hpp"
 Copy-Item -LiteralPath "$root\capabilities" -Destination "$snapshot\capabilities" -Recurse
+# Preserve the production TU dependency closure introduced by AMD settings.
+Copy-Item -LiteralPath "$root\deps\adlx-sdk" -Destination "$snapshot\deps\adlx-sdk" -Recurse
 Get-ChildItem -LiteralPath $snapshot -File -Recurse|ForEach-Object{Get-FileHash -LiteralPath $_.FullName}|Select-Object Path,Hash|ConvertTo-Json|Set-Content -LiteralPath "$OutputRoot\compiled-snapshot-hashes.json" -Encoding utf8
 $common=@('/nologo','/std:c++20','/utf-8','/EHsc','/MT','/O2','/bigobj','/DNDEBUG','/DUNICODE','/D_UNICODE','/DYMCC_SCREEN_NATIVE_INPUT_CANDIDATE=1')
 $include=@("/I$root\deps\webview2\build\native\include","/I$snapshot\deps\json","/I$winrt","/I$nativeSnapshot","/I$snapshot\tools")

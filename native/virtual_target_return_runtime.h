@@ -344,15 +344,35 @@ static bool inputHostTargetReturnBeforeHideLocked(
         const std::vector<HidHidePhysicalIdentity>& sources,
         const HidHideVisibilitySnapshot& current,const HidHideVisibilitySnapshot& original,
         const std::string& target,const std::string& transactionId,
-        bool* responsibilityReserved=nullptr) {
+        bool* responsibilityReserved=nullptr,bool nativeOwnedReassertion=false) {
     using namespace ymcc::inputHost::targetReturnRuntime;
     if(responsibilityReserved)*responsibilityReserved=false;
     try {
+        const bool alreadyHidden=hidHideContainsPath(current.hidden,target);
         if(!g_inputHostMx.ownedByCurrentThread()||!contextCurrent()||!current.valid||
-            hidHideContainsPath(current.hidden,target)||!duty::detail::instance(target)||
+            (nativeOwnedReassertion?!alreadyHidden:alreadyHidden)||!duty::detail::instance(target)||
             sources.empty()||sources.size()>duty::maxOrigins||transactionId.empty())return false;
         auto owner=currentOwner();if(!owner)return false;
         const auto stamp=physicalStamp();
+        // Only the native owner's exact terminal-helper proof can supply a
+        // prehidden path's original baseline. The caller's original snapshot
+        // and this internal switch are never donor ownership authority.
+        HidHideVisibilitySnapshot nativeBaseline;
+        if(nativeOwnedReassertion&&
+           (!msiNativeForegroundReassertionBaseline(target,nativeBaseline)||!nativeBaseline.valid||
+            hidHideContainsPath(nativeBaseline.hidden,target)))return false;
+        const auto& baseline=nativeOwnedReassertion?nativeBaseline:original;
+        const auto nativeBaselineCurrent=[&]() {
+            if(!nativeOwnedReassertion)return true;
+            HidHideVisibilitySnapshot observed;
+            const bool proven=msiNativeForegroundReassertionBaseline(target,observed)&&observed.valid&&
+                !hidHideContainsPath(observed.hidden,target)&&observed.cloaking==nativeBaseline.cloaking&&
+                observed.hidden==nativeBaseline.hidden&&observed.applications==nativeBaseline.applications&&
+                observed.cloakRaw==nativeBaseline.cloakRaw&&observed.hiddenRaw==nativeBaseline.hiddenRaw&&
+                observed.applicationsRaw==nativeBaseline.applicationsRaw&&observed.inverseRaw==nativeBaseline.inverseRaw;
+            if(!proven)note("physical-reservation-rejected","native-donor-proof-retired-or-baseline-changed",nullptr,target);
+            return proven;
+        };
         std::string root;
         std::set<std::string> attemptedRoots;
         for(const auto& source:sources) {
@@ -386,9 +406,9 @@ static bool inputHostTargetReturnBeforeHideLocked(
                 if(!physicalOriginWriterSettled(group.origin)) {
                     note("physical-reservation-rejected","old-origin-host-writer-unproven",&group.origin,target);return false;
                 }
-                return physicalContext(*owner,stamp);
+                return nativeBaselineCurrent()&&physicalContext(*owner,stamp);
             }
-        if(!original.valid||hidHideContainsPath(original.hidden,target)) {
+        if(!baseline.valid||hidHideContainsPath(baseline.hidden,target)) {
             note("physical-reservation-rejected","foreign-prehidden-or-baseline-unknown",nullptr,target);return false;
         }
         auto selected=std::find_if(state.physicals.begin(),state.physicals.end(),[&](const auto& item){
@@ -408,8 +428,120 @@ static bool inputHostTargetReturnBeforeHideLocked(
         if(responsibilityReserved)*responsibilityReserved=true;
         if(state.session->record()->revision!=revision)
             note("physical-path-reserved","reached-own-hide-before-dispatch",&selected->origin,target);
-        return physicalContext(*owner,stamp);
+        // Reassertion must still be dispatched as the same hide by the caller.
+        // If native ownership changed during commit, keep the durable duty and
+        // responsibilityReserved=true while withholding dispatch/adoption.
+        return nativeBaselineCurrent()&&physicalContext(*owner,stamp);
     }catch(...){note("physical-reservation-rejected","physical-record-exception",nullptr,target);return false;}
+}
+
+// Save the complete set ALREADY hidden by this native owner before the first
+// virtual handoff re-hide. No future ordinary hide tail is claimed here. Native
+// ownership remains held until the caller's final readback/Accept succeeds.
+static bool inputHostTargetReturnBeforeNativeHandoffLocked(
+        const std::vector<HidHidePhysicalIdentity>& sources,
+        const HidHideVisibilitySnapshot& current,const std::string& journalId,
+        std::vector<std::wstring>* responsibilityReserved) {
+    using namespace ymcc::inputHost::targetReturnRuntime;
+    if(responsibilityReserved)responsibilityReserved->clear();
+    try {
+        if(!responsibilityReserved||!g_inputHostMx.ownedByCurrentThread()||!contextCurrent()||
+           !current.valid||sources.empty()||sources.size()>duty::maxOrigins||journalId.empty())return false;
+        auto owner=currentOwner();if(!owner)return false;
+        const auto stamp=physicalStamp();
+        std::vector<std::string> exactOwned;
+        HidHideVisibilitySnapshot baseline;
+        if(!msiNativeForegroundNativeHandoffSnapshot(exactOwned,baseline)||!baseline.valid||
+           exactOwned.empty()||exactOwned.size()>16)return false;
+        std::set<std::string> exactSet;
+        std::vector<std::wstring> reservedPaths;reservedPaths.reserve(exactOwned.size());
+        for(const auto& target:exactOwned) {
+            if(!duty::detail::instance(target)||!exactSet.insert(duty::detail::fold(target)).second||
+               !hidHideContainsPath(current.hidden,target)||hidHideContainsPath(baseline.hidden,target))return false;
+            reservedPaths.push_back(U2W(target));
+        }
+        const auto nativeSetCurrent=[&]() {
+            std::vector<std::string> observedOwned;HidHideVisibilitySnapshot observed;
+            if(!msiNativeForegroundNativeHandoffSnapshot(observedOwned,observed)||!observed.valid||
+               observedOwned.empty()||observedOwned.size()>16)return false;
+            std::set<std::string> observedSet;
+            for(const auto& target:observedOwned)
+                if(!duty::detail::instance(target)||!observedSet.insert(duty::detail::fold(target)).second||
+                   hidHideContainsPath(observed.hidden,target))return false;
+            return observedSet==exactSet&&observed.cloaking==baseline.cloaking&&
+                observed.hidden==baseline.hidden&&observed.applications==baseline.applications&&
+                observed.cloakRaw==baseline.cloakRaw&&observed.hiddenRaw==baseline.hiddenRaw&&
+                observed.applicationsRaw==baseline.applicationsRaw&&observed.inverseRaw==baseline.inverseRaw;
+        };
+        // Every member must have unambiguous ancestry to the same selected
+        // physical root, under one captured owner/power/source/topology stamp.
+        std::string commonRoot;
+        for(const auto& target:exactOwned) {
+            std::string root;std::set<std::string> attemptedRoots;
+            for(const auto& source:sources) {
+                if(!source.resolved)continue;
+                const auto candidate=source.baseContainerDeviceInstanceId.empty()
+                    ? source.deviceInstanceId : source.baseContainerDeviceInstanceId;
+                if(!duty::detail::instance(candidate)||hidHideIsVirtualIdentity(candidate,{})||
+                   !attemptedRoots.insert(duty::detail::fold(candidate)).second)continue;
+                const auto proof=inputHostTargetReturnVerifyPhysicalPath(candidate,target);
+                if(!contextCurrent()||!(physicalStamp()==stamp))return false;
+                if(!proof.proven())continue;
+                if(!root.empty()&&duty::detail::fold(root)!=duty::detail::fold(candidate)) {
+                    note("native-owned-set-rejected","ambiguous-selected-physical-roots",nullptr,target);return false;
+                }
+                root=candidate;
+            }
+            if(root.empty()||(!commonRoot.empty()&&duty::detail::fold(commonRoot)!=duty::detail::fold(root))) {
+                note("native-owned-set-rejected","complete-same-root-ancestry-unproven",nullptr,target);return false;
+            }
+            commonRoot=root;
+        }
+        owner->physicalRoot=commonRoot;
+        if(!physicalContext(*owner,stamp)||!open()||!flushProven()||!physicalContext(*owner,stamp))return false;
+        pruneEmptyPhysicals();
+        // Preserve a single existing local origin exactly. File-only history,
+        // mixed origins or an unsettled old writer cannot authorize this set.
+        std::optional<duty::Origin> carried;bool hasNewPath=false;
+        for(const auto& target:exactOwned) {
+            bool found=false;
+            for(const auto& group:state.session->record()->obligations)for(const auto& path:group.paths)
+                if(duty::detail::fold(path.instanceId)==duty::detail::fold(target)) {
+                    found=true;
+                    const bool local=std::any_of(state.physicals.begin(),state.physicals.end(),
+                        [&](const auto& item){return duty::sameOrigin(item.origin,group.origin);});
+                    if(!local||duty::detail::fold(group.origin.physicalRoot)!=duty::detail::fold(commonRoot)||
+                       (carried&&!duty::sameOrigin(*carried,group.origin))||!physicalOriginWriterSettled(group.origin)) {
+                        note("native-owned-set-rejected","historical-cross-origin-or-writer-unproven",&group.origin,target);return false;
+                    }
+                    carried=group.origin;
+                }
+            if(!found)hasNewPath=true;
+        }
+        // An already complete carried set may stay under its old origin; never
+        // append a new owner's paths to a retired Host's responsibility.
+        if(carried&&hasNewPath&&!sameFlow(*carried,*owner))return false;
+        auto selected=std::find_if(state.physicals.begin(),state.physicals.end(),[&](const auto& item){
+            return carried?duty::sameOrigin(item.origin,*carried):item.journalId==journalId&&sameFlow(item.origin,*owner);});
+        if(selected==state.physicals.end()) {
+            if(state.physicals.size()>=duty::maxOrigins)return false;
+            owner->transactionId=newKey(*owner);if(owner->transactionId.empty())return false;
+            state.physicals.push_back({*owner,journalId});selected=std::prev(state.physicals.end());
+        }
+        if(!nativeSetCurrent()||!physicalContext(*owner,stamp))return false;
+        const auto revision=state.session->record()->revision;
+        if(!state.session->reserveNativeOwnedSet(revision,selected->origin,exactOwned,{true,true,true})) {
+            state.lastError=state.session->error().reason;
+            note("native-owned-set-rejected",state.lastError.c_str(),&selected->origin);return false;
+        }
+        // Preallocated output publishes EVERY committed member before any
+        // callback/authority recheck can retire the request. Caller journals it
+        // even on false, then sends zero re-hides unless this function returns true.
+        responsibilityReserved->swap(reservedPaths);
+        if(state.session->record()->revision!=revision)
+            note("native-owned-set-reserved","existing-native-hidden-set-before-rehide",&selected->origin);
+        return nativeSetCurrent()&&physicalContext(*owner,stamp);
+    }catch(...){note("native-owned-set-rejected","native-owned-set-record-exception");return false;}
 }
 
 // No new read/driver operation. The actual return consumer has already proved

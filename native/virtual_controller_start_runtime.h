@@ -225,7 +225,148 @@ static bool ymStartAwaitMsiSource(std::uint64_t ticket, bool& admitted, std::uni
     return admitted;
 }
 
+// Rebinding is allowed only in this pre-PREPARE window. The old source mask
+// may have been cleared by the disconnect, or still name a former slot. Waiting
+// for live before re-admission would deadlock a correct move to another slot.
+static int ymStartReadmitGpdPostHideSource(uint64_t ticket) {
+    if(!g_inputHostMx.ownedByCurrentThread())return 2;
+    std::string root;std::vector<std::wstring> positions;uint64_t power=0;
+    {
+        std::lock_guard leaseLock(g_msiNativeForegroundMx);auto& state=g_msiNativeForegroundLease;
+        if(!state.postHideCycle)return 1;
+        if(state.postHideTicket!=ticket || !msiPostHideContextCurrentLocked())return 2;
+        if(!state.postHideTerminalTick)return 1;
+        if(state.postHideReadmitted)return 0;
+        if(state.postHideReadmitAttempted)return 2;
+        if(!msiPostHideRootStartedLocked())return 1;
+        root=state.root;positions=state.locations;power=state.power;
+    }
+    int admitted=1;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    if(g_msiNativeForegroundTestIo.postHideReadmit){
+        admitted=g_msiNativeForegroundTestIo.postHideReadmit();
+        if(admitted==1){std::lock_guard leaseLock(g_msiNativeForegroundMx);return msiPostHideContextCurrentLocked()?1:2;}
+    }else
+#endif
+    {
+        unsigned topology=0,identity=0;DWORD physical=0;
+        {
+            std::unique_lock sampling(g_gamepadReadMx,std::try_to_lock);if(!sampling.owns_lock())return 1;
+            topology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+            identity=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
+            if(!g_xinputPreTargetBoundaryScanned.load(std::memory_order_relaxed) ||
+                g_xinputBoundaryScanEpoch.load(std::memory_order_acquire)!=topology){
+                if(!g_xinputSlotFullScanOnce.load(std::memory_order_relaxed)){
+                    g_xinputSlotFullScanEpochStart.store(topology,std::memory_order_release);
+                    g_xinputSlotFullScanOnce.store(true,std::memory_order_relaxed);
+                }
+                return 1;
+            }
+            physical=xinputNonVirtualConnectedMask();
+            if(!physical || (physical&g_xinputSlotUnknownMask))return 1;
+            if(physical&(physical-1))return 2; // no slot-to-root proof for multiple physical sources
+        }
+        std::vector<HidHidePhysicalIdentity> sources;bool complete=false;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+        if(g_msiNativeForegroundTestIo.candidates){sources=g_msiNativeForegroundTestIo.candidates();
+            complete=!g_msiNativeForegroundTestIo.inventoryComplete || g_msiNativeForegroundTestIo.inventoryComplete();}else
+#endif
+        (void)hidHideResolvePhysicalIdentities(sources,&complete);
+        if(!complete || sources.size()!=1 || !sources.front().resolved ||
+            ascii_lower(sources.front().baseContainerDeviceInstanceId)!=ascii_lower(root) ||
+            !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(sources.front().deviceInstanceId,root),
+                sources.front().vendorId,sources.front().productId,sources.front().usagePage,sources.front().usage) ||
+            !ymcc::msi::samePhysicalLocation(positions,msiForegroundIsolationLocations(root)))return 2;
+        std::unique_lock sampling(g_gamepadReadMx,std::try_to_lock);if(!sampling.owns_lock())return 1;
+        if(currentPowerGeneration()!=power || topology!=g_xinputTopologyEpoch.load(std::memory_order_acquire) ||
+            identity!=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) || physical!=xinputNonVirtualConnectedMask() ||
+            (physical&g_xinputSlotUnknownMask) || !g_xinputPreTargetBoundaryScanned ||
+            g_xinputBoundaryScanEpoch.load(std::memory_order_acquire)!=topology)return 1;
+        {
+            std::unique_lock leaseLock(g_msiNativeForegroundMx,std::try_to_lock);if(!leaseLock.owns_lock())return 1;
+            auto& state=g_msiNativeForegroundLease;
+            if(state.postHideTicket!=ticket || !msiPostHideContextCurrentLocked() || state.postHideReadmitAttempted)return 2;
+            state.postHideReadmitAttempted=true;
+        }
+        // Same selected root, one current physical slot, no virtual target yet.
+        // Keep the completed fresh boundary scan; only the obsolete source
+        // admission is replaced. This does not admit unknown/virtual slots.
+        g_xinputPhysicalSourceLocked=false;g_xinputPhysicalSourceMask=0;g_xinputPreTargetSlots=0;
+        g_xinputSourceReconfirmMask.store(0,std::memory_order_release);
+        g_xinputReconfirmIdentity.clear();g_xinputReconfirmMsiGeneration=0;g_xinputReconfirmRejectLogged=false;
+        g_xinputAdmittedMask=0;g_xinputLoggedAdmittedMask=0;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+        admitted=g_msiNativeForegroundTestIo.postHideAdmitSelectedSource && g_msiNativeForegroundTestIo.postHideAdmitSelectedSource()?0:2;
+#else
+        admitted=inputHostAdmitSelectedPhysicalSource()?0:2;
+#endif
+    }
+    std::lock_guard leaseLock(g_msiNativeForegroundMx);auto& state=g_msiNativeForegroundLease;
+    if(state.postHideTicket!=ticket || !msiPostHideContextCurrentLocked())return 2;
+    state.postHideReadmitAttempted=true;
+    if(admitted!=0)return 2;
+    state.postHideReadmitted=true;state.postHideSourceAfterTick=GetTickCount64();
+    state.postHideBaselineSequence=msiPostHideLatestSourceLocked().sequence;
+    msiNativeForegroundReceipt("post-hide-source-readmitted","same-root;new-pre-target-slot;newer-read-still-required");
+    return 0;
+}
+
+// This is a serialized substep of the admitted R3 Start, with
+// its existing deadline and capture owner. No independent retry or timeout.
+static bool ymStartAwaitGpdPostHideCycle(uint64_t ticket,std::unique_lock<InputHostMutex>& hostLock,bool* cycleCompleted=nullptr) {
+    if(cycleCompleted)*cycleCompleted=false;
+    bool cycleEntered=false;
+    struct OwnerReturn {bool accepted=false;~OwnerReturn() noexcept {
+        if(!accepted)try{(void)msiPostHideCancelForStop("post-hide-start-aborted");}
+        catch(...){/* Retain exact owner/history; optional cleanup must not terminate unwinding. */}
+    }} owner;
+    const auto epoch=g_inputHostEpoch,power=currentPowerGeneration();
+    const auto runId=g_inputHostRunId,persona=inputHostConfiguredPersona();
+    const auto process=g_inputHostProcess;
+    for(;;){
+        const auto now=inputHostStartProtectionNow();const auto view=g_virtualStartProtection.view(now);
+        if(!ticket || view.requestId!=ticket || !view.locked || !view.remainingMs || view.persona!=persona ||
+            currentPowerGeneration()!=power || g_inputHostEpoch!=epoch || g_inputHostRunId!=runId ||
+            g_inputHostProcess!=process || inputHostConfiguredPersona()!=persona ||
+            g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || !g_inputReady ||
+            inputHostExitFenceRaised() || g_exitRequested ||
+            (g_inputHostSwitchRecoveryStartDeadline && now>=g_inputHostSwitchRecoveryStartDeadline))return false;
+        cycleEntered=cycleEntered || g_postHideCycleOwned.load(std::memory_order_acquire);
+        const int reAdmit=ymStartReadmitGpdPostHideSource(ticket);
+        if(reAdmit==2)return false;
+        const int result=msiPostHideCycleStep(ticket);
+        if(result==2)return false;
+        if(result==0){owner.accepted=true;if(cycleCompleted)*cycleCompleted=cycleEntered;return true;}
+        const auto after=inputHostStartProtectionNow();
+        if(after<now || after-now>=view.remainingMs)return false;
+        const auto delay=(std::min)(uint64_t(kInputCaptureGamepadPublishIntervalMs),view.remainingMs-(after-now));
+        hostLock.unlock();
+        try{
+            Sleep(static_cast<DWORD>(delay));
+            if(g_inputCaptureOwnerDispatchesBus && !g_inputCaptureStop && !inputHostExitFenceRaised() && !g_exitRequested)
+                inputCaptureOwnerFallbackBusTick();
+        }catch(...){hostLock.lock();throw;}
+        hostLock.lock();
+    }
+}
+
 static bool inputHostStart() {
+    // Declared before every early return AND the Host lock: on unwind it runs
+    // after that lock retires, then reacquires the original owner order. Even
+    // a payload/persona/maintenance rejection must return an unconsumed donor.
+    struct NativeHandoffReturn {
+        uint64_t ticket=msiNativeForegroundVirtualHandoffTicket();
+        ~NativeHandoffReturn() noexcept {
+            if(!ticket)return;
+            try {
+                std::lock_guard hostLock(g_inputHostMx);
+                const bool recovering=g_inputHostSwitchRecovery.requestId==ticket &&
+                    g_inputHostSwitchRecoveryPending.load(std::memory_order_acquire);
+                msiNativeForegroundVirtualStartFinishedLocked(ticket,
+                    recovering || inputHostSwitchExecutionAwaitingLocked(ticket));
+            } catch(...) { /* original native owner retains every unproven debt */ }
+        }
+    } nativeHandoffReturn;
     if (g_inputHostSwitchRecoveryStartDeadline &&
             inputHostStartProtectionNow()>=g_inputHostSwitchRecoveryStartDeadline) return false;
     // Reject retired/unknown/disabled personas before observers, routes or Host creation.
@@ -339,6 +480,61 @@ static bool inputHostStart() {
     if(inputHostSwitchExecutionAwaitingLocked(requestTicket))return false;
     if (requestTicket) g_inputHostSwitchVerificationPending.store(requestTicket,std::memory_order_release);
     g_inputHostStartProtectionBoundTicket=requestTicket;
+    // Fence inherited native writers BEFORE cold return or any new hide. The
+    // later post-hide helper shares this same file-owner Session, not a second
+    // lock that would conflict with our own preflight. No new driver operation.
+    struct PostHideWriterFenceScope {
+        std::shared_ptr<ymcc::nativeRefreshWriter::Session> previous=g_postHideSharedWriterSession;
+        ~PostHideWriterFenceScope(){g_postHideSharedWriterSession=std::move(previous);}
+    } postHideWriterFenceScope;
+    const auto inheritedWriterPath=nativeRefreshWriterRecordPath();
+    const auto inheritedWriterHistory=ymcc::nativeRefreshWriter::load(inheritedWriterPath,inputHostTargetReturnMachineBinding());
+    // A healthy same-persona idempotent Start may have no player ticket and
+    // performs no new writer work. Preserve its original live-Host branch.
+    if(requestTicket && (nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd ||
+        inheritedWriterHistory.state==ymcc::nativeRefreshWriter::LoadState::Valid)){
+        const auto fencePower=currentPowerGeneration();std::string lastFenceFailure;
+        for(;;){
+            const auto now=inputHostStartProtectionNow();const auto pending=g_virtualStartProtection.view(now);
+            if(pending.requestId!=requestTicket || !pending.locked || !pending.remainingMs || pending.persona!=requestedPersona ||
+                currentPowerGeneration()!=fencePower || inputHostConfiguredPersona()!=requestedPersona ||
+                g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || g_inputHostPowerAdmissionRevoked ||
+                inputHostExitFenceRaised() || g_exitRequested || g_inputCaptureStop ||
+                (g_inputHostSwitchRecoveryStartDeadline && now>=g_inputHostSwitchRecoveryStartDeadline))return false;
+            std::shared_ptr<ymcc::nativeRefreshWriter::Session> session;
+            std::string failure;DWORD error=ERROR_SUCCESS;
+            try{
+                session.reset(new ymcc::nativeRefreshWriter::Session(ymcc::nativeRefreshWriter::Session::open(
+                    inheritedWriterPath,inputHostTargetReturnMachineBinding())));
+                if(!session->ready()){failure=session->error().reason;error=session->error().win32Error;}
+                else if(!ymcc::nativeRefreshWriter::LaunchScope::reconcilePrevious(*session,error,failure)){}
+                else if(session->record()->nativeVisibility)failure="native-visibility-return-still-owned";
+                else{
+                    const auto readyNow=inputHostStartProtectionNow();const auto readyView=g_virtualStartProtection.view(readyNow);
+                    if(readyView.requestId!=requestTicket || !readyView.locked || !readyView.remainingMs ||
+                        readyView.persona!=requestedPersona || currentPowerGeneration()!=fencePower ||
+                        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready ||
+                        inputHostExitFenceRaised() || g_exitRequested || g_inputHostPowerAdmissionRevoked || g_inputCaptureStop ||
+                        (g_inputHostSwitchRecoveryStartDeadline && readyNow>=g_inputHostSwitchRecoveryStartDeadline))return false;
+                    g_postHideSharedWriterSession=std::move(session);
+                    try{appendNativeLifecycleLog("input-host-native-writer-fence",{{"phase","held"},{"requestId",requestTicket},
+                        {"remainingMs",readyView.remainingMs},{"deviceOperationIssued",false},{"physicalReturnVerified",false}});}catch(...){}
+                    break;
+                }
+            }catch(...){failure="native-writer-fence-read-unknown";}
+            session.reset(); // permit the original live owner to settle; no stale session replay
+            if(failure!=lastFenceFailure){
+                lastFenceFailure=failure;
+                try{appendNativeLifecycleLog("input-host-native-writer-fence",{{"phase","wait"},{"requestId",requestTicket},
+                    {"reason",failure},{"error",error},{"remainingMs",pending.remainingMs},{"deviceOperationIssued",false},
+                    {"originalDeadlineRetained",true},{"physicalReturnVerified",false}});}catch(...){}
+            }
+            const auto after=inputHostStartProtectionNow();
+            if(after<now || after-now>=pending.remainingMs)return false;
+            const auto delay=(std::min)(uint64_t{100},pending.remainingMs-(after-now));
+            lock.unlock();try{Sleep(static_cast<DWORD>(delay));}catch(...){lock.lock();throw;}lock.lock();
+        }
+    }
     // Cold duties are execution, before any MSI preparation/source/mode or new
     // Host. They share this ticket and absolute period, never fallback quota.
     const auto coldReturn=inputHostTargetReturnColdPassLocked(requestTicket,currentPowerGeneration(),requestedPersona);
@@ -695,8 +891,9 @@ static bool inputHostStart() {
     // physical-source-pending 特殊分支（physicalVisibilitySkip）：无在线物理源 = 无需要隐藏的对象
     // → 跳过 hide 事务、也不进入上述拒绝门（HC 无此循环，0910-20 identity-unresolved
     // 重试循环不回归）。
+    const bool nativeHandoffRequired = msiNativeForegroundVirtualHandoffRequired(requestTicket);
     const bool physicalVisibilitySkip =
-        !msiSourceRequiredBeforeTarget && physicalSourcePending && inputHostCanCreateTargetWithoutPhysicalSource();
+        !nativeHandoffRequired && !msiSourceRequiredBeforeTarget && physicalSourcePending && inputHostCanCreateTargetWithoutPhysicalSource();
     const ULONGLONG hideTxnStartedTick = GetTickCount64();
     bool physicalHidAdmitted = hello &&
         (kVirtualTestKeepPhysicalVisible || physicalVisibilitySkip ||
@@ -727,7 +924,7 @@ static bool inputHostStart() {
     // virtual target while physical hide admission is unproven.
     const bool physicalSourceOnlineAtStart =
         physicalSourceAdmittedAtStart && !physicalSourcePending;
-    if (hello && physicalSourceOnlineAtStart && !physicalHidAdmitted) {
+    if (hello && (physicalSourceOnlineAtStart || nativeHandoffRequired) && !physicalHidAdmitted) {
         appendNativeLifecycleLog("input-host-hide-not-admitted", {
             {"phase", "initial"}, {"sourcePresent", true},
             {"physicalHidAdmitted", false}, {"runId", g_inputHostRunId},
@@ -745,7 +942,7 @@ static bool inputHostStart() {
             {"resetOk", resetOk}, {"retry", true}, {"safeStop", true}
         });
     }
-    if (hello && physicalSourceOnlineAtStart && !physicalHidAdmitted) {
+    if (hello && (physicalSourceOnlineAtStart || nativeHandoffRequired) && !physicalHidAdmitted) {
         appendNativeLifecycleLog("input-host-hide-not-admitted", {
             {"phase", "refused-pre-target"}, {"sourcePresent", true},
             {"physicalHidAdmitted", false}, {"retry", true},
@@ -753,6 +950,26 @@ static bool inputHostStart() {
         });
         inputHostStopLocked("physical-hide-not-admitted");
         return false;
+    }
+    if(hello && physicalSourceOnlineAtStart && nativeForegroundProfile()==ymcc::nativeForeground::Profile::Gpd){
+        const auto gpdCyclePower=currentPowerGeneration();bool gpdCycleCompleted=false;
+        if(!ymStartAwaitGpdPostHideCycle(requestTicket,lock,&gpdCycleCompleted)){
+            inputHostStopLocked("gpd-post-hide-cycle-unproven");return false;
+        }
+        // An unavailable optional refresh keeps the original standard path.
+        if(gpdCycleCompleted){
+            // Re-admit from the current standard-source path after re-enumeration;
+            // never reuse the pre-cycle source mask or invent a physical sample.
+            physicalSourceAdmittedAtStart=ymStartAdmitSource();physicalSourcePending=!physicalSourceAdmittedAtStart;
+            const bool currentHide=physicalSourceAdmittedAtStart && hidHideRefreshPhysicalHide(g_inputHostRunId,"gpd-post-cycle-source-current");
+            const auto afterCycleClock=inputHostStartProtectionNow();const auto afterCycleView=g_virtualStartProtection.view(afterCycleClock);
+            if(physicalSourcePending || !currentHide || currentPowerGeneration()!=gpdCyclePower ||
+                afterCycleView.requestId!=requestTicket || !afterCycleView.locked || !afterCycleView.remainingMs ||
+                g_inputHostPowerAdmissionRevoked || g_inputCaptureStop ||
+                (g_inputHostSwitchRecoveryStartDeadline && afterCycleClock>=g_inputHostSwitchRecoveryStartDeadline)){
+                inputHostStopLocked("gpd-post-cycle-source-unproven");return false;
+            }
+        }
     }
     // 虚拟目标创建（HC 顺序：hide 之后才建虚拟）。PREPARE 失败仍走既有
     // quarantine 流程（护栏不变）；hide 阶段不新建 epoch/多目标（epoch 已在

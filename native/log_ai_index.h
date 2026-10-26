@@ -21,7 +21,7 @@ inline const char* aiEvidenceLane(const std::string& entry) {
         "input-capture.jsonl","input-host-cost.log","input-host-signal.log","input-host-report-chain.log","input-host-xbox-sdk.log"})
         if(name==value || (name=="input-host-cost.log.pending")) return "detail";
     for(const auto* value:{"native-lifecycle.log","tdp.log","frontend-trace.log","fan-lifecycle.log","sleep-facts.log",
-        "frontend-errors.log","webview-failures.log","input-host-fatal.log","input-host-rejects.log","recovery-service.log",
+        "frontend-errors.log","webview-failures.log","input-host-fatal.log","input-host-rejects.log","recovery-service.log","steam-original-recovery.jsonl",
         "battery-charge-client.log","battery-charge-host.log","fan-host-fault.log"}) if(name==value) return "resident";
     if(hostCostArchiveEvidenceName(entry)) return "detail";
     return "unclassified-or-mixed";
@@ -41,6 +41,14 @@ inline EvidenceJson aiReadingGuide() {
             "explicit UTC/offset is absolute; timezone-free text stays timezone-unknown",
             "tick/monotonic fields order only within their declared process/boot; never convert them into wall time",
             "firstTime/lastTime in file_end are first/last observed timestamps in inspected order, not min/max or whole-file coverage"}},
+        {"sleepFacts",{{"schemaVersionField","factSchemaVersion"},
+            {"writer","writerPid + writerProcessCreation100ns; writerInstanceId is derived from those only; unknown birth stays null"},
+            {"order","writerSequence is within one native process; not a durable-write acknowledgement"},
+            {"clocks","timestampUtc/timestampLocal/utcEpochMs describe record creation; observedTickMs is boot-monotonic; details retain original kernel/event clocks"},
+            {"generation","writerPowerGeneration is native observation context, independent of details.generation and Windows ScenarioInstanceId"},
+            {"staticWakeSummary","status counts are retained cumulative journal state; lastError may be inherited; a new scan-result row does not prove a fresh per-item failure/write/readback"},
+            {"powercfgError","legacy powercfg-failed:1460 may originate in capture wrapper or child; no timeout/permission/encoding cause is proven by the number alone"},
+            {"legacy","old rows remain valid but identity/timezone may be unknown; never backfill exporter PID into historical rows"}}},
         {"identityRules",{"writerPid/observerPid identify writers only where their schema declares it",
             "pid/processId/hostPid may identify an observed subject; never substitute exporter or archiveWriterPid",
             "use process creation/run identity with PID; PID alone can be reused"}},
@@ -77,7 +85,7 @@ inline bool writeAiLogIndex(const std::filesystem::path& outputDir,
             if(evidence.value("status","").find("error")!=std::string::npos)throw std::runtime_error("AI index staged read failed");
             const auto sha=digest(path.wstring());if(sha.size()!=64)throw std::runtime_error("AI index hash unavailable");
             const auto fileId="f"+std::to_string(count++);const auto occurrence=occurrences[name]++;
-            std::string format=external?"text-or-opaque":jsonLinesEvidenceName(base)?"json-lines":path.extension()==L".json"?"json-document":
+            std::string format=external?"text-or-opaque":jsonLinesEvidenceName(base)?"json-lines":jsonDocumentEvidenceName(base)?"json-document":
                 hostCostArchiveEvidenceName(base)?"zip-volume":"text-or-opaque";
             EvidenceJson begin={{"record","file_begin"},{"fileId",fileId},{"entry",name},
                 {"archiveEntryOccurrence",occurrence},{"format",format},{"lane",external?"external":aiEvidenceLane(base)},

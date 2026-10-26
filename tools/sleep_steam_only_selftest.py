@@ -4,7 +4,7 @@ Does not access live Steam, sleep Windows, resume games or create input devices.
 from pathlib import Path
 import argparse,subprocess,re,json,uuid
 p=argparse.ArgumentParser();p.add_argument('--output',type=Path,default=Path('../../Build/Validation/SleepSteamOnly-20261011'))
-p.add_argument('--expect-capture-budget-rejected',action='store_true');p.add_argument('--expect-native-primary-old-target',action='store_true');p.add_argument('--expect-native-predispatch-blocked',action='store_true');p.add_argument('--expect-delayed-window-blocked',action='store_true');args=p.parse_args()
+p.add_argument('--coordinator-cost-only',action='store_true');p.add_argument('--expect-capture-budget-rejected',action='store_true');p.add_argument('--expect-native-primary-old-target',action='store_true');p.add_argument('--expect-native-predispatch-blocked',action='store_true');p.add_argument('--expect-delayed-window-blocked',action='store_true');args=p.parse_args()
 out=args.output.resolve();out.mkdir(parents=True,exist_ok=True);root=Path.cwd()
 api=(root/'native/sleep_recovery_api.h').read_text('utf-8-sig')
 tail=api[api.index('struct Tail {'):api.index('struct Leases {')]
@@ -55,6 +55,8 @@ bool sgModernStandbyRepairSupported(){return modernStandby;}
 ULONGLONG fileTimeBase=134362144573220276ULL;
 ULONGLONG sgNowFileTime(){return fileTimeBase+tick*10000;}
 std::condition_variable g_sgWorkCv;
+unsigned workNotifications=0;
+void sgNotifyWork(){++workNotifications;g_sgWorkCv.notify_one();}
 unsigned long long currentPowerGeneration(){return generation;}
 ULONGLONG fakeTick(){return tick;}
 #define GetTickCount64 fakeTick
@@ -211,6 +213,9 @@ bool isRunningLinkRead(const json& request){const auto operation=request.find("o
 json run(const std::wstring&,const json& request,const std::function<bool()>& admit={},DWORD budget=0){return fakeSteamLiveRun(request,admit);}
 }
 __LIVE_WRAPPER__
+#include "log_snapshot_state.h"
+bool domainLogEnabled(const char*){return false;}
+void appendNativeLifecycleLog(const char* name,const json& data){sgRecordFact(name,data);}
 #include "sleep_steam_recovery.h"
 #include "steam_game_link_state.h"
 namespace DenseTrackerRuntimeSeam {
@@ -284,6 +289,19 @@ int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;assert(argc==9);base=
  std::uint32_t app=0;assert(appId("2399932135",app)&&app==2399932135U);assert(appId("-1895035161",app)&&app==2399932135U);assert(appId("10307630032478011392",app)&&app==2399932135U);assert(appId("945360",app)&&app==945360);
  pass("three exact TMNT shortcut identities normalize to one app without 64bit rounding");
  reset();begin(true,0);assert(jobs.size()==1);pass("confirmed ready wake inspects immediately without separate 1500ms grace");
+ reset();assert(sleepRecoveryAutoWaitMs(tick)==~ULONGLONG{0});begin(true,0);
+ assert(SleepRecoveryAuto::get()["phase"]=="inspecting"&&sleepRecoveryAutoWaitMs(tick)==45001);
+ job();assert(SleepRecoveryAuto::get()["phase"]=="confirm-wait"&&sleepRecoveryAutoWaitMs(tick)==1500);
+ tick=1499;assert(sleepRecoveryAutoWaitMs(tick)==1);tick=1500;assert(sleepRecoveryAutoWaitMs(tick)==0);
+ sleepRecoveryAutoTick();assert(SleepRecoveryAuto::get()["phase"]=="verifying"&&sleepRecoveryAutoWaitMs(tick)>40000);
+ pass("actual automatic owner sleeps to its observation or worker deadline instead of 50ms heartbeats");
+ reset();running=true;begin(true,0);job();unsigned deadlineWakes=0;
+ while(g_sleepRecoveryAutoPending){const auto delay=sleepRecoveryAutoWaitMs(tick);assert(delay!=~ULONGLONG{0});tick+=delay;sleepRecoveryAutoTick();while(!jobs.empty())job();assert(++deadlineWakes<=45);}
+ std::cout<<"CPU_SCHEDULE_OBSERVED "<<json({{"deadlineWakes",deadlineWakes},{"tick",tick},{"scopeCalls",scopeCalls},{"inputCalls",inputCalls},{"notifications",workNotifications},{"phase",SleepRecoveryAuto::get()["phase"]}}).dump()<<"\n";
+ assert(deadlineWakes==40&&tick==60000&&SleepRecoveryAuto::get()["phase"]=="blocked"&&scopeCalls==0&&inputCalls==0&&workNotifications>0);
+ pass("actual sixty-second unchanged observation window uses at most forty scheduled wakes, formerly about twelve hundred");
+ if(__COORDINATOR_COST_ONLY__){std::cout<<"Steam-only coordinator cost selected: "<<passed<<" groups PASS\n";return 0;}
+
  reset();begin();jobs.clear();SleepRecoveryAuto::state.phase="game-wait";
  SleepRecoveryAuto::state.due=tick+750;sleepRecoveryAutoGameReleased(8);
  assert(SleepRecoveryAuto::state.due==tick+750);sleepRecoveryAutoGameReleased(7);
@@ -1979,11 +1997,13 @@ reset();running=true;inputContextAvailable=true;steamFocusedApp=2399932135U;capt
 
  std::cout<<"Steam-only production-header selftest: "<<passed<<" groups PASS\n";
 }
-'''.replace('__LINK_DENSE_SEAM__',link_dense_seam).replace('__CAPTURE_BUDGET_BASELINE__','true' if args.expect_capture_budget_rejected else 'false').replace('__TAIL__',tail).replace('__ONE_PID__',one_pid).replace('__WS_CONSTANTS__',ws_constants).replace('__LIVE_WRAPPER__',live_wrapper).replace('__PREDISPATCH_GUARD__',cancel_guard).replace('__PREDISPATCH_BASELINE__','true' if args.expect_native_predispatch_blocked else 'false').replace('__FIELD_PREDISPATCH_ELAPSED__',str(field_predispatch['terminalElapsedMs'])).replace('__DELAYED_WINDOW_BASELINE__','1' if args.expect_delayed_window_blocked else '0').replace('__NATIVE_PRIMARY_BASELINE__','true' if args.expect_native_primary_old_target else 'false')
+'''.replace('__COORDINATOR_COST_ONLY__','true' if args.coordinator_cost_only else 'false').replace('__LINK_DENSE_SEAM__',link_dense_seam).replace('__CAPTURE_BUDGET_BASELINE__','true' if args.expect_capture_budget_rejected else 'false').replace('__TAIL__',tail).replace('__ONE_PID__',one_pid).replace('__WS_CONSTANTS__',ws_constants).replace('__LIVE_WRAPPER__',live_wrapper).replace('__PREDISPATCH_GUARD__',cancel_guard).replace('__PREDISPATCH_BASELINE__','true' if args.expect_native_predispatch_blocked else 'false').replace('__FIELD_PREDISPATCH_ELAPSED__',str(field_predispatch['terminalElapsedMs'])).replace('__DELAYED_WINDOW_BASELINE__','1' if args.expect_delayed_window_blocked else '0').replace('__NATIVE_PRIMARY_BASELINE__','true' if args.expect_native_primary_old_target else 'false')
 source=out/'sleep_steam_only_selftest.cpp';source.write_text(cpp,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat');exe=out/'sleep_steam_only_selftest.exe';fixtureDir=out/("owned-SleepSteamOnly-20261011-fixture-"+uuid.uuid4().hex[:12])
 cmd=out/'run-steam-only.cmd'
-cmd.write_text(f'@echo off\r\ncall "{vs}" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_steam_only_selftest.obj"}" /Fe"{exe}" /link advapi32.lib\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{fixtureDir}" "{root / "tools/fixtures/sleep_steam_tmnt_gameprocess_20261011.txt"}" "{root / "tools/fixtures/sleep_steam_msi_2077_wake_20261011.json"}" "{root / "tools/fixtures/sleep_steam_msi_2077_s4_s0_20261011.json"}" "{root / "tools/fixtures/sleep_steam_msi_2077_r23_073143_20261012.json"}" "{root / "tools/fixtures/sleep_steam_msi_wrong_target_213819.json"}" "{root / "tools/fixtures/sleep_steam_rog_r25_014614_20261013.json"}" "{root / "tools/fixtures/sleep_steam_msi_tmnt_r31_delayed_window_023942.json"}"\r\n',encoding='ascii')
+toolchain_js='import {calibrationToolchainPreamble} from "./tools/fixtures/hc_reviewed_calibration/toolchain.mjs";process.stdout.write(calibrationToolchainPreamble(process.argv[1]));'
+toolchain_prefix=subprocess.check_output(['node','--input-type=module','-e',toolchain_js,str(vs)],text=True,encoding='utf-8')
+cmd.write_text(toolchain_prefix+f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_steam_only_selftest.obj"}" /Fe"{exe}" /link advapi32.lib\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{fixtureDir}" "{root / "tools/fixtures/sleep_steam_tmnt_gameprocess_20261011.txt"}" "{root / "tools/fixtures/sleep_steam_msi_2077_wake_20261011.json"}" "{root / "tools/fixtures/sleep_steam_msi_2077_s4_s0_20261011.json"}" "{root / "tools/fixtures/sleep_steam_msi_2077_r23_073143_20261012.json"}" "{root / "tools/fixtures/sleep_steam_msi_wrong_target_213819.json"}" "{root / "tools/fixtures/sleep_steam_rog_r25_014614_20261013.json"}" "{root / "tools/fixtures/sleep_steam_msi_tmnt_r31_delayed_window_023942.json"}"\r\n',encoding='ascii')
 res=subprocess.run(['cmd.exe','/d','/c',str(cmd)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 (out/'sleep-steam-only-selftest.log').write_bytes(res.stdout);print(res.stdout.decode('utf-8',errors='replace'));print('nativeReturn',res.returncode)
 raise SystemExit(res.returncode)

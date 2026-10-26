@@ -10,12 +10,13 @@
 #include <string>
 #include <vector>
 #include "one_shot_helper_diagnostic.h"
+#include "native_refresh_writer_runtime.h"
 using json = nlohmann::json;
 using Capture = ymcc::input::OneShotHelperDiagnostic;
 
 // Inert dependencies used only by the exact extracted runtime lease/receipt methods.
 namespace ymcc::nativeForeground {
-enum class Profile { Msi, Rog };
+enum class Profile { Msi, Rog, Gpd };
 static const char* name(Profile) { return "msi"; }
 // Transport-only dependency: deliberately does not execute production policy.
 // The full native TU oracle separately verifies mutation admission/zero writes.
@@ -70,6 +71,18 @@ static BOOL createProcess(LPCWSTR image, LPWSTR command, LPSECURITY_ATTRIBUTES p
     return fixtureCycleCreateProcessW(image, command, processAttributes, threadAttributes, inherit,
         flags, environment, cwd, startup, process);
 }
+}
+// The tracked GPD launch is outside this transport fixture. Compile its real
+// types, but fail before any writer record/Job can be created if entered.
+static unsigned unadmittedTrackedWriterCalls = 0;
+static std::wstring nativeRefreshWriterRecordPath() {
+    ++unadmittedTrackedWriterCalls; throw std::logic_error("unadmitted tracked writer path");
+}
+static std::string inputHostTargetReturnMachineBinding() {
+    ++unadmittedTrackedWriterCalls; throw std::logic_error("unadmitted tracked writer machine");
+}
+static json nativeRefreshWriterEvidence(const ymcc::nativeRefreshWriter::LaunchScope&, const char*) {
+    ++unadmittedTrackedWriterCalls; throw std::logic_error("unadmitted tracked writer evidence");
 }
 // Generated from the bound production runtime without editing its method bodies.
 #include "runtime-consumer.actual.h"
@@ -765,8 +778,16 @@ static void actualProducerReplay() {
                     diagnostic["reportedFacts"]["CompensationExceptionType"] == expected["CompensationExceptionType"] &&
                     diagnostic["reportedFacts"]["CompensationExceptionHResult"] == expected["CompensationExceptionHResult"],
                     replay.id + ": original and compensation facts remain separate and lossless");
-                check(code == 6 && !lease.cycleAccepted && diagnostic["hardwareSuccessProven"] == false &&
-                    expected["Stage"] == (expected["EnableCallEntered"] == true ? "enable" : "disable"),
+                // A current-locate/authority failure precedes Disable. Keep
+                // its real stage and prove that no later write/compensation ran.
+                const bool beforeDisable = expected["DisableCallEntered"] == false;
+                const auto stage = expected["Stage"].get<std::string>();
+                const bool stageConsistent = beforeDisable
+                    ? ((stage == "admission" || stage == "prepare" || stage == "prepare-locate" || stage == "revalidate" ||
+                        stage == "current-locate" || stage == "current-authority") && expected["EnableCallEntered"] == false &&
+                        expected["CompensationChecked"] == false && expected["CompensationAttempted"] == false)
+                    : expected["Stage"] == (expected["EnableCallEntered"] == true ? "enable" : "disable");
+                check(code == 6 && !lease.cycleAccepted && diagnostic["hardwareSuccessProven"] == false && stageConsistent,
                     replay.id + ": compensation never promotes failed operation or original stage to success");
             }
         }
@@ -903,6 +924,7 @@ int wmain(int argc, wchar_t** argv) {
         actualCycleAttribution();
         resourceRounds(rounds);
         check(readsWhileAlive == 0, "all terminal reads follow proven child termination");
+        check(unadmittedTrackedWriterCalls == 0, "transport fixture never enters tracked GPD writer side effects");
         check(files().empty(), "own final directory empty");
         // No file deletion or recursive deletion; remove only our newly-created empty directory.
         removed = RemoveDirectoryW(privateDirectory.c_str()) != FALSE;

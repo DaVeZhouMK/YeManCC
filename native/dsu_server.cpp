@@ -131,12 +131,23 @@ bool closeResources() noexcept {
        wsaInitialized&&WSACleanup()==0)wsaInitialized=false;
     return resourcesClosed();
 }
+// lifecycleMx retains the thread handle until a kernel termination receipt.
+// A failed/unknown wait never permits closing resources still used by run().
+bool joinStoppedServer() noexcept {
+    if(!serverThread.joinable())return true;
+    if(serverThread.get_id()==std::this_thread::get_id())return false;
+    const auto thread=serverThread.native_handle();
+    if(!thread||thread==INVALID_HANDLE_VALUE||WaitForSingleObject(thread,0)!=WAIT_OBJECT_0)return false;
+    try{serverThread.join();}catch(...){return false;}
+    return true;
+}
 bool start(std::uint16_t port,bool loopback) {
-    std::lock_guard<std::mutex> lifecycle(lifecycleMx);
+    std::unique_lock<std::mutex> lifecycle(lifecycleMx,std::try_to_lock);
+    if(!lifecycle.owns_lock())return false;
     if(running.load(std::memory_order_acquire))return true;
-    // The existing join has no arbitrary-blocking deadline, including on restart.
-    if(serverThread.joinable())serverThread.join();
-    std::lock_guard<std::mutex> lock(stateMx);
+    if(!joinStoppedServer())return false;
+    std::unique_lock<std::mutex> lock(stateMx,std::try_to_lock);
+    if(!lock.owns_lock())return false;
     if(!closeResources())return false; // Never overwrite an unsettled owner.
     WSADATA data{};if(WSAStartup(MAKEWORD(2,2),&data)!=0)return false;
     wsaInitialized=true;
@@ -176,19 +187,24 @@ std::size_t dsu_encode_pad_data_for_test(std::uint8_t* out,std::size_t capacity,
 }
 bool dsu_start(){return start(26760,false);}
 void dsu_stop(){
-    std::lock_guard<std::mutex> lifecycle(lifecycleMx);
+    std::unique_lock<std::mutex> lifecycle(lifecycleMx,std::try_to_lock);
+    if(!lifecycle.owns_lock())return;
     running.store(false,std::memory_order_release);
-    {std::lock_guard<std::mutex> lock(stateMx);if(stopEvent)SetEvent(stopEvent);}
-    // Join outside stateMx: run() may need it to finish its last snapshot.
-    // This remains an unbounded join; void return is not a cleanup receipt.
-    if(serverThread.joinable())serverThread.join();
-    {std::lock_guard<std::mutex> lock(stateMx);closeResources();currentFrame={};}
+    // Only lifecycle owners write/close stopEvent. Publishers access frameEvent
+    // under stateMx, never stopEvent; request stop even while stateMx is busy.
+    if(stopEvent)SetEvent(stopEvent);
+    if(!joinStoppedServer())return;
+    std::unique_lock<std::mutex> lock(stateMx,std::try_to_lock);
+    if(!lock.owns_lock())return;
+    closeResources();currentFrame={};
     clients.clear();hasClients.store(false);
 }
 bool dsu_stopped() noexcept {
     try {
-        std::lock_guard<std::mutex> lifecycle(lifecycleMx);
-        std::lock_guard<std::mutex> lock(stateMx);
+        std::unique_lock<std::mutex> lifecycle(lifecycleMx,std::try_to_lock);
+        if(!lifecycle.owns_lock())return false;
+        std::unique_lock<std::mutex> lock(stateMx,std::try_to_lock);
+        if(!lock.owns_lock())return false;
         return !running.load(std::memory_order_acquire)&&!serverThread.joinable()&&resourcesClosed();
     }catch(...){return false;} // Failure to inspect ownership cannot prove completion.
 }

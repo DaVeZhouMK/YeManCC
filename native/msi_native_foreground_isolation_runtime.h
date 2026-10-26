@@ -1,8 +1,11 @@
 #pragma once
+#include <string_view>
+#include <charconv>
 #include "process_efficiency.h"
 #include "msi_native_foreground_isolation.h"
 #include "native_foreground_source_policy.h"
 #include "one_shot_helper_diagnostic.h"
+#include "native_refresh_writer_runtime.h"
 #include <memory>
 #include "msi_focus_visibility_evidence_20261012_fa1322.h"
 
@@ -26,6 +29,25 @@ static bool nativeForegroundGameInputAdmitted(bool sameRoot,bool virtualIdentity
 static bool nativeForegroundCurrentXusbTargetAdmitted(const std::string& root,const ymcc::msi::NativeForegroundXusbInterface& item) {
     return ymcc::nativeForeground::xusbTargetAdmitted(nativeForegroundProfile(),root,item);
 }
+static std::wstring nativeRefreshWriterRecordPath() {
+    const auto directory=fspath::path(yemancc_data_dir())/L"controller-return";
+    std::error_code error;fspath::create_directories(directory,error);
+    return (directory/L"native-refresh-writer.json").wstring();
+}
+static json nativeRefreshWriterEvidence(const ymcc::nativeRefreshWriter::LaunchScope& scope,const char* phase) noexcept {
+    try {
+        const auto* attempt=scope.attempt();
+        return {{"phase",phase},{"recordPath",W2U((fspath::path(yemancc_data_dir())/L"controller-return"/L"native-refresh-writer.json").wstring())},
+            {"attemptId",attempt?attempt->attemptId:std::string{}},
+            {"jobName",attempt?attempt->jobName:std::string{}},
+            {"parentPid",attempt?attempt->parent.pid:0},
+            {"childPid",attempt&&attempt->child?attempt->child->pid:0},
+            {"reserved",scope.reserved()},{"settled",scope.settled()},
+            {"error",scope.error()},{"reason",scope.reason()},
+            {"writerFence","inherited-exclusive-owner-file-v1"},
+            {"scope","helper writer only; no node-enabled or external input delivery proof"}};
+    }catch(...){return nullptr;}
+}
 struct NativeForegroundRefreshTarget {HidHidePhysicalIdentity source;bool xusb=false;};
 struct MsiNativeForegroundLease {
     ymcc::nativeForeground::Profile profile=ymcc::nativeForeground::Profile::Msi;
@@ -37,6 +59,16 @@ struct MsiNativeForegroundLease {
     bool active=false,cloakChanged=false,restorePending=false,cycleForRestore=false;
     bool cycleIssued=false,cycleAccepted=false,syntheticCycle=false;
     bool configurationReturned=false,refreshFailed=false;
+    bool virtualHandoffHeld=false;
+    bool virtualContinuationEnded=false; // Start already rejected/ended or mandatory fault; not waiting work
+    // Isolated selected-source HC cycle substep, owned by the original R3.
+    bool postHideCycle=false,postHideAborted=false,postHideReadmitAttempted=false,postHideReadmitted=false;
+    uint64_t postHideTicket=0,postHideEpoch=0,postHideTerminalTick=0,postHideBaselineSequence=0,postHideSourceAfterTick=0;
+    unsigned postHideValidatedTopology=0;
+    HANDLE postHideHostProcess=nullptr,postHideCancelEvent=nullptr;
+    uint64_t postHideDeadline=0;
+    std::string postHideRunId,postHidePersona;
+    uint64_t virtualHandoffRequest=0; // original R3 request; never a new timeout/retry
     uint64_t refreshAttemptEdge=0;
     DWORD helperExitCode=STILL_ACTIVE,helperError=0;
     std::string helperFailure;
@@ -57,11 +89,15 @@ struct MsiNativeForegroundLease {
     bool diagnosticSelectedPathsComplete=false;
     json diagnosticBeforeConfiguration,diagnosticReturnConfiguration; // null = not captured, no proof
     HANDLE cycleProcess=nullptr;
+    std::unique_ptr<ymcc::nativeRefreshWriter::LaunchScope> nativeRefreshWriter; // GPD only, same root owner
+    json nativeRefreshWriterDiagnostic;
     std::unique_ptr<ymcc::input::OneShotHelperDiagnostic> helperDiagnosticCapture;
     json helperDiagnostic;
 };
 static std::mutex g_msiNativeForegroundMx;
 static MsiNativeForegroundLease g_msiNativeForegroundLease;
+static std::atomic<bool> g_postHideCycleOwned{false};
+static thread_local std::shared_ptr<ymcc::nativeRefreshWriter::Session> g_postHideSharedWriterSession;
 static std::atomic<uint64_t> g_msiNativeForegroundEdge{1};
 static std::atomic<bool> g_msiNativeForegroundCyclePending{false};
 static std::atomic<bool> g_msiNativeForegroundResumePending{false};
@@ -93,6 +129,10 @@ struct MsiNativeForegroundTestIo {
     std::function<bool(bool)> cloak;
     std::function<int(const std::string&,const std::wstring&,bool)> cycle; // 0=accepted,1=pending,2=failed
     std::function<int()> poll; // -1=still live,0=accepted,2=failed
+    std::function<ymcc::input::recoveryHealth::Source()> postHideSource;
+    std::function<bool(const std::string&)> postHideRootStarted;
+    std::function<int()> postHideReadmit; // offline IO boundary:0=admitted,1=read-only wait,2=failed
+    std::function<bool()> postHideAdmitSelectedSource; // only the existing standard-admission leaf, never real device IO offline
     std::function<bool()> ui;
     std::function<void()> queue;
     std::function<void(const std::string&)> virtualQueue;
@@ -192,24 +232,30 @@ static void msiNativeForegroundReceipt(const char* phase,const char* reason) {
     for(const auto& path:s.owned)targets.push_back(W2U(path));
     for(const auto& path:s.locations)locations.push_back(W2U(path));
     appendNativeLifecycleLog(s.profile==ymcc::nativeForeground::Profile::Msi?"msi-native-foreground-isolation":"native-foreground-isolation",{
-        {"family",ymcc::nativeForeground::name(s.profile)},{"rootPortCycleAllowed",s.profile==ymcc::nativeForeground::Profile::Msi},
+        {"family",ymcc::nativeForeground::name(s.profile)},{"rootPortCycleAllowed",s.profile==ymcc::nativeForeground::Profile::Msi || s.postHideCycle},
         {"refreshSeriesActive",s.refreshSeriesActive},{"refreshTargetIndex",s.nextRefreshTarget},{"refreshTargetCount",s.refreshTargets.size()},
         {"phase",phase},{"reason",reason},{"virtualTargetCreated",false},{"modeWrite",false},
         {"edge",s.edge},{"powerGeneration",s.power},{"sourceRoot",s.root},
         {"ownedPaths",targets},{"locationPaths",locations},{"cycleAccepted",s.cycleAccepted},
         {"xusbGameTargets",s.xusbTargets},{"xusbTargetEvidence","active-XUSB-interface-and-exact-PnP-ancestor"},
-        {"helperOperation",s.helperGameTarget.empty()?"physical-root-cycle":s.helperXusbTarget?"xusb-game-interface-refresh":"game-interface-refresh"},
+        {"helperOperation",s.postHideCycle?"selected-xusb-post-hide-port-cycle":s.helperGameTarget.empty()?"physical-root-cycle":s.helperXusbTarget?"xusb-game-interface-refresh":"game-interface-refresh"},
         {"helperGameTarget",s.helperGameTarget},{"gameSourceAttemptCount",s.gameSourceAttempts.size()},
+        {"postHideCycle",s.postHideCycle},{"postHideTicket",s.postHideTicket},
+        {"postHideTerminalTick",s.postHideTerminalTick},{"postHideSourceBaselineSequence",s.postHideBaselineSequence},
+        {"postHideReadmitted",s.postHideReadmitted},{"postHideSourceAfterTick",s.postHideSourceAfterTick},
+        {"postHideDeadline",s.postHideDeadline},{"postHideCancellationAvailable",s.postHideCancelEvent!=nullptr},
+        {"externalSuppressionVerified",false},
         {"gameSourceCandidate",s.gameSourceCandidate},{"gameSourceCacheGeneration",s.gameSourceCacheGeneration},
+        {"virtualHandoffHeld",s.virtualHandoffHeld},{"virtualHandoffRequest",s.virtualHandoffRequest},
         {"configurationReturned",s.configurationReturned},{ "beforeConfigurationEvidence",s.diagnosticBeforeConfiguration},{"returnConfigurationEvidence",s.diagnosticReturnConfiguration},{"refreshFailed",s.refreshFailed},
         {"helperPending",g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)},
         {"helperExitCode",s.helperExitCode},{"helperError",s.helperError},{"helperFailure",s.helperFailure},
-        {"helperDiagnostic",s.helperDiagnostic},
+        {"helperDiagnostic",s.helperDiagnostic},{"nativeRefreshWriter",s.nativeRefreshWriterDiagnostic},
         {"helperExePath",s.helperExePath},{"helperExeSha256",s.helperExeSha256},
         {"helperDllPath",s.helperDllPath},{"helperDllSha256",s.helperDllSha256},
         {"helperIdentityScope","on-disk-before-launch-not-loaded-image-proof"},
         {"cycleForRestore",s.cycleForRestore},{"refreshAttemptEdge",s.refreshAttemptEdge},
-        {"deferredVirtualWork",s.deferredVirtualWork},
+        {"deferredVirtualWork",s.deferredVirtualWork},{"virtualContinuationEnded",s.virtualContinuationEnded},
         {"verificationScope","config-and-cycle-command-only"},{"externalInputBlocked","unverified"}});
 }
 static void msiNativeForegroundQueue() {
@@ -352,13 +398,17 @@ static void msiNativeForegroundPowerEvent(WPARAM event) {
         g_msiNativeForegroundResumePending=true;msiNativeForegroundUiEvent(true);
     }
 }
+// Cached historical ownership is read under the same Host mutex. Defined by
+// the existing target-return owner later in this translation unit.
+static bool inputHostTargetReturnHistorySettledLocked();
 // caller holds Host mutex: native-only cannot race a target build/teardown.
 static ymcc::msi::NativeForegroundFacts msiNativeForegroundFacts() {
     ymcc::msi::NativeForegroundFacts f;
     f.knownBoard=nativeForegroundFamilyAllowed();
     f.nativeChoice=inputHostConfiguredPersona()=="disabled";
     f.virtualEnabled=g_realStickTest.virtualTargetEnabled;
-    f.hostAbsent=g_inputHostProcess==nullptr && !g_hidHideVisibilityJournal.active && !g_inputHostReleaseQuarantined;
+    f.hostAbsent=g_inputHostProcess==nullptr && !g_hidHideVisibilityJournal.active && !g_inputHostReleaseQuarantined &&
+        inputHostTargetReturnHistorySettledLocked(); // the historical return owner goes first
     f.powerReady=!g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) && g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready && g_inputReady.load(std::memory_order_acquire);
     f.uiOwned=g_msiNativeForegroundObserverActive.load(std::memory_order_acquire) && msiNativeForegroundUiEligible();f.exitFence=inputHostExitFenceRaised();
     f.borrowBusy=msiForegroundIsolationBorrowBusy();
@@ -507,12 +557,14 @@ static void msiNativeForegroundSettleHelperDiagnosticLocked(DWORD exitCode) noex
         });
     }catch(...){} // Evidence failure never changes the operation's exit result.
 }
+static int msiNativeForegroundPollCycleLocked();
+static bool msiPostHideContextCurrentLocked();
 static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalIdentity* gameSource=nullptr,bool xusbSource=false) {
     auto& s=g_msiNativeForegroundLease;
     // The leaf owns unresolved helper lifetime as well as its callers. A second
     // request must not replace its target, direction, hashes or evidence before
     // the existing lifecycle poll consumes this same operation's terminal state.
-    if(s.cycleProcess || s.syntheticCycle || g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)) {
+    if(s.cycleProcess || s.nativeRefreshWriter || s.syntheticCycle || g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)) {
         g_msiNativeForegroundCyclePending.store(true,std::memory_order_release);
         return 1;
     }
@@ -531,6 +583,7 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
     if(s.locations.empty()){s.helperFailure="helper-location-missing";return 2;}
     s.cycleForRestore=restoring;s.cycleIssued=true;s.cycleAccepted=false;
     s.refreshAttemptEdge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
+    if(s.postHideCycle && !msiPostHideContextCurrentLocked()){s.helperFailure="post-hide-context-ended-before-helper";return 2;}
 #ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
     if(gameSource && xusbSource && g_msiNativeForegroundTestIo.xusbRefresh){
         const int result=g_msiNativeForegroundTestIo.xusbRefresh(*gameSource,s.locations.front());
@@ -569,7 +622,16 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
     if(gameSource){
         const auto target=U2W(gameSource->deviceInstanceId);
         if(target.find(L'"')!=std::wstring::npos){s.helperFailure="invalid-game-refresh-arguments";return 2;}
-        command+=(xusbSource?L" --game-xusb \"":L" --game-hid \"")+target+L"\"";
+        command+=(s.postHideCycle?L" --game-xusb-cycle \"":xusbSource?L" --game-xusb \"":L" --game-hid \"")+target+L"\"";
+    }
+    if(s.postHideCycle){
+        const auto parent=ymcc::targetReturn::process::capture(GetCurrentProcess());
+        if(!parent || parent->pid!=GetCurrentProcessId() || !s.postHideDeadline){s.helperFailure="post-hide-parent-binding-unavailable";return 2;}
+        SECURITY_ATTRIBUTES inheritedEvent{sizeof(SECURITY_ATTRIBUTES),nullptr,TRUE};
+        s.postHideCancelEvent=CreateEventW(&inheritedEvent,TRUE,FALSE,nullptr);
+        if(!s.postHideCancelEvent){s.helperError=GetLastError();s.helperFailure="post-hide-cancel-event-unavailable";return 2;}
+        command+=L" --parent-birth "+U2W(parent->creationTime)+L" --deadline-tick "+std::to_wstring(s.postHideDeadline)+
+            L" --cancel-handle "+std::to_wstring(reinterpret_cast<uintptr_t>(s.postHideCancelEvent));
     }
     std::vector<wchar_t> buffer(command.begin(),command.end());buffer.push_back(0);
     STARTUPINFOW si{};si.cb=sizeof(si);si.dwFlags=STARTF_USESHOWWINDOW;si.wShowWindow=SW_HIDE;
@@ -578,6 +640,53 @@ static int msiNativeForegroundCycleLocked(bool restoring,const HidHidePhysicalId
     // Optional evidence; an unavailable sink preserves the original launch.
     std::unique_ptr<ymcc::input::OneShotHelperDiagnostic> capture;
     try {if(gameSource){capture=std::make_unique<ymcc::input::OneShotHelperDiagnostic>();if(!capture->prepare())capture.reset();}}catch(...){capture.reset();}
+    if(s.profile==ymcc::nativeForeground::Profile::Gpd){
+        // A GPD refresh may still be returning a disabled node after native
+        // death. No kill-on-close, no post-create association, no bare fallback.
+        try {
+            std::vector<std::string> positions;for(const auto& position:s.locations)positions.push_back(W2U(position));
+            if(s.postHideCycle && !g_postHideSharedWriterSession){s.helperFailure="post-hide-start-fence-missing";return 2;}
+            auto scope=s.postHideCycle?
+                std::make_unique<ymcc::nativeRefreshWriter::LaunchScope>(g_postHideSharedWriterSession,s.root,s.helperGameTarget,positions):
+                std::make_unique<ymcc::nativeRefreshWriter::LaunchScope>(nativeRefreshWriterRecordPath(),
+                    inputHostTargetReturnMachineBinding(),s.root,s.helperGameTarget,positions);
+            if(!scope->ready()){
+                s.helperError=scope->error();s.helperFailure=scope->reason();
+                s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(*scope,"prepare-deferred");return 2;
+            }
+            std::vector<HANDLE> inheritedHandles{scope->inheritedLease()};
+            if(s.postHideCycle)inheritedHandles.push_back(s.postHideCancelEvent);
+            const bool guarded=capture?capture->prepareTrackedLaunch(scope->job(),scope->jobName(),inheritedHandles):
+                scope->job().prepareTracked(si,scope->jobName(),inheritedHandles);
+            if(!guarded){s.helperError=scope->job().error();s.helperFailure="native-writer-job-prepare-failed";return 2;}
+            if(!scope->reserve()){
+                s.helperError=scope->error();s.helperFailure=scope->reason();
+                s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(*scope,"reserve-deferred");return 2;
+            }
+            s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(*scope,"reserved-before-create");
+            s.nativeRefreshWriter=std::move(scope); // own the record before CreateProcess, including failures
+        }catch(...){s.helperFailure="native-writer-prepare-exception";return 2;}
+        auto& scope=*s.nativeRefreshWriter;
+        if(s.postHideCycle && !msiPostHideContextCurrentLocked()){
+            s.helperFailure="post-hide-context-ended-before-create";
+            (void)scope.creationReturned(nullptr);g_msiNativeForegroundCyclePending=true;
+            const int terminal=msiNativeForegroundPollCycleLocked();return terminal<0?1:terminal;
+        }
+        if(!ymcc::processEfficiency::createProcess(exe.c_str(),buffer.data(),nullptr,nullptr,TRUE,
+            CREATE_NO_WINDOW|scope.job().flags(),nullptr,dir.c_str(),scope.job().startup(),&pi)){
+            s.helperError=GetLastError();s.helperFailure="helper-launch-failed";
+            (void)scope.creationReturned(nullptr);g_msiNativeForegroundCyclePending=true;
+            // A failed durable settlement remains pending under this owner.
+            const int terminal=msiNativeForegroundPollCycleLocked();return terminal<0?1:terminal;
+        }
+        if(capture)capture->started();s.helperDiagnosticCapture=std::move(capture);
+        CloseHandle(pi.hThread);s.cycleProcess=pi.hProcess;g_msiNativeForegroundCyclePending=true;
+        // Loss of this post-create PID receipt cannot release the inherited
+        // lease or replace the same process. Its terminal path still owns it.
+        (void)scope.creationReturned(pi.hProcess);
+        s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(scope,"created-in-exact-job");
+        const int terminal=msiNativeForegroundPollCycleLocked();return terminal<0?1:terminal;
+    }
     const DWORD launchFlags=CREATE_NO_WINDOW|(capture?EXTENDED_STARTUPINFO_PRESENT:0);
     if(!ymcc::processEfficiency::createProcess(exe.c_str(),buffer.data(),nullptr,nullptr,capture?TRUE:FALSE,launchFlags,nullptr,dir.c_str(),capture?capture->startup():&si,&pi)){s.helperError=GetLastError();s.helperFailure="helper-launch-failed";return 2;}
     if(capture)capture->started();
@@ -601,6 +710,23 @@ static int msiNativeForegroundPollCycleLocked() {
         if(result!=0)s.helperFailure="test-terminal-helper-failure";g_msiNativeForegroundCyclePending=false;return result;
     }
 #endif
+    if(s.nativeRefreshWriter){
+        if(s.cycleProcess && WaitForSingleObject(s.cycleProcess,0)!=WAIT_OBJECT_0)return -1;
+        if(!s.nativeRefreshWriter->retire(s.cycleProcess)){
+            const auto& reason=s.nativeRefreshWriter->reason();
+            s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(*s.nativeRefreshWriter,"retirement-deferred");
+            if(s.helperFailure!=reason){s.helperFailure=reason;msiNativeForegroundReceipt("refresh-retirement-deferred",reason.c_str());}
+            return -1;
+        }
+        s.nativeRefreshWriterDiagnostic=nativeRefreshWriterEvidence(*s.nativeRefreshWriter,"durably-settled");
+        if(!s.cycleProcess){
+            s.nativeRefreshWriter.reset();s.cycleAccepted=false;s.helperExitCode=1;
+            g_msiNativeForegroundCyclePending=false;
+            msiNativeForegroundReceipt("refresh-failed","same-helper-create-failure-durably-settled");return 2;
+        }
+        s.nativeRefreshWriter.reset(); // root HANDLE remains owned below, already terminal
+        s.helperFailure.clear();
+    }
     if(!s.cycleProcess)return -1;
     if(WaitForSingleObject(s.cycleProcess,0)!=WAIT_OBJECT_0)return -1;
     DWORD code=1;const bool ok=GetExitCodeProcess(s.cycleProcess,&code)!=FALSE && code==0;
@@ -617,6 +743,15 @@ static int nativeForegroundRefreshLocked(bool restoring) {
     if(g_msiNativeForegroundCyclePending)return 1;
     lease.refreshPlanAttemptEdge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
     lease.refreshPlanForRestore=restoring;
+    // A pending leaf already advanced nextRefreshTarget at launch. After its
+    // terminal poll, an exhausted list is not a successful series unless that
+    // same leaf was accepted. Preserve failed/unknown return evidence across
+    // a new focus edge; changing direction still runs the existing restore.
+    // GPD only: preserve the currently accepted ROG/MSI execution policy.
+    if(lease.profile==ymcc::nativeForeground::Profile::Gpd && lease.refreshSeriesActive && lease.cycleForRestore==restoring &&
+        lease.nextRefreshTarget>0 && !lease.cycleAccepted){
+        lease.refreshSeriesActive=false;return 2;
+    }
     if(!lease.refreshSeriesActive || lease.cycleForRestore!=restoring){
         lease.refreshTargets.clear();lease.nextRefreshTarget=0;lease.refreshSeriesActive=false;
         bool complete=false;std::vector<HidHideInterfaceRecord> inventory;
@@ -668,6 +803,14 @@ static int nativeForegroundRefreshLocked(bool restoring) {
 static void msiNativeForegroundClearLeaseLocked() {
     g_msiNativeForegroundWatchGameSources=false;
     auto& s=g_msiNativeForegroundLease;
+    // Never discard a GPD writer scope while its original root/job/record is
+    // unresolved. The existing lifecycle maintenance continues its one poll.
+    if(s.nativeRefreshWriter || (s.profile==ymcc::nativeForeground::Profile::Gpd &&
+        (s.cycleProcess || g_msiNativeForegroundCyclePending.load(std::memory_order_acquire)))){
+        msiNativeForegroundReceipt("clear-deferred","native-refresh-writer-not-retired");return;
+    }
+    if(s.postHideCancelEvent){CloseHandle(s.postHideCancelEvent);s.postHideCancelEvent=nullptr;}
+    g_postHideCycleOwned.store(false,std::memory_order_release);
     const auto spent=s.attemptedEdge;
     auto deferred=std::move(s.deferredVirtualWork);
     s=MsiNativeForegroundLease{};s.attemptedEdge=spent;
@@ -678,7 +821,256 @@ static void msiNativeForegroundClearLeaseLocked() {
         (void)inputHostQueueLifecycleWork(reason.c_str());
     }
 }
+// R3 continuation: the current player period may receive the already-returned
+// GPD source. This predicate neither creates a request nor renews its budget.
+static bool msiNativeForegroundGpdVirtualRequestCurrentLocked() {
+    const auto& s=g_msiNativeForegroundLease;
+    if(s.profile!=ymcc::nativeForeground::Profile::Gpd || nativeForegroundProfile()!=s.profile ||
+        !s.active || s.power!=currentPowerGeneration() ||
+        g_msiNativeForegroundPowerHold.load(std::memory_order_acquire) ||
+        g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready || !g_inputReady ||
+        inputHostExitFenceRaised() || g_exitRequested.load(std::memory_order_acquire) ||
+        !g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled || inputHostConfiguredPersona()=="disabled")return false;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    return view.requestId && view.locked && view.remainingMs &&
+        (view.phase=="pending" || view.phase=="verifying") && view.persona==inputHostConfiguredPersona() &&
+        (!s.virtualHandoffHeld || s.virtualHandoffRequest==view.requestId);
+}
+// A terminal helper is not an enable acknowledgement. Only an acknowledged
+// complete refresh, or explicit failure BEFORE any acknowledged Disable, can
+// take this shortcut. Missing/unknown facts and failed Enable stay on return.
+// No claim of external visibility or Steam consumption is made here.
+static bool msiNativeForegroundGpdTerminalGameWriterReturnedLocked() {
+    const auto& s=g_msiNativeForegroundLease;
+    if(s.nativeRefreshWriter || s.cycleProcess || g_msiNativeForegroundCyclePending.load(std::memory_order_acquire) ||
+        s.helperGameTarget.empty())return false;
+    if(s.cycleAccepted && s.helperExitCode==0)return true;
+    try {
+        const auto& report=s.helperDiagnostic;
+        if(s.helperExitCode!=6 || !report.is_object() || report.value("state",std::string{})!="record-accepted" ||
+            !report.contains("reportedFacts") || !report["reportedFacts"].is_object())return false;
+        const auto& facts=report["reportedFacts"];
+        if(facts.value("Kind",std::string{})!="ymcc.gameRefresh.failure" || facts.value("Stage",std::string{})!="disable" ||
+            !facts.contains("DisableCallEntered") || facts["DisableCallEntered"]!=true ||
+            !facts.contains("DisableResult") || !facts["DisableResult"].is_number_integer() ||
+            !facts.contains("EnableCallEntered") || facts["EnableCallEntered"]!=false ||
+            !facts.contains("EnableResult") || !facts["EnableResult"].is_null() ||
+            (facts.contains("CompensationAttempted") && facts["CompensationAttempted"]!=false))return false;
+        const auto& result=facts["DisableResult"];
+        return result.is_number_unsigned()?result.get<unsigned long long>()>0 && result.get<unsigned long long>()<=0xffffffffULL:
+            result.get<long long>()>0 && result.get<long long>()<=0xffffffffLL;
+    }catch(...){return false;}
+}
+// Experimental HC selected-XUSB cycle. This reuses the existing sole helper
+// owner/fence; it is not a parallel switch, CM-disable policy, or hardware PASS.
+static ymcc::input::recoveryHealth::Source msiPostHideLatestSourceLocked() {
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    if(g_msiNativeForegroundTestIo.postHideSource)return g_msiNativeForegroundTestIo.postHideSource();
+#endif
+    return inputHostRecoveryHealthLatestSourceLocked();
+}
+static bool msiPostHideContextCurrentLocked() {
+    const auto& s=g_msiNativeForegroundLease;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    return s.postHideCycle && !s.postHideAborted && s.profile==ymcc::nativeForeground::Profile::Gpd &&
+        nativeForegroundProfile()==s.profile && s.power==currentPowerGeneration() &&
+        !g_msiNativeForegroundPowerHold && g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready &&
+        g_inputReady && hardwareWriteAllowed() && !g_inputHostPowerAdmissionRevoked && !g_inputCaptureStop &&
+        !g_inputHostTransportFault && !g_inputHostPipeRetired &&
+        !inputHostExitFenceRaised() && !g_exitRequested &&
+        g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+        view.requestId==s.postHideTicket && view.locked && view.remainingMs &&
+        inputHostStartProtectionNow()<s.postHideDeadline &&
+        view.persona==s.postHidePersona && inputHostConfiguredPersona()==s.postHidePersona &&
+        g_inputHostEpoch==s.postHideEpoch && g_inputHostRunId==s.postHideRunId && g_inputHostProcess==s.postHideHostProcess &&
+        !g_inputHostPrepared && !g_inputHostPrepareMayHaveReachedHost && !g_inputHostActive;
+}
+static bool msiPostHideRootStartedFor(const std::string& sourceRoot,const std::vector<std::wstring>& positions) {
+    if(!ymcc::msi::samePhysicalLocation(positions,msiForegroundIsolationLocations(sourceRoot)))return false;
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+    return g_msiNativeForegroundTestIo.postHideRootStarted && g_msiNativeForegroundTestIo.postHideRootStarted(sourceRoot);
+#else
+    const auto root=U2W(sourceRoot);DEVINST node=0;ULONG status=0,problem=0;
+    return CM_Locate_DevNodeW(&node,const_cast<wchar_t*>(root.c_str()),CM_LOCATE_DEVNODE_NORMAL)==CR_SUCCESS &&
+        CM_Get_DevNode_Status(&status,&problem,node,0)==CR_SUCCESS && (status&DN_STARTED) &&
+        !(status&DN_HAS_PROBLEM) && problem==0;
+#endif
+}
+static bool msiPostHideRootStartedLocked() {
+    const auto& s=g_msiNativeForegroundLease;return msiPostHideRootStartedFor(s.root,s.locations);
+}
+static int msiPostHideSkip(uint64_t ticket,const char* reason) noexcept {
+    try{appendNativeLifecycleLog("input-host-post-hide-cycle",{{"stage","not-required-or-unavailable"},
+        {"requestId",ticket},{"reason",reason},{"driverOperationIssued",false},
+        {"standardVirtualRouteRetained",true},{"externalSuppressionVerified",false}});}catch(...){}
+    return 0;
+}
+// No node-enable claim: this operation never issues CM Disable/Enable. Cleanup
+// waits for the original exact writer before the visibility journal may return.
+static bool msiPostHideCleanupLocked(const char* reason) {
+    auto& s=g_msiNativeForegroundLease;
+    if(!s.postHideCycle)return true;
+    s.postHideAborted=true;
+    if(s.postHideCancelEvent)(void)SetEvent(s.postHideCancelEvent); // revoke unentered SDK work; never kill an in-flight cycle
+    if(g_msiNativeForegroundCyclePending)(void)msiNativeForegroundPollCycleLocked();
+    if(g_msiNativeForegroundCyclePending || s.cycleProcess || s.nativeRefreshWriter)return false;
+    try{msiNativeForegroundReceipt("post-hide-writer-retired",reason);}catch(...){}
+    msiNativeForegroundClearLeaseLocked();return !s.active;
+}
+// A delayed cleanup may repay only the same unfinished Host. It cannot borrow
+// a later target or clear the visibility journal merely because the player
+// request expired. This marker is private to the GPD post-hide candidate.
+static constexpr std::string_view kMsiPostHideCleanupBase="fault-stop:post-hide-cycle-cancelled";
+static constexpr std::string_view kMsiPostHideCleanupPrefix="fault-stop:post-hide-cycle-cancelled:";
+static bool msiPostHideCleanupIsWork(std::string_view reason) noexcept {
+    return reason==kMsiPostHideCleanupBase || reason.starts_with(kMsiPostHideCleanupPrefix);
+}
+static std::string msiPostHideCleanupWork(uint64_t epoch,const std::string& runId) {
+    return std::string(kMsiPostHideCleanupPrefix)+std::to_string(epoch)+":"+runId;
+}
+// Caller owns HostMx. Original UI expiry does not erase the old return duty.
+// Pre-target state also protects a later target that might share a kept Host.
+static bool msiPostHideCleanupWorkCurrentLocked(std::string_view reason) noexcept {
+    if(!msiPostHideCleanupIsWork(reason))return true;
+    if(!reason.starts_with(kMsiPostHideCleanupPrefix) || g_inputHostPrepared ||
+        g_inputHostPrepareMayHaveReachedHost || g_inputHostActive)return false;
+    const auto identity=reason.substr(kMsiPostHideCleanupPrefix.size());
+    const auto separator=identity.find(':');if(separator==std::string_view::npos)return false;
+    char epoch[32];const auto encoded=std::to_chars(epoch,epoch+sizeof(epoch),g_inputHostEpoch);
+    return encoded.ec==std::errc{} &&
+        identity.substr(0,separator)==std::string_view(epoch,static_cast<std::size_t>(encoded.ptr-epoch)) &&
+        identity.substr(separator+1)==g_inputHostRunId;
+}
+static void msiPostHideCleanupWorkRetiredLocked(std::string_view reason,const char* throat) noexcept {
+    try{appendNativeLifecycleLog("input-host-post-hide-cleanup-retired",{
+        {"reason",std::string(reason)},{"throat",throat?throat:"unknown"},
+        {"hostEpoch",g_inputHostEpoch},{"runId",g_inputHostRunId},
+        {"hostPrepared",g_inputHostPrepared},{"prepareMayHaveReachedHost",g_inputHostPrepareMayHaveReachedHost},
+        {"hostActive",g_inputHostActive},{"stopInvoked",false},{"ownershipCleared",false},
+        {"scope","original-pre-target-Host-tuple"}});}catch(...){}
+}
+
+static bool msiPostHideCancelForStop(const char* reason) {
+    // Caller owns HostMx; no new lock on unchanged ROG/MSI/standard paths.
+    if(!g_postHideCycleOwned.load(std::memory_order_acquire))return true;
+    std::lock_guard leaseLock(g_msiNativeForegroundMx);
+    if(msiPostHideCleanupLocked(reason))return true;
+    auto& deferred=g_msiNativeForegroundLease.deferredVirtualWork;
+    const auto cleanup=msiPostHideCleanupWork(g_msiNativeForegroundLease.postHideEpoch,g_msiNativeForegroundLease.postHideRunId);
+    if(std::find(deferred.begin(),deferred.end(),cleanup)==deferred.end())deferred.push_back(cleanup);
+    return false;
+}
+// Returns0 only after the SDK helper and a newer current source read. It does
+// not assert old external handles closed. Caller holds HostMx and R3 ownership.
+static int msiPostHideCycleStep(uint64_t ticket) {
+    std::lock_guard leaseLock(g_msiNativeForegroundMx);
+    auto& s=g_msiNativeForegroundLease;
+    if(!s.postHideCycle && nativeForegroundProfile()!=ymcc::nativeForeground::Profile::Gpd)return 0;
+    if(s.postHideCycle && !msiPostHideContextCurrentLocked())return 2;
+    if(!s.postHideCycle){
+        if(s.active || g_msiNativeForegroundCyclePending || s.cycleProcess || s.nativeRefreshWriter)return 2;
+        const auto originalNow=inputHostStartProtectionNow();
+        const auto view=g_virtualStartProtection.view(originalNow);
+        const auto& j=g_hidHideVisibilityJournal;
+        if(!ticket || view.requestId!=ticket || !view.locked || !view.remainingMs ||
+            view.persona!=inputHostConfiguredPersona() || !j.active || !j.before.valid ||
+            g_inputHostPrepared || g_inputHostPrepareMayHaveReachedHost || g_inputHostActive)return 2;
+        // Missing optional refresh recognition is not a new prerequisite for
+        // standard virtual output. Only an already-started owned action may
+        // require cancellation/return instead of this pre-mutation no-op.
+        if(j.physicalSources.size()!=1 || !j.physical.resolved ||
+            !nativeForegroundRootCandidate(j.physical.baseContainerDeviceInstanceId) ||
+            !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(j.physical.deviceInstanceId,j.physical.baseContainerDeviceInstanceId),
+                j.physical.vendorId,j.physical.productId,j.physical.usagePage,j.physical.usage))
+            return msiPostHideSkip(ticket,"selected-refresh-class-not-proven");
+        // HC skips re-cycling an already hidden selected source. A carried
+        // continuous-persona journal does not reopen consumers; foreign hiding
+        // grants no restart ownership to this candidate.
+        if(hidHideContainsPath(j.before.hidden,j.physical.baseContainerDeviceInstanceId) ||
+            hidHideContainsPath(j.before.hidden,j.physical.deviceInstanceId))return msiPostHideSkip(ticket,"selected-source-already-hidden");
+        if(!hidHideContainsPath(j.hiddenByUs,j.physical.baseContainerDeviceInstanceId) ||
+            !hidHideContainsPath(j.hiddenByUs,j.physical.deviceInstanceId))return 2;
+        if(!j.physicalSources.front().resolved ||
+            ascii_lower(j.physicalSources.front().deviceInstanceId)!=ascii_lower(j.physical.deviceInstanceId) ||
+            ascii_lower(j.physicalSources.front().baseContainerDeviceInstanceId)!=ascii_lower(j.physical.baseContainerDeviceInstanceId))return 2;
+        const auto expectedPower=currentPowerGeneration();const auto expectedEpoch=g_inputHostEpoch;
+        const auto expectedRun=g_inputHostRunId;const auto expectedProcess=g_inputHostProcess;
+        const auto root=j.physical.baseContainerDeviceInstanceId;
+        const auto positions=msiForegroundIsolationLocations(root);
+        const auto xusb=msiNativeForegroundXusbInventory(j.physical);
+        if(positions.empty() || !xusb.complete)return msiPostHideSkip(ticket,"selected-xusb-location-or-inventory-unproven");
+        unsigned exact=0;
+        for(const auto& item:xusb.interfaces)if(nativeForegroundCurrentXusbTargetAdmitted(root,item) &&
+            ascii_lower(item.instanceId)==ascii_lower(root))++exact;
+        if(exact!=1)return msiPostHideSkip(ticket,"exact-selected-xusb-node-not-proven");
+        if(!msiPostHideRootStartedFor(root,positions))return msiPostHideSkip(ticket,"selected-node-readiness-unproven-no-cycle");
+        HidHideVisibilitySnapshot after;
+        if(!msiNativeForegroundSnapshot(after) || !after.valid || !after.cloaking ||
+            hidHideInverseApplicationListState(after.inverseRaw)!="off" ||
+            !hidHideContainsPath(after.applications,W2U(hidHideCurrentModulePath())) ||
+            !hidHideContainsPath(after.hidden,root) || !hidHideContainsPath(after.hidden,j.physical.deviceInstanceId))return 2;
+        if(currentPowerGeneration()!=expectedPower || g_inputHostEpoch!=expectedEpoch || g_inputHostRunId!=expectedRun ||
+            g_inputHostProcess!=expectedProcess || g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId!=ticket)return 2;
+        // The ordinary journal already owns durable hide/return responsibility.
+        // This lease owns only the one exact helper, never a second hide writer.
+        s=MsiNativeForegroundLease{};s.profile=ymcc::nativeForeground::Profile::Gpd;
+        s.active=true;s.configurationReturned=true;s.postHideCycle=true;
+        g_postHideCycleOwned.store(true,std::memory_order_release);
+        s.root=root;s.locations=positions;s.power=expectedPower;s.postHideHostProcess=expectedProcess;
+        s.postHideTicket=ticket;s.postHideEpoch=g_inputHostEpoch;s.postHideRunId=g_inputHostRunId;s.postHidePersona=view.persona;
+        s.postHideDeadline=originalNow+view.remainingMs;
+        if(g_inputHostSwitchRecoveryStartDeadline)s.postHideDeadline=(std::min)(s.postHideDeadline,g_inputHostSwitchRecoveryStartDeadline);
+        if(!msiPostHideContextCurrentLocked())return 2;
+        auto target=j.physical;target.deviceInstanceId=root;
+        const int begin=msiNativeForegroundCycleLocked(false,&target,true);
+        msiNativeForegroundReceipt("post-hide-cycle-started","HC-selected-root-cycle;SDK-only-no-external-proof");
+        if(begin==2)return 2;
+    }
+    if(s.postHideTicket!=ticket || !msiPostHideContextCurrentLocked())return 2;
+    if(g_msiNativeForegroundCyclePending)(void)msiNativeForegroundPollCycleLocked();
+    if(g_msiNativeForegroundCyclePending || s.cycleProcess || s.nativeRefreshWriter)return 1;
+    if(!s.cycleAccepted || s.helperExitCode!=0)return 2;
+    if(!s.postHideTerminalTick){
+        s.postHideTerminalTick=GetTickCount64();s.postHideBaselineSequence=msiPostHideLatestSourceLocked().sequence;
+        xinputSlotsMarkDiscoveryDirty();xinputSlotsRequestIdentityReprobe(0xFu,"gpd-post-hide-cycle-returned");
+        g_xinputPreTargetBoundaryScanned.store(false,std::memory_order_relaxed);
+        g_xinputSlotFullScanEpochStart.store(g_xinputTopologyEpoch.load(std::memory_order_acquire),std::memory_order_release);
+        g_xinputSlotFullScanOnce.store(true,std::memory_order_relaxed);
+        msiNativeForegroundReceipt("post-hide-source-wait","same-R3;newer-source-read-required");return 1;
+    }
+    if(!s.postHideReadmitted)return 1;
+    const auto topology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    if(s.postHideValidatedTopology!=topology){
+        if(!msiPostHideRootStartedLocked())return 1;
+        s.postHideValidatedTopology=topology;
+    }
+    const auto source=msiPostHideLatestSourceLocked();
+    if(source.route!=ymcc::input::recoveryHealth::Route::XInput || !source.live || !source.stable ||
+        !source.incarnation || !source.continuity || source.continuity==(std::numeric_limits<uint64_t>::max)() ||
+        source.sequence<=s.postHideBaselineSequence || source.started<s.postHideSourceAfterTick ||
+        source.identity!=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire) ||
+        !ymcc::input::recoveryHealth::fresh(source,GetTickCount64(),s.power,topology))return 1;
+    if(!msiPostHideContextCurrentLocked())return 2;
+    msiNativeForegroundReceipt("post-hide-source-returned","new-current-source-read;external-visibility-unverified");
+    msiNativeForegroundClearLeaseLocked();return s.active?2:0;
+}
+
+// An already-owned writer survives temporary loss of the model/profile result.
+// Poll only that owner, even when new OEM activation is no longer permitted.
+static bool msiPostHideMaintainOwner(const char* reason,bool exiting=false) {
+    if(!g_postHideCycleOwned.load(std::memory_order_acquire))return false;
+    std::unique_lock<InputHostMutex> hostLock(g_inputHostMx,std::try_to_lock);if(!hostLock.owns_lock())return true;
+    std::unique_lock leaseLock(g_msiNativeForegroundMx,std::try_to_lock);if(!leaseLock.owns_lock())return true;
+    auto& state=g_msiNativeForegroundLease;
+    if(!state.postHideCycle){g_postHideCycleOwned.store(false,std::memory_order_release);return false;}
+    if(exiting){state.postHideAborted=true;state.deferredVirtualWork.clear();}
+    if(g_msiNativeForegroundCyclePending)(void)msiNativeForegroundPollCycleLocked();
+    if(exiting || !msiPostHideContextCurrentLocked())(void)msiPostHideCleanupLocked(reason);
+    return true;
+}
+
 static bool msiNativeForegroundRestoreLocked(const char* reason) {
+    if(g_msiNativeForegroundLease.postHideCycle)return msiPostHideCleanupLocked(reason);
     auto& s=g_msiNativeForegroundLease;
     if(!s.active)return true;
     g_msiNativeForegroundWatchGameSources=false;
@@ -728,6 +1120,17 @@ static bool msiNativeForegroundRestoreLocked(const char* reason) {
     if(!ymcc::msi::samePhysicalLocation(s.locations,current)){
         msiNativeForegroundReceipt("restored-old-config","old-root-no-longer-current");msiNativeForegroundClearLeaseLocked();return true;
     }
+    // The original native helper is truly retired and our exact configuration
+    // was read back returned above. A CURRENT virtual request is the next owner;
+    // do not create an inverse native HID/XUSB writer in front of that request.
+    // OFF/expired intents and unproven enable debt retain the original restore.
+    if(s.configurationReturned && !s.virtualContinuationEnded && !s.deferredVirtualWork.empty() &&
+        msiNativeForegroundGpdVirtualRequestCurrentLocked() &&
+        msiNativeForegroundGpdTerminalGameWriterReturnedLocked() && !g_inputHostProcess &&
+        !g_hidHideVisibilityJournal.active && !g_inputHostReleaseQuarantined){
+        msiNativeForegroundReceipt("handoff-config-returned","current-virtual-request-no-inverse-native-refresh");
+        msiNativeForegroundClearLeaseLocked();return !s.active;
+    }
     const auto edge=g_msiNativeForegroundEdge.load(std::memory_order_acquire);
     if(s.profile!=ymcc::nativeForeground::Profile::Msi && s.refreshFailed && s.refreshPlanForRestore && s.refreshPlanAttemptEdge==edge)return false;
     if(s.cycleForRestore && s.cycleIssued && !s.cycleAccepted && s.refreshAttemptEdge==edge){
@@ -746,11 +1149,141 @@ static bool msiNativeForegroundRestoreLocked(const char* reason) {
 static bool msiNativeForegroundVirtualHandoffLocked() {
     auto& s=g_msiNativeForegroundLease;
     if(s.active && s.configurationReturned && s.refreshFailed && !g_msiNativeForegroundCyclePending){
+        // The legacy handoff must not bypass the same GPD writer/enable guard
+        // used by the current-request shortcut above. Other OEM return protocols
+        // retain their original admission; no new refresh or budget is created.
+        if(s.profile==ymcc::nativeForeground::Profile::Gpd &&
+            !msiNativeForegroundGpdTerminalGameWriterReturnedLocked())return false;
         msiNativeForegroundReceipt("handoff-config-returned","physical-refresh-unverified-terminal-helper");
-        msiNativeForegroundClearLeaseLocked();return true;
+        msiNativeForegroundClearLeaseLocked();return !s.active;
     }
     return !s.active;
 }
+// VC-GPD-NATIVE-VIRTUAL-HANDOFF-20261025-R1.
+// Native UI isolation and virtual hiding are consecutive owners of the SAME
+// selected game paths. Returning configuration between them lets a consumer
+// open a new physical handle before PREPARE. Preserve private configuration
+// while the original helper retires; the normal virtual hide/readback is the
+// only recipient. No root reset, replacement helper, timer or mode write.
+// ROG/MSI retain their hardware-specific return protocols. OneX/AYA do not
+// gain native mutation authority from this transport handoff.
+static bool msiNativeForegroundVirtualHandoffContextLocked() {
+    const auto& s=g_msiNativeForegroundLease;
+    return msiNativeForegroundGpdVirtualRequestCurrentLocked() && !s.configurationReturned &&
+        !s.restorePending && !s.cloakChanged && !s.owned.empty() && s.diagnosticSelectedPathsComplete;
+}
+static bool msiNativeForegroundHoldForVirtualLocked(const char* reason) {
+    auto& s=g_msiNativeForegroundLease;
+    if(!msiNativeForegroundVirtualHandoffContextLocked())return false;
+    if(!s.virtualHandoffHeld){
+        // A live virtual session/journal has its own owner; never turn this
+        // repair into another route for stealing an existing transaction.
+        if(g_inputHostProcess || g_hidHideVisibilityJournal.active ||
+            !ymcc::msi::samePhysicalLocation(s.locations,msiForegroundIsolationLocations(s.root)))return false;
+        s.virtualHandoffRequest=g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId;
+        s.virtualHandoffHeld=true;
+        try { msiNativeForegroundReceipt("handoff-preserved",reason); } catch(...) {}
+    }
+    return true;
+}
+static uint64_t msiNativeForegroundVirtualHandoffTicket() {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    const auto& s=g_msiNativeForegroundLease;
+    return s.virtualHandoffHeld?s.virtualHandoffRequest:0;
+}
+static bool msiNativeForegroundVirtualHandoffRequired(uint64_t ticket) {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    return g_msiNativeForegroundLease.virtualHandoffHeld && g_msiNativeForegroundLease.virtualHandoffRequest==ticket;
+}
+// Current donor authority for one actual idempotent hide dispatch. This is
+// separate from a fresh-hidden-list observation: only our original native
+// baseline can prove the already-hidden path was not borrowed from a third party.
+static bool msiNativeForegroundReassertionBaseline(const std::string& target,HidHideVisibilitySnapshot& baseline) {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    const auto& s=g_msiNativeForegroundLease;
+    const auto& journal=g_hidHideVisibilityJournal;
+    if(!s.virtualHandoffHeld || !msiNativeForegroundVirtualHandoffContextLocked() ||
+        g_inputHostStartProtectionBoundTicket!=s.virtualHandoffRequest || g_msiNativeForegroundCyclePending || s.cycleProcess ||
+        !journal.active || journal.physicalSources.size()!=1 ||
+        ascii_lower(journal.physical.baseContainerDeviceInstanceId)!=ascii_lower(s.root) ||
+        !s.before.valid || hidHideContainsPath(s.before.hidden,target) || !hidHideContainsPath(s.owned,target) ||
+        !ymcc::msi::samePhysicalLocation(s.locations,msiForegroundIsolationLocations(s.root)))return false;
+    baseline=s.before;
+    return true;
+}
+// A complete preexisting owned set, authenticated by the same current native
+// owner. Atomic persistence of this already-hidden set closes a forced-stop
+// gap between per-path reassertions; it never preclaims future hide requests.
+static bool msiNativeForegroundNativeHandoffSnapshot(std::vector<std::string>& owned,HidHideVisibilitySnapshot& baseline) {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    const auto& s=g_msiNativeForegroundLease;
+    const auto& journal=g_hidHideVisibilityJournal;
+    if(!s.virtualHandoffHeld || !msiNativeForegroundVirtualHandoffContextLocked() ||
+        g_inputHostStartProtectionBoundTicket!=s.virtualHandoffRequest || g_msiNativeForegroundCyclePending || s.cycleProcess ||
+        !journal.active || journal.physicalSources.size()!=1 || !journal.physical.resolved ||
+        ascii_lower(journal.physical.baseContainerDeviceInstanceId)!=ascii_lower(s.root) ||
+        !s.before.valid || s.owned.empty() || s.owned.size()>16 ||
+        !ymcc::msi::samePhysicalLocation(s.locations,msiForegroundIsolationLocations(s.root)))return false;
+    std::vector<std::string> exact;
+    for(const auto& path:s.owned){
+        const auto target=W2U(path);
+        if(target.empty() || hidHideContainsPath(s.before.hidden,target) || hidHideIsVirtualIdentity(target,{}))return false;
+        hidHideAppendTarget(exact,target);
+    }
+    if(exact.size()!=s.owned.size())return false;
+    auto original=s.before;
+    owned.swap(exact);baseline=std::move(original);
+    return true;
+}
+static bool msiNativeForegroundAppendHandoffTargets(std::vector<std::string>& targets) {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    const auto& s=g_msiNativeForegroundLease;
+    if(!s.virtualHandoffHeld)return true;
+    const auto& journal=g_hidHideVisibilityJournal;
+    if(!msiNativeForegroundVirtualHandoffContextLocked() || g_msiNativeForegroundCyclePending || s.cycleProcess ||
+        g_inputHostStartProtectionBoundTicket!=s.virtualHandoffRequest || !journal.active ||
+        journal.physicalSources.size()!=1 || ascii_lower(journal.physical.baseContainerDeviceInstanceId)!=ascii_lower(s.root))return false;
+    auto proposed=targets;
+    for(const auto& path:s.owned)hidHideAppendTarget(proposed,W2U(path));
+    if(proposed.size()>16)return false;
+    targets.swap(proposed);
+    return true;
+}
+static bool msiNativeForegroundAcceptVirtualJournal(const HidHideVisibilitySnapshot& after) {
+    std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+    auto& s=g_msiNativeForegroundLease;
+    if(!s.virtualHandoffHeld)return true;
+    auto& journal=g_hidHideVisibilityJournal;
+    if(!msiNativeForegroundVirtualHandoffContextLocked() || g_msiNativeForegroundCyclePending || s.cycleProcess ||
+        g_inputHostStartProtectionBoundTicket!=s.virtualHandoffRequest || !journal.active || journal.physicalSources.size()!=1 || !journal.physical.resolved ||
+        ascii_lower(journal.physical.baseContainerDeviceInstanceId)!=ascii_lower(s.root) ||
+        !nativeForegroundGameInputAdmitted(true,hidHideIsVirtualIdentity(journal.physical.deviceInstanceId,s.root),
+            journal.physical.vendorId,journal.physical.productId,journal.physical.usagePage,journal.physical.usage) ||
+        !after.valid || !after.cloaking || hidHideInverseApplicationListState(after.inverseRaw)!="off" ||
+        !hidHideContainsPath(after.applications,W2U(hidHideCurrentModulePath())) ||
+        !ymcc::msi::samePhysicalLocation(s.locations,msiForegroundIsolationLocations(s.root)))return false;
+    // Every donor path must already have passed the actual durable reservation
+    // and idempotent hide dispatch. Merely copying memory ownership here would
+    // omit cold-return debt after a forced restart.
+    for(const auto& path:s.owned)if(!hidHideContainsPath(after.hidden,W2U(path)) ||
+        !hidHideContainsPath(journal.hiddenByUs,W2U(path)))return false;
+    try { msiNativeForegroundReceipt("handoff-transferred","virtual-journal-readback-accepted;external-input-unverified"); } catch(...) {}
+    msiNativeForegroundClearLeaseLocked();
+    return true;
+}
+static void msiNativeForegroundVirtualStartFinishedLocked(uint64_t ticket,bool keepForContinuation) noexcept {
+    try {
+        std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
+        const auto& s=g_msiNativeForegroundLease;
+        if(!s.virtualHandoffHeld || s.virtualHandoffRequest!=ticket)return;
+        if(keepForContinuation && msiNativeForegroundVirtualHandoffContextLocked())return;
+        g_msiNativeForegroundLease.virtualContinuationEnded=true;
+        // An early Start rejection/exception cannot strand a private native
+        // hide. Successful admission has already transferred it to journal.
+        (void)msiNativeForegroundRestoreLocked("virtual-start-ended-before-ownership-transfer");
+    } catch(...) { /* original lease/debt remains; never forge a return */ }
+}
+
 // Read-only diagnosis after a native/OFF UI boundary. It does NOT hide,
 // activate cloak, cycle a device, clear inherited entries, or claim ownership.
 // No resident polling: at most 32 explicit boundary snapshots per process.
@@ -849,13 +1382,34 @@ static void msiNativeForegroundRefreshGameSourceLocked() {
     if(refresh==0 && !lease.pendingGameSources.empty())msiNativeForegroundQueue();
 }
 static void msiNativeForegroundHandleWork() {
+    if(msiPostHideMaintainOwner("post-hide-maintenance"))return;
     if(!nativeForegroundFamilyAllowed())return;
     std::lock_guard hostLock(g_inputHostMx);
     std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
     auto& s=g_msiNativeForegroundLease;
     auto facts=msiNativeForegroundFacts();
+    if(s.postHideCycle){
+        if(g_msiNativeForegroundCyclePending)(void)msiNativeForegroundPollCycleLocked();
+        if(!msiPostHideContextCurrentLocked())(void)msiPostHideCleanupLocked("post-hide-context-ended");
+        return;
+    }
     msiNativeForegroundReadOnlyFilterAuditLocked(facts);
     if(s.active){
+        if(msiNativeForegroundHoldForVirtualLocked("native-owner-awaits-original-virtual-request")){
+            if(!g_msiNativeForegroundCyclePending){
+                // The same helper has ended. Resume each parked original work
+                // item once while leaving its hide with the donor until apply.
+                auto deferred=std::move(s.deferredVirtualWork);
+                s.deferredVirtualWork.clear();
+                for(const auto& reason:deferred){
+#ifdef YMCC_MSI_FOREGROUND_ISOLATION_TEST
+                    if(g_msiNativeForegroundTestIo.virtualQueue){g_msiNativeForegroundTestIo.virtualQueue(reason);continue;}
+#endif
+                    (void)inputHostQueueLifecycleWork(reason.c_str());
+                }
+            }
+            return;
+        }
         if(s.restorePending || !msiNativeForegroundLeaseCurrent() || (s.cycleIssued && !s.cycleAccepted && !g_msiNativeForegroundCyclePending)){
             const bool restored=msiNativeForegroundRestoreLocked("foreground-or-config-transition");
             if(!restored && !s.deferredVirtualWork.empty())(void)msiNativeForegroundVirtualHandoffLocked();
@@ -987,20 +1541,46 @@ static void msiNativeForegroundHandleWork() {
     msiNativeForegroundReceipt(cycle==0?"config-cycle-accepted":"hide-wait",cycle==0?"native-foreground-entered":"port-refresh-pending");
 }
 static bool msiNativeForegroundBeforeVirtualWork(const std::string& reason) {
-    if(!nativeForegroundFamilyAllowed())return true;
+    // Retire a stale private cleanup before it can restore another family lease.
+    if(msiPostHideCleanupIsWork(reason)){
+        std::lock_guard hostLock(g_inputHostMx);
+        if(!msiPostHideCleanupWorkCurrentLocked(reason)){
+            msiPostHideCleanupWorkRetiredLocked(reason,"before-lifecycle-work");return false;
+        }
+    }
+    if(!nativeForegroundFamilyAllowed() && !g_postHideCycleOwned.load(std::memory_order_acquire))return true;
     std::lock_guard hostLock(g_inputHostMx);
     std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);
     if(g_msiNativeForegroundSourceRetryNeeded && inputHostConfiguredPersona()!="disabled")
         g_msiNativeForegroundSourceRetryNeeded=false; // virtual route clears native-only retry work
     if(!g_msiNativeForegroundLease.active)return true;
-    if(!g_realStickTest.virtualTargetEnabled && inputHostConfiguredPersona()=="disabled")return true;
-        if(msiNativeForegroundRestoreLocked("handoff-to-virtual-route") || msiNativeForegroundVirtualHandoffLocked())return true;
+    if(!g_realStickTest.virtualTargetEnabled && inputHostConfiguredPersona()=="disabled" && !g_msiNativeForegroundLease.postHideCycle)return true;
+    if(g_msiNativeForegroundLease.postHideCycle){
+        if(msiPostHideContextCurrentLocked())return false; // original Start is the sole waiter
+        if(msiPostHideCleanupLocked("post-hide-before-new-work"))return true;
+        auto& pending=g_msiNativeForegroundLease.deferredVirtualWork;
+        if(std::find(pending.begin(),pending.end(),reason)==pending.end())pending.push_back(reason);
+        return false;
+    }
+    const bool mandatoryFault=reason=="frame-receipt-fault" || reason.rfind("fault-stop:",0)==0;
+    auto& lease=g_msiNativeForegroundLease;
+    if(mandatoryFault && lease.profile==ymcc::nativeForeground::Profile::Gpd)lease.virtualContinuationEnded=true;
+    const bool cancelHandoff=mandatoryFault && lease.profile==ymcc::nativeForeground::Profile::Gpd &&
+        (lease.virtualHandoffHeld || msiNativeForegroundVirtualHandoffContextLocked());
+    if(cancelHandoff){
+        lease.virtualHandoffHeld=false;lease.virtualHandoffRequest=0;
+        lease.deferredVirtualWork.clear();
+    }
+    const bool preserved=!cancelHandoff && msiNativeForegroundHoldForVirtualLocked("virtual-request-awaits-native-helper");
+    if(preserved && !g_msiNativeForegroundCyclePending)return true;
+    if(!preserved && (msiNativeForegroundRestoreLocked("handoff-to-virtual-route") || msiNativeForegroundVirtualHandoffLocked()))return true;
     auto& deferred=g_msiNativeForegroundLease.deferredVirtualWork;
     if(std::find(deferred.begin(),deferred.end(),reason)==deferred.end())deferred.push_back(reason);
     msiNativeForegroundReceipt("virtual-work-deferred","same-native-ownership-still-unresolved");
     return false;
 }
 static void msiNativeForegroundMaintenance() {
+    if(msiPostHideMaintainOwner("post-hide-period-ended"))return;
     if(!nativeForegroundFamilyAllowed())return;
     if(g_msiNativeForegroundResumePending.load(std::memory_order_acquire) &&
         g_powerLifecycle.load(std::memory_order_acquire)==PowerLifecycle::Ready && g_inputReady.load(std::memory_order_acquire) &&
@@ -1014,6 +1594,7 @@ static void msiNativeForegroundMaintenance() {
     if(msiNativeForegroundPollCycleLocked()>=0)msiNativeForegroundQueue();
 }
 static void msiNativeForegroundExitCleanup() {
+    if(msiPostHideMaintainOwner("post-hide-exit",true))return;
     if(!nativeForegroundFamilyAllowed())return;
     std::lock_guard hostLock(g_inputHostMx);
     std::lock_guard<std::mutex> leaseLock(g_msiNativeForegroundMx);

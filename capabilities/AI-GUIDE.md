@@ -2,6 +2,8 @@
 
 更新：2026-10-20，Asia/Hong_Kong。本指南整理现有入口，不新增运行时目录、分配器或验收门。机器可读索引：[AI-INDEX.json](AI-INDEX.json)；任务关系与数量口径：[OVERVIEW.md](OVERVIEW.md)。
 
+当前虚拟手柄修复支持：[适配说明](CONTROLLER-REPAIR-SUPPORT.md) · [机型、路线与来源快照](CONTROLLER-REPAIR-SUPPORT.json) · [全部102条源码/扩展覆盖](CONTROLLER-MODEL-COVERAGE.md)。覆盖 Win5、OneX、AYA 的已有入口及驱动／屏蔽证据边界；只供维护检索，不是新的运行分配表或验收证书。
+
 ## 1. 最短阅读顺序
 
 1. 先读[当前启用范围](ACTIVE-INTEGRATION-SCOPE.json)和[用户决定](USER-SCOPE-DECISIONS.json)，确认是已启用、只登记、暂缓还是明确排除。

@@ -172,6 +172,48 @@ inline bool reservePath(const Record&current,std::uint64_t expected,const Origin
     if(!group){next.obligations.push_back({origin,{},{}});group=&next.obligations.back();}group->paths.push_back({path,DispatchStage::Reserved});
     if(!detail::bump(next,error)||!validRecord(next,error))return false;candidate=std::move(next);return true;
 }
+// Existing native-owned hidden responsibility is saved as one set before a
+// handoff. This is NOT advance permission to claim an unvisited future hide.
+struct NativeOwnedSetProof {
+    bool existingOwnSetConfirmed=false,currentHiddenConfirmed=false,exactPhysicalAncestryConfirmed=false;
+};
+inline bool reserveNativeOwnedSet(const Record&current,std::uint64_t expected,const Origin&origin,
+        const std::vector<std::string>&paths,NativeOwnedSetProof proof,Record&candidate,std::string*error=nullptr){
+    if(!revisionMatches(current,expected,error)||!validRecord(current,error)||!detail::origin(origin)||
+       !proof.existingOwnSetConfirmed||!proof.currentHiddenConfirmed||!proof.exactPhysicalAncestryConfirmed||
+       paths.empty()||paths.size()>16)return detail::fail(error,"native-owned-set-authority-or-size-invalid");
+    std::set<std::string> exact;
+    for(const auto&path:paths)
+        if(!detail::instance(path)||!exact.insert(detail::fold(path)).second)
+            return detail::fail(error,"native-owned-set-path-invalid-or-duplicate");
+    // Validate the complete batch before constructing even a partial candidate.
+    for(const auto&group:current.obligations){
+        if(group.origin.transactionId==origin.transactionId&&!sameOrigin(group.origin,origin))
+            return detail::fail(error,"origin-rewrite-rejected");
+        for(const auto&path:group.paths)
+            if(exact.count(detail::fold(path.instanceId))&&!sameOrigin(group.origin,origin))
+                return detail::fail(error,"cross-origin-path-conflict");
+    }
+    Record next=current;
+    auto group=std::find_if(next.obligations.begin(),next.obligations.end(),
+        [&](const auto&item){return sameOrigin(item.origin,origin);});
+    if(group==next.obligations.end()){
+        next.obligations.push_back({origin,{},{}});group=std::prev(next.obligations.end());
+    }
+    bool changed=false;
+    for(const auto&path:paths){
+        const auto found=std::find_if(group->paths.begin(),group->paths.end(),
+            [&](const auto&item){return detail::fold(item.instanceId)==detail::fold(path);});
+        if(found==group->paths.end()){
+            group->paths.push_back({path,DispatchStage::Reserved});changed=true;
+        }
+    }
+    if(!changed){candidate=current;return true;}
+    // Keep all existing record limits; one revision and one Session store for
+    // the whole set. New paths remain Reserved, never fabricated MayHaveIssued.
+    if(!detail::bump(next,error)||!validRecord(next,error))return false;
+    candidate=std::move(next);return true;
+}
 inline bool markMayHaveIssued(const Record&current,std::uint64_t expected,const Origin&origin,const std::string&path,Record&candidate,std::string*error=nullptr){
     if(!revisionMatches(current,expected,error))return false;Record next=current;for(auto&g:next.obligations)if(sameOrigin(g.origin,origin))for(auto&p:g.paths)if(detail::fold(p.instanceId)==detail::fold(path)){
         if(p.stage==DispatchStage::MayHaveIssued){candidate=current;return true;}p.stage=DispatchStage::MayHaveIssued;if(!detail::bump(next,error))return false;candidate=std::move(next);return true;}return detail::fail(error,"exact-origin-path-not-found");

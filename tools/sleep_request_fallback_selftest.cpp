@@ -36,6 +36,9 @@ static bool testCapsKnown=true,validWindow=true,wakeAfterModern=false,generation
 static bool privilegeOk=true,stagedPermission=true,cancelDuringPrivilege=false;
 static bool wakeDuringCapabilities=false,wakeDuringPrivilege=false,disableDuringPrivilege=false;
 static bool sgAbnormalPermitted(){return stagedPermission && (!stagedOrigin || g_sgLastPowerButtonWakeEventFileTime.load()<stagedOrigin);}
+static unsigned finalSourceQueries=0,finalSourceFailAt=0;
+static bool sgAbnormalDispatchReady(){++finalSourceQueries;injectConfirmedWake("source-final-query");return finalSourceQueries!=finalSourceFailAt && sgAbnormalPermitted();}
+
 static DWORD privilegeError=ERROR_NOT_ALL_ASSIGNED,lastError=0;
 static int privilegeCalls=0;
 static HWND g_hwnd=reinterpret_cast<HWND>(1);
@@ -77,7 +80,7 @@ static BOOLEAN fakeSetSuspendState(BOOLEAN hibernate,BOOLEAN critical,BOOLEAN di
 #include "production_request.inc"
 static void reset(bool ms=true,bool ordinary=true,bool hibernate=true){
     capability={};capability.AoAc=ms;capability.SystemS3=ordinary;capability.SystemS4=hibernate;capability.HiberFilePresent=hibernate;
-    testCapsKnown=validWindow=privilegeOk=true;wakeAfterModern=generationAfterModern=false;
+    testCapsKnown=validWindow=privilegeOk=true;finalSourceQueries=finalSourceFailAt=0;wakeAfterModern=generationAfterModern=false;
     stagedPermission=true;cancelDuringPrivilege=wakeDuringCapabilities=wakeDuringPrivilege=disableDuringPrivilege=false;privilegeError=ERROR_NOT_ALL_ASSIGNED;lastError=0;privilegeCalls=0;
     g_guardEnabled=g_sgRetryInProgress=g_sgRetryEntryFailure=g_sgResleepEnabled=true;g_sgLastPowerButtonSleepIntentFileTime=1000000-20000;g_sgTask.retryKind=SgRetryKind::EntryFailure;
     g_sgLastPowerButtonWakeEventFileTime=0;g_sgAutomaticSleepTarget=Mode::None;testGeneration=7;
@@ -172,7 +175,7 @@ int main(int argc,char**argv){try{
         check(calls.size()==archived.at("expectedPowerCallsAfterFix").get<unsigned>(),"archived manual wake never reaches a power terminal");
       }
     for(const auto mode:{Mode::ModernStandby,Mode::Sleep,Mode::Hibernate})
-     for(const auto* point:{"before-helper","capabilities","sleep-request-route","privilege","sleep-request-dispatch","window-validation"}){
+     for(const auto* point:{"before-helper","capabilities","sleep-request-route","privilege","sleep-request-dispatch","window-validation","source-final-query"}){
         if((std::string(point)=="window-validation"&&mode!=Mode::ModernStandby)||
            (std::string(point)=="privilege"&&mode==Mode::ModernStandby))continue;
         reset(mode==Mode::ModernStandby,mode==Mode::Sleep,mode==Mode::Hibernate);
@@ -211,6 +214,16 @@ int main(int argc,char**argv){try{
         g_sgOriginalPowerButtonWakeFileTime=g_sgLastPowerButtonWakeEventFileTime.load();
         run("a newer original entry proves a fresh user sleep after a prior wake",{mode},true,mode);
      }
+    for(const auto mode:{Mode::ModernStandby,Mode::Sleep,Mode::Hibernate}){
+        reset(mode==Mode::ModernStandby,mode==Mode::Sleep,mode==Mode::Hibernate);stagedOrigin=sgNowFileTime()-20000;finalSourceFailAt=1;
+        const auto request=sgRequestSystemSleep(mode,mode,true);++scenarios;
+        check(!request.accepted&&request.requestError==ERROR_CANCELLED&&calls.empty(),"lost source at final boundary vetoes each staged target");
+    }
+    reset();modern={false,ERROR_NOT_SUPPORTED};finalSourceFailAt=2;stagedOrigin=sgNowFileTime()-20000;
+    {const auto request=sgRequestSystemSleep(Mode::ModernStandby,Mode::Sleep,true);++scenarios;
+     check(!request.accepted&&request.requestError==ERROR_CANCELLED&&calls==std::vector<Mode>{Mode::ModernStandby},"final source is rechecked before every staged fallback");}
+    reset();finalSourceFailAt=1;run("independent primary sleep request does not depend on abnormal observation source",{Mode::ModernStandby},true,Mode::ModernStandby);
+    check(finalSourceQueries==0,"non-staged authorized request never queries abnormal source");
     json result={{"status","passed"},{"scenarios",scenarios},{"checks",checks},{"results",outcomes},{"realSleepCalls",0},
         {"productionFunctions","sgRequestSystemSleep;sgPrepareSleepPrivilege;sgAutomaticClassicSleepPending"}};
     std::ofstream out(argv[1]);out<<result.dump(2)<<'\n';std::cout<<json{{"status","passed"},{"scenarios",scenarios},{"checks",checks}}.dump()<<'\n';return 0;

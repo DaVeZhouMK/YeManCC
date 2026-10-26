@@ -79,3 +79,68 @@ import, and abrupt child exit immediately after zero-byte owner creation with
 both existing and missing records. Only the fixture's own executable is spawned.
 No normal product, Host, real CLI, driver, device, Job, service or AppData is used.
 Static imports do not constitute runtime module tracing or hardware acceptance.
+## Native refresh writer and native visibility (same record/session/owner)
+
+Namespace `ymcc::nativeRefreshWriter` in the existing native refresh headers.
+Schema 1 retains the original five-key encoding and helper transformations.
+`kSchemaVersion=1`, `kVisibilitySchemaVersion=2`. Schema 2 requires the sixth
+envelope key `nativeVisibility` (object or null). Initial visibility reservation
+explicitly upgrades to 2; completion/transfer never downgrade it. Schema 1 with
+nativeVisibility, schema 2 missing it, and unsupported schemas fail. No Host
+Origin, Host PID, command, device proof or additional ledger is invented.
+
+- `VisibilityPathPhase::{Reserved,MayHaveIssued}`; wire values `reserved` and
+  `may-have-issued`.
+- `VisibilityPath { string instanceId; VisibilityPathPhase phase=Reserved; }`.
+- `Visibility { string transactionId; ProcessIdentity parent; string profile="gpd";
+  string physicalRoot; vector<string> locationPaths; bool beforeCloaking=false;
+  vector<VisibilityPath> paths; }`.
+- `Record::nativeVisibility` is `optional<Visibility>`. Parent is the real native
+  PID and creation time. Transaction/native identity/root/locations are immutable
+  for the lifetime of this responsibility.
+- `reserveVisibility(rev,const Visibility& allReserved)` requires no existing
+  visibility and 1..16 valid Reserved paths. It bumps once and upgrades schema.
+- `reserveVisibilityPath(rev,tx,const string& path)` appends a late same-source
+  path as Reserved. Caller must prove source association; syntax alone cannot.
+- `markVisibilityMayHaveIssued(rev,tx,path)` marks the exact reserved path before
+  issuing a command. An exact current-revision replay performs no write.
+- `settleVisibilityPath(rev,tx,path)` removes the exact path only after the caller
+  proved its per-path configuration returned. This includes retiring a Reserved
+  entry without issuing unhide. No proof is accepted/inferred here.
+- `completeVisibility(rev,tx)` requires empty paths AND no active writer.
+- `transferVisibility(rev,tx)` requires no active writer. Caller must first prove
+  the replacement Hosted ledger durably contains the complete obligation; the
+  same atomic commit then removes nativeVisibility, including pending paths.
+
+These bool Session methods use the existing exact share=0 owner and synchronous
+atomic commit. Pure overloads take `const Record& current` first and
+`Record& out, string* error=nullptr` last. Every changing operation bumps exactly
+once; stale revisions, wrong tx/path and overflow preserve output. Existing
+helper reserve/markChild/settle preserve all visibility facts. No Session method
+issues device commands, determines death or manufactures return/transfer proof.
+Complete and transfer do not settle a helper implicitly.
+
+Visibility has at most 16 paths and 1..16 unique locations (1024 bytes each).
+Case-insensitive duplicate paths/locations are rejected; transitions bind the
+exact recorded spelling. The physical root is strictly
+`USB\VID_045E&PID_028E\<instance>`, matching existing GPD root grammar. Only exact
+same-VID/PID USB/HID instances are admitted as paths. Virtual markers, foreign
+buses/VID/PID, malformed instances, controls and invalid UTF-8 fail. Existing
+unique-key (including escaped duplicates), depth-8 and 64KiB limits are unchanged,
+including within visibility/process/path objects.
+
+Reserved does not authorize unhide. Only MayHaveIssued can support compensation,
+and the caller still needs the required external proof. Cold recovery returns
+only exact per-path configuration: it preserves global cloak and app allowlists.
+`beforeCloaking` is diagnostic and never grants global cloak authority. This
+record does not establish that a GPD node was enabled or hardware recovered;
+node-return authority requires separate evidence.
+
+The canonical minimal selection is the original runner with
+`--native-refresh-only`, explicit fresh `--out` and captured `--toolchain`. It
+retains old native cases and all three compiled semantic negative operators.
+Added native/visibility cases cover both schemas, strict malformed input, exact
+revisions/identities, all six transitions, helper preservation, shared
+owner/reopen, no-op I/O and the existing seven file-fault leaves for every new
+transition. All files and processes remain owned by this fixture. No global
+suite, real HidHide/PnP/registry/user software or hardware acceptance is involved.

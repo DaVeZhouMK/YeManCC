@@ -38,6 +38,10 @@ public:
     bool reservePath(std::uint64_t expectedRevision,const Origin& exactOrigin,const std::string& path,ReservationProof proof){
         return update([&](Record& candidate,std::string& error){return targetReturn::reservePath(*record_,expectedRevision,exactOrigin,path,proof,candidate,&error);});
     }
+    bool reserveNativeOwnedSet(std::uint64_t expectedRevision,const Origin& exactOrigin,
+            const std::vector<std::string>& paths,NativeOwnedSetProof proof){
+        return update([&](Record& candidate,std::string& error){return targetReturn::reserveNativeOwnedSet(*record_,expectedRevision,exactOrigin,paths,proof,candidate,&error);});
+    }
     bool reserveTarget(std::uint64_t expectedRevision,const Origin& exactOrigin,TargetCreationProof proof){
         return update([&](Record& candidate,std::string& error){return targetReturn::reserveTargetCreation(*record_,expectedRevision,exactOrigin,proof,candidate,&error);});
     }

@@ -2589,6 +2589,12 @@ export async function sleepGuardSuspendCurrent(): Promise<{ paused: boolean; pid
 
 // Static wake hardening is independent of the existing power-plan repair preference.
 // Reads never scan; scan/restore are explicit, bounded user actions owned by native.
+export interface StaticWakeOperation {
+  requestId: string;
+  action: 'scan' | 'restore' | '';
+  state: 'unknown' | 'running' | 'completed';
+  ok?: boolean;
+}
 export interface StaticWakeStatus {
   enabled: boolean;
   phase: 'idle' | 'applied' | 'partial' | 'restore-pending';
@@ -2601,6 +2607,7 @@ export interface StaticWakeStatus {
   restorePending: number;
   diagnosticSourceReady: boolean;
   lastError: string;
+  operation?: StaticWakeOperation;
 }
 export interface StaticWakeResult {
   ok: boolean;
@@ -2615,18 +2622,30 @@ function checkedStaticWakeStatus(status: StaticWakeStatus): StaticWakeStatus {
         .every(value => Number.isSafeInteger(value) && value >= 0)) {
     throw new Error('静态屏蔽状态回执无效');
   }
+  const operation = status.operation;
+  if (operation && (!/^[A-Za-z0-9_-]{1,96}$/.test(operation.requestId) ||
+      !['unknown', 'running', 'completed'].includes(operation.state) ||
+      (operation.state === 'unknown' ? operation.action !== '' : !['scan', 'restore'].includes(operation.action)) ||
+      (operation.state === 'completed' && typeof operation.ok !== 'boolean'))) {
+    throw new Error('静态屏蔽完成回执无效');
+  }
   return status;
 }
-export async function getStaticWakeStatus(): Promise<StaticWakeStatus> {
-  return checkedStaticWakeStatus(await invoke<StaticWakeStatus>('sleep.staticWake.get', {}, { timeoutMs: 10000 }));
+export async function getStaticWakeStatus(requestId?: string): Promise<StaticWakeStatus> {
+  return checkedStaticWakeStatus(await invoke<StaticWakeStatus>('sleep.staticWake.get', requestId ? { requestId } : {}, { timeoutMs: 10000 }));
 }
-async function staticWakeAction(command: 'sleep.staticWake.scan' | 'sleep.staticWake.restore'): Promise<StaticWakeResult> {
-  const result = await invoke<StaticWakeResult>(command, {}, { timeoutMs: 180000 });
+async function staticWakeAction(command: 'sleep.staticWake.scan' | 'sleep.staticWake.restore', requestId: string): Promise<StaticWakeResult> {
+  if (!/^[A-Za-z0-9_-]{1,96}$/.test(requestId)) throw new Error('静态屏蔽请求标识无效');
+  const result = await invoke<StaticWakeResult>(command, { requestId }, { timeoutMs: 180000 });
   if (typeof result?.ok !== 'boolean') throw new Error('静态屏蔽操作回执无效');
-  return { ok: result.ok, status: checkedStaticWakeStatus(result.status) };
+  const status = checkedStaticWakeStatus(result.status), operation = status.operation;
+  const action = command === 'sleep.staticWake.scan' ? 'scan' : 'restore';
+  if (operation?.requestId !== requestId || operation.action !== action || operation.state !== 'completed' || operation.ok !== result.ok)
+    throw new Error('静态屏蔽操作完成尚未确认');
+  return { ok: result.ok, status };
 }
-export const scanStaticWakeSources = (): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.scan');
-export const restoreStaticWakeSources = (): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.restore');
+export const scanStaticWakeSources = (requestId: string): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.scan', requestId);
+export const restoreStaticWakeSources = (requestId: string): Promise<StaticWakeResult> => staticWakeAction('sleep.staticWake.restore', requestId);
 
 export interface SleepPowerPlanOptimizationResult {
   ok: boolean;

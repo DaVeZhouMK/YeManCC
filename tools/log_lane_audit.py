@@ -26,7 +26,7 @@ LANES = {
     'fan-api.log': 'fan-detail', 'virtual-gamepad.log': 'gamepad-detail',
     'gyro-motion.log': 'gyro-detail', 'input-capture.jsonl': 'input-detail',
     'tdp.log': 'tdp-low', 'tdp-detail.log': 'tdp-detail',
-    'sleep-facts.log': 'sleep-low', 'frontend-trace.log': 'frontend-low',
+    'sleep-facts.log': 'sleep-low', 'steam-original-recovery.jsonl': 'sleep-recovery-low', 'frontend-trace.log': 'frontend-low',
     'frontend-trace-detail.log': 'frontend-detail',
     'input-host-cost.log': 'host-detail', 'input-host-xbox-sdk.log': 'host-detail',
     'battery-charge-client.log': 'battery-low', 'battery-charge-host.log': 'battery-low',
@@ -35,7 +35,10 @@ LANES = {
 }
 TRANSPORT_FIELDS = {'time', 'timestamp', 'timestampUtc', 'timestampLocal', 'ts', 'pid',
                     'processId', 'runId', 'hostInstanceId', 'hwnd',
-                    'powerGeneration', 'powerLifecycle', 'writerPid'}
+                    'powerGeneration', 'powerLifecycle', 'writerPid', 'factSchemaVersion',
+                    'writerThreadId', 'writerProcessCreation100ns', 'writerInstanceId', 'writerIdentityStatus',
+                    'writerPowerGeneration', 'observedTickMs', 'writerSequence', 'utcEpochMs', 'utcOffsetMinutes',
+                    'clockScope', 'observationScope'}
 
 
 def canonical_log_name(name):
@@ -149,7 +152,7 @@ def pid(row, filename=''):
 
 
 def stamp(row, filename=''):
-    for key in ('time', 'timestampUtc', 'timestampLocal', 'timestamp', 'ts'):
+    for key in ('timestampUtc', 'timeWithOffset', 'timestampLocal', 'atUtc', 'time', 'timestamp', 'ts'):
         if isinstance(row.get(key), str):
             return row[key]
     # These are explicit epoch contracts. Input-capture.t remains monotonic.

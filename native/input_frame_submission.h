@@ -25,6 +25,40 @@ inline Verdict source(const Sample& s,const Current& c,Token now) noexcept {
        (s.msi && (!s.msiRevision || s.msiRevision!=c.msiRevision || !s.msiMode || s.msiMode!=c.msiMode)))return Verdict::SourceRetired;
     return Verdict::Allowed;
 }
+// Actual canonical API-read sequence, never XInput packet/button/axis changes.
+// Protected by the existing Host transaction mutex. Keep each provider's
+// progress independently so a route switch cannot revive its cached old read.
+class ReadProgress {
+    struct Entry {
+        Token sequence=0,power=0,msiRevision=0,msiMode=0;
+        unsigned topology=0,identity=0;
+        bool observed=false;
+    } entries_[2]{};
+public:
+    bool advance(const Sample& s) noexcept {
+        if(!s.window.readAttemptSequence)return false;
+        auto& p=entries_[s.msi?1:0];
+        const bool same=p.observed && p.power==s.window.readPowerGeneration &&
+            p.topology==s.window.readTopologyGeneration && p.identity==s.identity &&
+            (!s.msi || (p.msiRevision==s.msiRevision && p.msiMode==s.msiMode));
+        if(same && s.window.readAttemptSequence<=p.sequence)return false;
+        p.sequence=s.window.readAttemptSequence;
+        if(!same){
+            p.power=s.window.readPowerGeneration;p.topology=s.window.readTopologyGeneration;
+            p.identity=s.identity;p.msiRevision=s.msi?s.msiRevision:0;p.msiMode=s.msi?s.msiMode:0;
+            p.observed=true;
+        }
+        return true;
+    }
+};
+// Consume once at normal-frame assembly only. Request/MayIssue revalidation
+// still uses source(), so the SAME in-flight frame does not consume twice.
+// A known-valid first read retains the original opening-neutral admission.
+inline Verdict sourceForNewRead(const Sample& s,const Current& c,Token now,ReadProgress& progress) noexcept {
+    const auto verdict=source(s,c,now);
+    if(verdict!=Verdict::Allowed)return verdict;
+    return progress.advance(s)?Verdict::Allowed:Verdict::SourceRetired;
+}
 inline Verdict decide(const Ticket& t,const Sample& s,const Current& c,Token now) noexcept {
     if(!c.ready)return Verdict::PowerUnavailable;
     if(!t.host || t.host!=c.host)return Verdict::HostChanged;

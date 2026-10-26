@@ -43,7 +43,8 @@ static void fullPipeCheckUniqueOffFinal(std::uint64_t request,bool success){
 }
 static void fullPipeOffLifecycleCase(const std::string& variant){
  const bool msi=variant=="MSI-return-unproven",stale=variant=="expired-OFF-after-expired-new-ON";
- seed();fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
+ fixtureOffCheckpoint(("original-off-case-entry/"+variant).c_str());
+ seed();fixtureOffCheckpoint("original-off-seed-returned");fixtureFullPipe=true;fullPipeFault="none";g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  if(!msi){g_machineIdentity.family=stale?YmccFamily::Unknown:YmccFamily::AsusRogAllyX;g_machineIdentity.manufacturer=stale?"PC":"ASUSTEK COMPUTER INC.";g_machineIdentity.product=stale?"unregistered-desktop":"ROG Ally X";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;g_xinputAdmittedMask=1;}if(stale)fixturePcPowerCapabilities=true;
  g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_inputCaptureStop=false;reg_fs();
  cases.push_back({{"name","OFF-LIFECYCLE/"+variant},{"controlledFamily",msi?"MSI":stale?"PC":"ROG"}});
@@ -52,7 +53,7 @@ static void fullPipeOffLifecycleCase(const std::string& variant){
  const auto advance=[](std::uint64_t ms){startProtectionClock+=ms;fixturePowerClockOffset+=ms;};
  const auto base=targetDocument("disabled",0),on=targetDocument(msi?"steamdeck":"dualsense-edge",1),off=targetDocument("disabled",2);
  check(queueDepth()==0&&!g_inputHostProcess,"OFF case starts only after earlier owned work has drained");check(sgWriteFileAtomic(YM_SETTINGS_FILE,base.dump()),"OFF case initializes only its private starting settings document");
- check(writeTarget(base,on).value("ok",false),"OFF case enters original ON through real settings admission");inputCaptureRefreshRealStickSettings(true);
+ check(writeTarget(base,on).value("ok",false),"OFF case enters original ON through real settings admission");fixtureOffCheckpoint("before-original-ON-refresh");inputCaptureRefreshRealStickSettings(true);fixtureOffCheckpoint("after-original-ON-refresh");
  if(!stale){check(inputHostQueueLifecycleWork("initial-target-admission"),"OFF case queues real initial target work");fullPipeDrainQueuedLifecycle();check(fullPipeSpawnCount==spawns+1&&g_inputHostProcess&&g_inputHostPrepared,"OFF case owns an actual prepared managed Host before exercising return");}
  fullPipeWaitForPlayerLock(on,off);if(!msi&&!stale)g_startEntrySeam.hidHideRestoreResult=false;
  check(writeTarget(on,off).value("ok",false),"real player OFF is admitted only after original ON lock finishes");inputCaptureRefreshRealStickSettings(true);

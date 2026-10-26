@@ -36,7 +36,7 @@ export function loadOriginalEnvironment({sharedWorker,root,tool,sharedModule}){
 // Review the complete captured bytes, reconstruct every prior locked input and
 // keep missing/changed inputs as a refusal before any compiler or worker starts.
 export function verifyCurrentSleepSourceReview(repo){
- const relative="tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",expected="93feab41a4c02d6e52ed8bd765d3d0623b516cc8fab9275774385465f102b27a";
+ const relative="tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",expected="b33c488d82958637d7a994b37c23c7122b79f698c77292e1d17c88f618a6f637";
  const digest=bytes=>createHash('sha256').update(bytes).digest('hex');
  const need=(v,m)=>{if(!v)throw Error(m);};
  const bytes=fs.readFileSync(path.join(repo,relative));need(digest(bytes)===expected,'SLEEP_SOURCE_REVIEW_CHANGED');

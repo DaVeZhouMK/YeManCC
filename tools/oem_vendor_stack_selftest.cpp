@@ -20,6 +20,32 @@ static void seed(){
  for(const auto& n:oemVendorServiceNamesForFamily(g_machineIdentity.family))services[n]={};}
 static void drain(){size_t n=0;while(!jobs.empty()&&++n<32){auto f=std::move(jobs.front());jobs.erase(jobs.begin());f();}check(n<32,"serial queue remains bounded");}
 int main(){
+#ifdef YMCC_VENDOR_R15
+ // A saved ON request must not restart MSI startup tasks while adopting its
+ // exact previous-process task leases. OFF still owes their original state.
+ reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();
+ for(const auto& name:oemVendorTaskNamesForFamily(g_machineIdentity.family))tasks[name]={};
+ oemVendorStackShieldRequest(true);drain();
+ const auto restartJournal=journal;const auto restartTasks=tasks;
+ reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();
+ journalExists=true;journal=restartJournal;tasks=restartTasks;
+ oemVendorStackShieldRequest(true);drain();
+ check(taskStarts==0&&taskMutations==0,"MSI saved ON restart never re-enables or starts already-disabled task leases");
+ check(g_oemVendorTaskLeases.size()==2&&json::parse(journal)["tasks"].size()==2,"MSI restart preserves durable task originals until OFF");
+ check(state("applied"),"MSI restart confirms current disabled task readbacks");
+ oemVendorStackShieldRequest(false);drain();
+ check(taskStarts==2&&g_oemVendorTaskLeases.empty(),"MSI OFF after retained restart restores both originally-running tasks");
+ reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();
+ journalExists=true;journal=restartJournal;tasks=restartTasks;
+ for(auto& [name,task]:tasks){task.enabled=true;task.running=true;}
+ oemVendorStackShieldRequest(true);drain();
+ check(taskStarts==0&&taskMutations==2,"MSI retained restart re-disables externally enabled tasks without first running them");
+ reset();g_machineIdentity.family=YmccFamily::MsiClaw;seed();
+ journalExists=true;journal=restartJournal;tasks=restartTasks;
+ oemVendorStackShieldRequest(false);drain();
+ check(taskStarts==2&&g_oemVendorTaskLeases.empty(),"MSI saved OFF startup still restores the original task leases");
+#endif
+
  reset();seed();oemVendorStackRequest(true);drain();check(stops==3,"ROG all three HC services stopped");check(state("applied"),"aggregate service readback success");check(g_oemVendorServiceLeases.size()==3,"durable original service facts");
  oemVendorStackRequest(true);drain();check(starts==0,"unchanged takeover never briefly restarts Armoury Crate");check(stops==3,"unchanged takeover performs no redundant stop");oemVendorStackRestore("exit");check(starts==3&&g_oemVendorServiceLeases.empty(),"normal exit restores originals and clears debt");
  reset();seed();services.begin()->second.stopDelay=3000;oemVendorStackRequest(true);drain();check(state("applied"),"realistic 3-second service stop is not lost at old 2-second deadline");

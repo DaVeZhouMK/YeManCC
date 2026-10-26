@@ -15,6 +15,7 @@
 #include <winrt/Windows.Gaming.Input.h>
 #include <winrt/Windows.Foundation.Collections.h>
 #include <json.hpp>
+#include "../native/controller_device_stack_evidence.h"
 #include "../native/msi_controller_visibility_diagnostics.h"
 #include "../native/msi_external_raw_receipts_windows.h"
 #include "../native/msi_usb_name_origin_windows.h"
@@ -26,6 +27,7 @@
 #include <array>
 #include <thread>
 #include <stdexcept>
+#include <iostream>
 using nlohmann::json;
 namespace {
 std::ofstream out;HWND window=nullptr;unsigned inventoryId=0;
@@ -185,7 +187,57 @@ int wmain(int argc,wchar_t** argv){
             wakeEvidenceIdentity(L"18446744073709551615",L"2",wakeGeneration,wakeEpisode)&&wakeGeneration==UINT64_MAX&&wakeEpisode==2;
         for(const auto& bad:{std::pair{L"0",L"1"},std::pair{L"2",L"0"},std::pair{L"2",L"3"},std::pair{L"+2",L"1"},std::pair{L"2x",L"1"},std::pair{L"2",L" 1"},std::pair{L"18446744073709551616",L"1"}})
             expanded=expanded&&!wakeEvidenceIdentity(bad.first,bad.second,wakeGeneration,wakeEpisode);
-        return expanded?0:6;
+        // Extend the existing selftest only. Synthetic bytes/IDs/budgets; no CM
+        // capture, enumeration, driver/app access, or observer registration.
+        namespace ds = ymcc::controller::deviceStack;
+        json stackCases=json::array(); bool stackOk=true;
+        const auto check=[&](const char* name,bool pass){stackCases.push_back({{"case",name},{"passed",pass}});stackOk=stackOk&&pass;};
+        const auto bytes=[](const std::wstring& w){std::vector<uint8_t> b;for(auto c:w){b.push_back(uint8_t(c&255));b.push_back(uint8_t(uint16_t(c)>>8));}return b;};
+        const auto multi=[&](const std::vector<std::wstring>& list){std::wstring w;for(const auto& s:list){w+=s;w.push_back(0);}w.push_back(0);if(list.empty())w.push_back(0);return bytes(w);};
+        const auto parseList=[&](const std::vector<uint8_t>& b){return ds::decode(DEVPROP_TYPE_STRING_LIST,b,DEVPROP_TYPE_STRING_LIST);};
+        const auto bad=[&](const char* name,const json& v,const char* error){check(name,v["status"]=="unknown"&&v["values"].is_null()&&v["empty"].is_null()&&v["error"]==error);};
+        auto good=ds::decode(DEVPROP_TYPE_STRING,bytes(std::wstring(L"HidUsb\0",7)),DEVPROP_TYPE_STRING);
+        check("service-string",good["status"]=="known"&&good["values"]==json::array({"HidUsb"}));
+        good=ds::decode(DEVPROP_TYPE_STRING,bytes(std::wstring(1,0)),DEVPROP_TYPE_STRING);
+        check("empty-string",good["status"]=="known"&&good["empty"]==true);
+        auto token512=std::wstring(512,L'x');auto terminated=token512;terminated.push_back(0);
+        check("512-unit-token",ds::decode(DEVPROP_TYPE_STRING,bytes(terminated),DEVPROP_TYPE_STRING)["status"]=="known");
+        const std::wstring supplementary={wchar_t(0xd83d),wchar_t(0xde00)};
+        check("valid-surrogate-pair",parseList(multi({supplementary}))["status"]=="known");
+        const auto listed=parseList(multi({L"HidUsb",L"\\Driver\\HidHide"}));
+        check("stack-list",listed["status"]=="known"&&listed["values"].size()==2);
+        good=parseList(multi({}));check("exact-empty-double-nul",good["status"]=="known"&&good["empty"]==true&&good["values"].empty());
+        good=parseList(multi({L"HidHide",L"hidhide",L"HidUsb"}));
+        check("bounded-ordinal-dedup",good["status"]=="known"&&good["duplicateCount"]==1&&good["values"].size()==2);
+        std::vector<std::wstring> entries;for(unsigned i=0;i<64;++i)entries.push_back(L"d"+std::to_wstring(i));
+        check("64-list-entries",parseList(multi(entries))["values"].size()==64);
+        bad("wrong-property-type",ds::decode(DEVPROP_TYPE_STRING,multi({L"HidHide"}),DEVPROP_TYPE_STRING_LIST),"type-mismatch");
+        bad("zero-bytes",parseList({}),"missing-terminator");
+        bad("odd-byte-count",parseList({0,0,0}),"odd-byte-count");
+        bad("string-missing-nul",ds::decode(DEVPROP_TYPE_STRING,bytes(L"HidUsb"),DEVPROP_TYPE_STRING),"missing-terminator");
+        bad("list-single-nul",parseList(bytes(std::wstring(L"x\0",2))),"missing-terminator");
+        bad("string-interior-nul",ds::decode(DEVPROP_TYPE_STRING,bytes(std::wstring(L"x\0z\0",4)),DEVPROP_TYPE_STRING),"interior-nul-or-trailing-data");
+        bad("double-nul-then-garbage",parseList(bytes(std::wstring(L"x\0\0z\0\0",6))),"interior-empty-or-trailing-data");
+        bad("extra-trailing-nul",parseList(bytes(std::wstring(L"x\0\0\0",4))),"interior-empty-or-trailing-data");
+        bad("unpaired-high-surrogate",parseList(multi({std::wstring(1,wchar_t(0xd800))})),"invalid-utf16-or-control");
+        bad("unpaired-low-surrogate",parseList(multi({std::wstring(1,wchar_t(0xdc00))})),"invalid-utf16-or-control");
+        bad("tab-control",parseList(multi({L"Hid\tHide"})),"invalid-utf16-or-control");
+        bad("del-control",parseList(multi({std::wstring(1,wchar_t(0x7f))})),"invalid-utf16-or-control");
+        bad("513-unit-token",parseList(multi({std::wstring(513,L'x')})),"token-unit-limit");
+        entries.push_back(L"d64");bad("65-list-entries",parseList(multi(entries)),"list-entry-limit");
+        bad("property-over-16k",parseList(std::vector<uint8_t>(ds::maxPropertyBytes+2,0)),"property-byte-limit");
+        entries.clear();for(unsigned i=0;i<15;++i)entries.push_back(std::wstring(511,wchar_t(L'a'+i)));entries.push_back(std::wstring(510,L'z'));
+        const auto exact16k=multi(entries);check("property-exact-16k",exact16k.size()==ds::maxPropertyBytes&&parseList(exact16k)["status"]=="known");
+        check("derived-listed-only",ds::hidHideListed(listed,true)=="listed"&&ds::hidHideListed(parseList(multi({L"hIdHiDe"})),true)=="listed");
+        check("derived-not-listed-exact-token",ds::hidHideListed(parseList(multi({L"HidHideBackup"})),true)=="not-listed"&&ds::hidHideListed(parseList(multi({})),true)=="not-listed");
+        check("derived-unknown-invalid-or-unstable",ds::hidHideListed(listed,false)=="unknown"&&ds::hidHideListed(parseList({}),true)=="unknown");
+        std::wstring exact;bool idsOk=!ds::exactId("HID\\VID_1234&PID_5678\\abc",exact)&&!ds::exactId("USB\\VID_1234&PID_5678\\abc",exact);
+        for(const auto& invalid:std::vector<std::string>{"","HID\\x","HID\\x\\y\\z","HID\\x\\y*","HID\\x\\a\n","ROOT\\VIGEM\\0","VMBUS\\x\\y","HID\\VIRTUAL\\0","HID\\HIDMAESTRO\\0","USB\\HM-CTL\\0","\\\\?\\HID#x",std::string("HID\\x\\a\0b",10),std::string("HID\\x\\\xc0\xaf",8)})idsOk=ds::exactId(invalid,exact)!=nullptr&&idsOk;
+        check("exact-id-validation-no-cm",idsOk);
+        ds::RawBudget budget;bool budgetOk=true;for(unsigned i=0;i<4;++i)budgetOk=ds::reserveRaw(budget,ds::maxPropertyBytes)&&budgetOk;
+        check("64k-aggregate-budget",budgetOk&&budget.remaining==0&&!ds::reserveRaw(budget,2)&&budget.unreadProperties==1);
+        std::cout<<json({{"existingSelftestPassed",expanded},{"deviceStackCases",stackCases.size()},{"deviceStackPassed",stackOk},{"cases",stackCases},{"performsHardwareIO",false}}).dump()<<'\n';
+        return expanded&&stackOk?0:6;
     }
     const auto options=ymcc::msi::usbName::observerOptions(std::vector<std::wstring>(argv,argv+argc));
     if(!options.valid)return 2;const bool rawRequested=options.rawRequested;const bool nameRequested=!options.contextName.empty();argc=static_cast<int>(options.positionalCount);

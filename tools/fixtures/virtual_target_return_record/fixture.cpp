@@ -31,6 +31,7 @@ BOOL info(HANDLE h,LPBY_HANDLE_FILE_INFORMATION out){++infos;const BOOL ok=::Get
 #define ReadFile ioTest::read
 #define GetFileInformationByHandle ioTest::info
 #include "virtual_target_return_store.h"
+#include "virtual_target_return_session.h"
 #undef CreateFileW
 #undef CloseHandle
 #undef GetFileAttributesW
@@ -49,6 +50,10 @@ tr::Origin origin(unsigned n=1,const std::string&persona="dualsense-edge"){
 }
 const std::string pathA="HID\\VID_0DB0&PID_1901&IG_02\\PHYSICAL_A",pathB="HID\\VID_0B05&PID_1B4C&IG_00\\PHYSICAL_B";
 const tr::ReservationProof proof{true,true,true};
+const tr::NativeOwnedSetProof nativeSetProof{true,true,true};
+tr::Origin nativeOrigin(){auto o=origin(303,"steamdeck");o.cliWriterProtocol=1;return o;}
+std::vector<std::string> nativePaths(unsigned count){std::vector<std::string> paths;for(unsigned i=0;i<count;++i)paths.push_back("HID\\VID_1234&PID_5678\\NATIVE_"+std::to_string(i));return paths;}
+
 tr::Record empty(){tr::Record r;r.machineBinding="RAW|MS-1T52|微星|ClawA2VM";return r;}
 std::string encoded(const tr::Record&r){std::string s;if(!tr::encode(r,s))throw std::runtime_error("fixture record encoding failed");return s;}
 tr::Record one(){auto r=empty();tr::Record c;if(!tr::reservePath(r,r.revision,origin(),pathA,proof,c))throw std::runtime_error("fixture reserve failed");return c;}
@@ -69,7 +74,11 @@ int wmain(int argc,wchar_t**argv){
   auto target=tr::load(targetFile.wstring(),empty().machineBinding);const auto targetExpected=targetWitness();
   const bool targetPass=target.state==tr::LoadState::Valid&&target.record&&encoded(*target.record)==encoded(targetExpected)&&target.record->obligations[0].targetMayExist&&!target.record->obligations[0].acceptedPsPin&&target.record->obligations[0].paths.empty()&&target.record->obligations[0].origin.physicalRoot.empty();
   if(!targetPass){std::cout<<J({{"pass",false},{"mode","independent-process-target-witness-read"}}).dump()<<"\n";return 1;}
-  std::cout<<J({{"pass",pass},{"mode","independent-process-read"},{"targetWitnessRoundtrip",targetPass},{"obligationCount",r.record?r.record->obligations.size():0},{"historicalOnly",true}}).dump()<<"\n";return pass?0:1;
+  const auto nativeFile=std::filesystem::path(argv[2]).parent_path()/L"native-owned-set-cross-process.json";
+  auto native=tr::load(nativeFile.wstring(),empty().machineBinding);tr::Record nativeExpected;
+  const bool nativeBuilt=tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),nativePaths(2),nativeSetProof,nativeExpected);
+  const bool nativePass=nativeBuilt&&native.state==tr::LoadState::Valid&&native.record&&encoded(*native.record)==encoded(nativeExpected)&&native.record->schema==1&&native.record->obligations[0].paths.size()==2;
+  std::cout<<J({{"pass",pass&&nativePass},{"mode","independent-process-read"},{"targetWitnessRoundtrip",targetPass},{"nativeOwnedSetRoundtrip",nativePass},{"obligationCount",r.record?r.record->obligations.size():0},{"historicalOnly",true}}).dump()<<"\n";return pass&&nativePass?0:1;
  }
  if(argc!=3)return 2;const std::wstring directory=argv[1];const std::wstring resultPath=argv[2];const auto file=directory+L"\\record.json";
  run("roundtrip/tombstone",[]{auto r=empty();tr::Record decoded=one();auto s=encoded(r);check(tr::decode(s,decoded),"valid empty record decodes");check(decoded.obligations.empty()&&decoded.machineBinding==r.machineBinding,"explicit tombstone retains raw machine binding");check(encoded(decoded)==s,"tombstone roundtrip exact");});
@@ -231,6 +240,116 @@ int wmain(int argc,wchar_t**argv){
  });
 
  // Task128: immutable CLI writer provenance is data only, not cleanup permission.
+
+ run("native-set/complete-atomic-candidate",[]{
+  const auto r=empty();const auto prior=encoded(r);tr::Record candidate;
+  check(tr::reserveNativeOwnedSet(r,r.revision,nativeOrigin(),nativePaths(16),nativeSetProof,candidate),"complete 16-member existing native hidden set accepted");
+  check(candidate.schema==1&&candidate.revision==r.revision+1&&candidate.obligations.size()==1&&candidate.obligations[0].paths.size()==16,"entire set changes one revision under one origin without schema change");
+  check(std::all_of(candidate.obligations[0].paths.begin(),candidate.obligations[0].paths.end(),[](const auto& path){return path.stage==tr::DispatchStage::Reserved;}),"new native set members are Reserved only, never fabricated Issued");
+  check(encoded(r)==prior,"pure transform leaves original caller record unchanged");
+  tr::Record decoded;check(tr::decode(encoded(candidate),decoded)&&encoded(decoded)==encoded(candidate),"original schema cold readers roundtrip complete native set");
+ });
+ run("native-set/idempotent-same-origin",[]{
+  tr::Record current,candidate;check(tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),nativePaths(2),nativeSetProof,current),"seed complete native set");
+  const auto prior=encoded(current);auto reordered=nativePaths(2);std::reverse(reordered.begin(),reordered.end());
+  for(auto& path:reordered)for(auto& c:path)if(c>='A'&&c<='Z')c=char(c-'A'+'a');
+  check(tr::reserveNativeOwnedSet(current,current.revision,nativeOrigin(),reordered,nativeSetProof,candidate),"same-origin set is case-insensitive and order independent");
+  check(candidate.revision==current.revision&&encoded(candidate)==prior,"idempotent batch preserves original spelling, order and revision");
+ });
+ run("native-set/requires-distinct-typed-proof",[]{
+  for(const auto p:std::vector<tr::NativeOwnedSetProof>{{false,true,true},{true,false,true},{true,true,false},{false,false,false}}){
+   auto output=one();const auto prior=encoded(output);
+   check(!tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),nativePaths(2),p,output),"every original-owned/current-hidden/ancestry proof bit mandatory");
+   check(encoded(output)==prior,"failed batch proof cannot publish any candidate prefix");
+  }
+  auto output=one();const auto prior=encoded(output);
+  check(!tr::reservePath(empty(),1,nativeOrigin(),pathA,{true,true,false},output)&&encoded(output)==prior,"ordinary scalar prior-hidden proof remains mandatory");
+ });
+ run("native-set/empty-and-over-16-rejected",[]{
+  for(const auto count:{0U,17U}){auto output=one();const auto prior=encoded(output);
+   check(!tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),nativePaths(count),nativeSetProof,output),"native set bounded to 1 through 16 members");
+   check(encoded(output)==prior,"invalid batch count leaves output untouched");
+  }
+ });
+ run("native-set/duplicate-casefold-rejected",[]{
+  auto paths=nativePaths(2);auto duplicate=paths.front();for(auto& c:duplicate)if(c>='A'&&c<='Z')c=char(c-'A'+'a');paths.push_back(duplicate);
+  auto output=one();const auto prior=encoded(output);
+  check(!tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),paths,nativeSetProof,output),"same exact path with different case is a duplicate, not a second debt");
+  check(encoded(output)==prior,"duplicate tail refuses complete batch");
+ });
+ run("native-set/invalid-tail-refuses-whole-set",[]{
+  for(const auto& tail:std::vector<std::string>{"", "HID\\..\\TAIL", std::string(513,'X')}){
+   auto paths=nativePaths(2);paths.push_back(tail);auto output=one();const auto prior=encoded(output);
+   check(!tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),paths,nativeSetProof,output),"illegal tail rejects all valid leading members");
+   check(encoded(output)==prior,"no partial candidate escapes invalid tail");
+  }
+ });
+ run("native-set/cross-origin-foreign-tail-rejected",[]{
+  const auto current=one();auto paths=nativePaths(2);paths.push_back(pathA);auto output=empty();const auto prior=encoded(output);
+  check(!tr::reserveNativeOwnedSet(current,current.revision,nativeOrigin(),paths,nativeSetProof,output),"foreign conflicting member rejects whole native batch");
+  check(encoded(output)==prior&&current.obligations.size()==1,"no leading native path claimed and foreign origin preserved");
+ });
+ run("native-set/origin-rewrite-and-stale-rejected",[]{
+  tr::Record current;check(tr::reserveNativeOwnedSet(empty(),1,nativeOrigin(),nativePaths(2),nativeSetProof,current),"seed original native origin");
+  for(unsigned change=0;change<3;++change){auto owner=nativeOrigin();if(change==0)++owner.host.pid;else if(change==1)owner.physicalRoot="USB\\VID_1111&PID_2222\\OTHER";else owner.cliWriterProtocol=0;
+   auto output=one();const auto prior=encoded(output);
+   check(!tr::reserveNativeOwnedSet(current,current.revision,owner,nativePaths(3),nativeSetProof,output)&&encoded(output)==prior,"same transaction cannot rewrite Host/root/protocol in a batch");
+  }
+  auto output=one();const auto prior=encoded(output);
+  check(!tr::reserveNativeOwnedSet(current,current.revision-1,nativeOrigin(),nativePaths(3),nativeSetProof,output)&&encoded(output)==prior,"stale batch cannot bypass expected revision");
+ });
+ run("native-set/append-preserves-issued-and-target-duty",[]{
+  auto owner=nativeOrigin();tr::Record current,next;const auto paths=nativePaths(3);
+  check(tr::reserveTargetCreation(empty(),1,owner,{true,true},current),"original target provenance created");
+  check(tr::reservePath(current,current.revision,owner,paths[0],proof,next),"original scalar path created");current=next;
+  check(tr::markMayHaveIssued(current,current.revision,owner,paths[0],next),"existing scalar-issued evidence distinct");current=next;
+  check(tr::reserveNativeOwnedSet(current,current.revision,owner,paths,nativeSetProof,next),"batch adds missing native members once");
+  check(next.revision==current.revision+1&&next.obligations[0].targetMayExist&&next.obligations[0].paths.size()==3,"batch preserves independent target witness");
+  check(next.obligations[0].paths[0].stage==tr::DispatchStage::MayHaveIssued&&next.obligations[0].paths[1].stage==tr::DispatchStage::Reserved&&next.obligations[0].paths[2].stage==tr::DispatchStage::Reserved,"existing Issued preserved and only new members Reserved");
+ });
+ run("native-set/limits-origin32-global128-and-origins16",[]{
+  auto current=empty();auto owner=nativeOrigin();current.obligations.push_back({owner,{},{}});
+  for(unsigned i=0;i<31;++i)current.obligations[0].paths.push_back({"HID\\VID_1234&PID_5678\\OLD_"+std::to_string(i),tr::DispatchStage::Reserved});
+  check(tr::validRecord(current),"31-path original group valid");auto output=one();const auto prior=encoded(output);
+  check(!tr::reserveNativeOwnedSet(current,current.revision,owner,nativePaths(2),nativeSetProof,output)&&encoded(output)==prior,"native set cannot exceed original max32 per origin");
+  current=empty();for(unsigned i=1;i<=4;++i){tr::Obligation group;group.origin=origin(i);for(unsigned j=0;j<32;++j)group.paths.push_back({"HID\\VID_1234&PID_5678\\OLD_"+std::to_string(i)+"_"+std::to_string(j),tr::DispatchStage::Reserved});current.obligations.push_back(std::move(group));}
+  check(tr::validRecord(current),"128-path source record valid");
+  check(!tr::reserveNativeOwnedSet(current,current.revision,owner,nativePaths(1),nativeSetProof,output)&&encoded(output)==prior,"global max128 unchanged");
+  current=empty();for(unsigned i=1;i<=16;++i){tr::Obligation group;group.origin=origin(i);group.paths.push_back({"HID\\VID_1234&PID_5678\\ORIGIN_"+std::to_string(i),tr::DispatchStage::Reserved});current.obligations.push_back(std::move(group));}
+  check(tr::validRecord(current),"16-origin source record valid");
+  check(!tr::reserveNativeOwnedSet(current,current.revision,owner,nativePaths(1),nativeSetProof,output)&&encoded(output)==prior,"max16 origins unchanged");
+ });
+ run("native-set/revision-overflow-keeps-output",[]{
+  auto current=empty();current.revision=(std::numeric_limits<std::uint64_t>::max)();auto output=one();const auto prior=encoded(output);
+  check(!tr::reserveNativeOwnedSet(current,current.revision,nativeOrigin(),nativePaths(2),nativeSetProof,output)&&encoded(output)==prior,"revision overflow cannot publish partial native set");
+ });
+ run("IO/native-set-session-one-store-and-idempotent",[&]{
+  ioTest::reset();const auto nativeFile=directory+L"\\native-owned-set-cross-process.json";
+  {auto session=tr::Session::open(nativeFile,empty().machineBinding);check(session.ready(),"actual Session opens missing private native ledger");
+   ioTest::reset();check(session.reserveNativeOwnedSet(session.record()->revision,nativeOrigin(),nativePaths(2),nativeSetProof),"one-update Session persists whole native set");
+   check(ioTest::writes==1&&ioTest::flushes==1&&ioTest::renames==1,"whole set uses exactly one Write/Flush/atomic rename, not a per-path loop");
+   const auto prior=readRaw(nativeFile);ioTest::reset();
+   check(session.reserveNativeOwnedSet(session.record()->revision,nativeOrigin(),nativePaths(2),nativeSetProof),"same complete set is idempotent in actual Session");
+   check(ioTest::writes==0&&ioTest::flushes==0&&ioTest::renames==0&&readRaw(nativeFile)==prior,"idempotent call performs no durable store");
+  }
+  {auto reopened=tr::Session::open(nativeFile,empty().machineBinding);
+   check(reopened.ready()&&reopened.openedFrom()==tr::LoadState::Valid&&reopened.record()->obligations.size()==1&&reopened.record()->obligations[0].paths.size()==2,"new actual Session reads both debts without any hide or test-side tail repair");
+  }
+ });
+ for(const auto fault:{ioTest::Fault::Write,ioTest::Fault::ShortWrite,ioTest::Fault::Flush,ioTest::Fault::Rename}){
+  const std::string label=fault==ioTest::Fault::Write?"write":fault==ioTest::Fault::ShortWrite?"short-write":fault==ioTest::Fault::Flush?"flush":"rename";
+  run("IO/native-set-failure-"+label,[&,fault,label]{
+   ioTest::reset();const auto nativeFile=directory+L"\\native-set-failed-"+std::wstring(label.begin(),label.end())+L".json";
+   const auto initial=empty();check(tr::store(nativeFile,initial).committed(),"real prior ledger exists before fault");const auto prior=readRaw(nativeFile);
+   {auto session=tr::Session::open(nativeFile,empty().machineBinding);check(session.ready(),"actual Session opens prior valid ledger");
+    ioTest::reset(fault);check(!session.reserveNativeOwnedSet(session.record()->revision,nativeOrigin(),nativePaths(2),nativeSetProof),"actual batch store failure cannot publish half a set");
+    check(session.record()->obligations.empty()&&session.record()->revision==initial.revision,"failed batch preserves Session data/revision");
+    ioTest::reset();check(readRaw(nativeFile)==prior,"prior disk bytes survive failed whole-set publish");
+   }
+   check(tr::load(nativeFile,initial.machineBinding).record->obligations.empty(),"new reader sees no half-batch after failed atomic publish");
+  });
+ }
+
  run("writer-protocol/legacy-missing-and-explicit-zero",[]{
   const auto legacy=encoded(one());auto wire=J::parse(legacy);tr::Record decoded;
   check(!wire["obligations"][0]["origin"].contains("cliWriterProtocol"),"unknown provenance keeps legacy encoding without new field");

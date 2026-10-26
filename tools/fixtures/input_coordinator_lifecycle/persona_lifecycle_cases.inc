@@ -17,14 +17,22 @@ static void observeSource(int family,const std::string& persona){
   cases.back()["sourceDiscoveries"].push_back({{"persona",persona},{"discovery",fullPipeReadPhysicalSourceForElite()}});
  } // MSI source eligibility is observed after actual Start arms its canonical DInput route.
 }
-static void prepare(int family,const std::string& name){
+// Fixture display labels: new families must not be reported as GPD.
+static const char* familyName(int family){switch(family){case 0:return "MSI";case 1:return "ROG";case 2:return "GPD";case 3:return "OneXPlayer";case 4:return "Ayanero";default:throw std::logic_error("unknown persona fixture family");}}
+struct ControlledDmi {const char* manufacturer;const char* product;const char* declaredDeviceClass;const char* supportPointer;};
+static void prepare(int family,const std::string& name,const ControlledDmi* dmi=nullptr){
+ if(family>=3)require(family<=4&&dmi,"new family variants require declared controlled DMI leaves");
  require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"new independent lifecycle case starts with no residual owned child");
  seed();fixtureFullPipe=true;fullPipeFault="none";fixtureXinputSourceLive=true;fixturePsSameInstanceNames=false;fixturePsReturnManualTopology=false;
  g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;g_inputHostPowerAdmissionRevoked=false;g_sleepRecoveryOutputWanted=true;
  g_inputShortcutRuntime.clear();g_externalPriorityVirtualSuspended=false;g_shortcutRecordingActive=false;g_inputCaptureStop=false;
  g_msiSteamDeckReleaseDebt.clear();g_msiSdOwnedPnpSnapshotForTest={};g_msiMainSourceRevision=1;g_msiFeedbackModeGeneration=1;
- if(family){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
- reg_fs();cases.push_back({{"name",name},{"controlledFamily",family==0?"MSI":family==1?"ROG":"GPD"},{"realManagedPipe",true},{"sourceDiscoveries",json::array()},{"periods",json::array()},{"managedReceipts",json::array()}});
+ if(family){g_machineIdentity.family=family==1?YmccFamily::AsusRogAllyX:family==3?YmccFamily::OneXPlayer:family==4?YmccFamily::Ayanero:YmccFamily::Gpd;g_machineIdentity.manufacturer=family==1?"ASUSTEK COMPUTER INC.":"GPD";g_machineIdentity.product=family==1?"ROG Ally X":"G1617";g_msiDinput.enabled=false;g_msiDinputSourceValid=false;}
+ // Default 0/1/2 inputs remain MSI/ROG/G1617. Only explicit variants
+ // replace DMI at this fixture leaf; no catalog/deviceClass resolution is forged.
+ if(dmi){g_machineIdentity.manufacturer=dmi->manufacturer;g_machineIdentity.product=dmi->product;}
+ reg_fs();cases.push_back({{"name",name},{"controlledFamily",familyName(family)},{"realManagedPipe",true},{"sourceDiscoveries",json::array()},{"periods",json::array()},{"managedReceipts",json::array()}});
+ if(dmi)cases.back()["controlledDmi"]={{"boundary","fixture-leaf; not catalog resolution or hardware acceptance"},{"manufacturer",dmi->manufacturer},{"product",dmi->product},{"declaredDeviceClass",dmi->declaredDeviceClass},{"runtimeDeviceClass",g_machineIdentity.deviceClass},{"source","capabilities/CONTROLLER-REPAIR-SUPPORT.json"},{"jsonPointer",dmi->supportPointer}};
 }
 static json receipt(HANDLE child,const std::wstring& file,const std::string& persona,unsigned expectedCreates=1){
  const auto result=fullPipeChildOutcome(child,file);
@@ -72,7 +80,7 @@ static void close(int family,const std::string& persona,unsigned expectedCreates
  fullPipeDrainQueuedLifecycle();require(fullPipeSpawnCount==spawns&&fullPipeChildObservers.empty()&&!g_inputHostProcess,"queued late work cannot resurrect OFF and no fixture child remains");
  cases.back()["periods"].push_back({{"requestId",ticket},{"persona","disabled"},{"outcome",done.phase},{"finalCount",finalCount(ticket,"success")}});
 }
-static void first(int family,const std::string& persona){prepare(family,std::string(family==0?"MSI/":family==1?"ROG/":"GPD/")+"persona-first/"+persona);const auto spawns=fullPipeSpawnCount;startFirst(family,persona);close(family,persona);require(fullPipeSpawnCount==spawns+1,"first-ON-to-OFF lifecycle has exactly one Host without fallback replacement");cases.back()["passed"]=true;fixtureFullPipe=false;}
+static void first(int family,const std::string& persona,const ControlledDmi* dmi=nullptr){prepare(family,std::string(familyName(family))+"/persona-first/"+persona,dmi);const auto spawns=fullPipeSpawnCount;startFirst(family,persona);close(family,persona);require(fullPipeSpawnCount==spawns+1,"first-ON-to-OFF lifecycle has exactly one Host without fallback replacement");cases.back()["passed"]=true;fixtureFullPipe=false;}
 static void transfer(const std::string& from,const std::string& to){
  prepare(1,"ROG/persona-transfer/"+from+"-to-"+to);const auto caseSpawns=fullPipeSpawnCount;startFirst(1,from);
  auto oldSource=fresh(1);oldSource.pad.wButtons=XINPUT_GAMEPAD_B;oldSource.pad.sThumbLX=29000;
@@ -159,4 +167,38 @@ static void personaLifecycleCases140(){
  personaLifecycle140::recreateDurability();
  msiLateExplicitReturnCase(false);msiLateExplicitReturnCase(true);msiLateExplicitReturnCase(true,true);
  personaLifecycle140::require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"complete persona matrix leaves no residual fixture child or active native Host handle");
+}
+// Explicit parameters of the original first/Start/success/close consumer.
+// No transfer/recreate/wake matrix, registry ID or new parent gate.
+static void familyLifecycleCases140(){
+ using namespace personaLifecycle140;
+ if(!fspath::is_regular_file(fixtureManagedDll))throw std::runtime_error("explicit managed fixture missing");
+ // Exact support declarations used as DMI leaves; deviceClass stays unbound.
+ static const ControlledDmi dmi[]={
+ {"GPD","G1618-05","HandheldCompanion.Devices.GPDWin5","/physicalModels/0"},
+ {"ONE-NETBOOK TECHNOLOGY CO., LTD.","ONEXPLAYER X2","HandheldCompanion.Devices.OneXPlayerX2","/physicalModels/2"},
+ {"AYADEVICE","AYANEO 3","HandheldCompanion.Devices.AYANEO3","/physicalModels/5"}
+ };
+ const auto firstCase=cases.size();
+ for(int family:{2,3,4})for(const std::string persona:{"steamdeck","dualsense-edge","elite"}){
+  first(family,persona,&dmi[family-2]);
+  require(ymccFamilyInterfacePolicy(g_machineIdentity.family)==YmccInterfacePolicy::None&&!g_msiDinputRouteDinputArmed.load(),"generic family uses observed standard input without acquiring MSI mode authority");
+  if(family>=3)require(nativeForegroundProfile()==ymcc::nativeForeground::Profile::Unsupported&&!g_msiNativeForegroundLease.active,"OneX and AYA standard virtual output does not grant unimplemented native foreground writes");
+ }
+ require(cases.size()==firstCase+9,"family selector executes exactly nine original first variants");
+ require(fullPipeChildObservers.empty()&&!g_inputHostProcess,"nine family variants leave no owned child or active native Host");
+ // Negative: only the controlled physical-family enum, no Deck DMI claim.
+ // Both existing settings admission and actual Start execute the real policy.
+ prepare(2,"SteamDeck/physical-self-output-blocked");
+ g_machineIdentity.family=YmccFamily::ValveSteamDeck;g_machineIdentity.manufacturer.clear();g_machineIdentity.product.clear();
+ cases.back()["controlledFamily"]="SteamDeck";cases.back()["identityBoundary"]="fixture family enum only; no physical DMI or hardware acceptance";
+ const auto doc=targetDocument("steamdeck",0);require(sgWriteFileAtomic(YM_SETTINGS_FILE,doc.dump()),"physical Deck boundary seeds only its private explicit SD request");
+ inputCaptureRefreshRealStickSettings(true);
+ require(inputHostConfiguredPersona()=="steamdeck"&&!g_realStickTest.virtualTargetEnabled,"actual settings consumer preserves SD request and refuses physical Deck self output");
+ const auto spawns=fullPipeSpawnCount;const auto receipts=fullPipeReceipts.size();const auto eventBegin=fixtureEvents.size();
+ require(!inputHostStart(),"actual Start refuses a physical SteamDeck emulating SD");
+ bool rejected=false;for(auto i=eventBegin;i<fixtureEvents.size();++i){const auto& e=fixtureEvents[i];if(e.value("event","")=="input-host-start-blocked"&&e["detail"].value("reason","")=="physical-steamdeck-self-output-blocked"&&e["detail"].value("requestedPersona","")=="steamdeck")rejected=true;}
+ require(rejected,"actual Start reports the original physical SteamDeck self-output boundary");
+ require(fullPipeSpawnCount==spawns&&fullPipeReceipts.size()==receipts&&fullPipeChildObservers.empty()&&!g_inputHostProcess&&!g_inputHostPrepared,"physical Deck negative creates no managed Host or target");
+ cases.back()["passed"]=true;fixtureFullPipe=false;
 }

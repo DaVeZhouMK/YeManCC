@@ -2,10 +2,10 @@
   "schemaVersion": 1,
   "originalScript": {
     "path": "tools/sleep_non_user_wake_selftest.py",
-    "sha256": "c2bcd193a515586874930b48a9b5d9d829d0df8019ab585369e48dc893e88396",
+    "sha256": "8b62cd63b17dea9298cd98f0907c0a91a6617b53d89063347f804a075d427c8f",
     "originalBeforeCompatibilitySha256": "0b81a0e5cdb4106e53e3a076e603e9a9104c1d4dee651e899fdd5b95ef632ddc",
     "reviewedMaintenance": true,
-    "priorReviewedSha256": "33f47f921132cbd461ab06597c6a5b411a0503eeeda2ad961fdb5614b3601930"
+    "priorReviewedSha256": "c2bcd193a515586874930b48a9b5d9d829d0df8019ab585369e48dc893e88396"
   },
   "originalFixtures": [
     {
@@ -35,7 +35,8 @@
     "deps/json/json.hpp",
     "native/sleep_request_fallback.h",
     "tools/fixtures/hc_reviewed_calibration/toolchain.mjs",
-    "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json"
+    "tools/fixtures/sleep_non_user_wake/g3e_usb4_delayed_entry.json",
+    "native/sleep_notification_evidence.h"
   ],
   "sharedLeaves": [
     "tools/ymcc_sim/global/sleep-native-recovery-consumer/scratch.mjs",
@@ -132,7 +133,7 @@
     "schemaVersion": 2,
     "kind": "exact-current-source-reverse-deltas",
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "sha256": "b33c488d82958637d7a994b37c23c7122b79f698c77292e1d17c88f618a6f637",
     "consumedExport": "evidencePath",
     "consumedExportCanonicalLfSha256": "cc78ff8049a527434caec4c696e6f91d517d9a6a088bd08af50d3ffacde91966",
     "compilerAndEnvironmentTextUnchanged": true,
@@ -141,7 +142,7 @@
   },
   "sourceCompatibilityReview": {
     "manifest": "tools/ymcc_sim/global/sleep-non-user-wake-consumer/current-source-review.json",
-    "sha256": "276e76ce9396ad9185fd31832126e7294c83db1c412df0f2662d71fcf6966c9e",
+    "sha256": "b33c488d82958637d7a994b37c23c7122b79f698c77292e1d17c88f618a6f637",
     "oldIdentitiesRetained": true,
     "fullReverseDeltaRequired": true,
     "sourceApproval": false
@@ -230,5 +231,24 @@
     "s3": 4,
     "capsUnknown": 4,
     "main": 76
+  },
+  "priorNotificationDiagnosticReviews": [
+    {
+      "originalScript": {
+        "path": "tools/sleep_non_user_wake_selftest.py",
+        "sha256": "99f98b1220c3812bf3786bdd640ec7b5fe0aef82b6f047775bc9731e0ed5e720",
+        "originalBeforeCompatibilitySha256": "0b81a0e5cdb4106e53e3a076e603e9a9104c1d4dee651e899fdd5b95ef632ddc",
+        "reviewedMaintenance": true,
+        "priorReviewedSha256": "c2bcd193a515586874930b48a9b5d9d829d0df8019ab585369e48dc893e88396"
+      },
+      "reviewManifestSha256": "126afa2c65816c243abddfedc3858ad2ef41053536bfdc582ffa2948f8d2532f"
+    }
+  ],
+  "notificationEvidenceMaintenance": {
+    "existingCaseId": "sleep.non-user-wake-consumer",
+    "newCppAssertions": 18,
+    "originalProfileGroupCountsUnchanged": true,
+    "noNewWorkerTimerOrOsAction": true,
+    "historicalScriptBytesReverseVerified": true
   }
 }

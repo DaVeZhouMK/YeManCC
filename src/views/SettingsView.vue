@@ -332,6 +332,9 @@ async function refreshMsiControllerShield(): Promise<void> {
   try {
     const next = await msiControllerShieldGet();
     if (next.ok !== true) {
+      // Admission can be known even when the execution snapshot is unavailable.
+      // Keep that native capability visible without claiming an applied state.
+      if (next.supported === true) msiControllerShield.value = { ...msiControllerShield.value, supported: true };
       msiShieldStatus.value = '读取失败，请重新进入设置';
       console.warn('[msi-controller-shield] read failed', next.reason);
       return;
@@ -401,6 +404,7 @@ async function exportAllLogs(): Promise<void> {
   try {
     const r = await invoke<{
       ok?: boolean; path?: string; count?: number; reason?: string;
+      lastError?: string; win32Error?: number; attempts?: number; cleanupOk?: boolean;
       snapshotBoundaryWarnings?: number; snapshotInspectionFailures?: number;
       steamLogs?: { status?: string; copied?: number; skipped?: number; discoveryIssues?: number };
     }>(
@@ -408,7 +412,14 @@ async function exportAllLogs(): Promise<void> {
       { tdpDiagnosticDeliveryFailures: tdpDiagnosticDeliveryFailures(), frontendDiagnosticDeliveryFailures: frontendDiagnosticDeliveryFailures() },
       { timeoutMs: 150000 },
     );
-    if (r.ok !== true || !r.path) throw new Error(r.reason || '导出失败');
+    if (r.ok !== true || !r.path) {
+      const details = [r.reason || '导出失败'];
+      if (r.lastError) details.push(`失败阶段：${r.lastError}`);
+      if (typeof r.win32Error === 'number') details.push(`Win32 代码：${r.win32Error}`);
+      if (typeof r.attempts === 'number') details.push(`尝试次数：${r.attempts}`);
+      if (r.cleanupOk === false) details.push('临时文件清理未完成');
+      throw new Error(details.join('；'));
+    }
     detailLogStatus.value = `已导出 ${r.count ?? 0} 个日志文件到桌面：${r.path}`;
     if ((r.snapshotBoundaryWarnings ?? 0) > 0) detailLogStatus.value += `；${r.snapshotBoundaryWarnings} 个日志存在快照半条尾记录，原始内容已保留，详见 log-export-snapshot.json`;
     if ((r.snapshotInspectionFailures ?? 0) > 0) detailLogStatus.value += `；${r.snapshotInspectionFailures} 项快照检查未完成，详见 log-export-snapshot.json`;
@@ -419,6 +430,7 @@ async function exportAllLogs(): Promise<void> {
       if (issues > 0) detailLogStatus.value += `，收集不完整（${issues} 项），详见包内 steam/steam-log-export.json`;
       else if (steam.status !== 'collected') detailLogStatus.value += `（${steam.status || '状态未知'}）`;
     }
+    if (r.cleanupOk === false) detailLogStatus.value += '；临时文件清理未完成';
   } catch (e) {
     detailLogStatus.value = '导出失败：' + (e instanceof Error ? e.message : String(e));
   } finally {
@@ -879,6 +891,14 @@ onBeforeUnmount(() => {
  <template #device="{ active }"><div class="device-flow"><BatteryChargeSettings v-if="active" />
  <GpuDedicatedMemorySettings v-if="active" />
  <AmdFsrUpgradeSettings v-if="active" />
+    <section v-if="msiControllerShield.supported" class="card msi-controller-shield-card" aria-label="微星专属修复">
+      <h3 class="card-title">微星专属修复</h3>
+      <Toggle :model-value="msiControllerShield.enabled" label="微星前端屏蔽" color="accent" :disabled="msiShieldBusy" data-msi-controller-shield-toggle @update:model-value="onMsiControllerShieldToggle" />
+      <p class="muted body" role="status">微星屏蔽 {{ msiControllerShield.enabled ? '开启' : '关闭' }} · {{ msiShieldExecutionStatus }}</p>
+      <p class="muted body">专用键接管 {{ msiShieldShortcutStatus }} · 基础服务 {{ msiShieldServiceStatus }} · 重启 无需</p>
+      <p class="muted body">开启后关闭 MSI Center M 前端及 Server/Updater 启动任务，保留基础服务。<br />按键效果 待验证<span v-if="msiShieldExecutionStatus === '总体 OK（屏蔽已关闭）'"> · 前端未运行时可手动启动</span></p>
+      <p v-if="msiShieldStatus" class="muted body" role="status">{{ msiShieldStatus }}</p>
+    </section>
  <section v-if="active" class="card usbip-settings-card" aria-label="USB/IP 配套">
    <h3 class="card-title"><InlineIcon name="tools" /> USB/IP 配套</h3>
    <UsbipUpgradeStatus />

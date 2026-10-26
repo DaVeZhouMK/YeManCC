@@ -41,7 +41,7 @@ def main() -> int:
             raise ValueError("GPU Windows result is not a passing production transport fixture")
     else:
         gpu_result_bytes = None
-    extra_headers = {name:(ROOT/"native"/name).read_bytes() for name in ("log_snapshot_state.h", "log_jsonl_boundary.h", "sleep_steam_recovery.h", "decky_sidebar_diagnostics.h")}
+    extra_headers = {name:(ROOT/"native"/name).read_bytes() for name in ("log_snapshot_state.h", "sleep_fact_log_record.h", "log_jsonl_boundary.h", "sleep_steam_recovery.h", "decky_sidebar_diagnostics.h")}
     source_path = ROOT / "native/main.cpp"
     source_bytes = source_path.read_bytes()
     source = source_bytes.decode("utf-8-sig").replace("\r\n", "\n")
@@ -102,6 +102,7 @@ def main() -> int:
 #include "json.hpp"
 #include "log_frequency_policy.h"
 #include "log_snapshot_state.h"
+#include "sleep_fact_log_record.h"
 #include "log_jsonl_boundary.h"
 using json = nlohmann::json;
 static void flushTdpObservationLogs(bool = false) {}
@@ -163,6 +164,7 @@ static void flushDomainLogs(bool) {} // Real domain buffering has a separate R20
 static void flushNativeLifecycleLogs(bool closeDetail = false);
 static void rotateOneLogFile(const std::wstring&, unsigned long long maxBytes = kLogMaxBytes);
 """
+    prelude += "\n" + extract(source,"static unsigned long long currentPowerGeneration() {")
     tests = r"""
 static json checks = json::array();
 static void check(const char* name, bool pass) { checks.push_back({{"name", name}, {"pass", pass}}); }
@@ -268,9 +270,39 @@ int wmain(int argc, wchar_t** argv) {
     const auto treeRows=readRows(L"native-detail.log");
     check("generic-tree-notifications-detailed-no-row-or-field-loss",treeRows.size()==373 && treeRows.back()["details"]["standbyAgeMs"]==372 && treeRows.front()["factEvent"]=="device-change");
     check("arrival-removal-standby-and-power-boundaries-stay-sleep-facts",g_sgFacts.size()==5 && readRows(L"sleep-facts.log").size()==5);
+    const auto sleepIdentityRows=readRows(L"sleep-facts.log");
+    const auto& firstSleep=sleepIdentityRows.front();const auto& lastSleep=sleepIdentityRows.back();
+    check("sleep-facts-explicit-writer-process-creation-not-subject-pid",firstSleep["writerPid"]==GetCurrentProcessId()&&firstSleep["writerInstanceId"].is_string()&&firstSleep["writerProcessCreation100ns"].is_string()&&firstSleep["writerIdentityStatus"]=="pid-and-process-creation-known");
+    check("sleep-facts-local-legacy-clock-preserved-new-UTC-labeled",firstSleep["time"]==sgFactTimestamp()&&firstSleep["timestampUtc"].get<std::string>().back()=='Z'&&firstSleep["timestampLocal"].is_string()&&firstSleep["utcEpochMs"].is_number_unsigned()&&firstSleep["observedTickMs"].is_number_unsigned());
+    check("sleep-fact-sequence-follows-actual-journal-order",lastSleep["writerSequence"].get<unsigned long long>()==firstSleep["writerSequence"].get<unsigned long long>()+4);
+    check("sleep-fact-generation-observer-scope-is-explicit",firstSleep["writerPowerGeneration"]==currentPowerGeneration()&&firstSleep["factSchemaVersion"]==2&&firstSleep["observationScope"]=="journal-record-creation;not-kernel-event-time-or-action-completion");
+    auto originalFacts=json{{"generation",999},{"writerPid",987654},{"time","original-kernel-time"},{"result",false}};
+    sgRecordFact("sleep-action-failed",originalFacts);
+    const auto failedFact=readRows(L"sleep-facts.log").back();
+    check("sleep-fact-details-preserved-and-subject-identity-not-promoted",failedFact["details"]==originalFacts&&failedFact["writerPid"]==GetCurrentProcessId()&&failedFact["writerPowerGeneration"]==currentPowerGeneration());
+    // Restore only this fixture's extra row; original production assertions remain unchanged.
+    g_sgFacts.pop_back();{std::ofstream f(fspath::path(SG_FACT_LOG),std::ios::binary|std::ios::trunc);for(const auto& row:sleepIdentityRows)f<<row.dump()<<'\n';}
+
     g_domainLogEnabled[1]=false;
     sgRecordFact("device-change", {{"code",7},{"userStandby",true}});
     check("standby-relevant-device-event-survives-detail-off",g_sgFacts.size()==6);
+    // REQUIRED default-log contract for sleep repair; no frequent log opt-in.
+    reset(root, L"sleep-required-evidence-off");
+    unsigned requiredSleepFacts=0;
+    for(const char* event:{"user-initiated-sleep","abnormal-sleep-live-source-start","abnormal-sleep-live-source-gap",
+        "abnormal-sleep-armed","abnormal-sleep-evidence-state","abnormal-sleep-deadline","abnormal-sleep-request",
+        "abnormal-sleep-request-result","abnormal-sleep-owned-retry-result","abnormal-sleep-finished",
+        "s0-low-power-residency","static-wake-delay-armed","static-wake-delay-canceled","static-wake-scan-start",
+        "static-wake-scan-result","static-wake-restore-result"}) {
+        sgRecordFact(event,{{"mandatoryEvidence",true},{"detailLogsRequired",false}});++requiredSleepFacts;
+    }
+    const auto mandatorySleepRows=readRows(L"sleep-facts.log");
+    check("required-sleep-source-decision-action-cancel-facts-survive-default-detail-off",mandatorySleepRows.size()==requiredSleepFacts&&g_sgFacts.size()==requiredSleepFacts);
+    check("required-sleep-evidence-preserves-event-and-fields",mandatorySleepRows.front()["event"]=="user-initiated-sleep"&&mandatorySleepRows.back()["event"]=="static-wake-restore-result"&&mandatorySleepRows.back()["details"]["detailLogsRequired"]==false);
+    check("required-sleep-evidence-does-not-enable-high-frequency-stream",!fspath::exists(fspath::path(g_testRoot)/L"native-detail.log")&&!g_domainLogEnabled[1]);
+    check("static-summary-retained-errors-are-not-labeled-fresh-failures",mandatorySleepRows.back()["payloadSemantics"]["currentItemReadbackVerified"].is_null()&&mandatorySleepRows.back()["payloadSemantics"]["actualWritesThisOperation"].is_null()&&mandatorySleepRows.back()["details"]["mandatoryEvidence"]==true);
+
+
     reset(root, L"off");
     appendNativeLifecycleLog("app-exit-ipc", {{"fixture", true}});
     for (int i=0; i<1000; ++i) appendNativeLifecycleLog("real-stick-frame", {{"index", i}});

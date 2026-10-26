@@ -1,0 +1,173 @@
+{
+  "schemaVersion": 1,
+  "baselineId": "2026-08-09-user-default",
+  "configurationBaseline": {
+    "id": "ymcc-settings",
+    "legacyImported": true,
+    "revision": 1
+  },
+  "input": {
+    "appliedConfigHash": null,
+    "appliedRevision": null,
+    "applyStatus": "saved-pending",
+    "axisCalibration": {
+      "applyToLocal": false,
+      "applyToVirtual": true,
+      "deviceKey": "fixture-win5-physical-pad",
+      "enabled": true,
+      "schemaVersion": 1,
+      "sticks": {
+        "left": {
+          "antiDeadzonePct": 0,
+          "centerX": 0,
+          "centerY": 0,
+          "enabled": true,
+          "innerDeadzonePct": 25,
+          "outerDeadzonePct": 0,
+          "outputShape": "original"
+        },
+        "right": {
+          "antiDeadzonePct": 0,
+          "centerX": 0,
+          "centerY": 0,
+          "enabled": true,
+          "innerDeadzonePct": 0,
+          "outerDeadzonePct": 0,
+          "outputShape": "original"
+        }
+      },
+      "sticksEnabled": true,
+      "triggers": {
+        "lt": {
+          "fullScalePct": 100,
+          "startDeadzonePct": 0
+        },
+        "rt": {
+          "fullScalePct": 100,
+          "startDeadzonePct": 0
+        }
+      },
+      "triggersEnabled": true
+    },
+    "buttonMapping": {
+      "closure": "UNENCLOSED",
+      "profileId": "default",
+      "revision": 0,
+      "rules": {},
+      "schemaVersion": 1
+    },
+    "diagnostics": {
+      "inputLoggingEnabled": false
+    },
+    "gameOverride": null,
+    "gyroMotion": {
+      "accelerometerMultiplier": 1,
+      "aimingSightsMultiplier": 0.3,
+      "aimingSightsTrigger": null,
+      "antiDeadzone": 20,
+      "autoCalibrate": true,
+      "calibration": null,
+      "calibrationId": null,
+      "closure": "UNENCLOSED",
+      "deadzone": 1,
+      "enabled": false,
+      "gyroMultiplier": 1,
+      "gyroThreshold": 2000,
+      "gyroWeight": 1.8,
+      "innerDeadzone": 1,
+      "invertHorizontal": false,
+      "invertVertical": false,
+      "motionInput": "local-space",
+      "motionMode": "off",
+      "motionSensitivityX": 1.5,
+      "motionSensitivityY": 1.5,
+      "motionTrigger": null,
+      "outerDeadzone": 0,
+      "outputAxis": "xy",
+      "outputMode": "virtual-stick",
+      "outputShape": "default",
+      "outputStick": "right",
+      "preset": "fps",
+      "provider": null,
+      "revision": 0,
+      "schemaVersion": 1,
+      "steeringAxis": "roll",
+      "steeringDeadzone": 0,
+      "steeringMaxAngle": 30,
+      "steeringPower": 1,
+      "unit": null,
+      "velocityMode": "default",
+      "velocityScale": 1,
+      "virtualPadLink": true
+    },
+    "hostAcknowledgedConfigHash": null,
+    "hostAcknowledgedRevision": null,
+    "outputTarget": {
+      "backMapping": false,
+      "buttonMappingEnabled": false,
+      "closure": "UNENCLOSED",
+      "descriptorHash": null,
+      "gyroEnabled": false,
+      "persona": "disabled",
+      "revision": 0,
+      "schemaVersion": 1,
+      "visibilityPolicy": "hidden"
+    },
+    "ownership": {
+      "externalControllerPriority": false,
+      "frontendSummonVirtualControl": false,
+      "mode": "ymcc-semantic",
+      "schemaVersion": 1
+    },
+    "pendingConfigHash": "sha256:90692fde67aea4f0da0263b25a387aa521eeda8854304033d6eac74fdfb25ae8",
+    "revision": 11,
+    "schemaVersion": 1,
+    "startupAppliedBoot": "fixture-windows-boot-1",
+    "startupAppliedSession": "win5-previous-process",
+    "startupObservedBoot": "fixture-windows-boot-1"
+  },
+  "startupDesired": {
+    "bootControlCenter": true,
+    "desktopModeOnBoot": true,
+    "energyStar": false,
+    "fanControl": false,
+    "gyroPreset": "off",
+    "memoryCleanup": false,
+    "rtss": false,
+    "steamCommunity": false,
+    "virtualGamepadPersona": "disabled"
+  },
+  "gamepad": {
+    "bDoubleMinimize": true,
+    "enabled": true,
+    "feedback": {
+      "lighting": {
+        "brightness": 65,
+        "color": "#2ea6ff",
+        "color2": "#9d7cff",
+        "enabled": false,
+        "mode": "solid",
+        "off": false,
+        "presetId": "",
+        "speed": 55
+      },
+      "vibrationStrength": 70
+    },
+    "fpsShortcut": true,
+    "killGame": true,
+    "mouseBackend": "joyxoff",
+    "mouseMode": "off",
+    "mouseToggle": true,
+    "openKeyboard": true,
+    "returnDesktop": true,
+    "startDoubleF7": false,
+    "tdpShortcut": true
+  },
+  "extensions": {
+    "bootModesAppliedBoot": "fixture-windows-boot-1",
+    "bootTrayMigration": 1
+  },
+  "future": {
+    "sentinel": "keep"
+  }
+}

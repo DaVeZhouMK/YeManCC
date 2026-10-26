@@ -18,6 +18,39 @@ static DWORD memoryMessageWait(DWORD count,const HANDLE* handles,DWORD,DWORD,DWO
 @@EXIT_GLOBALS@@
 static std::vector<std::string> memoryLeaves;
 static std::atomic<unsigned> readyPosts{0};static unsigned captureStopCalls=0;
+// Test-only clock changes only explicit production GetTickCount64/Sleep ports;
+// real process/thread/pipe ownership and kernel waits remain real.
+static std::atomic<bool> fixtureStepClock{false};
+static std::atomic<ULONGLONG> fixtureClockOffset{0};
+static std::atomic<unsigned> steppedSleeps{0};
+static HANDLE fixtureParked=nullptr,fixtureContinue=nullptr;
+static std::atomic<bool> fixtureParkEnabled{false},fixtureParkHit{false};
+static bool fixtureParkOnHost=false;
+static std::atomic<ULONGLONG> fixtureHostAwaitBegan{0},fixtureCaptureAwaitBegan{0};
+static ULONGLONG fixtureNow(const char* caller=nullptr){
+    const auto now=::GetTickCount64()+fixtureClockOffset.load();
+    if(caller){
+        auto* first=std::strcmp(caller,"inputHostAwaitLocalRetirementForExit")==0?&fixtureHostAwaitBegan:
+            std::strcmp(caller,"inputCaptureAwaitStopForExit")==0?&fixtureCaptureAwaitBegan:nullptr;
+        if(first){ULONGLONG zero=0;(void)first->compare_exchange_strong(zero,now);}
+    }
+    return now;
+}
+static void fixtureSleep(DWORD ms,const char* caller=nullptr){
+    if(!fixtureStepClock){::Sleep(ms);return;}
+    fixtureClockOffset.fetch_add(ms);++steppedSleeps;
+    if(fixtureParkEnabled&&caller){
+        const bool sameStage=std::strcmp(caller,fixtureParkOnHost?"inputHostAwaitLocalRetirementForExit":"inputCaptureAwaitStopForExit")==0;
+        const auto began=fixtureParkOnHost?fixtureHostAwaitBegan.load():fixtureCaptureAwaitBegan.load();
+        if(sameStage&&began&&fixtureNow()-began>=31000&&!fixtureParkHit.exchange(true)){
+            need(SetEvent(fixtureParked)!=FALSE,"signal retained checkpoint observation");
+            need(::WaitForSingleObject(fixtureContinue,10000)==WAIT_OBJECT_0,"bounded fixture release of 31s late completion");
+        }
+    }
+}
+static std::atomic<std::uint64_t> captureReceiptDebts{0},captureReceiptGeneration{7};
+static std::atomic<bool> captureWorkerExited{true},captureHandleClosed{true},captureThrows{false};
+
 static BOOL memoryIsWindow(HWND){return TRUE;}
 static BOOL memoryPostMessage(HWND,UINT,WPARAM,LPARAM){++readyPosts;return TRUE;}
 static BOOL memoryPeekMessage(MSG*,HWND,UINT,UINT,UINT){return FALSE;}
@@ -56,12 +89,20 @@ static void recoverySnapSetExitIntent(){leaf("exit-intent-already-raised");}
 struct RecoveryStateBusyGuard {explicit RecoveryStateBusyGuard(const char*){leaf("controller-recovery-busy-scope");}};
 struct InputHostVirtualIntentMutation{~InputHostVirtualIntentMutation(){leaf("virtual-intent-mutation-scope");}};
 static bool g_realStickTestAdmissionLogged=false;
-// Premise: capture's owned resources were already retired, independently of Host.
-// Actual receipt type/classifier, actual AwaitStop/ExitOwnershipReleased consume it.
-static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool){
-    ++captureStopCalls;ymcc::captureLifecycle::StopReceipt receipt;
-    receipt.generation=7;receipt.workerExited=true;receipt.workerHandleClosed=true;receipt.classify();return receipt;
+// Explicit typed capture Stop port. Healthy/legacy cases pre-retire capture;
+// R8 injects receipt debts. This does NOT execute the physical Stop/COM/DSU leaves.
+// Actual AwaitStop, producer getter, authority and exit worker consume every receipt.
+static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool,DWORD workerWaitMs){
+    need(workerWaitMs<=2000,"capture worker wait budget capped");
+    ++captureStopCalls;if(captureThrows)throw std::runtime_error("explicit-capture-stop-fault");
+    ymcc::captureLifecycle::StopReceipt receipt;
+    receipt.generation=captureReceiptGeneration;receipt.debts=captureReceiptDebts;
+    receipt.workerExited=captureWorkerExited;receipt.workerHandleClosed=captureHandleClosed;
+    receipt.classify();return receipt;
 }
+static bool inputCaptureExitProducerOwnershipReleased() noexcept;
+static bool inputHostTryOrdinaryStopForExit();
+static bool inputHostRetireLocalResourcesForExit();
 constexpr UINT WM_APP_EXIT_READY=WM_USER+7;
 #define IsWindow memoryIsWindow
 #define PostMessageW memoryPostMessage
@@ -73,7 +114,11 @@ constexpr UINT WM_APP_EXIT_READY=WM_USER+7;
 #define WaitForSingleObject osWait
 #define CloseHandle osClose
 #define TerminateProcess noKill
+#define GetTickCount64() fixtureNow(__FUNCTION__)
+#define Sleep(ms) fixtureSleep(ms,__FUNCTION__)
 @@PRODUCTION@@
+#undef GetTickCount64
+#undef Sleep
 #undef IsWindow
 #undef PostMessageW
 #undef PeekMessageW
@@ -92,6 +137,236 @@ static json pipeSnapshot(){
     if(!owner)return {{"ownerExists",false}};
     const auto state=owner->snapshot();return {{"available",state.available},{"stopped",state.stopped},{"pending",state.pending},{"failedCloseDebt",state.failedCloseDebt},{"ownedOriginals",state.ownedOriginals},{"ownedDuplicates",state.ownedDuplicates},{"ownedEvents",state.ownedEvents}};
 }
+// Test-only contention owner. It owns only this fixture mutex and private events.
+struct ScopedHostHold {
+    HANDLE entered=nullptr,release=nullptr,thread=nullptr;
+    explicit ScopedHostHold(bool enabled){
+        if(!enabled)return;
+        entered=CreateEventW(nullptr,TRUE,FALSE,nullptr);release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        need(entered&&release,"create private mutex-holder events");
+        thread=CreateThread(nullptr,0,run,this,0,nullptr);need(thread!=nullptr,"create private mutex-holder thread");
+        need(::WaitForSingleObject(entered,2000)==WAIT_OBJECT_0,"holder acquired fixture Host lock");
+    }
+    static DWORD WINAPI run(LPVOID context){
+        auto* self=static_cast<ScopedHostHold*>(context);
+        std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+        if(!SetEvent(self->entered))return 1;
+        return ::WaitForSingleObject(self->release,15000)==WAIT_OBJECT_0?0u:2u;
+    }
+    void finish(){
+        if(!thread)return;
+        need(SetEvent(release)!=FALSE,"release fixture mutex holder");
+        need(::WaitForSingleObject(thread,2000)==WAIT_OBJECT_0,"mutex holder actually joined");
+        DWORD code=99;need(GetExitCodeThread(thread,&code)&&code==0,"mutex holder completed");
+        need(CloseHandle(thread)&&CloseHandle(entered)&&CloseHandle(release),"close fixture holder resources");
+        thread=nullptr;entered=nullptr;release=nullptr;
+    }
+    ~ScopedHostHold(){
+        if(release)SetEvent(release);
+        if(thread){::WaitForSingleObject(thread,2000);CloseHandle(thread);}
+        if(entered)CloseHandle(entered);if(release)CloseHandle(release);
+    }
+};
+// Only the existing pipe memory API blocks: Runtime::run itself owns its real
+// production mutex, so snapshot.available=false is observed, never fabricated.
+struct ScopedPipeHold {
+    HANDLE entered=nullptr,release=nullptr,thread=nullptr,source=nullptr;
+    ymcc::inputHost::pipeTransport::Result result{};
+    explicit ScopedPipeHold(HANDLE pipe):source(pipe){
+        entered=CreateEventW(nullptr,TRUE,FALSE,nullptr);release=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+        need(entered&&release,"create pipe-holder test events");
+        memoryApi::entered=entered;memoryApi::release=release;
+        thread=CreateThread(nullptr,0,run,this,0,nullptr);need(thread!=nullptr,"create runtime pipe-holder thread");
+        need(::WaitForSingleObject(entered,1000)==WAIT_OBJECT_0,"actual Runtime entered memory API holding its mutex");
+    }
+    static DWORD WINAPI run(LPVOID context){
+        auto* self=static_cast<ScopedPipeHold*>(context);unsigned char bytes[8]{};
+        self->result=ymcc::inputHost::pipeTransport::processRuntime().run(self->source,ymcc::inputHost::pipeTransport::Kind::Read,bytes,static_cast<DWORD>(sizeof(bytes)),0);
+        return 0;
+    }
+    void finish(){
+        need(SetEvent(release)!=FALSE,"release only blocked test memory API");
+        need(::WaitForSingleObject(thread,2000)==WAIT_OBJECT_0,"actual Runtime IO holder returned");
+        DWORD code=99;need(GetExitCodeThread(thread,&code)&&code==0,"pipe holder thread completed");
+        need(CloseHandle(thread)&&CloseHandle(entered)&&CloseHandle(release),"close pipe-holder private resources");
+        thread=nullptr;entered=nullptr;release=nullptr;memoryApi::entered=nullptr;memoryApi::release=nullptr;
+    }
+    ~ScopedPipeHold(){
+        if(release)SetEvent(release);
+        if(thread){::WaitForSingleObject(thread,2000);CloseHandle(thread);}
+        if(entered)CloseHandle(entered);if(release)CloseHandle(release);
+        memoryApi::entered=nullptr;memoryApi::release=nullptr;
+    }
+};
+static json r8BusyPipeCase(Child& child,HANDLE processOracle,HANDLE primaryOracle,HANDLE pipe){
+    const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release,job=child.job;
+    need(inputCaptureAwaitStopForExit()&&inputCaptureExitProducerOwnershipReleased(),"actual producer getter ready for independent-owner test");
+    // Explicit authority premise, via existing production note helper. This
+    // isolates the retirement successor of ordinary Stop. It does not claim
+    // this case also exercised whole Stop while pipe mutex was held.
+    inputHostNoteExitStopAttempted();
+    ScopedPipeHold holder(pipe);auto& runtime=ymcc::inputHost::pipeTransport::processRuntime();
+    need(!runtime.snapshot().available,"actual Runtime mutex unavailable");
+    const auto beforeCloses=memoryApi::closeAttempts;const auto realBegan=::GetTickCount64();
+    const bool returned=inputHostRetireLocalResourcesForExit();
+    const auto elapsed=::GetTickCount64()-realBegan;
+    need(!returned,"busy pipe remains debt after independent process cleanup");
+    need(elapsed<2000,"retirement did not enter pipe blocking Close");
+    need(g_inputHostProcess==nullptr&&g_inputHostPrimaryThread==nullptr,"busy pipe must not block exact owned process/primary retirement");
+    need(::WaitForSingleObject(processOracle,0)==WAIT_OBJECT_0&&::WaitForSingleObject(primaryOracle,0)==WAIT_OBJECT_0,"exact private process and primary really exited while pipe busy");
+    need(memoryApi::closeAttempts==beforeCloses&&g_inputHostServerPipe==pipe,"borrow and IO storage retained without touching busy Runtime Close");
+    const auto busyState=runtime.snapshot();need(!busyState.available&&busyState.sealed,"seal is admission-only while mutex remains busy");
+    need(!g_inputHostExitLocalReturned.load()&&g_inputHostExitForceSpent,"busy pipe never counted as local return");
+    const auto receipt=logData("input-host-exit-ownership");
+    need(receipt.at("pipeOwnerAvailable")==false&&receipt.at("pipeReturned")==false&&receipt.at("forceAttempted")==true,"actual ownership receipt distinguishes force from pipe return");
+    need(readyPosts.load()==0&&!g_exitCleanupCompleted,"independent process exit is not application READY");
+    need(!inputHostRetireLocalResourcesForExit(),"repeated busy retirement retains only same pipe debt");
+    holder.finish();
+    need(holder.result.admitted,"IO holder used actual admitted Runtime request");
+    need(inputHostAwaitLocalRetirementForExit(),"same Runtime returns after real mutex release");
+    need(inputHostExitLocalOwnershipReleased()&&memoryApi::live.empty()&&g_inputHostServerPipe==nullptr,"actual pipe handles return after conditional relief");
+    unsigned forces=0;for(const auto& item:ports.logs)if(item.at("event")=="input-host-exit-ownership"&&item.at("data").at("forceAttempted")==true)++forces;
+    need(forces==1,"busy pipe fallback spent exact-owned force once");
+    DWORD processCode=0;need(GetExitCodeProcess(processOracle,&processCode)&&processCode==ERROR_PROCESS_ABORTED,"owned fallback termination code");
+    need(::WaitForSingleObject(releaseEvent,0)==WAIT_TIMEOUT,"fixture did not release child to fake force success");
+    child.process=nullptr;child.primary=nullptr;
+    need(CloseHandle(processOracle)&&CloseHandle(primaryOracle)&&CloseHandle(releaseEvent)&&CloseHandle(job),"busy pipe observer cleanup");child.release=nullptr;child.job=nullptr;
+    const bool closed=!open(processOracle)&&!open(primaryOracle)&&!open(releaseEvent)&&!open(job)&&!open(originalProcess)&&!open(originalPrimary)&&!open(pipe);
+    need(closed,"busy pipe all private handles closed");
+    return {{"scopedLocalOwnerPass",true},{"scenario","busy-pipe-independent-force"},{"realRuntimeMutexHeld",true},
+      {"ordinaryStopPremise","existing actual note helper; isolated successor, not whole concurrent Stop"},
+      {"pipeIoPort","existing memory API; actual production Runtime mutex and OS process/primary owners"},
+      {"busyReceipt",receipt},{"retirementWallMsWhilePipeBusy",elapsed},{"forceAttempts",forces},
+      {"fixtureCleanup",{{"privateHandlesClosed",closed},{"childKillOrEventBackstop",false},{"productClosedOriginalOwners",true},
+        {"faultReliefWasConditional",true},{"permanentFaultDestructionAccepted",false},{"privateChildKillOnJobCloseBackstopArmed",true}}},
+      {"actualLogs",ports.logs},{"endpointAndPhysicalReleaseProven",false},{"fullApplicationExitAccepted",false},
+      {"assertionsPassed",fixtureAssertionCount.load()}};
+}
+
+static bool isR8Case(const std::wstring& scenario){
+    return scenario==L"capture-nonproducer-debt"||scenario==L"capture-worker-retained"||
+        scenario==L"capture-timer-retained"||scenario==L"capture-generation-mismatch"||
+        scenario==L"capture-stop-exception"||scenario==L"busy-host-budget"||scenario==L"permanent-close-budget";
+}
+static json r8BudgetCase(const std::wstring& scenario,Child& child,HANDLE processOracle,HANDLE primaryOracle,HANDLE pipe){
+    using namespace ymcc::captureLifecycle;
+    const bool nonproducer=scenario==L"capture-nonproducer-debt";
+    const bool worker=scenario==L"capture-worker-retained",timer=scenario==L"capture-timer-retained";
+    const bool generation=scenario==L"capture-generation-mismatch",fault=scenario==L"capture-stop-exception";
+    const bool busy=scenario==L"busy-host-budget",closeDebt=scenario==L"permanent-close-budget";
+    const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release,job=child.job;
+    need(!inputCaptureExitProducerOwnershipReleased(),"producer not released before actual receipt");
+    if(nonproducer){captureReceiptDebts=WorkerHandle|Dsu|SensorSta|SensorProviders|Census|OemIo;captureHandleClosed=false;}
+    if(worker){captureReceiptDebts=Worker;captureWorkerExited=false;captureHandleClosed=false;}
+    if(timer){captureReceiptDebts=Timer;g_captureMmTimerRetired=false;}
+    if(generation){captureReceiptDebts=SensorSta;captureReceiptGeneration=8;}
+    if(fault)captureThrows=true;
+    if(closeDebt){
+        need(SetHandleInformation(originalPrimary,HANDLE_FLAG_PROTECT_FROM_CLOSE,HANDLE_FLAG_PROTECT_FROM_CLOSE)!=FALSE,"protect fixture primary until delayed relief");
+        memoryApi::failRoles=memoryApi::Original;
+    }
+    ScopedHostHold holder(busy);
+    if(busy){
+        need(inputCaptureAwaitStopForExit(),"actual capture getter preparation for Host contention");
+        const auto requests=ports.requests;
+        inputHostQuiesceForCaptureExit();
+        need(ports.requests==requests,"busy quiesce issued no pipe commands");
+        const auto quiesce=logData("input-host-exit-capture-neutral");
+        need(quiesce.at("quiesced")==false&&quiesce.at("neutralAccepted")==false,"busy quiesce must retain no neutral proof");
+        need(!inputHostTryOrdinaryStopForExit(),"ordinary stop does not wait on busy Host");
+        need(!inputHostRetireLocalResourcesForExit(),"retirement does not wait on busy Host");
+    }
+    fixtureParked=CreateEventW(nullptr,TRUE,FALSE,nullptr);fixtureContinue=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    need(fixtureParked&&fixtureContinue,"create bounded late-completion observation events");
+    fixtureHostAwaitBegan=0;fixtureCaptureAwaitBegan=0;fixtureParkOnHost=busy||closeDebt;
+    fixtureParkEnabled=true;fixtureStepClock=true;
+    const auto realBegan=::GetTickCount64();
+    need(tryStartExitCleanupWorker(g_hwnd),"actual original cleanup worker creation");
+    const HANDLE originalCleanup=g_exitCleanupThread;
+    const DWORD originalTid=GetThreadId(originalCleanup);need(originalTid!=0,"actual cleanup thread identity");
+    HANDLE cleanupOracle=nullptr;need(DuplicateHandle(GetCurrentProcess(),originalCleanup,GetCurrentProcess(),&cleanupOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"late-completion cleanup observer duplicate");
+    need(::WaitForSingleObject(fixtureParked,10000)==WAIT_OBJECT_0,"original worker reached >=31s test-clock checkpoint");
+    const auto realWall=::GetTickCount64()-realBegan;
+    const auto began=fixtureParkOnHost?fixtureHostAwaitBegan.load():fixtureCaptureAwaitBegan.load();
+    const auto stageElapsed=fixtureNow()-began;
+    need(stageElapsed>=31000&&stageElapsed<32000,"actual await stage continued past 30-second checkpoint");
+    need(fixtureParkHit&&steppedSleeps.load()>0&&steppedSleeps.load()<=124,"finite stepped-clock observation and original 250ms cadence");
+    need(::WaitForSingleObject(cleanupOracle,0)==WAIT_TIMEOUT,"same original worker still running after 30 seconds");
+    need(g_exitCleanupThread==originalCleanup&&GetThreadId(g_exitCleanupThread)==originalTid,"checkpoint retained original cleanup owner");
+    need(readyPosts.load()==0&&!g_exitCleanupCompleted&&!g_exitReadyPosted.load(),"retained checkpoint never posts READY or completed");
+    const bool fullCapture=inputCaptureExitOwnershipReleased(),producer=inputCaptureExitProducerOwnershipReleased();
+    const auto checkpoint=logData(fixtureParkOnHost?"input-host-exit-retained":"input-capture-exit-retained");
+    need(checkpoint.at("observationEnded")==false&&checkpoint.at("continuationRetained")==true&&checkpoint.at("processExitAuthorized")==false,"actual retained receipt explicitly preserves continuation");
+    if(nonproducer){
+        need(!fullCapture&&producer,"nonproducer debt independent of verified BUS producer return");
+        need(g_inputHostExitOrdinaryStopAttempted.load()&&inputHostExitLocalOwnershipReleased(),"independent Host cleanup closes despite nonproducer debt");
+        need(g_inputHostProcess==nullptr&&g_inputHostPrimaryThread==nullptr&&g_inputHostServerPipe==nullptr,"nonproducer debt did not retain Host handles");
+        need(checkpoint.at("cleanupComplete")==false,"nonproducer debt remains real after checkpoint");
+    }else if(busy){
+        need(fullCapture&&producer&&!g_inputHostExitOrdinaryStopAttempted.load(),"busy Host never fabricates Stop attempt");
+        need(!g_inputHostExitLocalReturned.load()&&g_inputHostProcess==originalProcess&&g_inputHostPrimaryThread==originalPrimary&&g_inputHostServerPipe==pipe,"busy Host keeps exact original resources");
+        need(!g_inputHostExitForceSpent&&ports.requests==0,"busy Host neither force nor issue");
+    }else if(closeDebt){
+        need(fullCapture&&producer&&g_inputHostExitOrdinaryStopAttempted.load(),"close debt occurs after ordinary attempt");
+        need(g_inputHostProcess==nullptr&&g_inputHostPrimaryThread==originalPrimary,"primary close debt preserves exact owner");
+        need(!inputHostExitLocalOwnershipReleased()&&g_inputHostExitForceSpent,"retained pipe/primary not returned at checkpoint");
+        need(pipeSnapshot().at("stopped")==false&&!memoryApi::live.empty(),"actual pipe Runtime retains failed-Close debt");
+    }else{
+        need(!fullCapture&&!producer&&!g_inputHostExitOrdinaryStopAttempted.load(),"worker/timer/generation/exception cannot authorize Host stop");
+        need(g_inputHostProcess==originalProcess&&g_inputHostPrimaryThread==originalPrimary&&g_inputHostServerPipe==pipe,"unverified producer retains all exact Host owners");
+        need(::WaitForSingleObject(processOracle,0)==WAIT_TIMEOUT&&!g_inputHostExitForceSpent,"unverified producer cannot kill or release child");
+        need(ports.requests==1,"only pre-capture failed QUIESCE memory request before producer proof");
+    }
+    need(g_inputHostRunId=="exit-owned-private-run"&&g_inputHostEpoch==801,"same owner tuple remains during retained checkpoint");
+    unsigned checkpoints=0,exceptions=0;
+    for(const auto& item:ports.logs){const auto& data=item.at("data");
+        if(data.contains("observationEnded")&&data.at("observationEnded")==false)++checkpoints;
+        if(data.value("reason",std::string{})=="stop-exception")++exceptions;
+    }
+    need(checkpoints==1,"one retained checkpoint log, not every retry");
+    if(fault)need(exceptions==1&&captureStopCalls>120,"exception is retried by same worker with one diagnostic");
+    json before={{"workerStillRunning",true},{"workerTid",originalTid},{"readyPosts",readyPosts.load()},{"cleanupCompleted",g_exitCleanupCompleted},
+      {"stage",g_exitCleanupStage.load()},{"captureReturned",fullCapture},{"producerReturned",producer},
+      {"localReturnedFlag",g_inputHostExitLocalReturned.load()},{"processOwnerRetained",g_inputHostProcess!=nullptr},
+      {"primaryOwnerRetained",g_inputHostPrimaryThread!=nullptr},{"pipeState",pipeSnapshot()},
+      {"forceBudgetSpent",g_inputHostExitForceSpent},{"ordinaryAttempted",g_inputHostExitOrdinaryStopAttempted.load()},
+      {"actualAwaitStageElapsedMs",stageElapsed},{"wallElapsedMs",realWall},{"steppedSleepCalls",steppedSleeps.load()},
+      {"retainedReceipt",checkpoint},{"checkpointLogCount",checkpoints},{"exceptionLogCount",exceptions}};
+    holder.finish();
+    if(closeDebt){need(SetHandleInformation(originalPrimary,HANDLE_FLAG_PROTECT_FROM_CLOSE,0)!=FALSE,"remove only fixture primary protection");memoryApi::failRoles=0;}
+    // Conditional fixture relief at 31s. No new cleanup worker, no reset of
+    // force/cancel authority, no substituted successful receipt in production.
+    captureReceiptDebts=0;captureReceiptGeneration=7;captureWorkerExited=true;captureHandleClosed=true;captureThrows=false;g_captureMmTimerRetired=true;
+    need(SetEvent(fixtureContinue)!=FALSE,"release original worker after late fault relief");
+    inputCaptureEnsureExitOwner(0);
+    need(::WaitForSingleObject(cleanupOracle,0)==WAIT_OBJECT_0,"original worker actually exited after late completion");
+    DWORD workerCode=99;need(GetExitCodeThread(cleanupOracle,&workerCode)&&workerCode==0,"original late-completion worker return code");
+    need(inputCaptureExitOwnershipReleased()&&inputCaptureExitProducerOwnershipReleased()&&inputHostExitLocalOwnershipReleased(),"actual capture and local ownership proofs converge");
+    need(g_exitCleanupCompleted&&g_exitCleanupThread==nullptr&&readyPosts.load()==1&&std::strcmp(g_exitCleanupStage.load(),"finished")==0,"same original worker reaches real READY and final Ensure");
+    need(::WaitForSingleObject(processOracle,0)==WAIT_OBJECT_0&&::WaitForSingleObject(primaryOracle,0)==WAIT_OBJECT_0,"actual private process and primary exited");
+    DWORD processCode=0;need(GetExitCodeProcess(processOracle,&processCode)&&processCode==ERROR_PROCESS_ABORTED,"exact owned process fallback exit observed");
+    need(g_inputHostProcess==nullptr&&g_inputHostPrimaryThread==nullptr&&g_inputHostServerPipe==nullptr&&g_inputHostUnadoptedPipe==nullptr&&memoryApi::live.empty(),"all original local handles and actual Runtime returned");
+    unsigned forces=0;for(const auto& item:ports.logs)if(item.at("event")=="input-host-exit-ownership"&&item.at("data").at("forceAttempted")==true)++forces;
+    need(forces==1&&g_inputHostExitForceSpent,"checkpoint never renews exact-owned force budget");
+    need(::WaitForSingleObject(releaseEvent,0)==WAIT_TIMEOUT,"no fixture release-event success substitute");
+    fixtureStepClock=false;fixtureParkEnabled=false;
+    child.process=nullptr;child.primary=nullptr;
+    const HANDLE parked=fixtureParked,continued=fixtureContinue;
+    need(CloseHandle(processOracle)&&CloseHandle(primaryOracle)&&CloseHandle(cleanupOracle)&&CloseHandle(releaseEvent)&&CloseHandle(job)&&CloseHandle(parked)&&CloseHandle(continued),"close only independent observer/event/job handles");
+    child.release=nullptr;child.job=nullptr;fixtureParked=nullptr;fixtureContinue=nullptr;
+    const bool closed=!open(processOracle)&&!open(primaryOracle)&&!open(cleanupOracle)&&!open(releaseEvent)&&!open(job)&&!open(originalProcess)&&!open(originalPrimary)&&!open(pipe)&&!open(parked)&&!open(continued);
+    need(closed,"all private HANDLE oracles closed after production cleanup");
+    std::string scenarioName;for(const auto c:scenario){need(c>=0x21&&c<=0x7e,"scenario name ASCII");scenarioName.push_back(static_cast<char>(c));}
+    return {{"scopedLocalOwnerPass",true},{"scenario",scenarioName},{"beforeFixtureFaultRelief",before},
+      {"actualExitCleanup",{{"sameWorkerCompleted",true},{"originalTid",originalTid},{"cleanupCode",workerCode},{"readyPosts",readyPosts.load()},{"cleanupCompleted",g_exitCleanupCompleted}}},
+      {"actualEnsure",{{"returned",true},{"actualLocalGetter",inputHostExitLocalOwnershipReleased()},{"wholeMainAndWmAppReadyExecuted",false}}},
+      {"fixtureCleanup",{{"privateHandlesClosed",closed},{"childKillOrEventBackstop",false},{"productClosedOriginalOwners",true},
+        {"faultReliefWasConditional",true},{"permanentFaultDestructionAccepted",false},{"privateChildKillOnJobCloseBackstopArmed",true}}},
+      {"actualLogs",ports.logs},{"noncontrollerMemoryLeaves",memoryLeaves},{"endpointAndPhysicalReleaseProven",false},
+      {"permanentOsBlockStatus","UNKNOWN; conditional late completion proves continuation, not arbitrary hard-call cancellation"},
+      {"captureStopBodyExecuted",false},{"fullApplicationExitAccepted",false},{"assertionsPassed",fixtureAssertionCount.load()}};
+}
+
 int wmain(int argc,wchar_t** argv){
     if(argc==3&&std::wstring(argv[1])==L"--private-child"){
         HANDLE event=reinterpret_cast<HANDLE>(static_cast<std::uintptr_t>(std::stoull(argv[2])));
@@ -101,7 +376,7 @@ int wmain(int argc,wchar_t** argv){
     try{
         need(argc==2,"explicit current scenario required");const std::wstring scenario=argv[1];
         const bool protectedDebt=scenario==L"protected-primary-pipe",healthy=scenario==L"healthy-ordinary";
-        need(healthy||protectedDebt||scenario==L"unprotected-uncooperative","unknown scenario");
+        need(healthy||protectedDebt||scenario==L"unprotected-uncooperative"||isR8Case(scenario)||scenario==L"busy-pipe-independent-force","unknown scenario");
         Child child;const HANDLE originalProcess=child.process,originalPrimary=child.primary,releaseEvent=child.release;
         HANDLE processOracle=nullptr,primaryOracle=nullptr;
         need(DuplicateHandle(GetCurrentProcess(),originalProcess,GetCurrentProcess(),&processOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"process oracle duplicate");
@@ -121,7 +396,15 @@ int wmain(int argc,wchar_t** argv){
         g_inputHostActive=true;g_inputHostNeutralized=true;g_hidHideVisibilityJournal.active=true;g_realStickTest.virtualTargetEnabled=true;
         g_inputHostTransportFault=false;g_inputHostReleaseQuarantined=false;g_inputHostStartBlocked=false;
         g_exitSessionId="native-exit-owned-current";g_exitRequested=true;g_inputHostExitFence=true;g_captureExitReleased=false;
+        g_inputCaptureStop=true;g_captureGeneration=7;g_captureMmTimerRetired=true;
         g_hwnd=reinterpret_cast<HWND>(static_cast<std::uintptr_t>(1));
+        if(scenario==L"busy-pipe-independent-force"){
+            result=r8BusyPipeCase(child,processOracle,primaryOracle,pipe);std::cout<<result.dump()<<"\n";return 0;
+        }
+        if(isR8Case(scenario)){
+            result=r8BudgetCase(scenario,child,processOracle,primaryOracle,pipe);
+            std::cout<<result.dump()<<"\n";return 0;
+        }
         need(tryStartExitCleanupWorker(g_hwnd),"actual cleanup worker creation");
         HANDLE cleanupOracle=nullptr;need(DuplicateHandle(GetCurrentProcess(),g_exitCleanupThread,GetCurrentProcess(),&cleanupOracle,0,FALSE,DUPLICATE_SAME_ACCESS)!=FALSE,"cleanup observation duplicate");
         json beforeRelief=nullptr;
@@ -174,10 +457,11 @@ int wmain(int argc,wchar_t** argv){
         // Product already closed originals. Fixture releases only independent
         // observation duplicates and its unsignaled test event, after joining.
         child.process=nullptr;child.primary=nullptr;
-        need(CloseHandle(processOracle)&&CloseHandle(primaryOracle)&&CloseHandle(cleanupOracle)&&CloseHandle(releaseEvent),"fixture observation handle close");child.release=nullptr;
+        need(CloseHandle(processOracle)&&CloseHandle(primaryOracle)&&CloseHandle(cleanupOracle)&&CloseHandle(releaseEvent)&&CloseHandle(child.job),"fixture observation handle close");child.release=nullptr;child.job=nullptr;
         const bool privateClosed=!open(processOracle)&&!open(primaryOracle)&&!open(cleanupOracle)&&!open(releaseEvent)&&!open(originalProcess)&&!open(originalPrimary)&&!open(pipe);
         need(privateClosed,"scoped private HANDLE oracle open");
         result["fixtureCleanup"]={{"privateHandlesClosed",privateClosed},{"childKillOrEventBackstop",false},{"productClosedOriginalOwners",true},{"faultReliefWasConditional",protectedDebt},{"permanentFaultDestructionAccepted",false}};
+        result["assertionsPassed"]=fixtureAssertionCount.load();
         std::cout<<result.dump()<<"\n";return 0;
-    }catch(const std::exception& error){result["fixtureError"]=error.what();std::cout<<result.dump()<<"\n";return 3;}
+    }catch(const std::exception& error){result["fixtureError"]=error.what();result["actualLogs"]=ports.logs;result["assertionsReached"]=fixtureAssertionCount.load();std::cout<<result.dump()<<"\n";return 3;}
 }

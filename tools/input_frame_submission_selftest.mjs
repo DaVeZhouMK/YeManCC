@@ -26,7 +26,7 @@ UI_SOURCE_FIELD:block(evaluate,'actual neutral-admission source diagnostic','   
 FRAME:struct('FocusFrameContent')+'\n'+fn('focusIsolationNeutralContent')+'\n'+fn('focusIsolationAssembleFrame'),
 SETUP:block(submit,'normal frame original ticket scope','    // Bind normal BUS input','    // OFF revokes normal BUS'),
 POWER:block(submit,'initial normal-frame power admission','    const bool powerAdmitted =','    if (!powerAdmitted)'),
-NORMALIZE:block(submit,'stale source normalization before all final composition','        if(t_inputFrameSubmission && !semanticNeutral)','        suppressPublication ='),
+NORMALIZE:block(submit,'stale source normalization and exact source-neutral publication bypass','        if(t_inputFrameSubmission && !semanticNeutral)','        inputHostRecoveryHealthObserveLocked'),
 FRESH_WAIT:block(submit,'opening wait preserves explicit stale-source neutral cleanup','    if (!msiNeutralCleanup && !frameSubmission.sourceNeutralized','        ymcc::screenpads::observeNativeTransport'),
 ACCEPTED_NOTE:block(submit,'log recovery only after accepted current frame','                if(t_inputFrameSubmission && !frameSubmission.sourceNeutralized)','                firstFrame = fastReceipt.used'),
 HOST_READY:block(submit,'final Host readiness','        const bool hostFrameReady =','        const ymcc::screenpads::NativeTransportObservation'),

@@ -109,7 +109,7 @@ void cancelPreparedSuspend(){}
 std::mutex captureMx;
 unsigned long long repeatedSuspendGeneration=0,repeatedSuspendEpoch=0;
 /* EXACT_MEMORY_EPISODE_CLOSE_FUNCTION */
-json inspect(ULONGLONG){return {{"scope","steam"},{"steamRecovery",{{"status","unknown"},{"reason","fixture-not-used"}}}};}
+json inspect(ULONGLONG,const char* = "observation"){return {{"scope","steam"},{"steamRecovery",{{"status","unknown"},{"reason","fixture-not-used"}}}};}
 // Compatibility-only declarations. Actual Steam wake/input actions are covered
 // by sleep_steam_only_selftest.py against the production headers, not this stub.
 void captureSuspend(ULONGLONG){}
@@ -262,6 +262,8 @@ assert cpp.count(anchor)==1;cpp=cpp.replace(anchor,tests+'\n'+anchor,1)
 cpp=cpp.replace('int wmain(int argc,wchar_t** argv){','int wmain(int argc,wchar_t** argv){std::cout<<std::unitbuf;')
 source=out/'sleep_recovery_api_selftest.cpp';source.write_text(cpp,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat');exe=out/'sleep_recovery_api_selftest.exe';cmd=out/'run-sleep-recovery-api.cmd'
-cmd.write_text(f'@echo off\r\ncall "{vs}" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_recovery_api_selftest.obj"}" /Fe"{exe}" /link advapi32.lib ole32.lib shell32.lib\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{out / "owned-api-fixture-state"}"\r\n',encoding='ascii')
+toolchain_js='import {calibrationToolchainPreamble} from "./tools/fixtures/hc_reviewed_calibration/toolchain.mjs";process.stdout.write(calibrationToolchainPreamble(process.argv[1]));'
+toolchain_prefix=subprocess.check_output(['node','--input-type=module','-e',toolchain_js,str(vs)],text=True,encoding='utf-8')
+cmd.write_text(toolchain_prefix+f'cl /nologo /std:c++20 /utf-8 /EHsc /MT /W3 "{source}" /I"{root / "native"}" /I"{root / "deps/json"}" /Fo"{out / "sleep_recovery_api_selftest.obj"}" /Fe"{exe}" /link advapi32.lib ole32.lib shell32.lib\r\nif errorlevel 1 exit /b 1\r\n"{exe}" "{out / "owned-api-fixture-state"}"\r\n',encoding='ascii')
 res=subprocess.run(['cmd.exe','/d','/c',str(cmd)],stdout=subprocess.PIPE,stderr=subprocess.STDOUT)
 (out/'sleep-recovery-api-selftest.log').write_bytes(res.stdout);print(res.stdout.decode('utf-8',errors='replace'));print('Native fixture return:',res.returncode);raise SystemExit(res.returncode)

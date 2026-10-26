@@ -50,7 +50,7 @@ export function readFrontendErrorLog(): FrontendErrorRecord[] {
 // Named state tracing is evidence, not an error and not a localStorage error entry.
 // No timer/subscription/control action. Native owns the paths, caps and lane policy.
 let failedDiagnosticDeliveries = 0;
-export function reportFrontendTrace(where: 'gamepad-admission' | 'controller-preview', detail: Record<string, unknown>): void {
+export function reportFrontendTrace(where: 'gamepad-admission' | 'controller-preview' | 'controller-calibration', detail: Record<string, unknown>): void {
   try {
     if (!isNativeRuntime) return;
     const record = { where, message: JSON.stringify(detail),

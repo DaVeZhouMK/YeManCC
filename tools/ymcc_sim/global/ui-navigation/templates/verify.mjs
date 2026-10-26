@@ -242,21 +242,30 @@ async function checkShortcutRetirement(height){
     assert.match(await powerChange.locator('xpath=ancestor::*[contains(@class,"toggle-row")]').locator('.toggle-desc').innerText(),/电源变动/);
     await press(f,powerChange);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnNonUserWake),false);
     await press(f,powerChange);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnNonUserWake),true);
-    const toggle=f.getByRole('switch',{name:'睡眠异常重睡',exact:true});
+    const toggle=f.getByRole('switch',{name:'入睡失败重试',exact:true});
     assert.equal(await toggle.count(),1);
     assert.equal(await f.getByRole('note').filter({hasText:'30秒'}).count(),0);
     const description=await toggle.locator('xpath=ancestor::*[contains(@class,"toggle-row")]').locator('.toggle-desc').innerText();
-    for(const value of ['休眠','关机'])assert.ok(description.includes(value));
+    assert.equal(description,'明确入睡失败时重试，电源键唤醒优先');
+    for(const value of ['休眠','关机','持续异常'])assert.equal(description.includes(value),false);
     await press(f,toggle);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnEntryFailure),false);
     await press(f,toggle);assert.equal(await f.evaluate(()=>window.__sleepFixture.retryOnEntryFailure),true);
   });
-  await actionCase('Sleep static wake uses explicit actions and preserves existing power repair',height,async()=>{
+  await actionCase('Sleep static wake has no immediate scan, refreshes native completion, and preserves power repair',height,async()=>{
     const summary=f.getByRole('status',{name:'静态唤醒屏蔽状态',exact:true});
     const repair=f.getByRole('switch',{name:'睡眠电源修复',exact:true});
     let scan=f.getByRole('button',{name:'扫描并屏蔽',exact:true});
     assert.match(await summary.innerText(),/尚未扫描/);
     assert.deepEqual(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c!=='get')),[]);
     assert.equal(await repair.getAttribute('aria-checked'),'true');
+    assert.equal(await f.locator('.sleep-static-action span').innerText(),'开机及唤醒1分钟后单次扫描');
+    assert.equal(await repair.locator('xpath=ancestor::*[contains(@class,"toggle-row")]').locator('.toggle-desc').innerText(),'启动及电源变动时修正睡眠设置');
+    const getsBeforeAuto=await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='get').length);
+    await f.evaluate(()=>window.__staticWakeFixture.completeAuto({enabled:true,phase:'applied',lastScanEpoch:1,devices:4,software:5,timers:1,protectedDevices:2}));
+    await summary.filter({hasText:'设备 4'}).waitFor();
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='get').length),getsBeforeAuto+1);
+    assert.deepEqual(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c!=='get')),[]);
+    const getsBeforeManual=getsBeforeAuto+1;
     await f.evaluate(()=>{window.__staticWakeFixture.hold=true});await press(f,scan);
     await f.getByRole('button',{name:'扫描中…',exact:true}).waitFor();
     assert.equal(await repair.isDisabled(),true);
@@ -266,9 +275,11 @@ async function checkShortcutRetirement(height){
     await f.evaluate(()=>{const s=window.__staticWakeFixture;s.hold=false;s.release()});
     await summary.filter({hasText:'设备 2'}).waitFor();
     assert.match(await summary.innerText(),/软件 3.*定时器 1.*保护 2/);
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='get').length),getsBeforeManual+1);
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='scan').length),1);
     scan=f.getByRole('button',{name:'扫描并屏蔽',exact:true});
     await scan.evaluate(el=>window.__gamepadAudit.focus(el));await command(f,'nav-down');
-    assert.equal(await f.getByRole('switch',{name:'睡眠异常重睡',exact:true}).evaluate(el=>el===document.activeElement),true);
+    assert.equal(await f.getByRole('switch',{name:'入睡失败重试',exact:true}).evaluate(el=>el===document.activeElement),true);
     await command(f,'nav-up');assert.equal(await scan.evaluate(el=>el===document.activeElement),true);
     await f.evaluate(()=>{window.__staticWakeFixture.failPlanSave=true});await press(f,repair);
     assert.equal(await repair.getAttribute('aria-checked'),'true');
@@ -293,6 +304,36 @@ async function checkShortcutRetirement(height){
     assert.ok(copy.every(el=>el.whiteSpace==='nowrap'&&!el.wraps));
     assert.equal(await f.locator('.sleep-console').evaluate(el=>el.scrollWidth>el.clientWidth+1),false);
     await press(f,repair); // Leave original enabled preference for existing independent cases.
+  });
+  await actionCase('Sleep static wake reverse concurrent completion and OFF callbacks',height,async()=>{
+    const summary=f.getByRole('status',{name:'静态唤醒屏蔽状态',exact:true});
+    const repair=f.getByRole('switch',{name:'睡眠电源修复',exact:true});
+    await f.evaluate(()=>{window.__staticWakeFixture.holdReply=true});
+    await press(f,f.getByRole('button',{name:'扫描并屏蔽',exact:true}));
+    await f.waitForFunction(()=>window.__staticWakeFixture.releaseReply!==null);
+    await f.evaluate(()=>window.__staticWakeFixture.completeAuto({enabled:true,phase:'applied',devices:7,software:8}));
+    await f.evaluate(()=>{const s=window.__staticWakeFixture;s.holdReply=false;s.releaseReply()});
+    await f.getByRole('button',{name:'扫描并屏蔽',exact:true}).waitFor();
+    assert.match(await summary.innerText(),/设备 7.*软件 8/,'AUTO_LATEST_STATE_MUST_SURVIVE_DELAYED_MANUAL_ACK');
+    const scans=await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='scan').length);
+    await f.evaluate(()=>{window.__staticWakeFixture.failPlanSave=true});await press(f,repair);
+    assert.equal(await repair.getAttribute('aria-checked'),'true');
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.plan),true);
+    const restores=await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='restore').length);
+    await f.evaluate(()=>{const s=window.__staticWakeFixture;s.failPlanSave=false;s.holdRead=true;s.completeAuto({devices:9})});
+    await f.waitForFunction(()=>window.__staticWakeFixture.readReleases.length>0);
+    await press(f,repair);
+    await f.evaluate(()=>{const s=window.__staticWakeFixture;s.holdRead=false;s.readReleases.splice(0).forEach(release=>release())});
+    await summary.filter({hasText:'已恢复'}).waitFor();
+    assert.equal(await repair.getAttribute('aria-checked'),'false');
+    assert.equal(await f.evaluate(()=>window.__sleepFixture.plan),false);
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='restore').length),restores+1);
+    await f.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated',{detail:{enabled:true,phase:'applied',devices:99}})));
+    await summary.filter({hasText:'已恢复'}).waitFor();
+    assert.equal(await repair.getAttribute('aria-checked'),'false');
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='scan').length),scans);
+    assert.equal(await f.evaluate(()=>window.__staticWakeFixture.calls.filter(c=>c==='restore').length),restores+1);
+    await press(f,repair);
   });
   for(const id of ['protection','power','timeouts']){await press(f,f.locator('[data-settings-section="'+id+'"]'));await state(f,'sleep/'+id,height);
     await actionCase('Sleep '+id+' copy stays on one readable line',height,async()=>{

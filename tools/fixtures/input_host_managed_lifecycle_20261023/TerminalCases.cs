@@ -149,8 +149,49 @@ internal static partial class Program
             }
         }));
         rows.Add(Case("exact retry detail whitelist excludes all non-barrier failures",()=>{
-            foreach(var detail in new[]{"controller-output-stop:sdk-output-stop-timeout","controller-output-stop:sdk-output-stop-lock-timeout","steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout","controller-idle-cts-capture:sdk-idle-clock-timeout"})Assert(Terminal.CanRetryStopBarrier(detail),detail);
-            foreach(var detail in new[]{"","controller-dispose:IOException","context-dispose:IOException","controller-output-stop:sdk-output-stop-cancel-failed","controller-output-stop:sdk-output-stop-join-failed","controller-output-stop:sdk-output-stop-core-identity-mismatch","controller-output-stop:sdk-output-stop-field-value-mismatch","sdk-idle-clock-reader-not-stopped","neutral:failed;controller-output-stop:sdk-output-stop-timeout","game-output-detach:IOException;controller-output-stop:sdk-output-stop-timeout","virtual-endpoint-removal-timeout:present","controller-output-stop:sdk-output-stop-timeout;unknown"})Assert(!Terminal.CanRetryStopBarrier(detail),detail);
+            foreach(var detail in new[]{
+                "controller-output-stop:sdk-output-stop-timeout",
+                "controller-output-stop:sdk-output-stop-lock-timeout",
+                "steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout",
+                "controller-idle-cts-capture:sdk-idle-clock-timeout",
+                "neutral:failed;controller-output-stop:sdk-output-stop-timeout",
+                "game-output-detach:IOException;controller-output-stop:sdk-output-stop-timeout"
+            })Assert(Terminal.CanRetryStopBarrier(detail),detail);
+            foreach(var detail in new[]{
+                "",
+                "controller-dispose:IOException",
+                "context-dispose:IOException",
+                "controller-output-stop:sdk-output-stop-cancel-failed",
+                "controller-output-stop:sdk-output-stop-join-failed",
+                "controller-output-stop:sdk-output-stop-core-identity-mismatch",
+                "controller-output-stop:sdk-output-stop-field-value-mismatch",
+                "sdk-idle-clock-reader-not-stopped",
+                "virtual-endpoint-removal-timeout:present",
+                "controller-output-stop:sdk-output-stop-timeout;unknown",
+                "controller-dispose:IOException;controller-output-stop:sdk-output-stop-timeout",
+                "context-dispose:IOException;controller-idle-cts-capture:sdk-idle-clock-timeout",
+                "neutral:failed;controller-dispose:IOException;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed;controller-output-stop:sdk-output-stop-timeout;controller-dispose:IOException",
+                "neutral:failed;controller-idle-cts-capture:sdk-idle-clock-timeout;context-dispose:IOException",
+                "controller-idle-cts-release:sdk-idle-clock-reader-not-stopped;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed;controller-idle-cts-capture:sdk-idle-clock-timeout;virtual-endpoint-removal-timeout:present",
+                "neutral:neutral-exception:controller-dispose:IOException;controller-output-stop:sdk-output-stop-timeout",
+                "game-output-detach:neutral:IOException;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:neutral-exception:IOException:controller-output-stop:sdk-output-stop-timeout",
+                "prefix:controller-output-stop:sdk-output-stop-timeout",
+                "neutral:IOException;controller-output-stop:sdk-output-stop-timeout:suffix",
+                "controller-output-stop:sdk-output-stop-timeout;neutral:failed",
+                "neutral:failed;game-output-detach:IOException;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed;neutral:failed;controller-output-stop:sdk-output-stop-timeout",
+                "game-output-detach:IOException;game-output-detach:IOException;controller-output-stop:sdk-output-stop-timeout",
+                ";controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed;;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed;controller-output-stop:sdk-output-stop-timeout;",
+                "neutral:failed;steamdeck-idle-stop-failed:InvalidOperationException:steamdeck-idle-handoff:sdk-idle-clock-timeout",
+                "neutral:fake-neutral;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:failed ;controller-output-stop:sdk-output-stop-timeout",
+                "neutral:neutral-exception:Namespace.IOException;controller-output-stop:sdk-output-stop-timeout"
+            })Assert(!Terminal.CanRetryStopBarrier(detail),detail);
         }));
         foreach(var worker in new[]{"output","clock","capture"})foreach(var transient in new[]{true,false})rows.Add(Case($"direct-{worker}-{(transient?"transient":"permanent")}",()=>{
             OwnedWorkers.BlockOutput=worker=="output";OwnedWorkers.BlockClock=worker!="output";

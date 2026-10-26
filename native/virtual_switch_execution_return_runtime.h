@@ -44,6 +44,15 @@ static bool cleanLocked() {
         !g_inputHostNeutralized && !g_inputHostActive && !g_hidHideVisibilityJournal.active &&
         !g_inputHostReleaseQuarantined && !g_msiSteamDeckReleaseDebt.required();
 }
+// A cold historical ledger is independent of native/PS return ownership.
+// Arm its continuation early, but never consume it through a predecessor's
+// still-live source, mode, endpoint or quarantine duty.
+static bool coldPredecessorsReturnedLocked() {
+    return cleanLocked() && !g_psEndpointOwnership.retirementRequired() &&
+        !g_msiDinputReturnOwed.load(std::memory_order_acquire) &&
+        !g_msiDinputRouteDinputArmed.load(std::memory_order_acquire) &&
+        !g_msiPersonaModeHandoff.active;
+}
 static bool pausedLocked() {
     return (!state.cold && (!g_realStickTest.enabled || !g_realStickTest.virtualTargetEnabled)) ||
         g_externalPriorityVirtualSuspended.load(std::memory_order_acquire) ||
@@ -71,13 +80,31 @@ static bool inputHostSwitchExecutionAwaitingLocked(std::uint64_t ticket) {
 static bool inputHostSwitchExecutionBeginColdLocked(std::uint64_t ticket,
         ymcc::targetReturn::coldExecution::Reason reason) {
     using namespace ymcc::inputHost::switchExecutionReturnRuntime;
-    if(state.pending)return inputHostSwitchExecutionAwaitingLocked(ticket);
+    if(state.pending){
+        if(inputHostSwitchExecutionAwaitingLocked(ticket))return true;
+        if(state.pending)return false; // another still-current owner cannot be replaced
+    }
     const auto persona=inputHostConfiguredPersona();
     if(!g_virtualStartProtection.canContinueExecution(ticket,persona,inputHostStartProtectionNow()))return false;
     state={ticket,currentPowerGeneration(),0,{},persona,true,false,false,true,
         reason==ymcc::targetReturn::coldExecution::Reason::ContextRetired?0U:1U,inputHostStartProtectionNow()+1000};
     g_inputHostSwitchExecutionReturnPending.store(true,std::memory_order_release);
     logLocked("cold-return-begin",ymcc::targetReturn::coldExecution::reasonName(reason));return true;
+}
+// Stop may first be blocked by native mode/visibility retirement while cold
+// history remains. Retain that SAME admitted OFF ticket on the existing
+// continuation; otherwise local return can finish with no remaining consumer
+// of coldHistoryPending. No admission, Stop, IO or deadline renewal here.
+static bool inputHostSwitchExecutionCarryColdOffLocked(std::uint64_t ticket) {
+    if(!ticket || inputHostExitFenceRaised() ||
+        g_exitRequested.load(std::memory_order_acquire) ||
+        g_inputCaptureStop.load(std::memory_order_acquire) ||
+        inputHostConfiguredPersona()!="disabled" || inputHostTargetReturnHistorySettledLocked())return false;
+    const auto view=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    if(view.requestId!=ticket || view.persona!="disabled" || !view.locked ||
+        (view.phase!="pending" && view.phase!="verifying"))return false;
+    return inputHostSwitchExecutionBeginColdLocked(ticket,
+        ymcc::targetReturn::coldExecution::Reason::ContextRetired);
 }
 // The same cold return consumer serves startup-OFF and a later admitted OFF
 // with no local Host/journal. Return true only when this owner handles the
@@ -88,10 +115,7 @@ static bool inputHostPerformColdStartupReturn() {
     if(inputHostConfiguredPersona()!="disabled" || inputHostTargetReturnHistorySettledLocked())return false;
     // No local Host alone is insufficient: MSI mode return or a retired PS
     // endpoint still belongs to normal Stop. Never skip that owner's cleanup.
-    if(!cleanLocked() || g_psEndpointOwnership.retirementRequired() ||
-            g_msiDinputReturnOwed.load(std::memory_order_acquire) ||
-            g_msiDinputRouteDinputArmed.load(std::memory_order_acquire) ||
-            g_msiPersonaModeHandoff.active)return false;
+    if(!coldPredecessorsReturnedLocked())return false;
     if(state.pending && inputHostSwitchExecutionAwaitingLocked(
             g_virtualStartProtection.view(inputHostStartProtectionNow()).requestId))return true;
     const auto admission=inputHostStartProtectionConsume("disabled");
@@ -168,6 +192,7 @@ static void inputHostSwitchExecutionReturnMaintenanceLocked() {
     if(!state.pending)return;
     if(!currentLocked()){retireLocked("request-power-or-intent-retired");return;}
     if(state.queued || !cleanLocked() || pausedLocked())return;
+    if(state.cold && !coldPredecessorsReturnedLocked())return;
     if(state.cold){
         if(inputHostStartProtectionNow()<state.nextObservation)return;
         const auto environment=ymcc::inputHost::targetReturnRuntime::ColdEnvironment{state.requestId,state.power,state.persona};
@@ -187,6 +212,7 @@ static void inputHostPerformSwitchExecutionReturn(std::uint64_t ticket) {
         state.queued=false;
         if(!currentLocked()){retireLocked("queued-request-retired");return;}
         if(!cleanLocked() || pausedLocked() || (!state.cold && !state.returned))return;
+        if(state.cold && !coldPredecessorsReturnedLocked())return;
         if(state.cold){
             const auto result=inputHostTargetReturnColdPassLocked(ticket,state.power,state.persona);
             // An OS observation/file commit can outlast this request. Never

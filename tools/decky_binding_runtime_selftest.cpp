@@ -114,7 +114,17 @@ struct Harness {
         };
         runtime.initialize(std::move(config));runtime.observeSteam(1,true);
     }
-    void start(){need(runtime.setEnabled(true),"runtime-enable");need(waitFor([&]{return runtime.snapshot().pid!=0;}),"owned-inert-loader-start");}
+    // Callbacks capture this; stop the worker before callback state is destroyed.
+    ~Harness(){runtime.shutdown();}
+    void waitForCheckpoint(const std::function<bool()>& predicate,const char* checkpoint){
+        if(waitFor(predicate))return;
+        const auto observed=runtime.snapshot();
+        const Json evidence{{"phase",observed.phase},{"reason",observed.reason},{"error",observed.error},
+            {"launchStage",observed.launchStage},{"launchMode",observed.launchMode},{"loaderPid",observed.pid},
+            {"binding",state(client->snapshot())}};
+        throw std::runtime_error(std::string(checkpoint)+": "+evidence.dump());
+    }
+    void start(){need(runtime.setEnabled(true),"runtime-enable");waitForCheckpoint([&]{return runtime.snapshot().pid!=0;},"owned-inert-loader-start");}
 };
 inline Json stalled(const std::filesystem::path& output,const wchar_t* mode){
     Controls controls(L"success");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
@@ -174,7 +184,7 @@ inline Json ready(const std::filesystem::path& output,bool retained){
     Controls controls(L"runtime-success-checkpoint");Context context;ContextJob contextOwner(worker::number(context.lease.at("pid")));
     Harness harness(output,context,retained);const auto before=handles();
     need(harness.runtime.setEnabled(true),"ready-enable");
-    need(waitFor([&]{return harness.healthyGeneration==1;}),"initial-binding-checkpoint");
+    harness.waitForCheckpoint([&]{return harness.healthyGeneration==1;},"initial-binding-checkpoint");
     const auto initial=harness.runtime.snapshot();const auto originalLoader=initial.pid;
     const auto originalBinding=harness.client->snapshot().processId;
     need(retained?(initial.phase=="frontend-attached"&&originalLoader==0):(initial.phase=="loader-started"&&originalLoader!=0),"initial-loader-ownership");

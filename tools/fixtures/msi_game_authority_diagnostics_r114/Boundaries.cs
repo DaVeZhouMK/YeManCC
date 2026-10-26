@@ -11,6 +11,10 @@ namespace R114Offline
         internal bool Xusb,RootOnly,Direct,Disabled,NoParent,WrongBoard;
         internal int AliveFalseAt,RootDepth=2,IdFailureDepth,SizeBytes=-1,DataBytes=-1;
         internal uint Error=13,SizeType=0x2012,DataType=0x2012;
+#if CURRENT_STATUS
+        internal string ProbeFault="";
+        internal uint StatusResult,StatusBits=0x0000200A,ProblemCode=22;
+#endif
         internal string Root=>Family=="rog"?@"USB\VID_0B05&PID_1B4C\ROG":Family=="gpd"?@"USB\VID_045E&PID_028E\GPD":@"USB\VID_0DB0&PID_1901\00006F64096B22E7";
         internal string Target=>Xusb?Root[..21]+@"&MI_00\XUSB":Family=="rog"?@"HID\VID_0B05&PID_1B4C&IG_03\ROG":Family=="gpd"?@"HID\VID_045E&PID_028E&IG_03\GPD":@"HID\VID_0DB0&PID_1901&IG_03\8&3121E4E&0&0000";
         internal const string Location="PCIROOT(0)#USBROOT(0)#USB(4)";
@@ -20,7 +24,15 @@ namespace R114Offline
         internal static Scenario Config=new();
         internal static readonly List<string> Calls=[];
         internal static int GameLocates,RootLocates,AliveCalls,InterfaceSizes,SerializeCalls;
-        internal static void Reset(Scenario c){Config=c;Calls.Clear();GameLocates=RootLocates=AliveCalls=InterfaceSizes=SerializeCalls=0;}
+#if CURRENT_STATUS
+        internal static int ProbeLocates,StatusCalls;
+        internal static bool FailedDisableReturned;
+#endif
+        internal static void Reset(Scenario c){Config=c;Calls.Clear();GameLocates=RootLocates=AliveCalls=InterfaceSizes=SerializeCalls=0;
+#if CURRENT_STATUS
+            ProbeLocates=StatusCalls=0;FailedDisableReturned=false;
+#endif
+        }
         internal static bool Failing=>Config.Stage=="first"?GameLocates==1:GameLocates==3;
         internal static bool Fault(string f)=>Config.Fault==f && Failing;
         internal static string SerializeDiagnostic<T>(T facts)
@@ -38,6 +50,17 @@ namespace R114Offline
         internal static uint Locate(ref uint node,string instance,uint flags)
         {
             if(flags!=0)throw new Exception("Locate flags changed");
+#if CURRENT_STATUS
+            if(FailedDisableReturned){
+                ProbeLocates++;var post=ProbeLocates==2;var fault=Config.ProbeFault;
+                node=fault==(post?"post-node-mismatch":"node-mismatch")?11u:10u;
+                var located=fault==(post?"post-locate-error":"locate-error")?13u:0;
+                var throws=fault==(post?"post-locate-throw":"locate-throw");
+                Calls.Add($"diagnostic-locate:{instance}:{flags}:{(throws?"throw":located.ToString())}:{node}");
+                if(throws)throw new InvalidOperationException("inert diagnostic locate");
+                return located;
+            }
+#endif
             uint result=0;
             if(instance.Equals(Config.Root,StringComparison.OrdinalIgnoreCase)){
                 RootLocates++;node=1;
@@ -105,8 +128,25 @@ namespace R114Offline
         internal static uint Disable(uint node,uint flags)
         {
             if(flags!=4)throw new Exception("Disable flags changed");
-            var result=Config.Fault=="disable"?Config.Error:0;Calls.Add($"disable:{node}:{flags}:{result}");return result;
+#if CURRENT_STATUS
+            if(Config.Fault=="disable-throw"){Calls.Add($"disable:{node}:{flags}:throw");throw new InvalidOperationException("inert Disable");}
+#endif
+            var result=Config.Fault=="disable"?Config.Error:0;Calls.Add($"disable:{node}:{flags}:{result}");
+#if CURRENT_STATUS
+            FailedDisableReturned=result!=0;
+#endif
+            return result;
         }
+#if CURRENT_STATUS
+        internal static uint DevNodeStatus(out uint status,out uint problem,uint node,uint flags)
+        {
+            if(node!=10 || flags!=0)throw new Exception("Status node/flags changed");
+            StatusCalls++;status=Config.StatusBits;problem=Config.ProblemCode;
+            Calls.Add($"devnode-status:{node}:{flags}:{(Config.ProbeFault=="status-throw"?"throw":Config.StatusResult.ToString())}:{status}:{problem}");
+            if(Config.ProbeFault=="status-throw")throw new InvalidOperationException("inert diagnostic status");
+            return Config.StatusResult;
+        }
+#endif
         internal static uint Enable(uint node,uint flags)
         {
             if(flags!=0)throw new Exception("Enable flags changed");

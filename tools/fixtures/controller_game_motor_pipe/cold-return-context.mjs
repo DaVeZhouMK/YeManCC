@@ -20,7 +20,7 @@ export function coldReturnContext({sourceFile,resolveInput}){
   bindings.push({symbol,kind:'declaration',file:input,originalSourceSha256:digest(text),sha256:digest(code),startUtf8Byte:Buffer.byteLength(text.slice(0,match.index)),endUtf8ByteExclusive:Buffer.byteLength(text.slice(0,match.index+code.length)),environmentLeaf:false});
   return code;
  }
- function variable(text,input,symbol){return declaration(text,input,symbol,new RegExp('^static [^\\r\\n]*\\b'+symbol+'\\b[^\\r\\n]*','gm'));}
+ function variable(text,input,symbol){return declaration(text,input,symbol,new RegExp('^static [^\\r\\n;{}()=]*\\b'+symbol+'\\b[ \\t]*(?=[=;{])[^\\r\\n]*','gm'));}
  function member(text,input,symbol,kind='function'){
   const row=extract(text,symbol,kind);bindings.push({...row,code:undefined,file:input,originalSourceSha256:digest(text),environmentLeaf:false});return row.code;
  }

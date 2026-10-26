@@ -38,12 +38,16 @@ inline bool jsonLinesEvidenceName(std::string name) {
         "frontend-errors.log","frontend-trace.log","frontend-trace-detail.log","webview-failures.log","fan-api.log",
         "fan-lifecycle.log","gyro-motion.log","virtual-gamepad.log","focus-trace.log","hardware-coordinator.log",
         "input-host-fatal.log","input-host-rejects.log","input-host-cost.log","input-host-signal.log","input-host-report-chain.log","input-host-xbox-sdk.log",
-        "recovery-service.log","fan-host-fault.log","yeman-fan-host-runtime.log","sleep-facts.log",
+        "recovery-service.log","steam-original-recovery.jsonl","fan-host-fault.log","yeman-fan-host-runtime.log","sleep-facts.log",
         "battery-charge-client.log","battery-charge-host.log","msi-controller-visibility.log"})if(name==exact)return true;
     const std::string prefix="msi-controller-visibility-wake-";
     if(name.compare(0,prefix.size(),prefix)==0 && name.size()>prefix.size()+4 && name.compare(name.size()-4,4,".log")==0)
         return logEvidenceNumber(name.substr(prefix.size(),name.size()-prefix.size()-4));
     return false; // Steam/HC/app text logs are NOT malformed JSONL.
+}
+inline bool jsonDocumentEvidenceName(std::string name) {
+    name=canonicalLogEvidenceName(std::move(name));
+    return name.size()>=5 && name.compare(name.size()-5,5,".json")==0;
 }
 inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const std::string& entry) noexcept {
     try {
@@ -61,7 +65,7 @@ inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const
         row["endsWithNewline"]=size==0 || (!text.empty()&&text.back()=='\n');row["status"]="inspected";
         if(!jsonl)return row;
         size_t cursor=0;if(offset){const auto first=text.find('\n');cursor=first==std::string::npos?text.size():first+1;row["leadingBoundaryLineNotInspected"]=true;}
-        unsigned long long valid=0,invalid=0,oversize=0;std::string firstTime,lastTime;
+        unsigned long long valid=0,invalid=0,oversize=0;std::string firstTime,lastTime,firstTimeField,lastTimeField;
         bool partialTail=false,oversizeTail=false;
         while(cursor<text.size()){
             const auto newline=text.find('\n',cursor);const bool terminal=newline==std::string::npos;
@@ -69,15 +73,18 @@ inline EvidenceJson stagedFileEvidence(const std::filesystem::path& staged,const
             if(count>65536){++oversize;if(terminal)oversizeTail=true;}
             else if(count){
                 try {auto value=EvidenceJson::parse(text.substr(cursor,count));++valid;
-                    std::string time;for(const auto* key:{"timeWithOffset","timestampLocal","time","timestampUtc","atUtc"})
-                        if(value.is_object()&&value.contains(key)&&value[key].is_string()){time=value[key].get<std::string>();break;}
-                    if(!time.empty()){if(firstTime.empty())firstTime=time;lastTime=time;}
+                    std::string time,timeField;for(const auto* key:{"timestampUtc","timeWithOffset","timestampLocal","atUtc","time"})
+                        if(value.is_object()&&value.contains(key)&&value[key].is_string()){time=value[key].get<std::string>();timeField=key;break;}
+                    if(!time.empty()){if(firstTime.empty()){firstTime=time;firstTimeField=timeField;}lastTime=time;lastTimeField=timeField;}
                 }catch(...){++invalid;if(terminal)partialTail=true;}
             }
             if(terminal)break;cursor=newline+1;
         }
         row["validJsonRows"]=valid;row["invalidJsonRows"]=invalid;row["oversizeRowsNotParsed"]=oversize;
         row["firstTime"]=firstTime.empty()?"not-observed":firstTime;row["lastTime"]=lastTime.empty()?"not-observed":lastTime;
+        row["firstTimeField"]=firstTimeField.empty()?EvidenceJson(nullptr):EvidenceJson(firstTimeField);
+        row["lastTimeField"]=lastTimeField.empty()?EvidenceJson(nullptr):EvidenceJson(lastTimeField);
+        row["timeScope"]="first-last-in-inspected-file-order;field-names-retained;legacy-time-zone-not-inferred";
         row["partialOrInvalidTrailingRecord"]=partialTail;row["oversizeTrailingRecordNotParsed"]=oversizeTail;
         row["recordBoundary"]=partialTail?"partial-or-invalid-tail-retained":oversizeTail?"oversize-tail-retained-not-parsed":row["endsWithNewline"].get<bool>()?"line-terminated":"valid-json-without-final-newline";
         if(partialTail)row["status"]="snapshot-partial-tail-retained";

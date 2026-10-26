@@ -162,6 +162,58 @@ try {
     assert.equal(f.detailLogBusy.value, false);
     assert.equal(f.messages.length, 0);
   });
+  await check('export-failure-preserves-native-stage-code-attempts-and-cleanup-warning', async () => {
+    const f = fixture(async () => ({ ok: false, reason: 'archive-failed-after-2-attempts', lastError: 'tar-exit-nonzero', win32Error: 5, attempts: 2, cleanupOk: false }));
+    await f.exportAllLogs();
+    assert.equal(f.detailLogStatus.value, '导出失败：archive-failed-after-2-attempts；失败阶段：tar-exit-nonzero；Win32 代码：5；尝试次数：2；临时文件清理未完成');
+    assert.equal(f.detailLogBusy.value, false);
+    assert.equal(f.calls.length, 1, 'Showing native retry count must not retry the export');
+    assert.equal(f.calls[0][0], 'logs.exportAll');
+    assert.equal(f.messages.length, 0);
+  });
+  await check('export-failure-fields-are-independent-and-zero-code-is-not-dropped', async () => {
+    for (const [fields, detail] of [
+      [{ lastError: 'setup-create-process' }, '失败阶段：setup-create-process'],
+      [{ win32Error: 0 }, 'Win32 代码：0'],
+      [{ attempts: 1 }, '尝试次数：1'],
+      [{ cleanupOk: false }, '临时文件清理未完成'],
+    ]) {
+      const f = fixture(async () => ({ ok: false, ...fields }));
+      await f.exportAllLogs();
+      assert(f.detailLogStatus.value.startsWith('导出失败：'));
+      assert(f.detailLogStatus.value.includes(detail), detail);
+      assert(!f.detailLogStatus.value.includes('undefined'));
+      assert.equal(f.detailLogBusy.value, false);
+      assert.equal(f.calls.length, 1);
+      assert.equal(f.messages.length, 0);
+    }
+  });
+  await check('export-success-with-cleanup-and-attempt-metadata-keeps-original-feedback', async () => {
+    const f = fixture(async () => ({ ...successfulArchive, attempts: 2, cleanupOk: true }));
+    await f.exportAllLogs();
+    assert.equal(f.detailLogStatus.value, exportText);
+    assert.equal(f.detailLogBusy.value, false);
+    assert.equal(f.messages.length, 0);
+  });
+  await check('export-success-with-cleanup-failure-stays-success-with-inline-warning', async () => {
+    const f = fixture(async () => ({ ...successfulArchive, cleanupOk: false }));
+    await f.exportAllLogs();
+    assert.equal(f.detailLogStatus.value, exportText + '；临时文件清理未完成');
+    assert.equal(f.detailLogBusy.value, false);
+    assert.equal(f.calls.length, 1);
+    assert.equal(f.messages.length, 0);
+  });
+  await check('successful-export-after-detailed-failure-clears-stale-diagnostics', async () => {
+    let calls = 0;
+    const f = fixture(async () => ++calls === 1 ? { ok: false, reason: 'archive-failed-after-2-attempts', lastError: 'publish-zip-failed', win32Error: 32, attempts: 2, cleanupOk: false } : successfulArchive);
+    await f.exportAllLogs();
+    assert(f.detailLogStatus.value.includes('publish-zip-failed'));
+    await f.exportAllLogs();
+    assert.equal(f.detailLogStatus.value, exportText);
+    assert.equal(f.detailLogBusy.value, false);
+    assert.equal(f.calls.length, 2);
+    assert.equal(f.messages.length, 0);
+  });
   await check('unconfirmed-export-or-missing-path-cannot-show-success', async () => {
     for (const response of [{ ok: true }, { path: successfulArchive.path }]) {
       const f = fixture(async () => response);

@@ -650,3 +650,26 @@ static void msiCrashRecoveryMaintenance(ULONGLONG now) {
         else msiOwnedReturnRecordInitial("input-host-stop",MsiClawCommandOutcome{});
     }
 }
+
+// Read-only companion to shared OFF cleanup evidence. No recovery, record
+// write, registry/PnP read, mode command or journal retirement is performed.
+static json msiCrashCleanupEvidenceLocked() noexcept {
+    if(!g_inputHostMx.ownedByCurrentThread())return nullptr;
+    try {
+        if(!msiClawKnownBoardAuthority())return {{"applicable",false}};
+        json result={{"applicable",true},{"snapshotAvailable",false},
+            {"startupAttempted",g_msiCrashStartupAttempted},
+            {"startupTransactionPresent",!g_msiCrashStartupTransactionId.empty()},
+            {"startupHiddenPathCount",g_msiCrashStartupHiddenPaths.size()},
+            {"scope","cached-native-return-record;not-physical-return-proof"}};
+        std::unique_lock<std::mutex> lock(g_msiCrashMx,std::try_to_lock);
+        if(!lock.owns_lock())return result;
+        result.update({{"snapshotAvailable",true},{"loaded",g_msiCrashLoaded},
+            {"invalid",g_msiCrashStoreInvalid},{"modeReturnPending",g_msiCrashRecord.modeReturnPending},
+            {"ownedHiddenPathCount",g_msiCrashRecord.hiddenPaths.size()},
+            {"recordOwnerPid",g_msiCrashRecord.ownerPid},
+            {"recordOwnerCreationTime",g_msiCrashRecord.ownerCreationTime},
+            {"recordTransactionId",g_msiCrashRecord.transactionId.substr(0,128)}});
+        return result;
+    }catch(...){return nullptr;}
+}

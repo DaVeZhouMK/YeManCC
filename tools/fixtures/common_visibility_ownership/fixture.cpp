@@ -42,7 +42,10 @@ static void msiControllerTraceLog(const char*,json,bool){}
 static bool inputHostTargetReturnBeforeHideLocked(
  const std::vector<HidHidePhysicalIdentity>&,const HidHideVisibilitySnapshot&,
  const HidHideVisibilitySnapshot&,const std::string&,const std::string&,
- bool* responsibilityReserved=nullptr){
+ bool* responsibilityReserved=nullptr,bool nativeOwnedReassertion=false){
+ // This consumer covers ordinary refresh ownership only. Never supply the
+ // native donor authority which belongs to its separate actual runtime test.
+ if(nativeOwnedReassertion){if(responsibilityReserved)*responsibilityReserved=false;return false;}
  if(responsibilityReserved)*responsibilityReserved=true;
  return true;
 }

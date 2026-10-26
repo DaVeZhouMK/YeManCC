@@ -1,5 +1,6 @@
 #define NOMINMAX
 #include "sleep_residency_evidence.h"
+#include "sleep_export_diagnostics.h"
 #include <algorithm>
 #include <cmath>
 #include <fstream>
@@ -8,13 +9,14 @@
 #include <utility>
 #include <vector>
 using json = nlohmann::json;
-static unsigned checks = 0;
+static unsigned sleepEvidenceChecks = 0;
 static void check(bool ok, const std::string& name) {
-    ++checks;
+    ++sleepEvidenceChecks;
     if (!ok) throw std::runtime_error("CHECK_FAILED: " + name);
 }
 static std::vector<std::pair<std::string, json>> captured;
-static unsigned long long currentPowerGeneration() { return 771; }
+static unsigned long long testPowerGeneration=771;
+static unsigned long long currentPowerGeneration() { return testPowerGeneration; }
 static std::string sgFormatFactFileTime(unsigned long long) { return "fixture-original-event-time"; }
 static void (*runtimeFactObserver)(const char*,const json&)=nullptr;
 static void sgRecordFact(const char* event, const json& details) { captured.emplace_back(event, details);if(runtimeFactObserver)runtimeFactObserver(event,details); }
@@ -23,12 +25,23 @@ static void productionCapture(bool leaving, const std::string& xml) {
 #include "production_capture_hook.inc"
 }
 #include "abnormal_native_harness.inc"
+#ifndef YMCC_SLEEP_EXPORT_DIAGNOSTICS_SHARED
+#include "sleep_export_harness.inc"
+#endif
 #include "static_wake_harness.inc"
+#include "static_wake_schedule_harness.inc"
 int main(int argc, char** argv) {
     try {
         if (argc != 3) throw std::runtime_error("expected cases.json and result.json");
         std::ifstream input(argv[1]); json fixture; input >> fixture;
         json outcomes = json::array();
+        // Actual507 capture -> ordinary fact -> export selector. This producer
+        // join runs in every original mutation, independently of IO sharing.
+        productionCapture(true,"<Event><EventData><Data Name=\"DurationInUs\">120000000</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"SleepEntered\">true</Data></EventData></Event>");
+        check(captured.size()==1,"actual507 capture produces one source fact for export selection");
+        const json joined={{"event",captured.front().first},{"writerInstanceId","production-capture-join"},{"details",captured.front().second}};
+        check(ymcc::sleepexport::selectAnomaly({joined.dump()})==joined,"actual507 ordinary evidence reaches export selector without a separate schema model");
+        captured.clear();
         for (const auto& c : fixture.at("cases")) {
             const auto name = c.at("name").get<std::string>();
             const auto evidence = ymcc::sleep_residency::makeEvidence(c.at("xml").get<std::string>());
@@ -58,14 +71,25 @@ int main(int argc, char** argv) {
             check(emitted == evidence, name + ": emitted assessment is the production header result");
             captured.clear(); outcomes.push_back({{"name", name}, {"evidence", evidence}});
         }
+#ifdef YMCC_SLEEP_EXPORT_DIAGNOSTICS_SHARED
+        const unsigned sleepExportDiagnosticChecks=0; // Original none child owns this independent companion.
+#else
+        const auto sleepExportDiagnosticChecks=sleepExportDiagnosticTests();
+        check(sleepExportDiagnosticChecks>0,"export-only helper and actual native adapter execute nonzero checks");
+#endif
+        // Historical engine is explicitly isolated from the real production hooks.
         const auto runtimeChecks=abnormalRuntimeTests(fixture);
+        const auto conservativeProductionChecks=abnormalConservativeProductionTests();
+        check(conservativeProductionChecks>0,"real conservative production entry consumer executes nonzero checks");
         const auto staticWakeChecks=staticWakePolicyTests();
         check(staticWakeChecks>0,"static wake harness executes nonzero checks");
-        json result = {{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", checks}, {"cases", fixture.at("cases").size()},
+        const auto staticWakeScheduleChecks=staticWakeScheduleTests();
+        check(staticWakeScheduleChecks>0,"static wake schedule harness executes nonzero checks");
+        json result = {{"sleepExportDiagnosticChecks",sleepExportDiagnosticChecks},{"realSleepStudyQuery",false},{"conservativeProductionChecks",conservativeProductionChecks},{"historicalStagedEngineChecks",runtimeChecks},{"staticWakeScheduleChecks",staticWakeScheduleChecks},{"staticWakeChecks",staticWakeChecks},{"runtimeChecks",runtimeChecks},{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()},
             {"caseResults", outcomes}, {"actualSleepCalls", 0}, {"hardwareCalls", 0},
-            {"scope", "actual production accounting and abnormal runtime; 30 synthetic inputs plus archived ROG raw-field records and static-wake controls; Windows power boundaries mocked"}};
+            {"scope", "actual completed507 accounting and conservative production hooks; staged engine is historical-only explicit StartPhase regression; static companions separately scoped; Windows boundaries mocked; export-only WindowsSleepStudy adapter uses inert commands and owned local files"}};
         std::ofstream output(argv[2]); output << result.dump(2) << '\n';
-        std::cout << json{{"status", "passed"}, {"checks", checks}, {"cases", fixture.at("cases").size()}}.dump() << '\n';
+        std::cout << json{{"status", "passed"}, {"checks", sleepEvidenceChecks}, {"cases", fixture.at("cases").size()}}.dump() << '\n';
         return 0;
     } catch (const std::exception& error) { std::cerr << error.what() << '\n'; return 1; }
 }

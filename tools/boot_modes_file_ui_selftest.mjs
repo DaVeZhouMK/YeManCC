@@ -9,7 +9,7 @@ const out=outputDirectory(process.argv.slice(2),'file-ui');
 const report={schema:1,suite:'boot-modes-file-ui',pass:false,caseId:'settings.boot-modes-file-ui',scope:'Actual Vue/PowerView shell and gamepad engine -> actual boot bridge/settings repository -> production Win32 atomic file IO/metadata and native delta/CAS writers -> native startup policy -> fresh frontend repository. System app mutex, InputHost admission, services, registry and hardware owners are isolated. No installed app or physical reboot.',assertions:[],policyFailures:[],presetObservations:[],navigationFailures:[],sourceHashes:{},pageErrors:[],networkRejected:[],screenshots:[],coverage:[],timing:{}};
 const started=performance.now(),ids=['global','xbox','steam','xbox-steam'];let browser,server,active,native;
 const fileRead=f=>JSON.parse(fs.readFileSync(f,'utf8'));
-const sources=new Set([...nativeInputs,'tools/boot_modes_file_ui_selftest.mjs','tools/boot_modes_fixture/diskSettings.mjs','tools/boot_modes_fixture/diskApiPort.ts','tools/boot_modes_fixture/fileBrowserPorts.ts','PowerControl/settings-defaults-v1.json']);
+const sources=new Set([...nativeInputs,'tools/boot_modes_file_ui_selftest.mjs','tools/boot_modes_fixture/diskSettings.mjs','tools/boot_modes_fixture/diskApiPort.ts','tools/boot_modes_fixture/fileBrowserPorts.ts','PowerControl/settings-defaults-v1.json','tools/boot_modes_fixture/fixtures/win5-unconfigured-20261025.json']);
 const pinned=new Map();const pin=p=>{const value=hash(path.join(repo,p));if(pinned.has(p))assert.equal(value,pinned.get(p),'source changed during UI round '+p);else pinned.set(p,value);sources.add(p);};const collect=a=>a.inputs.forEach(pin);
 const command=async(page,action)=>{await page.evaluate(action=>window.__bootGamepad.command(action),action);if(action==='confirm'||action==='back')await page.evaluate(()=>new Promise(resolve=>requestAnimationFrame(resolve)));};
 const focus=async(page,locator)=>locator.evaluate(el=>window.__bootGamepad.focus(el));
@@ -50,6 +50,7 @@ async function editPersonaThroughUi(page,mode,persona){
 const cases=[];
 for(const target of ids)cases.push({kind:'absent',source:'global',target});
 for(const target of ids)cases.push({kind:'legacy',source:'global',target});
+for(const target of ids){cases.push({kind:'field-win5',source:'global',target});cases.push({kind:'field-win5',source:'global',target,custom:{global:'elite',xbox:'steamdeck',steam:'disabled','xbox-steam':'elite'}[target]});}
 for(const source of ids)for(const target of ids)cases.push({kind:'transition',source,target});
 for(const target of ids)cases.push({kind:'custom',source:'global',target,custom:{global:'elite',xbox:'disabled',steam:'steamdeck','xbox-steam':'dualsense-edge'}[target]});
 for(const fault of ['write-failure','corrupt-backup','corrupt-no-backup','future-schema'])cases.push({kind:'fault',source:'global',target:'xbox-steam',fault});
@@ -64,11 +65,12 @@ try{
   await page.exposeFunction('__bootFileBackend',async(operation,args)=>{const allowed=['loadBootModes','saveBootModes','chooseBootMode','readBootModeSupport','bootModeConnections','addBootSharedApplication'];assert(allowed.includes(operation),'forbidden UI call '+operation);active.bind();const value=await active.a.boot[operation](...args);return structuredClone(value);});
   await page.route('**/*',async route=>{if(route.request().url().startsWith(origin+'/')||route.request().url().startsWith('data:'))await route.continue();else{report.networkRejected.push(route.request().url());await route.abort();}});
   for(let index=0;index<cases.length;index++){
-   const c=cases[index],name=height+'-'+c.kind+'-'+c.source+'-to-'+c.target+(c.fault?'-'+c.fault:''),dir=out+'/files/'+name;let next;
+   const c=cases[index],name=height+'-'+c.kind+'-'+c.source+'-to-'+c.target+(c.fault?'-'+c.fault:'')+(c.kind==='field-win5'&&c.custom?'-custom-'+c.custom:''),dir=out+'/files/'+name;let next;
    const entry={name,height,...c,pass:false};let began=performance.now();
    try{
     active=await createDiskRuntime(dir,native,{storageDirectory:path.join(report.storageWorkspace,height+'-'+String(index).padStart(2,'0')),moduleDirectory:out+'/runtime-module'});collect(active.a);const defaults=JSON.parse(fs.readFileSync(repo+'/PowerControl/settings-defaults-v1.json','utf8'));
-    if(c.kind==='legacy')active.writeRaw({schemaVersion:1,input:{revision:7,outputTarget:{persona:'disabled',buttonMappingEnabled:false},startupAppliedSession:'legacy-native-process'},startupDesired:{virtualGamepadPersona:'disabled'},future:{sentinel:'keep'}});
+    if(c.kind==='field-win5')active.writeRaw(JSON.parse(fs.readFileSync(repo+'/tools/boot_modes_fixture/fixtures/win5-unconfigured-20261025.json','utf8')));
+    else if(c.kind==='legacy')active.writeRaw({schemaVersion:1,input:{revision:7,outputTarget:{persona:'disabled',buttonMappingEnabled:false},startupAppliedSession:'legacy-native-process'},startupDesired:{virtualGamepadPersona:'disabled'},future:{sentinel:'keep'}});
     else if(c.kind!=='absent'){defaults.future={sentinel:'keep'};active.writeRaw(defaults);}
     entry.fileExistedBeforeRead=fs.existsSync(active.file);
     if(c.fault==='corrupt-no-backup'||c.fault==='future-schema'){
@@ -85,10 +87,11 @@ try{
     }
     await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled&&!!window.__bootFileDocument);
     const before=active.read(),currentPersona=before.input.outputTarget.persona;entry.currentPersonaBefore=currentPersona;
+    if(c.kind==='field-win5'){assert.equal(before.extensions?.bootModes,undefined);assert.equal(before.startupDesired.virtualGamepadPersona,'disabled');entry.fieldState='boot marker exists without boot-mode document; legacy preference off';}
     if(c.kind==='absent'){
      const card=page.locator('.boot-mode-cards button').nth(ids.indexOf(c.target));await focus(page,card);await command(page,'confirm');entry.editorReturn=await editorPeek(page,c.target,height);assert.equal(await page.evaluate(()=>window.__bootFileCalls.includes('saveBootModes')),false);
     }
-    if(c.kind==='custom')entry.realEdit=await editPersonaThroughUi(page,c.target,c.custom);
+    if(c.kind==='custom'||c.kind==='field-win5'&&c.custom)entry.realEdit=await editPersonaThroughUi(page,c.target,c.custom);
     entry.editorSavesBeforeSelection=await page.evaluate(()=>window.__bootFileCalls.filter(op=>op==='saveBootModes').length);const requested=await page.evaluate(()=>window.__bootFileDocument);entry.requestedPersona=active.a.model.resolveBootMode(requested,c.target).input.persona;
     if(c.fault==='write-failure')active.faults.failWrite=true;
     await choose(page,c.target);
@@ -99,6 +102,7 @@ try{
     const selected=active.read();assert.equal(selected.extensions.bootModes.boot,c.target);assert.equal(selected.extensions.bootModes.bootEnabled,true);assert.equal(selected.input.outputTarget.persona,currentPersona,'selection hot-applied the controller');assert.equal(selected.extensions.bootModes.current,before.extensions?.bootModes?.current||'global');assert.equal(await page.evaluate(()=>window.__bootFileCalls.filter(op=>op==='saveBootModes').length),entry.editorSavesBeforeSelection,'selection performed an extra editor save');
     entry.savedPersona=selected.startupDesired.virtualGamepadPersona;entry.summary=await page.locator('.boot-summary').innerText();fs.copyFileSync(active.file,dir+'/selected-settings.json');
     const expected=c.custom??entry.requestedPersona;
+    if(c.kind==='field-win5'){const expectedField=c.custom??(c.target==='steam'||c.target==='xbox-steam'?'steamdeck':'disabled');assert.equal(expected,expectedField,'Win5 defaults/custom intent must follow the independent four-mode contract');}
     assert.equal(entry.savedPersona,expected,'intent differs from configured/global scene');
     report.presetObservations.push({name,height,mode:c.target,requestedPersona:entry.requestedPersona,savedPersona:entry.savedPersona,custom:c.custom??null});
     const same=await active.startup('fixture-windows-boot-1','same-boot-new-process');assert.equal(same.ok,true);assert.equal(JSON.parse(same.content).input.outputTarget.persona,currentPersona,'app restart replayed next boot');

@@ -29,6 +29,8 @@
 
 #include "fan_resume_evidence.h"
 #include "sleep_residency_evidence.h"
+#include "sleep_notification_evidence.h"
+#include "sleep_export_diagnostics.h"
 #include "sleep_abnormal_resleep.h"
 #include "sleep_request_fallback.h"
 #include "fan_activity_identity.h"
@@ -59,6 +61,8 @@
 #include "input_host_transport_state.h"
 #include "xinput_identity_refresh_policy.h"
 #include "input_host_recovery_health.h"
+#include "controller_device_stack_evidence.h"
+#include "controller_pnp_veto_evidence.h"
 #include "input_host_lifecycle_claim.h"
 #include "virtual_start_protection.h"
 #include "input_host_transaction_mutex.h"
@@ -225,6 +229,7 @@ static ymcc::msi::rearObservation::Counters g_msiRearSourceObservation;
 #include "steam_log_export.h"
 #include "log_export_evidence.h"
 #include "log_ai_index.h"
+#include "sleep_fact_log_record.h"
 #include "tdp_static_observation.h"
 #include "buffered_domain_log.h"
 #include "quick_app_file_icons.h"
@@ -1210,6 +1215,7 @@ static HPOWERNOTIFY       g_idleDisplayNotify = nullptr; // diagnostic session o
 static std::atomic<int> g_idleSessionDisplayState{-1},g_idleLegacyMonitorState{-1};
 static HPOWERNOTIFY       g_schemeNotify = nullptr; // 活动电源方案通知句柄
 static HPOWERNOTIFY       g_suspendResumeNotify = nullptr; // Windows 8+ 专用挂起/恢复订阅句柄
+static ymcc::sleepnotifications::Evidence g_sleepNotificationEvidence;
 static EVT_HANDLE         g_sgKernelPowerSubscription = nullptr; // Kernel-Power 506/507 intent evidence
 static int               g_lastAcState  = -1;      // -1=未初始化 0=离电(DC) 1=插电(AC)
 static std::atomic<unsigned long long> g_acdcDebounceGeneration{1};
@@ -1226,6 +1232,8 @@ static std::vector<DWORD> g_acSwitchTicks;          // 5 秒滑动窗口内的�
 #define SG_MONITOR_ENTRY_FAILURE_TIMER_ID 0xA20E // S0 睡眠后屏幕异常保持亮起
 #define SG_ABNORMAL_TIMER_ID 0xA212
 static constexpr UINT WM_SG_ABNORMAL_EVIDENCE=WM_APP+825;
+static constexpr UINT WM_SG_STATIC_SCAN=WM_APP+826;
+static constexpr UINT_PTR SG_STATIC_SCAN_TIMER_ID=0xA213;
 #define RESUME_GAME_FOCUS_TIMER_ID 0xA211 // bounded, optional post-thaw focus scheduling
 // GP-926R17c（operator 指定）：唤醒对焦 nudge 的延迟计时器（5 s 一次性；无目标则跳过）。
 #define WAKE_FOCUS_NUDGE_TIMER_ID 0xA20F
@@ -1502,6 +1510,7 @@ static void sgCancelEntryFailureRetry(const char* reason);
 static void sgAbnormalStop(const char* reason);
 static void sgAbnormalStopAsync();
 static bool sgAbnormalPermitted();
+static bool sgAbnormalDispatchReady();
 static bool sgAbnormalSourceReady();
 static bool sgAbnormalObserveOwnedRetry(ULONGLONG originalHumanIntent, ULONGLONG requestFileTime);
 static void sgAbnormalOwnedRetryResult(ULONGLONG originalHumanIntent, ULONGLONG requestFileTime, bool accepted);
@@ -1641,6 +1650,8 @@ static void fanDiagnosticsApplyEnabled(bool enabled);
 static void rogBindInputHid();
 static bool rogEnsureXboxFaceEnabled(const char* reason);
 static void sgRecordFact(const char* event, const json& details = json::object());
+static void sgStaticScanCancel(const char* reason);
+static void sgStaticScanSchedule(bool startup);
 static std::string nativeLifecycleTimestamp();
 static std::wstring yemancc_data_dir();
 static std::wstring fan_host_state_dir();
@@ -2106,6 +2117,7 @@ static bool powerLifecycleMatches(PowerLifecycle phase, unsigned long long gener
 
 static void closeHardwareWriteGate(const char* reason) {
     g_hardwareWriteGate.store(false, std::memory_order_release);
+    sgStaticScanCancel(reason); // Cancel pending/active inventory before sleep owns the machine.
     msiDinputInvalidateFeedbackLease();
     traceLog("power gate closed reason=%s generation=%llu", reason ? reason : "unknown",
              currentPowerGeneration());
@@ -2127,6 +2139,15 @@ static std::condition_variable g_sgWorkCv;
 static std::deque<SgWorkItem> g_sgWorkQ;
 static std::thread g_sgWorkThread;
 static bool g_sgWorkStop = false;
+// Changes and notification share the wait mutex, so a completion cannot be
+// lost between computing an absolute deadline and entering the blocked wait.
+static unsigned long long g_sgWorkWakeRevision = 0;
+static void sgNotifyWork() {
+    { std::lock_guard<std::mutex> lock(g_sgWorkMx); ++g_sgWorkWakeRevision; }
+    g_sgWorkCv.notify_one();
+}
+static ULONGLONG sgWakeGameRecoveryWaitMs(ULONGLONG now);
+static ULONGLONG sleepRecoveryAutoWaitMs(ULONGLONG now);
 static std::atomic<bool> g_sgWakeRecoveryPending{false};
 static std::atomic<unsigned long long> g_sgManualPauseSerial{0};
 static std::atomic<unsigned long long> g_sgExplicitGameWakeGeneration{0};
@@ -2307,7 +2328,8 @@ static SgSystemSleepRequestResult sgRequestSystemSleep(
         const bool windowValid=mode!=Mode::ModernStandby || (g_hwnd && IsWindow(g_hwnd));
         // Logging and window validation can yield to event callbacks. Recheck
         // after them, immediately before the OS boundary for every fallback.
-        if (canceled()) return {Outcome::Failed,ERROR_CANCELLED};
+        // The live-source query can also block: manual veto is checked after it.
+        if ((staged && !sgAbnormalDispatchReady()) || canceled()) return {Outcome::Failed,ERROR_CANCELLED};
         g_sgAutomaticSleepTarget.store(mode,std::memory_order_release);
         SetLastError(ERROR_SUCCESS);
         BOOL accepted=FALSE;
@@ -2406,8 +2428,12 @@ static void sgRecordFact(const char* event, const json& details) {
         {"event", event ? event : "unknown"},
         {"details", details.is_object() ? details : json::object()}
     };
-    const std::string line = record.dump();
+    ymcc::sleepfactlog::decorateRecord(record,currentPowerGeneration());
     std::lock_guard<std::mutex> lock(g_sgFactMx);
+    // Append order only. A reservation is not a durable file-write acknowledgement.
+    static unsigned long long writerSequence=0;
+    record["writerSequence"]=++writerSequence;
+    const std::string line = record.dump();
     g_sgFacts.push_back(line);
     while (g_sgFacts.size() > SG_FACT_HISTORY_LIMIT) g_sgFacts.pop_front();
 
@@ -6716,16 +6742,23 @@ static void inputHostRaiseExitFence(const char* trigger);
 // 因此这里用普通 std::string 不构成数据竞争（本文件内仅这两类读点）。
 static std::string g_exitSessionId;
 
-static void inputCaptureAwaitStopForExit();
+static bool inputCaptureAwaitStopForExit();
+static bool inputCaptureExitProducerOwnershipReleased() noexcept;
+static bool inputHostTryOrdinaryStopForExit();
 static void inputHostNoteExitStopAttempted() noexcept;
 static bool inputHostRetireLocalResourcesForExit();
-static void inputHostAwaitLocalRetirementForExit();
+static bool inputHostAwaitLocalRetirementForExit();
 static bool inputHostExitLocalOwnershipReleased() noexcept;
 static void inputCaptureEnsureExitOwner(WPARAM code);
 static bool inputCaptureExitOwnershipReleased() noexcept;
 static void inputCaptureClearExitConfiguration();
 static void inputHostQuiesceForCaptureExit();
 static std::atomic<bool> g_captureExitReleased{false};
+// Producer retirement is narrower than full sensor/COM/Close resource return.
+static std::atomic<bool> g_captureExitProducerReturned{false};
+static std::atomic<std::uint64_t> g_captureExitProducerGeneration{0};
+static std::atomic<bool> g_captureExitSyncCancelIssued{false};
+static std::atomic<unsigned> g_captureExitProviderRetryMask{0};
 
 static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     g_optiCatalogStartup.stop();
@@ -6765,12 +6798,12 @@ static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     // 批136：**放在风扇交接之后**（协议未改，仅顺序调整）。
     g_exitCleanupStage.store("input-release",std::memory_order_release);
     inputHostQuiesceForCaptureExit();
-    inputCaptureAwaitStopForExit();
+    (void)inputCaptureAwaitStopForExit(); // this same owner continues after a retained checkpoint
+    g_exitCleanupStage.store("input-release",std::memory_order_release);
     oemVendorStackRestore("app-exit");
     msiNativeForegroundExitCleanup();
     externalControllerPriorityShutdown();
-    inputHostStop("app-exit");
-    inputHostNoteExitStopAttempted();
+    (void)inputHostTryOrdinaryStopForExit();
     (void)inputHostRetireLocalResourcesForExit();
     inputCaptureClearExitConfiguration();
     appendNativeLifecycleLog("exit-chain-order", {
@@ -6825,7 +6858,7 @@ static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     }
     // Other feature cleanup has completed before any retained local Close wait.
     g_exitCleanupStage.store("input-local-return",std::memory_order_release);
-    inputHostAwaitLocalRetirementForExit();
+    (void)inputHostAwaitLocalRetirementForExit(); // late completion retains its original owner
     g_exitCleanupStage.store("finished",std::memory_order_release);
     appendNativeLifecycleLog("exit-cleanup-finished", {
         {"exitSessionId",g_exitSessionId},{"elapsedMs",GetTickCount64()-exitChainStartTick},
@@ -8401,6 +8434,15 @@ struct InputFrameSubmission {
     std::uint64_t gameMotorBinding=0;
     const ymcc::legion_motion::Sample* controllerMotion = nullptr;
     const ymcc::windows_motion::Stamp* windowsMotion = nullptr;
+    // Borrowed only within inputHostSubmitPad: its Effective keeps the exact
+    // immutable plan alive through final pipe issue/ACK. Static hint is never
+    // dereferenced; null means this frame had no applied correction.
+    const std::atomic<const void*>* axisCalibrationPublished=nullptr;
+    const void* axisCalibrationExpected=nullptr;
+    bool axisCalibrationCurrent() const noexcept {
+        return !axisCalibrationPublished ||
+            axisCalibrationPublished->load(std::memory_order_acquire)==axisCalibrationExpected;
+    }
     bool physicalSourceAdmitted=false,rejected=false,sourceNeutralized=false;
     ymcc::input::frameSubmission::Verdict reason=ymcc::input::frameSubmission::Verdict::Allowed;
 };
@@ -23697,6 +23739,8 @@ static InputHostSwitchRecoveryRequest g_inputHostSwitchRecovery;
 static std::atomic<bool> g_inputHostSwitchRecoveryPending{false};
 static std::atomic<bool> g_inputHostSwitchExecutionReturnPending{false};
 static void inputHostSwitchExecutionReturnMaintenanceLocked();
+static bool inputHostSwitchExecutionCarryColdOffLocked(std::uint64_t);
+static json msiCrashCleanupEvidenceLocked() noexcept;
 static void recordStartupInputAttempt(bool);
 static bool inputHostSwitchExecutionReturnedLocked(std::uint64_t,const std::string&);
 static thread_local std::uint64_t g_inputHostSwitchRecoveryStartDeadline=0;
@@ -27533,6 +27577,10 @@ struct HidHideVisibilityJournal {
 
 static void msiForegroundIsolationRememberMain(const std::string& root);
 static void msiForegroundIsolationJournalReady();
+static bool msiNativeForegroundAcceptVirtualJournal(const HidHideVisibilitySnapshot&);
+static bool msiNativeForegroundReassertionBaseline(const std::string&,HidHideVisibilitySnapshot&);
+static bool msiNativeForegroundAppendHandoffTargets(std::vector<std::string>&);
+static bool msiNativeForegroundVirtualHandoffRequired(uint64_t);
 static void msiForegroundIsolationObserveNative(const HidHidePhysicalIdentity& source);
 static void msiNativeForegroundObserveSource(const HidHidePhysicalIdentity& source,uint64_t sourceGeneration);
 static bool gamepadUiInputEligible();
@@ -27545,7 +27593,10 @@ static HidHidePhysicalIdentity g_hidHidePhysicalIdentity;
 static HidHideVisibilityJournal g_hidHideVisibilityJournal;
 static bool inputHostTargetReturnBeforeHideLocked(
     const std::vector<HidHidePhysicalIdentity>&,const HidHideVisibilitySnapshot&,
-    const HidHideVisibilitySnapshot&,const std::string&,const std::string&,bool*);
+    const HidHideVisibilitySnapshot&,const std::string&,const std::string&,bool*,bool);
+static bool inputHostTargetReturnBeforeNativeHandoffLocked(
+    const std::vector<HidHidePhysicalIdentity>&,const HidHideVisibilitySnapshot&,
+    const std::string&,std::vector<std::wstring>*);
 static bool inputHostTargetReturnAfterPhysicalRestoreLocked(
     const HidHideVisibilitySnapshot&,bool,const std::vector<std::wstring>&);
 struct MsiClawHidDiag;
@@ -30103,6 +30154,34 @@ static void inputCaptureLogVisibilitySnapshotRows(const HidHideVisibilitySnapsho
         {"excludedNonGameTargets", excludedNonGameTargets},
         {"filterReadback", readback ? "yes" : "unknown"},
         {"filterAttached", "unknown"},
+        // Only current selected-node metadata at an existing transition. No
+        // global enumeration, persistent polling or input-admission decision.
+        {"pnpDeviceStackEvidence", [&]() -> json {
+            if(!g_machineIdentity.resolved ||
+                (g_machineIdentity.family!=YmccFamily::Gpd &&
+                 g_machineIdentity.family!=YmccFamily::OneXPlayer &&
+                 g_machineIdentity.family!=YmccFamily::Ayanero))return nullptr;
+#if defined(YMCC_MSI_FOREGROUND_ISOLATION_TEST) || defined(YMCC_FAULT_INJECT)
+            return {{"state","offline-consumer-pnp-read-suppressed"},{"writesHardware",false},
+                {"inputDeliveryProven",false}};
+#else
+            std::vector<std::string> exact;
+            for(const auto& target:facts.expectedHiddenTargets)hidHideAppendTarget(exact,W2U(target));
+            hidHideAppendTarget(exact,facts.deviceInstanceId);
+            hidHideAppendTarget(exact,facts.baseContainerDeviceInstanceId);
+            const auto powerBefore=currentPowerGeneration();
+            const auto topologyBefore=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+            auto evidence=ymcc::controller::deviceStack::capture(exact);
+            evidence["powerBefore"]=powerBefore;
+            evidence["powerAfter"]=currentPowerGeneration();
+            evidence["topologyBefore"]=topologyBefore;
+            evidence["topologyAfter"]=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+            evidence["contextStableAcrossRead"]=evidence["powerBefore"]==evidence["powerAfter"] &&
+                evidence["topologyBefore"]==evidence["topologyAfter"];
+            evidence["family"]=ymccFamilyName(g_machineIdentity.family);
+            return evidence;
+#endif
+        }()},
         {"externalVisibility", "unknown"},
         {"applicationRegistered", applicationRegistered},
         {"inverseApplicationList", inverseApplicationList},
@@ -30372,10 +30451,9 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
             {"pXinput", "UNENCLOSED"}
         });
     }
-    // 7.52 P1-T5（A3）：journal 持久化已删（HC 幂等 hide，崩溃不恢复）。
-    // persistIntent 门（曾在每个 hide/cloak/app-reg 前落盘"防进程崩溃遗忘
-    // 所有权"）随之删除——HC 无此机制；事务只在本进程内存内推进并由 readback
-    // 验证。
+    // Historical blanket journal was removed. Current exact-path duties are
+    // persisted at BeforeHide / BeforeNativeHandoff below, before dispatch.
+    // This current snapshot is configuration evidence, never foreign ownership.
     bool ok = true;
     // L1 方案 B（2026-09-29，用户裁决「落地豁免」）：主 exe 与 YeManLightSetter.exe
     // 一同登记为 HidHide 豁免（见 hidHideExemptApplicationPaths，首项恒为主模块）。
@@ -30410,14 +30488,42 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
             physicalSources.size(), "virtual-apply");
         targets.insert(targets.end(), physicalTargets.begin(), physicalTargets.end());
     }
+    if(!msiNativeForegroundAppendHandoffTargets(targets))return false;
     std::sort(targets.begin(), targets.end());
     targets.erase(std::unique(targets.begin(), targets.end()), targets.end());
+    // The native donor already hid the ENTIRE set. Save that existing duty
+    // atomically before any per-path re-hide: a forced stop after A must not
+    // leave B hidden with no durable owner. Ordinary hide tails stay per-path.
+    if(msiNativeForegroundVirtualHandoffRequired(g_inputHostStartProtectionBoundTicket)){
+        std::vector<std::wstring> nativeReserved;
+        const bool nativeAdmitted=inputHostTargetReturnBeforeNativeHandoffLocked(
+            physicalSources,before,transactionId,&nativeReserved);
+        for(const auto& path:nativeReserved)
+            if(!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,W2U(path)))
+                g_hidHideVisibilityJournal.hiddenByUs.push_back(path);
+        if(!nativeAdmitted)return false; // committed paths stay owed, even on rejection
+    }
     if(!msiCrashRecoveryBeforeHide(physicalSources.front(),targets,before,transactionId))return false;
     if(msiControllerTraceEnabled())msiControllerTraceLog("hide-targets-begin",{{"transactionId",transactionId},{"targets",targets},{"beforeReadbackValid",before.valid},{"beforeCloak",before.cloaking},{"beforeInverse",before.inverseRaw},{"applicationSnapshot",msiControllerVisibilityApplications(before,before.valid)}},false);
     for (const auto& target : targets) {
         if (!ok) break;
         if (target.empty() || hidHideIsVirtualIdentity(target, {})) { ok = false; break; }
         if (hidHideContainsPath(before.hidden, target)) {
+            HidHideVisibilitySnapshot nativeBaseline;
+            if(msiNativeForegroundReassertionBaseline(target,nativeBaseline)){
+                // Real idempotent hide while the original native hide stays
+                // active. Reserve its exact return duty BEFORE dispatch.
+                const std::wstring wide=U2W(target);
+                bool responsibilityReserved=false;
+                const bool reassertAdmitted=inputHostTargetReturnBeforeHideLocked(physicalSources,before,nativeBaseline,
+                    target,transactionId,&responsibilityReserved,true);
+                if(responsibilityReserved&&!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,target))
+                    g_hidHideVisibilityJournal.hiddenByUs.push_back(wide);
+                if(!reassertAdmitted){ok=false;break;}
+                ok=(inputHostHidHideApplyViaPipeLocked(L"hide",wide) ||
+                    hidHideRun(L"--dev-hide \""+wide+L"\"")) && ok;
+                continue;
+            }
             // GP-GBRETURN-2（缺陷A）：已在隐藏名单内 + 属于携带册 ⇒ 本会话自有责任：认领
             // （记入 hiddenByUs 供后续借用/退出恢复），**不重发 hide**；第三方 pre-hidden
             // 保持原行为不认领。
@@ -30435,7 +30541,7 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
         const std::wstring wide = U2W(target);
         bool responsibilityReserved=false;
         const bool hideAdmitted=inputHostTargetReturnBeforeHideLocked(physicalSources,before,before,
-            target,transactionId,&responsibilityReserved);
+            target,transactionId,&responsibilityReserved,false);
         if(responsibilityReserved&&!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,target))
             g_hidHideVisibilityJournal.hiddenByUs.push_back(wide);
         if(!hideAdmitted){ok=false;break;}
@@ -30526,6 +30632,9 @@ static bool hidHideApplyPhysicalTransaction(const std::string& transactionId, bo
             hideCycleOk = hidHideCycleInstance(U2W(hideBase), "hide");
         }
     }
+    // Finish the GPD native -> virtual handoff only after this exact hide/readback.
+    // Failure leaves the donor owned for the original Start cleanup.
+    if (!msiNativeForegroundAcceptVirtualJournal(after)) return false;
     // HC 的 Hide() 是 void 语义：CyclePort 失败不撤销 hide、不阻塞 admit
     // （失败细节已由 hidHideCycleInstance 记入 hidhide.cycle-hub-port 日志）。
     appendNativeLifecycleLog("hidhide.p-hid-admitted", {
@@ -30606,7 +30715,7 @@ static bool hidHideRefreshPhysicalHide(const std::string& transactionId, const c
             // existing carried/borrowed responsibility remains untouched.
             bool responsibilityReserved=false;
             const bool hideAdmitted=inputHostTargetReturnBeforeHideLocked(physicalSources,before,
-                g_hidHideVisibilityJournal.before,target,transactionId,&responsibilityReserved);
+                g_hidHideVisibilityJournal.before,target,transactionId,&responsibilityReserved,false);
             auto& hiddenByUs = g_hidHideVisibilityJournal.hiddenByUs;
             if (responsibilityReserved&&!hidHideContainsPath(hiddenByUs, target)) hiddenByUs.push_back(wide);
             if(!hideAdmitted){ok=false;break;}
@@ -35200,6 +35309,9 @@ static void inputHostCommandResultLog(const json& row) noexcept {
     catch(...) { /* diagnostic loss must not replace command success/failure */ }
 }
 
+// This history is accessed only while the existing g_inputHostMx is held.
+// Input acquisition remains the original producer; no reader, timer or queue.
+static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;
 static bool inputHostPhysicalPublicationSourceAdmitted(bool physicalSourceAdmitted,bool semanticNeutral);
 static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(const InputCaptureGamepadSnapshot* sample) {
     if(!sample)return {};
@@ -35283,6 +35395,10 @@ static bool inputHostFrameSubmissionMayIssue(void* context) noexcept {
     }
     if (verdict==ymcc::input::frameSubmission::Verdict::Allowed &&
         !inputHostWindowsMotionSubmissionCurrent(*frame)) return false;
+    if (verdict==ymcc::input::frameSubmission::Verdict::Allowed &&
+        !frame->ticket.neutral && !frame->axisCalibrationCurrent()) {
+        frame->rejected=true;frame->reason=ymcc::input::frameSubmission::Verdict::SourceRetired;return false;
+    }
     if(verdict==ymcc::input::frameSubmission::Verdict::Allowed)return true;
     frame->rejected=true;frame->reason=verdict;return false;
 }
@@ -35308,6 +35424,13 @@ static bool inputHostFrameSubmissionRequestCurrent(const char* command,json* res
                 ? "windows-motion-publication-not-committed":"windows-motion-source-retired"},
             {"deviceWriteAttempted",false},{"phase",phase}};
         inputHostFrameSubmissionNote(frame.reason,phase,false); return false;
+    }
+    if (verdict==ymcc::input::frameSubmission::Verdict::Allowed &&
+        !frame.ticket.neutral && !frame.axisCalibrationCurrent()) {
+        frame.rejected=true;frame.reason=ymcc::input::frameSubmission::Verdict::SourceRetired;
+        if(responseOut)*responseOut={{"status","frame-context-retired"},{"detail","axis-calibration-publication-retired"},
+            {"deviceWriteAttempted",false},{"phase",phase}};
+        inputHostFrameSubmissionNote(frame.reason,phase,false);return false;
     }
     if(verdict==ymcc::input::frameSubmission::Verdict::Allowed)return true;
     frame.rejected=true;frame.reason=verdict;
@@ -36176,7 +36299,12 @@ static bool inputHostHidHideApplyViaPipeAdopted(const std::wstring& operation,
 #include "virtual_controller_stop_runtime.h"
 
 static void inputHostQuiesceForCaptureExit() {
-    std::lock_guard<InputHostMutex> lock(g_inputHostMx);
+    std::unique_lock<InputHostMutex> lock(g_inputHostMx,std::try_to_lock);
+    if(!lock.owns_lock()){
+        appendNativeLifecycleLog("input-host-exit-capture-neutral",{{"quiesced",false},{"neutralAccepted",false},
+            {"hostLockAcquired",false},{"reason","owned-host-transaction-busy"},{"gameConsumptionProven",false}});
+        return;
+    }
     g_inputHostActive=false;
     if(!g_inputHostProcess||!g_inputHostHello||g_inputHostTransportFault||g_inputHostPipeRetired)return;
     const bool quiesced=inputHostRequestLocked("QUIESCE",json::object(),"quiesced",1000);
@@ -41002,8 +41130,8 @@ static void inputHostRunQueuedLifecycleWork() {
             } else if (reason == "msi-native-foreground") {
                 msiNativeForegroundHandleWork();
             } else if (!msiNativeForegroundBeforeVirtualWork(powerWork.bound?queuedReason:reason)) {
-                // MSI native-only ownership must be returned before virtual work.
-                // Do not build a target through an unresolved physical refresh.
+                // The native owner must return or transfer its exact hide.
+                // Never build a target through the same still-live helper.
             } else if (reason.rfind("msi-foreground-isolation:", 0) == 0) {
                 msiForegroundIsolationHandleWork(reason);
             } else if (msiModeWriteWork) {
@@ -42097,7 +42225,7 @@ static bool hidHideReapplyReconnectedSource(const HidHideVisibilityJournal& jour
             // a proven not-prehidden baseline may create a new obligation.
             bool responsibilityReserved=false;
             const bool hideAdmitted=inputHostTargetReturnBeforeHideLocked(matchedSources,membershipForRecord,
-                g_hidHideVisibilityJournal.before,target,journal.transactionId,&responsibilityReserved);
+                g_hidHideVisibilityJournal.before,target,journal.transactionId,&responsibilityReserved,false);
             if(responsibilityReserved&&!hidHideContainsPath(g_hidHideVisibilityJournal.hiddenByUs,target))
                 g_hidHideVisibilityJournal.hiddenByUs.push_back(wide);
             if(!hideAdmitted)return false;
@@ -44046,10 +44174,14 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
         // resumes automatically when the source returns. There is no persistent
         // "source-suppressed" marker, no keepalive fault, and no rearm gate.
         if(t_inputFrameSubmission && !semanticNeutral) {
-            const auto verdict=ymcc::input::frameSubmission::source(frameSubmission.sample,
-                inputHostFrameSubmissionCurrent(physicalSourceAdmitted,frameSubmission.sample.msi),GetTickCount64());
+            const auto verdict=ymcc::input::frameSubmission::sourceForNewRead(frameSubmission.sample,
+                inputHostFrameSubmissionCurrent(physicalSourceAdmitted,frameSubmission.sample.msi),GetTickCount64(),
+                g_inputHostReadProgress);
             if(verdict!=ymcc::input::frameSubmission::Verdict::Allowed) {
                 semanticNeutral=true;frameSubmission.sourceNeutralized=true;frameSubmission.reason=verdict;
+                // A repeated canonical read is not a new physical sample. Keep
+                // every composed channel neutral and skip calibration math.
+                physicalSourceAdmitted=false;frameSubmission.physicalSourceAdmitted=false;
             }
             if(frameSubmission.sourceNeutralized)inputHostFrameSubmissionNote(verdict,"before-frame-assembly",true);
         }
@@ -44203,6 +44335,12 @@ static json inputHostSubmitPad(bool physicalSourceAdmitted, const XINPUT_GAMEPAD
     // Source admission above still sees the unmodified physical sample. Correction
     // changes only this downstream copy, once, before the existing gyro blend.
     const auto axisCalibration = axisCalibrationRuntime::effective(rawPad,physicalSourceAdmitted);
+    // Capture the plan that actually computed these axes, never a later hint.
+    // The local Effective owns this address until the synchronous ACK returns.
+    if(axisCalibration.applied){
+        frameSubmission.axisCalibrationPublished=&axisCalibrationRuntime::virtualProfileHint;
+        frameSubmission.axisCalibrationExpected=axisCalibration.config.get();
+    }
     if(axisCalibration.applied){
         outputPad.sThumbLX=axisCalibration.pad.sThumbLX;outputPad.sThumbLY=axisCalibration.pad.sThumbLY;
         outputPad.sThumbRX=axisCalibration.pad.sThumbRX;outputPad.sThumbRY=axisCalibration.pad.sThumbRY;
@@ -44707,7 +44845,8 @@ static bool applyInputStartupOnce() {
             SettingsFileGuard guard;
             auto all = ymSettingsReadUnlocked();
             const auto input = all.contains("input") ? all.at("input") : json::object();
-            const auto prepared = ymcc::initializeBootModeInputStartup(all, gameInputOwnerSession(), bootModeStartupIdentity());
+            json bootModeDecision;
+            const auto prepared = ymcc::initializeBootModeInputStartup(all, gameInputOwnerSession(), bootModeStartupIdentity(), &bootModeDecision);
             const auto next = prepared.at("input");
             applied = prepared == all || ymSettingsWriteDocumentUnlocked(prepared.dump(2));
             // Reuse documents already in this transaction; no extra settings read/write.
@@ -44715,6 +44854,7 @@ static bool applyInputStartupOnce() {
                 g_startupInputIntentDiagnostic = {
                     {"desiredPersona", next.at("outputTarget").at("persona")},
                     {"startupSettingsApplied", applied},
+                    {"bootModeIntent", std::move(bootModeDecision)},
                     {"windowsBootIdentity", bootModeStartupIdentity()},
                     {"bootIdentityProvider", "machine-volatile-hive-v2"},
                     {"bootIdentityCreated", bootModeStartupObservation().created},
@@ -45599,7 +45739,7 @@ bool dsu_start();
 void dsu_stop();
 }
 
-[[nodiscard]] static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool comReady=false) {
+[[nodiscard]] static ymcc::captureLifecycle::StopReceipt inputCaptureStop(bool comReady=false,DWORD workerWaitMs=2000) {
     using namespace ymcc::captureLifecycle;
     StopReceipt receipt;receipt.generation=g_captureGeneration.load(std::memory_order_acquire);
     StopLease owner(g_captureStopOwner);
@@ -45612,8 +45752,18 @@ void dsu_stop();
     if(!startPublished){receipt.debts=Debt::StartReservation;receipt.classify();return receipt;}
     if(g_inputCaptureThread){
         receipt.waitPerformed=true;
-        receipt.waitResult=WaitForSingleObject(g_inputCaptureThread,2000);
+        receipt.waitResult=WaitForSingleObject(g_inputCaptureThread,(std::min)(workerWaitMs,DWORD{2000}));
         receipt.waitWin32=receipt.waitResult==WAIT_FAILED?GetLastError():ERROR_SUCCESS;
+        if(receipt.waitResult==WAIT_TIMEOUT&&g_exitRequested.load(std::memory_order_acquire)&&
+           !g_captureExitSyncCancelIssued.exchange(true,std::memory_order_acq_rel)){
+            // Existing Win32 cancellation capability, exact owned capture
+            // thread only. A request is never an exit/disposal receipt.
+            const bool requested=CancelSynchronousIo(g_inputCaptureThread)!=FALSE;
+            const DWORD error=requested?ERROR_SUCCESS:GetLastError();
+            try{appendNativeLifecycleLog("input-capture-exit-sync-cancel",{{"generation",receipt.generation},
+                {"requested",requested},{"win32",error},{"workerExitVerified",false},
+                {"requestOnly",true},{"budgetSpent",true}});}catch(...){}
+        }
         receipt.workerExited=receipt.waitResult==WAIT_OBJECT_0;
         if(receipt.workerExited){
             if(CloseHandle(g_inputCaptureThread))g_inputCaptureThread=nullptr;
@@ -45621,7 +45771,7 @@ void dsu_stop();
         }
         receipt.workerHandleClosed=g_inputCaptureThread==nullptr;
         try{appendNativeLifecycleLog("input-capture-worker-stop",{
-            {"threadWaitBudgetMs",2000},{"waitResult",receipt.waitResult},{"waitWin32",receipt.waitWin32},
+            {"threadWaitBudgetMs",(std::min)(workerWaitMs,DWORD{2000})},{"waitResult",receipt.waitResult},{"waitWin32",receipt.waitWin32},
             {"threadExitVerified",receipt.workerExited},{"handleClosed",receipt.workerHandleClosed},
             {"closeWin32",receipt.closeWin32},{"ownerRetained",g_inputCaptureThread!=nullptr}});}catch(...){}
     }else{receipt.workerExited=true;receipt.workerHandleClosed=true;}
@@ -47337,8 +47487,23 @@ static std::uint64_t inputCaptureRetireResources(bool comReady) {
             (void)inputCaptureSensorThreadPostPower(SensorThreadRequest::Shutdown);
     }
     if(sta){
-        if(!g_msiSensorApiProvider.stopped()&&!g_msiSensorApiProvider.running())(void)g_msiSensorApiProvider.stop(0);
-        if(!g_hcWindowsSensorApiProvider.stopped()&&!g_hcWindowsSensorApiProvider.running())(void)g_hcWindowsSensorApiProvider.stop(0);
+        // The provider owns its exact thread/state and stop(0) uses its existing
+        // nonblocking lifecycle lock + CoCancelCall. An active provider is the
+        // case needing cancellation, not a reason to skip it forever. One
+        // exit-only retry per provider; only stopped() discharges the debt.
+        const auto retryProvider=[&](auto& provider,unsigned bit,const char* name){
+            if(provider.stopped())return;
+            const bool active=provider.running();
+            const bool retry=active&&g_exitRequested.load(std::memory_order_acquire)&&
+                !(g_captureExitProviderRetryMask.fetch_or(bit,std::memory_order_acq_rel)&bit);
+            if(!active||retry){const bool returned=provider.stop(0);
+                if(retry)appendNativeLifecycleLog("input-capture-exit-provider-retry",{
+                    {"provider",name},{"stopReturned",returned},{"attemptBudgetSpent",true},
+                    {"resourceReturned",provider.stopped()}});
+            }
+        };
+        retryProvider(g_msiSensorApiProvider,1u,"msi-sensor-api");
+        retryProvider(g_hcWindowsSensorApiProvider,2u,"hc-windows-sensor-api");
     }
     if(!g_msiSensorApiProvider.stopped()||!g_hcWindowsSensorApiProvider.stopped())debts|=Debt::SensorProviders;
     if(!ymcc::sensors::sensorapi_inventory::Census::retire()||!ymcc::sensors::sensorapi_inventory::Census::stopped())debts|=Debt::Census;
@@ -47352,11 +47517,14 @@ static std::uint64_t inputCaptureRetireResources(bool comReady) {
     if(!g_onexBack.readPending&&!g_onexBack.writeInFlight)onexBackFinalizeClose();
     if(g_onexBack.readPending||g_onexBack.writeInFlight||g_onexBack.device!=INVALID_HANDLE_VALUE||g_onexBack.ovEvent||g_onexBack.writeEvent)debts|=Debt::OemIo;
     {
-        std::lock_guard<std::mutex> lock(g_onexX2OwnerMx);
-        g_onexX2Transport.pollRetirement(GetTickCount64());
-        if(!g_onexX2Transport.stopped())debts|=Debt::OemIo;
-        if(g_onexX2DeviceNotify){if(UnregisterDeviceNotification(g_onexX2DeviceNotify))g_onexX2DeviceNotify=nullptr;else debts|=Debt::OemIo;}
-        g_onexX2NotifyAttempted=g_onexX2DeviceNotify!=nullptr;
+        std::unique_lock<std::mutex> lock(g_onexX2OwnerMx,std::try_to_lock);
+        if(!lock.owns_lock())debts|=Debt::OemIo;
+        else {
+            g_onexX2Transport.pollRetirement(GetTickCount64());
+            if(!g_onexX2Transport.stopped())debts|=Debt::OemIo;
+            if(g_onexX2DeviceNotify){if(UnregisterDeviceNotification(g_onexX2DeviceNotify))g_onexX2DeviceNotify=nullptr;else debts|=Debt::OemIo;}
+            g_onexX2NotifyAttempted=g_onexX2DeviceNotify!=nullptr;
+        }
     }
     // Game Bar observation has no GM dependency. Only the COM-initialized
     // exit owner retires its ABI tokens; it does not change key/Guide policy.
@@ -47381,25 +47549,61 @@ static std::uint64_t inputCaptureRetireResources(bool comReady) {
 }
 
 static bool inputCaptureExitOwnershipReleased() noexcept {return g_captureExitReleased.load(std::memory_order_acquire);}
-static void inputCaptureAwaitStopForExit() {
+static bool inputCaptureExitProducerOwnershipReleased() noexcept {
+    return g_captureExitProducerReturned.load(std::memory_order_acquire)&&
+        g_inputCaptureStop.load(std::memory_order_acquire)&&
+        g_captureMmTimerRetired.load(std::memory_order_acquire)&&
+        g_captureExitProducerGeneration.load(std::memory_order_acquire)==g_captureGeneration.load(std::memory_order_acquire);
+}
+static bool inputCaptureAwaitStopForExit() {
     const HRESULT com=CoInitializeEx(nullptr,COINIT_MULTITHREADED);
-    const bool comReady=SUCCEEDED(com);
-    std::uint64_t previous=~std::uint64_t{0};const auto began=GetTickCount64();bool deadlineReported=false;
+    struct ComOwner {bool ready;~ComOwner(){if(ready)CoUninitialize();}} comOwner{SUCCEEDED(com)};
+    std::uint64_t previous=~std::uint64_t{0};const auto began=GetTickCount64();
+    bool deadlineReported=false,exceptionReported=false;
     for(;;){
-        const auto receipt=inputCaptureStop(comReady);
+        const auto elapsed=GetTickCount64()-began;
+        if(!deadlineReported&&elapsed>=30000){
+            deadlineReported=true;g_exitCleanupStage.store("input-capture-retained",std::memory_order_release);
+            appendNativeLifecycleLog("input-capture-exit-retained",{{"debts",previous},{"budgetMs",30000},
+                {"producerReturned",inputCaptureExitProducerOwnershipReleased()},{"cleanupComplete",false},
+                {"observationEnded",false},{"continuationRetained",true},{"processExitAuthorized",false}});
+        }
+        ymcc::captureLifecycle::StopReceipt receipt;
+        const auto workerWait=elapsed<30000?(std::min)(std::uint64_t{2000},30000-elapsed):std::uint64_t{2000};
+        try {receipt=inputCaptureStop(comOwner.ready,static_cast<DWORD>(workerWait));}
+        catch(...){
+            if(!exceptionReported){exceptionReported=true;appendNativeLifecycleLog("input-capture-exit-retained",{
+                {"debts",previous},{"cleanupComplete",false},{"reason","stop-exception"},
+                {"continuationRetained",true},{"processExitAuthorized",false}});}
+            Sleep(250);continue;
+        }
         if(receipt.debts!=previous){previous=receipt.debts;appendNativeLifecycleLog("input-capture-exit-ownership",{
-            {"version",1},{"scope","capture-resource-only;Host-return-separate"},{"generation",receipt.generation},{"debts",receipt.debts},{"workerExited",receipt.workerExited},
-            {"workerHandleClosed",receipt.workerHandleClosed},{"completion",static_cast<unsigned>(receipt.completion)},
-            {"boundedTotalDestructionProven",false}});}
-        if(receipt.settled()){g_captureExitReleased.store(true,std::memory_order_release);break;}
-        if(!deadlineReported&&GetTickCount64()-began>=30000){deadlineReported=true;
-            appendNativeLifecycleLog("input-capture-exit-retained",{{"debts",receipt.debts},{"budgetMs",30000},{"cleanupComplete",false}});}
-        // Exit-only passive retirement observation. No target create/rebuild or
-        // fresh sensor/read subscription is admitted. A permanently blocked
-        // child remains retained; bounded total destruction is NOT accepted.
+            {"version",2},{"scope","capture-resource-only;Host-return-separate"},{"generation",receipt.generation},
+            {"debts",receipt.debts},{"workerExited",receipt.workerExited},{"workerHandleClosed",receipt.workerHandleClosed},
+            {"completion",static_cast<unsigned>(receipt.completion)},{"boundedTotalDestructionProven",false}});}
+        // A dead worker plus actually retired multimedia timer means the BUS
+        // writer has returned. Sensor/COM/failed-Close debts remain real, but
+        // cannot postpone the independent exact-owned Host stop indefinitely.
+        const auto producerDebts=ymcc::captureLifecycle::Debt::StartReservation|ymcc::captureLifecycle::Debt::Worker|
+            ymcc::captureLifecycle::Debt::StopOwner;
+        if(receipt.workerExited&&!(receipt.debts&producerDebts)&&
+           g_captureMmTimerRetired.load(std::memory_order_acquire)&&g_inputCaptureStop.load(std::memory_order_acquire)&&
+           receipt.generation==g_captureGeneration.load(std::memory_order_acquire)){
+            g_captureExitProducerGeneration.store(receipt.generation,std::memory_order_release);
+            g_captureExitProducerReturned.store(true,std::memory_order_release);
+            if(!receipt.settled()){
+                try {(void)inputHostTryOrdinaryStopForExit();(void)inputHostRetireLocalResourcesForExit();}
+                catch(...){if(!exceptionReported){exceptionReported=true;appendNativeLifecycleLog("input-capture-exit-retained",{
+                    {"debts",receipt.debts},{"reason","independent-Host-retirement-exception"},{"cleanupComplete",false},
+                    {"continuationRetained",true},{"processExitAuthorized",false}});}}
+            }
+        }
+        if(receipt.settled()){g_captureExitReleased.store(true,std::memory_order_release);return true;}
+        // Original passive retirement cadence; the budget does not abandon
+        // this owner or renew cancellation/force authority. Late completion
+        // must still reach real cleanup and READY without another worker.
         Sleep(250);
     }
-    if(comReady)CoUninitialize();
 }
 static void inputCaptureEnsureExitOwner(WPARAM code) {
     if(g_exitCleanupCompleted&&inputCaptureExitOwnershipReleased()&&inputHostExitLocalOwnershipReleased())return;
@@ -50920,45 +51124,66 @@ static bool sgRunExeSync(const std::wstring& exe, const std::wstring& args, DWOR
 
 // 同步运行命令并捕获 stdout（CREATE_NO_WINDOW），stderr 合并到 stdout 避免管道死锁。
 // 供 smt.get / smt.set 调用（读/写 BCD 的 bcdedit）。
-struct RunOut { std::string out; DWORD exitCode = 0; bool ran = false; };
-static RunOut runCapture(const std::wstring& cmdLine, DWORD timeoutMs = 10000) {
+struct RunOut {
+    std::string out; DWORD exitCode = 0; bool ran = false;
+    // Additive evidence only: exitCode retains the existing wrapper/child mapping.
+    const char* completion = "not-started";
+    DWORD win32Error = ERROR_SUCCESS; // Only a failing Win32 API's immediate error.
+};
+static RunOut runCapture(const std::wstring& cmdLine, DWORD timeoutMs = 10000, const std::function<bool()>& canceled = {}, HANDLE stdinHandle = nullptr, HANDLE stdoutHandle = nullptr, const wchar_t* workingDirectory = nullptr) {
     RunOut res;
+    const auto cancellationRequested=[&]() noexcept {try{return canceled&&canceled();}catch(...){return true;}};
+    if(cancellationRequested()){res.exitCode=ERROR_CANCELLED;res.completion="canceled-before-start";return res;}
     SECURITY_ATTRIBUTES sa{sizeof(sa), nullptr, TRUE};
     HANDLE hOutR = nullptr, hOutW = nullptr;
-    if (!CreatePipe(&hOutR, &hOutW, &sa, 0)) return res;
+    if (!CreatePipe(&hOutR, &hOutW, &sa, 0)) {res.win32Error=GetLastError();res.completion="setup-create-pipe";return res;}
     SetHandleInformation(hOutR, HANDLE_FLAG_INHERIT, 0);
 
     HANDLE job = CreateJobObjectW(nullptr, nullptr);
-    if (!job) { CloseHandle(hOutR); CloseHandle(hOutW); return res; }
+    if (!job) { res.win32Error=GetLastError();res.completion="setup-create-job";CloseHandle(hOutR); CloseHandle(hOutW); return res; }
     JOBOBJECT_EXTENDED_LIMIT_INFORMATION limits{};
     limits.BasicLimitInformation.LimitFlags = JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
     if (!SetInformationJobObject(job, JobObjectExtendedLimitInformation, &limits, sizeof(limits))) {
+        res.win32Error=GetLastError();res.completion="setup-configure-job";
         CloseHandle(job); CloseHandle(hOutR); CloseHandle(hOutW); return res;
     }
 
     STARTUPINFOW si{sizeof(si)};
     si.dwFlags = STARTF_USESTDHANDLES;
-    si.hStdOutput = hOutW;
+    si.hStdOutput = stdoutHandle ? stdoutHandle : hOutW;
     si.hStdError = hOutW; // 合并 stderr→stdout，单行读取无死锁
+    si.hStdInput = stdinHandle; // nullptr preserves the original no-stdin callers.
     PROCESS_INFORMATION pi{};
     std::vector<wchar_t> buf(cmdLine.begin(), cmdLine.end());
     buf.push_back(0);
     if (!ymcc::processEfficiency::createProcess(nullptr, buf.data(), nullptr, nullptr, TRUE,
-            CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, nullptr, &si, &pi)) {
+            CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, workingDirectory, &si, &pi)) {
+        res.win32Error=GetLastError();res.completion="setup-create-process";
         CloseHandle(job); CloseHandle(hOutR); CloseHandle(hOutW);
         return res;
     }
     if (!AssignProcessToJobObject(job, pi.hProcess)) {
+        res.win32Error=GetLastError();res.completion="setup-assign-job";
         TerminateProcess(pi.hProcess, ERROR_ACCESS_DENIED);
         WaitForSingleObject(pi.hProcess, 1000);
         CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
         CloseHandle(job); CloseHandle(hOutR); CloseHandle(hOutW);
         return res;
     }
+    // Creation/Job setup may have crossed a sleep/OFF/deadline boundary. This
+    // child is ours and still suspended; never execute an already revoked task.
+    if(cancellationRequested()) {
+        TerminateJobObject(job,ERROR_CANCELLED);
+        CloseHandle(job); // KILL_ON_JOB_CLOSE also covers failed explicit termination.
+        WaitForSingleObject(pi.hProcess,1000);
+        CloseHandle(pi.hThread);CloseHandle(pi.hProcess);CloseHandle(hOutR);CloseHandle(hOutW);
+        res.exitCode=ERROR_CANCELLED;res.completion="canceled-before-resume";return res;
+    }
     ResumeThread(pi.hThread);
     CloseHandle(hOutW);
 
     constexpr size_t MAX_CAPTURE_BYTES = 8u << 20;
+    bool cancellationObserved = false;
     bool timedOut = false;
     bool overflow = false;
     bool processExited = false;
@@ -50978,19 +51203,37 @@ static RunOut runCapture(const std::wstring& cmdLine, DWORD timeoutMs = 10000) {
     };
 
     for (;;) {
+        if(cancellationRequested()){cancellationObserved=true;break;}
         drainAvailable();
+        if(cancellationRequested()){cancellationObserved=true;break;}
         if (overflow) break;
         const DWORD wait = WaitForSingleObject(pi.hProcess, 20);
+        const DWORD waitError = wait == WAIT_FAILED ? GetLastError() : ERROR_SUCCESS;
+        if(cancellationRequested()){cancellationObserved=true;break;}
         if (wait == WAIT_OBJECT_0) { processExited = true; break; }
-        if (wait == WAIT_FAILED || GetTickCount64() >= deadline) { timedOut = true; break; }
+        if (wait == WAIT_FAILED || GetTickCount64() >= deadline) {
+            timedOut = true;
+            res.completion = wait == WAIT_FAILED ? "wait-failed" : "deadline";
+            res.win32Error = waitError;
+            break;
+        }
     }
 
     // 即使根进程已退出，也终止仍持有管道/硬件句柄的后代，保证函数必然收敛。
-    TerminateJobObject(job, timedOut ? ERROR_TIMEOUT : (overflow ? ERROR_BUFFER_OVERFLOW : ERROR_SUCCESS));
+    TerminateJobObject(job, cancellationObserved ? ERROR_CANCELLED : (timedOut ? ERROR_TIMEOUT : (overflow ? ERROR_BUFFER_OVERFLOW : ERROR_SUCCESS)));
     WaitForSingleObject(pi.hProcess, 1000);
     drainAvailable();
-    if (processExited && !timedOut && !overflow) GetExitCodeProcess(pi.hProcess, &res.exitCode);
-    else res.exitCode = timedOut ? ERROR_TIMEOUT : ERROR_BUFFER_OVERFLOW;
+    if (processExited && !cancellationObserved && !timedOut && !overflow) {
+        if (GetExitCodeProcess(pi.hProcess, &res.exitCode)) res.completion = "child-exit";
+        else {
+            res.win32Error = GetLastError();res.completion = "exit-code-failed";
+            res.exitCode = res.win32Error ? res.win32Error : ERROR_GEN_FAILURE;
+        }
+    } else {
+        res.exitCode = cancellationObserved ? ERROR_CANCELLED : (timedOut ? ERROR_TIMEOUT : ERROR_BUFFER_OVERFLOW);
+        if (cancellationObserved) res.completion = "canceled";
+        else if (!timedOut) res.completion = "overflow";
+    }
     CloseHandle(hOutR);
     CloseHandle(job);
     CloseHandle(pi.hThread); CloseHandle(pi.hProcess);
@@ -51002,6 +51245,9 @@ static RunOut runCapture(const std::wstring& cmdLine, DWORD timeoutMs = 10000) {
 // staging 快照，再从快照生成临时 ZIP；失败只清理本次临时物，最终 ZIP 直到候选归档
 // 验证通过后才更新。
 static constexpr unsigned int LOG_ARCHIVE_MAX_ATTEMPTS = 2;
+#include "log_archive_command.h"
+
+#include "sleep_export_diagnostics_native.inc"
 
 struct TarArchiveRetryResult {
     bool ok = false;
@@ -51012,6 +51258,9 @@ struct TarArchiveRetryResult {
     unsigned long long steamCopied = 0, steamSkipped = 0;
     std::string steamStatus;
     unsigned long long snapshotBoundaryWarnings = 0, snapshotInspectionFailures = 0;
+    std::string archiveCommandMode="not-planned";
+    unsigned long long archiveCommandUtf16Units=0;unsigned archiveFileLists=0;
+    unsigned listEntries=0,wideArgumentEntries=0;size_t commandCharacters=0;const char* completion="not-started";
 };
 
 static bool archiveOutputReadableAndNonEmpty(const std::wstring& path) {
@@ -51030,7 +51279,6 @@ static TarArchiveRetryResult createTarArchiveWithRetry(
     const std::wstring& manifestName = {},
     const ymcc::logexport::SteamLogs* steamLogs = nullptr) {
     TarArchiveRetryResult result;
-    const auto quote = [](const std::wstring& value) { return L"\"" + value + L"\""; };
     static std::atomic<unsigned long long> archiveSequence{0};
     const auto sequence = archiveSequence.fetch_add(1, std::memory_order_relaxed);
     const std::wstring archiveNonce =
@@ -51170,6 +51418,7 @@ static TarArchiveRetryResult createTarArchiveWithRetry(
                 result.win32Error=receiptEc?static_cast<DWORD>(receiptEc.value()):ERROR_WRITE_FAULT;}
             else stagedEntries.emplace_back(receiptDir.wstring(),L"log-export-snapshot.json");
         }
+        if(snapshotReady)ymcc::logexport::orderArchiveEntries(stagedEntries);
         if (snapshotReady && steamLogs) {
             const auto aiDir=fspath::path(stagingRoot)/L"ai-index";
             if(!ymcc::logexport::writeAiLogIndex(aiDir,stagedEntries,[](const std::wstring& path){return sha256File(path);})) {
@@ -51180,37 +51429,65 @@ static TarArchiveRetryResult createTarArchiveWithRetry(
             }
         }
         if (snapshotReady) {
-            std::wstring command = L"\"C:\\Windows\\System32\\tar.exe\" --options zip:hdrcharset=UTF-8 -a -c -f " + quote(tempPath);
-            for (const auto& entry : stagedEntries) {
-                command += L" -C " + quote(entry.first) + L" " + quote(entry.second);
-            }
-            const RunOut run = runCapture(command, 120000);
-            const bool archiveReady = run.ran && run.exitCode == 0 &&
-                                      archiveOutputReadableAndNonEmpty(tempPath);
-            if (archiveReady) {
-                SetLastError(ERROR_SUCCESS);
-                if (MoveFileExW(tempPath.c_str(), finalPath.c_str(),
-                                MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
-                    if (archiveOutputReadableAndNonEmpty(finalPath)) {
-                        std::error_code stageCleanupEc;
-                        fspath::remove_all(stagingRoot, stageCleanupEc);
-                        if (stageCleanupEc) result.cleanupOk = false;
-                        result.ok = true;
-                        result.reason = "ok";
-                        return result;
-                    }
-                    result.reason = "promoted-archive-unreadable";
-                } else {
-                    result.reason = "promote-failed";
-                    result.win32Error = GetLastError();
-                }
-            } else if (!run.ran) {
-                result.reason = "tar-launch-failed";
-            } else if (run.exitCode != 0) {
-                result.reason = "tar-exit-nonzero";
-                result.win32Error = run.exitCode;
+            const auto commandPlan=ymcc::logexport::buildArchiveCommand(tempPath,stagingRoot,stagedEntries);
+            const auto& command=commandPlan.command;
+            result.archiveCommandMode=commandPlan.mode;result.archiveCommandUtf16Units=command.size()+1;
+            result.archiveFileLists=commandPlan.fileLists;result.listEntries=commandPlan.listEntries;
+            result.wideArgumentEntries=commandPlan.wideArgumentEntries;result.commandCharacters=command.size();
+            if(!commandPlan.ok) {
+                result.reason=commandPlan.reason;result.win32Error=commandPlan.error;
             } else {
-                result.reason = "archive-empty-or-unreadable";
+                HANDLE archiveInput=nullptr;bool inputReady=true;
+                if(!commandPlan.inputPath.empty()) {
+                    SECURITY_ATTRIBUTES inputSecurity{sizeof(inputSecurity),nullptr,TRUE};
+                    archiveInput=CreateFileW(commandPlan.inputPath.c_str(),GENERIC_READ,FILE_SHARE_READ,&inputSecurity,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
+                    if(archiveInput==INVALID_HANDLE_VALUE) {
+                        result.reason="archive-list-open-failed";result.win32Error=GetLastError();archiveInput=nullptr;inputReady=false;
+                    }
+                }
+                HANDLE archiveOutput=nullptr;
+                if(inputReady) {
+                    SECURITY_ATTRIBUTES outputSecurity{sizeof(outputSecurity),nullptr,TRUE};
+                    archiveOutput=CreateFileW(ymcc::logexport::winPath(fspath::path(tempPath)).c_str(),GENERIC_WRITE,FILE_SHARE_READ,&outputSecurity,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);
+                    if(archiveOutput==INVALID_HANDLE_VALUE) {
+                        result.reason="archive-output-open-failed";result.win32Error=GetLastError();archiveOutput=nullptr;inputReady=false;
+                    }
+                }
+                if(!inputReady&&archiveInput){CloseHandle(archiveInput);archiveInput=nullptr;}
+                if(inputReady) {
+                const RunOut run = runCapture(command, 120000, {}, archiveInput, archiveOutput, stagingRoot.c_str());
+                result.completion=run.completion;
+                if(archiveInput)CloseHandle(archiveInput);
+                CloseHandle(archiveOutput);
+                const bool archiveReady = run.ran && run.exitCode == 0 &&
+                                          archiveOutputReadableAndNonEmpty(tempPath);
+                if (archiveReady) {
+                    SetLastError(ERROR_SUCCESS);
+                    if (MoveFileExW(tempPath.c_str(), finalPath.c_str(),
+                                    MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+                        if (archiveOutputReadableAndNonEmpty(finalPath)) {
+                            std::error_code stageCleanupEc;
+                            fspath::remove_all(stagingRoot, stageCleanupEc);
+                            if (stageCleanupEc) result.cleanupOk = false;
+                            result.ok = true;
+                            result.reason = "ok";
+                            return result;
+                        }
+                        result.reason = "promoted-archive-unreadable";
+                    } else {
+                        result.reason = "promote-failed";
+                        result.win32Error = GetLastError();
+                    }
+                } else if (!run.ran) {
+                    result.reason = "tar-launch-failed";
+                    result.win32Error = run.win32Error;
+                } else if (run.exitCode != 0) {
+                    result.reason = "tar-exit-nonzero";
+                    result.win32Error = run.exitCode;
+                } else {
+                    result.reason = "archive-empty-or-unreadable";
+                }
+                }
             }
         }
 
@@ -54046,6 +54323,7 @@ static void sgQueueWork(SgWork work, unsigned long long generation) {
     }
     // 电源事件偶尔会成组到达；保持小而有界的队列，且不让旧事件无限堆积。
     g_sgWorkQ.push_back({work, generation});
+    ++g_sgWorkWakeRevision;
     g_sgWorkCv.notify_one();
 }
 
@@ -54115,24 +54393,30 @@ static void sgAbortSleepIntent(const char* reason) {
     }
 }
 
+// Idle owns no periodic wakeup. Pending recovery sleeps until its existing
+// owner deadline; a power/worker event invalidates the computed wait immediately.
+static bool sgWaitForWork(SgWorkItem& item) {
+    unsigned long long revision;
+    { std::lock_guard<std::mutex> lock(g_sgWorkMx); revision = g_sgWorkWakeRevision; }
+    const auto now = GetTickCount64();
+    const auto delay = (std::min)(sgWakeGameRecoveryWaitMs(now), sleepRecoveryAutoWaitMs(now));
+    std::unique_lock<std::mutex> lock(g_sgWorkMx);
+    const auto changed = [&] { return g_sgWorkStop || !g_sgWorkQ.empty() || g_sgWorkWakeRevision != revision; };
+    if (delay == ~ULONGLONG{0})
+        g_sgWorkCv.wait(lock, [&] { return changed() ||
+            g_sgWakeRecoveryPending.load(std::memory_order_acquire) ||
+            g_sleepRecoveryAutoPending.load(std::memory_order_acquire); });
+    else
+        g_sgWorkCv.wait_for(lock, std::chrono::milliseconds(delay), changed);
+    if (g_sgWorkStop && g_sgWorkQ.empty()) return false;
+    if (!g_sgWorkQ.empty()) { item = g_sgWorkQ.front(); g_sgWorkQ.pop_front(); }
+    else item.generation = 0;
+    return true;
+}
 static void sgWorkLoop() {
     for (;;) {
         SgWorkItem item{};
-        {
-            std::unique_lock<std::mutex> lock(g_sgWorkMx);
-            if (g_sgWakeRecoveryPending.load(std::memory_order_acquire) || g_sleepRecoveryAutoPending.load(std::memory_order_acquire))
-                g_sgWorkCv.wait_for(lock, std::chrono::milliseconds(50), [] {
-                    return g_sgWorkStop || !g_sgWorkQ.empty();
-                });
-            else
-                g_sgWorkCv.wait(lock, [] { return g_sgWorkStop || !g_sgWorkQ.empty() ||
-                    g_sgWakeRecoveryPending.load(std::memory_order_acquire) || g_sleepRecoveryAutoPending.load(std::memory_order_acquire); });
-            if (g_sgWorkStop && g_sgWorkQ.empty()) return;
-            if (!g_sgWorkQ.empty()) {
-                item = g_sgWorkQ.front();
-                g_sgWorkQ.pop_front();
-            } else item.generation = 0;
-        }
+        if (!sgWaitForWork(item)) return;
         try {
             sleepRecoveryAutoTick();
             if (item.generation == 0) {
@@ -54393,6 +54677,28 @@ static std::wstring exportSteamTouchpadConsumerEvidence() noexcept {
 }
 
 // Explicit export only. No new source probe, mode request or background sampler.
+// One explicit export snapshot, using cached calibration owners only. The
+// existing atomic file writer owns disk behavior after all input locks release.
+static std::wstring exportControllerAxisCalibrationEvidence() noexcept {
+    const DWORD saved=GetLastError();
+    struct RestoreError {DWORD value;~RestoreError(){SetLastError(value);}} restoreError{saved};
+    try {
+        auto snapshot=axisCalibrationRuntime::exportEvidence();
+        snapshot["exportEntry"]="logs.exportAll";snapshot["observedAt"]=nativeLifecycleTimestamp();snapshot["processId"]=GetCurrentProcessId();
+        auto bytes=snapshot.dump(2,' ',false,json::error_handler_t::replace);
+        if(bytes.size()>32768){
+            snapshot={{"schemaVersion",1},{"policy","YMCC-AXIS-CALIBRATION-EVIDENCE-20261025-R1"},
+                {"captureKnown",false},{"unavailableReason","export-byte-cap"},{"exportEntry","logs.exportAll"},
+                {"observedAt",nativeLifecycleTimestamp()},{"processId",GetCurrentProcessId()},{"originalBytes",bytes.size()},
+                {"maxBytes",32768},{"localSubmit",{{"state","unknown"},{"reason","export-byte-cap"}}}};
+            bytes=snapshot.dump(2);
+        }
+        const auto path=yemancc_data_dir()+L"\\controller-axis-calibration-evidence.json";
+        if(sgWriteFileAtomic(path,bytes))return path;
+    }catch(...){/* Export availability reports missing evidence, never retries input. */}
+    return {};
+}
+
 static std::wstring exportControllerMotionEvidence() noexcept {
     const DWORD saved=GetLastError();
     struct RestoreError {DWORD value;~RestoreError(){SetLastError(value);}} restoreError{saved};
@@ -54820,6 +55126,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "monitor-notice-native", // Lease/owner receipts only; never frame telemetry.
         "input-capture-worker-stop", "input-capture-sensor-owner-rejected", "input-host-process-retirement", "input-host-primary-thread-retirement",
         "input-capture-exit-ownership", "input-capture-exit-retained", "input-host-exit-capture-neutral", "input-host-exit-ownership", "input-host-exit-retained",
+        "exit-cleanup-retained", "input-capture-exit-sync-cancel", "input-capture-exit-provider-retry", "input-host-exit-stop-exception",
         // 进程/窗口/单实例/恢复/WebView（启动退出可归因）
         "app-exit-ipc", "begin-async-exit", "screen-touchpads-exit-release", "boot-single-instance-acquired", "startup-input-state",
         "msi-crash-return", "msi-owned-return-recovery", "input-host-target-return-record", "input-host-cold-return", "hidhide-cli-writer",
@@ -54885,6 +55192,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         // 状态**实际变化**时写 1 行，零周期开销）；必须常开——否则「日志什么时候被
         // 关掉」这件事本身会被关掉的日志门挡掉，仍是黑盒。
         "domain-log-gate",
+        "log-export-result", // One terminal receipt per explicit export; no periodic work.
         "steamdeck-ui-output", // GP-UIINPUT-3: transitions/first neutral receipt only.
         "virtual-ui-output",
         "dsu-ui-output",
@@ -54999,7 +55307,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "input-host-switch-execution", "input-host-tuple-recovery", "input-host-wake-execution", "input-host-player-start-work", "input-host-ps-return-proof",
         "msi-crash-record-read",
         "input-host-xbox-startup",
-        "input-host-stop-request", "input-host-stop-result", "input-host-transport-fault",
+        "input-host-stop-request", "input-host-stop-result", "input-host-cleanup-evidence", "input-host-transport-fault",
         "input-host-backend-fault-hold", "input-host-fault-cooldown",
         "input-host-persona-transition", "input-host-persona-transition-requested",
         "input-host-open-result", "input-host-open-lazy-admit", "input-host-release-receipt",
@@ -56024,12 +56332,14 @@ static std::string boundedJsonString(const json& value, const char* key, size_t 
 
 static std::atomic<unsigned long long> g_frontendDiagnosticsFailures{0}, g_frontendTraceDetailSuppressed{0};
 static std::atomic<unsigned long long> g_frontendPreviewTraceSuppressed{0};
+static std::atomic<unsigned long long> g_frontendCalibrationTraceSuppressed{0};
 static bool appendFrontendTrace(const json& input) noexcept {
     try {
         const auto where=boundedJsonString(input,"where",100);
         const bool notice=where=="monitor-notice-lifecycle";
         const bool preview=where=="controller-preview";
-        if(!notice&&!preview&&where!="gamepad-admission")return false;
+        const bool calibration=where=="controller-calibration";
+        if(!notice&&!preview&&!calibration&&where!="gamepad-admission")return false;
         const auto original=input.value("message",std::string{});
         auto message=boundedJsonString(input,"message",8192);
         json trace=json::parse(message,nullptr,false);
@@ -56039,6 +56349,13 @@ static bool appendFrontendTrace(const json& input) noexcept {
         if(preview && (original.size()>8192 || !trace.is_object() ||
                 (!trace.contains("schemaVersion") || !trace["schemaVersion"].is_number_integer() || trace["schemaVersion"]!=1) || trace.value("stage",std::string{})!="window" ||
                 trace.value("policy",std::string{})!="VC-PREVIEW-TRACE-20261024-R1"))return false;
+        if(calibration){
+            if(original.size()>8192||!trace.is_object()||!trace.contains("schemaVersion")||!trace["schemaVersion"].is_number_integer()||trace["schemaVersion"]!=1||
+               trace.value("policy",std::string{})!="YMCC-AXIS-CALIBRATION-TRACE-20261025-R1"||!trace.contains("phase")||!trace["phase"].is_string()||
+               trace["phase"].get_ref<const std::string&>().empty()||trace["phase"].get_ref<const std::string&>().size()>48||trace.contains("released"))return false;
+            const auto stage=trace.value("stage",std::string{});
+            if(stage!="page"&&stage!="observe"&&stage!="read"&&stage!="apply"&&stage!="snapshot"&&stage!="center")return false;
+        }
         const bool parsed=trace.is_object();
         json semantic=parsed?trace:json(message);
         if(parsed){semantic.erase("qSeq");semantic.erase("t");} // keep the actual values in the saved row
@@ -56049,10 +56366,14 @@ static bool appendFrontendTrace(const json& input) noexcept {
             {"powerGeneration",g_powerGeneration.load()},
             {"gpuMode",webViewGpuModeName(g_webviewGpuMode)},{"routeStatus",g_webviewRouteStatus}};
         if(parsed)entry["trace"]=trace;
-        if(notice){entry["origin"]="renderer-observation";entry["pid"]=GetCurrentProcessId();}
+        if(notice||calibration){entry["origin"]="renderer-observation";entry["pid"]=GetCurrentProcessId();}
+        if(calibration)entry["evidenceScope"]="renderer-receipt-only;not-native-release-or-device-consumption";
         const auto signature=json({{"where",where},{"trace",semantic},{"route",entry["route"]},{"nativeGeneration",entry["nativeGeneration"]}}).dump();
         std::lock_guard<std::mutex> lock(g_webviewFailureLogMx);
-        static ymcc::logging::SnapshotLogState gamepadState,noticeState,previewState;
+        static ymcc::logging::SnapshotLogState gamepadState,noticeState,previewState,calibrationState;
+        static bool calibrationBudgetKnown=false;
+        static ULONGLONG calibrationBudgetStart=0;
+        static unsigned calibrationBudgetCount=0;
         static bool previewBudgetKnown=false;
         static ULONGLONG previewBudgetStart=0;
         static unsigned previewBudgetCount=0;
@@ -56064,12 +56385,18 @@ static bool appendFrontendTrace(const json& input) noexcept {
             if(previewBudgetCount>=12){++g_frontendPreviewTraceSuppressed;return true;}
             ++previewBudgetCount;
         }
+        if(calibration){
+            const auto now=GetTickCount64();
+            if(!calibrationBudgetKnown||now<calibrationBudgetStart||now-calibrationBudgetStart>=60000){calibrationBudgetKnown=true;calibrationBudgetStart=now;calibrationBudgetCount=0;}
+            if(calibrationBudgetCount>=120){++g_frontendCalibrationTraceSuppressed;return false;}
+            ++calibrationBudgetCount;
+        }
         static ymcc::noticelog::Budget noticeBudget;
         if(notice&&!noticeBudget.admit(GetTickCount64())){++g_frontendDiagnosticsFailures;return false;}
-        auto& state=notice?noticeState:(preview?previewState:gamepadState);auto nextState=state;
+        auto& state=notice?noticeState:(preview?previewState:(calibration?calibrationState:gamepadState));auto nextState=state;
         const bool changed=nextState.observe(signature,g_powerGeneration.load());
-        if(notice&&!changed)return true;
-        const bool base=notice||preview||changed;
+        if((notice||calibration)&&!changed)return true;
+        const bool base=notice||preview||calibration||changed;
         if(!base && !g_domainLogEnabled[1].load()){++g_frontendTraceDetailSuppressed;return true;}
         entry["lane"]=base?"event":"detail";
         const auto path=fspath::path(webview_data_dir())/(base?L"frontend-trace.log":L"frontend-trace-detail.log");
@@ -57389,12 +57716,14 @@ static json csRestoreUsb4Emergency() {
 #endif
 
 #include "sleep_static_wake_native.inc"
+#include "sleep_static_wake_schedule_native.inc"
 
 // ── 异步白名单：只放「无 UI、无全局可变状态、纯本地计算/IO」的命令 ──
 static bool ipc_cmd_async(const std::string& cmd) {
     // Memory-only observation/cancel must retain one ordered WebView owner,
     // including timeout cleanup using the client-known exact watch token.
-    if (cmd == "controller.axisCalibration.observe" || cmd == "controller.axisCalibration.center.cancel") return false;
+    if (cmd == "controller.axisCalibration.observe" || cmd == "controller.axisCalibration.center.cancel" ||
+        cmd == "controller.axisCalibration.center.start") return false; // memory-only start/cancel share request order
     if (cmd == "sleep.staticWake.get" || cmd == "sleep.staticWake.scan" || cmd == "sleep.staticWake.restore") return true; // Explicit bounded IO; never block the UI, including legacy mode.
     if (cmd == "gpu.fsr.page") return false; // Metadata-only cancellation must never queue behind AMD driver IO.
     if (cmd == "gamepad.driverSetup.get") return true; // On-demand USB/IP read-only helper must never block the UI.
@@ -57427,8 +57756,7 @@ static bool ipc_cmd_async(const std::string& cmd) {
     if (cmd == "steamDeckMouse.get" || cmd == "steamDeckMouse.set" || cmd == "steamOverlayFix.get" || cmd == "steam.settings.get" || cmd == "steam.settings.set") return true;
     // Shell icon IO and wake-password power/settings writes stay off the UI thread.
     if (cmd == "fs.getFileIcon" || cmd == "power.wakePassword.set") return true;
-    if (cmd == "controller.axisCalibration.get" || cmd == "controller.axisCalibration.apply" ||
-        cmd == "controller.axisCalibration.center.start") return true; // existing settings/CAS IO worker
+    if (cmd == "controller.axisCalibration.get" || cmd == "controller.axisCalibration.apply") return true; // existing settings/CAS IO worker
     if (cmd == "game.detect" || cmd == "rtss.reloadProfiles" ||
         cmd == "rtss.prepareOverlay" || cmd == "rtss.loadOverlay") return true;
     if (cmd == "app.retireUpdateDownload" || cmd == "app.cancelUpdateDownload") return false; // Atomic control, never wait for the IO pool.
@@ -59997,6 +60325,7 @@ static void reg_fs() {
         // 前端每次保存 = 一次原子写盘 = 一次立即刷新（HC 无文件轮询，
         // SettingsManager 事件即生效）。无新增逻辑：复用现有 forced 刷新。
         if (result) {
+            sgStaticScanPreference(committed.value("sleep",json::object()).value("sleepPowerPlanOptimizationEnabled",true));
             g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());
             inputCaptureRefreshRealStickSettings(true);
             ipc_emit("input.shortcutRuntime", inputShortcutRuntimeSnapshot());
@@ -60210,9 +60539,12 @@ static void reg_fs() {
             {"fanDiagnosticEnabled",g_fanLogEnabled.load()},{"frontendLogFailureCount",g_frontendDiagnosticsFailures.load()},
             {"frontendTraceDetailSuppressed",g_frontendTraceDetailSuppressed.load()},
             {"frontendControllerPreviewTraceSuppressed",g_frontendPreviewTraceSuppressed.load()},
+            {"frontendCalibrationTraceSuppressed",g_frontendCalibrationTraceSuppressed.load()},
             {"rendererDiagnosticDeliveryFailures",exportArgs.value("frontendDiagnosticDeliveryFailures",0ULL)},
             {"files",json::array()}};
         availability["monitorDetail"]=monitorDetailState().stats();
+        // REQUIRED ordinary snapshot: no source refresh/query or callback I/O.
+        availability["sleepPowerNotifications"]=g_sleepNotificationEvidence.snapshot();
         auto addFile = [&](const std::wstring& path) {
             std::error_code ec;const bool present=fspath::is_regular_file(path, ec);
             json row={{"name",W2U(fspath::path(path).filename().wstring())},{"present",present}};
@@ -60284,6 +60616,7 @@ static void reg_fs() {
         // Owner-lock sentinels and temp candidates are not collected or repaired.
         addFile(dataDir + L"\\controller-return\\target-return.json");
         addFile(dataDir + L"\\controller-return\\hidhide-cli-writer.json");
+        addFile(dataDir + L"\\controller-return\\native-refresh-writer.json");
         // 域/协调/输入宿主（yemancc_data_dir）
         addRotated(dataDir + L"\\tdp.log");
         addRotated(dataDir + L"\\tdp-detail.log");
@@ -60346,6 +60679,12 @@ static void reg_fs() {
         }
         // 睡眠事实
         addRotated(SG_FACT_LOG);
+        // On-demand OS evidence only; no scan, channel enable or recovery action.
+        const auto windowsSleepEvidence=sgExportWindowsSleepEvidence(dataDir);
+        availability["windowsSleepDiagnostics"]=windowsSleepEvidence.receipt;
+        for(const auto& file:windowsSleepEvidence.files)addFile(file);
+        const auto staticWakeJournal=swExportJournalPath();
+        if(!staticWakeJournal.empty())addFile(staticWakeJournal); // Existing owned journal only; never scan on export.
         addFile(SG_DIR + L"\\wake-recovery-last.json"); // most recently completed generation only
         addFile(SleepRecoveryAuto::exportCurrentSnapshot()); // copied current/pending state; NEVER triggers recovery
         const auto steamLinkSnapshot=steamGameLinkExportSnapshot();
@@ -60386,6 +60725,35 @@ static void reg_fs() {
         if(!windowsSensorEvidence.empty())addFile(windowsSensorEvidence);
         else availability["files"].push_back({{"name","windows-sensor-evidence.json"},{"present",false},
             {"missingReason","current-windows-sensor-snapshot-not-saved"}});
+        const auto controllerAxisCalibrationEvidence=exportControllerAxisCalibrationEvidence();
+        if(!controllerAxisCalibrationEvidence.empty())addFile(controllerAxisCalibrationEvidence);
+        else availability["files"].push_back({{"name","controller-axis-calibration-evidence.json"},{"present",false},
+            {"missingReason","calibration-cached-snapshot-not-saved"}});
+        // Export-time historical System events only. No subscription, device
+        // open/restart, process lookup or input admission follows from them.
+        const auto pnpVetoEvidencePath=fspath::path(dataDir)/L"controller-pnp-veto-evidence.json";
+        bool pnpVetoEvidenceSaved=false;
+        try {
+            json evidence;
+#if defined(YMCC_MSI_FOREGROUND_ISOLATION_TEST) || defined(YMCC_FAULT_INJECT)
+            evidence={{"schemaVersion",1},{"readOnly",true},{"status","offline-consumer-system-event-read-suppressed"},
+                {"captureInvoked",false},{"events",json::array()},{"noVetoProven",false}};
+#else
+            evidence=ymcc::controller::pnpVeto::capture();
+            if(evidence.is_object())evidence["captureInvoked"]=true;
+#endif
+            if(!evidence.is_object())evidence={{"schemaVersion",1},{"readOnly",true},{"status","capture-unavailable"},
+                {"captureInvoked",true},{"events",json::array()},{"noVetoProven",false}};
+            evidence["observedAt"]=nativeLifecycleTimestamp();
+            evidence["exportPid"]=GetCurrentProcessId();
+            evidence["familyAtExport"]=ymccFamilyName(g_machineIdentity.family);
+            evidence["targetCorrelation"]="not-performed;raw historical records are not bound to current controller or Disable call";
+            std::ofstream out(pnpVetoEvidencePath,std::ios::binary|std::ios::trunc);
+            out<<evidence.dump(2)<<'\n';out.close();pnpVetoEvidenceSaved=bool(out);
+        } catch(...) { /* A failed snapshot never exports an older file as current. */ }
+        if(pnpVetoEvidenceSaved)addFile(pnpVetoEvidencePath.wstring());
+        else availability["files"].push_back({{"name","controller-pnp-veto-evidence.json"},{"present",false},
+            {"missingReason","current-controller-pnp-event-snapshot-not-saved"}});
         const auto controllerMotionEvidence=exportControllerMotionEvidence();
         if(!controllerMotionEvidence.empty())addFile(controllerMotionEvidence);
         else availability["files"].push_back({{"name","controller-motion-evidence.json"},{"present",false},
@@ -60494,13 +60862,20 @@ static void reg_fs() {
                 manifest << "snapshotReceipt=log-export-snapshot.json actualStagedBytes=true partialTailRetained=true\n";
                 // REQUIRED ordinary sleep evidence; export must not start a source or scan.
                 manifest << "sleepEvidenceFile=sleep-facts.log;detailLoggingRequired=0;mandatoryEvidence=true\n";
+                manifest << "sleepPowerNotifications=log-export-availability.json#sleepPowerNotifications;callback-fixed-atomics;no-poll;not-power-authority\n";
+                manifest << "sleepFactSchemaVersion=2;writerIdentity=writerPid+writerProcessCreation100ns;recordOrder=writerSequence;time=legacy-local;absoluteTime=timestampUtc+timestampLocal;monotonic=observedTickMs;scope=record-creation-not-kernel-event-time;historicalRowsMayLackMetadata=true\n";
                 manifest << "sleepEvidenceScope=human-intent;source-start-stop-loss;bounded-low-power-intervals;deadline;request-result;cancel-reason;static-scan-restore-summary\n";
                 manifest << "sleepEvidenceMissingPolicy=UNKNOWN;no-event-is-not-success;completed507-is-not-live-retry-authority\n";
-                manifest << "virtualReturnEvidence=target-return.json;hidhide-cli-writer.json;existingHistoricalBytesOnly=true;noRepairOrDeviceQuery=true;notCurrentInputProof=true\n";
+                manifest << "windowsSleepDiagnostics=explicit-export-only;recorded-zero-software-drips-only;one-read-only-sleepstudy;sleepstudy-minimum-session-us=600000000;short-anomaly-unknown-without-query;target-coverage-unverified;timeoutMs=8000;historyDays=1;no-power-action;ordinary-evidence-required\n";
+                manifest << "virtualReturnEvidence=target-return.json;hidhide-cli-writer.json;native-refresh-writer.json;existingHistoricalBytesOnly=true;noRepairOrDeviceQuery=true;notCurrentInputProof=true\n";
                 manifest << "availabilityReceipt=log-export-availability.json missingIsNotError=true\n";
                 manifest << "controllerSensorBanks=controller-sensor-banks-evidence.json;readOnly=true;rawDataOnly=true;selectionAndProcessingUnchanged=true\n";
                 manifest << "windowsSensorEvidence=windows-sensor-evidence.json;readOnly=true;metadataAndExplicitRawProbeEvidence=true;queryDoesNotEnumerate=true;hostAndGameConsumptionNotProven=true\n";
+                manifest << "controllerPnpVetoEvidence=controller-pnp-veto-evidence.json;export-only-read-existing-System-Kernel-PnP225;no-subscription-device-or-process-control;empty-not-no-veto-proof\n";
                 manifest << "controllerMotionEvidence=controller-motion-evidence.json;readOnly=true;queueTimeNotFirmwareSampling=true;hostAndGameConsumptionNotProven=true\n";
+                manifest << "controllerAxisCalibrationEvidence=controller-axis-calibration-evidence.json;cached-memory-only;single-try-owner-locks;max32768-bytes;no-settings-refresh-or-source-read;not-hardware-or-game-proof\n";
+                manifest << "controllerCalibrationFrontendTrace=frontend-trace.log;where=controller-calibration;schema1;max8192-bytes;120rows-per60seconds;no-per-frame-logging;not-native-release-proof\n";
+                manifest << "frontendCalibrationTraceSuppressed=" << g_frontendCalibrationTraceSuppressed.load() << "\n";
                 manifest << "inputTargetIntentEvidenceVersion=1\n";
                 manifest << "inputTargetIntentEvidenceFile=native-lifecycle.log event=input-target-intent-evidence;MSI-legacy-event=msi-target-intent-evidence\n";
                 manifest << "inputHelperAuthorityEvidenceFile=native-lifecycle.log event=input-host.native-helper-diagnostic detailLoggingRequired=0 scope=helper-existing-call-facts\n";
@@ -60811,17 +61186,27 @@ static void reg_fs() {
         swprintf_s(stamp, L"%04u%02u%02u-%02u%02u%02u",
                    now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
         const std::wstring zipPath = exportRoot + L"\\YeManCC-logs-" + stamp + L".zip";
+        const auto archiveStartedTick=GetTickCount64();
         const TarArchiveRetryResult packed =
             createTarArchiveWithRetry(zipPath, files, dataDir, manifestName, &steamLogs);
+        appendNativeLifecycleLog("log-export-result",{{"ok",packed.ok},{"reason",packed.reason},
+            {"attempts",packed.attempts},{"win32Error",packed.win32Error},{"completion",packed.completion},
+            {"cleanupOk",packed.cleanupOk},{"archiveElapsedMs",GetTickCount64()-archiveStartedTick},
+            {"sourceFileCount",files.size()},{"steamCopied",packed.steamCopied},{"steamSkipped",packed.steamSkipped},
+            {"archiveCommand",{{"mode",packed.archiveCommandMode},{"utf16UnitsIncludingNull",packed.archiveCommandUtf16Units},
+                {"fileLists",packed.archiveFileLists},{"listEntries",packed.listEntries},{"wideArgumentEntries",packed.wideArgumentEntries}}},
+            {"scope","terminal-after-snapshot;may-first-appear-in-next-export;not-full-live-source-proof"}});
         if (!packed.ok) {
             return json{{"ok", false},
                         {"reason", "archive-failed-after-2-attempts"},
                         {"attempts", packed.attempts},
                         {"lastError", packed.reason},
+                        {"archiveCommand",{{"mode",packed.archiveCommandMode},{"utf16UnitsIncludingNull",packed.archiveCommandUtf16Units},{"fileLists",packed.archiveFileLists}}},
                         {"win32Error", packed.win32Error},
                         {"cleanupOk", packed.cleanupOk}};
         }
         return json{{"ok", true}, {"path", W2U(zipPath)},
+                    {"archiveCommand",{{"mode",packed.archiveCommandMode},{"utf16UnitsIncludingNull",packed.archiveCommandUtf16Units},{"fileLists",packed.archiveFileLists}}},
                     {"count", static_cast<unsigned long long>(files.size()) + packed.steamCopied},
                     {"steamLogs", {{"status", packed.steamStatus}, {"root", W2U(steamLogs.root.wstring())},
                         {"source", steamLogs.source}, {"discovered", steamLogs.files.size()},
@@ -62441,14 +62826,20 @@ static void reg_shell_app() {
     });
     ipc_on("steamDeckMouse.get", [](const json&) -> json { return steamDeckMouseGet(); });
     ipc_on("steamDeckMouse.set", [](const json& a) -> json { return steamDeckMouseSet(a); });
-    // Static scan is opt-in. The default power repair preference never starts a broad scan.
-    ipc_on("sleep.staticWake.get", [](const json&) -> json { return swGetStatus(); });
-    ipc_on("sleep.staticWake.scan", [](const json&) -> json {
-        sgRecordFact("static-wake-scan-start",{{"detailLogsRequired",false},{"mandatoryEvidence",true}});
-        const auto result=swScan();sgRecordFact("static-wake-scan-result",result);return result;
+    // Saved power repair controls delayed boot/wake scans; the button supplements it.
+    ipc_on("sleep.staticWake.get", [](const json& a) -> json { return swGetStatus(a.value("requestId",std::string{})); });
+    ipc_on("sleep.staticWake.scan", [](const json& a) -> json {
+        const auto result=swManualOperation(false,a.value("requestId",std::string{}),[]{
+            sgRecordFact("static-wake-scan-start",{{"trigger","manual"},{"detailLogsRequired",false},{"mandatoryEvidence",true}});
+            const auto result=sgStaticScanNow();sgRecordFact("static-wake-scan-result",result);return result;
+        });
+        ipc_emit("sleep.staticWake.updated",result.at("status"));return result;
     });
-    ipc_on("sleep.staticWake.restore", [](const json&) -> json {
-        const auto result=swRestore();sgRecordFact("static-wake-restore-result",result);return result;
+    ipc_on("sleep.staticWake.restore", [](const json& a) -> json {
+        const auto result=swManualOperation(true,a.value("requestId",std::string{}),[]{
+            const auto result=sgStaticRestoreNow();sgRecordFact("static-wake-restore-result",result);return result;
+        });
+        ipc_emit("sleep.staticWake.updated",result.at("status"));return result;
     });
     // ── 睡眠守护（Sleep Guard）控制面 ──
     ipc_on("sleepGuard.set", [](const json& a) -> json {
@@ -76743,22 +77134,16 @@ static void sgHandleModernStandbyWake(bool userWake) {
 }
 
 static DWORD WINAPI suspendResumeSubscriptionCallback(PVOID, ULONG type, PVOID) {
-    // Sensor admission closes immediately, even when the window pump is delayed.
-    // Shared sleep generations/game leases still belong to WM_POWERBROADCAST.
+    if(ymcc::sleepnotifications::Evidence::index(type)<0)return ERROR_SUCCESS;
+    g_sleepNotificationEvidence.callback(type,GetTickCount64());
+    // Sensor admission closes immediately; shared generations/game leases still
+    // belong to WM_POWERBROADCAST. Diagnostic counters never admit a recovery.
     if (type == PBT_APMSUSPEND) inputCaptureSignalSensorPowerPause();
-    else if (type == PBT_APMRESUMEAUTOMATIC || type == PBT_APMRESUMESUSPEND || type == PBT_APMRESUMECRITICAL)
-        g_sensorSuspendCallbackActive.store(false, std::memory_order_release);
-    if (!g_hwnd) return ERROR_SUCCESS;
-    if (type == PBT_APMSUSPEND) {
-        PostMessageW(g_hwnd, WM_POWERBROADCAST, PBT_APMSUSPEND, 0);
-    } else if (type == PBT_APMRESUMEAUTOMATIC) {
-        PostMessageW(g_hwnd, WM_POWERBROADCAST, PBT_APMRESUMEAUTOMATIC, 0);
-    } else if (type == PBT_APMRESUMESUSPEND) {
-        PostMessageW(g_hwnd, WM_POWERBROADCAST, PBT_APMRESUMESUSPEND, 0);
-    } else if (type == PBT_APMRESUMECRITICAL) {
-        // Hibernate commonly reports only this resume variant.
-        PostMessageW(g_hwnd, WM_POWERBROADCAST, PBT_APMRESUMECRITICAL, 0);
-    }
+    else g_sensorSuspendCallbackActive.store(false, std::memory_order_release);
+    if (!g_hwnd) {g_sleepNotificationEvidence.noWindow();return ERROR_SUCCESS;}
+    const BOOL posted=PostMessageW(g_hwnd,WM_POWERBROADCAST,type,0);
+    const DWORD error=posted?ERROR_SUCCESS:GetLastError();
+    g_sleepNotificationEvidence.forwarded(posted!=FALSE,error);
     return ERROR_SUCCESS;
 }
 
@@ -76886,6 +77271,9 @@ static DWORD WINAPI sgKernelPowerEventCallback(EVT_SUBSCRIBE_NOTIFY_ACTION actio
         ymcc::abnormalsleep::publishConfirmedWake(g_sgLastPowerButtonWakeEventFileTime,recordedFileTime);
         if(eventFileTime!=0)sgPublishSleepEventTime(g_sgOriginalPowerButtonWakeFileTime,eventFileTime);
     }
+    // Inventory must stop even when the independent sleep guard is disabled.
+    if(entering && recordedFileTime>g_sgLastPowerButtonWakeEventFileTime.load(std::memory_order_acquire))
+        sgStaticScanCancel("kernel-power-506");
     if (entering) sgRememberKernelSleepEntry(reason, eventFileTime);
     if (entering) {
         g_sgLastKernel506Reason.store(reason, std::memory_order_release);
@@ -77033,6 +77421,8 @@ static bool commitPowerResume(unsigned long long generation, const char* source)
     // GP-926R17b：登记真实 resume 提交时刻（显示器恢复宽限 + 唤醒对焦窗口共用同一"这次真的醒了"锚点）。
     g_lastPowerResumeCommitTick.store(GetTickCount64(), std::memory_order_release);
     openHardwareWriteGate();
+    sgStaticScanSchedule(false);
+    sgNotifyWork();
     traceLog("power resumeComplete committed generation=%llu source=%s inputReady=%d",
              generation, source ? source : "unknown",
              g_inputReady.load(std::memory_order_acquire) ? 1 : 0);
@@ -77411,6 +77801,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
             // Completed setup returns immediately; no new timer, reader or install attempt.
             gamepadDriverSetupRequestRead();
             refreshMemTrayIcon();
+        }
+        if (w == SG_STATIC_SCAN_TIMER_ID) {
+            sgStaticScanTimer();
+            return 0;
         }
         if (w == SG_ABNORMAL_TIMER_ID) {
             KillTimer(g_hwnd,SG_ABNORMAL_TIMER_ID);
@@ -78155,6 +78549,9 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         }
         break;
 
+    case WM_SG_STATIC_SCAN:
+        sgStaticScanMessage(w,l);
+        return 0;
     case WM_SG_ABNORMAL_EVIDENCE:
         sgAbnormalHandleEvent(l);
         return 0;
@@ -78364,6 +78761,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         return 0;
     }
     case WM_POWERBROADCAST: {
+        g_sleepNotificationEvidence.handled(static_cast<ULONG>(w),GetTickCount64());
         if (w == PBT_APMSUSPEND || w == PBT_APMRESUMEAUTOMATIC ||
             w == PBT_APMRESUMESUSPEND || w == PBT_APMRESUMECRITICAL)
             focusLosslessReturnCancel();
@@ -85143,6 +85541,8 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
         params.Context = nullptr;
         const DWORD rc = PowerRegisterSuspendResumeNotification(
             DEVICE_NOTIFY_CALLBACK, reinterpret_cast<HANDLE>(&params), &g_suspendResumeNotify);
+        g_sleepNotificationEvidence.registered(rc);
+        sgRecordFact("sleep-power-notification-registration",g_sleepNotificationEvidence.snapshot());
         if (rc != ERROR_SUCCESS) {
             g_suspendResumeNotify = nullptr;
             traceLog("power suspend/resume subscription unavailable rc=%lu; WM fallback active", rc);
@@ -85220,6 +85620,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
             sgSaveConfig();
             sgSyncEnableMirror();
         }
+        sgStaticScanPreference(ymSettingsSection("sleep").value("sleepPowerPlanOptimizationEnabled",true),true);
         // 启动只恢复本程序自己留下的两类身份标记：睡眠冻结和手动暂停。
         // 两个目录分离，任何一类都不会按名称/内存扫描其他进程。
         // 恢复标记只影响本程序自己留下的 PID 文件。放到独立线程，让

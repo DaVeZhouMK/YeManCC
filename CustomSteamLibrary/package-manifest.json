@@ -2,7 +2,7 @@
     "schemaVersion":  2,
     "packageId":  "custom-steam-library",
     "packageType":  "green-child",
-    "packageVersion":  "0.0.35",
+    "packageVersion":  "0.0.36",
     "productName":  "Steam自定义游戏库",
     "productNameEnglish":  "Custom Steam Library",
     "entryPoint":  "CustomSteamLibrary.exe",
@@ -73,10 +73,10 @@
     "legacyPaths":  [
                         "D:\\YeMan\\Steam大屏"
                     ],
-    "generatedAt":  "2026-10-24T17:21:13.2482703+08:00",
+    "generatedAt":  "2026-10-26T07:25:48.1402011+08:00",
     "sourceBuild":  {
-                        "host":  "ff0ef9b6cb806f7638e4cdd365305d0097ebc1dd5b2f5a4b2629d30de7598cb2",
-                        "worker":  "2b53d0803543fefa133259bde71537ba3d1a30f7cfc66652c8be8f3d1670b961",
+                        "host":  "aff457d1343a9c67d2ba89e57d75857c8655d45205b3a5f2dac9229189b6df9a",
+                        "worker":  "3a4aa4e9071982ec31d923ded56318e28597c4ae11feaf9d2fd31a6d10118aee",
                         "hostSources":  [
                                             {
                                                 "path":  "CustomSteamLibrary/assets/custom-steam-library.ico",
@@ -282,12 +282,12 @@
                       {
                           "path":  "CustomSteamLibrary.exe",
                           "bytes":  2139648,
-                          "sha256":  "ff0ef9b6cb806f7638e4cdd365305d0097ebc1dd5b2f5a4b2629d30de7598cb2"
+                          "sha256":  "aff457d1343a9c67d2ba89e57d75857c8655d45205b3a5f2dac9229189b6df9a"
                       },
                       {
                           "path":  "SteamArtworkLab.exe",
                           "bytes":  3081728,
-                          "sha256":  "2b53d0803543fefa133259bde71537ba3d1a30f7cfc66652c8be8f3d1670b961"
+                          "sha256":  "3a4aa4e9071982ec31d923ded56318e28597c4ae11feaf9d2fd31a6d10118aee"
                       },
                       {
                           "path":  "run-workspace.bat",

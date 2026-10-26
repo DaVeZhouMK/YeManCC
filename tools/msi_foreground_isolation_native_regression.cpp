@@ -106,6 +106,256 @@ static std::pair<unsigned,unsigned> msiExplicitRearmForegroundBoundaryRegression
     return {cases,failures};
 }
 
+// Bounded actual-production-helper coverage. No Stop/cold pass, Source,
+// endpoint-absence proof, SDK/PnP access or independent lifecycle implementation.
+static std::pair<unsigned,unsigned> msiCleanupColdOffRegression() {
+    using namespace ymcc::inputHost;
+    unsigned cases=0,failures=0;
+    auto check=[&](const char* name,bool ok){++cases;if(!ok)++failures;
+        std::cout<<(ok?"PASS ":"FAIL ")<<"cleanup-cold-off: "<<name<<"\n";};
+    auto* const pipeBefore=pipeTransport::existingProcessRuntime();
+    const bool oldQuarantine=g_inputHostReleaseQuarantined;
+    const bool oldHistory=targetReturnRuntime::state.coldHistoryPending;
+    const auto oldHistoryError=targetReturnRuntime::state.lastError;
+    auto* const oldHistorySession=targetReturnRuntime::state.session.get();
+    check("cleanup evidence without HostMx is null",inputHostCleanupEvidenceLocked().is_null());
+    check("cleanup and verification events are base-registered",
+        nativeLifecycleEventIsBase("input-host-cleanup-evidence")&&nativeLifecycleEventIsBase("input-host-switch-verification"));
+    {
+        std::lock_guard hostLock(g_inputHostMx);
+        const auto facts=inputHostCleanupEvidenceLocked();
+        check("locked evidence reports actual cached inputs and unknown schema",facts.is_object()&&
+            facts.value("schemaVersion",0)==1&&!facts.value("predicateReexecuted",true)&&
+            facts.at("checks").at("hostProcessAbsent")==!g_inputHostProcess&&
+            facts.at("checks").at("preparedCleared")==!g_inputHostPrepared&&
+            facts.at("checks").at("visibilityJournalInactive")==!g_hidHideVisibilityJournal.active&&
+            facts.at("unknown").is_array()&&facts.at("pipe").at("runtimePresent")==bool(pipeBefore)&&
+            (!oldHistorySession?facts.at("historyObligations").is_null():true)&&
+            !facts.value("physicalReturnVerified",true)&&!facts.value("gameInputVerified",true));
+        g_inputHostReleaseQuarantined=true;
+        const auto quarantined=inputHostCleanupEvidenceLocked();
+        check("quarantine is a concrete cached blocker",quarantined.is_object()&&
+            quarantined.at("checks").at("releaseQuarantineCleared")==false&&
+            std::find(quarantined.at("blockers").begin(),quarantined.at("blockers").end(),"releaseQuarantineCleared")!=quarantined.at("blockers").end());
+        targetReturnRuntime::state.coldHistoryPending=true;
+        const auto historical=inputHostCleanupEvidenceLocked();
+        check("cold history is a blocker without inventing a loaded record",historical.is_object()&&
+            historical.at("checks").at("coldReturnHistorySettledCached")==false&&
+            std::find(historical.at("blockers").begin(),historical.at("blockers").end(),"coldReturnHistorySettledCached")!=historical.at("blockers").end()&&
+            (!oldHistorySession?historical.at("historyObligations").is_null():true));
+        check("evidence observes without creating runtime or mutating duties",
+            pipeTransport::existingProcessRuntime()==pipeBefore&&g_inputHostReleaseQuarantined&&
+            targetReturnRuntime::state.coldHistoryPending&&targetReturnRuntime::state.session.get()==oldHistorySession&&
+            targetReturnRuntime::state.lastError==oldHistoryError);
+        g_inputHostReleaseQuarantined=oldQuarantine;targetReturnRuntime::state.coldHistoryPending=oldHistory;
+    }
+    // The preceding original fixture resets R3 to idle. Reuse its existing
+    // placement-reset convention only for this private process's test episode.
+    const auto oldProtection=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    check("original fixture leaves an idle R3 authority",oldProtection.requestId==0&&!oldProtection.locked);
+    if(oldProtection.requestId||oldProtection.locked)return {cases,failures};
+    const auto oldContinuation=switchExecutionReturnRuntime::state;
+    const bool oldPending=g_inputHostSwitchExecutionReturnPending.load();
+    const bool oldEnabled=g_realStickTest.virtualTargetEnabled;const auto oldPersona=g_realStickTest.virtualTargetPersona;
+    const auto oldEpoch=g_inputHostEpoch;const auto oldProcess=g_inputHostProcess;
+    const bool oldHello=g_inputHostHello,oldPrepared=g_inputHostPrepared,oldNeutral=g_inputHostNeutralized,oldActive=g_inputHostActive;
+    const bool oldJournal=g_hidHideVisibilityJournal.active;
+    const bool oldOwed=g_msiDinputReturnOwed.load(),oldArmed=g_msiDinputRouteDinputArmed.load(),oldHandoff=g_msiPersonaModeHandoff.active;
+    {
+        std::lock_guard hostLock(g_inputHostMx);
+        g_realStickTest.virtualTargetEnabled=false;g_realStickTest.virtualTargetPersona="disabled";
+        switchExecutionReturnRuntime::state={};g_inputHostSwitchExecutionReturnPending=false;
+        targetReturnRuntime::state.coldHistoryPending=true;
+        const auto clock=inputHostStartProtectionNow();const auto admitted=g_virtualStartProtection.admit("disabled",clock);
+        const auto ticket=admitted.requestId;const auto original=g_virtualStartProtection.view(clock);
+        check("control without Carry hook leaves historical OFF pending without consumer",admitted.accepted&&
+            original.phase=="pending"&&original.locked&&targetReturnRuntime::state.coldHistoryPending&&
+            !switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending.load());
+        const bool armed=inputHostSwitchExecutionCarryColdOffLocked(ticket);
+        const auto first=switchExecutionReturnRuntime::state;const auto after=g_virtualStartProtection.view(clock);
+        check("actual Carry hook arms same OFF id and deadline with zero passes/fallback",armed&&first.pending&&first.cold&&
+            first.requestId==ticket&&first.persona=="disabled"&&first.coldPasses==0&&g_inputHostSwitchExecutionReturnPending.load()&&
+            after.requestId==ticket&&after.remainingMs==original.remainingMs&&after.phase==original.phase&&after.fallbackAttempts==0);
+        const bool repeated=inputHostSwitchExecutionCarryColdOffLocked(ticket);
+        const auto& again=switchExecutionReturnRuntime::state;const auto repeatedView=g_virtualStartProtection.view(clock);
+        check("repeated Carry hook cannot renew observation or admission budget",repeated&&again.requestId==ticket&&
+            again.nextObservation==first.nextObservation&&again.coldPasses==0&&repeatedView.remainingMs==original.remainingMs&&
+            repeatedView.inspectionDeadlineElapsedMs==original.inspectionDeadlineElapsedMs&&repeatedView.fallbackAttempts==0);
+        switchExecutionReturnRuntime::state={};g_inputHostSwitchExecutionReturnPending=false;
+        targetReturnRuntime::state.coldHistoryPending=false;
+        check("no historical duty cannot arm a cold consumer",!inputHostSwitchExecutionCarryColdOffLocked(ticket)&&
+            !switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending.load());
+        targetReturnRuntime::state.coldHistoryPending=true;
+        check("wrong ticket cannot arm or replace current OFF",!inputHostSwitchExecutionCarryColdOffLocked(ticket+1)&&
+            !switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending.load()&&
+            g_virtualStartProtection.view(clock).requestId==ticket);
+        const bool savedFence=g_inputHostExitFence.load(),savedExit=g_exitRequested.load(),savedStop=g_inputCaptureStop.load();
+        g_inputHostExitFence=true;g_exitRequested=false;g_inputCaptureStop=false;
+        const bool fenceRefused=!inputHostSwitchExecutionCarryColdOffLocked(ticket);
+        g_inputHostExitFence=false;g_exitRequested=true;
+        const bool exitRefused=!inputHostSwitchExecutionCarryColdOffLocked(ticket);
+        g_exitRequested=false;g_inputCaptureStop=true;
+        const bool stopRefused=!inputHostSwitchExecutionCarryColdOffLocked(ticket);
+        g_inputHostExitFence=savedFence;g_exitRequested=savedExit;g_inputCaptureStop=savedStop;
+        check("each exit guard refuses a new cold continuation on the same OFF",fenceRefused&&exitRefused&&stopRefused&&
+            !switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending.load());
+        // Exercise only the actual predecessor gate. Clearing controlled cache
+        // inputs here is not a claim of device absence or completed return.
+        g_inputHostProcess=nullptr;g_inputHostEpoch=0;g_inputHostHello=false;g_inputHostPrepared=false;
+        g_inputHostNeutralized=false;g_inputHostActive=false;g_hidHideVisibilityJournal.active=false;
+        g_inputHostReleaseQuarantined=false;g_msiDinputRouteDinputArmed=false;g_msiPersonaModeHandoff.active=false;
+        g_msiDinputReturnOwed=true;const bool modeBlocked=!switchExecutionReturnRuntime::coldPredecessorsReturnedLocked();
+        g_msiDinputReturnOwed=false;const bool modeCleared=switchExecutionReturnRuntime::coldPredecessorsReturnedLocked();
+        check("mode return debt blocks cold predecessor gate and clearing it reopens",modeBlocked&&modeCleared&&
+            !switchExecutionReturnRuntime::state.pending&&!g_inputHostSwitchExecutionReturnPending.load());
+        g_inputHostProcess=oldProcess;g_inputHostEpoch=oldEpoch;g_inputHostHello=oldHello;g_inputHostPrepared=oldPrepared;
+        g_inputHostNeutralized=oldNeutral;g_inputHostActive=oldActive;g_hidHideVisibilityJournal.active=oldJournal;
+        g_inputHostReleaseQuarantined=oldQuarantine;g_msiDinputReturnOwed=oldOwed;
+        g_msiDinputRouteDinputArmed=oldArmed;g_msiPersonaModeHandoff.active=oldHandoff;
+        g_realStickTest.virtualTargetEnabled=oldEnabled;g_realStickTest.virtualTargetPersona=oldPersona;
+        targetReturnRuntime::state.coldHistoryPending=oldHistory;
+        switchExecutionReturnRuntime::state=oldContinuation;g_inputHostSwitchExecutionReturnPending=oldPending;
+        g_virtualStartProtection.~VirtualStartProtection();new (&g_virtualStartProtection) ymcc::VirtualStartProtection();
+        check("controlled fields restored and no pipe runtime created",pipeTransport::existingProcessRuntime()==pipeBefore&&
+            targetReturnRuntime::state.coldHistoryPending==oldHistory&&g_inputHostReleaseQuarantined==oldQuarantine&&
+            g_inputHostEpoch==oldEpoch&&g_inputHostProcess==oldProcess&&g_msiDinputReturnOwed.load()==oldOwed&&
+            g_msiDinputRouteDinputArmed.load()==oldArmed&&g_msiPersonaModeHandoff.active==oldHandoff&&
+            switchExecutionReturnRuntime::state.requestId==oldContinuation.requestId&&
+            g_inputHostSwitchExecutionReturnPending.load()==oldPending&&g_virtualStartProtection.view(clock).requestId==0);
+    }
+    std::cout<<"MSI_CLEANUP_COLD_OFF cases="<<cases<<" failures="<<failures<<" scope=actual-hook-consumption no-cold-pass not-managed-pipe-proof\n";
+    return {cases,failures};
+}
+
+// Existing production-TU consumer: diagnostic budget assertions only. Cached
+// pause gates avoid writer/SDK access; no cold-return or coordinator execution.
+static std::pair<unsigned,unsigned> pauseMaskOnlyLogRegression() {
+    using namespace ymcc::inputHost::switchVerificationRuntime;
+    unsigned cases=0,failures=0;
+    auto check=[&](const char* name,bool ok){++cases;if(!ok)++failures;
+        std::cout<<(ok?"PASS ":"FAIL ")<<"pause-log-cap: "<<name<<"\n";};
+    flushNativeLifecycleLogs();
+    const auto logPath=fspath::path(g_appDataDir)/L"native-lifecycle.log";
+    const auto logOffset=fspath::exists(logPath)?fspath::file_size(logPath):0;
+    auto rows=[&](std::uint64_t request){flushNativeLifecycleLogs();json result=json::array();
+        std::ifstream input(logPath);input.seekg(static_cast<std::streamoff>(logOffset));std::string line;
+        while(std::getline(input,line)){auto row=json::parse(line,nullptr,false);
+            if(!row.is_discarded()&&row.value("event","")=="input-host-switch-verification"&&
+                row.value("requestId",std::uint64_t{0})==request)result.push_back(row);}
+        return result;};
+    const auto oldView=g_virtualStartProtection.view(inputHostStartProtectionNow());
+    check("private consumer starts with idle authority",oldView.requestId==0&&!oldView.locked);
+    if(oldView.requestId||oldView.locked)return {cases,failures};
+    const auto oldObservation=observation;const auto oldFinal=lastFinalRequestId.load();
+    const auto oldPending=g_inputHostSwitchVerificationPending.load();
+    const bool oldRecording=g_shortcutRecordingActive.load(),oldExternal=g_externalPriorityVirtualSuspended.load();
+    const bool oldReady=g_inputReady.load(),oldEnabled=g_realStickTest.enabled,oldTarget=g_realStickTest.virtualTargetEnabled;
+    const auto oldPersona=g_realStickTest.virtualTargetPersona;const auto oldPower=g_powerGeneration.load();
+    const auto oldLifecycle=g_powerLifecycle.load();
+    ymcc::VirtualStartProtection::View timeoutView;
+    {
+        std::lock_guard hostLock(g_inputHostMx);
+        lastFinalRequestId=0;observation={};g_shortcutRecordingActive=true;
+        g_externalPriorityVirtualSuspended=false;g_inputReady=true;g_powerLifecycle=PowerLifecycle::Ready;
+        g_realStickTest.enabled=false;g_realStickTest.virtualTargetEnabled=true;g_realStickTest.virtualTargetPersona="elite";
+        const auto clock=inputHostStartProtectionNow();
+        const auto admission=g_virtualStartProtection.admit("elite",clock-11000);
+        const bool verifying=g_virtualStartProtection.beginVerification(admission.requestId,"failure",clock-10001);
+        g_inputHostSwitchVerificationPending=admission.requestId;
+        const auto initial=g_virtualStartProtection.view(clock);
+        check("existing 30s/10s and one fallback budgets remain unchanged",admission.accepted&&verifying&&
+            ymcc::VirtualStartProtection::maxMs==30000&&ymcc::VirtualStartProtection::executionInspectionMs==10000&&
+            ymcc::VirtualStartProtection::fallbackMaxAttempts==1&&initial.verificationRemainingMs==0);
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("initial state row does not spend mask-only allowance",observation.checks==1&&
+            observation.pauseMaskOnlyLogAttempts==0&&observation.pauseMaskOnlyChangesOmitted==0&&rows(admission.requestId).size()==1);
+        const auto first=observation.firstExcluded;
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("identical paused samples neither emit nor spend allowance",observation.checks==2&&
+            observation.pauseMaskOnlyLogAttempts==0&&observation.pauseMaskOnlyChangesOmitted==0&&rows(admission.requestId).size()==1);
+        bool boundaries=true;
+        for(unsigned i=1;i<=12;++i){g_externalPriorityVirtualSuspended=(i&1)!=0;g_powerGeneration=oldPower+i;
+            inputHostSwitchVerificationMaintenanceLocked();
+            if(i==8)boundaries=boundaries&&observation.pauseMaskOnlyLogAttempts==8&&observation.pauseMaskOnlyChangesOmitted==0&&rows(admission.requestId).size()==9;
+            if(i==9)boundaries=boundaries&&observation.pauseMaskOnlyLogAttempts==8&&observation.pauseMaskOnlyChangesOmitted==1&&rows(admission.requestId).size()==9;}
+        check("eighth mask-only row emits and ninth is omitted",boundaries&&pauseMaskOnlyLogLimit==8);
+        check("further mask changes remain capped while every sample is counted",observation.checks==14&&
+            observation.excludedChecks==14&&observation.pauseMaskOnlyLogAttempts==8&&
+            observation.pauseMaskOnlyChangesOmitted==4&&rows(admission.requestId).size()==9);
+        // Seed only the previous diagnostic mask to isolate the observed-mask
+        // trigger; the next sample itself still comes from the actual predicate.
+        observation.pauseReasonObservedMask^=SgWriterBlocked;
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("observed-mask-only transition also respects exhausted allowance",observation.pauseMaskOnlyLogAttempts==8&&
+            observation.pauseMaskOnlyChangesOmitted==5&&rows(admission.requestId).size()==9);
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("unchanged sample after exhaustion is not an omitted change",observation.checks==16&&
+            observation.pauseMaskOnlyChangesOmitted==5&&rows(admission.requestId).size()==9);
+        check("omitted changes preserve latest and first/last exclusion facts",observation.pauseReasonMask==Recording&&
+            (observation.pauseReasonMaskSeen&(Recording|ExternalPriority))==(Recording|ExternalPriority)&&
+            observation.pauseReasonObservedMask==(AllPauseReasons&~SgWriterBlocked)&&
+            observation.firstExcluded.elapsedMs==first.elapsedMs&&observation.firstExcluded.powerGeneration==first.powerGeneration&&
+            observation.lastExcluded.powerGeneration==oldPower+12&&observation.lastExcludedPauseReasonMask==Recording&&
+            observation.lastInspection.powerGeneration==oldPower+12&&observation.healthyChecks==0&&observation.knownFaultChecks==0);
+        const auto paused=g_virtualStartProtection.view(inputHostStartProtectionNow());
+        check("exhausted diagnostics cannot bypass pause or finalize elapsed inspection",paused.locked&&paused.verificationPending&&
+            paused.requestId==initial.requestId&&paused.inspectionDeadlineElapsedMs==initial.inspectionDeadlineElapsedMs&&
+            paused.fallbackAttempts==0&&lastFinalRequestId.load()==0);
+        // An evidence-only predecessor is diagnostic state, not a health proof.
+        observation.lastEvidence="previous-diagnostic-evidence";
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("evidence change still emits after mask-only allowance is exhausted",rows(admission.requestId).size()==10&&
+            observation.pauseMaskOnlyLogAttempts==8&&observation.pauseMaskOnlyChangesOmitted==5&&
+            std::string(observation.lastEvidence)=="expected-pause");
+        g_shortcutRecordingActive=false;
+        inputHostSwitchVerificationMaintenanceLocked();
+        const auto final=g_virtualStartProtection.view(inputHostStartProtectionNow());const auto emitted=rows(admission.requestId);
+        check("state change still emits and ordinary candidate failure finalizes",final.phase=="failure"&&!final.locked&&
+            final.fallbackAttempts==0&&emitted.size()==12&&emitted[10].value("stage","")=="inspection"&&
+            emitted[10].value("state","")=="evidence-unknown");
+        const json finalRow=emitted.empty()?json::object():emitted.back();
+        check("final row retains complete same-request sampling and log-budget totals",finalRow.value("stage","")=="final"&&
+            finalRow.value("inspectionChecks",0)==18&&finalRow.value("excludedChecks",0)==17&&
+            finalRow.value("healthyChecks",-1)==0&&finalRow.value("pauseMaskOnlyLogLimit",0)==8&&
+            finalRow.value("pauseMaskOnlyLogAttempts",0)==8&&finalRow.value("pauseMaskOnlyChangesOmitted",0)==5&&
+            finalRow.value("lastExcludedPowerGeneration",std::uint64_t{0})==oldPower+12);
+        inputHostSwitchVerificationMaintenanceLocked();finalLogLocked(final,"failure","duplicate-diagnostic-check");
+        check("repeated maintenance and final logging cannot duplicate terminal row",rows(admission.requestId).size()==12);
+        const auto nextClock=inputHostStartProtectionNow();const auto next=g_virtualStartProtection.admit("elite",nextClock);
+        const bool nextVerifying=g_virtualStartProtection.beginVerification(next.requestId,"failure",nextClock);
+        g_shortcutRecordingActive=true;g_inputHostSwitchVerificationPending=next.requestId;
+        inputHostSwitchVerificationMaintenanceLocked();
+        check("new request resets attempts omissions and sampling",next.accepted&&nextVerifying&&next.requestId!=admission.requestId&&
+            observation.requestId==next.requestId&&observation.checks==1&&observation.excludedChecks==1&&
+            observation.pauseMaskOnlyLogAttempts==0&&observation.pauseMaskOnlyChangesOmitted==0&&rows(next.requestId).size()==1);
+        g_externalPriorityVirtualSuspended=true;inputHostSwitchVerificationMaintenanceLocked();
+        check("new request gets its own mask-only allowance",observation.pauseMaskOnlyLogAttempts==1&&
+            observation.pauseMaskOnlyChangesOmitted==0&&rows(next.requestId).size()==2);
+        json unavailable=json::object();appendInspectionFacts(unavailable,nullptr);
+        check("unavailable observation has null counters and fixed limit",unavailable.at("pauseMaskOnlyLogLimit")==8&&
+            unavailable.at("pauseMaskOnlyLogAttempts").is_null()&&unavailable.at("pauseMaskOnlyChangesOmitted").is_null());
+        timeoutView=g_virtualStartProtection.view(nextClock+ymcc::VirtualStartProtection::maxMs);
+    }
+    // Exercise the existing admission-timeout path without HostMx even though a
+    // different available observation exists; protected facts must remain null.
+    inputHostRecordSwitchTimeout(timeoutView);
+    const auto timeoutRows=rows(timeoutView.requestId);const auto timeout=timeoutRows.empty()?json::object():timeoutRows.back();
+    check("lock-free admission timeout does not expose Host observation",timeoutView.phase=="expired"&&
+        timeout.value("stage","")=="final"&&timeout.contains("pauseMaskOnlyLogAttempts")&&
+        timeout.at("pauseMaskOnlyLogAttempts").is_null()&&timeout.at("pauseMaskOnlyChangesOmitted").is_null()&&
+        timeout.at("inspectionChecks").is_null()&&timeout.at("paused").is_null()&&timeout.value("pauseMaskOnlyLogLimit",0)==8);
+    {
+        std::lock_guard hostLock(g_inputHostMx);
+        observation=oldObservation;lastFinalRequestId=oldFinal;g_inputHostSwitchVerificationPending=oldPending;
+        g_shortcutRecordingActive=oldRecording;g_externalPriorityVirtualSuspended=oldExternal;g_inputReady=oldReady;
+        g_powerGeneration=oldPower;g_powerLifecycle=oldLifecycle;g_realStickTest.enabled=oldEnabled;
+        g_realStickTest.virtualTargetEnabled=oldTarget;g_realStickTest.virtualTargetPersona=oldPersona;
+        g_virtualStartProtection.~VirtualStartProtection();new (&g_virtualStartProtection) ymcc::VirtualStartProtection();
+    }
+    std::cout<<"PAUSE_MASK_ONLY_LOG cases="<<cases<<" failures="<<failures<<" actual-production-TU no-hardware\n";
+    return {cases,failures};
+}
+
 int wmain(int argc,wchar_t** argv) {
     if(argc!=2) return 2;
     g_yemanccDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);
@@ -491,6 +741,8 @@ int wmain(int argc,wchar_t** argv) {
     const auto nativeOnly=msiNativeForegroundRegression();cases+=nativeOnly.first;failures+=nativeOnly.second;
     const auto rearmBoundary=msiExplicitRearmForegroundBoundaryRegression();cases+=rearmBoundary.first;failures+=rearmBoundary.second;
     const auto helperFacts=msiHelperDiagnosticAttributionRegression();cases+=helperFacts.first;failures+=helperFacts.second;
+    const auto cleanupColdOff=msiCleanupColdOffRegression();cases+=cleanupColdOff.first;failures+=cleanupColdOff.second;
+    const auto pauseLogCap=pauseMaskOnlyLogRegression();cases+=pauseLogCap.first;failures+=pauseLogCap.second;
     g_inputHostProcess=nullptr;
     std::cout<<"MSI_FOREGROUND_NATIVE cases="<<cases<<" failures="<<failures<<" realHardwareAccess=false\n";
     std::ofstream report(fspath::path(g_yemanccDataDir)/L"msi-foreground-native-summary.json");

@@ -8,7 +8,7 @@ const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),args=
 assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY');
 const out=path.resolve(args[1]),toolchain=path.resolve(args[3]);assert(!fs.existsSync(out),'Existing evidence must never be overwritten');fs.mkdirSync(out,{recursive:true});
 const sha=p=>crypto.createHash('sha256').update(fs.readFileSync(p)).digest('hex'),json=p=>JSON.parse(fs.readFileSync(p,'utf8').replace(/^\uFEFF/,'')),save=(p,j)=>fs.writeFileSync(p,JSON.stringify(j,null,2)+'\n');
-const sourceFiles=['native/virtual_target_return_record.h','native/virtual_target_return_store.h','tools/fixtures/virtual_target_return_record/fixture.cpp','tools/virtual_target_return_record_selftest.mjs','deps/json/json.hpp'];
+const sourceFiles=['native/virtual_target_return_record.h','native/virtual_target_return_store.h','native/virtual_target_return_session.h','tools/fixtures/virtual_target_return_record/fixture.cpp','tools/virtual_target_return_record_selftest.mjs','deps/json/json.hpp'];
 const inputs=sourceFiles.map(relative=>({relative,path:path.join(repo,relative),sha256:sha(path.join(repo,relative))}));save(out+'/SOURCES.json',{inputs,claimedScopeOnly:true});
 const capture=json(toolchain+'/build-environment.json'),manifest=json(toolchain+'/toolchain-manifest.json'),env={...capture.environment};
 for(const k of Object.keys(env))if(/^(CL|_CL_|LINK|_LINK_)$/i.test(k))delete env[k];env.INCLUDE=manifest.roots.filter(r=>r.category==='INCLUDE').map(r=>r.frozen).join(';');env.LIB=manifest.roots.filter(r=>r.category==='LIB').map(r=>r.frozen).join(';');env.LIBPATH=env.LIB;

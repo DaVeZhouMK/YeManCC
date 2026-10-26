@@ -39,7 +39,8 @@ internal static class ExternalControllerPortCycle
          "AB05-MENDOCINO", "AB05", "AIR 1S", "AIR PRO", "AIR LITE", "AIR"];
     private static readonly string[] OneXModels =
         ["X1 MINI", "X1PRO", "X1 I", "X1", "APEX", "G1 I", "G1", "F1PRO", "F1", "MINI A07",
-         "MINI PRO", "ONE XPLAYER", "2 PRO", "2 ARP23"];
+         "MINI PRO", "ONE XPLAYER", "2 PRO", "2 ARP23", "ONEXPLAYER X2", "ONEXPLAYER X2MINI PRO",
+         "ONEXPLAYER 3", "ONEXPLAYER-3"];
     private static readonly string[] AynModels = ["LOKI MINIPRO", "LOKI ZERO", "LOKI MAX"];
     private static readonly string[] AokzoeModels = ["AOKZOE A1 AR07", "AOKZOE A1 PRO", "AOKZOE A1X", "AOKZOE A2 PRO"];
     private static readonly string[] VirtualMarkers = ["VIGEM", "HIDMAESTRO", "VIRTUAL", "VJOY", "VHID", "USBIP", "ROOT", "SWD"];

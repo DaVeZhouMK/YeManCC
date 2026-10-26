@@ -194,12 +194,115 @@ internal static class Fixture
             Check(Boundary.Calls.Count==0,"diagnostic emission adds no OS calls");
         }
     }
+#if CURRENT_STATUS
+    // Current-source mode reuses the complete helper and original inert consumer.
+    // HID OS boundaries are unreachable here; policy enumeration stays shared.
+    private static List<Outcome> CurrentStatusTests()
+    {
+        var tests=new List<Test>();
+        foreach(var family in new[]{"msi","rog","gpd"}){
+            foreach(var fault in new[]{"","disable","enable","action-locate","action-node","locate"})
+                tests.Add(new(new(){Id="current/"+family+"/"+(fault.Length==0?"success":fault),Family=family,Xusb=true,Fault=fault,Error=23},fault.Length==0?0:fault=="locate"?8:6));
+        }
+        tests.Add(new(new(){Id="current/root-success",RootOnly=true},0));
+        foreach(var fault in new[]{"","disable-throw","enable"})
+            tests.Add(new(new(){Id="direct/no-probe/"+(fault.Length==0?"success":fault),Direct=true,Xusb=true,Fault=fault},fault.Length==0?0:6));
+        tests.Add(new(new(){Id="direct/no-facts",Direct=true,Disabled=true,Xusb=true,Fault="disable",Error=23},6));
+        foreach(var probe in new[]{"","locate-error","node-mismatch","locate-throw","status-error","status-throw","post-locate-error","post-node-mismatch","post-locate-throw"})
+            tests.Add(new(new(){Id="direct/failure/"+(probe.Length==0?"same-node":probe),Direct=true,Xusb=true,Fault="disable",Error=23,ProbeFault=probe,StatusResult=probe=="status-error"?uint.MaxValue:0},6));
+        tests.Add(new(new(){Id="direct/raw-status-bits",Direct=true,Xusb=true,Fault="disable",Error=23,StatusBits=uint.MaxValue,ProblemCode=uint.MaxValue},6));
+        foreach(var serializer in new[]{"throw","oversize","at-cap","over-cap","utf8-over-cap"})
+            tests.Add(new(new(){Id="direct/serializer/"+serializer,Direct=true,Xusb=true,Fault="disable",Error=23,Serializer=serializer},6));
+        foreach(var writer in new[]{"throw","partial-throw"})
+            tests.Add(new(new(){Id="direct/stdout/"+writer,Direct=true,Xusb=true,Fault="disable",Error=23,Writer=writer},6));
+        return tests.Select(RunCurrentStatus).ToList();
+    }
+    private static Outcome RunCurrentStatus(Test test)
+    {
+        var c=test.Config;Boundary.Reset(c);var writer=new Output();var saved=Console.Out;int result;
+        MsiNativePortCycle.GameRefreshFacts? refresh=null;
+        Console.SetOut(writer);
+        try{
+            if(c.Direct){
+                refresh=c.Disabled?null:MsiNativePortCycle.GameRefreshFacts.TryCreate(c.Xusb);
+                try{
+                    var action=(Action?)Call("PrepareGameRefresh",c.Target,null,refresh,null);
+                    if(action is null)result=7;else{action();result=0;}
+                }catch(Exception error){
+                    if(error is TargetInvocationException invocation && invocation.InnerException is not null)error=invocation.InnerException;
+                    refresh?.WriteFailure(error);refresh?.WriteFailure(error);result=6;
+                }
+            }else{
+                var args=new List<string>{MsiNativePortCycle.Command,c.Root,"--location",Scenario.Location,"--parent-pid","999999","--once"};
+                if(!c.RootOnly)args.AddRange(["--game-xusb",c.Target]);
+                result=MsiNativePortCycle.Run(args.ToArray());
+            }
+        }finally{Console.SetOut(saved);}
+        var text=writer.Text.ToString();var bytes=Encoding.UTF8.GetByteCount(text);
+        var lines=text.Split(['\r','\n'],StringSplitOptions.RemoveEmptyEntries);
+        Check(result==test.Expected,c.Id+": original result");
+        Check(lines.Length<=1 && writer.Writes<=1 && Boundary.SerializeCalls<=1,c.Id+": one-shot record");
+        Check(bytes<=2048,c.Id+": original total UTF8 cap");MaxBytes=Math.Max(MaxBytes,bytes);
+        if(c.Serializer=="at-cap"){Check(bytes==2048,c.Id+": exact cap accepted");MaxGuardBytes=Math.Max(MaxGuardBytes,bytes);}
+        JsonElement? facts=null;
+        if(c.Writer.Length==0 && c.Serializer.Length==0 && lines.Length==1){
+            Check(lines[0].StartsWith(Prefix,StringComparison.Ordinal),c.Id+": prefix");
+            using var parsed=JsonDocument.Parse(lines[0][Prefix.Length..]);facts=parsed.RootElement.Clone();
+            Check(facts.Value.GetProperty("Result").GetInt32()==result,c.Id+": authoritative exit result");
+        }
+        var failedDisable=Boundary.Calls.Contains("disable:10:4:23");
+        var hasFacts=!c.Disabled;
+        var candidate=typeof(MsiNativePortCycle.GameRefreshFacts).GetProperty("DisableFailureStatus") is not null;
+        var probeExpected=candidate && failedDisable && hasFacts;
+        var beforeFailure=c.ProbeFault is "locate-error" or "node-mismatch" or "locate-throw";
+        Check(Boundary.StatusCalls==(probeExpected && !beforeFailure?1:0),c.Id+": bounded status/no-probe");
+        Check(Boundary.ProbeLocates==(probeExpected?(beforeFailure || c.ProbeFault=="status-throw"?1:2):0),c.Id+": exact matching probes");
+        if(!failedDisable || !hasFacts)Check(Boundary.StatusCalls==0 && Boundary.ProbeLocates==0,c.Id+": success/non-disable/no-facts zero new queries");
+        if(result==0)Check(writer.Writes==0 && Boundary.SerializeCalls==0,c.Id+": success zero output");
+        if(c.Disabled)Check(writer.Writes==0 && Boundary.SerializeCalls==0,c.Id+": no-facts zero output");
+        if(c.Writer.Length==0 && c.Serializer.Length==0 && result is 6 or 8 && hasFacts && !c.RootOnly)Check(lines.Length==1,c.Id+": failure record retained");
+        if(failedDisable && facts is JsonElement f){
+            Check(f.GetProperty("Stage").GetString()=="disable" && f.GetProperty("DisableCallEntered").GetBoolean() && f.GetProperty("DisableResult").GetUInt32()==23,c.Id+": original Disable result/stage");
+            Check(!f.GetProperty("EnableCallEntered").GetBoolean() && !f.GetProperty("CompensationAttempted").GetBoolean(),c.Id+": no enable/retry");
+            Check(f.GetProperty("ExceptionType").GetString()==typeof(InvalidOperationException).FullName,c.Id+": original failure exception");
+            if(candidate){
+                var observation=f.GetProperty("DisableFailureStatus");
+                var expected=c.ProbeFault switch{
+                    "locate-error"=>"unknown-locate-error","node-mismatch"=>"unknown-node-mismatch",
+                    "status-error"=>"unknown-status-error","post-locate-error"=>"unknown-post-locate-error",
+                    "post-node-mismatch"=>"unknown-post-node-mismatch",
+                    "locate-throw" or "status-throw" or "post-locate-throw"=>"unknown-diagnostic-throw",_=>"observed"};
+                Check(observation.GetProperty("State").GetString()==expected,c.Id+": observed/UNKNOWN preserved");
+                if(c.ProbeFault!="locate-throw"){
+                    Check(observation.GetProperty("LocateResult").GetUInt32()==(c.ProbeFault=="locate-error"?13u:0),c.Id+": locate CONFIGRET");
+                    if(c.ProbeFault=="locate-error")Null(observation,"SameNode");
+                    else Value(observation,"SameNode",c.ProbeFault!="node-mismatch");
+                }
+                if(!beforeFailure && c.ProbeFault!="status-throw"){
+                    Check(observation.GetProperty("StatusResult").GetUInt32()==c.StatusResult,c.Id+": status CONFIGRET retained");
+                    Check(observation.GetProperty("Status").GetUInt32()==c.StatusBits && observation.GetProperty("Problem").GetUInt32()==c.ProblemCode,c.Id+": raw status/problem retained even on error");
+                    if(c.ProbeFault!="post-locate-throw"){
+                        Check(observation.GetProperty("PostLocateResult").GetUInt32()==(c.ProbeFault=="post-locate-error"?13u:0),c.Id+": post locate CONFIGRET");
+                        if(c.ProbeFault=="post-locate-error")Null(observation,"PostSameNode");
+                        else Value(observation,"PostSameNode",c.ProbeFault!="post-node-mismatch");
+                    }
+                }else{Null(observation,"StatusResult");Null(observation,"Status");Null(observation,"Problem");}
+            }
+        }
+        return new(c.Id,result,Boundary.Calls.ToArray(),lines.Length,bytes,writer.Writes,Boundary.SerializeCalls,facts);
+    }
+#endif
     internal static int Main(string[] args)
     {
         var saved=Console.Out;var selftest=new StringWriter();bool okay;
         Console.SetOut(selftest);try{okay=MsiNativePortCycle.SelfTest();}finally{Console.SetOut(saved);}
         using var self=JsonDocument.Parse(selftest.ToString());Check(okay && self.RootElement.GetProperty("failures").GetInt32()==0,"unchanged production SelfTest");
-        var results=Tests().Select(Run).ToList();var policyScans=PolicyScans();OneShot();
+#if CURRENT_STATUS
+        var results=CurrentStatusTests();
+#else
+        var results=Tests().Select(Run).ToList();
+#endif
+        var policyScans=PolicyScans();OneShot();
         Boundary.Reset(new());Check(MsiNativePortCycle.Run(["invalid"])==2 && Boundary.Calls.Count==0,"invalid CLI no I/O");
         var receipt=new{instrumented=FactsType is not null,scenarios=results.Count,assertions,failures=Failures,existingSelfTest=self.RootElement.Clone(),maxDiagnosticUtf8Bytes=MaxBytes,maxParentSteps=MaxParents,maxInterfaceAttempts=MaxInterfaceAttempts,maxGuardUtf8Bytes=MaxGuardBytes,realHardwareAccess=false,realSdkLinked=false,policyScans,results};
         File.WriteAllText(args[0],JsonSerializer.Serialize(receipt,new JsonSerializerOptions{WriteIndented=true}));

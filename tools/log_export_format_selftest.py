@@ -34,6 +34,7 @@ int wmain(int argc,wchar_t** argv){
  using namespace ymcc::logexport;
  for(const char* name:{"native-lifecycle.log.12","native-detail.log.previous","input-capture.jsonl.prev",
      "input-host-cost.log.pending","input-host-signal.log.prev","input-host-report-chain.log",
+     "steam-original-recovery.jsonl","steam-original-recovery.jsonl.1","steam-original-recovery.jsonl.previous",
      "yeman-fan-host-runtime.1.log","yeman-fan-host-runtime.12.log","yeman-fan-host-runtime.previous.log",
      "msi-controller-visibility.log","msi-controller-visibility.log.2","msi-controller-visibility-wake-2.log.12",
      "msi-controller-visibility-wake-123.log.previous","battery-charge-client.log.7","battery-charge-host.log.1"}){
@@ -43,6 +44,8 @@ int wmain(int argc,wchar_t** argv){
      "steam/logs/controller.txt","steam-controller.log","unknown.log","msi-controller-visibility-wake-x.log",
      "msi-controller-visibility-wake-.log","msi-controller-visibility-wake-2junk.log"})
      check(std::string("unrecognized-or-text-format:")+name,!jsonLinesEvidenceName(name));
+ check("historical-json-document-format",jsonDocumentEvidenceName("gamepad-driver-setup.json.previous")&&jsonDocumentEvidenceName("wake-recovery-last.json.12")&&!jsonDocumentEvidenceName("steam/logs/file.txt"));
+ check("recovery-jsonl-is-resident-evidence",std::string(aiEvidenceLane("steam-original-recovery.jsonl.1"))=="resident");
  const auto seed=root/L"fixture.data";const std::string content="{\"timestampUtc\":\"2026-10-15T09:00:00Z\",\"processId\":8}\n{\"unfinished\":";
  {std::ofstream f(seed,std::ios::binary);f<<content;}
  for(const char* name:{"yeman-fan-host-runtime.1.log","msi-controller-visibility-wake-2.log.12","battery-charge-host.log.1"}){
@@ -77,8 +80,12 @@ int wmain(int argc,wchar_t** argv){
  check("full-staged-sha256-begin-end-agree",frames[1]["sha256"]==sha256File(seed.wstring())&&frames[2]["sha256"]==frames[1]["sha256"]);
  check("file-end-does-not-claim-session-exit",frames[2]["processSessionComplete"].is_null()&&frames.back()["processSessionComplete"].is_null());
  check("failed-hash-refuses-successful-index",!writeAiLogIndex(root/L"bad-ai",entries,[](const std::wstring&){return std::string{};}));
+ const auto clockSeed=root/L"sleep-clock.log";
+ {std::ofstream f(clockSeed);f<<json({{"time","2026-10-25 23:20:11.820"},{"timestampUtc","2026-10-25T15:20:11.820Z"},{"timestampLocal","2026-10-25T23:20:11.820+08:00"},{"writerPid",77}}).dump()<<'\n';}
+ const auto clocks=stagedFileEvidence(clockSeed,"sleep-facts.log");
+ check("staged-sleep-prefers-explicit-UTC-and-reports-field",clocks["firstTime"]=="2026-10-25T15:20:11.820Z"&&clocks["firstTimeField"]=="timestampUtc"&&clocks["lastTimeField"]=="timestampUtc");
  const auto guide=aiReadingGuide();
- check("ai-guide-warns-about-untrusted-input-and-inspection-scope",guide.contains("instructionTrust")&&guide.contains("inspection")&&guide.contains("clockRules")&&guide.contains("identityRules"));
+ check("ai-guide-warns-about-untrusted-input-and-inspection-scope",guide.contains("instructionTrust")&&guide.contains("inspection")&&guide.contains("clockRules")&&guide.contains("identityRules")&&guide.contains("sleepFacts"));
  unsigned failures=0;for(const auto& item:checks)if(!item["pass"].get<bool>())++failures;
  std::cout<<json({{"checks",checks},{"failures",failures}}).dump(2)<<std::endl;return failures?3:0;
 }

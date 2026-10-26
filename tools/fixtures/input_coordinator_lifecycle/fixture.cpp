@@ -11,6 +11,9 @@
 #include <vector>
 #include <string>
 #include <stdexcept>
+#include <exception>
+#include <cstdlib>
+#include <crtdbg.h>
 #include <functional>
 #include <future>
 #include <thread>
@@ -137,12 +140,86 @@ static CONFIGRET fixtureXboxStatus(PULONG,PULONG,DEVINST,ULONG);
 // model that one process-query leaf without changing production liveness.
 static BOOL fixtureOwnedHostExitCode(HANDLE,LPDWORD);
 static void ymStartSeamTrace(const std::string&);
+static bool fixtureGpdPostHideFullStart=false;
+static bool fixtureGpdPostHideApplied=false;
+struct HidHideVisibilitySnapshot;
+struct HidHidePhysicalIdentity;
+static bool fixtureGpdPostHideApply(const std::string&,bool);
+static bool fixtureGpdPostHideSnapshot(HidHideVisibilitySnapshot&);
+static bool fixtureGpdPostHidePhysicalIdentities(std::vector<HidHidePhysicalIdentity>&);
 #define GetExitCodeProcess fixtureOwnedHostExitCode
 #define YMCC_FOCUS_RECOVERY_PORTS
 #include "focus_recovery_cases.inc"
 #undef YMCC_FOCUS_RECOVERY_PORTS
 #include "main.inert.cpp"
 #undef GetExitCodeProcess
+
+static const std::string& fixtureGpdPostHideRoot(){
+ static const std::string value="USB\\VID_045E&PID_028E\\GPD-WIN5-ROOT";return value;
+}
+static const std::string& fixtureGpdPostHideGame(){
+ static const std::string value="HID\\VID_045E&PID_028E&IG_00\\GPD-WIN5-GAME";return value;
+}
+static const std::wstring& fixtureGpdPostHideLocation(){
+ static const std::wstring value=L"PCIROOT(0)#PCI(1400)#USBROOT(0)#USB(4)";return value;
+}
+static HidHidePhysicalIdentity fixtureGpdPostHideSource(){
+ HidHidePhysicalIdentity value;value.resolved=true;value.vendorId=0x045e;value.productId=0x028e;
+ value.usagePage=1;value.usage=5;value.deviceInstanceId=fixtureGpdPostHideGame();
+ value.baseContainerDeviceInstanceId=fixtureGpdPostHideRoot();
+ value.sourcePath=fixtureGpdPostHideGame();return value;
+}
+static bool fixtureGpdPostHideSnapshot(HidHideVisibilitySnapshot& snapshot){
+ if(!fixtureGpdPostHideApplied)return false;
+ snapshot={};snapshot.valid=true;snapshot.cloaking=true;snapshot.inverseRaw="off";
+ snapshot.hidden={U2W(fixtureGpdPostHideRoot()),U2W(fixtureGpdPostHideGame())};
+ const auto module=hidHideCurrentModulePath();if(!module.empty())snapshot.applications={module};
+ return true;
+}
+static bool fixtureGpdPostHidePhysicalIdentities(std::vector<HidHidePhysicalIdentity>& out){
+ if(!fixtureGpdPostHideApplied)return false;out={fixtureGpdPostHideSource()};return true;
+}
+static bool fixtureGpdPostHideApply(const std::string& transactionId,bool powerCycle){
+ if(!fixtureFullPipe || g_machineIdentity.family!=YmccFamily::Gpd)return false;
+ const auto source=fixtureGpdPostHideSource();fixtureGpdPostHideApplied=true;
+ auto& journal=g_hidHideVisibilityJournal;journal=HidHideVisibilityJournal{};journal.active=true;
+ journal.transactionId=transactionId.empty()?"fixture-gpd-post-hide":transactionId;
+ journal.physical=source;journal.physicalSources={source};journal.before.valid=true;
+ journal.before.cloaking=true;journal.before.inverseRaw="off";
+ const auto module=hidHideCurrentModulePath();if(!module.empty())journal.before.applications={module};
+ journal.hiddenByUs={U2W(fixtureGpdPostHideRoot()),U2W(fixtureGpdPostHideGame())};
+ g_msiForegroundTestIo.locations=[](const std::string& root){
+   return root==fixtureGpdPostHideRoot()?std::vector<std::wstring>{fixtureGpdPostHideLocation()}:std::vector<std::wstring>{};
+ };
+ g_msiNativeForegroundTestIo.snapshot=[](HidHideVisibilitySnapshot& value){return fixtureGpdPostHideSnapshot(value);};
+ g_msiNativeForegroundTestIo.candidates=[](){return std::vector<HidHidePhysicalIdentity>{fixtureGpdPostHideSource()};};
+ g_msiNativeForegroundTestIo.inventoryComplete=[](){return true;};
+ g_msiNativeForegroundTestIo.xusbInventory=[](const HidHidePhysicalIdentity& source){
+   MsiNativeForegroundXusbInventory result;result.complete=true;result.reason="fixture-gpd-exact-xusb";
+   ymcc::msi::NativeForegroundXusbInterface item;item.activeInterface=true;item.ancestorMatched=true;item.virtualDevice=false;
+   item.instanceId=fixtureGpdPostHideRoot();item.ancestorRoot=source.baseContainerDeviceInstanceId;
+   result.interfaces={item};return result;
+ };
+ static unsigned refreshCalls=0,sourceSequence=0;refreshCalls=sourceSequence=0;
+ g_msiNativeForegroundTestIo.xusbRefresh=[&](const HidHidePhysicalIdentity& target,const std::wstring& location){
+   ++refreshCalls;return target.baseContainerDeviceInstanceId==fixtureGpdPostHideRoot()&&location==fixtureGpdPostHideLocation()?1:2;
+ };
+ g_msiNativeForegroundTestIo.poll=[&](){return refreshCalls?0:-1;};
+ g_msiNativeForegroundTestIo.postHideRootStarted=[](const std::string& root){return root==fixtureGpdPostHideRoot();};
+ g_msiNativeForegroundTestIo.postHideSource=[](){
+   using namespace ymcc::input::recoveryHealth;Source value;value.sequence=++sourceSequence;
+   value.started=value.completed=GetTickCount64();value.power=currentPowerGeneration();
+   value.topology=g_xinputTopologyEpoch.load(std::memory_order_acquire);
+   value.identity=g_xinputSlotIdentityEpoch.load(std::memory_order_acquire);
+   value.live=true;value.stable=true;value.route=Route::XInput;value.incarnation=1;value.continuity=1;return value;
+ };
+ // The real readmit guards/mask-reset path is exercised in the dedicated
+ // native regression; this full lifecycle consumer uses only its final
+ // standard-admission leaf, while retaining the same post-cycle await.
+ g_msiNativeForegroundTestIo.postHideReadmit=[](){return 0;};
+ g_msiNativeForegroundTestIo.postHideAdmitSelectedSource=[](){return true;};
+ (void)powerCycle;return true;
+}
 static std::uint64_t fixtureActiveExecutionDeadline(){return g_inputHostSwitchRecoveryStartDeadline;}
 static BOOL fixtureOwnedHostExitCode(HANDLE process,LPDWORD exitCode){
  if(!fixtureFullPipe&&ymStartSeamActive()&&process&&process==g_inputHostProcess&&exitCode&&
@@ -152,8 +229,43 @@ static BOOL fixtureOwnedHostExitCode(HANDLE process,LPDWORD exitCode){
  return ::GetExitCodeProcess(process,exitCode);
 }
 static unsigned checks=0;static json failures=json::array(),cases=json::array();
+// Evidence-only, explicit bounded OFF mode. Each row is flushed before the
+// next operation so abnormal private-process exit cannot erase prior checks.
+static bool fixturePersistOffCheckpoints=false;
+static void fixtureOffCheckpoint(const char* stage,const char* assertion=nullptr,int passed=-1){
+ if(!fixturePersistOffCheckpoints)return;
+ const auto owner=cases.empty()?std::string("bootstrap"):cases.back().value("name","");
+ const json row={{"stage",stage},{"case",owner},{"checkIndex",checks},{"failureCount",failures.size()},
+  {"assertion",assertion?json(assertion):json(nullptr)},{"passed",passed<0?json(nullptr):json(passed!=0)},
+  {"requestId",g_virtualStartProtection.view(startProtectionClock).requestId},
+  {"nativeClock",startProtectionClock},{"hostPresent",g_inputHostProcess!=nullptr},
+  {"sourceScope","private-fixture-checkpoint;not-runtime-acceptance"}};
+ std::ofstream checkpoint(fspath::path(g_yemanccDataDir)/L"off-checkpoints.jsonl",std::ios::app|std::ios::binary);
+ if(!checkpoint)throw std::runtime_error("private OFF checkpoint open failed");
+ checkpoint<<row.dump()<<'\n';checkpoint.flush();
+ if(!checkpoint)throw std::runtime_error("private OFF checkpoint write failed");
+}
 static json assertionTrace=json::array();
-static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?"bootstrap":cases.back().value("name","");assertionTrace.push_back({{"case",owner},{"assertion",name},{"passed",good},{"checkIndex",checks}});if(!good)failures.push_back({{"case",owner},{"assertion",name}});}
+static void fixtureOffFatalCheckpoint(const char* kind,const char* what) noexcept {
+ if(!fixturePersistOffCheckpoints)return;
+ try {void* frames[24]{};const auto count=CaptureStackBackTrace(0,24,frames,nullptr);json stack=json::array();
+  for(USHORT i=0;i<count;++i)stack.push_back(reinterpret_cast<std::uintptr_t>(frames[i]));
+  const json row={{"stage",kind},{"what",what?what:""},{"checkIndex",checks},{"failureCount",failures.size()},
+   {"exeBase",reinterpret_cast<std::uintptr_t>(GetModuleHandleW(nullptr))},{"frames",stack}};
+  std::ofstream out(fspath::path(g_yemanccDataDir)/L"off-fatal-checkpoint.json",std::ios::binary);out<<row.dump(2);out.flush();
+ }catch(...){}
+}
+static void fixtureOffTerminate() noexcept {
+ const char* what="no-current-exception";
+ try {if(const auto error=std::current_exception())std::rethrow_exception(error);}
+ catch(const std::exception& error){fixtureOffFatalCheckpoint("terminate",error.what());std::abort();}
+ catch(...){what="non-std-current-exception";}
+ fixtureOffFatalCheckpoint("terminate",what);std::abort();
+}
+static void fixtureOffInvalidParameter(const wchar_t*,const wchar_t*,const wchar_t*,unsigned int,uintptr_t) {
+ fixtureOffFatalCheckpoint("invalid-CRT-parameter","invalid parameter reached CRT");
+}
+static void check(bool good,const char* name){++checks;const auto owner=cases.empty()?"bootstrap":cases.back().value("name","");assertionTrace.push_back({{"case",owner},{"assertion",name},{"passed",good},{"checkIndex",checks}});if(!good)failures.push_back({{"case",owner},{"assertion",name}});fixtureOffCheckpoint("assertion",name,good?1:0);}
 static json state(){return {{"hostHandle",g_inputHostProcess!=nullptr},{"prepared",g_inputHostPrepared},{"creationPossible",g_inputHostPrepareMayHaveReachedHost},{"neutralized",g_inputHostNeutralized},{"active",g_inputHostActive},{"transportFault",g_inputHostTransportFault},{"quarantined",g_inputHostReleaseQuarantined},{"startBlocked",g_inputHostStartBlocked},{"journalActive",g_hidHideVisibilityJournal.active},{"routeArmed",g_msiDinputRouteDinputArmed.load()},{"runId",g_inputHostRunId},{"epoch",g_inputHostEpoch},{"personaHandoffActive",g_msiPersonaModeHandoff.active},{"readPaused",g_msiPersonaReadPause.load()}};}
 static void fixtureTargetReturnIndependentCase(){
  ymcc::inputHost::targetReturnRuntime::state=ymcc::inputHost::targetReturnRuntime::State{};
@@ -980,7 +1092,7 @@ static void switchRecoveryCases(){
  fixtureXinputSourceLive=false;g_inputHostSwitchRecovery={};g_inputHostSwitchRecoveryPending=false;
 }
 int wmain(int argc,wchar_t**argv){try{
- if(argc!=3&&argc!=4)return 2;const std::wstring mode=argv[2];if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
+ if(argc!=3&&argc!=4)return 2;const std::wstring mode=argv[2];if(argc==4)fixtureManagedDll=argv[3];g_yemanccDataDir=argv[1];g_appDataDir=argv[1];fspath::create_directories(g_yemanccDataDir);fixturePersistOffCheckpoints=mode==L"off-lifecycle";if(fixturePersistOffCheckpoints){std::set_terminate(fixtureOffTerminate);_set_invalid_parameter_handler(fixtureOffInvalidParameter);}fixtureOffCheckpoint("consumer-entry");fixtureTargetReturnIndependentCase();g_machineIdentity.attempted=true;g_machineIdentity.resolved=true;
  g_msiControllerTraceInventoryForTest=[](){return json{{"known",false},{"scope","offline"}};};g_msiControllerOfficialStackForTest=[](){return json{{"scope","offline"},{"modeWriterProven",false}};};
  bool expectedFailure=false,ok=false;
  if(mode==L"entry"||mode==L"mutation1"||mode==L"mutation2"){const int mutation=mode==L"entry"?0:mode==L"mutation1"?1:2;expectedFailure=mutation!=0;ok=msiStartOrderEntrySelfTest(mutation);}
@@ -994,6 +1106,7 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"switch-recovery"){switchRecoveryCases();ok=failures.empty();}
  else if(mode==L"tuple-protection"){protectedTupleRecoveryCases();ok=failures.empty();}
  else if(mode==L"persona-lifecycle"){personaLifecycleCases140();ok=failures.empty();}
+ else if(mode==L"family-lifecycle"){familyLifecycleCases140();ok=failures.empty();}
  else if(mode==L"worker-cost"){workerMaintenanceCostCases();ok=failures.empty();}
  else if(mode==L"recovery-cost"){recoveryMaintenanceCostCases();ok=failures.empty();}
  else if(mode==L"late-hide-pending"){expectedFailure=!ymcc::msi::latehide::buildEnabled;msiLateHidePendingConsumerCases();ok=failures.empty();}
@@ -1001,6 +1114,7 @@ int wmain(int argc,wchar_t**argv){try{
  else if(mode==L"late-hide-inflight"){msiLateHideInflightConsumerCases();ok=failures.empty();}
  else if(mode==L"late-hide-inflight-edges"){msiLateHideInflightEdgeCases();ok=failures.empty();}
  else if(mode==L"late-hide-orphaned-inflight"){msiLateHideOrphanedInflightCase();ok=failures.empty();}
+ else if(mode==L"off-lifecycle"){coldOffCarryCases();fixtureOffCheckpoint("cold-cases-returned");fullPipeOffLifecycleCases();fixtureOffCheckpoint("original-off-cases-returned");ok=failures.empty();}
  else if(mode==L"cold-archive"){coldArchiveCases();ok=failures.empty();}
  else if(mode==L"cold-msi-archive"){coldMsiArchiveCases();ok=failures.empty();}
  else if(mode==L"focus-recovery"){focusRecoveryCases();ok=failures.empty();}

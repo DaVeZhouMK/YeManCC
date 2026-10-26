@@ -1,0 +1,1917 @@
+﻿{
+  "schemaVersion": 1,
+  "updatedOn": "2026-10-25",
+  "capturedAt": "2026-10-25T19:10:38.963010+08:00",
+  "purpose": "Provide current unified-library support to the active virtual-controller repair owner; descriptive handoff only. No new runtime allocator, writer, driver allowlist or test gate.",
+  "sourceRoot": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC",
+  "targetThread": {
+    "id": "01a126b6-427a-7cc1-9476-ddba6fdb5413",
+    "title": "虚拟手柄",
+    "focusObserved": "23:25 corrected three-machine exports; ROG/MSI priority, whole-library source and consumer support"
+  },
+  "runtimeChanges": false,
+  "hardwareOperations": false,
+  "fixturesRun": false,
+  "newFixtureCreated": false,
+  "sourcePinMeaning": "Captured support references, not qualification of changing native/main.cpp or final packaged bytes.",
+  "physicalModels": [
+    {
+      "deviceClass": "HandheldCompanion.Devices.GPDWin5",
+      "catalogMembership": "frozen-source-device-catalog",
+      "board": "G1618-05",
+      "manufacturerPredicate": "native manufacturer contains GPD",
+      "deviceId": "hc.device.GPDWin5",
+      "source": "deps/handheldcompanion-runtime/source/Devices/GPD/GPDWin5.cs"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.ClawCG3EM",
+      "catalogMembership": "frozen-source-device-catalog",
+      "board": "MS-1T91",
+      "manufacturerPredicate": "native manufacturer contains MICRO-STAR",
+      "deviceId": "hc.device.ClawCG3EM",
+      "source": "deps/handheldcompanion-runtime/source/Devices/MSI/ClawCG3EM.cs"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2",
+      "catalogMembership": "reviewed-a250b19a-native-extension; absent from frozen 06c0b954 device table",
+      "boardExactValues": [
+        "ONEXPLAYER X2"
+      ],
+      "manufacturerExactValues": [
+        "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+        "ONE-NETBOOK"
+      ],
+      "extensionDeclaredIn": "capabilities/hc-motion-policy.json /reviewedExtensionClasses",
+      "oemBinding": "InputBindingCache retains existing native selectors even if model is null",
+      "standardInputAvailability": "only observed provider/source live context can establish it"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayerX2MiniPro",
+      "catalogMembership": "reviewed-a250b19a-native-extension; absent from frozen 06c0b954 device table",
+      "boardExactValues": [
+        "ONEXPLAYER X2MINI PRO"
+      ],
+      "manufacturerExactValues": [
+        "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+        "ONE-NETBOOK"
+      ],
+      "extensionDeclaredIn": "capabilities/hc-motion-policy.json /reviewedExtensionClasses",
+      "oemBinding": "InputBindingCache retains existing native selectors even if model is null",
+      "standardInputAvailability": "only observed provider/source live context can establish it"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.OneXPlayer3",
+      "catalogMembership": "reviewed-a250b19a-native-extension; absent from frozen 06c0b954 device table",
+      "boardExactValues": [
+        "ONEXPLAYER 3",
+        "ONEXPLAYER-3"
+      ],
+      "manufacturerExactValues": [
+        "ONE-NETBOOK TECHNOLOGY CO., LTD.",
+        "ONE-NETBOOK"
+      ],
+      "extensionDeclaredIn": "capabilities/hc-motion-policy.json /reviewedExtensionClasses",
+      "oemBinding": "InputBindingCache retains existing native selectors even if model is null",
+      "standardInputAvailability": "only observed provider/source live context can establish it"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.AYANEO3",
+      "catalogMembership": "reviewed-a250b19a-native-extension; absent from frozen 06c0b954 device table",
+      "boardExactValues": [
+        "AYANEO 3",
+        "AB07"
+      ],
+      "manufacturerExactValues": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "extensionDeclaredIn": "capabilities/hc-motion-policy.json /reviewedExtensionClasses",
+      "oemBinding": "InputBindingCache retains existing native selectors even if model is null",
+      "standardInputAvailability": "only observed provider/source live context can establish it"
+    },
+    {
+      "deviceClass": "HandheldCompanion.Devices.AYANEONEXT2",
+      "catalogMembership": "reviewed-a250b19a-native-extension; absent from frozen 06c0b954 device table",
+      "boardExactValues": [
+        "NEXT II",
+        "NEXT 2",
+        "AYANEO NEXT II",
+        "AYANEO NEXT 2",
+        "AB09"
+      ],
+      "manufacturerExactValues": [
+        "AYADEVICE",
+        "AYANEO",
+        "AYA"
+      ],
+      "extensionDeclaredIn": "capabilities/hc-motion-policy.json /reviewedExtensionClasses",
+      "oemBinding": "InputBindingCache retains existing native selectors even if model is null",
+      "standardInputAvailability": "only observed provider/source live context can establish it"
+    }
+  ],
+  "availableBindings": [
+    {
+      "domain": "standard-input",
+      "entry": "capabilities/HcControllerInputCapabilityCatalog.h::bindStandardInput",
+      "sourceAliases": [
+        "xinput",
+        "xinput-any-connected",
+        "msi-dinput"
+      ],
+      "xinputRequiresConnectedMask": true,
+      "mustNotInfer": [
+        "driver readiness",
+        "physical suppression",
+        "vendor backbuttons",
+        "all-controller support"
+      ]
+    },
+    {
+      "domain": "OEM-input",
+      "entry": "capabilities/HcOemInputCapabilityBinding.h::InputBindingCache::bind",
+      "consumer": "native/main.cpp::oemUnifiedInputBindingFor",
+      "authority": "canonical identity plus existing model/profile/catalog selectors; raw key-up and current interface/generation retained"
+    },
+    {
+      "domain": "MSI-rear-configuration",
+      "entry": "capabilities/HcControllerConfigurationCapabilityCatalog.h::bindRear/consumeRear",
+      "scope": "existing MSI DInput rear preparation only; no GPD/OneX/AYA generic mode writer"
+    },
+    {
+      "domain": "physical-feedback",
+      "entry": "capabilities/HcControllerFeedbackCapabilityCatalog.h::bindPhysicalFeedback",
+      "authority": "current physical writer kind, not chassis family; live owner and zero/stop retained"
+    },
+    {
+      "domain": "motion",
+      "entry": "capabilities/HcMotionCapabilityCatalog.h",
+      "authority": "immutable model recipe only; no proof of present/calibrated/fresh sensor"
+    },
+    {
+      "domain": "controller-motion",
+      "entry": "capabilities/HcControllerMotionCapabilityCatalog.h::ModelBindingCache",
+      "scope": "declared Legion controller protocols; not a general Win5/OneX/AYA decoder"
+    }
+  ],
+  "win5": {
+    "standardController": "nativeForeground policy admits 045E:028E only after exact machine/root/virtual-source checks; not the backbutton endpoint",
+    "rearEndpoint": {
+      "vid": "2F24",
+      "pids": [
+        "0137",
+        "0135"
+      ],
+      "usagePage": "FF00",
+      "usage": "0001",
+      "consumer": "gpdBackBind"
+    },
+    "reportBoundary": {
+      "rawBodyOffset": 1,
+      "gamepadBodyByte": 7,
+      "leftRearBodyByte": 8,
+      "rightRearBodyByte": 9,
+      "mask": "69",
+      "source": "gpdBackParse; raw ReadFile report ID is removed once"
+    },
+    "legacyKeyboard": {
+      "keyboard": "Ctrl+Win+O",
+      "home": "Win+D",
+      "gamepad": "F13",
+      "L4": "F14",
+      "R4": "F15",
+      "guard": "Win5 OEM profile, live interface and generation, producer authority/release checks; not global F14/F15 suppression"
+    },
+    "firmwareScope": "frozen HC IsHidSupported is Version(0x01,0x11); current native gpdBackBind uses exact HID collection and does not prove a firmware read or newly installable driver"
+  },
+  "onex": {
+    "endpoint": "1A86:FE00; additionally 1A86:1305 for X2/X2MiniPro, not OneXPlayer3; FF00:0001",
+    "role": "vendor/OEM collection only, not standard gamepad/USBIP virtual endpoint",
+    "rearLogicalIds": {
+      "22": "L4",
+      "23": "R4"
+    },
+    "modelSpecific": "21 is Mini keyboard vs X2/3 Home; 24 is X2 keyboard vs Mini/3 Home. Preserve modelForClass/mapButton/session.",
+    "warning": "Do not use chassis inputHidKey keyboard-oem string as proof of the active standard input source; source aliases and actual producer receipts decide it."
+  },
+  "suppressionAndDrivers": {
+    "separateFacts": [
+      "catalog/device matched",
+      "physical standard source current",
+      "virtual persona/profile backend target created and endpoint observed",
+      "physical interface external visibility confirmed"
+    ],
+    "currentHostBehavior": "CreateTargetWithBackendWarning records backend warning yet calls SDK createTarget; metadata probe false is neither target creation failure nor proof of readiness",
+    "prerequisiteScope": "GamepadPrerequisites --check observes UMDF package state; composite USBIP/backend endpoint readiness remains with selected profile/Host/native setup owner",
+    "nativeForegroundImplementedProfiles": [
+      "Msi",
+      "Rog",
+      "Gpd"
+    ],
+    "nativeForegroundNotImplementedProfiles": [
+      "OneXPlayer",
+      "Ayanero"
+    ],
+    "vendorStackServiceProcessFallback": "OneX/GPD/AYA default-empty lists are not proof official software absent or shield succeeded; no guessed vendor service names",
+    "rootScope": "never disable/hide all endpoints of a composite parent based on vendor family or VID alone; keep actual interface/container and virtual-vs-physical checks"
+  },
+  "knownPriorFindings": [
+    {
+      "id": "g3e-rear-display",
+      "fieldObservation": "User confirmed Steam rear direction correct on 2026-10-21; YMCC presentation fixed by front-view catalog side. M1 right/R5; M2 left/L5. Do not globally swap production mapping."
+    },
+    {
+      "id": "R8",
+      "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ControllerCalibration-20261025-lifecycle-r8\\COORDINATOR-ACCEPTANCE.json",
+      "status": "R8_SCOPED_REPLAY_AND_RETIREMENT_FIXES_VALIDATED_FULL_EXIT_NOT_ACCEPTED",
+      "fullApplicationExitAccepted": false,
+      "rerunThisTurn": false,
+      "boundary": "new canonical read sequence, same-target neutral cleanup, retained cancellation/ownership; no physical CPU/latency/full-exit acceptance"
+    }
+  ],
+  "requestedRepairEvidence": [
+    "machine canonical identity/extension path",
+    "physical VID/PID/usage/interface/container and virtual exclusion",
+    "actual source label plus read sequence and power/topology/source generation",
+    "selected persona/profile, SDK/payload identity, backend warning vs real creation/endpoint receipt",
+    "physical hiding scope/readback and external consumer visibility if observed",
+    "on duplicate events: actual producer route/chord/HID edge receipt and source generation, never infer from number of logs"
+  ],
+  "supportOnlyGaps": [
+    {
+      "id": "oneX-aya-nativeForeground",
+      "state": "not implemented in current nativeForeground policy; do not mark supported from generic input or OEM metadata"
+    },
+    {
+      "id": "extensions-not-frozen",
+      "state": "known native extensions absent from frozen model table by design/history; preserve fallback, separately register future approved catalog extension if runtime consumer needs it"
+    },
+    {
+      "id": "driver-readiness-not-library",
+      "state": "runtime/OS proof stays owned by driver and target consumers, not capability metadata"
+    }
+  ],
+  "sourcePins": [
+    {
+      "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+      "sha256": "f7de83c3d11e97fc7e173123a75edcb2700fc710e9e278ab00115399e0014149",
+      "bytes": 1605,
+      "anchors": [
+        {
+          "anchor": "bindStandardInput(",
+          "observedLines": [
+            18
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/hc-controller-input-policy.json",
+      "sha256": "795c3e147d04499d4c16a3ab4ad7bf1af395686fca0fc81da9b4e4b1c947d5a1",
+      "bytes": 1717,
+      "anchors": [
+        {
+          "anchor": "\"providers\"",
+          "observedLines": [
+            5
+          ]
+        },
+        {
+          "anchor": "\"excludedFromAvailability\"",
+          "observedLines": [
+            41
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/HcOemInputCapabilityBinding.h",
+      "sha256": "0e5f36306f84e98c28106b0faa7da9b0bc493d6151efdba52b3ad5f20cd4c4f4",
+      "bytes": 2784,
+      "anchors": [
+        {
+          "anchor": "class InputBindingCache",
+          "observedLines": [
+            25
+          ]
+        },
+        {
+          "anchor": "if (model && model->consumerClass != deviceClass)",
+          "observedLines": [
+            43
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/HcControllerConfigurationCapabilityCatalog.h",
+      "sha256": "1db26fd0350c91551e0596f14a57b00cd90f4fc1c6b033144d6a5c1be51e33c0",
+      "bytes": 3198,
+      "anchors": [
+        {
+          "anchor": "rearEndpointAdmitted(",
+          "observedLines": [
+            12,
+            23,
+            32
+          ]
+        },
+        {
+          "anchor": "bindRear(",
+          "observedLines": [
+            22
+          ]
+        },
+        {
+          "anchor": "consumeRear(",
+          "observedLines": [
+            27
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/HcControllerFeedbackCapabilityCatalog.h",
+      "sha256": "140be1502b57859b53e84f22101798a1572b586b3c061713ab77273c79471d01",
+      "bytes": 1699,
+      "anchors": [
+        {
+          "anchor": "bindPhysicalFeedback(",
+          "observedLines": [
+            16
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/HcControllerMotionCapabilityCatalog.h",
+      "sha256": "37c12fa2155f212ca250ba8d314d3d75fe8bcf6450a8dce8312044e695ce5087",
+      "bytes": 3455,
+      "anchors": [
+        {
+          "anchor": "class ModelBindingCache",
+          "observedLines": [
+            50
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/hc-motion-policy.json",
+      "sha256": "e7f7358626dd1141d5ae96fadfd0494807bec60472e1e8dd029c00397a7b7483",
+      "bytes": 2485,
+      "anchors": [
+        {
+          "anchor": "\"reviewedExtensionClasses\"",
+          "observedLines": [
+            42
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/hc-device-catalog.json",
+      "sha256": "5efd576710e42a62310698eb039ea5cac8c5d4c6607b9ec0b820a3b6b79a2d49",
+      "bytes": 753140,
+      "anchors": [
+        {
+          "anchor": "\"name\": \"GPDWin5\"",
+          "observedLines": [
+            5680
+          ]
+        },
+        {
+          "anchor": "\"name\": \"ClawCG3EM\"",
+          "observedLines": [
+            4806,
+            14809
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "capabilities/CONTROLLER-CONSUMPTION.json",
+      "sha256": "4d112773637d5cf61e3845ca9e4246862fa3eb4240017fc9e19e6757b71270cf",
+      "bytes": 48083,
+      "anchors": [
+        {
+          "anchor": "\"id\": \"physical-source\"",
+          "observedLines": [
+            15
+          ]
+        },
+        {
+          "anchor": "\"id\": \"buttons-axes-backbuttons\"",
+          "observedLines": [
+            70
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/main.cpp",
+      "sha256": "669009517accee4c4644703b4f63720955e9afbf6af67369fc41d70c584df987",
+      "bytes": 5216487,
+      "anchors": [
+        {
+          "anchor": "static void ymccResolveFamily(",
+          "observedLines": [
+            16716
+          ]
+        },
+        {
+          "anchor": "static int oemChordProfileIdFor(",
+          "observedLines": [
+            16475
+          ]
+        },
+        {
+          "anchor": "static OemCatalogRef oemCatalogForFamily(",
+          "observedLines": [
+            17713
+          ]
+        },
+        {
+          "anchor": "oemUnifiedInputBindingFor(",
+          "observedLines": [
+            17791,
+            17797,
+            17800,
+            73922,
+            73972
+          ]
+        },
+        {
+          "anchor": "static bool oemKeyCaptureImplemented(",
+          "observedLines": [
+            17806
+          ]
+        },
+        {
+          "anchor": "static bool gpdBackBind()",
+          "observedLines": [
+            12594
+          ]
+        },
+        {
+          "anchor": "static uint64_t oemProducerAuthorityMask()",
+          "observedLines": [
+            9805,
+            10399
+          ]
+        },
+        {
+          "anchor": "static std::vector<HidHideInterfaceRecord> hidHideBuildSourceInterfaceInventory(",
+          "observedLines": [
+            29692
+          ]
+        },
+        {
+          "anchor": "inputHostFrameSubmissionSample(",
+          "observedLines": [
+            35239,
+            44012,
+            46701
+          ]
+        },
+        {
+          "anchor": "bindPhysicalFeedback(",
+          "observedLines": [
+            69755,
+            69765,
+            69811,
+            69840
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/input_frame_submission.h",
+      "sha256": "19936613701d4b2a41ec4b6a77f564fd0551c869d889b5ed4c5385750a7b905f",
+      "bytes": 4175,
+      "anchors": [
+        {
+          "anchor": "class ReadProgress",
+          "observedLines": [
+            31
+          ]
+        },
+        {
+          "anchor": "sourceForNewRead(",
+          "observedLines": [
+            57
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/native_foreground_source_policy.h",
+      "sha256": "55590a080c2277a45a38ec8a8f521ca31362c2d85a8df3e54acf9c7ee6230ab2",
+      "bytes": 5120,
+      "anchors": [
+        {
+          "anchor": "inline Profile machineProfile(",
+          "observedLines": [
+            26
+          ]
+        },
+        {
+          "anchor": "inline bool deviceAdmitted(",
+          "observedLines": [
+            36
+          ]
+        },
+        {
+          "anchor": "inline bool rootCandidate(",
+          "observedLines": [
+            51
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/onex_x2_protocol.h",
+      "sha256": "412253230ab3eca8031cc2e2719792731b2f7fc7917cb104e66bec90aac78a2d",
+      "bytes": 7900,
+      "anchors": [
+        {
+          "anchor": "constexpr Model modelForClass(",
+          "observedLines": [
+            22
+          ]
+        },
+        {
+          "anchor": "constexpr bool matchesCollection(",
+          "observedLines": [
+            29
+          ]
+        },
+        {
+          "anchor": "constexpr Button mapButton(",
+          "observedLines": [
+            36
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/onex_x2_session.h",
+      "sha256": "cece7d680a7ede24d8483fead25bae5a9a3a615ec86146c45f48041a6b66cd95",
+      "bytes": 14125,
+      "anchors": [
+        {
+          "anchor": "namespace",
+          "observedLines": [
+            11,
+            245
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/oem_vendor_stack.h",
+      "sha256": "89030aee9fa518ad7eb38c60ef02f43148c0ee5ae7789e116246dab5cf37d0d6",
+      "bytes": 51481,
+      "anchors": [
+        {
+          "anchor": "oemVendorServiceNamesForFamily(",
+          "observedLines": [
+            87,
+            141,
+            378,
+            483
+          ]
+        },
+        {
+          "anchor": "oemVendorProcessNamesForFamily(",
+          "observedLines": [
+            105,
+            122,
+            143,
+            485
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/oem_gamepad_mode_contract.h",
+      "sha256": "d98fd03be7d304b2df36dda892298e98c436be7aed9ab4a9aebd70675de89b74",
+      "bytes": 7522,
+      "anchors": [
+        {
+          "anchor": "struct Capability",
+          "observedLines": [
+            71
+          ]
+        },
+        {
+          "anchor": "struct Owner",
+          "observedLines": [
+            58
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "InputHost/Program.cs",
+      "sha256": "4c6bd11498afc898b8213364b49c0aa9cb584d932f4d24353229bb2e3e190002",
+      "bytes": 258607,
+      "anchors": [
+        {
+          "anchor": "CreateTargetWithBackendWarning<T>",
+          "observedLines": [
+            194
+          ]
+        },
+        {
+          "anchor": "requireUsbip: profile.RequiresUsbipBackend",
+          "observedLines": [
+            2625
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "GamepadPrerequisites/Program.cs",
+      "sha256": "4205cd97a62231838f0aea0190ab3bb844b9a09dda0e7e5599b9a8ac48638a84",
+      "bytes": 18983,
+      "anchors": [
+        {
+          "anchor": "UMDF-preparation-only",
+          "observedLines": [
+            164
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/gamepad_driver_setup.h",
+      "sha256": "c4f692796260ee34277ba6a8c59e5c85b458d9c231a54a18e013bdfcd5abc094",
+      "bytes": 18023,
+      "anchors": [
+        {
+          "anchor": "usbipUpgradeSnapshot()",
+          "observedLines": [
+            56
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "deps/handheldcompanion-runtime/source/Devices/GPD/GPDWin5.cs",
+      "sha256": "20b384920207b803553fde7d83f8070b26eb0073af109323de2a7c530b03ed45",
+      "bytes": 12627,
+      "anchors": [
+        {
+          "anchor": "private const int GpdVendorId",
+          "observedLines": [
+            16
+          ]
+        },
+        {
+          "anchor": "private bool IsHidSupported",
+          "observedLines": [
+            29
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "src/bridge/controllerOemPresentation.ts",
+      "sha256": "ed6f73ed6210796c2fae9a1b1acb048d574a3cc1ec59ba158f05e023b077b1b0",
+      "bytes": 1668,
+      "anchors": [
+        {
+          "anchor": "const numberedRear",
+          "observedLines": [
+            16
+          ]
+        },
+        {
+          "anchor": "const backIndex",
+          "observedLines": [
+            17
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    },
+    {
+      "path": "native/virtual_switch_verification_runtime.h",
+      "sha256": "017d3ddf0160839ce8a3a212d11988ce88daa04716766587518f99f948cce0eb",
+      "bytes": 35076,
+      "anchors": [
+        {
+          "anchor": "static void finalLogLocked(",
+          "observedLines": [
+            224
+          ]
+        },
+        {
+          "anchor": "\"resultScope\",\"local-switch-verification\"",
+          "observedLines": [
+            267
+          ]
+        },
+        {
+          "anchor": "\"current-intent-host-and-fresh-source-verified\"",
+          "observedLines": [
+            496
+          ]
+        }
+      ],
+      "meaning": "support-source snapshot only; no runtime or regression qualification"
+    }
+  ],
+  "currentRepairFocus": {
+    "reportedBy": "虚拟手柄 thread latest commentary, not an independent replay of its Win5 logs",
+    "reportedObservation": "HidHide list write/readback succeeds; physical refresh helper fails; later switch check says success",
+    "sourceVerifiedDistinction": {
+      "listMembership": "physicalHiddenByHidHideMeaning=hidhide-allowlist-membership-only; filterAttached/externalVisibility=unknown",
+      "switchResult": "finalLogLocked reports resultScope=local-switch-verification, physicalReturnVerified=false, gameInputVerified=false",
+      "onSuccess": "currentOutputProvenLocked(view) -> current-intent-host-and-fresh-source-verified"
+    },
+    "nextDiscrimination": "Check whether a genuine control/ownership completion is incorrectly accepted, or UI/upper layers interpret local target success as confirmed physical shield. Keep actual target success and external hiding proof separate.",
+    "repairImplementedByThisSupportTask": false,
+    "latestSupport": "23:25 exports: model/source mappings unchanged; per-machine current-session actual virtual HELLO identities verified and FanHost manifest roles corrected; five local switch finals per machine successful, physical layers still unaccepted."
+  },
+  "wholeLibraryCoverage": {
+    "capturedAt": "2026-10-25T23:34:49.635717+08:00",
+    "json": "capabilities/CONTROLLER-MODEL-COVERAGE.json",
+    "guide": "capabilities/CONTROLLER-MODEL-COVERAGE.md",
+    "counts": {
+      "frozenCatalogClasses": 92,
+      "factoryClasses": 80,
+      "reviewedExtensionsOutsideFrozenCatalog": 10,
+      "totalSourceRows": 102,
+      "families": {
+        "AOKZOE": 4,
+        "ASUS": 5,
+        "AYANEO": 30,
+        "Ayn": 5,
+        "MSI": 4,
+        "Generic": 3,
+        "GPD": 21,
+        "Zotac": 1,
+        "Lenovo": 5,
+        "Minisforum": 1,
+        "OneXPlayer": 20,
+        "Valve": 2,
+        "SuiPlay": 1
+      },
+      "rowsWithOemTable": 92,
+      "rowsWithMotionRecipe": 72,
+      "rowsWithControllerMotionProtocol": 4,
+      "rowsWithEnabledRearPreparationModel": 4,
+      "hardwareAcceptedRows": 0,
+      "factoryRowsWithSharedNativeIdentity": 18
+    },
+    "countsMeaning": "source inventory only, not hardware/consumer completion",
+    "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325",
+    "scope": "all frozen source classes plus every reviewedExtensionClass",
+    "previousCapture": {
+      "capturedAt": "2026-10-25T22:25:42.742256+08:00",
+      "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library"
+    }
+  },
+  "ongoingCollaboration": {
+    "status": "ACTIVE",
+    "role": "capability-library owner; runtime owner remains targetThread",
+    "logArchives": [
+      {
+        "label": "msi-g3e",
+        "path": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261025-215411-1025手柄修复-微星.zip",
+        "sha256": "7146a72976f37ec7a1c42eceef860cf15c911b6ecea26eb93045eac3eed2e79a"
+      },
+      {
+        "label": "gpd-win5",
+        "path": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261025-2151491025手柄修复-Win5.zip",
+        "sha256": "e81d52b65e4ad0dd6e5658c1c232274085241cea8354211ac60432bbea0fce8a"
+      },
+      {
+        "label": "rog-xbox-x",
+        "path": "G:\\YeManCC-Work\\日志\\ROG-Xbox-2025\\YeManCC-logs-20261025-215218-1025手柄修复-ROGX.zip",
+        "sha256": "85cb62a54563a27a3112fc54c942831b749a5331b547f0082023130192a29151"
+      }
+    ],
+    "logReceiptEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\THREE-MACHINE-LOG-SUPPORT.json",
+    "doNotCloseOnDocumentationDelivery": true,
+    "logRounds": [
+      {
+        "round": 1,
+        "userReportedRestarted": false,
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\THREE-MACHINE-LOG-SUPPORT.json"
+      },
+      {
+        "round": 2,
+        "userReportedRestarted": true,
+        "archives": [
+          {
+            "label": "msi-g3e",
+            "path": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261025-221044-1025手柄修复-微星-2.zip",
+            "sha256": "a635582f253d7fe23c27156d9647b04682b5f745c7e18564da731873c2deec14"
+          },
+          {
+            "label": "gpd-win5",
+            "path": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261025-221135-1025手柄修复-Win5-2.zip",
+            "sha256": "e341462cc8e8cdae22ecc65cad9e983884511217b14b2a915359238605cad2f1"
+          },
+          {
+            "label": "rog-xbox-x",
+            "path": "G:\\YeManCC-Work\\日志\\ROG-Xbox-2025\\YeManCC-logs-20261025-2209501025手柄修复-ROGX-2.zip",
+            "sha256": "546a52cf25889a3d05b43fd7549f40875c264597d98f26617842772233caa17c"
+          }
+        ],
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\THREE-MACHINE-REBOOT-LOG-SUPPORT.json",
+        "deltaComparison": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\REBOOT-ROUND-COMPARISON.json"
+      },
+      {
+        "roundId": "export-2325",
+        "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325\\THREE-MACHINE-CAPABILITY-SUPPORT.json",
+        "archives": [
+          {
+            "label": "msi-g3e",
+            "path": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261025-232531-1025微星-第二轮.zip",
+            "sha256": "4a6d8206c7e7d77d26122a36b1b829872239ae21d3a7e2df6e56d95be797d87c"
+          },
+          {
+            "label": "rog-xbox-x",
+            "path": "G:\\YeManCC-Work\\日志\\ROG-Xbox-2025\\YeManCC-logs-20261025-232523-1025-ROGX-第二轮-.zip",
+            "sha256": "4218148d9ece2fbacccb315aed34c3abd6641a9248327593dc74d85552235afb"
+          },
+          {
+            "label": "gpd-win5",
+            "path": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261025-232512-1025-Win5第二轮.zip",
+            "sha256": "de9c8428b02d3496421ef91918a30d4521fd80fabfab3cbe01daabc5befb82e7"
+          }
+        ]
+      }
+    ],
+    "actualLibraryConsumptionEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\MSI-LIBRARY-CONSUMPTION-RECEIPTS.json",
+    "remainingSupport": [
+      {
+        "item": "Follow R8 current-export delivery for concrete capability-library delta",
+        "state": "current 2325 request answered; repair owner explicitly requests no new model special case or admission relaxation",
+        "doNotRepeat": "Do not re-run unchanged model inventory/full fixtures or replace the runtime single writer."
+      },
+      {
+        "item": "Whole-library coverage vs physical observation",
+        "state": "102 source rows and all10 extensions rechecked; logs cover G3E/ROG/Win5 only",
+        "boundary": "OneX/AYA physical source/visibility/return protocols and specialized isolation gaps remain unverified."
+      },
+      {
+        "item": "Current local successes vs remaining physical duties",
+        "state": "five local final successes per machine; preserve prior-round failures and current ROG quarantine/Win5 refresh failure",
+        "boundary": "No physical suppression/rear mapping/game acceptance signed by library support."
+      },
+      {
+        "item": "R6/R7 source and validation histories",
+        "state": "R6 shared OFF continuation delivery exists; later tests/owner conclusions remain separately scoped",
+        "boundary": "Do not turn R5/R6 support references into first-hide/OFF-crash/whole-family hardware acceptance."
+      }
+    ],
+    "latestSoftwareDeliveryReference": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\whole-library\\R5-DELIVERY-REFERENCE.json",
+    "priorityObservedInRepairThread": "User 2026-10-25: ROG and MSI first; retain Win5 issue; all-library scope unchanged.",
+    "supportWorkResumedByUser": "2026-10-25: user supplied new export and explicitly requested continued whole-library support"
+  },
+  "updatedAt": "2026-10-25T23:43:07.187642+08:00",
+  "repairDataContractResponse": {
+    "schemaVersion": 1,
+    "answeredAt": "2026-10-25T23:41:16.008718+08:00",
+    "requestPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-Win5Family25-R1\\latest-three-215x\\CAPABILITY-DATA-REQUEST.json",
+    "requestSha256": "8155187984447544c54d7e74d1278be886669540422c0f302dec40f3b480f903",
+    "requestSupportShaMeaning": "Request existingSupport.sha256 is its historical snapshot. Current support evolves; source pins below are this answer snapshot, not test/runtime qualification.",
+    "purpose": "Answer all five requested existing capability-library data domains; descriptive navigation only. No second model database, dispatcher, device writer, polling or admission gate.",
+    "domains": [
+      {
+        "id": "canonical-source-binding",
+        "fieldResponses": [
+          {
+            "requestedField": "canonical model/family and extension origin",
+            "availability": "STATIC_MODEL_FACTS_PROVIDED",
+            "explanation": "Use CONTROLLER-MODEL-COVERAGE.models by class/alias and nativeIdentityProjection for 18 shared OEM source classes. All 10 reviewed native extensions retain original selector fallback if frozen model lookup is null; projection never rewrites global identity.",
+            "references": [
+              {
+                "path": "capabilities/HcOemInputCapabilityBinding.h",
+                "anchor": "const auto* model = ymcc::capabilities::find(deviceClass);",
+                "line": 34
+              }
+            ]
+          },
+          {
+            "requestedField": "physical-vs-virtual device source identity",
+            "availability": "RUNTIME_REQUIRED_DIAGNOSTIC_CACHE_NOT_SAMPLE_PROOF",
+            "explanation": "Original HID role classifier excludes virtual identity; actual standard source is provider-selected. input-host-frame-evidence.physicalIdentityCache is a diagnostic cache and explicitly physicalIdentitySampleBindingProven=false; do not join it to a frame as established device ownership.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static HidHideIfaceRole hidHideClassifyInterfaceRole(",
+                "line": 29619
+              },
+              {
+                "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+                "anchor": "inline InputBinding bindStandardInput(",
+                "line": 18
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "{\"physicalIdentitySampleBindingProven\",false}",
+                "line": 45970
+              }
+            ]
+          },
+          {
+            "requestedField": "exact interface, VID/PID, usage page/usage, container root, location",
+            "availability": "LIVE_SOURCE_INVENTORY_REQUIRED",
+            "explanation": "Existing selected-source inventory records instanceId/interfacePath/baseContainerDeviceInstanceId/vendorId/productId/usagePage/usage/miCol/role/gameInput. Container/location must come from actual source or current owner record; a VID/PID or DMI hint alone is not an integrated-controller proof. MSI command preparation usage is not the main game interface.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static std::vector<HidHideInterfaceRecord> hidHideBuildSourceInterfaceInventory(",
+                "line": 29702
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static HidHideIfaceRole hidHideClassifyInterfaceRole(",
+                "line": 29619
+              }
+            ]
+          },
+          {
+            "requestedField": "generation and snapshot source",
+            "availability": "LIVE_GENERATIONS_REQUIRED",
+            "explanation": "Use InputCaptureGamepadSnapshot read topology/identity/power/context stamps; diagnostic physicalIdentitySampleBindingProven remains false. Never substitute exported old metadata for the current producer association.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "struct InputCaptureGamepadSnapshot {",
+                "line": 8391
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(",
+                "line": 35307
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "{\"physicalIdentitySampleBindingProven\",false}",
+                "line": 45970
+              }
+            ]
+          }
+        ],
+        "unknownHandlingPreserved": "unrecognized family does not prohibit observed standard controller input; do not adopt virtual endpoint as physical"
+      },
+      {
+        "id": "current-input",
+        "fieldResponses": [
+          {
+            "requestedField": "actual producer/source label",
+            "availability": "EXISTING_RUNTIME_FIELDS",
+            "explanation": "inputSource and connectedMask feed bindStandardInput; supported aliases xinput/xinput-any-connected/msi-dinput. Optional OEM, motion or isolation absence cannot reject all observed standard input.",
+            "references": [
+              {
+                "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+                "anchor": "inline InputBinding bindStandardInput(",
+                "line": 18
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(",
+                "line": 35307
+              }
+            ]
+          },
+          {
+            "requestedField": "fresh read sequence and completion",
+            "availability": "EXISTING_RUNTIME_FIELDS",
+            "explanation": "readAttemptSequence/readStartedTick/readCompletedTick/readContextStable are actual canonical API-read evidence. sourceForNewRead rejects replay of the old read; unchanged XInput packet or stationary buttons are not stale-read proof. No additional reader or per-frame logger is requested.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "struct InputCaptureGamepadSnapshot {",
+                "line": 8391
+              },
+              {
+                "path": "native/input_frame_submission.h",
+                "anchor": "inline Verdict sourceForNewRead(",
+                "line": 57
+              },
+              {
+                "path": "native/virtual_output_status.h",
+                "anchor": "inline bool virtualOutputSourceCurrent(",
+                "line": 25
+              }
+            ]
+          },
+          {
+            "requestedField": "source/topology/power generation",
+            "availability": "EXISTING_RUNTIME_FIELDS",
+            "explanation": "readPowerGeneration/readTopologyGeneration/readIdentityGeneration and MSI readMsiSourceRevision/readMsiModeGeneration must match current owner. readContinuityGeneration is diagnostic context, not a substitute for API read sequence.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "struct InputCaptureGamepadSnapshot {",
+                "line": 8391
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(",
+                "line": 35307
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Current inputHostFrameSubmissionCurrent(",
+                "line": 35317
+              }
+            ]
+          },
+          {
+            "requestedField": "source owner and current pretarget slots",
+            "availability": "EXISTING_RUNTIME_FIELDS_WITH_IDENTITY_LIMIT",
+            "explanation": "Use ticket host/power/intent with current Host epoch, source ownership and primarySlot/connectedMask; pointer or slot number alone does not prove the physical root. Keep the same-target full-neutral release valid when the source disappears.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "struct InputCaptureGamepadSnapshot {",
+                "line": 8391
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Current inputHostFrameSubmissionCurrent(",
+                "line": 35317
+              },
+              {
+                "path": "native/input_frame_submission.h",
+                "anchor": "return t.neutral?Verdict::Allowed:source(s,c,now);",
+                "line": 69
+              }
+            ]
+          }
+        ],
+        "unknownHandlingPreserved": "no family name or mode label substitutes fresh live sample"
+      },
+      {
+        "id": "visibility-and-refresh",
+        "fieldResponses": [
+          {
+            "requestedField": "exact game collections permitted to hide",
+            "availability": "LIVE_TARGET_PLAN_REQUIRED",
+            "explanation": "Use original hidHideVirtualPhysicalTargets and selected-source inventory, including existing nativeForeground/MSI auxiliary policy. Role inventory is descriptive and does not itself authorize hiding all siblings or a composite root. Never hide a virtual source as the physical source.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static std::vector<std::string> hidHideVirtualPhysicalTargets(",
+                "line": 29797
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static std::vector<HidHideInterfaceRecord> hidHideBuildSourceInterfaceInventory(",
+                "line": 29702
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static HidHideIfaceRole hidHideClassifyInterfaceRole(",
+                "line": 29619
+              }
+            ]
+          },
+          {
+            "requestedField": "game node refresh capability separated from simple source detection",
+            "availability": "FAMILY_POLICY_SEPARATE_FROM_PROVIDER",
+            "explanation": "nativeForeground policy has MSI/ROG/GPD candidate profiles with board and actual VID/PID/topology checks. OneX/AYA lack this specialized native-foreground refresh route; retain standard virtual output and do not borrow GPD 045E:028E mutation.",
+            "references": [
+              {
+                "path": "native/native_foreground_source_policy.h",
+                "anchor": "inline Profile machineProfile(",
+                "line": 26
+              },
+              {
+                "path": "native/native_foreground_source_policy.h",
+                "anchor": "inline bool gameNodeRefreshMutationAllowed(",
+                "line": 66
+              },
+              {
+                "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+                "anchor": "inline InputBinding bindStandardInput(",
+                "line": 18
+              }
+            ]
+          },
+          {
+            "requestedField": "known write prohibition and exact return/compensation recipe",
+            "availability": "EXISTING_WRITER_LIMITS_AND_RETURN_REQUIRED",
+            "explanation": "ROG PID_1B4C HID refresh remains mutation-prohibited. Return/compensation belongs to original owner and helper implementation, not model declaration. R5 tracks GPD native helper writer only; native first-hide ledger/OFF crash recovery remain incomplete.",
+            "references": [
+              {
+                "path": "native/native_foreground_source_policy.h",
+                "anchor": "inline bool gameNodeRefreshMutationAllowed(",
+                "line": 66
+              },
+              {
+                "path": "native/virtual_target_return_record.h",
+                "anchor": "struct Origin",
+                "line": 21
+              },
+              {
+                "path": "native/virtual_target_return_cold_runtime.h",
+                "anchor": "struct ColdEnvironment {",
+                "line": 21
+              },
+              {
+                "path": "native/native_refresh_writer_runtime.h",
+                "anchor": "class LaunchScope final {",
+                "line": 12
+              }
+            ]
+          },
+          {
+            "requestedField": "external consumer observation if available",
+            "availability": "UNKNOWN_UNLESS_EXTERNAL_OBSERVED",
+            "explanation": "HidHide list membership/readback is configuration evidence. Existing final switch logs are local-switch-verification with gameInputVerified=false/physicalReturnVerified=false. Neither cache nor success fills external delivery/isolation proof.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "{\"physicalHiddenByHidHideMeaning\", \"hidhide-allowlist-membership-only\"}",
+                "line": 30141
+              },
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static void finalLogLocked(",
+                "line": 271
+              }
+            ]
+          }
+        ],
+        "unknownHandlingPreserved": "not implemented stays unknown; no family-wide composite-root stop or blanket service kill"
+      },
+      {
+        "id": "return-expectation",
+        "fieldResponses": [
+          {
+            "requestedField": "what physical signal/interface should return for each supported transport",
+            "availability": "TRANSPORT_AND_CURRENT_OWNER_REQUIRED",
+            "explanation": "MSI managed 1902 DInput route has mode/visibility return duties to the actual recorded physical source; native 1901 and vendor command collections are separate roles. ROG uses its original current-source XInput OFF observation; GPD helper terminal receipt does not prove node enabled. OneX/AYA use only existing generic return duties until a source-specific physical protocol is verified.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static std::vector<std::string> hidHideVirtualPhysicalTargets(",
+                "line": 29797
+              },
+              {
+                "path": "native/virtual_target_return_record.h",
+                "anchor": "struct Origin",
+                "line": 21
+              },
+              {
+                "path": "native/native_foreground_source_policy.h",
+                "anchor": "inline Profile machineProfile(",
+                "line": 26
+              },
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static void finalLogLocked(",
+                "line": 271
+              }
+            ]
+          },
+          {
+            "requestedField": "exact owner release and helper retirement receipts",
+            "availability": "EXACT_PERSISTED_IDENTITY_REQUIRED",
+            "explanation": "Use persisted Origin parent/host birth identity, runId/hostInstanceId/epoch/transaction and exact native helper writer. Empty Host state or missing named Job alone is not a writer-quiet or responsibility-settlement proof. Do not clear foreign/inherited unknown ownership.",
+            "references": [
+              {
+                "path": "native/virtual_target_return_record.h",
+                "anchor": "struct Origin",
+                "line": 21
+              },
+              {
+                "path": "native/virtual_target_return_cold_runtime.h",
+                "anchor": "struct ColdEnvironment {",
+                "line": 21
+              },
+              {
+                "path": "native/native_refresh_writer_runtime.h",
+                "anchor": "class LaunchScope final {",
+                "line": 12
+              }
+            ]
+          },
+          {
+            "requestedField": "current physical source and bounded follow-up after OFF",
+            "availability": "CURRENT_RUNTIME_OBSERVATION_REQUIRED",
+            "explanation": "Cold cleanup revalidates current ticket/persona/power, no active competing owner, actual exact target absence, path ancestry/owned hidden record and writer quiet before removal. Later physical read or wake output is distinct evidence, not a rewrite of an expired OFF/switch request.",
+            "references": [
+              {
+                "path": "native/virtual_target_return_cold_runtime.h",
+                "anchor": "struct ColdEnvironment {",
+                "line": 21
+              },
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static void finalLogLocked(",
+                "line": 271
+              },
+              {
+                "path": "native/virtual_wake_execution_runtime.h",
+                "anchor": "struct Work {",
+                "line": 16
+              }
+            ]
+          },
+          {
+            "requestedField": "classification of partial return vs complete return",
+            "availability": "LAYERED_RESULTS_REQUIRED",
+            "explanation": "Report configuration returned, virtual endpoint absent, helper terminal, current source resumed and external consumer delivery separately. Keep pending/FAIL/UNKNOWN; a local success does not establish complete physical return.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "{\"physicalHiddenByHidHideMeaning\", \"hidhide-allowlist-membership-only\"}",
+                "line": 30141
+              },
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static void finalLogLocked(",
+                "line": 271
+              },
+              {
+                "path": "native/virtual_target_return_cold_runtime.h",
+                "anchor": "struct ColdEnvironment {",
+                "line": 21
+              }
+            ]
+          }
+        ],
+        "unknownHandlingPreserved": "HidHide list readback/local target success not complete physical return"
+      },
+      {
+        "id": "power-and-intent",
+        "fieldResponses": [
+          {
+            "requestedField": "current power generation/state with event origin/filetime",
+            "availability": "EXISTING_RUNTIME_EVENT_FIELDS",
+            "explanation": "currentPowerGeneration/PowerLifecycle govern current admission. Wake Work stores generation/serial/armedAt and original deadline. Original kernel sleep matching uses eventFileTime; use existing sleep-facts for actual event provenance, not UI focus or a metadata counter.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Current inputHostFrameSubmissionCurrent(",
+                "line": 35317
+              },
+              {
+                "path": "native/virtual_wake_execution_runtime.h",
+                "anchor": "struct Work {",
+                "line": 16
+              },
+              {
+                "path": "native/main.cpp",
+                "anchor": "static bool sgInternalSleepRequestMatches506(",
+                "line": 2465
+              }
+            ]
+          },
+          {
+            "requestedField": "current accepted intent/request and Host epoch/run identity",
+            "availability": "EXISTING_RUNTIME_OWNER_FIELDS",
+            "explanation": "Ticket host/power/intent plus current accepted requestId/Host epoch/run/birth identity must agree. Wake Work additionally binds requestId, epoch, playerDeadline and MSI intent revision. No old HELLO or later wake success proves an old request succeeded.",
+            "references": [
+              {
+                "path": "native/main.cpp",
+                "anchor": "static ymcc::input::frameSubmission::Current inputHostFrameSubmissionCurrent(",
+                "line": 35317
+              },
+              {
+                "path": "native/virtual_target_return_record.h",
+                "anchor": "struct Origin",
+                "line": 21
+              },
+              {
+                "path": "native/virtual_wake_execution_runtime.h",
+                "anchor": "struct Work {",
+                "line": 16
+              },
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static void finalLogLocked(",
+                "line": 271
+              }
+            ]
+          },
+          {
+            "requestedField": "known UI focus temporary gate vs switching gate vs sleep gate",
+            "availability": "EXISTING_PAUSE_SEMANTICS",
+            "explanation": "pausedLocked distinguishes recording/physical-release/external-priority/power/exit gates. YMCC focus permits legitimate neutral output and is not a driver fault. Expected pause grants no retry and currently retains original deadline; changes to pending-request sleep arbitration belong to repair owner, not the library.",
+            "references": [
+              {
+                "path": "native/virtual_switch_verification_runtime.h",
+                "anchor": "static bool pausedLocked()",
+                "line": 368
+              },
+              {
+                "path": "native/virtual_wake_execution_runtime.h",
+                "anchor": "struct Work {",
+                "line": 16
+              },
+              {
+                "path": "native/input_frame_submission.h",
+                "anchor": "return t.neutral?Verdict::Allowed:source(s,c,now);",
+                "line": 69
+              }
+            ]
+          },
+          {
+            "requestedField": "old producer/driver/boot baseline identity",
+            "availability": "OBSERVED_PROCESS_AND_BOOT_BASELINE_REQUIRED",
+            "explanation": "Use exported process creation identity and actual Host HELLO/run/loadedMvid; disk native SHA/version is not loaded-byte proof. Owner clean-three comparison isolates current PID/session/boot and keeps pre-reboot historical rows separate.",
+            "references": [
+              {
+                "path": "native/virtual_target_return_record.h",
+                "anchor": "struct Origin",
+                "line": 21
+              },
+              {
+                "path": "native/virtual_wake_execution_runtime.h",
+                "anchor": "struct Work {",
+                "line": 16
+              }
+            ],
+            "observed": {
+              "reference": "VC-Win5Family25-R1/clean-three-221x/COMPARISON.json",
+              "loadedNativeBytesNotProven": true
+            }
+          }
+        ],
+        "unknownHandlingPreserved": "UI focus and real suspend must not be bypassed by recovery; stale events should not silently become current proof"
+      }
+    ],
+    "readOwnerTokenReuse": {
+      "purpose": "Reuse existing read-owner context only in its original enabled feedback/calibration consumers; no extra discovery or universal input gate.",
+      "fields": [
+        "InputCaptureGamepadSnapshot.feedbackSource",
+        "InputCaptureGamepadSnapshot.axisCalibrationDeviceKey",
+        "InputCaptureGamepadSnapshot.readContinuityGeneration"
+      ],
+      "boundContext": "inputCaptureStampFeedbackSourceLocked checks the captured read, current power/topology/identity and provider, then stamps backend/source generation and mode/slot. Existing xinputFeedbackIdentityProbe uses the current discovery observation; it does not add device API calls.",
+      "sourceTokenReadyMeaning": "SourceToken.ready() only means backend != None; it is not exact path, firmware, physical isolation or game acceptance proof.",
+      "xinputLegacyMeaning": "identityRefresh::Proof may have valid=true and legacyFallback=true when the discovery provider is unavailable. This is the original pathless compatibility branch, not proof of a physical interface path.",
+      "deviceKeyMeaning": "MSI key comes from current managed main-source interface; XInput key requires available physical classification and a nonempty path. Null remains null; no slot/name fallback is allowed for a calibration key.",
+      "admissionBoundary": "These tokens remain optional for standard virtual input. Do not require feedbackSource.ready() or a calibration key for every target, and do not replace selected-source HID/root ownership or external visibility evidence with a token.",
+      "references": [
+        {
+          "path": "native/main.cpp",
+          "anchor": "static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& sample) {",
+          "line": 70039
+        },
+        {
+          "path": "native/main.cpp",
+          "anchor": "static bool xinputFeedbackIdentityProbe(",
+          "line": 8854
+        },
+        {
+          "path": "native/touch_haptic_dispatch.h",
+          "anchor": "struct SourceToken {",
+          "line": 32
+        },
+        {
+          "path": "native/xinput_identity_refresh_policy.h",
+          "anchor": "struct Proof {",
+          "line": 12
+        },
+        {
+          "path": "native/xinput_identity_refresh_policy.h",
+          "anchor": "Proof capture(Tick epoch,Tick power) const noexcept {",
+          "line": 73
+        }
+      ]
+    },
+    "diagnosticSemantics": {
+      "pauseReasonBits": {
+        "Recording": 1,
+        "PhysicalRelease": 2,
+        "ExternalPriority": 4,
+        "PowerNotReady": 8,
+        "InputNotReady": 16,
+        "SgWriterBlocked": 32,
+        "AdmissionRevoked": 64,
+        "ExitFence": 128,
+        "ExitRequested": 256,
+        "CaptureStop": 512
+      },
+      "pauseMeaning": "Diagnostic bits only, no new recovery or deadline authority. pauseReasonMask states sampled active gates; pauseReasonObservedMask states which gates were observed. A bit absent from the observed mask is UNKNOWN, not false. Earlier gates short-circuit SgWriterBlocked observation.",
+      "nullMeaning": "No matching observation or no Host-mutex facts means null/unobserved, not a clear gate. pauseReasonMaskSeen is accumulated history, not necessarily current. Excluded/healthy point timestamps belong to the same request and observed power generation.",
+      "cleanupMeaning": "Final cleanupEvidence is emitted only with Host facts for disabled persona; null on ON is not missing capability. checks/blockers/unknown are a cached, non-atomic, single-try snapshot; empty blockers alone is not physical return proof. Physical/game flags remain false.",
+      "references": [
+        {
+          "path": "native/virtual_switch_verification_runtime.h",
+          "anchor": "enum PauseReason : std::uint32_t {",
+          "line": 14
+        },
+        {
+          "path": "native/virtual_switch_verification_runtime.h",
+          "anchor": "static void appendInspectionFacts(",
+          "line": 38
+        },
+        {
+          "path": "native/virtual_switch_verification_runtime.h",
+          "anchor": "static std::uint32_t pauseReasonMaskLocked(",
+          "line": 348
+        },
+        {
+          "path": "native/virtual_controller_stop_runtime.h",
+          "anchor": "static json inputHostCleanupEvidenceLocked() noexcept {",
+          "line": 77
+        }
+      ]
+    },
+    "hostIdentityRoles": {
+      "exportManifestHost": "hostExe/hostDll/hostSha256/hostDllSha256 describe fan-host-v2 YeManFanHost, not virtual YeManInputHost.",
+      "virtualHost": "Use actual input-host-runtime-binary-identity HELLO identity.inputHostBusiness.disk.diskSha256 plus inputHostBusiness.loadedMvid/path; scope by current native process, runId, hostInstanceId and epoch. SDK verifiedDiskSha256/MVID is a separate identity.",
+      "boundary": "Disk SHA, loaded MVID, loaded image bytes, target output and external consumption are distinct. Matching FanHost fields cannot prove virtual Host version.",
+      "references": [
+        {
+          "path": "native/main.cpp",
+          "anchor": "manifest << \"hostDll=\"",
+          "line": 60926
+        },
+        {
+          "path": "native/virtual_controller_start_runtime.h",
+          "anchor": "appendNativeLifecycleLog(\"input-host-runtime-binary-identity\", evidence);",
+          "line": 648
+        },
+        {
+          "path": "InputHost/HostRuntimeBinaryIdentity.cs",
+          "anchor": "internal sealed record LoadedBusiness(",
+          "line": 10
+        }
+      ]
+    },
+    "globalInvariants": {
+      "physicalSteamDeckSelfEmulationBlocked": true,
+      "scope": "Only requested persona steamdeck on an identified physical ValveSteamDeck; other machines/personas retain original policy",
+      "references": [
+        {
+          "path": "native/virtual_controller_capability_runtime.h",
+          "anchor": "static bool inputHostSteamDeckSelfOutputBlocked()",
+          "line": 10
+        },
+        {
+          "path": "native/virtual_target_policy.h",
+          "anchor": "inline const char* rejectionReason(",
+          "line": 8
+        }
+      ],
+      "optionalCapabilitiesDoNotGateAllTargets": true
+    },
+    "sourcePins": [
+      {
+        "path": "capabilities/HcOemInputCapabilityBinding.h",
+        "sha256": "0e5f36306f84e98c28106b0faa7da9b0bc493d6151efdba52b3ad5f20cd4c4f4",
+        "bytes": 2784
+      },
+      {
+        "path": "capabilities/HcControllerInputCapabilityCatalog.h",
+        "sha256": "f7de83c3d11e97fc7e173123a75edcb2700fc710e9e278ab00115399e0014149",
+        "bytes": 1605
+      },
+      {
+        "path": "native/main.cpp",
+        "sha256": "61bf33a1902485684c02f60ca301e4b3e2eed173aa7e4d99d3975c4cebb31764",
+        "bytes": 5141121
+      },
+      {
+        "path": "native/input_frame_submission.h",
+        "sha256": "19936613701d4b2a41ec4b6a77f564fd0551c869d889b5ed4c5385750a7b905f",
+        "bytes": 4175
+      },
+      {
+        "path": "native/virtual_output_status.h",
+        "sha256": "04285cba1eb4eb6624af7c76d10359137fb611462f080343e423e98953478222",
+        "bytes": 4482
+      },
+      {
+        "path": "native/native_foreground_source_policy.h",
+        "sha256": "55590a080c2277a45a38ec8a8f521ca31362c2d85a8df3e54acf9c7ee6230ab2",
+        "bytes": 5120
+      },
+      {
+        "path": "native/virtual_target_return_record.h",
+        "sha256": "0083d0919d5bc4c58bd55f267d2bd189c3b284c2ea81a25e84f3317f3fee8158",
+        "bytes": 24511
+      },
+      {
+        "path": "native/virtual_target_return_cold_runtime.h",
+        "sha256": "2fd72833644169483432ecb327b8241e5b946b6fe9690f31812c6ecc238905e0",
+        "bytes": 12545
+      },
+      {
+        "path": "native/native_refresh_writer_runtime.h",
+        "sha256": "dc5bb50b5cb4f3cd18fe85b2f21a4f4e5b55370f4202b851b5dce40f945ee776",
+        "bytes": 7414
+      },
+      {
+        "path": "native/virtual_switch_verification_runtime.h",
+        "sha256": "504acc4cb140faa2594ba6f10aea2ab99efd9503240a67241f3c57be778f8273",
+        "bytes": 41702
+      },
+      {
+        "path": "native/virtual_wake_execution_runtime.h",
+        "sha256": "76eb171a147245ea2cc901fea3ed0aa49e3bdae894d140f76464cac58ffd9c76",
+        "bytes": 23568
+      },
+      {
+        "path": "native/virtual_controller_capability_runtime.h",
+        "sha256": "8a55de85b1b7f6859b9382117f8bbded31571b647ed7f3a3f162b1c88076a16a",
+        "bytes": 1377
+      },
+      {
+        "path": "native/virtual_target_policy.h",
+        "sha256": "cf3ace232a2acb4835955424578f8be5be334e14f235698ca3dae176a29a5e58",
+        "bytes": 645
+      },
+      {
+        "path": "native/touch_haptic_dispatch.h",
+        "sha256": "3aa5841e72bfed77b966a8f315690f9f17af240ce39830ae6c550ce1e7c36e2a",
+        "bytes": 10877
+      },
+      {
+        "path": "native/xinput_identity_refresh_policy.h",
+        "sha256": "0d10809acadaa96c1f5a9634d6ae6b5c7a933acd3a25860488933c2237aa8fe1",
+        "bytes": 6368
+      },
+      {
+        "path": "native/virtual_controller_stop_runtime.h",
+        "sha256": "4a44227fe521abbc6ba74cb1bff1c7f9865f17dd675ef0f024247e841ea0b48a",
+        "bytes": 43665
+      },
+      {
+        "path": "native/virtual_controller_start_runtime.h",
+        "sha256": "9d694bf85747ec509a204231b90b5abeb990d4c779903b59f429f382c03e44a7",
+        "bytes": 65431
+      },
+      {
+        "path": "InputHost/HostRuntimeBinaryIdentity.cs",
+        "sha256": "8bc5065cd522c1e78de5847cfc51e13a71ab65663536acebd24860d202193152",
+        "bytes": 3503
+      }
+    ],
+    "runtimeChanges": false,
+    "newFixtures": false,
+    "hardwareAcceptance": false,
+    "goalComplete": false,
+    "r11EvidenceSeparation": {
+      "recordedAt": "2026-10-26T01:47:27.084832+08:00",
+      "scope": "Existing input-contract addendum; independent source-bound observations.",
+      "contract": [
+        {
+          "id": "physical-root-and-inventory",
+          "requiredFields": [
+            "manufacturer/board/model binding provenance",
+            "original physical HID/interface/usage",
+            "selected physical USB root and game instance",
+            "selected-path inventory with explicit completeness",
+            "locationPaths bound to session and source/topology/power generation"
+          ],
+          "unknownRule": "Missing completeness or live root association remains UNKNOWN. Public VID/PID grants no family classification or device restart authority.",
+          "observed": {
+            "dmiAsReportedByOwner": "GPD G1618-05",
+            "physicalHidAsReportedByOwner": "VID_045E&PID_028E&IG_00",
+            "physicalRoot": "USB\\VID_045E&PID_028E\\7&2EA17D0F&0&1",
+            "gameInstance": "USB\\VID_045E&PID_028E\\7&2EA17D0F&0&1",
+            "locationPaths": [
+              "PCIROOT(0)#PCI(0803)#PCI(0000)#USBROOT(0)#USB(5)#USB(1)",
+              "ACPI(_SB_)#ACPI(PCI0)#ACPI(GPPC)#ACPI(XHC0)#ACPI(RHUB)#ACPI(PRT5)#ACPI(PRT1)"
+            ],
+            "rootInventoryComplete": "UNKNOWN"
+          }
+        },
+        {
+          "id": "fresh-acquisition-and-host-receipt",
+          "requiredFields": [
+            "actual producer",
+            "new read attempt sequence/completed tick",
+            "sourceLive/freshness",
+            "Host epoch/request/power generation",
+            "frameAccepted and neutralAccepted independently"
+          ],
+          "unknownRule": "Successful acquisition or Host acceptance proves only its own stage, not hidden physical device or external consumption.",
+          "observed": {
+            "neutralAccepted": true,
+            "framePeriods": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-ThreeFamily26-0107-R11\\win5\\FRAME-PERIODS.json",
+            "acceptedAndLiveButSuppressedPeriodsBothPresent": true
+          }
+        },
+        {
+          "id": "hidden-configuration-readback",
+          "requiredFields": [
+            "exact selected hidden-path plan",
+            "explicit plan completeness",
+            "configuration before/after readback",
+            "owned vs inherited/foreign paths",
+            "write authority/request identity and result"
+          ],
+          "unknownRule": "Configuration write/readback is distinct from system refresh and external visibility. Missing current readback remains UNKNOWN.",
+          "observed": {
+            "configurationReturnAcceptanceByThisReview": false
+          }
+        },
+        {
+          "id": "inflight-refresh-and-return",
+          "requiredFields": [
+            "attemptId",
+            "writer parent/child PID plus creation times",
+            "root/game instance/location binding",
+            "in-flight/terminal plus helper exit",
+            "Disable/Enable original result and separate elapsed times",
+            "write return obligation plus original configuration readback",
+            "original request/current continuation"
+          ],
+          "unknownRule": "active=null, helper terminal, original configuration return and external visibility are separate observations. Do not treat any single one as all obligations settled.",
+          "observed": {
+            "writerSnapshotRevisions": [
+              78,
+              118
+            ],
+            "firstActiveWriter": true,
+            "supplementActiveWriter": false,
+            "narrowFixOwnerScope": "Existing GPD profile/current R3 request only: original writer terminal and return readback ended can skip redundant inverse; independent unproven Enable responsibility stays.",
+            "fixHardwareVerified": false,
+            "sharedTimingDiagnosticStatus": "INERT_MINIMUM_CONSUMER_PASS_HARDWARE_UNKNOWN"
+          }
+        },
+        {
+          "id": "external-visibility-and-consumption",
+          "requiredFields": [
+            "external observer identity/time",
+            "observed physical and virtual identities/slots",
+            "sleep/wake boundary",
+            "current source/request/generation association"
+          ],
+          "unknownRule": "Current visibility stays UNKNOWN until externally observed for the current context. Host accepted/neutralAccepted cannot prove physical suppression.",
+          "observed": {
+            "steamPhysicalSlot0AndVirtualSlot1": "Observed before sleep in R11; sleep correlation is not general fix acceptance.",
+            "isolationAccepted": false,
+            "currentExternalVisibility": "UNKNOWN",
+            "offThisRound": "NOT_COVERED"
+          }
+        }
+      ],
+      "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\gpd-family-hc-20261026\\R11-INPUT-CONTRACT-SUPPORT.json",
+      "newRuntimeAllocator": false,
+      "newDeviceAuthority": false
+    }
+  },
+  "latestExportSupport": {
+    "roundId": "export-2325",
+    "updatedAt": "2026-10-25T23:43:07.187642+08:00",
+    "evidenceRoot": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325",
+    "logSupport": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325\\THREE-MACHINE-CAPABILITY-SUPPORT.json",
+    "modelComparison": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325\\MODEL-COMPARISON.json",
+    "modelSemanticsUnchanged": true,
+    "hostIdentityCorrection": "Manifest hostExe/hostDll/hostSha256/hostDllSha256 are fan-host-v2 YeManFanHost. Virtual Host identity is independently observed per machine via actual runtime-binary-identity HELLO; disk SHA/MVID/loaded bytes remain separate.",
+    "machines": [
+      {
+        "label": "msi-g3e",
+        "archive": "G:\\YeManCC-Work\\日志\\微星G3E\\YeManCC-logs-20261025-232531-1025微星-第二轮.zip",
+        "archiveSha256": "4a6d8206c7e7d77d26122a36b1b829872239ae21d3a7e2df6e56d95be797d87c",
+        "nativePid": 10124,
+        "deviceClass": "HandheldCompanion.Devices.ClawCG3EM",
+        "localFinalCount": 5,
+        "localFinalSuccessCount": 5,
+        "virtualHostIdentitySummary": {
+          "observedHelloInstances": 4,
+          "inputHostDllDiskSha256s": [
+            "6574f4c068cab653d4af842cc6fabc6dd9cd7a07f0d4fe23a6145fadb59feff8"
+          ],
+          "inputHostLoadedMvids": [
+            "89696b43-14d3-43b6-88bf-7260eb5895f7"
+          ],
+          "sdkVerifiedDiskSha256s": [
+            "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c"
+          ],
+          "meaning": "Actual current-session HELLO identity observations; disk hashes and loaded MVID remain distinct, no loaded-byte or external game proof."
+        },
+        "manifestFanHost": {
+          "hostExe": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.exe",
+          "hostDll": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.dll",
+          "exeDiskSha256": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733",
+          "dllDiskSha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df",
+          "meaning": "Export manifest hostExe/hostDll is FanHost in PowerControl/fan-host-v2, not virtual YeManInputHost. Do not use these values as virtual Host identity."
+        },
+        "physicalAcceptanceSignedBySupport": false
+      },
+      {
+        "label": "rog-xbox-x",
+        "archive": "G:\\YeManCC-Work\\日志\\ROG-Xbox-2025\\YeManCC-logs-20261025-232523-1025-ROGX-第二轮-.zip",
+        "archiveSha256": "4218148d9ece2fbacccb315aed34c3abd6641a9248327593dc74d85552235afb",
+        "nativePid": 8316,
+        "deviceClass": "HandheldCompanion.Devices.XboxROGAllyX",
+        "localFinalCount": 5,
+        "localFinalSuccessCount": 5,
+        "virtualHostIdentitySummary": {
+          "observedHelloInstances": 4,
+          "inputHostDllDiskSha256s": [
+            "6574f4c068cab653d4af842cc6fabc6dd9cd7a07f0d4fe23a6145fadb59feff8"
+          ],
+          "inputHostLoadedMvids": [
+            "89696b43-14d3-43b6-88bf-7260eb5895f7"
+          ],
+          "sdkVerifiedDiskSha256s": [
+            "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c"
+          ],
+          "meaning": "Actual current-session HELLO identity observations; disk hashes and loaded MVID remain distinct, no loaded-byte or external game proof."
+        },
+        "manifestFanHost": {
+          "hostExe": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.exe",
+          "hostDll": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.dll",
+          "exeDiskSha256": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733",
+          "dllDiskSha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df",
+          "meaning": "Export manifest hostExe/hostDll is FanHost in PowerControl/fan-host-v2, not virtual YeManInputHost. Do not use these values as virtual Host identity."
+        },
+        "physicalAcceptanceSignedBySupport": false
+      },
+      {
+        "label": "gpd-win5",
+        "archive": "G:\\YeManCC-Work\\日志\\Win5\\YeManCC-logs-20261025-232512-1025-Win5第二轮.zip",
+        "archiveSha256": "de9c8428b02d3496421ef91918a30d4521fd80fabfab3cbe01daabc5befb82e7",
+        "nativePid": 8632,
+        "deviceClass": "HandheldCompanion.Devices.GPDWin5",
+        "localFinalCount": 5,
+        "localFinalSuccessCount": 5,
+        "virtualHostIdentitySummary": {
+          "observedHelloInstances": 4,
+          "inputHostDllDiskSha256s": [
+            "6574f4c068cab653d4af842cc6fabc6dd9cd7a07f0d4fe23a6145fadb59feff8"
+          ],
+          "inputHostLoadedMvids": [
+            "89696b43-14d3-43b6-88bf-7260eb5895f7"
+          ],
+          "sdkVerifiedDiskSha256s": [
+            "8fe7bdb21ec497591f527b7b87c4bc7b41b45c35a06cc211a7a0dce48838ed2c"
+          ],
+          "meaning": "Actual current-session HELLO identity observations; disk hashes and loaded MVID remain distinct, no loaded-byte or external game proof."
+        },
+        "manifestFanHost": {
+          "hostExe": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.exe",
+          "hostDll": "C:\\SOFT\\YeMan\\PowerControl\\fan-host-v2\\YeManFanHost.dll",
+          "exeDiskSha256": "a3ce266b880f67045d3f895e2fc68b1fe81f641d5f1a08a01f0de19d2458f733",
+          "dllDiskSha256": "5c235b39ffa6eb43346d7eb5d0e43aad5eccb96bd5c3f19530e9b39131e266df",
+          "meaning": "Export manifest hostExe/hostDll is FanHost in PowerControl/fan-host-v2, not virtual YeManInputHost. Do not use these values as virtual Host identity."
+        },
+        "physicalAcceptanceSignedBySupport": false
+      }
+    ],
+    "remaining": [
+      "Physical isolation/external consumer observations remain separate from local success.",
+      "Win5 native refresh helper exit6 and ROG PID1B4C HID refresh quarantine remain.",
+      "G3E rear write receipts do not prove observed rear mapping.",
+      "OneX/AYA physical protocol/visibility gaps are not resolved by the three machine logs."
+    ],
+    "runtimeChangedBySupport": false,
+    "fixturesRunBySupport": false,
+    "verificationPath": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325\\verification.json",
+    "resumptionEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\new-export-2325\\RESUMPTION.json"
+  },
+  "gpdFamilyHcComparison": {
+    "capturedAt": "2026-10-26T00:14:20.291347+08:00",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\gpd-family-hc-20261026\\GPD-HC-COMPARISON.md",
+    "json": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\gpd-family-hc-20261026\\GPD-HC-COMPARISON.json",
+    "counts": {
+      "gpdSourceClasses": 21,
+      "factoryInstantiable": 20,
+      "nativeSharedOemProjectionRows": 14,
+      "checkedHcFiles": 27,
+      "sourceIndexMatchedFiles": 27,
+      "distinctRefreshFailures": 3,
+      "localFinals": 5,
+      "successfulLocalFinals": 5,
+      "hardwareAcceptedModels": 0
+    },
+    "conclusions": [
+      {
+        "id": "C1",
+        "status": "CONFIRMED_FROM_LOG",
+        "text": "拒绝发生在实体 XUSB 游戏节点的 disable 阶段；同会话五个虚拟切换本地 final 均 success，不能归因为总库拒绝 Win5 虚拟创建。"
+      },
+      {
+        "id": "C2",
+        "status": "CONFIRMED_FROM_SDK",
+        "text": "CONFIGRET 23(0x17)=CR_REMOVE_VETOED；disable flags 0x4=CM_DISABLE_UI_NOT_OK，PERSIST=0x8。helper exit6 与 CONFIGRET、异常 HRESULT 分属不同域。"
+      },
+      {
+        "id": "C3",
+        "status": "CONFIRMED_FROM_SOURCE",
+        "text": "HC 通用 XInput Hide/Unhide 后调用 USB CyclePort；YMCC GPD --game-xusb 对当前同 devnode 作 CM_Disable/Enable。二者 API 和目标处理层级不同，不能视作已等价移植。"
+      },
+      {
+        "id": "C4",
+        "status": "CONFIRMED_FROM_SOURCE",
+        "text": "21 个 GPD 设备类没有声明自己的 Hide/Unhide/CyclePort；045E:028E 在 HC ControllerManager 无匹配专用类时回落 XInputController。未发现 Win5 专属虚拟创建禁止条件。"
+      },
+      {
+        "id": "C5",
+        "status": "CONFIRMED_FROM_SOURCE",
+        "text": "Win5 2F24:0137/0135 FF00:0001 与固件门只涉及 OEM 背键。>=0x01.0x11 时静音 L4/R4/Gamepad legacy chords；读取循环仍独立启动，固件门不是虚拟目标准入。"
+      },
+      {
+        "id": "C6",
+        "status": "CONFIRMED_LIMIT",
+        "text": "HC Hide 不消费 CyclePort bool，随后仍通知 VisibilityChanged；PnPDetails 吞端口循环异常并返回 false。HC 界面状态不足以证明端口刷新或外部屏蔽成功。"
+      }
+    ],
+    "status": "SOURCE_AND_LOG_COMPARISON_DELIVERABLE; PHYSICAL_ACCEPTANCE_PENDING",
+    "runtimeChanges": false,
+    "hardwareOperations": false,
+    "fixturesRun": false,
+    "subsequentSoftwareConsumerEvidence": "r9SharedConsumerSoftwareEvidence"
+  },
+  "r9SharedConsumerSoftwareEvidence": {
+    "recordedAt": "2026-10-26T00:47:12.553403+08:00",
+    "classification": "SOFTWARE_CONSUMER_EVIDENCE_ONLY",
+    "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\gpd-family-hc-20261026\\R9-SOFTWARE-CONSUMER-SUPPORT.json",
+    "delivery": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-Win5Return26-R9\\DELIVERY.json",
+    "familyLifecycle": {
+      "status": "PASS",
+      "cases": 10,
+      "checks": 329,
+      "managedLifecycleInstances": 9,
+      "negativeCases": 1,
+      "scope": "Original actual consumer Start/frame acceptance/unique ON final/OFF/fixture managed-child natural exit/unique OFF final under controlled DMI, SDK and PnP boundaries. Runtime deviceClass blank; no real catalog resolver claim."
+    },
+    "offReturnRegression": {
+      "status": "PASS",
+      "cases": 5,
+      "checks": 168
+    },
+    "vetoDiagnosticDifferential": {
+      "status": "PASS",
+      "scenarios": 40,
+      "deviceWriteSequencesUnchanged": true,
+      "realVetoActor": "UNKNOWN"
+    },
+    "currentSourcePinsMatchRecorded": true,
+    "boundaries": {
+      "dmiOrigin": "Existing support physicalModels leaves, verified against current field values",
+      "runtimeDeviceClass": "",
+      "optionalOemOrUnknownModelDoesNotBlockControlledStandardInput": true,
+      "oneXAndAyaNativeForeground": "Unsupported remains; standard output grants no unimplemented native foreground writes",
+      "msiModeWriteAuthorityGranted": false,
+      "physicalSteamDeckEmulatingSdForbidden": "negative case PASS",
+      "hardwareAcceptedRowsAdded": 0,
+      "catalogResolverAcceptance": false,
+      "oemHardwareAcceptance": false,
+      "externalVisibilityAcceptance": false
+    },
+    "runtimeChangesBySupport": false,
+    "fixturesRunBySupport": false,
+    "compilerRunBySupport": false,
+    "packaged": false,
+    "deployed": false,
+    "hardwareAcceptedRowsAdded": 0
+  },
+  "r11FieldEvidenceContract": {
+    "recordedAt": "2026-10-26T01:47:27.084832+08:00",
+    "classification": "FIELD_EVIDENCE_AND_CONTRACT_SEPARATION; HARDWARE_REPAIR_OPEN",
+    "evidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\CapabilitySupport-VirtualController-20261025\\gpd-family-hc-20261026\\R11-INPUT-CONTRACT-SUPPORT.json",
+    "contractLayers": [
+      "physical-root-and-inventory",
+      "fresh-acquisition-and-host-receipt",
+      "hidden-configuration-readback",
+      "inflight-refresh-and-return",
+      "external-visibility-and-consumption"
+    ],
+    "selectedPhysicalRoot": "USB\\VID_045E&PID_028E\\7&2EA17D0F&0&1",
+    "recordedLocationPaths": [
+      "PCIROOT(0)#PCI(0803)#PCI(0000)#USBROOT(0)#USB(5)#USB(1)",
+      "ACPI(_SB_)#ACPI(PCI0)#ACPI(GPPC)#ACPI(XHC0)#ACPI(RHUB)#ACPI(PRT5)#ACPI(PRT1)"
+    ],
+    "vidPidAloneGrantsFamilyOrRestartAuthority": false,
+    "writerSnapshotsAreExportScoped": true,
+    "hostAcceptanceProvesIsolation": false,
+    "externalVisibility": "UNKNOWN",
+    "realVetoActor": "UNKNOWN",
+    "offThisRound": "NOT_COVERED",
+    "newModelRegistrations": 0,
+    "hardwareAcceptedRowsAdded": 0,
+    "runtimeChangesBySupport": false,
+    "fixturesRunBySupport": false
+  }
+}

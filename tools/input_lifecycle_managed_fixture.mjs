@@ -42,7 +42,7 @@ export function buildManagedFixture(out,options={}){
  const commands=[];
  function run(name,args){const r=spawnSync('dotnet',args,{cwd:out,encoding:'utf8',timeout:60000,windowsHide:true,env:{...process.env,DOTNET_CLI_TELEMETRY_OPTOUT:'1',DOTNET_NOLOGO:'1',DOTNET_CLI_WORKLOAD_UPDATE_NOTIFY_DISABLE:'true'}});fs.writeFileSync(path.join(out,name+'.log'),(r.stdout??'')+(r.stderr??''));commands.push({name,args,exit:r.status,error:r.error?.message??null});need(!r.error&&r.status===0,name+' failed: '+path.join(out,name+'.log'));return r.stdout;}
  try{
- const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
+ const names=['InputHost/Program.cs','InputHost/PsEndpointOwnership.cs','InputHost/ParentProcessLifetime.cs','InputHost/HostTerminalCleanup.cs','InputHost/HostControllerOutputStop.cs','InputHost/HostControllerIdleCtsRelease.cs','InputHost/HostGameOutputObservation.cs','InputHost/HostVirtualSignalEvidence.cs','InputHost/SteamDeckPadReportObservation.cs','InputHost/MsiSteamDeckReleaseFence1726.cs','InputHost/MsiVirtualReportChain1410.cs','InputHost/ScreenTouchpadReport.cs','InputHost/ScreenButtonReport.cs','InputHost/CanonicalFrameFingerprintMemo.cs','InputHost/HostResponseFields.cs','tools/msi_steamdeck_release_fence_1726_selftest.mjs','tools/msi_steamdeck_release_fence_1726_selftest.cs','tools/inputhost_lifecycle_selftest.cs','tools/input_lifecycle_managed_fixture.mjs','tools/fixtures/input_lifecycle_integration/ManagedEntry.cs','tools/ymcc_sim/global/inputhost-protocol/adapter.mjs','tools/ymcc_sim/global/inputhost-protocol/toolchain-inputs.json','capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs'];
  if(options.psOwnershipSelfTest)names.push('tools/ps_endpoint_ownership_selftest.cs','tools/ps_endpoint_ownership_selftest.mjs');
  const inputs=names.map(relative=>{const p=path.join(repo,relative),bytes=fs.readFileSync(p),snapshot=path.join(out,'input-sources',relative);fs.mkdirSync(path.dirname(snapshot),{recursive:true});fs.writeFileSync(snapshot,bytes,{flag:'wx'});return{path:p,relative,snapshot,sha256:hash(bytes),bytes:bytes.length};});
  const read=relative=>fs.readFileSync(inputs.find(r=>r.relative===relative).snapshot,'utf8').replace(/^\uFEFF/,'');
@@ -139,14 +139,25 @@ export function buildManagedFixture(out,options={}){
  compatibility=replaceOnce(compatibility,'\"injected-reader-stall\"','\"sdk-output-stop-timeout\"');
  const pieces=['private static async Task<HostTerminalCleanup.LoopResult> RunPipeClientAsync(','private sealed class MessageCodec'].map(marker=>({...member(source,marker),marker}));
  const files={
- 'SignalSdkTerminal.cs':'// Explicit USB maintenance memory leaves; no system mutex or reboot state is read.\nnamespace HIDMaestro { internal sealed class HMGamepadState {} }\nnamespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending => false; } }\nnamespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDisposable { internal static UsbipMaintenanceGate? TryEnter(bool required)=>new(); public void Dispose(){} } }\n',
+ 'SignalSdkTerminal.cs':`// Inert SDK data shapes for the actual HostVirtualSignalEvidence observer.
+// The enum/state shape matches the existing report-chain SDK stand-ins.
+namespace HIDMaestro {
+ [System.Flags] internal enum HMButton { None=0,A=1,B=2,X=4,Y=8,LeftBumper=16,RightBumper=32,Back=64,Start=128,LeftStick=256,RightStick=512,Guide=1024 }
+ internal enum HMHat { None=0,North=1,NorthEast=2,East=3,SouthEast=4,South=5,SouthWest=6,West=7,NorthWest=8 }
+ internal enum HMAxis { X,Y,Z,Rx,Ry,Rz,Vx,Vy }
+ internal struct HMGamepadState { public HMButton Buttons; public HMHat Hat; public System.Collections.Generic.Dictionary<HMAxis,float>? Axes; }
+}
+// Explicit USB maintenance memory leaves; no system mutex or reboot state is read.
+namespace YeManCC { internal static class UsbipMaintenanceState { internal static bool Pending => false; } }
+namespace YeManInputHost { internal sealed class UsbipMaintenanceGate:System.IDisposable { internal static UsbipMaintenanceGate? TryEnter(bool required)=>new(); public void Dispose(){} } }
+`,
  'ExtractedHost.cs':fake,'FixtureTerminals.cs':compatibility,'LegacyFixture.cs':legacy,
  'ManagedEntry.cs':managedEntry,
  'ProductionPipe.cs':'using System.Diagnostics; using System.IO.Pipes; using System.Text; using YeManInputHost.Diagnostics;\ninternal static partial class Program {\n'+pieces.map(r=>r.text).join('\n')+'\n}\n',
  'ParentProcessLifetime.cs':read('InputHost/ParentProcessLifetime.cs'),
   'PsEndpointOwnership.cs':read('InputHost/PsEndpointOwnership.cs')
  };
- for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostGameOutputObservation.cs','HostVirtualSignalEvidence.cs'])files[name]=read('InputHost/'+name);
+ for(const name of ['MsiSteamDeckReleaseFence1726.cs','MsiVirtualReportChain1410.cs','CanonicalFrameFingerprintMemo.cs','HostResponseFields.cs','HostGameOutputObservation.cs','HostVirtualSignalEvidence.cs','SteamDeckPadReportObservation.cs'])files[name]=read('InputHost/'+name);
  files['HcControllerGameFeedbackCapabilityCatalog.generated.cs']=read('capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  if(options.psOwnershipSelfTest)files['PsEndpointOwnershipTests.cs']=read('tools/ps_endpoint_ownership_selftest.cs');
  for(const [name,text]of Object.entries(files))fs.writeFileSync(path.join(out,name),text,{flag:'wx'});
@@ -178,6 +189,9 @@ export function buildManagedFixture(out,options={}){
  const signalInput=inputs.find(r=>r.relative==='InputHost/HostVirtualSignalEvidence.cs');
  const signalCompile=actual.filter(r=>r.kind==='Compile'&&path.resolve(r.path)===path.resolve(out,'HostVirtualSignalEvidence.cs'));
  need(signalCompile.length===1&&signalCompile[0].sha256===signalInput.sha256,'Virtual signal helper missing or changed in actual compiler inputs');
+ const signalDecoderInput=inputs.find(r=>r.relative==='InputHost/SteamDeckPadReportObservation.cs');
+ const signalDecoderCompile=actual.filter(r=>r.kind==='Compile'&&path.resolve(r.path)===path.resolve(out,'SteamDeckPadReportObservation.cs'));
+ need(signalDecoderCompile.length===1&&signalDecoderCompile[0].sha256===signalDecoderInput.sha256,'Virtual signal decoder missing or changed in actual compiler inputs');
  const gameFeedbackCatalogInput=inputs.find(r=>r.relative==='capabilities/HcControllerGameFeedbackCapabilityCatalog.generated.cs');
  const gameFeedbackCatalogCompile=actual.filter(r=>r.kind==='Compile'&&path.resolve(r.path)===path.resolve(out,'HcControllerGameFeedbackCapabilityCatalog.generated.cs'));
  need(gameFeedbackCatalogCompile.length===1&&gameFeedbackCatalogCompile[0].sha256===gameFeedbackCatalogInput.sha256,'Game feedback catalog missing or changed in actual compiler inputs');

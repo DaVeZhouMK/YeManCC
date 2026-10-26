@@ -5,11 +5,13 @@
 #include <string>
 #include <vector>
 #include "json.hpp"
+#include "hidhide_cli_job_guard.h"
 
 namespace ymcc::input {
 // Optional, one-shot evidence transport. A delete-on-close spool cannot block
 // the helper on pipe capacity; it is never a persistent receipt or a poller.
-// Only two exact standard handles may be inherited by this launch.
+// Only the two exact standard handles and explicit caller-owned tracking
+// leases may be inherited by a tracked launch.
 class OneShotHelperDiagnostic {
 public:
     OneShotHelperDiagnostic() = default;
@@ -61,6 +63,18 @@ public:
         } catch (...) { cleanup(); return false; }
     }
     LPSTARTUPINFOW startup() noexcept { return &startup_.StartupInfo; }
+    // Compose stdout HANDLE_LIST and exact JOB_LIST in one owner. The
+    // diagnostic spool still owns its handles until the real launch ends.
+    bool prepareTrackedLaunch(ymcc::hidHideCli::JobGuard& job,const std::wstring& name,
+                              const std::vector<HANDLE>& trackingLeases={}) noexcept {
+        if(!initialized_ || !output_ || !null_)return false;
+        try {
+            auto ordinary=startup_.StartupInfo;ordinary.cb=sizeof(STARTUPINFOW);
+            std::vector<HANDLE> handles(inherited_.begin(),inherited_.end());
+            handles.insert(handles.end(),trackingLeases.begin(),trackingLeases.end());
+            return job.prepareTracked(ordinary,name,handles);
+        } catch(...) { return false; }
+    }
     void started() noexcept { closeLaunchHandles(); }
     // Caller proves process termination using its existing handle/wait. Never
     // read while the child runs, add a wait, or change the helper's exit result.

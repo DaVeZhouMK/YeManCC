@@ -33,6 +33,10 @@ cpp = r"""
 #include <algorithm>
 #include <iostream>
 #include <functional>
+#include <deque>
+#include <future>
+#include <thread>
+#include <chrono>
 #include "json.hpp"
 #include "wake_game_resume.h"
 using json=nlohmann::json; namespace fspath=std::filesystem;
@@ -43,6 +47,13 @@ std::atomic<DWORD> g_manualPausedPid{0};
 std::atomic<unsigned long long> g_sgExplicitGameWakeGeneration{0},g_sgExplicitGameWakePauseFence{0};
 std::mutex g_sgOpMtx,g_gameRulesMx;
 std::condition_variable g_sgWorkCv;
+enum class SgWork : uint8_t { Suspend, WakeAutomatic, WakeSuspend, WakeHibernate };
+struct SgWorkItem { SgWork kind; unsigned long long generation; };
+std::mutex g_sgWorkMx;std::deque<SgWorkItem> g_sgWorkQ;
+bool g_sgWorkStop=false;unsigned long long g_sgWorkWakeRevision=0;
+std::function<ULONGLONG(ULONGLONG)> workDelay;
+ULONGLONG sleepFixtureAutoWaitMs(ULONGLONG now){return workDelay?workDelay(now):~ULONGLONG{0};}
+__ACTUAL_WORK_NOTIFY__
 bool g_guardEnabled=true,g_sgPauseResume=true,retry=false;
 ULONGLONG generation=7,tick=0;
 std::atomic<bool> g_sleepRecoveryAutoEnabled{false},g_sleepRecoveryAutoPending{false};
@@ -246,6 +257,37 @@ cpp=cpp.replace(' std::cout<<"sleep wake recovery production-header selftest:',r
  reset();marker(100);g_sgTask={};sgRealWake("resume_auto",7);assert(inlineResumeCalls==0&&procs[100].calls==0&&exists(100)&&!g_sgWakeRecoveryPending);pass("automatic wake with lost SleepTask does not authorize inline/global thaw");
  std::cout<<"sleep wake recovery production-header selftest:""")
 
+def production_function(name):
+    pattern=re.search(r'\bstatic (?:bool|void) '+name+r'\([^;{}]*\)\s*\{',masked)
+    assert pattern,name
+    first=masked.index('{',pattern.start());pos=first+1;depth=1
+    while depth:
+        depth+=(masked[pos]=='{')-(masked[pos]=='}');pos+=1
+    return source[pattern.start():pos]
+cpp=cpp.replace('__ACTUAL_WORK_NOTIFY__',production_function('sgNotifyWork'))
+cpp=cpp.replace('int passed=0;',production_function('sgWaitForWork').replace('sleepRecoveryAutoWaitMs(', 'sleepFixtureAutoWaitMs(')+'\nint passed=0;')
+cpp=cpp.replace(' std::cout<<"sleep wake recovery production-header selftest:',r'''
+ reset();assert(sgWakeGameRecoveryWaitMs(tick)==~ULONGLONG{0});marker(100);procs[100].fail=10;sgBeginWakeGameRecovery(7);
+ unsigned deadlineWakes=0;while(g_sgWakeRecoveryPending){const auto delay=sgWakeGameRecoveryWaitMs(tick);assert(delay!=~ULONGLONG{0});tick+=delay;sgWakeGameRecoveryTick();assert(++deadlineWakes<=5);}
+ assert(deadlineWakes==5&&procs[100].calls==5&&tick==10000);pass("actual deadline scheduling needs five wakes for the unchanged ten-second five-attempt window, formerly 200 polling wakes");
+ reset();marker(100);sgBeginWakeGameRecovery(7);g_inputReady=false;
+ assert(sgWakeGameRecoveryWaitMs(tick)==250);tick=9990;assert(sgWakeGameRecoveryWaitMs(tick)==10);tick=10000;assert(sgWakeGameRecoveryWaitMs(tick)==0);
+ g_exitRequested=true;assert(sgWakeGameRecoveryWaitMs(tick)==0);sgWakeGameRecoveryTick();assert(!g_sgWakeRecoveryPending);pass("actual readiness fallback is bounded and cancellation has no polling delay");
+ reset();g_sgWorkStop=false;g_sgWorkQ.clear();g_sgWorkWakeRevision=0;
+ {std::promise<void> calculated,release;auto releaseWait=release.get_future().share();
+  workDelay=[&](ULONGLONG){calculated.set_value();releaseWait.wait();return ~ULONGLONG{0};};
+  auto waiter=std::async(std::launch::async,[]{SgWorkItem item{};return sgWaitForWork(item);});
+  assert(calculated.get_future().wait_for(std::chrono::seconds(2))==std::future_status::ready);
+  sgNotifyWork();release.set_value();assert(waiter.wait_for(std::chrono::seconds(2))==std::future_status::ready&&waiter.get());workDelay={};
+ }pass("actual production wait retains a completion arriving between deadline computation and blocking");
+ {std::promise<void> calculated;workDelay=[&](ULONGLONG){calculated.set_value();return ~ULONGLONG{0};};
+  auto waiter=std::async(std::launch::async,[]{SgWorkItem item{};return sgWaitForWork(item);});
+  assert(calculated.get_future().wait_for(std::chrono::seconds(2))==std::future_status::ready);
+  assert(waiter.wait_for(std::chrono::milliseconds(120))==std::future_status::timeout);
+  {std::lock_guard<std::mutex> lock(g_sgWorkMx);g_sgWorkStop=true;}g_sgWorkCv.notify_all();
+  assert(waiter.wait_for(std::chrono::seconds(2))==std::future_status::ready&&!waiter.get());workDelay={};g_sgWorkStop=false;
+ }pass("actual idle wait owns no repeating timeout and wakes immediately for shutdown");
+ std::cout<<"sleep wake recovery production-header selftest:''')
 cpp_path=out/'sleep_wake_resume_native_selftest.cpp'; cpp_path.write_text(cpp,'utf-8')
 vs=Path(r'C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvars64.bat')
 exe=out/'sleep_wake_resume_native_selftest.exe'; cmd=out/'run-wake-recovery-selftest.cmd'

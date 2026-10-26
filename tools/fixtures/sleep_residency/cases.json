@@ -295,6 +295,52 @@
         "wakeEventLocal": "2026-10-25T15:35:54.863+08:00",
         "liveFailureEvents": []
       }
+    },
+    {
+      "name": "ROG actual positive DRIPS after repeated manual sleep 20261025",
+      "archive": {
+        "source": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SleepOptimizationsAssessment-20261024\\ROG-LongEntry-20261025-155307\\raw\\155307\\sleep-facts.log",
+        "sha256": "8e5805cf0f5525a673510d5ebc2b9d8b1df0199fc70c7e24761a931563f97313",
+        "line": 269,
+        "rawEventXmlAvailable": false,
+        "reconstructedEventDataFromExportedRawValues": true,
+        "liveFailureEventsAvailable": false,
+        "repairOutcome": "UNKNOWN; completed507 cannot authorize historical realtime action"
+      },
+      "xml": "<Event><EventData><Data Name=\"ActiveResidencyInUs\">22202450</Data><Data Name=\"BootId\">1</Data><Data Name=\"DripsResidencyInUs\">13007873</Data><Data Name=\"DripsTransitions\">1</Data><Data Name=\"DurationInUs\">35210323</Data><Data Name=\"DwmSyncFlushTime\">0</Data><Data Name=\"EnergyDrain\">3271</Data><Data Name=\"FirstDripsEntryInUs\">21136392</Data><Data Name=\"GdiOnTime\">0</Data><Data Name=\"HwDripsResidencyInUs\">12369537</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"MonitorPowerOnTime\">615766</Data><Data Name=\"NonActivatedCpuInUs\">838528</Data><Data Name=\"NonAttributedCpuInUs\">4391</Data><Data Name=\"NonDripsTimeActivatedInUs\">255842657</Data><Data Name=\"NonResiliencyTimeInUs\">18446744073463206447</Data><Data Name=\"PowerStateAc\">false</Data><Data Name=\"ResiliencyDripsTimeInUs\">13007873</Data><Data Name=\"ResiliencyHwDripsTimeInUs\">12369537</Data><Data Name=\"ScenarioInstanceId\">16</Data><Data Name=\"ScenarioInstanceIdV2\">14</Data><Data Name=\"ScreenOffDurationInUs\">1057362</Data><Data Name=\"ScreenOffHwDripsResidencyInUs\">0</Data><Data Name=\"ScreenOffSwDripsResidencyInUs\">0</Data><Data Name=\"SleepDurationInUs\">34152779</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"SleepHwDripsResidencyInUs\">12369537</Data><Data Name=\"SleepSwDripsResidencyInUs\">13007873</Data></EventData></Event>",
+      "expectedAssessment": "short-session",
+      "expected": {
+        "expectedDurationUs": 35210323,
+        "expectedWindowsSleepStage": "entered"
+      },
+      "historicalReplay": {
+        "sleepEventLocal": "2026-10-25T15:36:15.824+08:00",
+        "wakeEventLocal": "2026-10-25T15:36:51.034+08:00",
+        "liveFailureEvents": []
+      }
+    },
+    {
+      "name": "ROG actual later manual sleep166seconds no DRIPS 20261025",
+      "archive": {
+        "source": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SleepOptimizationsAssessment-20261024\\ROG-LongEntry-20261025-155307\\raw\\155307\\sleep-facts.log",
+        "sha256": "8e5805cf0f5525a673510d5ebc2b9d8b1df0199fc70c7e24761a931563f97313",
+        "line": 302,
+        "rawEventXmlAvailable": false,
+        "reconstructedEventDataFromExportedRawValues": true,
+        "liveFailureEventsAvailable": false,
+        "repairOutcome": "UNKNOWN; completed507 cannot authorize historical realtime action"
+      },
+      "xml": "<Event><EventData><Data Name=\"ActiveResidencyInUs\">166765437</Data><Data Name=\"BootId\">1</Data><Data Name=\"DripsResidencyInUs\">0</Data><Data Name=\"DripsTransitions\">0</Data><Data Name=\"DurationInUs\">166765437</Data><Data Name=\"DwmSyncFlushTime\">0</Data><Data Name=\"EnergyDrain\">4166</Data><Data Name=\"FirstDripsEntryInUs\">0</Data><Data Name=\"GdiOnTime\">0</Data><Data Name=\"HwDripsResidencyInUs\">0</Data><Data Name=\"IsCsSessionInProgressOnExit\">false</Data><Data Name=\"MonitorPowerOnTime\">634000</Data><Data Name=\"NonActivatedCpuInUs\">3516458</Data><Data Name=\"NonAttributedCpuInUs\">0</Data><Data Name=\"NonDripsTimeActivatedInUs\">1436845034</Data><Data Name=\"NonResiliencyTimeInUs\">18446744072282158871</Data><Data Name=\"PowerStateAc\">false</Data><Data Name=\"ResiliencyDripsTimeInUs\">0</Data><Data Name=\"ResiliencyHwDripsTimeInUs\">0</Data><Data Name=\"ScenarioInstanceId\">19</Data><Data Name=\"ScenarioInstanceIdV2\">17</Data><Data Name=\"ScreenOffDurationInUs\">1064865</Data><Data Name=\"ScreenOffHwDripsResidencyInUs\">0</Data><Data Name=\"ScreenOffSwDripsResidencyInUs\">0</Data><Data Name=\"SleepDurationInUs\">165700060</Data><Data Name=\"SleepEntered\">true</Data><Data Name=\"SleepHwDripsResidencyInUs\">0</Data><Data Name=\"SleepSwDripsResidencyInUs\">0</Data></EventData></Event>",
+      "expectedAssessment": "no-software-drips-recorded",
+      "expected": {
+        "expectedDurationUs": 166765437,
+        "expectedWindowsSleepStage": "entered"
+      },
+      "historicalReplay": {
+        "sleepEventLocal": "2026-10-25T15:49:57.039+08:00",
+        "wakeEventLocal": "2026-10-25T15:52:43.804+08:00",
+        "liveFailureEvents": []
+      }
     }
   ]
 }

@@ -111,7 +111,8 @@ inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
 // boundary from a PID, wall clock, renderer reload, wake, or unknown identity.
 inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
                                                     const std::string& session,
-                                                    const std::string& boot) {
+                                                    const std::string& boot,
+                                                    nlohmann::json* decision = nullptr) {
     using nlohmann::json;
     if (!document.is_object()) throw std::runtime_error("startup-settings-invalid");
     const auto input = document.value("input", json::object());
@@ -142,6 +143,25 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
         !previousSession.get<std::string>().empty();
     const bool claimed = !boot.empty() && extensions.value("bootModesAppliedBoot", json(nullptr)) == boot;
     const bool preserve = configured && (boot.empty() || migration || previousBoot == boot || claimed);
+    if (decision) {
+        try {
+            const auto selected = configured ? modes.value("boot", json(nullptr)) : json(nullptr);
+            const bool validMode = selected == "global" || selected == "xbox" || selected == "steam" || selected == "xbox-steam";
+            const auto preferences = normalizeInputStartupPreferences(startup);
+            *decision = {{"schema", 1}, {"configured", configured},
+                {"source", configured ? "four-mode-startup" : "legacy-startupDesired"},
+                {"selectedMode", validMode ? selected : json(nullptr)},
+                {"bootEnabled", configured && (!modes.contains("bootEnabled") || modes.at("bootEnabled").is_boolean()) ? modes.value("bootEnabled", json(true)) : json(nullptr)},
+                {"revision", configured && modes.contains("revision") && modes.at("revision").is_number_integer() ? modes.at("revision") : json(nullptr)},
+                {"requestedPersona", preferences.at("virtualGamepadPersona")},
+                {"requestedGyroPreset", preferences.at("gyroPreset")},
+                {"selectionBootMatchesObserved", claimed}, {"inputBootMatchesObserved", !boot.empty() && previousBoot == boot},
+                {"identityUpgrade", identityUpgrade}, {"legacyAnchor", migration},
+                {"action", previousSession == session ? "preserve-same-process" :
+                    preserve ? "preserve-current-input" : "apply-startup-preferences"},
+                {"scope", "settings-decision-only;not-host-start-or-game-consumption-proof"}};
+        } catch (...) { /* Optional evidence must never change startup behavior. */ }
+    }
     auto next = initializeInputStartup(input, startup, session, !preserve);
     if (!boot.empty()) next["startupAppliedBoot"] = boot;
     // Unknown observations must not make a previous boot's result look current.

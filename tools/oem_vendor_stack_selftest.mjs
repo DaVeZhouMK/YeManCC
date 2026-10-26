@@ -4,6 +4,7 @@ import path from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {spawnSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
+import {calibrationToolchainPreamble} from './fixtures/hc_reviewed_calibration/toolchain.mjs';
 const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..');
 const out=path.resolve(process.env.YMCC_VENDOR_OUT || path.join(root,'../../Build/Validation/oem-vendor-stack-r15'));
 fs.mkdirSync(out,{recursive:true});
@@ -48,7 +49,7 @@ static const char* ymccFamilyName(YmccFamily family) { return family == YmccFami
 static void ipc_on(const char* command, std::function<json(const json&)> handler) { g_shieldIpc[command] = std::move(handler); }
 ` + productionSlice('static bool ymSettingsSetInputBooleanCas(', '\nstatic bool ymSettingsExists()') +
 productionSlice('static json msiControllerShieldTargetProcessesJson()', '\nstatic bool sgShouldKeepInputDuringStandby()') +
-'\nstatic void registerShieldIpcFixture() {\n' + productionSlice('    ipc_on("msiControllerShield.get",', '    ipc_on("shortcut.recording.set",') + '\n}\n' : '';
+'\nstatic void registerShieldIpcFixture() {\n' + productionSlice('    ipc_on("msiControllerShield.get",', main.includes('    nativeShortcutActionRegisterIpc();') ? '    nativeShortcutActionRegisterIpc();' : '    ipc_on("shortcut.recording.set",') + '\n}\n' : '';
 if (hasShieldPolicy) {
   assert.equal((main.match(/msiControllerShieldRequested\(input\)/g) || []).length, 2,
     'Startup refresh and getter must use the same default policy');
@@ -66,7 +67,7 @@ const generated=path.join(out,'oem-vendor-stack.fixture.cpp');
 fs.writeFileSync(generated,(modern?'#define YMCC_VENDOR_STACK_FIXTURE\n#define YMCC_VENDOR_R15\n':'')+pre+'\n'+wakePower+block+shieldIpc+wakeHook+'\n#include "'+path.join(root,'tools/oem_vendor_stack_selftest.cpp').replaceAll('\\','/')+'"\n');
 const exe=path.join(out,'oem-vendor-stack.fixture.exe');
 const cmd=path.join(out,'compile.cmd');
-fs.writeFileSync(cmd,'@echo off\r\ncall "C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Auxiliary\\Build\\vcvars64.bat" >nul\r\ncl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"'+path.join(root,'deps/json')+'" "'+generated+'" /Fo"'+path.join(out,'fixture.obj')+'" /Fe"'+exe+'"\r\nexit /b %errorlevel%\r\n');
+fs.writeFileSync(cmd,calibrationToolchainPreamble('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')+'cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /I"'+path.join(root,'deps/json')+'" "'+generated+'" /Fo"'+path.join(out,'fixture.obj')+'" /Fe"'+exe+'"\r\nexit /b %errorlevel%\r\n');
 const compile=spawnSync('cmd.exe',['/d','/c',cmd],{encoding:'utf8',cwd:out});
 fs.writeFileSync(path.join(out,'build.log'),(compile.stdout||'')+(compile.stderr||''));
 process.stdout.write(compile.stdout||'');process.stderr.write(compile.stderr||'');

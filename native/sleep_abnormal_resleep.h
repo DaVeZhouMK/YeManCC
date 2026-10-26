@@ -87,6 +87,22 @@ struct Episode {
         badEnd=o.end;
     }
     void invalidate(){badBegin=badEnd=lastObservation=0;}
+    // Non-consuming check for an ALREADY selected stage. Every blocking source
+    // query and terminal drain must re-evaluate this with current clocks/data.
+    // next may already be4 for the one terminal shutdown attempt.
+    Decision dispatch(unsigned stage,U64 tick,U64 fileTime)const {
+        if(!origin||stage>=deadlines.size())return {};
+        if(tick<startTick||fileTime<origin)return {Action::None,stage,"canceled"};
+        const auto elapsed=tick-startTick,wall=(fileTime-origin)/10000;
+        if((elapsed>wall?elapsed-wall:wall-elapsed)>5000)return {Action::None,stage,"clock-drift"};
+        if(elapsed<deadlines[stage]||elapsed>deadlines[stage]+dispatchWindow)
+            return {Action::None,stage,"outside-dispatch-window"};
+        const bool fresh=badEnd&&fileTime>=badEnd&&fileTime-badEnd<=freshMs*10000;
+        if(!fresh||badEnd<=badBegin)return {Action::None,stage,"unknown-or-stale"};
+        if((badEnd-badBegin)/10000<escalationBadMs)return {Action::None,stage,"insufficient-continuous-evidence"};
+        if(stage==3&&(!hibernateRejected||hibernateAccepted))return {Action::None,stage,"hibernate-not-proven-rejected"};
+        return {stage<2?Action::Sleep:stage==2?Action::Hibernate:Action::PowerOff,stage,"current-known-bad"};
+    }
     Decision poll(U64 tick,U64 fileTime,bool permitted) {
         if(!active())return {};
         if(!permitted||tick<startTick||fileTime<origin){cancel();return {Action::None,4,"canceled"};}
@@ -96,12 +112,9 @@ struct Episode {
         while(next<4&&elapsed>deadlines[next]+dispatchWindow)++next;
         if(next>=4){cancel();return {Action::None,4,"expired"};}
         if(elapsed<deadlines[next])return {Action::None,next,"waiting"};
-        const bool fresh=badEnd&&fileTime>=badEnd&&fileTime-badEnd<=freshMs*10000;
-        if(!fresh||badEnd<=badBegin)return {Action::None,next,"unknown-or-stale"};
-        const auto stage=next;
-        if((badEnd-badBegin)/10000<escalationBadMs)return {Action::None,stage,"insufficient-continuous-evidence"};
-        if(stage==3&&(!hibernateRejected||hibernateAccepted)) {++next;return {Action::None,stage,"hibernate-not-proven-rejected"};}
-        ++next;return {stage<2?Action::Sleep:stage==2?Action::Hibernate:Action::PowerOff,stage,"current-known-bad"};
+        const auto decision=dispatch(next,tick,fileTime);
+        if(decision.action!=Action::None||std::string_view(decision.reason)=="hibernate-not-proven-rejected")++next;
+        return decision;
     }
     U64 delay(U64 tick)const {
         if(!active()||tick<startTick)return 0;

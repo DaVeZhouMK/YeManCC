@@ -72,7 +72,7 @@ function beginDraft(event: Event) {
   sliderInput = event.target instanceof HTMLInputElement ? event.target : null;
   sliderDraft = structuredClone(state.value.draft);
 }
-function cancelDraft() { const draft = sliderDraft; sliderDraft = null; sliderInput = null; if (draft && !childrenLocked.value) editor.restoreDraft(draft); }
+function cancelDraft() { const draft = sliderDraft; retireEdits(); if (draft && !childrenLocked.value) editor.restoreDraft(draft); }
 function commitDraft() { sliderDraft = null; sliderInput = null; }
 function retireEdits(restore = false, focusMaster = false) {
   const draft = sliderDraft, oldInput = sliderInput; sliderDraft = null; sliderInput = null;
@@ -80,18 +80,35 @@ function retireEdits(restore = false, focusMaster = false) {
   const panel = root.value;
   const ownedFocus = !!panel?.contains(document.activeElement) || !!panel?.querySelector('.dd-open');
   // The shared owner resets native cadence and every local range through its existing event.
-  panel?.dispatchEvent(new CustomEvent('gp:slider-edit-invalidated', { bubbles: true, detail: { panel, input: oldInput } }));
+  if (panel) {
+    // KeepAlive can detach the panel before blur/deactivated; its retirement must still reach the existing owner.
+    const target = panel.isConnected ? panel : window;
+    target.dispatchEvent(new CustomEvent('gp:slider-edit-invalidated', { bubbles: true, detail: { panel, input: oldInput } }));
+  }
   stickSelect.value?.closeMenu(); triggerSelect.value?.closeMenu(); shapeSelect.value?.closeMenu();
   if (focusMaster && ownedFocus) void nextTick(() => {
     if (!state.value.draft.enabled && root.value?.isConnected) focusGamepadElement(root.value.querySelector<HTMLElement>('.calibration-master [role="switch"]'));
   });
 }
 let stopVisibility: (() => void) | null = null;
-function mount() {
+let nativeBlurSubscribed = false;
+function onNativeBlur() { editor.tracePage('native-blur-local-edit'); retireEdits(true); }
+function mount(reason = 'mount') {
+  if (!nativeBlurSubscribed) {
+    window.addEventListener('ipc:window.blur', onNativeBlur);
+    nativeBlurSubscribed = true;
+  }
   if (!stopVisibility) stopVisibility = onUiVisibilityChange(value => editor.setObservationVisible(value.visible));
-  void editor.mount();
+  void editor.mount(reason);
 }
-function dispose() { retireEdits(); stopVisibility?.(); stopVisibility = null; editor.dispose(); }
+function dispose(reason = 'dispose') {
+  retireEdits();
+  if (nativeBlurSubscribed) {
+    window.removeEventListener('ipc:window.blur', onNativeBlur);
+    nativeBlurSubscribed = false;
+  }
+  stopVisibility?.(); stopVisibility = null; editor.dispose(reason);
+}
 watch(stickSide, () => { sliderDraft = null; editor.cancelCenter(); });
 watch(triggerSide, () => { sliderDraft = null; });
 watch(() => props.disabled, disabled => { if (disabled) { retireEdits(); editor.cancelCenter(); } });
@@ -105,7 +122,7 @@ watch(() => state.value.applying, (applying, previous) => {
     if (root.value?.isConnected && !gateLocked.value) focusGamepadElement(root.value.querySelector<HTMLElement>('.calibration-master [role="switch"]'));
   });
 });
-onMounted(mount); onActivated(mount); onDeactivated(dispose); onBeforeUnmount(dispose);
+onMounted(() => mount('mounted')); onActivated(() => mount('activated')); onDeactivated(() => dispose('deactivated')); onBeforeUnmount(() => dispose('before-unmount'));
 </script>
 
 <template>

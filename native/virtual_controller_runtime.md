@@ -405,3 +405,19 @@ MsiNativePortCycle的gameRefresh失败事实沿现有单次stdout收集、native
 VC-ROGX-AMPM-20261023-R1 保留真实HID/XUSB识别，分离实体停启权限。13:37包中三个会话的同一ROGX HID节点刷新后87/109/120ms掉光XInput；08:34包此前13次延后。ROG VID0B05/PID1B4C的原生前台屏蔽在任何隐藏前、刷新叶子及helper消费三处禁止该HID停启，无父根fallback；虚拟HidHide非破坏性源规划仍保留。原生屏蔽此时只报deferred，不以识别成功推导写入安全或屏蔽生效。
 
 执行清理的原节点一次Enable补偿不改变原失败6；最终生产调用只准入已取证ROG PID1B4C，MSI/GPD/ROG1ABE调用保持旧行为。持久devnode-enable责任仍未接通，配置返还/空账本/补偿0均不代表完整物理归还。当前证据Testing/YMCC/Evidence/VC-ROGShieldRegression23/DELIVERY.json；原正式native404、最新helper344/2951及日志消费1918分开保留来源，全局仍INCOMPLETE_COVERAGE、实机未验收，不改R3唯一玩家生命周期版本。
+
+
+## Win5 / ONEXPLAYER / AYA 选中节点的驱动栈取证（2026-10-25 R4）
+
+`controller_device_stack_evidence.h` 只在原 `hidhide.visibility-snapshot` 过渡日志点，由当前journal自有目标与选中的HID/root读取PnP属性，字段为`pnpDeviceStackEvidence`。GPD、OneXPlayer、Ayanero三类可调用；ROG/MSI不进入这个新增读取分支，机型/来源仍由原总库与原采集消费者决定。没有新的常驻扫描、线程或输入判定。
+
+每次最多16个精确节点，读取Device_Stack、Service和Upper/LowerFilters，各自保留CONFIGRET、类型、长度、解析状态与节点身份前后校对。unsupported、失败、截断或预算耗尽保持unknown，不能当空列表；Device_Stack中列出HidHide与配置过滤项是不同证据。`filterAttached`、`externalVisibility`仍为unknown，日志不会证明Steam现存句柄已经停止消费。
+
+原native首次取得隐藏责任到R3 handoff整组持盘之前仍有恢复缺口：当时没有真实Host，不能伪造Host Origin；one-shot刷新可能在旧parent死亡后仍处于设备调用中，必须取得writer终态证明。R4日志补强本身不授予新解隐、刷新、服务或模式写权限。
+
+
+## 2026-10-26：历史归还优先于本机前台再接管
+
+`msiNativeForegroundFacts`沿原Host锁读取`inputHostTargetReturnHistorySettledLocked`缓存：历史责任未结时不进入native-only借用/隐藏。`inputHostTargetReturnColdPassLocked`持盘结清，并确认原OFF/power/exit上下文仍有效后，复用`msiNativeForegroundUiEvent(true)`把当前前台意图交回原队列。禁止新建第二个请求、计时器或重试；不会用模式名/写入ACK替代归还证明。原R3的30秒/10秒/一次保底与三次cold观察保持。证据：工作区Testing/YMCC/Evidence/VC-Win5Return26-R9/DELIVERY.json。
+
+原coordinator可显式选择`off-lifecycle`或`family-lifecycle`；后者复用原first/Start/success/close，共9个GPD/OneX/AYA人格变体加物理Deck禁止自模拟负例。受控DMI来自能力库声明，但不冒充总库运行解析或硬件验收，不赋OneX/AYA未实现的native写能力。

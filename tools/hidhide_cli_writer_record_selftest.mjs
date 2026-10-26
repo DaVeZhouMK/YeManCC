@@ -4,8 +4,10 @@ import crypto from 'node:crypto';
 import {spawn} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import assert from 'node:assert/strict';
-const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),args=process.argv.slice(2);
-assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY');
+const repo=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'..'),rawArgs=process.argv.slice(2);
+const nativeOnly=rawArgs.at(-1)==='--native-refresh-only',args=nativeOnly?rawArgs.slice(0,-1):rawArgs;
+const started=Date.now();
+assert(args.length===4&&args[0]==='--out'&&args[2]==='--toolchain'&&path.isAbsolute(args[1])&&path.isAbsolute(args[3]),'Use --out ABS_FRESH_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY [--native-refresh-only]');
 const out=path.resolve(args[1]),toolchain=path.resolve(args[3]),key=p=>path.resolve(p).toLowerCase();
 const within=(a,b)=>{const r=path.relative(a,b);return r===''||(!r.startsWith('..'+path.sep)&&r!=='..'&&!path.isAbsolute(r));};
 assert(!within(repo,out)&&!within(out,repo)&&!within(toolchain,out)&&!within(out,toolchain),'Output cannot overlap product source or captured toolchain');
@@ -22,7 +24,7 @@ for(const name of ['build-environment.json','toolchain-manifest.json']){const p=
 const capture=json(path.join(toolchain,'build-environment.json')),manifest=json(path.join(toolchain,'toolchain-manifest.json'));
 fs.mkdirSync(out,{recursive:true});
 const save=(name,value)=>{const p=path.resolve(out,name);assert(within(out,p)&&p!==out,'evidence path boundary');fs.mkdirSync(path.dirname(p),{recursive:true});fs.writeFileSync(p,JSON.stringify(value,null,2)+'\n',{flag:'wx'});return id(p);};
-const sources=['native/hidhide_cli_writer_record.h','native/hidhide_cli_writer_store.h','native/virtual_target_return_record.h','native/virtual_target_return_store.h','tools/fixtures/hidhide_cli_writer_record/fixture.cpp','tools/fixtures/hidhide_cli_writer_record/README.md','tools/hidhide_cli_writer_record_selftest.mjs','deps/json/json.hpp'];
+const sources=['native/native_refresh_writer_record.h','native/native_refresh_writer_store.h','native/hidhide_cli_writer_record.h','native/hidhide_cli_writer_store.h','native/virtual_target_return_record.h','native/virtual_target_return_store.h','tools/fixtures/hidhide_cli_writer_record/fixture.cpp','tools/fixtures/hidhide_cli_writer_record/README.md','tools/hidhide_cli_writer_record_selftest.mjs','deps/json/json.hpp'];
 const frozen=sources.map(relative=>{const p=path.join(repo,relative),before=sha(p),dest=path.join(out,'source',relative);fs.mkdirSync(path.dirname(dest),{recursive:true});fs.copyFileSync(p,dest,fs.constants.COPYFILE_EXCL);assert.equal(sha(dest),before,'source copy identity');assert.equal(sha(p),before,'source stable at copy');return{relative,path:p,sha256:before,snapshot:dest,bytes:fs.statSync(dest).size};});
 save('SOURCES.json',{schemaVersion:1,sources:frozen,toolchain:id(path.join(toolchain,'toolchain-manifest.json')),capturedEnvironment:id(path.join(toolchain,'build-environment.json')),priorResult:id(priorResultPath)});
 const env={...capture.environment};for(const k of Object.keys(env))if(/^(CL|_CL_|LINK|_LINK_|YEMAN_SCREEN_NATIVE_INPUT_CANDIDATE)$/i.test(k))delete env[k];
@@ -39,10 +41,26 @@ async function run(executable,argv,cwd,log,timeout=0){
         child.once('close',(code,signal)=>{if(finished)return;finished=true;if(timer)clearTimeout(timer);fs.closeSync(fd);resolve({exitCode:code,signal,log:id(log)});});
     });
 }
-const variants=[{name:'Release',flags:['/O2','/DNDEBUG']},{name:'Checked',flags:['/Od','/RTC1','/Z7']},
+const originalVariants=[{name:'Release',flags:['/O2','/DNDEBUG']},{name:'Checked',flags:['/Od','/RTC1','/Z7']},
 {name:'negative-duplicate-keys',flags:['/O2'],file:'hidhide_cli_writer_record.h',before:'if(duplicate||!stack.empty()||',after:'if(!stack.empty()||',requiredCase:'decode/duplicate-root'},
 {name:'negative-owner-shared',flags:['/O2'],file:'hidhide_cli_writer_store.h',before:'ownerShareMode=0;',after:'ownerShareMode=FILE_SHARE_READ|FILE_SHARE_WRITE|FILE_SHARE_DELETE;',requiredCase:'lock/other-process-writer-blocked'},
 {name:'negative-publish-before-commit',flags:['/O2'],file:'hidhide_cli_writer_store.h',before:'if(!saved.committed())return setError',after:'if(!saved.committed())record_=candidate;\n        if(!saved.committed())return setError',requiredCase:'store/flush-preserves'}];
+// Same canonical executable, IO harness, tool identity and negative operators.
+// Native-only omits unchanged CLI cases and Checked; all three semantic negative
+// operators instead mutate the new typed headers and require native assertions.
+const visibilityNegativeCases={
+    'negative-duplicate-keys':['native/visibility/strict-shape-types-duplicates-and-byte-limit'],
+    'negative-owner-shared':['native/visibility/session-shared-owner-commit-order-reopen-and-noops'],
+    'negative-publish-before-commit':[1,2,3,4,5,6,11].map(fault=>'native/visibility/store/fault-preserves/'+fault)
+};
+const variants=nativeOnly?originalVariants.filter(v=>v.name!=='Checked').map(v=>v.file?{
+    ...v,file:v.file.replace('hidhide_cli_writer_','native_refresh_writer_'),requiredCase:'native/'+v.requiredCase,requiredVisibilityCases:visibilityNegativeCases[v.name]
+}:v):originalVariants;
+save('PLAN.json',{canonicalTestId:'hidhide_cli_writer_record',selection:nativeOnly?'native-refresh-only':'all',
+    variants:variants.map(v=>({name:v.name,requiredCase:v.requiredCase??null,requiredVisibilityCases:v.requiredVisibilityCases??[]})),
+    checkedExecuted:!nativeOnly,legacyCliCasesExecuted:!nativeOnly,originalAssertionsAndThreeNegativeOperatorsRetained:true,
+    sourceAndToolIdentityCheckMs:Date.now()-started,fixtureTimeoutMs:60000,buildTimeoutMs:60000,
+    ownerLeaseDuplicateSameProcessTested:true,ownerLeaseCrossProcessInheritanceTested:false,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true});
 try {
     for(const variant of variants){
         const dir=path.join(out,variant.name);fs.mkdirSync(path.join(dir,'files'),{recursive:true});const generated=[];
@@ -51,8 +69,9 @@ try {
         save(variant.name+'/GENERATED.json',{files:generated,mutation:variant.file?variant:null});
         const exe=path.join(dir,'CliWriterRecordFixture.exe'),dependencyPath=path.join(dir,'dependencies.json');
         const command=['/nologo','/std:c++20','/utf-8','/EHsc','/MT','/W4','/DUNICODE','/D_UNICODE',...variant.flags,'/showIncludes','/sourceDependencies',dependencyPath,path.join(dir,'fixture.cpp'),'/I'+dir,'/Fo'+path.join(dir,'fixture.obj'),'/Fe'+exe,'/link','/SUBSYSTEM:CONSOLE','/MACHINE:x64','kernel32.lib','/VERBOSE:LIB','/MAP:'+path.join(dir,'fixture.map')];
+        const buildStarted=Date.now();
         console.log('BUILD '+variant.name);
-        const built=await run(cl,command,dir,path.join(dir,'build.log'));save(variant.name+'/COMMAND.json',{executable:id(cl),arguments:command,...built});assert.equal(built.exitCode,0,'actual native compilation/link failed: '+variant.name+'/build.log');
+        const built=await run(cl,command,dir,path.join(dir,'build.log'),60000);const buildMs=Date.now()-buildStarted;save(variant.name+'/COMMAND.json',{executable:id(cl),arguments:command,...built});assert.equal(built.exitCode,0,'actual native compilation/link failed: '+variant.name+'/build.log');
         const generatedBy=new Map(generated.map(x=>[key(x.path),x])),dep=json(dependencyPath);
         const inputPaths=[...new Set([dep.Data.Source,...dep.Data.Includes])];
         const actualInputs=inputPaths.map(p=>{const row=generatedBy.get(key(p))??toolRows.get(key(p));assert(row&&sha(p)===row.sha256,'unbound/changed actual compiler input: '+p);return{path:p,sha256:row.sha256,scope:generatedBy.has(key(p))?'frozen-source-or-explicit-mutant':'captured-toolchain'};});
@@ -65,23 +84,28 @@ try {
         const inspected=await run(dump,['/imports',exe],dir,path.join(dir,'imports.log'));assert.equal(inspected.exitCode,0);
         const imports=[...new Set([...fs.readFileSync(path.join(dir,'imports.log'),'utf8').matchAll(/^\s+([A-Za-z0-9_.-]+\.dll)\s*$/gm)].map(m=>m[1].toLowerCase()))];assert.deepEqual(imports,['kernel32.dll'],'static imports exclude all device/CLI/Host DLLs');
         const closure=save(variant.name+'/COMPILE-LINK-CLOSURE.json',{sourceDependencyReport:id(dependencyPath),actualCompilerInputs:actualInputs,unboundInputs:[],actualLinkerSearchedLibraries:libraries,mapContributors:contributors,map:id(path.join(dir,'fixture.map')),binary:id(exe),staticImportedDlls:imports,compiler:id(cl),linker:id(capture.tools['link.exe'].paths[0]),dumpbin:id(dump),scope:'Static imports and exact compile/link identities only; no runtime module trace.'});
+        const executeStarted=Date.now();
         console.log('RUN '+variant.name);
-        const ran=await run(exe,[path.join(dir,'files'),path.join(dir,'RESULT.json')],dir,path.join(dir,'run.log'),60000);assert(fs.existsSync(path.join(dir,'RESULT.json')),'fixture produced terminal receipt');
+        const ran=await run(exe,[path.join(dir,'files'),path.join(dir,'RESULT.json'),...(nativeOnly?['--native-refresh-only']:[])],dir,path.join(dir,'run.log'),60000);assert(fs.existsSync(path.join(dir,'RESULT.json')),'fixture produced terminal receipt');
+        const executionMs=Date.now()-executeStarted;
         const result=json(path.join(dir,'RESULT.json'));
+        assert.equal(result.nativeRefreshOnly,nativeOnly,'exact fixture selection');
+        assert.equal(result.ownerLeaseDuplicateSameProcessTested,true);assert.equal(result.ownerLeaseCrossProcessInheritanceTested,false);assert.equal(result.jobQuietOrTerminalProofTested,false);
+        if(nativeOnly)assert(result.cases.every(x=>x.name.startsWith('native/')),'native-only executes no legacy CLI cases');
         assert(!result.failures.some(x=>x.assertion.startsWith('scenario exception:')),'setup/runtime exceptions cannot count as semantic mutant detection');
-        if(variant.file){assert.equal(ran.exitCode,1,'mutant must fail assertions, not compile/crash');assert(result.failures.some(x=>x.case===variant.requiredCase),'mutant trips original intended assertion: '+variant.requiredCase);}
-        else{assert.equal(ran.exitCode,0,'private fixture assertions failed: '+variant.name+'/RESULT.json');assert(result.pass);assert(result.realIndependentNativeProcesses>=7&&result.ownerCreationCrashProcesses===2,'real independent native exclusion and exact owner-creation crash release');assert(result.childRuns.every(x=>x.pass),'independent process probes passed');}
+        if(variant.file){assert.equal(ran.exitCode,1,'mutant must fail assertions, not compile/crash');assert(result.failures.some(x=>x.case===variant.requiredCase),'mutant trips original intended assertion: '+variant.requiredCase);for(const name of variant.requiredVisibilityCases??[])assert(result.failures.some(x=>x.case===name),'same original mutant must also trip new visibility boundary: '+name);}
+        else{assert.equal(ran.exitCode,0,'private fixture assertions failed: '+variant.name+'/RESULT.json');assert(result.pass);assert(result.realIndependentNativeProcesses>=(nativeOnly?7:14)&&result.ownerCreationCrashProcesses===(nativeOnly?2:4),'real independent native exclusion and exact owner-creation crash release');assert(result.childRuns.every(x=>x.pass),'independent process probes passed');}
         for(const row of generated)assert.equal(sha(row.path),row.sha256,'compiled generated input remains unchanged');
-        const receipt={variant:variant.name,status:variant.file?'PASS_EXPECTED_SEMANTIC_FAILURE':'PASS',expectedFailure:!!variant.file,requiredCase:variant.requiredCase??null,caseCount:result.caseCount,assertions:result.assertions,observedFailures:result.failures,realIndependentNativeProcesses:result.realIndependentNativeProcesses,ownerCreationCrashProcesses:result.ownerCreationCrashProcesses,actualCompilerInputs:actualInputs.length,actualLinkerLibraries:libraries.length,staticImportedDlls:imports,closure,result:id(path.join(dir,'RESULT.json')),binary:id(exe),execution:ran};
+        const receipt={buildMs,executionMs,variant:variant.name,status:variant.file?'PASS_EXPECTED_SEMANTIC_FAILURE':'PASS',expectedFailure:!!variant.file,requiredCase:variant.requiredCase??null,requiredVisibilityCases:variant.requiredVisibilityCases??[],caseCount:result.caseCount,assertions:result.assertions,observedFailures:result.failures,realIndependentNativeProcesses:result.realIndependentNativeProcesses,ownerCreationCrashProcesses:result.ownerCreationCrashProcesses,actualCompilerInputs:actualInputs.length,actualLinkerLibraries:libraries.length,staticImportedDlls:imports,closure,result:id(path.join(dir,'RESULT.json')),binary:id(exe),execution:ran};
         results.push(receipt);allArtifacts.push(closure,receipt.result,receipt.binary);console.log(JSON.stringify({variant:variant.name,status:receipt.status,cases:receipt.caseCount,assertions:receipt.assertions,observedFailures:result.failures.length,compilerInputs:actualInputs.length,libraries:libraries.length}));
     }
     const sourceDrift=frozen.filter(x=>sha(x.path)!==x.sha256||sha(x.snapshot)!==x.sha256);assert.equal(sourceDrift.length,0,'claimed data/store/test inputs drifted');
-    const productionHeaders=frozen.filter(x=>x.relative.startsWith('native/hidhide_cli_writer_')).map(x=>({relative:x.relative,text:fs.readFileSync(x.snapshot,'utf8')}));
+    const productionHeaders=frozen.filter(x=>/^native\/(?:hidhide_cli|native_refresh)_writer_/.test(x.relative)).map(x=>({relative:x.relative,text:fs.readFileSync(x.snapshot,'utf8')}));
     const forbidden=/\b(?:CreateProcessW|OpenProcess|GetProcessTimes|GetExitCodeProcess|TerminateProcess|CreateJobObjectW|AssignProcessToJobObject|SetInformationJobObject|WaitForSingleObject|CreateThread|ShellExecuteW)\s*\(/;
     assert(productionHeaders.every(x=>!forbidden.test(x.text)),'production headers have no process/liveness/Job/thread/command calls');
     const inventory=[];function collect(dir){for(const entry of fs.readdirSync(dir,{withFileTypes:true})){if(dir===out&&['temp'].includes(entry.name))continue;const p=path.join(dir,entry.name);if(entry.isDirectory())collect(p);else if(!['RESULT.json','RESULT.sha256','evidence-manifest.json'].includes(entry.name)||dir!==out)inventory.push(id(p));}}
     collect(out);const inventoryId=save('evidence-manifest.json',{schemaVersion:1,sealedAtUtc:new Date().toISOString(),files:inventory,toolchainManifest:id(path.join(toolchain,'toolchain-manifest.json'))});
-    save('RESULT.json',{schemaVersion:1,task:119,status:'PASS_DATA_AND_SYNCHRONOUS_WRITER_SESSION_NOT_LIFECYCLE',pass:true,recordedAtUtc:new Date().toISOString(),results,sources:frozen,sourceDrift,toolchain:{explicitDirectory:toolchain,manifest:id(path.join(toolchain,'toolchain-manifest.json')),environment:id(path.join(toolchain,'build-environment.json')),rediscovered:false},evidenceManifest:inventoryId,realPrivateFileIo:true,ordinaryProductHostRealCliDevicesServicesJobsOrAppDataAccessed:false,onlyOwnedFixtureProcessesLaunched:true,productionProcessOrJobCalls:false,runtimeIntegrated:false,targetOrColdCleanupAuthorityGranted:false,scope:'Strict writer record and bounded synchronous file Session with independently compiled semantic negatives; not CLI lifecycle/Job wiring, main integration or hardware acceptance.'});
+    save('RESULT.json',{schemaVersion:1,task:119,nativeRefreshOnly:nativeOnly,canonicalTestId:'hidhide_cli_writer_record',elapsedMs:Date.now()-started,jobQuietOrTerminalProofTested:false,missingNamedJobIsUnknown:true,status:'PASS_DATA_AND_SYNCHRONOUS_WRITER_SESSION_NOT_LIFECYCLE',pass:true,recordedAtUtc:new Date().toISOString(),results,sources:frozen,sourceDrift,toolchain:{explicitDirectory:toolchain,manifest:id(path.join(toolchain,'toolchain-manifest.json')),environment:id(path.join(toolchain,'build-environment.json')),rediscovered:false},evidenceManifest:inventoryId,realPrivateFileIo:true,ordinaryProductHostRealCliDevicesServicesJobsOrAppDataAccessed:false,onlyOwnedFixtureProcessesLaunched:true,productionProcessOrJobCalls:false,runtimeIntegrated:false,targetOrColdCleanupAuthorityGranted:false,scope:'Strict typed CLI/native helper record and bounded synchronous file Session with independently compiled semantic negatives. Native-only selects native cases and three existing negative operators on native headers. No Job proof, lifecycle/Job wiring, main integration or hardware acceptance.'});
     fs.writeFileSync(path.join(out,'RESULT.sha256'),sha(path.join(out,'RESULT.json'))+'  RESULT.json\n',{flag:'wx'});
     console.log(JSON.stringify({status:'PASS',result:id(path.join(out,'RESULT.json')),variants:results.length}));
 } catch(error){save('FAILED.json',{status:'FAIL',error:error.stack,completedVariants:results,sources:frozen});console.error(error.stack);process.exitCode=1;}

@@ -35,8 +35,9 @@ inline nlohmann::json gpuMemoryEvidence(const monitorgpu::Device* gpu,bool healt
     result["effectiveTotalMb"]=amount(effective.value.total);
     result["effectiveLoadPct"]=percent(effective.value.load);
     result["effectiveSource"]=effective.source;
-    result["status"]=normalized.total>0&&normalized.used>=0?"capacity-and-used":
-        normalized.used>=0?"used-without-capacity":normalized.load>=0?"load-without-capacity":"no-coherent-memory-tuple";
+    // Status describes the published tuple; raw counters above stay diagnostic.
+    result["status"]=effective.value.total>0&&effective.value.used>=0?"capacity-and-used":
+        effective.value.used>=0?"used-without-capacity":effective.value.load>=0?"load-without-capacity":"no-coherent-memory-tuple";
     return result;
 }
 }

@@ -13,6 +13,9 @@ const baseline=option('--baseline',null);
 const sourcePath=path.resolve(option('--source',path.join(repo,'InputHost/MsiNativePortCycle.cs')));
 const hash=value=>crypto.createHash('sha256').update(value).digest('hex');
 const original=fs.readFileSync(sourcePath);
+// The sole new import has a fail-closed fixture body; unknown extra imports still fail admission.
+const cancellationWaitImport='    [DllImport("kernel32.dll",EntryPoint="WaitForSingleObject",SetLastError=true)] private static extern uint WaitForCycleCancellation(SafeWaitHandle handle,uint milliseconds);';
+const cancellationWaitInert=original.toString('utf8').split(/\r?\n/).includes(cancellationWaitImport);
 fs.mkdirSync(output,{recursive:true});
 const fixturePath=path.join(repo,'tools/fixtures/native_game_hid_caps/Fixture.cs');
 const summaries=[];
@@ -26,7 +29,7 @@ for(const configuration of ['Release','Checked']){
  const directory=path.join(output,configuration);fs.mkdirSync(directory,{recursive:true});
  let source=original.toString('utf8').replace('internal static class MsiNativePortCycle','internal static partial class MsiNativePortCycle').replace('using Microsoft.Win32;','using Registry = InertRegistry.Registry;');
  const imports=[...source.matchAll(/^    \[DllImport[^\r\n]+$/gm)].map(match=>match[0]);
- assert.equal(imports.length,14);
+ assert.equal(imports.length,cancellationWaitInert?16:15);
  for(const declaration of imports)source=source.replace(declaration,'');
  assert(!source.includes('DllImport'));
  fs.writeFileSync(path.join(directory,'Actual.cs'),source);fs.copyFileSync(fixturePath,path.join(directory,'Fixture.cs'));
@@ -72,4 +75,4 @@ for(const mutation of mutations){
 assert.equal(hash(fs.readFileSync(sourcePath)),hash(original));
 assert.equal(hash(fs.readFileSync(fixturePath)),fixtureSha256);
 assert.equal(hash(fs.readFileSync(fileURLToPath(import.meta.url))),runnerSha256);
-fs.writeFileSync(path.join(output,'RESULT.json'),JSON.stringify({...identity,passed:true,status:'passed',configurations:summaries,realHardwareAccess:false,realSdkLoaded:false,productMainExecuted:false,fullActualHelperCompiled:true,replacements:['CM/HID/file imports replaced by inert bodies','registry and parent lifetime inert','Nefarius classes inert','partial keyword only'],importCount:14},null,2)+'\n');
+fs.writeFileSync(path.join(output,'RESULT.json'),JSON.stringify({...identity,passed:true,status:'passed',configurations:summaries,realHardwareAccess:false,realSdkLoaded:false,productMainExecuted:false,fullActualHelperCompiled:true,replacements:['CM/HID/file imports replaced by inert bodies','registry and parent lifetime inert','Nefarius classes inert','Stopwatch forwards real monotonic time except explicit inert timing cases','partial keyword only','optional cancellation wait fails closed without OS access'],importCount:cancellationWaitInert?16:15,cancellationWaitInert},null,2)+'\n');

@@ -169,6 +169,11 @@ static ymcc::targetReturn::coldExecution::Result inputHostTargetReturnColdPassLo
         {"settledPaths",result.settledPaths},{"settledOrigins",result.settledOrigins},
         {"originsRemaining",state.session&&state.session->record()?state.session->record()->obligations.size():0},
         {"gameInputVerified",false},{"fallbackAttempt",false},{"deadlineRenewed",false}});}catch(...){}
+    // Old history must return before native foreground can borrow the source.
+    // Replay the existing UI intent only on the clean edge and still-current
+    // original OFF. This queues existing work; no new owner/timer/device IO.
+    if(result.clean() && persona=="disabled" && environment.current())
+        msiNativeForegroundUiEvent(true);
     return result;
 }
 // Bootstrap loads provenance before the input BUS can attempt a target. It
