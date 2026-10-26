@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -56,3 +57,21 @@ test('selected interpreter/compiler tools have declared pinned members',()=>{
 });
 
 test('whole mocked aliases do not require a real module or imply an actual IPC consumer',t=>{const root=fixture(t);fs.writeFileSync(path.join(root,'entry.ts'),"import {invoke} from '@/bridge/ipc';");assert.deepEqual(localImportClosure(root,['entry.ts']),['entry.ts']);});
+
+test('selected host tools retain both manifest identities and reject missing, stale or unreviewed authority',t=>{
+ const root=fixture(t),baseline=path.join(root,'tools/ymcc_sim/global/lighting-signals/tool-inputs.json');fs.mkdirSync(path.dirname(baseline),{recursive:true});
+ const tool=path.join(root,'compiler.exe');fs.writeFileSync(tool,'inert identity input');
+ const sha=file=>createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+ const original={schemaVersion:1,kind:'ymcc-lighting-signal-selected-tools',maxArtifactInputs:3072,files:[{path:tool,sha256:sha(tool)}]};fs.writeFileSync(baseline,JSON.stringify(original));
+ const selected=path.join(root,'reviewed.json'),anchor=path.join(root,'browser.cjs');
+ const declaration={...original,selectionStatus:'REVIEWED_HOST_DECLARATION',originalManifestSha256:sha(baseline),playwrightRequireAnchor:anchor};
+ const select=patch=>{fs.writeFileSync(selected,JSON.stringify({...declaration,...patch}));return {YMCC_LIGHTING_TOOLS_MANIFEST:selected,YMCC_LIGHTING_TOOLS_SHA256:sha(selected),YMCC_UI_TEST_REQUIRE_ANCHOR:anchor};};
+ const environment=select({}),actual=lightingToolDeclaration(root,{environment});
+ assert(actual.files.some(row=>row.path===selected&&row.sha256===environment.YMCC_LIGHTING_TOOLS_SHA256));assert(actual.files.some(row=>row.path===baseline&&row.sha256===sha(baseline)));
+ assert.throws(()=>lightingToolDeclaration(root,{environment:{YMCC_LIGHTING_TOOLS_MANIFEST:selected}}),/PIN_REQUIRED/);
+ assert.throws(()=>lightingToolDeclaration(root,{environment:{...environment,YMCC_LIGHTING_TOOLS_SHA256:'0'.repeat(64)}}),/MANIFEST_CHANGED/);
+ assert.throws(()=>lightingToolDeclaration(root,{environment:{...environment,YMCC_UI_TEST_REQUIRE_ANCHOR:path.join(root,'other.cjs')}}),/BROWSER_MODULE_AUTHORITY_CHANGED/);
+ assert.throws(()=>lightingToolDeclaration(root,{environment:select({selectionStatus:'CAPTURED_FOR_REVIEW'})}),/REVIEW_REQUIRED/);
+ assert.throws(()=>lightingToolDeclaration(root,{environment:select({originalManifestSha256:'0'.repeat(64)})}),/REVIEW_REQUIRED/);
+ assert.throws(()=>lightingToolDeclaration(root,{environment:select({runnerImageVersion:'other-image'})}),/RUNNER_IMAGE_CHANGED/);
+});

@@ -13,7 +13,7 @@ fixture = pathlib.Path(__file__).resolve().parent
 repo = fixture.parents[2]
 scratch = pathlib.Path(args.scratch).resolve() / 'native-binding'
 scratch.mkdir(parents=True, exist_ok=True)
-vs = pathlib.Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC')
+vs = pathlib.Path(os.environ['VCToolsInstallDir']).parent if os.environ.get('VCToolsInstallDir') else pathlib.Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC')
 versions = sorted((p for p in vs.iterdir() if (p / 'bin/Hostx64/x64/cl.exe').is_file()), reverse=True)
 if not versions:
     raise RuntimeError('MSVC compiler unavailable')

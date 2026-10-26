@@ -146,7 +146,7 @@ export async function runLightingSignals(options = {}) {
   const legacy = command(dotnet, [dll(legacyBuild, 'LightingSignalsLegacyRegression.dll')], path.join(out, 'existing-legacy-regressions.log'));
   const legacyResult = JSON.parse(legacy.stdout.trim());
   const pythonBundled = path.join(os.homedir(), '.cache/codex-runtimes/codex-primary-runtime/dependencies/python/python.exe');
-  const python = options.python ?? (fs.existsSync(pythonBundled) ? pythonBundled : 'python');
+  const python = options.python ?? inputToolsBefore.executables.python;
   if(path.resolve(python).toLowerCase()!==path.resolve(inputToolsBefore.executables.python).toLowerCase())throw Error('LIGHTING_PYTHON_TOOL_NOT_DECLARED');
   const nativeOut = path.join(out, 'native');
   const nativeRun = command(python, [path.join(here, 'native-probe.py'), '--evidence-dir', nativeOut, '--node', process.execPath], path.join(out, 'native-probe.log'));

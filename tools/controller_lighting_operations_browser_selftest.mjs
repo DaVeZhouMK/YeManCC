@@ -1,7 +1,7 @@
 // Real feedback card/controls; IPC, settings, and backend calls are in-memory only.
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {createRequire} from 'node:module';import {createServer} from 'node:http';import crypto from 'node:crypto';
 const repo=process.cwd(),out=path.resolve(process.argv[2]);fs.mkdirSync(out,{recursive:true});const req=createRequire(path.join(repo,'package.json'));
-const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compiler-sfc');const{chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_lighting.cjs')('playwright');
+const {build}=req('esbuild'),{parse,compileScript,compileStyle}=req('vue/compiler-sfc');const{chromium}=createRequire(process.env.YMCC_UI_TEST_REQUIRE_ANCHOR||'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_lighting.cjs')('playwright');
 const styles=[],errors=[],cases=[];
 const mocks={
  '@/bridge/api':`export const gamepadFeedback={capabilities:async()=>structuredClone(window.f.caps),setLed:async a=>{window.f.applies.push(structuredClone(a));return {ok:true}},vibrate:async()=>{throw Error('Unexpected vibration')}};`,

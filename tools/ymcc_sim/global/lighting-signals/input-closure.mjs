@@ -73,11 +73,19 @@ export function describeLightingPayload(options={},{exists=fs.existsSync,hashFil
  const root=path.resolve(options.hostPayloadRoot),file=[path.join(root,'YeManLightSetter.dll'),path.join(root,'light-setter/YeManLightSetter.dll')].find(exists);
  return {requested:true,origin:'explicit-reviewed-external-payload',sourceBuildAcceptanceReused:false,file:file??null,actual:file?hashFile(file):null,expectedReviewedSha256:options.expectedHelperSha256?.toLowerCase()??null};
 }
-export function lightingToolDeclaration(repo){
- const manifestFile=path.join(repo,MODULE,'tool-inputs.json'),manifest=read(manifestFile);
+export function lightingToolDeclaration(repo,{environment=process.env}={}){
+ const baselineFile=path.join(repo,MODULE,'tool-inputs.json');
+ const selected=environment.YMCC_LIGHTING_TOOLS_MANIFEST,expected=environment.YMCC_LIGHTING_TOOLS_SHA256;
+ need(Boolean(selected)===Boolean(expected),'LIGHTING_SELECTED_TOOL_PIN_REQUIRED');
+ const manifestFile=selected?path.resolve(selected):baselineFile;
+ if(selected)need(path.isAbsolute(selected)&&/^[a-f0-9]{64}$/.test(expected)&&hash(manifestFile)===expected,'LIGHTING_SELECTED_TOOL_MANIFEST_CHANGED');
+ const manifest=read(manifestFile);
+ if(selected)need(manifest.selectionStatus==='REVIEWED_HOST_DECLARATION'&&manifest.originalManifestSha256===hash(baselineFile),'LIGHTING_SELECTED_TOOL_REVIEW_REQUIRED');
+ if(selected)need(typeof manifest.playwrightRequireAnchor==='string'&&key(manifest.playwrightRequireAnchor)===key(environment.YMCC_UI_TEST_REQUIRE_ANCHOR??'C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_lighting.cjs'),'LIGHTING_BROWSER_MODULE_AUTHORITY_CHANGED');
+ if(selected&&manifest.runnerImageVersion)need(environment.GITHUB_ACTIONS==='true'&&manifest.runnerImageVersion===environment.ImageVersion,'LIGHTING_SELECTED_RUNNER_IMAGE_CHANGED');
  need(manifest.schemaVersion===1&&manifest.kind==='ymcc-lighting-signal-selected-tools'&&manifest.maxArtifactInputs===3072&&Array.isArray(manifest.files),'LIGHTING_TOOL_MANIFEST_SCHEMA');
  const bindingFile=path.join(repo,'.ymcc-source-snapshot/node-tools-binding.json');
- let packageRepo=repo,binding,metadata=[];
+ let packageRepo=repo,binding,metadata=selected?[{path:baselineFile,sha256:hash(baselineFile)},{path:manifestFile,sha256:expected}]:[];
  if(fs.existsSync(bindingFile)){
   binding=read(bindingFile);
   need(binding.kind==='ymcc-snapshot-node-tools-binding'&&binding.status==='PASS'&&key(binding.snapshotRoot)===key(repo)&&binding.sourceApprovalGranted===false,'LIGHTING_NODE_BINDING_IDENTITY');
@@ -86,7 +94,7 @@ export function lightingToolDeclaration(repo){
   need(hash(snapshotManifest)===binding.expectedSnapshotManifestSha256,'LIGHTING_NODE_SOURCE_MANIFEST_CHANGED');
   packageRepo=binding.sourceRoot;
   need(key(binding.graph.primaryRepo)===key(packageRepo),'LIGHTING_NODE_BINDING_ROOT');
-  metadata=[{path:bindingFile,sha256:hash(bindingFile)},{path:snapshotManifest,sha256:binding.expectedSnapshotManifestSha256},binding.graph.primaryPackageJson,...(binding.verifierSource?[binding.verifierSource]:[])];
+  metadata=[...metadata,{path:bindingFile,sha256:hash(bindingFile)},{path:snapshotManifest,sha256:binding.expectedSnapshotManifestSha256},binding.graph.primaryPackageJson,...(binding.verifierSource?[binding.verifierSource]:[])];
  }
  const rows=manifest.files.map(row=>{
   need(/^[a-f0-9]{64}$/.test(row.sha256??''),'LIGHTING_TOOL_HASH_SCHEMA');

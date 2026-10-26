@@ -62,9 +62,20 @@ function Assert-YmccLightingBuildCandidate {
  $toolManifestRelative='tools/ymcc_sim/global/lighting-signals/tool-inputs.json'
  $toolSourceRows=@($rows[0].sourceInputs|Where-Object path -CEQ $toolManifestRelative)
  Need ($toolSourceRows.Count -eq 1 -and $toolSourceRows[0].status -ceq 'OK') 'CONSUMER_TOOL_SOURCE_REQUIRED'
- $toolManifest=Get-Content -LiteralPath (Resolve-YmccLightingChild $ProjectRoot $toolManifestRelative) -Raw -Encoding UTF8|ConvertFrom-Json
+ $baselineToolFile=Resolve-YmccLightingChild $ProjectRoot $toolManifestRelative
+ $toolManifest=Get-Content -LiteralPath $baselineToolFile -Raw -Encoding UTF8|ConvertFrom-Json
+ Need ([bool]$env:YMCC_LIGHTING_TOOLS_MANIFEST -eq [bool]$env:YMCC_LIGHTING_TOOLS_SHA256) 'SELECTED_TOOL_PIN_REQUIRED'
+ $selectedToolFile=$null
+ if($env:YMCC_LIGHTING_TOOLS_MANIFEST){
+  $selectedToolFile=[IO.Path]::GetFullPath($env:YMCC_LIGHTING_TOOLS_MANIFEST)
+  Need ([IO.Path]::IsPathRooted($env:YMCC_LIGHTING_TOOLS_MANIFEST) -and $env:YMCC_LIGHTING_TOOLS_SHA256 -cmatch '^[a-f0-9]{64}$' -and (Get-YmccLightingFileHash $selectedToolFile) -ceq $env:YMCC_LIGHTING_TOOLS_SHA256) 'SELECTED_TOOL_MANIFEST_CHANGED'
+  $toolManifest=Get-Content -LiteralPath $selectedToolFile -Raw -Encoding UTF8|ConvertFrom-Json
+  Need ($toolManifest.selectionStatus -ceq 'REVIEWED_HOST_DECLARATION' -and $toolManifest.originalManifestSha256 -ceq (Get-YmccLightingFileHash $baselineToolFile)) 'SELECTED_TOOL_REVIEW_REQUIRED'
+  if($toolManifest.PSObject.Properties['runnerImageVersion']){Need ($env:GITHUB_ACTIONS -ceq 'true' -and $toolManifest.runnerImageVersion -ceq $env:ImageVersion) 'SELECTED_RUNNER_IMAGE_CHANGED'}
+ }
  Need ($toolManifest.schemaVersion -eq 1 -and @($toolManifest.files).Count -gt 0 -and @($toolManifest.files).Count -le 3072) 'CONSUMER_TOOL_SET'
  $externalToolPins=@{}
+ if($selectedToolFile){$externalToolPins[$selectedToolFile]=$env:YMCC_LIGHTING_TOOLS_SHA256}
  foreach($tool in @($toolManifest.files)){
   if($tool.PSObject.Properties['path']){
    $toolPath=[IO.Path]::GetFullPath($tool.path)

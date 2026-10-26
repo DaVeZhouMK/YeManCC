@@ -16,7 +16,7 @@ cpp_path=command_out/'actual-lighting-command.cpp'
 cpp=cpp_path.read_text(encoding='utf-8-sig')
 cpp=cpp.replace('const auto value=cmd.str();return json{{"command",std::string(value.begin(),value.end())}};', 'const auto value=cmd.str();std::string ascii;for(wchar_t ch:value){if(ch<0||ch>127)throw std::runtime_error("non-ASCII fixture command");ascii.push_back(static_cast<char>(ch));}return json{{"command",ascii}};')
 cpp_path.write_text(cpp,encoding='utf-8')
-vs=pathlib.Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC')
+vs=pathlib.Path(os.environ['VCToolsInstallDir']).parent if os.environ.get('VCToolsInstallDir') else pathlib.Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Tools/MSVC')
 msvc=sorted((v for v in vs.iterdir() if (v/'bin/Hostx64/x64/cl.exe').is_file()),reverse=True)[0]
 sdk=pathlib.Path('C:/Program Files (x86)/Windows Kits/10');version=sorted((v.name for v in (sdk/'Include').iterdir() if (v/'ucrt').is_dir()),reverse=True)[0]
 env=os.environ.copy();binary=msvc/'bin/Hostx64/x64';env['PATH']=str(binary)+os.pathsep+env.get('PATH','')
