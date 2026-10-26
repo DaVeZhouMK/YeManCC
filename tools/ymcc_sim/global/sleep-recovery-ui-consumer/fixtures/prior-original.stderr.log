@@ -1,0 +1,16 @@
+node:internal/modules/run_main:122
+    triggerUncaughtException(
+    ^
+
+locator.evaluate: Timeout 5000ms exceeded.
+Call log:
+[2m  - waiting for locator('.sleep-recovery-auto').locator('button.switch')[22m
+
+    at D:\Codex\2026-10-19\wo-z\work\b0su1\positive-original\source-repo\tools\sleep_recovery_ui_browser_selftest.mjs:38:228 {
+  log: [
+    "  - waiting for locator('.sleep-recovery-auto').locator('button.switch')"
+  ],
+  name: 'TimeoutError'
+}
+
+Node.js v22.14.0

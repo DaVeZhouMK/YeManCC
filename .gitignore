@@ -146,3 +146,6 @@ deps/ymcc-device-core-runtime/bin/*
 !deps/ymcc-device-core-runtime/bin/Nefarius.Utilities.Bluetooth.dll
 !deps/ymcc-device-core-runtime/bin/Nefarius.ViGEm.Client.dll
 !deps/ymcc-device-core-runtime/bin/PInvoke.Windows.Core.dll
+
+# Recorded failure is an explicit regression fixture input.
+!/tools/ymcc_sim/global/sleep-recovery-ui-consumer/fixtures/prior-original.stderr.log

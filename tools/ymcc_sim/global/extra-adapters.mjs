@@ -152,7 +152,7 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 ()=>[...getSleepStartupExitConsumerAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getBatteryUiNativeRecoveryConsumerAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getBatteryNativeHostRoundtripConsumerAdapters()],
-()=>[...getControllerGameFeedbackWriterConsumerAdapters()],
+()=>[...getControllerGameFeedbackWriterConsumerAdapters({selectedIds})],
 ()=>[...getSleepDirectoryResumeConsumerAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getFanExplicitOffHostChainAdapters().map(adapter=>({...adapter,evidenceInputs:[...new Set([...adapter.evidenceInputs,'tools/ymcc_sim/global/runner.mjs','tools/ymcc_sim/global/execution-completion/index.mjs'])]}))],
 ()=>[...getControllerGameMotorPipeConsumerAdapters()],

@@ -43,3 +43,12 @@ test('malformed scope selectors cannot silently bypass registration input gates'
   assert.throws(()=>getSignalAdapters(repo,{selectedIds}),/SIGNAL_SELECTION_SHAPE/);
  }
 });
+import {getControllerGameFeedbackWriterConsumerAdapters as getWriter,CASE_ID as writerId} from './controller-game-feedback-writer-consumer/adapter.mjs';
+test('unrelated writer registration defers inputs while default and selected writer keep original rejection',()=>{
+ const reads={readSources:()=>[evidence],readArtifacts:()=>[]},full=getWriter(reads);
+ const unrelated=getWriter({selectedIds:['lighting.signal-consumer'],readSources:()=>{throw Error('UNREQUESTED_WRITER_SOURCE');},readArtifacts:()=>{throw Error('UNREQUESTED_WRITER_TOOL');}});
+ assert.deepEqual(unrelated.map(row=>row.id),full.map(row=>row.id));assert(unrelated[0].inputRegistrationDeferred);assert.deepEqual(unrelated[0].artifactInputs,[]);
+ assert.deepEqual(getWriter({...reads,selectedIds:[writerId]}),full);
+ for(const selectedIds of [undefined,[writerId]])assert.throws(()=>getWriter({selectedIds,readSources:()=>[evidence],readArtifacts:()=>{throw Error('WRITER_TOOL_CLOSURE_EXCEEDS1024');}}),/WRITER_TOOL_CLOSURE_EXCEEDS1024/);
+ for(const selectedIds of [null,'writer',[1],['']])assert.throws(()=>getWriter({selectedIds}),/WRITER_SELECTION_SHAPE/);
+});
