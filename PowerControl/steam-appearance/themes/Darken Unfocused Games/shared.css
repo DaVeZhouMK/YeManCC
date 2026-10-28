@@ -3,10 +3,23 @@
     --ren-game-tile-saturate: 0.5;
 }
 
+
+/* Preserve legacy parameter files but do not apply image-processing effects.
+   A steady native/Round outline is sufficient to identify the selected game. */
+.BasicUI .appportrait_LibraryItemBox_WYgDg,
+.BasicUI .appportrait_LibraryItemBox_WYgDg .libraryassetimage_Image_24_Au {
+    filter: none!important;
+    backdrop-filter: none!important;
+    box-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+}
+
 /* YMCC: observe this theme file without changing layout or input. */
 :root { --ymcc-receipt-darken-unfocused-games: 1; }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-2ec8ffe6c8f63bf7: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-17a99962151898fe: 1; }
+:root { --ymcc-content-79423d593918733e: 1; }

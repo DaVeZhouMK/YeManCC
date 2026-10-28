@@ -2,12 +2,12 @@ import { fs, shell, settingsStore, type RunResult } from './api';
 import { invoke } from './ipc';
 
 export const STEAM_APPEARANCE_THEMES = [
-  { name: 'Art Hero', label: '首页布局', description: '宽幅背景与游戏轮播布局', group: '首页' },
+  { name: 'Art Hero', label: '首页布局', description: '保留宽幅背景与轮播比例，取消附加特效', group: '首页' },
   { name: 'Centered Game Text', label: '文字居中', description: '让游戏标题保持居中', group: '首页' },
-  { name: 'Darken Unfocused Games', label: '焦点突出', description: '暗化未选中的游戏封面', group: '首页' },
+  { name: 'Darken Unfocused Games', label: '焦点突出', description: '保留静态焦点提示，关闭封面滤镜与装饰动画', group: '首页' },
   { name: 'Mini Carousel', label: '紧凑轮播', description: '使用你设定的迷你轮播尺寸', group: '首页' },
-  { name: 'NEX-85 Keyboard', label: '定制键盘', description: '使用 NEX-85 键盘外观', group: '界面' },
-  { name: 'Round', label: '界面圆角', description: '沿用你的圆角与描边设置', group: '界面' },
+  { name: 'NEX-85 Keyboard', label: '定制键盘', description: '平面键盘配色，保留按键比例与焦点提示', group: '界面' },
+  { name: 'Round', label: '界面圆角', description: '保留圆角与静态描边，取消阴影和呼吸动画', group: '界面' },
   { name: 'YMCC Game Details', label: '放大详情背景', description: '放大至开始游戏操作行，底部仅留少量空隙', group: '游戏详情' },
 ] as const;
 // Bundled presets enable every managed effect; a missing snapshot is not an off selection.

@@ -3,14 +3,14 @@
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN {
-	background: linear-gradient(180deg, #7a9c82, #617359);
+	background: #7a9c82;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before {
-	background: linear-gradient(85deg, #7b9d81, #6f7d6e);
+	background: #7b9d81;
 }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-c02a41aaf2e77d6b: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-a0f1242a4547118a: 1; }
+:root { --ymcc-content-a4d89b2ad877d2fb: 1; }

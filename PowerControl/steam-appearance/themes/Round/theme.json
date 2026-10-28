@@ -1,7 +1,7 @@
 {
   "name": "Round",
   "author": "EMERALD#0874",
-  "version": "v2.7-ymcc.1",
+  "version": "v2.7-ymcc.2",
   "manifest_version": 2,
   "inject": {
     "shared.css": [

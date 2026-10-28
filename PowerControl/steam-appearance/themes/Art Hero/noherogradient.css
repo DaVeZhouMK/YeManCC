@@ -1,18 +1,11 @@
-.gamepadhomerecentgames_RecentGamesBackground_1SRox {
-    opacity: 1!important;
-    filter: none!important
-}
-
-.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt, .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
+/* Legacy gradient choices stay loadable, with no full-screen mask surface. */
+.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt,
+.gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
     -webkit-mask-image: none!important;
-}
-
-.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
-    opacity: 1;
-    filter: brightness(100%)!important;
+    mask-image: none!important;
 }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-6aeebc22f356bfda: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-466df711d60593dc: 1; }
+:root { --ymcc-content-a5b1a5ac5efb246c: 1; }

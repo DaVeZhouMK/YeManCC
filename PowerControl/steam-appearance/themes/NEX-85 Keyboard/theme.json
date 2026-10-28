@@ -2,7 +2,7 @@
   "name": "NEX-85 Keyboard",
   "author": "bunaventure",
   "manifest_version": 4,
-  "version": "v2.1",
+  "version": "v2.1-ymcc.1",
   "inject": {
     "shared.css": [
       "SP"
