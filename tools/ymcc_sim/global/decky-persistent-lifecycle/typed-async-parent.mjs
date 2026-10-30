@@ -20,6 +20,21 @@ const integer = (value, label, minimum = 0) => assert(Number.isSafeInteger(value
 const bool = (value, label) => assert.equal(typeof value, 'boolean', label);
 const samePath = (actual, expected, label) => assert.equal(key(actual), key(expected), label);
 const fail = label => 'TYPED_ASYNC_PARENT_' + label;
+
+// Exact source-only Ready extraction: main.cpp is never compiled wholesale.
+export function verifyTypedAsyncReadyExtraction(row,{repo,workRoot,sourcePins}) {
+  const origin='native/main.cpp',sourceFile=path.join(repo,origin),source=fs.readFileSync(sourceFile,'utf8');
+  assert.equal(sourcePins.get(origin),digest(sourceFile),fail('READY_SOURCE_PREBINDING'));
+  const match=source.match(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation\) \{[\s\S]*?\n\}/);
+  assert(match,fail('READY_SOURCE_REQUIRED'));assert.equal(source.split(match[0]).length-1,1,fail('READY_SOURCE_UNIQUE'));
+  assert(row&&row.origin===origin,fail('READY_ORIGIN'));assert.equal(row.originSha256,sourcePins.get(origin));
+  assert.deepEqual(row.slice,{begin:match.index,end:match.index+match[0].length,appendNewline:true});assert.equal(row.bytePreserved,true);
+  samePath(row.path,path.join(workRoot,'s/native/decky_wake_ready_consumer.inc'),fail('READY_PATH'));
+  assert(inside(workRoot,row.path),fail('READY_SCOPE'));samePath(fs.realpathSync(row.path),row.path,fail('READY_REPARSE'));
+  assert.equal(row.sha256,hash(Buffer.from(match[0]+'\n')),fail('READY_BYTES'));assert.equal(digest(row.path),row.sha256,fail('READY_CHANGED'));
+  return row;
+}
+
 export const TYPED_ASYNC_ORDERED_IDS = Object.freeze([
   'inert child did not start', 'owned child handle unavailable', 'child identity mismatch',
   'production request did not reach silent fixture', 'elapsed < 1500', 'returned',
@@ -276,7 +291,9 @@ export function validateTypedAsyncRequestParentReceipt(value, {
     {name:'local-peer',origin:'tools/decky_sidebar_bootstrap_selftest.cpp',source:peer,begin:0,end:peer.indexOf('\nint main()')},
     {name:'original-io',origin:LEGACY,source:legacy,begin:ioBegin,end:legacy.indexOf('\n            }catch',ioBegin)},
   ];
-  assert.equal(value.generated.length, 3, fail('EXTRACTION_MEMBERSHIP'));
+  const readyDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalReadyConsumer(path.join(work,'s'),{write:true})");
+  if(sourceMode==='current')assert(readyDeclared,fail('CURRENT_READY_EXTRACTION_REQUIRED'));
+  assert.equal(value.generated.length, 3+(readyDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
   extractions.forEach((expected, i) => {
     const row = value.generated[i]; assert(expected.begin >= 0 && expected.end > expected.begin, fail('EXTRACTION_BOUNDARY'));
     assert.equal(row.origin, expected.origin); assert.equal(row.originSha256, sourcePins.get(expected.origin));
@@ -286,6 +303,7 @@ export function validateTypedAsyncRequestParentReceipt(value, {
     assert.equal(hash(Buffer.from(expected.source.slice(expected.begin, expected.end)+'\n')), row.sha256, fail('EXTRACTED_BYTES'));
     verify(row, workRoot); compilePins.set(key(row.path), row);
   });
+  if(readyDeclared){const ready=verifyTypedAsyncReadyExtraction(value.generated[3],{repo,workRoot,sourcePins});compilePins.set(key(ready.path),ready);}
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
   const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');
@@ -404,7 +422,7 @@ export function validateTypedAsyncRequestParentReceipt(value, {
     currentSourceStatus:staleSources.length?'STALE':'CURRENT',sourceMode,staleSources,
     fullPersistentAcceptance:false,summary:reconstructed.summary,missingPredicates,ordered:reconstructed.ordered,
     result:receiptPin,raw:value.raw,mapping:value.mapping,legacy:{status:oldRun.status,raw:oldRun.raw,independentlyExecuted:true},
-    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,generated:3,originalPredicates:72},
+    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,generated:value.generated.length,originalPredicates:72},
     boundary:'Completed original files only; frozen historical evidence cannot authorize current-source acceptance. No installed Steam/Loader, real browser/physical sleep, complete parent lifecycle or power claim.'};
 }
 

@@ -7,7 +7,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import assert from 'node:assert/strict';
-import {reconstructTypedAsyncOriginalContract} from './typed-async-parent.mjs';
+import {reconstructTypedAsyncOriginalContract,verifyTypedAsyncReadyExtraction} from './typed-async-parent.mjs';
 import {inspectOwnedAsyncNative} from './typed-owned-async-native.mjs';
 
 const MODULE = 'tools/ymcc_sim/global/decky-persistent-lifecycle';
@@ -143,7 +143,9 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     {name:'local-peer',origin:'tools/decky_sidebar_bootstrap_selftest.cpp',source:peer,begin:0,end:peer.indexOf('\nint main()')},
     {name:'original-io',origin:LEGACY,source:legacy,begin:ioBegin,end:legacy.indexOf('\n            }catch',ioBegin)},
   ];
-  assert.equal(value.generated.length, 4, fail('EXTRACTION_MEMBERSHIP'));
+  const readyDeclared=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8').includes("originalReadyConsumer(path.join(work,'s'),{write:true})");
+  if(sourceMode==='current')assert(readyDeclared,fail('CURRENT_READY_EXTRACTION_REQUIRED'));
+  assert.equal(value.generated.length, 4+(readyDeclared?1:0), fail('EXTRACTION_MEMBERSHIP'));
   extractions.forEach((expected, i) => {
     const row = value.generated[i]; assert(expected.begin >= 0 && expected.end > expected.begin, fail('EXTRACTION_BOUNDARY'));
     assert.equal(row.origin, expected.origin); assert.equal(row.originSha256, sourcePins.get(expected.origin));
@@ -155,6 +157,7 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
   });
   const renamed=value.generated[3],v1Text=fs.readFileSync(path.join(repo,V1_DRIVER+'.cpp'),'utf8'),entry='int main(int argc,char** argv){',replacement='int legacySameProcessMain(int argc,char** argv){';
   assert.equal(v1Text.split(entry).length,2,fail('V1_RENAME_ENTRY_UNIQUE'));assert.equal(renamed.origin,V1_DRIVER+'.cpp');assert.equal(renamed.originSha256,sourcePins.get(V1_DRIVER+'.cpp'));assert.equal(renamed.derivation,'rename-main-only');assert.equal(renamed.entry,entry);assert.equal(renamed.replacement,replacement);samePath(renamed.path,path.join(workRoot,'s/tools/typed-owned-async-legacy-body.inc'),fail('V1_DERIVED_PATH'));assert.equal(renamed.sha256,hash(Buffer.from(v1Text.replace(entry,replacement))),fail('V1_BODY_BYTE_PRESERVATION'));verify(renamed,workRoot);compilePins.set(key(renamed.path),renamed);
+  if(readyDeclared){const ready=verifyTypedAsyncReadyExtraction(value.generated[4],{repo,workRoot,sourcePins});compilePins.set(key(ready.path),ready);}
   assert.deepEqual(read(path.join(evidenceRoot,'GENERATED.json')), value.generated, fail('EXTRACTION_FILE'));
   const native = selectedNativeTools().native;
   const driverSource=fs.readFileSync(path.join(repo,DRIVER+'.mjs'),'utf8');
@@ -276,7 +279,7 @@ export function validateOwnedAsyncRequestParentReceipt(value, {
     currentSourceStatus:staleSources.length?'STALE':'CURRENT',sourceMode,staleSources,
     fullPersistentAcceptance:false,summary:reconstructed.summary,missingPredicates,ordered:reconstructed.ordered,
     result:receiptPin,raw:value.raw,mapping:value.mapping,legacy:{status:oldRun.status,raw:oldRun.raw,independentlyExecuted:true},
-    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,generated:4,originalPredicates:72,ownedDirectControls:10},
+    checked:{sources:sourceSeen.size,tools:toolSeen.size,compilerGraphs:graphCounts,generated:value.generated.length,originalPredicates:72,ownedDirectControls:10},
     boundary:'Completed original files only; frozen historical evidence cannot authorize current-source acceptance. No installed Steam/Loader, real browser/physical sleep, complete parent lifecycle or power claim.'};
 }
 

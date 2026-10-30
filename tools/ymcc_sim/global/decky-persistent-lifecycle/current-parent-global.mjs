@@ -157,6 +157,25 @@ export function legacyMigration(repo){
    executableCommand:[process.execPath,path.join(repo,MODULE,'current-parent-native.mjs'),'--evidence-dir','<fresh core DeckyParentMigration-20261023 evidence>','--workspace-dir','<owned core DeckyParentMigration-20261023 work>'],promotionAllowed:false};
  });
 }
+export const PARENT_METADATA_FILES=Object.freeze(['SOURCE-PINS.json','TOOL-PINS.json','REGRESSION-COVERAGE.json','LEGACY-TYPED-MIGRATION.json','RAW-EVIDENCE.json','HISTORY.json']);
+// Documents bind provenance and retained failures; they are not behavioral PASS
+// receipts. Keep their bytes/verdicts, verify integrity, and gate the primary
+// behavioral result on this complete metadata set.
+export function verifyParentMetadata(out,report){
+ const pins=[];
+ for(const name of PARENT_METADATA_FILES){
+  const file=ownedFile(out,path.join(out,name)),value=read(file);assert(value&&typeof value==='object','PARENT_METADATA_JSON_REQUIRED:'+name);
+  if(name==='SOURCE-PINS.json')assert.deepEqual(value.map(({path,sha256})=>({path,sha256})),report.sourceInputs,'PARENT_METADATA_SOURCE_BINDING');
+  if(name==='TOOL-PINS.json')assert.deepEqual(value,report.toolArtifacts,'PARENT_METADATA_TOOL_BINDING');
+  if(name==='REGRESSION-COVERAGE.json'){assert.equal(value.oldFailsNotPromoted,true);assert.equal(value.historical47,47);}
+  if(name==='LEGACY-TYPED-MIGRATION.json')assert.deepEqual(value,report.legacyTypedMigration,'PARENT_METADATA_MIGRATION_BINDING');
+  if(name==='RAW-EVIDENCE.json'){assert.equal(value.rawVerdictsPreserved,true);assert.deepEqual(value.files,report.rawEvidence,'PARENT_METADATA_RAW_BINDING');for(const row of value.files)verifyFile(row);for(const row of value.processes){ownedFile(out,row.path);verifyFile(row);}}
+  if(name==='HISTORY.json'){assert.equal(value.status,'HISTORICAL_FAIL_PRESERVED');assert(value.oldSummary.failed>0,'PARENT_HISTORY_FAILURE_MUST_REMAIN');for(const row of value.files)verifyFile(row);}
+  pins.push({...pin(file),kind:'provenance-metadata',preservedVerdict:value.status??null});
+ }
+ return pins;
+}
+
 export function parentDeclaration(repo){
  assert.equal(key(process.execPath),key(path.resolve(simulationNodePath())),'FIXED_NODE_REQUIRED');
  const parent=getLegacyDeckyPersistentLifecycleAdapters(repo)[0],baseline=getDeckyUpdateRecoveryAdapters(repo)[0],tools=ownedToolDeclaration(repo);
@@ -172,17 +191,17 @@ export function parentDeclaration(repo){
  for(const name of ['PowerControl/GameTitlePolicy.ps1','tools/steam_cssloader_exit_selftest.ps1','tools/steam_cssloader_exit_selftest.cpp','tools/steam_cssloader_exit_extract.mjs','tsconfig.json','tsconfig.node.json'])inputs.add(name);
  const resolveInput=base=>[base,...['.mjs','.js','.ts','.tsx','.vue','.json','.css','/index.mjs','/index.js','/index.ts'].map(ext=>base+ext)].find(p=>fs.existsSync(p)&&fs.statSync(p).isFile());
  const queue=[...inputs];for(let i=0;i<queue.length;i++){
-  const file=path.join(repo,queue[i]);if(!/\.(mjs|cjs|js|ts|tsx|vue|cpp|h)$/.test(file))continue;const text=fs.readFileSync(file,'utf8'),discovered=[];
+  const file=path.join(repo,queue[i]);if(!/\.(mjs|cjs|js|ts|tsx|vue|cpp|h|inc)$/.test(file))continue;const text=fs.readFileSync(file,'utf8'),discovered=[];
   for(const m of text.matchAll(/(?:\bfrom\s*|\bimport\s*(?:\(\s*)?|\brequire\s*\(\s*|new URL\(\s*)['"]((?:\.|@\/)[^'"\r\n]+)['"]/g)){const specifier=m[1].split('?')[0],base=specifier.startsWith('@/')?path.resolve(repo,'src',specifier.slice(2)):path.resolve(path.dirname(file),specifier),target=resolveInput(base);if(target&&within(repo,target))discovered.push(slash(path.relative(repo,target)));}
-  for(const m of text.matchAll(/^\s*#\s*include\s*"([^"\r\n]+)"/gm)){const found=[path.resolve(path.dirname(file),m[1]),path.join(repo,'native',m[1]),path.join(repo,'deps/json',m[1])].find(p=>fs.existsSync(p)&&fs.statSync(p).isFile());if(found&&within(repo,found))discovered.push(slash(path.relative(repo,found)));}
+  for(const m of text.matchAll(/^\s*#\s*include\s*"([^"\r\n]+)"/gm)){const found=[path.resolve(path.dirname(file),m[1]),...['native','deps/json','tools'].map(root=>path.resolve(repo,root,m[1]))].find(p=>within(repo,p)&&fs.existsSync(p)&&fs.statSync(p).isFile());if(found&&within(repo,found))discovered.push(slash(path.relative(repo,found)));}
   for(const m of text.matchAll(/['"]((?:src\/bridge|decky-plugin\/src|PowerControl)\/[^'"\r\n]+\.(?:tsx?|js|json))['"]/g))if(fs.existsSync(path.join(repo,m[1])))discovered.push(m[1]);
   for(const found of discovered)if(!inputs.has(found)){inputs.add(found);queue.push(found);}
  }
  const authority=lockBundledNodeTools(repo);verifyBundledToolScope(authority,repo);
  const currentChildArtifactInputs=[...new Map([...tools.artifactInputs,...authority.tools.map(row=>row.path),process.execPath].map(file=>[key(file),path.resolve(file)])).values()];assert(currentChildArtifactInputs.length<=3072,'CURRENT_CHILD_TOOL_LIMIT');
  const artifactInputs=[...new Map([...tools.artifactInputs,...(baseline.artifactInputs??[]),...authority.tools.map(r=>r.path),process.execPath].map(file=>[key(file),path.resolve(file)])).values()];assert(artifactInputs.length<=3072,'TOOL_LIMIT');
- const resultFiles=['result.json','SOURCE-PINS.json','TOOL-PINS.json','REGRESSION-COVERAGE.json','LEGACY-TYPED-MIGRATION.json','RAW-EVIDENCE.json','HISTORY.json'].map(p=>'decky-persistent-lifecycle/'+p);
- return {id:PARENT_ID,kind:'node',path:WRAPPER,args:['--mode','run','--evidence-dir','{outDir}/decky-persistent-lifecycle'],timeoutMs:BUDGETS.parent,scope:'behavioral-mock',evidenceInputs:[...inputs].sort(),artifactInputs,resultFiles,lifecycleContract,requiredComponentsRecommendation:['plugins.decky-owned-runtime-lifecycle'],requiredComponentsAreNotMutated:true,baselineRequiredSources:[...new Set([baseline.path,...baseline.evidenceInputs])].sort(),currentChildArtifactInputs,authority};
+ const resultFiles=['decky-persistent-lifecycle/result.json'];
+ return {id:PARENT_ID,kind:'node',path:WRAPPER,args:['--mode','run','--evidence-dir','{outDir}/decky-persistent-lifecycle'],timeoutMs:BUDGETS.parent,scope:'behavioral-mock',evidenceInputs:[...inputs].sort(),artifactInputs,resultFiles,metadataFiles:PARENT_METADATA_FILES.map(p=>'decky-persistent-lifecycle/'+p),lifecycleContract,requiredComponentsRecommendation:['plugins.decky-owned-runtime-lifecycle'],requiredComponentsAreNotMutated:true,baselineRequiredSources:[...new Set([baseline.path,...baseline.evidenceInputs])].sort(),currentChildArtifactInputs,authority};
 }
 export function currentChildToolPins(declaration,parentToolPins){
  assert(Array.isArray(declaration.currentChildArtifactInputs)&&declaration.currentChildArtifactInputs.length>0&&declaration.currentChildArtifactInputs.length<=3072,'CURRENT_CHILD_TOOL_SCOPE_REQUIRED');
@@ -341,10 +360,12 @@ export async function runParent({repoRoot=path.resolve(import.meta.dirname,'../.
  report.rawEvidenceChanges=report.rawEvidence.filter(row=>currentHash(row.path)!==row.sha256);if(report.rawEvidenceChanges.length)add('parent.raw-evidence-changed',false,{changes:report.rawEvidenceChanges});
  if(Date.now()-startedAt>BUDGETS.parent)add('parent.deadline',false,{elapsedMs:Date.now()-startedAt});
  if(old)save(path.join(out,'REGRESSION-COVERAGE.json'),{historical47:47,current:coverageMap(old.value,report.cases),fullUpdaterBudget:240000,oldFailsNotPromoted:true});
+ save(path.join(out,'RAW-EVIDENCE.json'),{files:report.rawEvidence,processes:report.processes.map(p=>pin(path.join(out,'processes',p.id+'.json'))),childEvidence,childWork,rawVerdictsPreserved:true});
+ try{report.metadataEvidence=verifyParentMetadata(out,report);report.metadataIntegrity=true;}catch(error){report.metadataIntegrity=false;add('parent.metadata-integrity',false,{error:String(error.stack??error)});}
  report.passed=report.cases.length>0&&report.cases.every(c=>c.passed===true)&&report.missingEvidence.length===0&&report.sourceUnchanged&&report.toolsUnchanged;
  report.status=report.cases.some(c=>c.passed!==true)?'FAIL':report.passed?'PASS':'INCOMPLETE';report.softwareAcceptance=report.passed;report.fullPersistentAcceptance=report.passed;
  report.fullProductAcceptance=false;report.finishedAt=new Date().toISOString();report.elapsedMs=Date.now()-startedAt;report.summary={cases:report.cases.length,passed:report.cases.filter(c=>c.passed).length,failed:report.cases.filter(c=>c.passed!==true).map(c=>c.id),missingEvidence:report.missingEvidence};
- save(path.join(out,'RAW-EVIDENCE.json'),{files:report.rawEvidence,processes:report.processes.map(p=>pin(path.join(out,'processes',p.id+'.json'))),childEvidence,childWork,rawVerdictsPreserved:true});checkpoint();return report;
+ checkpoint();return report;
 }
 const processExec=process.execPath;
 if(process.argv[1]&&import.meta.url===pathToFileURL(path.resolve(process.argv[1])).href){

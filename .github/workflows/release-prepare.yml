@@ -231,8 +231,10 @@ jobs:
             ${{ runner.temp }}/release-runner-compatibility.json
             ${{ runner.temp }}/yc/Evidence/**/*.json
             ${{ runner.temp }}/yc/Evidence/**/*.log
+            ${{ runner.temp }}/yc/Evidence/**/*.jsonl
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.json
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.log
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/**/*.jsonl
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.json
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Lighting/**/*.log
           if-no-files-found: error

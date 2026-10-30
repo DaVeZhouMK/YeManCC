@@ -2,7 +2,8 @@
 param([Parameter(Mandatory=$true)][string]$EvidenceDir,[switch]$SkipMutationProof,
  [ValidateRange(1,30000)][int]$TotalBudgetMs=30000,
  [ValidateRange(1,25000)][int]$RunBudgetMs=25000,
- [ValidateRange(0,5000)][int]$CleanupReserveMs=5000)
+ [ValidateRange(0,5000)][int]$CleanupReserveMs=5000,
+ [ValidateSet('no-rollback','allow-downgrade','stale-rollback-snapshot')][string]$MutationCase)
 $ErrorActionPreference='Stop'
 # One stopwatch per consumer; includes all its preparation and all mutations.
 $taskBudgetWatch=[Diagnostics.Stopwatch]::StartNew()
@@ -38,6 +39,18 @@ $cases=New-Object 'System.Collections.Generic.List[object]'
 $taskProgressFile=Join-Path $EvidenceDir 'case-progress.jsonl'
 $taskMutationStates=[ordered]@{'no-rollback'='NOT_RUN';'allow-downgrade'='NOT_RUN';'stale-rollback-snapshot'='NOT_RUN'}
 $taskMutationReceipts=New-Object 'System.Collections.Generic.List[object]'
+$taskMutationDefinitions=@(
+  @{name='no-rollback';from='Undo-YmccDeckyTransaction $transaction';to='Write-Verbose "injected missing rollback"';case='mid-transaction copy failure restores all prior committed files';failure='Failed install did not restore exact prior state'},
+  @{name='allow-downgrade';from="throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC'";to="Write-Verbose 'injected downgrade permission'";case='old YMCC package cannot downgrade a recorded newer Loader';failure='Expected rejection DOWNGRADE_REFUSED, got '},
+  @{name='stale-rollback-snapshot';from='if ($now -cne $entry.after) { throw ''DECKY_ROLLBACK_CONCURRENT_CHANGE'' }';to='Write-Verbose "injected stale rollback snapshot"';case='rollback revalidates every file after its initial snapshot before restoring it';failure='Expected rejection ROLLBACK_CONCURRENT_CHANGE, got '}
+)
+# A child may select only the original assertion owned by its semantic mutation.
+# The ordinary parent always declares and executes the full original 32 cases.
+if($MutationCase -and !$SkipMutationProof){throw 'DECKY_PACKAGE_MUTATION_SCOPE_REQUIRES_SKIP_MUTATION_PROOF'}
+$taskSelectedCase=if($MutationCase){@($taskMutationDefinitions|Where-Object{$_.name -ceq $MutationCase})[0].case}else{$null}
+$taskDeclaredCases=New-Object 'System.Collections.Generic.List[string]'
+$taskOmittedCases=New-Object 'System.Collections.Generic.List[string]'
+$taskExecutionScope=if($MutationCase){'selected-original-mutation-assertion'}else{'full-original-ordinary-suite'}
 function Write-TaskPackageProgress([string]$Phase,$Detail){
  $row=[ordered]@{at=[DateTimeOffset]::UtcNow.ToString('o');phase=$Phase;pid=$PID;elapsedMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;cleanupUsedMs=$taskCleanupUsedMs;partial=$true;formalPass=$false;detail=$Detail}
  [IO.File]::AppendAllText($taskProgressFile,(($row|ConvertTo-Json -Depth 12 -Compress)+[Environment]::NewLine),(New-Object Text.UTF8Encoding($false)))
@@ -63,7 +76,7 @@ function Wait-TaskOwnedChildExit($Process){
  return $Process.WaitForExit($limit)
 }
 function Quote-TaskPackageLiteral([string]$Value){return "'"+$Value.Replace("'","''")+"'"}
-Write-TaskPackageProgress 'consumer-start' @{skipMutationProof=[bool]$SkipMutationProof}
+Write-TaskPackageProgress 'consumer-start' @{skipMutationProof=[bool]$SkipMutationProof;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;executionScope=$taskExecutionScope}
 
 function Need([bool]$Condition,[string]$Message) { if (!$Condition) { throw $Message } }
 function Reject([scriptblock]$Action,[string]$Reason) {
@@ -72,10 +85,13 @@ function Reject([scriptblock]$Action,[string]$Reason) {
   if (!$message -or ($Reason -and !$message.Contains($Reason))) { throw ('Expected rejection '+$Reason+', got '+$message) }
 }
 function Check([string]$Name,[scriptblock]$Action) {
+ $taskDeclaredCases.Add($Name)
+ if($MutationCase -and $Name -cne $taskSelectedCase){$taskOmittedCases.Add($Name);return}
  Write-TaskPackageProgress 'case-enter' @{name=$Name;ordinal=$cases.Count+1}
  if($taskBudgetExhausted){$cases.Add([pscustomobject]@{name=$Name;pass=$false;executed=$false;status='NOT_RUN';error='DECKY_PACKAGE_TEST_RUN_BUDGET_EXHAUSTED'});Write-TaskPackageProgress 'case-not-run' $cases[$cases.Count-1];return}
- try{[void](Get-TaskPackageRemaining); & $Action;$cases.Add([pscustomobject]@{name=$Name;pass=$true;executed=$true})}
- catch{$cases.Add([pscustomobject]@{name=$Name;pass=$false;error=$_.Exception.Message;stack=$_.ScriptStackTrace;position=$_.InvocationInfo.PositionMessage})}
+ $caseStarted=$false
+ try{[void](Get-TaskPackageRemaining);$caseStarted=$true; & $Action;$cases.Add([pscustomobject]@{name=$Name;pass=$true;executed=$true})}
+ catch{$cases.Add([pscustomobject]@{name=$Name;pass=$false;executed=$caseStarted;error=$_.Exception.Message;stack=$_.ScriptStackTrace;position=$_.InvocationInfo.PositionMessage})}
  Write-TaskPackageProgress 'case-complete' $cases[$cases.Count-1]
 }
 function Put([string]$Base,[string]$Name,[string]$Text) {
@@ -393,6 +409,8 @@ Check 'native updater includes production transaction and excludes generic merge
   }
   Need ($native.IndexOf('$deckyPlan = Get-YmccDeckyPlan') -lt $native.IndexOf('  Register-TreeForRollback $programSource')) 'Decky validation occurs after mutations'
 }
+$taskOrdinaryDeclaredCount=$taskDeclaredCases.Count
+$taskOrdinaryExecutedCount=@($cases|Where-Object{$_.executed -eq $true}).Count
 # Candidate fixture owner only. New Add-Type/compiler authority must be reviewed
 # and pinned before execution; this proposal has only AST validation.
 if (!$SkipMutationProof -and !$taskBudgetExhausted) {
@@ -435,13 +453,10 @@ Write-TaskPackageProgress 'fixture-job-type-ready' @{compiler=$fixtureAuthority.
 }
 if (!$SkipMutationProof) {
   Check 'rollback and downgrade semantic mutations fail their original production assertions' {
-    $mutations=@(
-      @{name='no-rollback';from='Undo-YmccDeckyTransaction $transaction';to='Write-Verbose "injected missing rollback"';case='mid-transaction copy failure restores all prior committed files'},
-      @{name='allow-downgrade';from="throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC'";to="Write-Verbose 'injected downgrade permission'";case='old YMCC package cannot downgrade a recorded newer Loader'},
-      @{name='stale-rollback-snapshot';from='if ($now -cne $entry.after) { throw ''DECKY_ROLLBACK_CONCURRENT_CHANGE'' }';to='Write-Verbose "injected stale rollback snapshot"';case='rollback revalidates every file after its initial snapshot before restoring it'}
-    )
+    $mutations=$taskMutationDefinitions
     # Independent roots and Mutex namespaces share one wall-clock run deadline
-    # and cleanup reserve. Every child executes the complete original suite.
+    # and cleanup reserve. Each child executes only its selected original assertion;
+    # its setup and assertion body are unchanged, with omitted cases in result.json.
     $ownedMutations=New-Object 'System.Collections.Generic.List[object]'
     $batchError=$null
     try {
@@ -470,7 +485,7 @@ if (!$SkipMutationProof) {
       $test=Join-Path $negativeRoot 'tools/decky_package_maintenance_selftest.ps1'
       [IO.File]::Copy($PSCommandPath,$test,$false)
       $negativeOut=Join-Path $negativeRoot 'evidence'
-      Write-TaskPackageProgress 'mutation-enter' @{name=$mutation.name;expectedCase=$mutation.case}
+      Write-TaskPackageProgress 'mutation-enter' @{name=$mutation.name;expectedCase=$mutation.case;executionScope='selected-original-mutation-assertion';plannedCaseCount=1}
       $waitBudget=[Math]::Min(25000,(Get-TaskPackageRemaining))
       $cleanupForChild=Get-TaskCleanupRemaining
       if($cleanupForChild -le 0){$script:taskIncomplete=$true;throw 'DECKY_PACKAGE_TEST_CLEANUP_RESERVE_EXHAUSTED'}
@@ -478,7 +493,7 @@ if (!$SkipMutationProof) {
       $cleanupForChild=[Math]::Max(0,$childTotal-$waitBudget)
       $eventName='Local\YMCC-DeckyPackageFixture-'+[guid]::NewGuid().ToString('N')
       $ready=[Threading.EventWaitHandle]::new($false,[Threading.EventResetMode]::ManualReset,$eventName)
-      $taskCommand='$ErrorActionPreference=''Stop'';$gate=[Threading.EventWaitHandle]::OpenExisting('+(Quote-TaskPackageLiteral $eventName)+');try{if(!$gate.WaitOne(1000)){exit 12}}finally{$gate.Dispose()}; & '+(Quote-TaskPackageLiteral $test)+' -EvidenceDir '+(Quote-TaskPackageLiteral $negativeOut)+' -SkipMutationProof -TotalBudgetMs '+$childTotal+' -RunBudgetMs '+$waitBudget+' -CleanupReserveMs '+$cleanupForChild+';if($?){exit 0}else{exit 1}'
+      $taskCommand='$ErrorActionPreference=''Stop'';$gate=[Threading.EventWaitHandle]::OpenExisting('+(Quote-TaskPackageLiteral $eventName)+');try{if(!$gate.WaitOne(1000)){exit 12}}finally{$gate.Dispose()}; & '+(Quote-TaskPackageLiteral $test)+' -EvidenceDir '+(Quote-TaskPackageLiteral $negativeOut)+' -SkipMutationProof -MutationCase '+(Quote-TaskPackageLiteral $mutation.name)+' -TotalBudgetMs '+$childTotal+' -RunBudgetMs '+$waitBudget+' -CleanupReserveMs '+$cleanupForChild+';if($?){exit 0}else{exit 1}'
       $info=New-Object Diagnostics.ProcessStartInfo
       $info.FileName=(Get-Process -Id $PID).Path
       $info.Arguments='-NoProfile -NonInteractive -ExecutionPolicy Bypass -EncodedCommand '+[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($taskCommand))
@@ -522,7 +537,7 @@ if (!$SkipMutationProof) {
         finally {
           $taskCleanupCurrentWatch.Stop();$script:taskCleanupUsedMs+=$taskCleanupCurrentWatch.Elapsed.TotalMilliseconds;$script:taskCleanupCurrentWatch=$null
           if($taskCleanupUsedMs -gt $CleanupReserveMs){$script:taskIncomplete=$true}
-          $receipt=[ordered]@{name=$owned.mutation.name;expectedCase=$owned.mutation.case;startedAt=$owned.startedAt;finishedAt=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=$owned.watch.Elapsed.TotalMilliseconds;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;cleanupUsedMs=$taskCleanupUsedMs;pid=$owned.childPid;file=$owned.info.FileName;args=$owned.info.Arguments;waitBudgetMs=$owned.waitBudgetMs;jobAssigned=$owned.assigned;jobCloseSucceeded=$owned.jobClosed;timedOut=$owned.timedOut;exitCode=$owned.exit;exitObserved=$owned.exitObserved;error=$owned.error;sharedDeadline=$true;independentRoot=$owned.negativeRoot;allChildrenLaunchedBeforeWait=($ownedMutations.Count -eq $mutations.Count)}
+          $receipt=[ordered]@{name=$owned.mutation.name;expectedCase=$owned.mutation.case;expectedFailure=$owned.mutation.failure;executionScope='selected-original-mutation-assertion';plannedCaseCount=1;startedAt=$owned.startedAt;finishedAt=[DateTimeOffset]::UtcNow.ToString('o');elapsedMs=$owned.watch.Elapsed.TotalMilliseconds;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;cleanupUsedMs=$taskCleanupUsedMs;pid=$owned.childPid;file=$owned.info.FileName;args=$owned.info.Arguments;waitBudgetMs=$owned.waitBudgetMs;jobAssigned=$owned.assigned;jobCloseSucceeded=$owned.jobClosed;timedOut=$owned.timedOut;exitCode=$owned.exit;exitObserved=$owned.exitObserved;error=$owned.error;sharedDeadline=$true;independentRoot=$owned.negativeRoot;allChildrenLaunchedBeforeWait=($ownedMutations.Count -eq $mutations.Count)}
           $taskMutationReceipts.Add([pscustomobject]$receipt)
           try {
             $receipt|ConvertTo-Json -Depth 8|Set-Content -LiteralPath (Join-Path $owned.negativeRoot 'process.json') -Encoding UTF8
@@ -545,7 +560,9 @@ if (!$SkipMutationProof) {
       $expected=@($negative.cases|Where-Object{$_.name -ceq $owned.mutation.case})
       if($negative.complete -ne $true -or $negative.status -cne 'FAIL'){$script:taskIncomplete=$true;if($negative.status -ceq 'TIMEOUT'){$script:taskBudgetExhausted=$true};$taskMutationStates[$owned.mutation.name]=$negative.status}
       Need ($negative.complete -eq $true -and $negative.status -ceq 'FAIL') 'TIMEOUT or INCOMPLETE cannot witness the original mutation assertion'
+      Need ($negative.executionScope -ceq 'selected-original-mutation-assertion' -and $negative.selectedMutation -ceq $owned.mutation.name -and $negative.selectedCase -ceq $owned.mutation.case -and $negative.count -eq 1 -and $negative.declaredOrdinaryCaseCount -eq $taskOrdinaryDeclaredCount -and $negative.executedOrdinaryCaseCount -eq 1 -and @($negative.omittedOrdinaryCases).Count -eq ($taskOrdinaryDeclaredCount-1)) 'Negative test did not execute exactly its declared original assertion scope'
       Need ($owned.exit -ne 0 -and $negative.pass -eq $false -and $expected.Count -eq 1 -and $expected[0].pass -eq $false) ('Mutation escaped original assertion '+$owned.mutation.name)
+      Need ($expected[0].executed -eq $true -and $expected[0].error -ceq $owned.mutation.failure) ('Mutation failed outside its original semantic assertion '+$owned.mutation.name)
       $taskMutationStates[$owned.mutation.name]='EXPECTED_NONZERO'
     }
   }
@@ -556,7 +573,7 @@ $taskMutationsComplete=$SkipMutationProof -or (@($taskMutationStates.Values|Wher
 if(!$taskMutationsComplete){$taskIncomplete=$true}
 $taskComplete=!$taskBudgetExhausted -and !$taskIncomplete -and $taskMutationsComplete
 $taskStatus=if($taskBudgetExhausted){'TIMEOUT'}elseif(!$taskComplete){'INCOMPLETE'}elseif($failures.Count){'FAIL'}else{'PASS'}
-$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;mutations=$taskMutationStates;mutationRetirement=$taskMutationReceipts.ToArray();count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope='Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
+$result=[ordered]@{pass=($failures.Count -eq 0 -and $taskComplete);status=$taskStatus;complete=$taskComplete;totalBudgetMs=$TotalBudgetMs;runBudgetMs=$RunBudgetMs;cleanupReserveMs=$CleanupReserveMs;elapsedTotalMs=$taskBudgetWatch.Elapsed.TotalMilliseconds;cleanupUsedMs=$taskCleanupUsedMs;executionScope=$taskExecutionScope;selectedMutation=$MutationCase;selectedCase=$taskSelectedCase;declaredOrdinaryCaseCount=$taskOrdinaryDeclaredCount;executedOrdinaryCaseCount=$taskOrdinaryExecutedCount;omittedOrdinaryCases=$taskOmittedCases.ToArray();mutations=$taskMutationStates;mutationRetirement=$taskMutationReceipts.ToArray();count=$cases.Count;passed=($cases.Count-$failures.Count);cases=$cases.ToArray();sourceSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance.ps1'));embeddedSha256=(Get-YmccDeckyHash (Join-Path $root 'native/decky_package_maintenance_script.h'));realSteamActions=0;hardwareWrites=0;productProcessesLaunched=0;productionGlobalMutexAccessed=$false;fixtureMutexNamespaceRemapped=$fixtureMutexRemapped;scope=$(if($MutationCase){'Selected original assertion only: '+$taskSelectedCase+'; other 31 ordinary cases omitted. '}else{'Full original 32 ordinary assertions. '})+'Exact embedded production PowerShell executes real file transactions in isolated evidence; inert Loader bytes, no installed/physical acceptance'}
 $result | ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $EvidenceDir 'result.json') -Encoding UTF8
 if (!$taskComplete){Write-Error ('DECKY_PACKAGE_TEST_'+$taskStatus) -ErrorAction Continue;exit 124}
 if ($failures.Count) { $failures | Format-Table -Wrap; throw ('Decky package maintenance failed '+$failures.Count+'/'+$cases.Count) }
