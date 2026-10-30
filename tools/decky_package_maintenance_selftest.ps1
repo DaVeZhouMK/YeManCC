@@ -398,7 +398,10 @@ Check 'native updater includes production transaction and excludes generic merge
 if (!$SkipMutationProof -and !$taskBudgetExhausted) {
 $fixtureToolManifest=Join-Path $root 'tools/ymcc_sim/global/decky-update-recovery/package-fixture-tools.json'
 Need ((Get-YmccDeckyHash $fixtureToolManifest) -ceq '2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a') 'Fixture compiler manifest identity changed'
-$fixtureAuthority=Get-Content -LiteralPath $fixtureToolManifest -Raw -Encoding UTF8|ConvertFrom-Json
+. (Join-Path $root 'tools/ymcc_sim/global/release-host-environment.ps1')
+$fixtureAuthority=Get-YmccPackageFixtureToolAuthority $fixtureToolManifest
+$fixtureAuthoritySha256=Get-YmccDeckyHash $fixtureToolManifest
+if($env:YMCC_RELEASE_HOSTED_ENVIRONMENT -ceq '1'){$fixtureAuthoritySha256=Get-YmccDeckyHash (Join-Path $root 'tools/ymcc_sim/global/hosted-release-tools.json')}
 foreach($toolPin in $fixtureAuthority.files){Need ((Get-YmccDeckyHash $toolPin.path) -ceq $toolPin.sha256) ('Fixture compiler input changed: '+$toolPin.path)}
 Add-Type -ReferencedAssemblies @($fixtureAuthority.referencedAssemblies) -TypeDefinition @"
 using System;
@@ -428,7 +431,7 @@ public sealed class YmccDeckyPackageFixtureJob : IDisposable {
  public void Dispose(){Close();}
 }
 "@
-Write-TaskPackageProgress 'fixture-job-type-ready' @{compiler=$fixtureAuthority.compiler;manifestSha256='2ba2e58c4c1367375cd265192972a371e993544880623f4b51ca412cfe85746a';moduleVersionId=[YmccDeckyPackageFixtureJob].Assembly.ManifestModule.ModuleVersionId.ToString();loadedModuleCompleteness=$false}
+Write-TaskPackageProgress 'fixture-job-type-ready' @{compiler=$fixtureAuthority.compiler;manifestSha256=$fixtureAuthoritySha256;hostedEnvironment=($env:YMCC_RELEASE_HOSTED_ENVIRONMENT -ceq '1');moduleVersionId=[YmccDeckyPackageFixtureJob].Assembly.ManifestModule.ModuleVersionId.ToString();loadedModuleCompleteness=$false}
 }
 if (!$SkipMutationProof) {
   Check 'rollback and downgrade semantic mutations fail their original production assertions' {

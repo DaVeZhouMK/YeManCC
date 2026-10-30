@@ -165,7 +165,7 @@ function New-DeckyLifecycleProof($Owner,[string]$RunId,[string]$StartedAt,[strin
 function Invoke-DeckyLifecycleRequired {
   $owner=if($LifecycleEvidenceRoot){Initialize-DeckyLifecycleEvidence $LifecycleEvidenceRoot}else{Initialize-DeckyRecoveryEvidence}
   $before=@([IO.Directory]::GetDirectories($owner.root));$started=[DateTime]::UtcNow.ToString('o')
-  Invoke-Required 'decky-persistent-lifecycle' 'node' @((Join-Path $PSScriptRoot 'ymcc_sim/global/cli.mjs'),'--mode','run','--profile','desktop','--test','plugins.decky-persistent-lifecycle','--out-dir',$owner.root)
+  Invoke-Required 'decky-persistent-lifecycle' 'node' @((Join-Path $PSScriptRoot 'ymcc_sim/global/cli.mjs'),'--mode','run','--profile','desktop','--test','plugins.decky-persistent-lifecycle,plugins.decky-owned-runtime-lifecycle','--out-dir',$owner.root)
   $finished=[DateTime]::UtcNow.ToString('o');$fresh=@([IO.Directory]::GetDirectories($owner.root)|Where-Object{$_ -notin $before})
   if($fresh.Count -ne 1){throw 'DECKY_LIFECYCLE_FRESH_RUN_NOT_UNIQUE'}
   $proof=New-DeckyLifecycleProof $owner ([IO.Path]::GetFileName($fresh[0])) $started $finished

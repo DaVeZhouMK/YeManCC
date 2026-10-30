@@ -84,8 +84,27 @@ using namespace ymcc::deckybinding;using namespace ymcc::deckybinding::worker;
 class SteamLease {
     detail::Handle parent;const Request& request;
 public:
-    explicit SteamLease(const Request& value):request(value){ULONGLONG birth=0;parent.value=ymcc::steamsession::verifiedProcess(request.steam.pid,request.steam.root,&birth);require(parent.value&&birth==request.steam.created&&current(),"mirror-bootstrap-session-changed");}
-    bool current()const{DWORD session=MAXDWORD;return parent.value&&WaitForSingleObject(parent.value,0)==WAIT_TIMEOUT&&ProcessIdToSessionId(request.steam.pid,&session)&&session==request.windowsSession&&ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid);}
+    // Accept the exact current worker port. The registry selector belongs to
+    // the independent installed-identity gate; this fixture observes its own
+    // real parent lease and reports the same named, value-free refusals.
+    explicit SteamLease(const Request& value,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr):request(value){
+        (void)registryPath;
+        if(rejectedCheck)rejectedCheck->clear();
+        ULONGLONG birth=0;parent.value=ymcc::steamsession::verifiedProcess(request.steam.pid,request.steam.root,&birth);
+        const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;throw std::runtime_error("mirror-bootstrap-session-changed");};
+        if(!parent.value||birth!=request.steam.created)reject("steam-process-or-birth");
+        if(!ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid))reject("steam-user-or-session");
+        require(current(rejectedCheck),"mirror-bootstrap-session-changed");
+    }
+    SteamLease(const SteamLease&)=delete;
+    bool current(std::string* rejectedCheck=nullptr)const{
+        const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;return false;};
+        if(rejectedCheck)rejectedCheck->clear();
+        if(!parent.value||WaitForSingleObject(parent.value,0)!=WAIT_TIMEOUT)return reject("steam-process-exited");
+        DWORD session=MAXDWORD;if(!ProcessIdToSessionId(request.steam.pid,&session)||session!=request.windowsSession)return reject("steam-windows-session");
+        if(!ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid))return reject("steam-user-or-session");
+        return true;
+    }
 };
 #include "typed-legacy-health-close-worker.inc"
 inline bool child(int& code){int argc=0;auto** argv=CommandLineToArgvW(GetCommandLineW(),&argc);if(!argv)return false;const auto mode=ChildChannel::classify(argc,argv);LocalFree(argv);if(mode==ChildMode::ordinary)return false;ChildChannel channel;ChildMode actual{};if(!channel.tryRunCommandLine(GetCommandLineW(),code,actual)||actual!=ChildMode::worker){code=87;return true;}const auto frame=channel.readFrame(7000);if(!frame){code=88;return true;}const std::string bytes(frame.payload.begin(),frame.payload.end());code=run(bytes,channel.cancelEvent(),[&](const Json& packet){const auto text=packet.dump();return bool(channel.writeFrame(std::vector<std::uint8_t>(text.begin(),text.end()),2500));});return true;}

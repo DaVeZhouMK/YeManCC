@@ -7,6 +7,7 @@ import {getNativeLaunchNoIoToolDeclaration} from '../decky-update-recovery/nativ
 export const OWNED_ID='plugins.decky-owned-runtime-lifecycle';
 export const OWNED_MODULE='tools/ymcc_sim/global/decky-persistent-lifecycle';
 export const OWNED_SOURCES=Object.freeze([
+ "native/main.cpp",
  "tools/decky_binding_runtime_selftest.cpp",
  "tools/decky_binding_client_selftest.cpp",
  "native/decky_binding_client.h",

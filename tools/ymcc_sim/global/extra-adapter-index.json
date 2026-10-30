@@ -8965,7 +8965,7 @@
     },
     {
       "path": "tools/decky_package_maintenance_selftest.ps1",
-      "sha256": "e55f9e6f99f02c57dfbf4ba5b9f1212eda92f997abc8eb8adad34f5b655f760f",
+      "sha256": "5b6c18f1a3871d48c302e1033c2d9f7f07813508e449244b0ff5acaf2288629e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12765,7 +12765,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-global.mjs",
-      "sha256": "9e868cc37fe4535fd668ebfebddb81d5f7550bcc57643c9d9e3a417d43859fd2",
+      "sha256": "829c4d9e84f76f2835b9e904e26f67f15f7d1b50a1a23be5fd7a6e9c1a48ed4e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12775,7 +12775,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/current-parent-native.mjs",
-      "sha256": "cf5303c14875f40d36e394155f91217af22ec6390c223936e988cb65f8ade498",
+      "sha256": "38d23242a4e72c465dae5fd2835f781e0942596730fca2cd3dad177b6b7a014e",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12785,7 +12785,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/owned-adapter.mjs",
-      "sha256": "e5e761877244b5180be1edbc98e03c6f7f9e0c68604f87f8bd9ae3f281102de3",
+      "sha256": "28fe3c63d09080a6a3b4d60016c93a1658143aef4e077d24c3d94f340fd8f6d3",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12795,7 +12795,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/owned-run.mjs",
-      "sha256": "5868619b3ed6c93495983a51de36acd75a04375ae812139e30321438c23a8cb1",
+      "sha256": "1716a813e4d2096557f1346b437c7e4a4ecb291ddf2d85a07182bb367bec4262",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12845,7 +12845,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-health-close-parent.mjs",
-      "sha256": "3a861b8f2e3c768ddba0012bacbbc51fa3945b72e9bd6002d08bb4fbcd23b8b7",
+      "sha256": "f5ddf26216c7823bb6127931459c65ffdaff90f578c660a94bb9d82db531822c",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12865,12 +12865,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-legacy-health-close-regression.cpp",
-      "sha256": "35606fd026a5289a96e69f4ccfe43e8ac08aa367b20e036f481b38fa6a68ace0",
+      "sha256": "4eedbfd7542d32ae50687c60eee5424a5721fd299b9b97de87ad8b0a7ce6726c",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-legacy-health-close-regression.mjs",
-      "sha256": "3c9d830310d4cd32201777372ebbb3d8241f8cbde537cbbaa176f66df29d6fd4",
+      "sha256": "901ee98924fe702c20872101d3cdc47c6b094c89f27313bbdcfaa71561666d9b",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12885,7 +12885,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-legacy-runtime-regression.mjs",
-      "sha256": "0dc2cd5c76ec4d15a58512244b9815bddf3a93cd598a21b158aaaa623a16b20c",
+      "sha256": "9d7730de5015570941afe79cca41318662f00cb56112b3761f0c36f4a6c6be99",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12915,7 +12915,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-persistent-lifecycle/typed-owned-async-request-regression.mjs",
-      "sha256": "2f7c0d87c89269216b9960fbb45c8f548f91857d5576650c5988c46d6bbb40e6",
+      "sha256": "a1b5819531ef4ca8c1937ff9efe497d726f1efeb2d335adb06961de3a5535398",
       "contentNormalization": "utf8-lf"
     },
     {

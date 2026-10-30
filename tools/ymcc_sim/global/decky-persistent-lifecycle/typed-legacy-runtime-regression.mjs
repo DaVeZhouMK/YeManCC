@@ -1,3 +1,4 @@
+import {originalReadyConsumer} from './owned-run.mjs';
 import {simulationCorePath,selectedNativeTools} from '../release-host-environment.mjs';
 // Independent sidecar; no parent registration or source changes are performed.
 import fs from 'node:fs';
@@ -118,6 +119,7 @@ export async function execute(argv) {
   for(const [name,text,origin] of [['helpers',original.slice(0,end)+'\n','tools/decky_binding_runtime_selftest.cpp'],['path-assertions',pure,legacyRel]]) {
    const file=path.join(work,'s/tools/typed-legacy-runtime-'+name+'.inc');fs.writeFileSync(file,text);frozen.set(key(file),pin(file));report.generated.push({...pin(file),origin,originSha256:sources.get(origin).sha256,bytePreserved:true});
   }
+  const readyConsumer=originalReadyConsumer(path.join(work,'s'),{write:true});frozen.set(key(readyConsumer.path),readyConsumer);report.generated.push(readyConsumer);
   write(path.join(out,'GENERATED.json'),report.generated);
   const compiler=selectedNativeTools().native;
   env=Object.fromEntries(Object.entries(process.env).map(([k,v])=>[k.toUpperCase(),v]));env.PATH=path.dirname(compiler.compiler)+';'+process.env.SystemRoot+'/System32';env.INCLUDE=compiler.include.join(';');env.LIB=compiler.lib.join(';');

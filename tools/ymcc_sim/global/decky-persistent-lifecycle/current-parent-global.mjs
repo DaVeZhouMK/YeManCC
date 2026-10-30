@@ -10,7 +10,7 @@ import {getLegacyDeckyPersistentLifecycleAdapters} from './adapter.mjs';
 import {getDeckyUpdateRecoveryAdapters} from '../decky-update-recovery/adapter.mjs';
 import {lifecycleContract} from './contract.mjs';
 import {ownedToolDeclaration,OWNED_INPUTS} from './owned-adapter.mjs';
-import {ORIGINAL_CASES} from './owned-run.mjs';
+import {ORIGINAL_CASES,originalReadyConsumer,originalAggregateCases,validateOriginalResult} from './owned-run.mjs';
 import {resourceZero} from './typed-binding-gate.mjs';
 import {validateTypedRuntimeParentReceipt} from './typed-runtime-parent.mjs';
 import {validateTypedHealthCloseParentReceipt} from './typed-health-close-parent.mjs';
@@ -201,16 +201,18 @@ export function verifyCurrentDisk(value,parentSources,toolPins,childRoot,work){
  for(const phase of value.executions){verifyFile(phase.program);verifyFile(phase.stdout);verifyFile(phase.stderr);ownedFile(childRoot,phase.stdout.path);ownedFile(childRoot,phase.stderr.path);}
  const original=value.originalProducer,current=value.currentProducer;
  for(const row of [original.raw,original.result,original.sourcePins,original.exe,current.raw,current.exe,current.cef]){verifyFile(row);ownedFile(work,row.path);}
- const typed=read(original.raw.path),typedRun=read(original.result.path);assert.equal(typed.schema,'ymcc.typed-binding-runtime-gate.v1');assert.equal(typed.passed,true);assert.deepEqual(typed.cases.map(c=>c.id),TYPED_IDS);assert.equal(typedRun.status,'pass');assert.equal(typedRun.runExit,0);assert.deepEqual(typedRun.changedOriginalInputs,[]);
- for(const c of typed.cases){const delivered=value.cases.find(r=>r.id===c.id);assert.deepEqual(delivered.measurements,Object.fromEntries(Object.entries(c).filter(([k])=>!['id','passed'].includes(k))));assert.deepEqual(delivered.evidence,original.raw);}
+ const typed=read(original.raw.path),typedRun=read(original.result.path),fullOriginal=validateOriginalResult(typed,typedRun);assert.equal(fullOriginal.completeCurrentProducer,true,'CURRENT_COMPLETE_ORIGINAL_PRODUCER_REQUIRED');assert.equal(typed.passed,true);assert.equal(fullOriginal.failed,0);assert.deepEqual(value.originalSummary,fullOriginal);
+ for(const c of originalAggregateCases(typed)){const delivered=value.cases.find(r=>r.id===c.id);assert.deepEqual(delivered.measurements,Object.fromEntries(Object.entries(c).filter(([k])=>!['id','passed'].includes(k))));assert.deepEqual(delivered.evidence,original.raw);}
  const frozen=read(original.sourcePins.path);verifySourceRows(frozen.files,parentSources);const frozenMap=new Map();for(const row of frozen.files){const p=ownedFile(work,path.join(frozen.source,row.path));assert.equal(hash(p),row.sha256);frozenMap.set(key(p),{path:p,sha256:row.sha256});}
+ const readyConsumer=originalReadyConsumer(frozen.source);frozenMap.set(key(readyConsumer.path),readyConsumer);
  const originals=path.dirname(original.raw.path);validateGraph(path.join(originals,'dependencies.json'),frozenMap,toolPins);const build=read(path.join(originals,'BUILD.json'));assert.equal(build.exit,0);assert.equal(build.error,null);assert.equal(toolPins.get(key(build.compiler))?.sha256,build.compilerSha256);
  const n=read(current.raw.path);assert.equal(n.schema,'ymcc.current-decky-parent-native.v1');assert.equal(n.passed,true);assert.equal(n.productCallbackMode,'typed-only; legacy macro absent');assert.equal(n.remainingTrackedJobHandles,0);assert.equal(n.resourceLedgerOverflow,false);assert.deepEqual(n.cases.map(c=>c.id),CURRENT_IDS);
  for(const c of n.cases){const delivered=value.cases.find(r=>r.id===c.id);assert.equal(c.passed,true);assert.deepEqual(delivered.measurements,c.measurements);assert.deepEqual(delivered.evidence,current.raw);}
  const nativeRoot=path.dirname(current.raw.path),graph=read(path.join(nativeRoot,'d.json')),actualSources=new Map();
+ const currentReadyConsumer=originalReadyConsumer(path.join(nativeRoot,'s'));assert.equal(currentReadyConsumer.originSha256,parentSources.get('native/main.cpp'),'CURRENT_READY_INCLUDE_SOURCE_CHANGED');
  for(const p of [graph.Data.Source,...graph.Data.Includes])if(within(nativeRoot,p)){
   ownedFile(work,p);assert(within(path.join(nativeRoot,'s'),p),'FROZEN_NATIVE_INPUT_REQUIRED');const sourceRelative=slash(path.relative(path.join(nativeRoot,'s'),p));
-  if(parentSources.has(sourceRelative))assert.equal(hash(p),parentSources.get(sourceRelative),'FROZEN_CURRENT_SOURCE_CHANGED');else assert(Object.values(value.nativeExtractions).some(x=>key(x.generated?.path??'')===key(p)&&x.generated.sha256===hash(p)),'UNBOUND_GENERATED_NATIVE_INPUT');actualSources.set(key(p),pin(p));
+  if(parentSources.has(sourceRelative))assert.equal(hash(p),parentSources.get(sourceRelative),'FROZEN_CURRENT_SOURCE_CHANGED');else assert((key(currentReadyConsumer.path)===key(p)&&currentReadyConsumer.sha256===hash(p))||Object.values(value.nativeExtractions).some(x=>key(x.generated?.path??'')===key(p)&&x.generated.sha256===hash(p)),'UNBOUND_GENERATED_NATIVE_INPUT');actualSources.set(key(p),pin(p));
  }
  validateGraph(path.join(nativeRoot,'d.json'),actualSources,toolPins);
  for(const x of Object.values(value.nativeExtractions)){verifyFile(x.generated);assert.equal(parentSources.get(relative(x.path)),x.sha256,'EXTRACTION_SOURCE_CHANGED');}

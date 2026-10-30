@@ -53,7 +53,7 @@ export function validateTypedHealthCloseParentReceipt(value,{repo,evidenceRoot,w
   const toolSeen=new Set();assert(value.toolArtifacts.length>0&&value.toolArtifacts.length<=3072);
   for(const row of value.toolArtifacts){assert(!toolSeen.has(key(row.path)),'TYPED_HEALTH_DUPLICATE_TOOL');toolSeen.add(key(row.path));
     assert.equal(toolPins.get(key(row.path))?.sha256,row.sha256,'TYPED_HEALTH_TOOL_NOT_PREBOUND');verify(row);compilePins.set(key(row.path),row);}
-  assert.equal(value.generated.length,4,'TYPED_HEALTH_EXTRACTION_MEMBERSHIP');
+  assert.equal(value.generated.length,5,'TYPED_HEALTH_EXTRACTION_MEMBERSHIP');
   for(const row of value.generated){assert.equal(row.bytePreserved,true);assert.equal(sourcePins.get(row.origin),row.originSha256,'TYPED_HEALTH_GENERATED_ORIGIN');
     const source=fs.readFileSync(path.join(repo,row.origin),'utf8');
     const extract=slice=>{assert(Number.isSafeInteger(slice.begin)&&Number.isSafeInteger(slice.end)&&slice.begin>=0&&slice.end>slice.begin&&slice.end<=source.length,'TYPED_HEALTH_SLICE_RANGE');return source.slice(slice.begin,slice.end);};
