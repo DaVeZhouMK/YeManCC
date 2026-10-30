@@ -304,7 +304,7 @@ export function getExtraFactories(_repoRoot,{selectedIds}={}) {
 }
 
 const extraIndexBytes=fs.readFileSync(new URL('./extra-adapter-index.json',import.meta.url));
-if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='f7390ba46aa65ec6662f38cc0d61a1858251a4383deaf4f3f13a55261157d32a')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
+if(createHash('sha256').update(extraIndexBytes).digest('hex')!=='74bd0800d3fb33e6eed80497109c1bae6600dd2858c55e181e56ad80a4e7766c')throw Error('EXTRA_REGISTRATION_INDEX_IDENTITY_CHANGED');
 const extraIndex=JSON.parse(extraIndexBytes);
 export function getExtraAdapters(repoRoot=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../../..'),{selectedIds,auditReceiptIds}={}){
  const current=registrationIndexCurrent(extraIndex,repoRoot);

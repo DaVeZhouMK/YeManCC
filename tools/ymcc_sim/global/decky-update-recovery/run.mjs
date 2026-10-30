@@ -185,6 +185,33 @@ try{
  const commonPrefix=originals[0].text.slice(0,commonLength);
  if(!commonPrefix.includes('#define YMCC_DECKY_RUNTIME_LEGACY_FIXTURE 1')||!commonPrefix.includes('#define deckylaunch fixtureStageLaunch')||!commonPrefix.includes('#include "decky_sidebar_runtime.h"')||!commonPrefix.includes('#undef deckylaunch')||commonPrefix.includes('#include "decky_sidebar_manual_repair.h"')||commonPrefix.includes('#include "decky_sidebar_automatic_repair.h"'))throw Error('Review native common preamble mutation/macro boundary');
  const prefixFile=path.join(out,'native-shared-prefix.inc');fs.writeFileSync(prefixFile,commonPrefix);
+ const nativeNegativeAssertions={"wake-power-guard-negative":"uncommitted power phase cannot emit Ready or renew Decky binding","prewarm-negative":"native Runtime prewarms resources without requiring a running Steam process","wake-preparation-negative":"actual committed Ready retries native prewarm while Steam remains absent","wake-binding-negative":"actual committed wake reaches production Runtime binding refresh","wake-ready-event-negative":"actual committed wake emits current generation Ready event","repair-auto-ui-negative":"automatic retained repair cannot rebuild Steam UI or consume manual launch consent","repair-stale-mode-negative":"explicit owned repair must read current frontend instead of stale pre-load cache","repair-auto-repeat-negative":"one automatic attempt per document survives duplicate events","repair-uncertain-negative":"exception after dispatch preserves uncertain mutation","repair-retained-negative":"retained bridge with absent owned backend permits explicit repair","retained-negative":"retained frontend must restore broker without official Loader","legacy":"field regression: recovery grant cannot reinject the loaded Steam context"};
+ // A negative exits naturally at its original assertion. Its dead suffix
+ // never ran in the original case; retain every preceding byte and the catch.
+ function selectNegativeDriver(driver,structural,mode){
+  if(mode==='fixed')return {source:driver,selection:{kind:'full-normal',originalBodyBytePreserved:true}};
+  const expected=nativeNegativeAssertions[mode];if(!expected)throw Error('Unmapped original native negative');
+  const target=uniqueAnchor(driver,expected,'negative assertion'),after=driver.slice(target+expected.length),ending=/^"\s*\)\s*;/.exec(after);
+  if(!ending)throw Error('Review original negative assertion boundary: '+mode);
+  const end=target+expected.length+ending[0].length,tryAt=uniqueAnchor(structural,'\n try{','scenario try'),block=cppBlock(structural,tryAt+5,'scenario try');
+  if(target<=block.open||end>=block.end)throw Error('Negative assertion left original scenario try');
+  const opens=[];let state='code',escaped=false;
+  for(let i=block.open+1;i<end;i++){
+   const c=structural[i],next=structural[i+1];
+   if(state==='line'){if(c==='\n')state='code';continue;}
+   if(state==='block'){if(c==='*'&&next==='/'){state='code';i++;}continue;}
+   if(state==='string'||state==='character'){if(escaped){escaped=false;continue;}if(c==='\\'){escaped=true;continue;}if(c===(state==='string'?'"':"'"))state='code';continue;}
+   if(c==='/'&&next==='/'){state='line';i++;continue;}if(c==='/'&&next==='*'){state='block';i++;continue;}
+   if(c==='"'){state='string';continue;}if(c==="'"){state='character';continue;}
+   if(c==='{')opens.push(i);else if(c==='}'){if(!opens.length)throw Error('Negative selection escaped try');opens.pop();}
+  }
+  if(state!=='code')throw Error('Incomplete original negative statement');
+  for(const open of opens){if(/\b(try|do)\s*$/.test(structural.slice(Math.max(block.open,open-24),open)))throw Error('Review required suffix of nested try/do');}
+  const prefix=driver.slice(0,end),suffix=driver.slice(block.end-1),cleanup='\n g_steamModeObserver.shutdown();g_deckySidebarRuntime.shutdown();return 0;\n';
+  const source=prefix+cleanup+'}\n'.repeat(opens.length)+suffix;
+  if(source.slice(0,end)!==prefix)throw Error('Original negative prefix changed');
+  return {source,selection:{kind:'original-prefix-through-expected-failure',expectedAssertion:expected,prefixBytes:Buffer.byteLength(prefix),prefixSha256:crypto.createHash('sha256').update(prefix).digest('hex'),originalBodyBytePreserved:false,originalExecutedPrefixBytePreserved:true,catchBytePreserved:true,omittedOriginalBytes:Buffer.byteLength(driver.slice(end,block.end-1)),successPath:'original target unexpectedly passes -> explicit shutdown -> natural zero; existing negative validator rejects zero',closedFixtureScopes:opens.length}};
+ }
  const derivedSources=originals.map(original=>{
   const tail=original.text.slice(commonLength);if(!Buffer.from(commonPrefix+tail).equals(fs.readFileSync(original.file)))throw Error('Native preamble transform changed original bytes: '+original.mode);
   const file=path.join(out,original.mode+'.pch.cpp'),line=commonPrefix.split('\n').length;
@@ -197,10 +224,11 @@ try{
   if(tail.slice(driverEnd).trim())throw Error('Review declarations after native fixture driver');
   const driver=tail.slice(entryAt,driverEnd),entryLine=(commonPrefix+tail.slice(0,entryAt)).split('\n').length;
   const driverSha256=crypto.createHash('sha256').update(driver).digest('hex');
+  const selectedDriver=selectNegativeDriver(driver,structuralTail.slice(entryAt,driverEnd),original.mode);
   const fileLabel=JSON.stringify(original.file.replaceAll('\\','/'));
-  const driverSource=tail.slice(0,entryAt)+'#pragma optimize("", off)\n#line '+entryLine+' '+fileLabel+'\n'+driver+'\n#pragma optimize("", on)\n'+tail.slice(driverEnd);
+  const driverSource=tail.slice(0,entryAt)+'#pragma optimize("", off)\n#line '+entryLine+' '+fileLabel+'\n'+selectedDriver.source+'\n#pragma optimize("", on)\n'+tail.slice(driverEnd);
   fs.writeFileSync(file,'#include "native-pch.h"\n#line '+line+' '+fileLabel+'\n'+driverSource);
-  return {mode:original.mode,original:{path:original.file,sha256:hash(original.file)},derived:{path:file,sha256:hash(file)},prefixBytes:Buffer.byteLength(commonPrefix),tailBytes:Buffer.byteLength(tail),originalReconstructionByteEqual:true,fixtureDriver:{entry,originalLine:entryLine,sha256:driverSha256,bodyBytePreserved:true,optimization:'disabled only for generated fixture driver; production definitions retain /O2'}};
+  return {mode:original.mode,original:{path:original.file,sha256:hash(original.file)},derived:{path:file,sha256:hash(file)},prefixBytes:Buffer.byteLength(commonPrefix),tailBytes:Buffer.byteLength(tail),originalReconstructionByteEqual:true,fixtureDriver:{entry,originalLine:entryLine,sha256:driverSha256,bodyBytePreserved:original.mode==='fixed',selection:selectedDriver.selection,compiledDriverSha256:crypto.createHash('sha256').update(selectedDriver.source).digest('hex'),optimization:'disabled only for generated fixture driver; production definitions retain /O2'}};
  });
  const capacity={availableProcessors:os.availableParallelism(),totalMemoryBytes:os.totalmem(),freeMemoryBytes:os.freemem(),perWorkerMemoryReserveBytes:1024*1024*1024,maxWorkers:4};
  const compileWorkers=Math.max(1,Math.min(capacity.maxWorkers,capacity.availableProcessors,Math.floor(capacity.freeMemoryBytes/capacity.perWorkerMemoryReserveBytes)));
