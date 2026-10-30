@@ -52,11 +52,7 @@ vm.runInNewContext(transformSync(fs.readFileSync(path.join(root,'src/bridge/game
  {module:noticeModule,exports:noticeModule.exports,require:()=>policy});
 const environment=noticeModule.exports.gamepadEnvironmentNotice;
 const deferredNotice=environment({driverSetup:9,hidHideSetupNotice:0,driverSetupResult:19});
-assert.equal(deferredNotice.title,'手柄驱动维护已暂缓');
-assert.equal(deferredNotice.tone,'neutral');
-assert.match(deferredNotice.description,/已检测到当前或更新版本的驱动包/);
-assert.match(deferredNotice.description,/自动维护已跳过/);
-assert.match(deferredNotice.description,/不代表当前设备已绑定或输入正常/);
+assert.equal(deferredNotice,null);
 for(const snapshot of [{driverSetup:3,hidHideSetupNotice:0,driverSetupResult:11},
  {driverSetup:9,hidHideSetupNotice:8,driverSetupResult:19}, {driverSetup:8,hidHideSetupNotice:8,driverSetupResult:18}]) {
  const notice=environment(snapshot);assert(notice);assert.doesNotMatch(notice.description,/已检测到当前或更新版本的驱动包/);

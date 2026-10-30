@@ -91,7 +91,7 @@ await check('malformed trainer states and private paths are rejected before UI s
 await check('available trainer without a current game is an invalid snapshot',()=>{const f=fixture(),socket=f.connect(),snap=f.snapshot(2);snap.game=null;snap.trainer={available:true,pending:false,notice:''};socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});assert.equal(socket.closed,true);f.client.dispose();});
 await check('trainer open rejects alternate actions and supplied file paths without sending',async()=>{const f=fixture(),socket=f.connect(),snap=f.snapshot(2);snap.trainer={available:true,pending:false,notice:''};socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});const count=socket.sent.length;for(const args of [{field:'trainer',value:'download'},{field:'trainer',value:'open',path:'C:/anything.exe'}])await assert.rejects(f.client.mutate('game.setField',args));assert.equal(socket.sent.length,count);f.client.dispose();});
 await check('trainer intent timeout refreshes state and never repeats the launch',async()=>{const f=fixture(),socket=f.connect(),snap=f.snapshot(2);snap.trainer={available:true,pending:false,notice:''};socket.emit('message',{type:'snapshot',runId:'run-1',snapshot:snap});const pending=f.client.mutate('game.setField',{field:'trainer',value:'open'});f.fireDelay(4000);await assert.rejects(pending,/未确认/);assert.equal(socket.sent.filter(p=>p.args?.field==='trainer').length,1);assert.equal(socket.sent.at(-1).command,'snapshot');assert.equal(f.client.snapshot().busy,false);f.client.dispose();});
-await check('wallpaper passive demand does not own HUD traffic or business snapshots',()=>{const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);const socket=f.sockets.at(-1);socket.emit('open');assert.equal(socket.sent.length,0);assert.equal(f.client.sendHud('hud.status',{}),false);assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:1,appId:'570',visible:true}),true);assert.equal(socket.sent.length,1);assert.equal(f.timers.size,0);f.client.dispose();});
+await check('wallpaper passive demand does not own HUD traffic or business snapshots',()=>{const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);const socket=f.sockets.at(-1);socket.emit('open');assert.equal(socket.sent.length,0);assert.equal(f.client.sendHud('hud.status',{}),false);assert.equal(f.client.sendWallpaper('wallpaper.context',{contextSeq:1,appId:'570',visible:true}),true);assert.equal(socket.sent.length,1);assert.equal(f.timers.size,1);socket.emit('message',{type:'wallpaper-ready',runId:f.bootstrap.runId,contextSeq:1,enabled:true});assert.equal(f.timers.size,0);f.client.dispose();});
 await check('HUD and wallpaper independently release one shared connection',()=>{const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);const socket=f.sockets.at(-1);socket.emit('open');f.client.setPassiveDemand('hud',true);f.client.setPassiveDemand('wallpaper',false);assert.equal(socket.closed,false);assert.equal(f.client.sendWallpaper('wallpaper.context',{}),false);assert.equal(f.client.sendHud('hud.status',{}),true);assert.equal(f.sockets.length,1);f.client.setPassiveDemand('hud',false);assert.equal(socket.closed,true);assert.equal(f.timers.size,0);f.client.dispose();});
 
 function rebind(f){f.bootstrap.runId='run-2';f.bootstrap.token='NEW-TEST-TOKEN';f.bootstrap.endpoint='ws://127.0.0.1:23456/mirror';f.client.bootstrapChanged();const next=f.sockets.at(-1);next.emit('open');next.emit('message',{type:'snapshot',runId:'run-2',snapshot:{...f.snapshot(2),runId:'run-2'}});return next;}
@@ -109,6 +109,83 @@ await check('a timeout observer hiding the last page cannot restart paused passi
 });
 await check('hiding during busy admission cancels an unsent write without relabeling it as send failure',async()=>{
  const f=fixture(),socket=f.connect();let once=false;f.client.subscribe(state=>{if(state.busy&&!once){once=true;f.client.setVisible(false);}});const pending=f.client.mutate('fan.setPreset',{preset:'soft'}).then(()=>null,e=>e);assert.equal(typeof (await pending)?.message,'string');assert.equal(socket.sent.filter(m=>m.command!=='snapshot').length,0);assert.equal(f.client.snapshot().notice,'侧栏已隐藏');assert.equal(f.timers.size,0);f.client.dispose();
+});
+
+// The hidden-sidebar pause is also a write to the shared transport. A send
+// exception must use the same recovery owner as HUD/wallpaper/updater messages.
+for(const consumer of ['hud','wallpaper','updater'])await check('failed hidden pause recovers '+consumer+' transport without replaying an uncertain action',async()=>{
+ const f=fixture();f.bootstrap[consumer+'Protocol']=1;f.client.setPassiveDemand(consumer,true);
+ try{
+  const socket=f.connect(),send=socket.send.bind(socket);
+  const pending=f.client.mutate('fan.setEnabled',{enabled:true}).then(()=>null,error=>error);
+  assert.equal(socket.sent.filter(x=>x.command==='fan.setEnabled').length,1);
+  socket.send=value=>{const message=JSON.parse(value);if(message.command==='snapshot'&&message.subscribe===false)throw Error('Inert hidden pause send failed');send(value);};
+  f.client.setVisible(false);assert.equal(typeof (await pending)?.message,'string');
+  assert.equal(f.client.snapshot().connected,false);assert.equal(socket.closed,true);
+  assert.equal(f.timers.size,1);f.fireDelay(250);
+  const next=f.sockets.at(-1);assert.notEqual(next,socket);next.emit('open');
+  assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+  assert.equal(next.sent.some(x=>x.command==='snapshot'||x.command==='fan.setEnabled'),false,'Hidden reconnect must not replay business intent or poll state');
+  f.client.setVisible(true);assert.equal(next.sent.at(-1).command,'snapshot');assert.notEqual(next.sent.at(-1).subscribe,false);
+  next.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(2)});assert.equal(f.timers.size,0);
+ }finally{f.client.dispose();}
+ assert.equal(f.timers.size,0);
+});
+await check('hidden restored snapshot pause failure creates one recovery despite repeated stale packets',()=>{
+ const f=fixture();f.bootstrap.hudProtocol=1;f.client.setPassiveVisible(true);
+ try{
+  const socket=f.sockets.at(-1);socket.emit('open');socket.send=()=>{throw Error('Inert restored pause send failed');};
+  for(let i=0;i<1024;i++)socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(i+1)});
+  assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);assert.equal(f.sockets.length,1);
+  f.fireDelay(250);f.sockets.at(-1).emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,0);
+  assert.equal(f.sockets.at(-1).sent.length,0,'Background recovery must not request a business snapshot');
+ }finally{f.client.dispose();}
+ assert.equal(f.timers.size,0);
+});
+
+// Context liveness belongs to this wallpaper request, independently of sidebar
+// snapshot/HUD messages and of whether a valid response contains a playable asset.
+function contextFixture(){const f=fixture();f.bootstrap.wallpaperProtocol=1;f.bootstrap.hudProtocol=1;f.client.setPassiveDemand('wallpaper',true);const socket=f.sockets.at(-1);socket.emit('open');return {...f,socket,context:(seq=1,extra={})=>f.client.sendWallpaper('wallpaper.context',{contextSeq:seq,appId:'480',visible:true,...extra}),ack:(seq=1,type='wallpaper-ready',extra={})=>socket.emit('message',{type,runId:f.bootstrap.runId,contextSeq:seq,enabled:true,...extra})};}
+await check('OPEN wallpaper context without response times out and recovers without replay',()=>{
+ const f=contextFixture();try{assert.equal(f.context(),true);assert.equal(f.timers.size,1);f.fireDelay(10000);assert.equal(f.client.snapshot().connected,false);assert.equal(f.socket.closed,true);assert.equal(f.timers.size,1);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(f.client.snapshot().connected,true);assert.equal(next.sent.length,0);assert.equal(f.timers.size,0);f.context(2);next.emit('message',{type:'wallpaper',runId:f.bootstrap.runId,contextSeq:2,appId:'480',enabled:true,entry:null});assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+for(const type of ['wallpaper','wallpaper-ready'])await check('correlated '+type+' response settles context transport even when disabled or empty',()=>{
+ const f=contextFixture();try{f.context();assert.equal(f.timers.size,1);f.ack(1,type,{enabled:false,entry:null});assert.equal(f.timers.size,0);for(let i=0;i<1000;i++)f.client.sendWallpaper('wallpaper.status',{contextSeq:1,status:'observed'});assert.equal(f.timers.size,0);assert.equal(f.client.snapshot().connected,true);}finally{f.client.dispose();}
+});
+await check('context deadline is armed before synchronous socket response',()=>{
+ const f=contextFixture();try{const send=f.socket.send.bind(f.socket);f.socket.send=value=>{send(value);f.ack(JSON.parse(value).contextSeq);};assert.equal(f.context(),true);assert.equal(f.timers.size,0);assert.equal(f.client.snapshot().connected,true);}finally{f.client.dispose();}
+});
+await check('HUD snapshot uncorrelated ready wrong seq app and malformed status cannot cancel context deadline',()=>{
+ const f=contextFixture();try{f.client.setPassiveDemand('hud',true);f.context();const timer=[...f.timers.keys()][0];for(const message of [{type:'hud-ready'},{type:'hud',contextSeq:1},{type:'snapshot',snapshot:f.snapshot()},{type:'wallpaper-ready',enabled:true},{type:'wallpaper-ready',contextSeq:0,enabled:true},{type:'wallpaper-ready',contextSeq:2,enabled:true},{type:'wallpaper',contextSeq:'1',enabled:true},{type:'wallpaper',contextSeq:1,enabled:'true'},{type:'wallpaper',contextSeq:1,enabled:true,appId:'481'}]){f.socket.emit('message',{...message,runId:f.bootstrap.runId});assert.equal(f.timers.size,1);assert(f.timers.has(timer));}f.ack();assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await check('newest context owns reply while repeated demand never postpones unanswered deadline',()=>{
+ const f=contextFixture();try{f.context();const timer=[...f.timers.keys()][0];for(let seq=2;seq<=1024;seq++)f.context(seq);assert.equal(f.timers.size,1);assert(f.timers.has(timer));f.ack(1);assert.equal(f.timers.size,1);f.ack(1023);assert.equal(f.timers.size,1);f.ack(1024);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await check('already queued expired context callback cannot revoke a later acknowledged generation',()=>{
+ const f=contextFixture();try{f.context();const old=[...f.timers.values()][0].action;f.ack();f.context(2);old();assert.equal(f.client.snapshot().connected,true);assert.equal(f.timers.size,1);f.ack(1);assert.equal(f.timers.size,1);f.ack(2);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+for(const boundary of ['hide','wallpaper-off','close','bootstrap','dispose'])await check('context deadline cleanup at '+boundary+' ignores a late callback',()=>{
+ const f=contextFixture();try{f.context();const old=[...f.timers.values()][0].action;let next;
+  if(boundary==='hide')f.context(2,{visible:false});
+  if(boundary==='wallpaper-off'){f.client.setPassiveDemand('hud',true);f.client.setPassiveDemand('wallpaper',false);}
+  if(boundary==='close'){f.socket.close();f.fireDelay(250);next=f.sockets.at(-1);next.emit('open');}
+  if(boundary==='bootstrap'){f.bootstrap.runId='run-2';f.bootstrap.token='NEW-TEST';f.client.bootstrapChanged();next=f.sockets.at(-1);next.emit('open');}
+  if(boundary==='dispose')f.client.dispose();
+  assert.equal(f.timers.size,0);const count=f.sockets.length;old();assert.equal(f.timers.size,0);assert.equal(f.sockets.length,count);assert.equal(f.client.snapshot().connected,boundary!=='dispose');
+  if(boundary==='bootstrap'){f.context(2);f.socket.emit('message',{type:'wallpaper-ready',runId:'run-1',contextSeq:2,enabled:true});assert.equal(f.timers.size,1);next.emit('message',{type:'wallpaper-ready',runId:'run-2',contextSeq:2,enabled:true});assert.equal(f.timers.size,0);}
+ }finally{f.client.dispose();}
+});
+await check('a stale hidden context cannot cancel a newer visible context deadline',()=>{
+ const f=contextFixture();try{f.context(2);f.context(1,{visible:false});assert.equal(f.timers.size,1);f.ack(1);assert.equal(f.timers.size,1);f.ack(2);assert.equal(f.timers.size,0);}finally{f.client.dispose();}
+});
+await check('local context serialization failure does not arm a transport deadline',()=>{
+ const f=contextFixture();try{const cyclic={};cyclic.self=cyclic;assert.equal(f.context(1,{cyclic}),false);assert.equal(f.timers.size,0);assert.equal(f.client.snapshot().connected,true);}finally{f.client.dispose();}
+});
+await check('context send exception clears its deadline and keeps only original recovery',()=>{
+ const f=contextFixture();try{f.socket.send=()=>{throw Error('Inert context send failure');};assert.equal(f.context(),false);assert.equal(f.client.snapshot().connected,false);assert.equal(f.timers.size,1);assert.equal([...f.timers.values()][0].delay,250);}finally{f.client.dispose();}
+});
+await check('wallpaper timeout never replays an uncertain business write',async()=>{
+ const f=contextFixture();try{f.client.setVisible(true);f.socket.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot()});f.context();const pending=f.client.mutate('fan.setEnabled',{enabled:true}).then(()=>null,error=>error);f.fireDelay(4000);assert.equal(typeof (await pending)?.message,'string');f.fireDelay(10000);f.fireDelay(250);const next=f.sockets.at(-1);next.emit('open');assert.equal(f.sockets.flatMap(s=>s.sent).filter(m=>m.command==='fan.setEnabled').length,1);assert.equal(next.sent.some(m=>m.command==='wallpaper.context'||m.command==='fan.setEnabled'),false);next.emit('message',{type:'snapshot',runId:f.bootstrap.runId,snapshot:f.snapshot(2)});assert.equal(f.timers.size,0);}finally{f.client.dispose();}
 });
 
 fs.writeFileSync(path.resolve(task,'validation/MIRROR-CLIENT-SELFTEST.json'),JSON.stringify({project:'YMCC Decky 侧边栏',cases:cases.length,results:cases,realSockets:false,hardware:false,productionClientSource:true},null,2));console.log(`Mirror client tests passed: ${cases.length}`);

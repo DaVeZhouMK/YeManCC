@@ -83,3 +83,21 @@ v2 原生入口是 `typed-owned-async-request-regression.cpp`，驱动为同名 
 测试父的 loopback 服务与公开握手加密初始化单独运行并记录两轮 before/after 句柄表，第二轮严格相等；不启动 Runtime/Client/WinHTTP 来预热，不保留 session/actor，不减任何资源偏移。当前已观察的冷初始化最多是9个 ETW、1个 Event、1个 KsecDD File；未知类型/访问权/计数或基线丢失均拒绝。
 
 v2 仅能证明产品 typed worker 与父资源的所有权合同，不能证明一个仍存活的同进程 WinHTTP 调用会在1.5s内自然销毁所有 Windows 库状态。后一命题继续由 v1 诊断和其实际失败原件表达。独立75秒 WebIO NtClose 来源调查不进入正式预算、不作产品豁免，不允许私有回收 API、隐藏 anchor 或共享 session。实际安装/Steam/物理睡眠仍须另验。
+
+### 2026-10-29 ROG historical no-op lease / resource deadline replay
+
+The existing typed Runtime producer now has 31 required cases: the previous 16 plus 9 session-result and 6 resource-preflight boundaries. `typed-binding-gate.mjs` enforces the exact case set, original resource/handle assertions and 3200ms stop deadline. The same-count substitution of any of the 15 new IDs fails validation. No new parent or permanent history fixture runner is introduced; archive inventories/scripts stay in core Evidence.
+
+A strict `mutated=false` session-change result permits a new verified plan using existing connection backoff. Written/unknown/malformed results, OFF and rejected admission do not grant replay. Resource-worker-deadline preflight uses the original finite 1/3/8/20s RetryWindow only for an already admitted unavailable launch. It rechecks admission/resources before binding, retains pending intent across real Ready, and does not retry corrupt hashes or incomplete worker cleanup. A Ready event grants no new launch permission or healthy maintenance polling.
+
+The actual owned worker reports only a named initial session rejection predicate; the existing diagnostics filter accepts the enumerated predicate on bootstrap boundaries and rejects arbitrary values. Historical permission740 remains unproven, and the old 10/23 differing identity field cannot be reconstructed from absent data. Older manual-upgrade and frozen six-case migration receipts remain historical evidence; no full parent or installed acceptance is claimed.
+
+Evidence: `Testing/YMCC/Evidence/Decky-History-ROG-20261029/REPORT.md`. Targeted tests execute inert owned peers, real isolated process/registry boundaries and official resource bytes; no actual Steam or Windows sleep actions.
+
+### 2026-10-29 crossed-history continuation: 39 current typed cases
+
+`resourceAdmissionHandoff` adds four real-clock resource/mode cases: verified mode wake, admission recovery without another event, corrupted-resource refusal, and explicit OFF. Parking the resource schedule must retain its original clock/count; it never refills from a window event. A private compiled refill mutation recovers around2.063s and fails the existing>=2.9s original-clock assertion. Only a real admission/preparation epoch resets that budget.
+
+`finalAdmissionRecovery` adds four late permission cases: automatic recovery, exact retained frontend handoff, OFF, and nonretryable refusal. The final Loader-creation check schedules the original AdmissionWindow instead of leaving a waiting state without a timer. Re-entry rechecks admission and preflight. Retained never starts the Loader; OFF and nonretryable decisions do not restart.
+
+The existing `typed-binding-gate.mjs` requires all39 cases and original zero-resource/handle/3200ms predicates. Eight same-count case substitutions are rejected. Demand-only plan-started/plan-finished diagnostics carry controlled scope and elapsed time, not requests or credentials; no healthy polling is added. Existing original failures and older31/35-case receipts remain stage-specific evidence. Whole parent/package and installed sleep acceptance remain NOT_RUN. Evidence: `Testing/YMCC/Evidence/Decky-History-ROG-20261029/Reverse-Handoff/REPORT.md`.

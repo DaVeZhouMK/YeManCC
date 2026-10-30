@@ -47,12 +47,12 @@
                   {
                       "name":  "HIDMaestroSetup.exe",
                       "bytes":  162304,
-                      "sha256":  "393649FD2A52D8414931AA65597CBE1CA773ABFE1FC2EA4005178865677FB9DA"
+                      "sha256":  "C56E35DA2516200525D15C2436ABCD05CD583D137F45EFB0219A96B7F9395605"
                   },
                   {
                       "name":  "HIDMaestroSetup.dll",
                       "bytes":  225792,
-                      "sha256":  "60F0D2F58D09745F44992CC63E1CEBAFB232CECAE0D02A5E3FB044866A30E79C"
+                      "sha256":  "F5D750D6132949CEBC69B5556405BEBFA7BFCDDB532BAF0FE1F81879DC319644"
                   },
                   {
                       "name":  "HIDMaestroSetup.deps.json",

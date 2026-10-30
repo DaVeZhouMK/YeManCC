@@ -1578,6 +1578,10 @@ onMounted(async () => {
   // FanHost handshake. The native splash waits for this signal, so the first
   // visible frame is already in its normal background state.
   await loadUiSettings();
+  // Wallpaper only needs its persisted switch/appearance and the existing
+  // shared media owner. Do not wait for unrelated background, controls or
+  // tray initialization; those hosts keep their original later readiness gate.
+  if (!aiFanMockActive && !aiCpuIsolated) steamWallpaperHost?.ready();
   backgroundOpacity.value = getBackgroundOpacity();
   backgroundBlur.value = getBackgroundBlur();
   backgroundVideoAutoPause.value = getUiSetting('videoBatteryPause');
@@ -1817,7 +1821,7 @@ onMounted(async () => {
     applyCpuAutostart().catch(() => {});
   }, 30000);
 
-  if (!aiFanMockActive && !aiCpuIsolated) { deckyMirrorHost?.ready(); monitorHudHost?.ready(); steamWallpaperHost?.ready(); updatePredownloadHost = startUpdatePredownload(); }
+  if (!aiFanMockActive && !aiCpuIsolated) { deckyMirrorHost?.ready(); monitorHudHost?.ready(); updatePredownloadHost = startUpdatePredownload(); }
 });
 onUnmounted(() => {
   cancelBootModeLaunches();

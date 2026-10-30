@@ -1,6 +1,7 @@
 import { migrateControllerPersona } from './controllerPersona';
 import { fs, settingsStore } from './api';
 import { snapshotSettingsData } from './settingsSnapshot';
+import { globalShortcutContainer, prepareGlobalShortcutEdit, retireBootGlobalShortcuts } from './bootModeSharedShortcuts';
 import { SETTINGS_BASELINE, assertSupportedSettingsBaseline, hasCompletedSettingsBaseline, stampSettingsBaseline, equalSettingsDocuments, type ConfigurationBaseline } from './settingsBaseline';
 import { createDefaultQuickApps } from './quickAppDefaults';
 import { normalizeInputStartupPreferences } from './inputStartupPolicy';
@@ -112,8 +113,8 @@ export interface InputSettingsSnapshot extends JsonObject {
 }
 
 export type SettingsCasResult =
-  | { ok: true; revision: number; value: InputSettingsSnapshot }
-  | { ok: false; reason: 'revision-conflict' | 'write-failed' | 'game-override-active' | 'cancelled' | 'virtual-start-protection-active'; currentRevision: number; value: InputSettingsSnapshot; startProtection?: VirtualStartProtectionState };
+  | { ok: true; revision: number; value: InputSettingsSnapshot; globalShortcutRules?: JsonObject }
+  | { ok: false; reason: 'revision-conflict' | 'write-failed' | 'game-override-active' | 'cancelled' | 'virtual-start-protection-active'; currentRevision: number; value: InputSettingsSnapshot; startProtection?: VirtualStartProtectionState; globalShortcutRules?: JsonObject };
 
 /** Pure CAS decision used by the durable writer and S-15 fixtures. */
 export function evaluateInputCas(
@@ -267,9 +268,10 @@ const DEFAULTS: UnifiedSettings = {
     mode: 'custom',
     pauseGameOnSleep: true,
     retryOnEntryFailure: true,
-    retryOnNonUserWake: true,
+    retryOnNonUserWake: false,
     factMonitorEnabled: false,
     sleepPowerPlanOptimizationEnabled: true,
+    staticWakeAutoScanEnabled: true,
     wakePasswordEnabled: false,
     steamOverlayOffFix: false, // deprecated/abandoned; normalized off, no UI
     autoWakeRecovery: true,
@@ -320,6 +322,7 @@ const DEFAULTS: UnifiedSettings = {
       backMapping: false,
     },
     buttonMapping: { schemaVersion: 1, revision: 0, closure: 'UNENCLOSED', profileId: 'default', rules: {} },
+    bootModeShortcuts: null,
     gyroMotion: {
       schemaVersion: 1, revision: 0, closure: 'UNENCLOSED', enabled: false,
       provider: null, unit: null, calibrationId: null,
@@ -403,6 +406,14 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   }
   repairShape(merged as unknown as JsonObject, DEFAULTS as unknown as JsonObject);
   if (!isObject(merged.sleep)) merged.sleep = structuredClone(DEFAULTS.sleep);
+  // Preserve an explicit legacy choice; missing preferences stay off.
+  if (isObject(source.sleep) && typeof source.sleep.retryOnNonUserWake !== 'boolean' &&
+      typeof source.sleep.resleepEnabled === 'boolean')
+    merged.sleep.retryOnNonUserWake = source.sleep.resleepEnabled;
+  // Older builds coupled automatic wake scans to power-plan repair. Preserve
+  // that saved choice once, then keep the new independent switch authoritative.
+  if (!isObject(source.sleep) || typeof source.sleep.staticWakeAutoScanEnabled !== 'boolean')
+    merged.sleep.staticWakeAutoScanEnabled = merged.sleep.sleepPowerPlanOptimizationEnabled !== false;
   // This abandoned key can survive older imports, but can never become active.
   merged.sleep.steamOverlayOffFix = false;
   if (typeof merged.sleep.autoWakeRecovery !== 'boolean') merged.sleep.autoWakeRecovery = false;
@@ -610,6 +621,7 @@ export function normalizeSettings(raw: unknown): UnifiedSettings {
   if ('axisOrder' in motion) delete (motion as Record<string, unknown>).axisOrder;
   if ('axisMatrix' in motion) delete (motion as Record<string, unknown>).axisMatrix;
   input.gyroMotion = motion;
+  retireBootGlobalShortcuts(merged);
   stampSettingsBaseline(merged);
   return merged;
 }
@@ -921,6 +933,7 @@ export async function compareAndSwapInputSettings(
   expectedRevision: number,
   value: JsonObject,
   isCurrent?: () => boolean,
+  options: { globalShortcuts?: boolean } = {},
 ): Promise<SettingsCasResult> {
   if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 0) {
     throw new Error('Invalid expected input revision');
@@ -942,17 +955,18 @@ export async function compareAndSwapInputSettings(
     // A first CAS must complete legacy import before it can publish the receipt.
     const current = onDisk && hasCompletedSettingsBaseline(onDisk) ? normalize(onDisk) : await loadSettings();
     const snapshot = current.input;
+    const globalPatch = prepareGlobalShortcutEdit(patch);
     // Recheck at the queued commit boundary, after disk I/O, not only in the caller.
     if (isCurrent && !isCurrent()) {
       result = { ok: false, reason: 'cancelled', currentRevision: snapshot.revision, value: structuredClone(snapshot) };
       return;
     }
-    const decision = evaluateInputCasWrite(snapshot, expectedRevision, patch, true);
+    const decision = evaluateInputCasWrite(snapshot, expectedRevision, globalPatch, true);
     if (decision.ok === false) {
       // 单调接受：磁盘版本不旧于缓存时把它并入缓存，令下一次 UI 写入基于最新
       // 版本成功（冲突结果仍如实返回给调用方）。
       if (!cache || (current.input.revision ?? -1) >= (cache.input.revision ?? -1)) cache = current;
-      result = decision;
+      result = options.globalShortcuts ? { ...decision, globalShortcutRules: globalShortcutContainer(current) } : decision;
       return;
     }
     const next = normalize(current);
@@ -971,12 +985,14 @@ export async function compareAndSwapInputSettings(
         cache = error.document; cacheStamp = null;
         result = { ok: false, reason: error instanceof VirtualStartProtectionActive ? error.reason : 'revision-conflict',
           currentRevision: error.document.input.revision, value: snapshotSettingsData(error.document.input),
+          ...(options.globalShortcuts ? { globalShortcutRules: globalShortcutContainer(error.document) } : {}),
           ...(error instanceof VirtualStartProtectionActive ? { startProtection: error.startProtection } : {}) };
       } else result = evaluateInputCasWrite(snapshot, expectedRevision, patch, false);
       return;
     }
     cache = next;
-    result = { ok: true, revision: next.input.revision, value: structuredClone(next.input) };
+    result = { ok: true, revision: next.input.revision, value: structuredClone(next.input),
+      ...(options.globalShortcuts ? { globalShortcutRules: globalShortcutContainer(next) } : {}) };
   });
   writeQueue = run.catch(() => {});
   await run;

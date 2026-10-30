@@ -1,5 +1,5 @@
 import fs from 'node:fs';import path from 'node:path';import vm from 'node:vm';import assert from 'node:assert/strict';import {fileURLToPath} from 'node:url';
-export async function manualRepairTests(root,out){
+export async function manualRepairTests(root,out,{upgradeActionsFile=process.env.YMCC_DECKY_UPGRADE_ACTIONS}={}){
  const source=fs.readFileSync(path.join(root,'native/steam_live.js'),'utf8');const header=fs.readFileSync(path.join(root,'native/steam_live_script.h'),'utf8').split('inline constexpr const char kUiModeScript[] =')[0];
  const embedded=[...header.matchAll(/R"YMSTEAM\(([\s\S]*?)\)YMSTEAM"/g)].map(m=>m[1]).join('');const cases=[];
  const invoke=async(script,options={})=>{
@@ -28,6 +28,24 @@ export async function manualRepairTests(root,out){
  assert(handler.includes('g_deckyConnectionRepair.request(args,deckySidebarRepairDependencies())')&&deps.includes('allowManualRepair(session)')&&deps.includes('deckySidebarEnvironment(false)')&&deps.includes('deckySidebarPortPreflight()'));
  assert(deps.includes('PowerLifecycle::Ready'),'final admission retains native power boundary');
  assert(deps.includes('ymcc::steamui::read(g_steamSettingsObserver,true)'),'manual request has one native current context reader');
+ // When supplied, consume real serialized actions produced by compiled native
+ // target selection, not separately invented JS requests. Same canonical test.
+ const upgradeFile=upgradeActionsFile;
+ if(upgradeFile){const native=JSON.parse(fs.readFileSync(upgradeFile,'utf8'));assert.equal(native.pass,true);assert(native.upgradeActions?.length>=3);
+  const trace=[];
+  for(const row of native.upgradeActions){for(const [kind,script]of Object.entries({source,embedded})){
+   const action=row.action;
+   const normal=await invoke(script,{request:action,version:row.loadedLoader,build:action.expectedFrontendBuild});
+   assert.equal(normal.result.ok,true);assert.equal(normal.result.requestDispatched,true);assert.equal(normal.refreshes,1);assert.equal(normal.before,0);
+   const stale=await invoke(script,{request:action,version:row.installedLoader,build:action.expectedFrontendBuild});
+   assert.equal(stale.result.ok,false);assert.equal(stale.refreshes,0,'new page cannot consume old document refresh');
+   const late=await invoke(script,{request:action,version:row.loadedLoader,build:action.expectedFrontendBuild,timerRace:true});assert.equal(late.refreshes,0,'new module cannot consume old scheduled refresh');
+   const automatic=await invoke(script,{request:action,version:row.loadedLoader,build:action.expectedFrontendBuild,automatic:true});assert.equal(automatic.result.reason,'steam-ui-refresh-requires-user');assert.equal(automatic.refreshes,0);assert.equal(automatic.modeReads,0);
+   trace.push({kind,installed:row.installedLoader,loaded:row.loadedLoader,normalRefreshes:normal.refreshes,staleRefreshes:stale.refreshes,lateRefreshes:late.refreshes,automaticRefreshes:automatic.refreshes});
+   cases.push(kind+': serialized native upgrade action '+row.loadedLoader+' -> '+row.installedLoader+' preserves exact document fencing');
+  }}
+  fs.writeFileSync(path.join(out,'native-to-js-upgrade-scenarios.json'),JSON.stringify({pass:true,nativeActionFile:upgradeFile,scope:'Actual compiled native target -> production source and embedded JS; memory Steam API, no real Steam actions',trace},null,2));
+ }
  const repairHeader=fs.readFileSync(path.join(root,'native/decky_sidebar_manual_repair.h'),'utf8');assert(repairHeader.includes('origin==Origin::Manual&&deps.freshMode?deps.freshMode(session):deps.mode(session)'),'automatic demand cannot force manual context IO');
  assert(!handler.includes('setEnabled(true)')&&!handler.includes('startOwned')&&!handler.includes('steam.uiMode'));
  const automatic=main.slice(main.indexOf('static void deckySidebarObserveAutomaticRepair'),main.indexOf('static void deckySidebarInitialize'));

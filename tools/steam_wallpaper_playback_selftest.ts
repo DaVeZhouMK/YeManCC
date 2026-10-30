@@ -25,13 +25,28 @@ const pool=new WallpaperPlayers(doc,()=>{throw Error('background interruption is
 focused=false;pool.show(container,frame);check(created===0&&plays===0,'unfocused page creates no video or source');
 focused=true;doc.visibilityState='hidden';pool.show(container,frame);check(created===0,'hidden page creates no source');
 doc.visibilityState='visible';allowed=false;pool.show(container,frame);check(created===0,'blur latch vetoes stale positive document focus');
-allowed=true;pool.show(container,frame);check(created===1&&plays===1,'foreground creates the selected source');const old=nodes.at(-1);
+allowed=true;pool.show(container,frame);check(created===1&&plays===0,'foreground selects one source without starting decoder before intro/random seek');const old=nodes.at(-1);
 allowed=false;old.fire('loadedmetadata');check(old.paused&&!old.src&&old.parentNode===null,'late metadata releases source in background');
 const count=plays;for(const event of ['loadeddata','canplay','seeked','timeupdate'])old.fire(event);check(plays===count,'late readiness cannot restart background video');
-allowed=true;pool.show(container,{...frame,contextSeq:2});check(created===2&&plays===count+1,'foreground recovery creates one source');const current=nodes.at(-1);current.fire('loadedmetadata');current.fire('canplay');
+allowed=true;pool.show(container,{...frame,contextSeq:2});check(created===2&&plays===count,'foreground recovery creates one source and waits for metadata');const current=nodes.at(-1);current.fire('loadedmetadata');check(plays===count,'metadata/random seek does not start a discarded intro decoder');current.fire('canplay');check(plays===count+1,'ready selected seek starts playback exactly once');
 focused=false;current.fire('timeupdate');check(current.paused&&!current.src,'real focus loss vetoes playback boundary');
 focused=true;pool.show(container,{...frame,contextSeq:3});pool.stop();check(nodes.every(n=>!n.src&&n.paused),'stop releases all sources');
 const finalPlays=plays;for(const node of nodes)for(const event of ['loadeddata','canplay','seeked'])node.fire(event);await Promise.resolve();check(plays===finalPlays,'disposed events and play completion cannot revive video');
+
+// Rapid navigation reuses one delayed latest selection, never a preload pool.
+let selectedClock=1000,selectionId=0;const selectionTimers=new Map<number,{run:()=>void;delay:number}>();
+const selectionPool=new WallpaperPlayers(doc,()=>{throw Error('selection must not fail');},{allowed:()=>allowed,now:()=>selectedClock,schedule:((run:()=>void,delay:number)=>{selectionTimers.set(++selectionId,{run,delay});return selectionId;}) as any,cancel:((id:number)=>selectionTimers.delete(id)) as any});
+const selectedFrame=(id:number)=>({...frame,contextSeq:id,entry:{...frame.entry,assetId:'choice-'+id,url:'http://fixture/'+id+'.mp4'}});
+const selectedStart=created;selectionPool.show(container,selectedFrame(1));check(created===selectedStart+1&&selectionTimers.size===0,'first selected card is immediate');
+selectedClock+=35;selectionPool.show(container,selectedFrame(2));check(created===selectedStart+1&&selectionTimers.size===1&&nodes.at(-1).paused&&!nodes.at(-1).src,'rapid different card stops old source and delays starting a replacement');
+const repeatedTimer=selectionId;selectionPool.show(container,{...selectedFrame(2),contextSeq:99});check(selectionId===repeatedTimer&&selectionTimers.size===1,'same pending asset updates its frame without rearming delay');
+const obsoleteSelection=[...selectionTimers.values()][0];
+for(let i=3;i<=20;i++){selectedClock+=35;selectionPool.show(container,selectedFrame(i));check(selectionTimers.size===1&&created===selectedStart+1,'intermediate navigation creates no source and only one pending timer');}
+obsoleteSelection.run();check(selectionTimers.size===1&&created===selectedStart+1,'a superseded queued callback cannot start a later selection early');
+const committed=[...selectionTimers.values()][0];check(committed.delay===90,'rapid latest selection settles in ninety milliseconds');selectionTimers.clear();selectedClock+=90;committed.run();check(created===selectedStart+2&&nodes.at(-1).src==='http://fixture/20.mp4','only final selection obtains a video source');
+selectedClock+=200;selectionPool.show(container,selectedFrame(21));check(created===selectedStart+3&&selectionTimers.size===0,'ordinary isolated card movement adds no settling delay');
+selectedClock+=35;selectionPool.show(container,selectedFrame(22));const cancelled=[...selectionTimers.values()][0];selectionPool.stop();check(selectionTimers.size===0&&nodes.every(n=>!n.src&&n.paused),'background/OFF stop cancels the pending selection and every source');const stoppedCreated=created;cancelled.run();check(created===stoppedCreated,'a cancelled timer callback cannot resurrect a stopped source');
+selectionPool.show(container,selectedFrame(23));selectedClock+=35;selectionPool.show(container,selectedFrame(24));const hidden=[...selectionTimers.values()][0];selectionTimers.clear();allowed=false;hidden.run();check(nodes.every(n=>!n.src&&n.paused),'late selection rechecks foreground before assigning src');allowed=true;selectionPool.stop();
 
 // The shared document owner survives route teardown without creating timers.
 class TrackedEvents extends EventTarget {

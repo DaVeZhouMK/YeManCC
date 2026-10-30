@@ -2,6 +2,7 @@
 // Export-time AI envelopes over staged bytes. No runtime collection or timers.
 #include "log_export_evidence.h"
 #include <map>
+#include <limits>
 #include <stdexcept>
 #include <vector>
 
@@ -13,6 +14,52 @@ inline bool hostCostArchiveEvidenceName(const std::string& name) {
     return logEvidenceNumber(ticks) && name[prefix.size()+19]=='.' &&
         std::all_of(digest.begin(),digest.end(),[](char c){return (c>='0'&&c<='9')||(c>='a'&&c<='f');}) &&
         name.substr(name.size()-4)==".zip";
+}
+// The live log keeps its existing retention. Ordinary export carries only a
+// recent, byte-bounded suffix of complete immutable volumes; no extraction,
+// sampling, deletion, controller query or timer is involved here.
+inline constexpr unsigned long long HostCostArchiveExportMaxBytes=8ULL*1024*1024;
+struct HostCostArchiveExportCandidate {
+    std::string name;
+    unsigned long long bytes=0;
+    bool sizeKnown=true;
+    int sizeError=0;
+};
+inline EvidenceJson selectHostCostArchivesForExport(std::vector<HostCostArchiveExportCandidate> candidates,
+        unsigned long long budget=HostCostArchiveExportMaxBytes) {
+    std::sort(candidates.begin(),candidates.end(),[](const auto& a,const auto& b){return a.name>b.name;});
+    EvidenceJson rows=EvidenceJson::array();
+    unsigned long long selectedBytes=0,knownBytes=0,selected=0,omitted=0,unknownSizes=0;
+    bool budgetBoundary=false,knownBytesOverflow=false;
+    for(const auto& candidate:candidates) {
+        if(!hostCostArchiveEvidenceName(candidate.name))continue;
+        EvidenceJson row={{"name",candidate.name},{"sourceSizeKnown",candidate.sizeKnown},{"includedByBudget",false}};
+        if(!candidate.sizeKnown) {
+            ++unknownSizes;++omitted;row["sourceBytes"]=nullptr;
+            row["reason"]="source-size-error";row["errorCode"]=candidate.sizeError;
+        } else {
+            row["sourceBytes"]=candidate.bytes;
+            const auto maximum=(std::numeric_limits<unsigned long long>::max)();
+            if(candidate.bytes>maximum-knownBytes){knownBytes=maximum;knownBytesOverflow=true;}
+            else knownBytes+=candidate.bytes;
+            if(!budgetBoundary && candidate.bytes<=budget-selectedBytes) {
+                selectedBytes+=candidate.bytes;++selected;row["includedByBudget"]=true;
+                row["reason"]="recent-whole-volume-selected";
+            } else {
+                budgetBoundary=true;++omitted;row["reason"]="ordinary-export-cost-history-byte-budget";
+            }
+        }
+        rows.push_back(std::move(row));
+    }
+    return {{"schemaVersion",1},{"policy","recent-whole-cost-volumes-with-explicit-omission-inventory"},
+        {"evidenceScope","selection-at-discovery;not-packed-byte-proof"},
+        {"budgetScope","nested-cost-archive-file-bytes-only;active-pending-keyboard-signal-fault-logs-excluded"},
+        {"budgetBytes",budget},{"selectedSourceBytes",selectedBytes},{"knownDiscoveredBytes",knownBytes},
+        {"knownDiscoveredBytesSaturated",knownBytesOverflow},{"selectedVolumes",selected},{"omittedVolumes",omitted},
+        {"sourceSizeErrors",unknownSizes},{"allDiscoveredHistorySelected",omitted==0},
+        {"order","descending-source-file-ticks-in-validated-filename;not-cross-process-event-order"},
+        {"sourceHistoryModified",false},{"omittedMeaning","not-exported;source-not-deleted;not-evidence-of-no-anomaly"},
+        {"archives",std::move(rows)}};
 }
 inline const char* aiEvidenceLane(const std::string& entry) {
     const auto name=canonicalLogEvidenceName(entry);
@@ -57,7 +104,9 @@ inline EvidenceJson aiReadingGuide() {
         {"ordering","fileId/index order is packing order only; duplicate entry names use archiveEntryOccurrence; cross-file chronology and rotation adjacency are not inferred"},
         {"inspection","file_end.inspectionScope and earlierBytesNotInspected bound JSON inspection; SHA256 still covers the full staged file"},
         {"reader","tools/ai_log_reader.py produces structured envelopes and payload records without executing log content"},
-        {"retention",{{"costActiveMaxBytes",5*1024*1024},{"costTotalRetainedBudgetBytes",100*1024*1024},
+        {"retention",{{"costArchiveOrdinaryExportMaxBytes",HostCostArchiveExportMaxBytes},
+            {"costArchiveExportInventory","log-export-availability.json costArchiveDiscovery.exportSelection; omitted originals remain on source"},
+            {"costActiveMaxBytes",5*1024*1024},{"costTotalRetainedBudgetBytes",100*1024*1024},
             {"costCompressedMaxBytes",100*1024*1024-3*5*1024*1024-65536},{"costWorkingReserveBytes",2*5*1024*1024+65536},
             {"pendingException","normal pending+ZIP-temp+receipt space reserved; legacy oversized files or IO failures preserve originals and can exceed budget"},
             {"history","finite retention; archive eviction counters are process-local and not a global lifetime ledger"}}}};

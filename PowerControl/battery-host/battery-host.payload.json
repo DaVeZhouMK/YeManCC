@@ -13,12 +13,12 @@
     "files":  [
                   {
                       "path":  "YeManBatteryHost.exe",
-                      "sha256":  "45eef9a92654b5a28423d9edba3506fa49fca7155586b7bbaa43ee1eb793a40b",
+                      "sha256":  "a08af1b6f1100b2adcf2bd8764a867d59a064a7e1f8f607bf323d905e6421364",
                       "bytes":  162304
                   },
                   {
                       "path":  "YeManBatteryHost.dll",
-                      "sha256":  "a9c8990150af9236381e2cf1f134bef9e4cdeb29b85c4cf752b2e19e27d75d6f",
+                      "sha256":  "fb10c425df2638cb12c236bcf27f1abae290e0a5f106c2ea0aa45974fcd6ddb9",
                       "bytes":  206336
                   },
                   {

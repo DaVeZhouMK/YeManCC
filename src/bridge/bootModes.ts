@@ -8,6 +8,7 @@ import { normalizeMonitorOutput } from './monitorHudModel';
 import { readMonitorOutputPreferences, saveMonitorOutputPreferences, monitorOutputCoordinator } from './monitorOutput';
 import { screenTouchpadsGet, screenTouchpadsSet, screenTouchpadDefaults, type ScreenTouchpadPersona, type ScreenTouchpadConfig } from './screenTouchpads';
 import { NATIVE_DEFAULT_SHORTCUTS, reconcileControllerShortcutRules, readControllerShortcutRules } from './controllerShortcutRules';
+import { globalShortcutContainer, effectiveShortcutContainer, hasStoredGlobalShortcuts, hasModeShortcutOverride } from './bootModeSharedShortcuts';
 import { getMouseModeState, setMouseModeEnabled, setMouseModePolicy, setMouseBackend, type MouseModeState } from './gameproc';
 import { batteryCharge } from './batteryCharge';
 import { steamUi, type SteamUiState } from './steamUi';
@@ -113,7 +114,9 @@ export async function captureBootModeSnapshot(shared?: BootModeSharedReads): Pro
         ? basePolicy === 'off' ? 'off' : basePolicy === 'on' && ['gamebar', 'joyxoff'].includes(baseBackend)
             ? baseBackend === 'gamebar' ? 'microsoft' : 'joyxoff' : null
         : mouse?.stateKnown === false ? null : mouse ? mouse.on ? mouse.backend === 'gamebar' ? 'microsoft' : 'joyxoff' : 'off' : null;
-    const rules = reconcileControllerShortcutRules(readControllerShortcutRules(input.buttonMapping?.rules), settings.gamepad).rules;
+    const persistedRules = readControllerShortcutRules(effectiveShortcutContainer(settings));
+    const rules = hasStoredGlobalShortcuts(settings) || hasModeShortcutOverride(settings)
+        ? persistedRules : reconcileControllerShortcutRules(persistedRules, settings.gamepad).rules;
     // A failed read stays unknown. It must not become a fabricated OFF value later applied to hardware.
     return cloneBootValue({
         performance: { schedule: config, controls: continuousControlsFromSchedule(config), frames: frameRatePair(settings.rtss.frameRates) },
@@ -151,7 +154,15 @@ export async function readBootModeSupport(category?: BootModeCategory, shared?: 
         ...(sleep ? { hibernate: { state: hib?.supportedKnown ? (hib.supported ? 'supported' : 'unsupported') : 'unknown', reason: '以系统 S4 支持状态为准' } } : {}),
     };
 }
-export function readStoredBootMode(settings: UnifiedSettings, baseline: BootModeSnapshot): BootModeDocument { return normalizeBootModeDocument(settings.extensions?.[MODULE_KEY], baseline); }
+export function readStoredBootMode(settings: UnifiedSettings, baseline: BootModeSnapshot): BootModeDocument {
+    const raw = object(settings.extensions?.[MODULE_KEY]);
+    const persisted = readControllerShortcutRules(globalShortcutContainer(settings));
+    const controller = { name: '当前手柄规则', rules: hasStoredGlobalShortcuts(settings)
+        ? persisted : reconcileControllerShortcutRules(persisted, settings.gamepad).rules } as unknown as BootModeSnapshot['controller'];
+    // This is an in-memory view of ordinary global settings, never another
+    // persisted global shortcut snapshot. Independent scenes remain separate.
+    return normalizeBootModeDocument({ ...raw, global: { ...object(raw.global), controller } }, { ...baseline, controller });
+}
 /** Overview reads durable preferences only. Unknown device values remain null;
  * this view must never substitute for the editor's live capture. */
 function savedOverviewSnapshot(settings: UnifiedSettings): BootModeSnapshot {
@@ -177,42 +188,20 @@ function savedOverviewSnapshot(settings: UnifiedSettings): BootModeSnapshot {
         sleep: { config: settings.sleep, acButton: null, dcButton: null, hibernate: null, hibernateSize: null, timeouts: null, steamAutoRecovery: null },
     } as unknown as BootModeSnapshot);
 }
-function reconcileBootModeSnapshot(document: BootModeDocument, settings: UnifiedSettings, baseline: BootModeSnapshot, observable: readonly BootModeModule[]) {
-    const desired = resolveBootMode(document, document.current);
-    const storedActive = object(object(settings.extensions?.[MODULE_KEY]).activeSnapshot);
-    for (const module of observable) {
-        // Reconcile only actual saved applied modules; a pending scene is not current state.
-        if (!Object.keys(object(storedActive[module])).length)
-            continue;
-        if (module === 'input' && deferredMouse)
-            continue;
-        if (!same(desired[module], document.activeSnapshot[module]))
-            continue;
-        if (module === 'input' && baseline.input.mouse === null)
-            baseline.input.mouse = desired.input.mouse;
-        if (document.current === 'global' || !document.scenes[document.current].overrides[module])
-            document.global[module] = cloneBootValue(baseline[module]);
-        else
-            document.scenes[document.current].overrides[module] = cloneBootValue(baseline[module]);
-        document.activeSnapshot[module] = cloneBootValue(baseline[module]);
-    }
-}
 export async function loadBootModes(options: { overviewOnly?: boolean; editorOnly?: boolean } = {}): Promise<BootModeContext> {
     const generation = getSettingsGeneration();
-    // Browsing/editing presets reads saved data only. Runtime restore and an
-    // explicit first startup selection retain the complete observation path.
+    // A saved preset is user intent, not a mirror of current runtime values.
+    // Browsing, editor reloads and mode changes never adopt live settings into
+    // it. Only a new document is seeded from capture; edits require explicit save.
+    // Full capture still serves live capability reads and startup comparison.
     if (options.overviewOnly || options.editorOnly) {
         const settings = await readOnce(loadSettings, '开机模式设置'), raw = object(settings.extensions?.[MODULE_KEY]);
         const global = object(raw.global);
-        const complete = raw.schema === 1 && BOOT_MODE_MODULES.every(module => global[module] && typeof global[module] === 'object' && !Array.isArray(global[module]));
+        const complete = raw.schema === 1 && BOOT_MODE_MODULES.every(module => module === 'controller' || global[module] && typeof global[module] === 'object' && !Array.isArray(global[module]));
         const baseline = complete
             ? Object.fromEntries(BOOT_MODE_MODULES.map(module => [module, normalizeBootConfig(global[module])])) as BootModeSnapshot
             : savedOverviewSnapshot(settings);
         const document = readStoredBootMode(settings, baseline);
-        if (options.editorOnly) {
-            const observed = savedOverviewSnapshot(settings);
-            reconcileBootModeSnapshot(document, settings, observed, ['performance', 'input', 'gyro', 'controller', 'monitor', 'background', 'steamWallpaper']);
-        }
         return { document, requiresCapture: !complete,
             startupResult: normalizeBootStartupResult(settings.extensions?.bootModesStartupResult, object(settings.input).startupObservedBoot),
             baseline: cloneBootValue(document.global), support: {}, apps: Array.isArray(settings.quickApps.apps) ? cloneBootValue(settings.quickApps.apps) : [] };
@@ -223,7 +212,6 @@ export async function loadBootModes(options: { overviewOnly?: boolean; editorOnl
         const settings = await readOnce(loadSettings, '开机模式设置');
         assertSettingsGeneration(generation);
         const document = readStoredBootMode(settings, baseline);
-        reconcileBootModeSnapshot(document, settings, baseline, ['performance', 'input', 'gyro', 'controller', 'touch', 'monitor', 'background', 'steamWallpaper']);
         return { document, startupResult: normalizeBootStartupResult(settings.extensions?.bootModesStartupResult, object(settings.input).startupObservedBoot), baseline: cloneBootValue(document.global), support, apps: Array.isArray(settings.quickApps.apps) ? cloneBootValue(settings.quickApps.apps) : [] };
     });
 }
@@ -310,8 +298,9 @@ export function chooseBootMode(id: BootModeId, document: BootModeDocument, enabl
                     }
                 }],
             // All fixed non-global modes repair handheld identity. Only 2/4
-            // enable Xbox's Windows startup flag; 3 uses advanced Steam instead.
-            ['Windows 开机配置', () => writeGamingHomeStartup(enabled && (id === 'xbox' || id === 'xbox-steam'), enabled)],
+            // select Xbox AND enable its sign-in flag immediately; 3 clears both now.
+            // These are pre-boot OS settings, never deferred to runtime restoration.
+            ['Windows 开机配置', () => writeGamingHomeStartup(enabled && (id === 'xbox' || id === 'xbox-steam'), enabled, enabled && (id === 'xbox' || id === 'xbox-steam') ? 'xbox' : 'none')],
             ['Steam 高级启动', () => steamMasterSet(enabled && (id === 'steam' || id === 'xbox-steam'), enabled)],
             ['音质优化开机联动', () => fxSet(false)],
             ['小黄鸭开机联动', () => steamAddonSet('steamscale', false)],
@@ -490,14 +479,14 @@ function deferBootMouse(input: BootModeSnapshot['input'], receipt: BootModeRecei
     // Close the gap between the failed apply and subscription without a timer or poller.
     wake();
 }
-function inputPatch(snapshot: BootModeSnapshot, settings: UnifiedSettings, activate = true): Record<string, any> {
-    const input = object(snapshot.input), rawMotion = object(object(snapshot.gyro).motion), motion = { ...rawMotion, ...(activate && rawMotion.enabled === true ? { outputMode: 'virtual-stick', unit: 'deg/s' } : {}) }, controller = object(snapshot.controller);
-    return { outputTarget: { ...object(input.outputTarget), ...(activate ? { persona: input.persona, buttonMappingEnabled: input.persona !== 'disabled', gyroEnabled: rawMotion.enabled === true } : {}) }, ownership: input.ownership, gyroMotion: motion,
-        buttonMapping: { ...settings.input.buttonMapping, rules: { ...object(settings.input.buttonMapping?.rules), schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: controller.rules } } };
+function inputPatch(snapshot: BootModeSnapshot, settings: UnifiedSettings, activate = true, shortcutOverride?: Record<string, any> | null): Record<string, any> {
+    const input = object(snapshot.input), rawMotion = object(object(snapshot.gyro).motion), motion = { ...rawMotion, ...(activate && rawMotion.enabled === true ? { outputMode: 'virtual-stick', unit: 'deg/s' } : {}) };
+    return { outputTarget: { ...object(input.outputTarget), ...(activate ? { persona: input.persona, buttonMappingEnabled: input.persona !== 'disabled', gyroEnabled: rawMotion.enabled === true } : {}) }, ...(input.ownership === undefined ? {} : { ownership: input.ownership }), gyroMotion: motion,
+        bootModeShortcuts: shortcutOverride === undefined ? settings.input.bootModeShortcuts ?? null : shortcutOverride };
 }
-async function writeBaseInput(snapshot: BootModeSnapshot, expected: number, isCurrent: () => boolean): Promise<number> {
+async function writeBaseInput(snapshot: BootModeSnapshot, expected: number, isCurrent: () => boolean, shortcutOverride: Record<string, any> | null): Promise<number> {
     const settings = await readOnce(loadSettings, '开机模式设置');
-    const result = await compareAndSwapInputSettings(expected, inputPatch(snapshot, settings), isCurrent);
+    const result = await compareAndSwapInputSettings(expected, inputPatch(snapshot, settings, true, shortcutOverride), isCurrent);
     if (result.ok === false)
         throw Error('全局输入配置冲突或写入未确认：' + result.reason);
     return result.value.revision;
@@ -883,7 +872,9 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
         throw Error('开机模式已变化，请重新读取');
     const isCurrent = () => getSettingsGeneration() === generation;
     // Native-only metadata is not input intent. No dedicated game profile is written here.
-    const inputChanged = !same(inputPatch(before, beforeSettings, false), inputPatch(next, beforeSettings));
+    const ownShortcuts = id !== 'global' && document.scenes[id].overrides.controller;
+    const shortcutOverride = ownShortcuts ? { schema: 1, mode: id, boot: String(beforeSettings.input.startupObservedBoot || ''), rules: cloneBootValue(next.controller.rules) } : null;
+    const inputChanged = !same(inputPatch(before, beforeSettings, false), inputPatch(next, beforeSettings, true, shortcutOverride));
     const mouseChanged = before.input.persona !== next.input.persona || (next.input.mouse !== null && (before.input.mouse !== next.input.mouse || (before.input.mousePolicy !== null && before.input.mousePolicy !== (next.input.mouse === 'off' ? 'off' : 'on'))));
     const steps: BootApplyStep[] = [];
     let inputRevision = beforeSettings.input.revision;
@@ -900,8 +891,8 @@ async function applyBootModeInQueue(id: BootModeId, document: BootModeDocument, 
                 }
             }, rollback: () => restoreMouse(before.input) });
     if (inputChanged)
-        steps.push({ id: 'global-input', apply: async () => { inputRevision = await writeBaseInput(next, inputRevision, isCurrent); receipt.applied.push('全局手柄与陀螺仪'); }, rollback: async () => {
-                const result = await compareAndSwapInputSettings(inputRevision, { outputTarget: beforeSettings.input.outputTarget, ownership: beforeSettings.input.ownership, gyroMotion: beforeSettings.input.gyroMotion, buttonMapping: beforeSettings.input.buttonMapping }, isCurrent);
+        steps.push({ id: 'global-input', apply: async () => { inputRevision = await writeBaseInput(next, inputRevision, isCurrent, shortcutOverride); receipt.applied.push('全局手柄与陀螺仪'); }, rollback: async () => {
+                const result = await compareAndSwapInputSettings(inputRevision, { outputTarget: beforeSettings.input.outputTarget, ownership: beforeSettings.input.ownership, gyroMotion: beforeSettings.input.gyroMotion, bootModeShortcuts: beforeSettings.input.bootModeShortcuts ?? null }, isCurrent);
                 if (result.ok === false)
                     throw Error('旧输入配置恢复遇到新版本：' + result.reason);
                 inputRevision = result.value.revision;

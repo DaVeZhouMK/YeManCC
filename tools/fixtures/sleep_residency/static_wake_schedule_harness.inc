@@ -78,6 +78,18 @@ static void work(){while(!jobs.empty()){auto f=std::move(jobs.front());jobs.pop_
 static void reset(){g_sgStaticScanDelay={};g_sgStaticScanPreference=-1;g_sgStaticScanRevision=1;g_sgStaticScanArmedRevision=0;g_sgStaticScanRunning=false;
  tick=1000;testScheduleGeneration=1;timerDue=0;gate=true;queueAvailable=true;scans=scanWrites=restores=restoreWrites=0;jobs.clear();messages.clear();receipts.clear();duringScan={};duringRestore={};duringPost={};duringGenerationRead={};duringClockRead={};g_exitRequested=false;g_powerLifecycle=PowerLifecycle::Ready;}
 static unsigned run(){unsigned checks=0;auto expect=[&](bool ok,const char* name){++checks;if(!ok)throw std::runtime_error(name);};
+ expect(sgStaticScanEnabled(json::object()),"new installs preserve enabled automatic scanning default");
+ expect(!sgStaticScanEnabled({{"sleepPowerPlanOptimizationEnabled",false}}),"old saved OFF migrates without activating scans");
+ expect(sgStaticScanEnabled({{"sleepPowerPlanOptimizationEnabled",true}}),"old saved ON migrates to automatic scanning");
+ expect(sgStaticScanEnabled({{"sleepPowerPlanOptimizationEnabled",false},{"staticWakeAutoScanEnabled",true}}),"independent automatic ON works with power repair OFF");
+ expect(!sgStaticScanEnabled({{"sleepPowerPlanOptimizationEnabled",true},{"staticWakeAutoScanEnabled",false}}),"independent automatic OFF overrides power repair ON");
+ reset();sgStaticScanPreference(sgStaticScanEnabled({{"staticWakeAutoScanEnabled",false}}),true);pump();
+ expect(timerDue==0&&scans==0,"saved automatic OFF schedules no startup scan");
+ sgStaticScanPreference(sgStaticScanEnabled({{"staticWakeAutoScanEnabled",true}}));pump();
+ expect(timerDue==61000&&scans==0,"explicit automatic ON schedules one minute with no immediate inventory");
+ tick=61000;sgStaticScanTimer();work();expect(scans==1,"explicit automatic ON actually reaches native inventory once");
+ sgStaticScanPreference(true);pump();tick=121000;sgStaticScanTimer();work();
+ expect(scans==1&&timerDue==0,"unrelated saved settings cannot reschedule an already enabled scan");
  reset();sgStaticScanPreference(true,true);pump();expect(timerDue==61000&&scans==0,"actual startup queues a minute without immediate inventory");
  tick=60999;sgStaticScanTimer();expect(timerDue==61000&&jobs.empty(),"actual early timer rearms remaining absolute millisecond");
  tick=61000;sgStaticScanTimer();expect(jobs.size()==1&&scans==0,"actual delay dispatch uses existing worker queue");work();

@@ -73,17 +73,12 @@ jobs:
         with:
           dotnet-version: '10.0.400'
 
-      - name: Setup MSVC and Windows SDK
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
-
       - name: Provide frozen-source Visual Studio compatibility entrypoints
         shell: pwsh
         run: |
           # Only provision the disposable hosted runner. No tracked source is edited.
           $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
+          # Reuse a selected installation or discover MSVC directly (including preview VS).
           $installation = $env:VSINSTALLDIR
           if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
             $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
@@ -284,7 +279,7 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@efb35369e0ad2afab669f228072c1b0d510eae64 # v3.0.3; Node.js 24
         with:
           files: |
             ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/Packages/YeManCC.zip

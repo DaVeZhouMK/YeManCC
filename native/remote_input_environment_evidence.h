@@ -30,8 +30,16 @@ inline constexpr std::array<const wchar_t*, 5> executableNames{{
     L"GameViewer.exe", L"GameViewerServer.exe", L"GameViewerService.exe",
     L"GameViewerHealthd.exe", L"GameViewerLauncher.exe"
 }};
-inline constexpr std::array<const wchar_t*, 3> serviceNames{{
-    L"uuycinput", L"uuycinputmf", L"ViGEmBus"
+// Export-only GameInput context. Keep these separate from the GameViewer
+// installation list: service images must never derive UU log discovery roots.
+inline constexpr std::array<const wchar_t*, 2> gameInputExecutableNames{{
+    L"GameInputSvc.exe", L"GameInputRedistService.exe"
+}};
+// Exact SCM candidate probes, not an EXE-to-service-name mapping. A missing
+// candidate name does not prove no GameInput service/runtime is installed.
+inline constexpr std::array<const wchar_t*, 5> serviceNames{{
+    L"uuycinput", L"uuycinputmf", L"ViGEmBus",
+    L"GameInputSvc", L"GameInputRedistService"
 }};
 
 struct LastErrorScope {
@@ -79,8 +87,13 @@ inline bool sameExecutable(const wchar_t* value, const wchar_t* expected) noexce
     }
     return false;
 }
+inline bool gameInputExecutable(const wchar_t* value) noexcept {
+    for (const auto* expected : gameInputExecutableNames) if (sameExecutable(value,expected)) return true;
+    return false;
+}
 inline const wchar_t* selectedName(const wchar_t* value) noexcept {
     for (const auto* expected : executableNames) if (sameExecutable(value,expected)) return expected;
+    for (const auto* expected : gameInputExecutableNames) if (sameExecutable(value,expected)) return expected;
     return nullptr;
 }
 inline bool checkpointExpired(ULONGLONG begin) noexcept { return GetTickCount64()-begin>=phaseCheckpointMs; }
@@ -228,6 +241,7 @@ inline json processRow(const PROCESSENTRY32W& entry, const wchar_t* name, Versio
     json out={{"pid",entry.th32ProcessID},{"parentPid",entry.th32ParentProcessID},
         {"parentPidScope","Toolhelp snapshot; parent lifetime/identity unverified"},
         {"snapshotName",asciiName(name)},{"snapshotToHandleIdentityProven",false},
+        {"category",gameInputExecutable(name) ? "gameinput-service-candidate" : "remote-input-client"},
         {"imagePath",skipped("process-open-unavailable")},{"birthFileTime",skipped("process-open-unavailable")},
         {"fileVersion",skipped("image-path-unavailable")},{"installation",skipped("image-path-unavailable")}};
     SetLastError(ERROR_SUCCESS);
@@ -265,7 +279,8 @@ inline json processRow(const PROCESSENTRY32W& entry, const wchar_t* name, Versio
     const wchar_t* baseName=path.c_str()+(separator==std::wstring::npos ? 0 : separator+1);
     const bool stillMatches=sameExecutable(baseName,name);
     out["imagePath"]["baseNameStillMatchesSnapshot"]=stillMatches;
-    out["installation"]=installationObservation(path,name,entry.th32ProcessID,installs);
+    out["installation"]=gameInputExecutable(name) ? skipped("not-GameViewer-installation")
+        : installationObservation(path,name,entry.th32ProcessID,installs);
     if (!stillMatches) out["fileVersion"]=skipped("image-name-changed-after-snapshot");
     else if (checkpointExpired(begin)) out["fileVersion"]=skipped("process-phase-checkpoint-budget");
     else out["fileVersion"]=fileVersion(api,path);
@@ -312,6 +327,7 @@ inline void collectProcesses(json& out,std::vector<ObservedInstallation>& instal
     out["defaultInstallationPathObserved"]=false; out["nonDefaultInstallationObserved"]=false;
     out["nonDefaultExecutablePathObserved"]=false;out["installPathQueriesComplete"]=out["enumerationComplete"];
     for(const auto& row:out["rows"]) {
+        if(row.value("category",std::string{})=="gameinput-service-candidate")continue;
         const auto& install=row["installation"];
         if(!install.value("known",false)){out["installPathQueriesComplete"]=false;continue;}
         if(install.value("defaultExecutableLocationMatchesByPath",false))out["defaultInstallationPathObserved"]=true;
@@ -393,7 +409,9 @@ inline void serviceConfig(SC_HANDLE manager, const wchar_t* name, json& row) {
 inline void collectServices(json& out) {
     const ULONGLONG begin=GetTickCount64();
     out={{"managerOpen",skipped("not-yet-attempted")},{"rows",json::array()},
-        {"scope","three exact local service names; status and config queried independently"}};
+        {"candidateNameProbes",true},{"missingExactNameProvesGameInputAbsent",false},
+        {"servicePidToImageBindingProven",false},
+        {"scope","five exact SCM candidate names; not inferred from EXE names; status and config queried independently"}};
     SetLastError(ERROR_SUCCESS);
     ServiceHandle manager(OpenSCManagerW(nullptr,SERVICES_ACTIVE_DATABASEW,SC_MANAGER_CONNECT));
     const DWORD managerError=manager.value ? ERROR_SUCCESS : GetLastError();
@@ -643,7 +661,8 @@ static json collectRemoteInputEnvironmentEvidence() {
             {"logEntriesPerRoot",maxLogEntriesPerRoot},{"logEntries",maxLogEntries}}},
         {"interpretation",{{"processPresenceProvesRemoteSession",false},{"runningDriverProvesRemoteSession",false},
             {"inputSenderKnown",false},{"activeControllerOwnershipKnown",false},{"processNamesProvePublisher",false},
-            {"pidReuseExcluded",false},{"fileVersionProvesLoadedImage",false}}},
+            {"pidReuseExcluded",false},{"fileVersionProvesLoadedImage",false},
+            {"gameInputRuntimeSelectionKnown",false},{"servicePidToImageBindingProven",false}}},
         {"privacy",{{"commandLinesCollected",false},{"accountsOrTokensCollected",false},
             {"connectionIdsCollected",false},{"privateConfigurationCollected",false}}},
         {"scope","One Toolhelp process snapshot and sequential read-only queries. Names/presence, file versions and driver state do not prove a remote connection, input sender, keyboard delivery or active gamepad ownership. Process exit/PID reuse, file replacement and SCM changes can occur between observations. Checkpoints do not bound a single OS call."}};
@@ -652,6 +671,8 @@ static json collectRemoteInputEnvironmentEvidence() {
             {"birthFileTime",birth(GetCurrentProcess())},{"session",session(GetCurrentProcessId())}};
         out["processAllowlist"]=json::array();
         for (const auto* name:executableNames) out["processAllowlist"].push_back(asciiName(name));
+        for (const auto* name:gameInputExecutableNames) out["processAllowlist"].push_back(asciiName(name));
+        out["collectorExtensions"]=json::array({"gameinput-service-context-export-only-v1"});
         std::vector<ObservedInstallation> installs;installs.reserve(maxDerivedInstallations);
         collectProcesses(out["processes"],installs);
         collectServices(out["services"]);

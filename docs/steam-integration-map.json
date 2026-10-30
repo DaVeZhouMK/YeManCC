@@ -1,4 +1,625 @@
 {
+  "deckyReverseHandoff20261029": {
+    "date": "2026-10-29",
+    "status": "SOURCE_FIXED_CURRENT_TARGETED_PASS_NOT_INSTALLED",
+    "sources": [
+      "native/decky_sidebar_runtime.h"
+    ],
+    "consumerIds": [
+      "plugins.decky-persistent-lifecycle"
+    ],
+    "checks": {
+      "typedRuntime": 39,
+      "resourceWorker": 15,
+      "resourceWorkerHardStopNegative": 1,
+      "requiredCaseSubstitutions": 8
+    },
+    "negativeBefore": {
+      "resourceModeHandoff": "2/3",
+      "finalAdmission": "2/4"
+    },
+    "resourceBudgetRefillSemanticNegative": "rejected at ~2063ms; source-built intermediate-stage witness",
+    "automaticUiRefresh": false,
+    "officialLoaderModified": false,
+    "healthyPollingAdded": false,
+    "wholeFormalGate": "NOT_RUN",
+    "installed": false,
+    "evidence": "Testing/YMCC/Evidence/Decky-History-ROG-20261029/Reverse-Handoff/REPORT.md"
+  },
+  "deckyHistoryRog20261029": {
+    "date": "2026-10-29",
+    "status": "SCOPED_MAINLINE_FIXES_AND_TARGETED_REPLAY_PASS_NOT_INSTALLED",
+    "sources": [
+      "native/decky_sidebar_runtime.h",
+      "native/decky_binding_worker.h",
+      "native/decky_sidebar_diagnostics.h"
+    ],
+    "consumerIds": [
+      "plugins.decky-persistent-lifecycle",
+      "plugins.decky-update-recovery"
+    ],
+    "archiveFiles": 87,
+    "deckyArchives": 57,
+    "uniqueDeckyEvents": 8302,
+    "checks": {
+      "typedRuntime": 31,
+      "steamLease": 14,
+      "resourceWorker": 15,
+      "workerDiagnostics": 3,
+      "leaseMutationNegatives": 2,
+      "resourceMutationNegatives": 1,
+      "requiredCaseSubstitutionNegatives": 15
+    },
+    "automaticUiRefresh": false,
+    "unknownWriteReplay": false,
+    "officialLoaderModified": false,
+    "realSleepVerified": false,
+    "installed": false,
+    "wholeFormalGate": "NOT_RUN",
+    "historicalPermission740RootCause": "UNKNOWN",
+    "evidence": "Testing/YMCC/Evidence/Decky-History-ROG-20261029/REPORT.md",
+    "perFileLedger": "Testing/YMCC/Evidence/Decky-History-ROG-20261029/PER-FILE-REVIEW.md"
+  },
+  "deckyWakeUpgrade20261029": {
+    "date": "2026-10-29",
+    "status": "MAINLINE_SCOPED_FIX_AND_TARGETED_SIMULATION_PASS_NOT_INSTALLED",
+    "sources": [
+      "native/main.cpp",
+      "native/decky_sidebar_manual_repair.h",
+      "native/decky_binding_process_owner.h"
+    ],
+    "consumerIds": [
+      "plugins.decky-update-recovery",
+      "plugins.decky-persistent-lifecycle"
+    ],
+    "checks": {
+      "runtime": 16,
+      "manualNative": 15,
+      "ui": 4,
+      "manualSourceAndEmbeddedJs": 64,
+      "fileTransactions": 33,
+      "releaseOmissionNegatives": 4
+    },
+    "automaticUiRefresh": false,
+    "officialLoaderModified": false,
+    "wholeFormalGate": "NOT_RUN",
+    "installed": false,
+    "currentWholeMainMatchesCompiledSnapshot": false,
+    "evidence": "Testing/YMCC/Evidence/Decky-WakeHealing-20261029/REPORT.md",
+    "futureUpgradeScenarios": [
+      "v3.3.0 -> v3.3.1",
+      "v3.3.1 -> v3.4.0",
+      "v3.4.0 -> v4.0.0",
+      "v3.9.0 -> v3.10.0"
+    ]
+  },
+  "deckyRenderPressure20261028": {
+    "date": "2026-10-28",
+    "status": "SOURCE_AND_INSTALLED_NORMAL_RESTART_TARGETED_PASS",
+    "sources": [
+      "PowerControl/steam-appearance/preset.ps1",
+      "PowerControl/steam-appearance/manifest.json",
+      "PowerControl/steam-appearance/themes"
+    ],
+    "guide": "docs/steam-appearance-flat-layout-policy-20261028.md",
+    "tests": [
+      "tools/steam_appearance_owned_upgrade_selftest.ps1",
+      "tools/steam_appearance_stable_focus_selftest.mjs",
+      "tools/steam_appearance_focus_css_selftest.mjs"
+    ],
+    "finalThemeManifestSha256": "bf307446d53beba339af2a2e55859369cec3bfa73edda10d0fdd1b7ec20730db",
+    "officialLoaderModified": false,
+    "resourceBudgetMiB": 512,
+    "rootCause": "Art Hero full hero IMG brightness(100%) identity filter is the demonstrated causal trigger for the reproducible visible-tile budget storm. Scope limited to tested original/home/sidebar/store path.",
+    "actualNavigation": [
+      {
+        "label": "FINAL-INSTALLED-PRE-RESTART",
+        "warningCount": 0,
+        "tileStates": 1567,
+        "oom": 0,
+        "insufficientBudget": 0,
+        "allVisible": true,
+        "allHomeFocused": true
+      },
+      {
+        "label": "FINAL-INSTALLED-POST-RESTART",
+        "warningCount": 0,
+        "tileStates": 1335,
+        "oom": 0,
+        "insufficientBudget": 0,
+        "allVisible": true,
+        "allHomeFocused": true
+      }
+    ],
+    "checks": {
+      "ownedUpgrade": 86,
+      "themeOwner": {
+        "geometryAndEffects": 48,
+        "coverFocus": 16,
+        "renderPlan": 317,
+        "export": 24,
+        "source": "Theme-Side/FINAL-IDENTITY.json"
+      },
+      "fullFormalFixture": "NOT_RUN"
+    },
+    "installedUpdate": {
+      "mode": "asset-only via existing production Ensure/owned transaction",
+      "confirmed": true,
+      "userThemeConfigValuesPreserved": 7,
+      "retiredEmptyFolderFixed": true,
+      "ordinarySteamRestart": true,
+      "exactContentReceipts": 13
+    },
+    "evidence": "Testing/YMCC/Evidence/Decky-RenderPressure-20261028/REPORT.md",
+    "formalReleaseAccepted": false,
+    "limits": [
+      "Normal Steam shutdown/start and BPM re-entry tested, not real sleep or Windows reboot.",
+      "Final whole navigation contained two cumulative dropped frames at home-return; never claim globally zero dropped frames. Restored verification segment had no new drops.",
+      "Old full DeckyOfficial331 ZIP predates final theme assets and is not a delivery of this fix. Use latest mainline resources for the next ordinary complete export.",
+      "Unknown files in retired folders are preserved; a loader error remains explicit rather than recursive cleanup or a forged success."
+    ]
+  },
+  "deckyOfficial331Windows20261028": {
+    "date": "2026-10-28",
+    "status": "OFFICIAL331_INSTALLED_FUNCTIONAL_PASS_RENDER_FOLLOWUP_TARGETED_PASS",
+    "officialVersion": "v3.3.1",
+    "officialLoaderSha256": "8b7a36146591a3d3b54ba69c986dc508e2aea21f56652520b21e1126deebe65b",
+    "loaderModified": false,
+    "windowsUpdateOwner": "YMCC whole-package transaction",
+    "sources": [
+      "PowerControl/decky/PluginLoader_noconsole.exe",
+      "PowerControl/decky/LICENSE.decky-loader",
+      "decky-plugin/vendor/decky-loader.lock.json",
+      "native/decky_loader_identity.h"
+    ],
+    "exportBuildId": "a8268ebbfa0d03d8e716f8dbe1197423e3c1b2eb33317ef54c4a06c20adb7c5b",
+    "runtimeChecks": {
+      "staticJsOfficialBytes": 18,
+      "sidebarCycles": 3,
+      "storeCatalogItems": 116,
+      "mirrorRecoveryMs": [
+        369,
+        1088
+      ],
+      "wallpaper": "actual presented frame"
+    },
+    "evidence": "Testing/YMCC/Evidence/Decky-Official331-20261028/REPORT.md",
+    "fixtureValidation": "NOT_RUN",
+    "formalReleaseAccepted": false,
+    "limits": "Targeted runtime/install checks; no real sleep, hardware writes, foreign plugin installs or long soak. Initial Steam startup crash before Loader retained; ordinary launch/BPM later succeeded."
+  },
+  "deckyStableRecoveryBackoff20261027": {
+    "date": "2026-10-27",
+    "status": "TARGETED_DECKY_CLIENT_SOURCE_PASS_NOT_DEPLOYED_THIS_BATCH",
+    "sources": [
+      "decky-plugin/src/mirrorClient.ts",
+      "tools/decky_sidebar_hang_recovery_selftest.mjs"
+    ],
+    "behavior": "Original >=30s stable-connection backoff reset now applies to explicit disconnect (send failure and response deadline) as well as socket close. Brief flaps keep old capped backoff. Healthy idle has no additional timer/traffic; no replay or identity relaxation.",
+    "evidence": "Testing/YMCC/Evidence/Decky-Wallpaper-Support-20261027/REPORT.md",
+    "checks": {
+      "hang": 37,
+      "existingKeepalive": 23,
+      "existingClient": 74,
+      "pluginBuildAndRecompiledContent": "PASS"
+    },
+    "limits": "Virtual clocks/memory sockets; retry delay30s to250ms is scheduling only after a stable connection, not measured total recovery/startup or CPU gain. Current R9-R11 preconnection identity waits remain separately investigated by wallpaper thread."
+  },
+  "wallpaperFirstStartHealing20261027": {
+    "date": "2026-10-27",
+    "status": "REVISION5_ORDINARY_COMPLETE_LOCAL_DEPLOY_TARGETED_HEALING_AND_MINIMIZED_CPU_PASS",
+    "sources": [
+      "native/steam_ui_mode_observer.h",
+      "native/main.cpp",
+      "native/decky_sidebar_broker.h",
+      "src/bridge/steamWallpaperDelivery.ts",
+      "src/bridge/deckyMirrorHost.ts",
+      "src/bridge/deckyMirrorRelay.ts",
+      "decky-plugin/src/mirrorClient.ts"
+    ],
+    "exportBuildId": "b1981a44f08007e1772be0c6c0b153f54617c727d75b32ecc5f2284426372e92",
+    "nativeSha256": "22241d4c41dd439d481eabbda46491f80b9f46ed82bb6c0b03093c23a50210b0",
+    "pluginSha256": "64a6439fbdde5d0b9a9659f35be18cf21ad67f4e096a1909a9bf2a2b839d96a7",
+    "pluginBuildId": "e5371ee19467691b454b83ad18ce61b57847baf63ad4e3a5a2ef5d91bb400b04",
+    "packageSha256": "5c40486210205612787f0c49871058b758dbb9a09f95837518bd6e4768bd535a",
+    "behavior": [
+      "Finite startup short mode-read slots, genuine IO debt preserved; account-pending no prepare",
+      "Local live-busy misses may spend finite short slots without exhausting genuine IO failure attempts",
+      "Latest wallpaper state refusal backoff 250/1000/3000/10000/20000ms; healthy no timer",
+      "Visible current context has one correlated 10s reply deadline, no polling heartbeat or uncertain write replay",
+      "Pending native output has 10s actual-byte-progress deadline; healthy WSA_INFINITE",
+      "Same-peer hidden ready/attach preserves paused business demand, pause-send failure reconnects"
+    ],
+    "checks": {
+      "sharedMode": 100,
+      "productionStartupCallbacksEarlierInBatch": 50,
+      "wallpaperHostCases": 42,
+      "wallpaperHostAssertions": 183,
+      "mirrorClient": 74,
+      "keepalive": 23,
+      "jointBrowserFourSizesChecks": [
+        50,
+        54,
+        50
+      ],
+      "typedOwnedResumeSelected": 5,
+      "realWinsockStallAssertions": 432,
+      "originalBrokerProtocol": 26,
+      "actualVisibleSidebarCycles": 3,
+      "actualMirrorRecoveryMs": {
+        "sidebar": 347,
+        "wallpaper": 1091
+      },
+      "settingsPreserved": true
+    },
+    "localStartup": {
+      "controlledForegroundFinalVideoReadyMs": 6066,
+      "actualFrameCallbackObservationUpperBoundMs": 6229,
+      "scope": "Cold Steam process, same desktop, one explicit existing-window restore; not OS cold boot/handheld or untouched same-condition comparison",
+      "hiddenFinalProbes": [
+        "after7 video-ready7471 then minimized, no observed frame, original DEADLINE retained",
+        "after8 hidden, no video, original DEADLINE retained"
+      ],
+      "oldSequentialVideoReadyMs": [
+        11133,
+        11168
+      ]
+    },
+    "minimizedCpu": {
+      "seconds": 20,
+      "logicalProcessors": 32,
+      "stableVerifiedSteamProcesses": 8,
+      "totalMachineCpuPercent": 0.007313105748803592,
+      "rendererMachineCpuPercent": 0,
+      "videoElements": 0,
+      "nativeSidebarEvents": 0,
+      "foregroundPlaybackRestored": true
+    },
+    "evidence": "Testing/YMCC/Evidence/Wallpaper-FirstStart-20261027/REPORT.md",
+    "limits": "Physical sleep/WM_POWER_RESUME_COMMIT dispatch, real Xbox FSE, handheld and GPU watts NOT_RUN. Old sleep field root cause UNKNOWN. Whole-process finite CPU, not exclusive feature attribution. Full global formal release fixtures NOT_RUN; formalReleaseAccepted=false. Docs entry written after package, for next mainline exports."
+  },
+  "deckyHiddenPauseRecovery20261027": {
+    "date": "2026-10-27",
+    "status": "TARGETED_CLIENT_SOURCE_PASS_NOT_DEPLOYED_THIS_BATCH",
+    "sources": [
+      "decky-plugin/src/mirrorClient.ts"
+    ],
+    "behavior": "Hidden sidebar snapshot pause send exceptions use the original shared transport disconnect/backoff owner; recover current passive demand without replaying uncertain business operations. Healthy idle polling and wrong-run refusal unchanged.",
+    "evidence": "Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/Hidden-Pause-Recovery/REPORT.md",
+    "checks": {
+      "client": 58,
+      "keepalive": 23,
+      "pluginBuildAndContentCheck": "PASS"
+    },
+    "limits": "Fault-injected original client with memory socket/clock. Does not prove historical sleep root cause, actual sleep recovery or CPU percentage benefit. Separate native PowerLifecycle/runtime task remains independently owned."
+  },
+  "deckyHiddenAttachDemand20261027": {
+    "date": "2026-10-27",
+    "status": "TARGETED_SOURCE_SOFTWARE_PASS_NOT_DEPLOYED_THIS_BATCH",
+    "sources": [
+      "src/bridge/deckyMirrorRelay.ts",
+      "src/bridge/deckyMirrorHost.ts"
+    ],
+    "behavior": "Relay remembers authenticated same-peer explicit sidebar pause; late Host.ready/attach no longer restarts hidden business reads. Active/unknown/new-peer restoration still refreshes; stale/malformed peer pause cannot suppress demand.",
+    "evidence": "Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/Hidden-Attach/REPORT.md",
+    "checks": {
+      "productionHost": 33,
+      "attachBoundaries": 6,
+      "stabilityMatrix": 109,
+      "frontendCompile": "PASS",
+      "oldReadinessConsumer": "INCOMPLETE missing authentic historical baseline; original exit1 preserved"
+    },
+    "limits": "Memory-backed actual production Host/relay. Removes observed retained hidden work; no seconds-of-startup or CPU percentage gain claim. Peer owns shared mode startup catchup and live deployment."
+  },
+  "wallpaperDeckyLocalDeploy20261027": {
+    "date": "2026-10-27",
+    "status": "FINAL_REVISION2_ORDINARY_COMPLETE_DEPLOY_AND_LOCAL_FUNCTIONAL_PASS_WITH_MEASUREMENT_LIMITS",
+    "sources": [
+      "native/decky_wallpaper_process_cost.h",
+      "native/main.cpp",
+      "src/bridge/deckyMirrorRelay.ts"
+    ],
+    "exportBuildId": "22ab6a7e1ab1e4e0abf28ca60da6cef02e48e43118b21a9521496a59004c2a79",
+    "nativeSha256": "45f186758100e81062fccd04e5b552377b5cbad6c4f868d1407937c8be1a0216",
+    "relaySha256": "d74a32b086769796ced23f6a31fc45691dcfd96074487e14d0a1e2acb808f88a",
+    "behavior": [
+      "Existing wallpaper ready/startup and passive transport optimizations deployed",
+      "Ordinary overlapping snapshot demand shares in-flight owner read; real source/probe/reopen still refresh",
+      "CPU role keys/counters unchanged; context owner and UI candidate do not prove JS renderer, candidate can be GPU process"
+    ],
+    "actualLocal": {
+      "retainedSteamPid": 40344,
+      "finalAppPid": 38404,
+      "mirrorReconnectMs": 1794,
+      "sidebarOpenReadCloseCycles": 3,
+      "actualFrameCallback": true,
+      "deploySettingsByteIdentical": true
+    },
+    "evidence": "Testing/YMCC/Evidence/Wallpaper-Decky-Local-20261027/REPORT.md",
+    "limits": "CPU is whole identified process, not exclusive feature; first batch CPU is not relay before/after comparison. CEF tile warnings remain unattributed. No GPU engine/watts, ROG or physical sleep validation; full global release fixtures NOT_RUN."
+  },
+  "deckyCpuDemandCoalescing20261027": {
+    "date": "2026-10-27",
+    "status": "TARGETED_SOURCE_PASS_NOT_DEPLOYED_THIS_BATCH",
+    "sources": [
+      "src/bridge/deckyMirrorRelay.ts"
+    ],
+    "behavior": "Ordinary overlapping snapshot requests share the current business read; reopened demand, explicit probe and later settled requests refresh. Real owner source changes still discard/re-read stale results.",
+    "tests": {
+      "productionHost": 27,
+      "hostStormBoundaries": 4,
+      "duplicatesPerBoundary": 1024,
+      "commitCoalesce": "PASS original one postcommit read",
+      "profileImportRemove": 29,
+      "frontendBuild": "PASS existing >500kB warning retained"
+    },
+    "evidence": "Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/REPORT.md",
+    "limits": "Memory-backed actual production Host/relay replay counts, not measured CPU percent gain. Live CPU reference belongs to separate frozen local deployment. Full release and physical sleep NOT_RUN."
+  },
+  "deckyStormStartup20261027": {
+    "date": "2026-10-27",
+    "status": "TARGETED_SOURCE_FIXES_AND_STORM_REGRESSIONS_PASS_NOT_DEPLOYED_THIS_ROUND",
+    "sources": [
+      "decky-plugin/src/mirrorClient.ts",
+      "native/decky_sidebar_runtime.h",
+      "src/App.vue"
+    ],
+    "behavior": [
+      "Passive send failures use original transport backoff; no payload replay",
+      "Verified retained frontend attaches before optional resource preparation; mandatory new-Loader verification retained",
+      "Wallpaper ready follows persisted UI settings; original isolation and OFF guards preserved"
+    ],
+    "evidence": "Testing/YMCC/Evidence/Decky-Storm-Startup-20261027/REPORT.md",
+    "limits": "Isolated source-built native and browser tests; no physical sleep/ROG live startup or CPU benefit claim; full release NOT_RUN"
+  },
+  "wallpaperR5CpuRequestDedupe20261027": {
+    "date": "2026-10-27",
+    "status": "MAINLINE_TARGETED_SOFTWARE_PASS_NOT_DEPLOYED",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-ROG-R5-235015-20261026\\REPORT.md",
+    "sources": [
+      "decky-plugin/src/steamWallpaper.tsx",
+      "tools/steam_wallpaper_startup_browser_selftest.mjs"
+    ],
+    "behavior": "Identical same-owner/app/visibility ready-pending requests spaced 1000ms on existing events only; first, changed, forced and failed sends exempt; no new timer. Known unchanged context retains clock-free early return.",
+    "evidence": "24 repeated focusin: additional context messages48 ->0; later retry and changed game preserved",
+    "cpuAttribution": "R5 missing steamDeckyProcessCost and export descriptor; global CPU18.457%, after host false15.565%, not wallpaper exclusive. Host false may be not-ready, not user OFF.",
+    "validation": {
+      "oldClientStartupChecks": 1006,
+      "oldClientStartupCases": 56,
+      "finalClientJointChecks": 166,
+      "finalClientJointCases": 12,
+      "playerChecks": 675,
+      "isolatedPluginCheck": true
+    },
+    "coordinatedClientSha256": "46f98b51d80e9863a8df185b5e2fa7cfa946168eb021934888e0c80d5aa0099a",
+    "installedThisRound": false,
+    "cpuSavingsMeasured": false,
+    "fullGlobalFixtures": "NOT_RUN"
+  },
+  "wallpaperDeckyHighFrequencyProcessCpu20261026": {
+    "date": "2026-10-26",
+    "status": "LOCAL_INSTALLED_AND_TARGETED_TEST_PASSED",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-ROG-212633-20261026\\REPORT.md",
+    "sources": [
+      "native/decky_wallpaper_process_cost.h",
+      "native/main.cpp",
+      "native/decky_sidebar_runtime.h",
+      "native/steam_session_observer.h"
+    ],
+    "log": "virtual-gamepad.log / input-idle-window / steamDeckyProcessCost",
+    "gate": "domainLogs.virtual; existing max1Hz audit; OFF releases handles and performs no target process queries",
+    "processes": [
+      "binding-verified SharedJSContext",
+      "existing native UI-window event candidate",
+      "owned Decky Loader root and Job members"
+    ],
+    "identity": "PID + process creation + image + Windows session; retained read-only handles",
+    "cpuUnits": [
+      "cpuMsPerSec",
+      "oneLogicalCpuPercent",
+      "machineCpuPercent"
+    ],
+    "limits": "Whole process includes shared Steam/other plugin work; not exclusive wallpaper JS CPU. GPU/video decode processes not included. Missing/refused/lock-busy/exit/gap samples remain unknown or baseline.",
+    "performance": "No new thread/timer/process enumeration; reuse binding/broker/observer caches; diagnostic state and Job locks use try_lock.",
+    "installed": true,
+    "fullReleaseAcceptance": "NOT_RUN",
+    "deploymentReport": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-ROG-212633-20261026\\deployment\\REPORT.md",
+    "deploymentResult": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-ROG-212633-20261026\\deployment\\RESULT.json",
+    "installedNativeSha256": "d8c8848ffb4c821cf9e0be95af71eb58e18fc8988fd4fd16b548f85fd3defbdd",
+    "installedPluginSha256": "8f6165bbccc379978583e74912d9bcb74e8caaa4eed0b877b9a44243ade76f16",
+    "realSleepWake": "NOT_RUN",
+    "handheldRevalidation": "NOT_RUN"
+  },
+  "bootModeXboxPrimarySelection20261026": {
+    "date": "2026-10-26",
+    "status": "FIXED_IN_MAINLINE_NOT_DEPLOYED",
+    "contract": {
+      "global": "preserve current home selection and startup flag",
+      "xbox": "select Xbox AUMID and startup=1 immediately on chooseBootMode",
+      "steam": "clear home selection and startup=0 immediately on chooseBootMode",
+      "xbox-steam": "select Xbox AUMID and startup=1 immediately on chooseBootMode"
+    },
+    "runtimeInput": "next Windows boot; no virtual-controller repair in this task",
+    "sources": [
+      "src/bridge/gamingHomePolicy.ts",
+      "src/bridge/yeman.ts",
+      "src/bridge/bootModes.ts"
+    ],
+    "report": "Testing/YMCC/Evidence/BootMode-XboxPrimary-20261026/REPORT.md"
+  },
+  "wallpaperInstalledLateHome20261026": {
+    "scope": "User-authorized installed deployment and real Steam startup/navigation/background tests. Wallpaper-only public API fallback; no Loader fork, theme changes or synthetic visibility.",
+    "sources": [
+      "decky-plugin/src/wallpaperRouteFallback.ts",
+      "decky-plugin/src/steamWallpaper.tsx",
+      "decky-plugin/src/wallpaperPlayers.ts",
+      "native/shared_game_media_download_worker.h"
+    ],
+    "contracts": {
+      "lateHome": "Public Decky addGlobalComponent/removeGlobalComponent carries existing Surface when late addPatch does not mount an already rendered native Home; normal route takeover releases fallback. No new React root/polling/timer.",
+      "scope": "Known non-home m_locationPathname rejected before document scanning. Existing guarded m_history.listen subscription disposes. Unknown route discovery is bounded; real Home direct-child observers only after discovery.",
+      "selection": "Exact current native background-holder React appid is the initial selection; previousAppid/preloadAppid are not substituted. Scoped observer handles holder replacement.",
+      "ownership": "Original foreground/visibility/viewport/OFF/sequence/source release gates retained. No background preloading or additional media owner."
+    },
+    "regression": {
+      "startupChecks": 766,
+      "startupCases": 44,
+      "evidence": "G:/YeManCC-Work/Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/late-route-startup-final/wallpaper-startup-results.json",
+      "kind": "Browser fixtures using real product source; not installed acceptance"
+    },
+    "installedEvidence": "G:/YeManCC-Work/Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REPORT.md",
+    "statusAtSourceFreeze": "Superseded by installedFinal actual local acceptance; original A/B/C compile/deploy failures retained in report.",
+    "limitations": "No hard 30fps playback cap or cached 60fps transcode; no physical watts or remote ROG acceptance. FixtureValidation remains NOT_RUN for full ordinary export.",
+    "installedFinal": {
+      "status": "PASS_LOCAL_TARGETED_ACCEPTANCE",
+      "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REPORT.md",
+      "acceptance": "G:/YeManCC-Work/Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/FINAL-ACCEPTANCE.json",
+      "checks": 24,
+      "coldStartFirstFrameMs": 6282,
+      "sameYmccSteamRestartFirstFrameMs": 11251,
+      "pluginBuildId": "6f858a342a687a2f663cac285da652adfcadf8cbf0d3fdcfb01192a69efba33a",
+      "normalHomeTargetedChecks": 258,
+      "fullReleaseFixtures": "NOT_RUN",
+      "renderPressure": "Intermittent tile-memory warnings remain; stable post-restart19s had zero. Cause not uniquely attributed, no theme/Chromium budget change. CPU group measurements are not net wallpaper cost."
+    },
+    "reverseLocal1547": {
+      "status": "PASS_TARGETED_LOCAL",
+      "installedChecks": 24,
+      "reverseChecks": 7,
+      "coldFirstFrameMs": 6443,
+      "sameYmccSteamRestartFirstFrameMs": 6033,
+      "nativeAppId": "2288340",
+      "ignoredPreloadAppId": "945360",
+      "servedRangeBytes": 4096,
+      "bytePrefixMatches": true,
+      "productChanges": false,
+      "source": "Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REVERSE-1547-RESULT.json",
+      "renderBudgetWarnings": "Still observed; stable893/10.748s, source UNKNOWN; CPU group not power attribution"
+    }
+  },
+  "steamBootSimpleNoYmccFocus20261026": {
+    "date": "2026-10-26",
+    "status": "SIMPLE_NO_YMCC_LAUNCH_TWO_FOCUS_CANDIDATE_READY",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-130851-ROG\\simple-no-ymcc\\REPORT.md",
+    "desktop": "C:\\Users\\DaVe\\Desktop\\YeManSteam-Simple-NoYMCC-20261026.bat",
+    "sha256": "fd9668908b3407647a4498e070de2a7a62941d7633d83b1de907d9c88fbbc2b7",
+    "ymccLaunchInBat": false,
+    "ymccStartupOwner": "existing normal startup task; no changes to task or settings",
+    "focusMilestones": [
+      "first verified Steam Big Picture window",
+      "fresh current-owner virtual-target accepted frame"
+    ],
+    "maximumFocusGroups": 2,
+    "simultaneousMilestones": "coalesced",
+    "virtualDisabled": "window milestone only",
+    "steamArguments": "-bigpicture -noverifyfiles -nobootstrapupdate -skipinitialbootstrap",
+    "installedBatChanged": false,
+    "nativeInstalled": false,
+    "directConsumerChecksTotal": 132,
+    "qualifiedCoreAdapter": "NOT_RUN_UNPROVEN_CLOSURE retained; direct consumer diagnostics do not upgrade it",
+    "fullFixtures": "NOT_RUN",
+    "runtimeAcceptance": false,
+    "inputSourceCauseStillOpen": true,
+    "latestUserFeedback": "Working reference BAT and one screen click can restore control; do not treat older all-zero frames as proof of a driver fault"
+  },
+  "steamBootOnlinePreferred20261026": {
+    "date": "2026-10-26",
+    "status": "ONLINE_PREFERRED_BAT_READY_FOR_USER_TEST",
+    "intent": "Start quickly with normal Steam connectivity; do not force offline",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootLatestValveStartup-20261026\\online-preferred\\REPORT.md",
+    "source": "G:\\YeManCC-Work\\Mainline\\YeManCC-source\\YeManCC\\PowerControl\\YeManSteam.bat",
+    "desktop": "C:\\Users\\DaVe\\Desktop\\YeManSteam-NetworkStartup.bat",
+    "previousSha256": "47bc6043183e710a316f311af33a28c3956766f4da2a17960ba54ed7caa9ac68",
+    "sha256": "08cb60e92fdbc438c6f9936e6cbb73a8495bdd185d40b152b4999f0a9cb5a1d6",
+    "change": "Remove -offline only; do not add -offlinemode",
+    "networkStartup": "Existing optional 302 task request immediately next to YMCC; no added wait for network readiness",
+    "preserved": "YMCC --minimized, no active focus, existing Steam instance reuse, CSS/Decky owned by YMCC",
+    "installedBatChanged": false,
+    "steamSettingsChanged": false,
+    "applicationsStartedOrStopped": false,
+    "fullFixturesRun": false,
+    "runtimeSpeedValidated": false,
+    "previousOfflineTrial": "Retained as historical experiment; not selected for normal delivery"
+  },
+  "wallpaperCpuStartup20261026": {
+    "scope": "Wallpaper product changes only. User-authorized local Steam restore/navigation and one normal restart for measurement; no theme/transport changes, installed payload replacement, YMCC restart or game launch.",
+    "sources": [
+      "decky-plugin/src/wallpaperPlayers.ts",
+      "decky-plugin/src/steamWallpaper.tsx",
+      "native/shared_game_media_download_worker.h"
+    ],
+    "contracts": {
+      "selection": "Known ON same owner/app force request preserves displayed asset, incoming still checks current sequence/owner/revision. Route-bound focus ignores known hidden cached routes.",
+      "player": "No play before metadata/random seek; metadata preload. On different selections under120ms apart, one cancellable latest90ms timer. First/ordinary single-card movement immediate; OFF/background/dispose cancel and release sources.",
+      "quality": "Default720/480 band prefers declared<=30fps; manual height remains authoritative; absent or only60fps sources remain usable. No cached-video re-encode or hard playback fps cap.",
+      "logging": "At most96 logs; first95 details, ordinal96 trace-limit/suppressedStage makes truncation explicit. No added timer."
+    },
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/Wallpaper-BackgroundPower-20261023/cpu-deep-20261026/REPORT.md",
+    "limitations": "Existing60fps cache unchanged. Final log patch startup469 checks and TypeScript passed; earlier full host/video78+78 and player675/native50 passed. Isolated CPU benefit is rapid-navigation work only. Local restart valid DOM samples +28.945..64.893s had0 wallpaper surfaces/assets; native intro excluded. Native session admission unresolved, no full EXE export/deploy, physical watts or remote ROG acceptance.",
+    "finalPlugin": {
+      "buildId": "ea32a82c83ad431a92c4c7ac56bab338a1ea539da6fbad42dc1a42d79aae3e72",
+      "sha256": "d764e808fcb2c307ddda27b7dc914756eb1573fae3819e5850b8e8722642ef68",
+      "sourceSurfaceSha256": "a5b51107ce2dd295430e0e15ac48cbc5f70244409e95fc13ff48df7ab57e9c75",
+      "installed": false
+    },
+    "localMeasured": {
+      "summary": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-BackgroundPower-20261023\\cpu-deep-20261026/live-installed/MEASURED-SUMMARY.json",
+      "foregroundSeconds": 5.108,
+      "logicalProcessors": 32,
+      "steamwebhelperGroupCpuPercent": 0.87,
+      "ymccGroupCpuPercent": 0.191,
+      "scope": "Aggregate process CPU; no OFF/GPU/watt baseline, not wallpaper net cost",
+      "contextToReadyMs": [
+        117,
+        85,
+        69
+      ],
+      "restartStatus": "DEADLINE_NO_WALLPAPER_OBSERVED",
+      "restartEvidence": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\Wallpaper-BackgroundPower-20261023\\cpu-deep-20261026/live-installed/STARTUP-CLASSIFICATION.json",
+      "nativeFailure": "steam-session-unconfirmed",
+      "nativeWriteScope": false
+    }
+  },
+  "steamBootLatestValveStartup20261026": {
+    "date": "2026-10-26",
+    "status": "RESEARCH_COMPLETE_OFFLINE_PARAMETER_TRIAL_UNVALIDATED",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootLatestValveStartup-20261026\\REPORT.md",
+    "actualClientVersion": "1792618285",
+    "linuxNewestInspectedBuildUtc": "2026-10-23T20:43:29Z",
+    "observedLoginWaitsSeconds": [
+      10,
+      30
+    ],
+    "offlinemodeRegisteredInCurrentOfficialBinary": true,
+    "offlinemodeEffectiveConsumerProven": false,
+    "offlinemodeRuntimeValidated": false,
+    "candidateDesktop": "C:/Users/DaVe/Desktop/YeManSteam-OfflineTrial.bat",
+    "candidateSha256": "d0f8ae8104c5c8c243571b06f50c58c39d2f3931b4a6011e4b3ee5eef3abf48c",
+    "mainlineBatChanged": false,
+    "installedBatChanged": false,
+    "steamSettingsChanged": false,
+    "applicationsStartedOrStopped": false,
+    "fullFixturesRun": false,
+    "runtimeAccelerationAccepted": false
+  },
+  "steamBootNetworkCompanion20261026": {
+    "date": "2026-10-26",
+    "status": "NETWORK_ACCELERATOR_COMPANION_REQUEST_READY_FOR_USER_TEST",
+    "report": "G:/YeManCC-Work/Testing/YMCC/Evidence/SteamBootNetworkStartup-20261026/REPORT.md",
+    "desktop": "C:/Users/DaVe/Desktop/YeManSteam-NetworkStartup.bat",
+    "sha256": "47bc6043183e710a316f311af33a28c3956766f4da2a17960ba54ed7caa9ac68",
+    "configurationAuthority": "PowerView root Steamcommunity_302 scheduled task, not obsolete startupDesired mirror",
+    "dispatchStage": "Immediately next to YMCC dispatch, before Steam, no app readiness or FSE exit wait",
+    "deduplication": "Verified fixed executable; current process check twice; unknown identity skips; original registered task IgnoreNew; at most one request per BAT",
+    "taskOrSettingsChanged": false,
+    "installedBatChanged": false,
+    "secondBatChanged": false,
+    "ymccMinimizedPreserved": true,
+    "focusActionsAbsent": true,
+    "validation": "PowerShell AST plus19 temporary memory-terminal checks; no real launches or full fixtures",
+    "fieldAcceptance": false,
+    "initialLogAssessment": "Accelerator actual launch time absent from export; cannot prove delayed until Xbox FSE exit"
+  },
   "bootAdvancedStartupFinalMatrix20261025": {
     "date": "2026-10-25",
     "supersedes": "Steam/AnyFSE primary-app discovery interpretation; Windows startup is Xbox or none.",
@@ -9343,6 +9964,7 @@
       "id": "decky",
       "label": "Decky 侧边栏 / 镜像 / Steam 当前游戏观察",
       "anchors": [
+        "native/decky_wallpaper_process_cost.h",
         "src/bridge/deckySidebar.ts",
         "src/components/SteamQuickAccessMapping.vue",
         "src/bridge/deckyMirrorHost.ts",
@@ -9398,6 +10020,7 @@
         "native/decky_binding_worker.h"
       ],
       "sourcePatterns": [
+        "native/decky_wallpaper_process_cost.h",
         "native/decky_package_maintenance.ps1",
         "native/decky_package_maintenance_script.h",
         "native/decky_resource_worker.h",
@@ -9771,8 +10394,28 @@
     },
     {
       "id": "library",
+      "wallpaperWakeReady": {
+        "reviewedAt": "2026-10-29",
+        "scope": "Wallpaper-only S0 Ready; no generic power.resumed or input recovery replay",
+        "native": "sgAbortSleepIntent: current generation and PowerLifecycle::Ready",
+        "event": "gameMedia.resume-ready",
+        "consumers": [
+          "src/bridge/gameMediaPreparationPolicy.ts",
+          "src/bridge/gameMediaDownloads.ts",
+          "src/bridge/sharedGameMedia.ts",
+          "src/bridge/steamWallpaperHost.ts"
+        ],
+        "fences": "One resume per generation; stale suspend-generation guard; explicit OFF and native resource policy retained; dispose unsubscribes",
+        "evidence": "Testing/YMCC/Evidence/Wallpaper-LogAssist-20261029/REPORT.md",
+        "installedAcceptance": false,
+        "physicalSleepAcceptance": false
+      },
       "label": "自定义游戏库 / 账号 / 非 Steam 快捷方式 / 素材",
       "anchors": [
+        "src/bridge/gameMediaPreparationPolicy.ts",
+        "src/bridge/gameMediaDownloads.ts",
+        "src/bridge/sharedGameMedia.ts",
+        "src/bridge/steamWallpaperHost.ts",
         "src/bridge/customSteamLibrary.ts",
         "src/bridge/monitorGameLogo.ts",
         "src/bridge/gameLogoConsumer.ts",
@@ -9787,6 +10430,10 @@
         "PowerControl/GameTitlePolicy.ps1"
       ],
       "sourcePatterns": [
+        "src/bridge/gameMediaPreparationPolicy.ts",
+        "src/bridge/gameMediaDownloads.ts",
+        "src/bridge/sharedGameMedia.ts",
+        "src/bridge/steamWallpaperHost.ts",
         "src/bridge/customSteamLibrary.ts",
         "src/views/CustomSteamLibraryView.vue",
         "native/custom-steam-library/**",
@@ -9798,6 +10445,7 @@
         "PowerControl/GameTitlePolicy.ps1"
       ],
       "symbols": [
+        "gameMedia.resume-ready",
         "customSteamLibrary.status",
         "customSteamLibrary.gameLogo",
         "customSteamLibrary.sendAction",
@@ -9808,6 +10456,9 @@
         "appmanifest_"
       ],
       "testPatterns": [
+        "tools/shared_game_media_recovery_selftest.ts",
+        "tools/shared_game_media_downloads_reverse_selftest.ts",
+        "tools/steam_wallpaper_host_selftest.ts",
         "tools/custom_steam_library*",
         "tools/build-custom-steam-library*",
         "tools/game_trainer_reliability_selftest.ps1",
@@ -12463,5 +13114,172 @@
     "fixtureValidation": "NOT_RUN",
     "hardwareAccepted": false,
     "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\VC-G3E190108-Bat24-R1\\REPORT.zh-CN.md"
+  },
+  "steamControllerInputBatIsolation20261026": {
+    "date": "2026-10-26",
+    "status": "INPUT_READ_BOUNDARY_FOUND_SIMPLE_BAT_COMPARISON_AWAITING_USER",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\REPORT.md",
+    "result": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\RESULT.json",
+    "desktopPackage": "C:/Users/DaVe/Desktop/YeManSteam-Controller-Test-20261026.zip",
+    "packageSha256": "1a26d5b2383df601510e271007910eccc642246b0cab1d548a4b6a4aa681e3d1",
+    "previousBatSha256": "fd9668908b3407647a4498e070de2a7a62941d7633d83b1de907d9c88fbbc2b7",
+    "previousBatPreserved": true,
+    "userDoesNotUseFse": "not a premise of new tests; no mode query/change in package",
+    "selectedSourceFaultSegment": {
+      "reads": 4637,
+      "nonzero": 0,
+      "semanticNeutral": 0
+    },
+    "sourceAndSystemSlot": 0,
+    "canonicalModulePath": "C:/SOFT/YeMan/YeManCC/xinput1_4.dll",
+    "firstSelectedNonzero": "2026-10-26T14:04:15.780+08:00",
+    "sdkNonzeroSubmittedAfterRecovery": true,
+    "steamConsumptionProven": false,
+    "rootCause": "UNKNOWN",
+    "variants": [
+      {
+        "id": "01",
+        "behavior": "Steam only"
+      },
+      {
+        "id": "02",
+        "behavior": "01 plus one pass over 3 known Xbox app names"
+      },
+      {
+        "id": "03",
+        "behavior": "02 plus one verified Steam activate/focus group, 25s bounded wait"
+      },
+      {
+        "id": "00",
+        "behavior": "45s read-only external system all-slot observer; no XInputEnable, feedback, device/mode writes"
+      },
+      {
+        "id": "99",
+        "behavior": "previous version byte-for-byte preserved"
+      }
+    ],
+    "installedBatChanged": false,
+    "nativeProductChanged": false,
+    "deviceControlExecuted": false,
+    "fullFixtures": "NOT_RUN",
+    "runtimeAcceptance": "AWAITING_USER_TEST"
+  },
+  "steamBootPureBigPictureParamTrial20261026": {
+    "date": "2026-10-26",
+    "status": "PURE_BIGPICTURE_ARGUMENT_COMPARISON_READY_NOT_RUN",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\parameter-only\\REPORT.md",
+    "desktopPackage": "C:/Users/DaVe/Desktop/YeManSteam-Controller-Test-20261026-v2.zip",
+    "zipSha256": "697228f95826312d2dd455c089ece33f5f32101b076774fe0d3593c78a305727",
+    "baseline": "01 original 4 cold-start arguments",
+    "trial": "04 only -bigpicture",
+    "requiresColdSteam": true,
+    "singleBehaviorVariable": "remove 3 extra startup arguments",
+    "parametersCause": "UNKNOWN",
+    "priorPackageAndBatsPreserved": true,
+    "installedBatChanged": false,
+    "applicationOrDeviceControlExecuted": false,
+    "fullFixtures": "NOT_RUN",
+    "realMachine": "AWAITING_USER",
+    "latestUserFeedback": "03 Steam appears then disappears; suspected Xbox kill affecting input handoff",
+    "priorityComparison": "01 vs 02: only taskkill changes, Steam arguments identical",
+    "new03LogsAvailable": false,
+    "xboxExecutableInputRoles": "UNKNOWN",
+    "crashCause": "UNKNOWN",
+    "allPreviousCandidatesPreserved": true
+  },
+  "steamXboxUpstreamAnyFseAssessment20261026": {
+    "date": "2026-10-26",
+    "status": "CONSULTATION_ONLY_NO_INSTALL",
+    "roleReport": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\xbox-process-roles\\REPORT.md",
+    "anyFseReport": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\anyfse-direct-evaluation\\REPORT.md",
+    "tag": "v0.90.21",
+    "controllerCompatibility": "UNKNOWN",
+    "backgroundCall": "Command path exists; setup required",
+    "resident": "Conditional on HID/hotkey and exit-wait features",
+    "priority": "Disable auto-start at upstream source, retain input services",
+    "installed": false,
+    "productChanged": false,
+    "systemSettingsChanged": false,
+    "oldCandidatesPreserved": true
+  },
+  "steamStandardSingleXboxBats20261026": {
+    "date": "2026-10-26",
+    "status": "FOUR_STANDARD_STEAM_START_BATS_READY",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\standard-single-xbox\\REPORT.md",
+    "desktopZip": "C:/Users/DaVe/Desktop/YeManSteam-Standard-SingleXbox-20261026.zip",
+    "zipSha256": "f353d5e4ae70bcddab9e1975c4a6adea473052fe6ac4a92e611486cdb59b080c",
+    "allFourStartSteam": true,
+    "variants": [
+      "no Xbox handling",
+      "XboxPcApp.exe once then Steam",
+      "XboxPcAppCE.exe once then Steam",
+      "XboxPcAppFT.exe once then Steam"
+    ],
+    "coldArguments": "-bigpicture",
+    "existingSteam": "steam://open/gamepadui",
+    "continueAfterKillFailure": true,
+    "fixtures": "NOT_RUN_USER_REQUEST",
+    "scriptsExecuted": false,
+    "installedBatChanged": false,
+    "oldVersionsPreserved": true
+  },
+  "steamSameNameFolderRevision20261026": {
+    "date": "2026-10-26",
+    "desktopZip": "C:/Users/DaVe/Desktop/YeManSteam-SameName-20261026.zip",
+    "desktopFolder": "C:/Users/DaVe/Desktop/YeManSteam-SameName-20261026",
+    "zipSha256": "81fb1c3841e9e1adce61bf51317eb1f59f1da903188f8bb02e37ec49c5ab5040",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\standard-single-xbox\\same-name-folders\\REPORT.md",
+    "allFourBatNames": "YeManSteam.bat",
+    "steamExitCommand": false,
+    "batExitStatementRemoved": true,
+    "existingSteamProtocolOnly": true,
+    "steamCrashCause": "UNKNOWN",
+    "fixtures": "NOT_RUN_USER_REQUEST",
+    "installedChanged": false,
+    "oldPackagesPreserved": true
+  },
+  "steamThemeExitAudit20261026": {
+    "date": "2026-10-26",
+    "status": "NO_DIRECT_THEME_STEAM_RESTART_FOUND_CURRENT_SOURCE; NEW_CRASH_UNKNOWN",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\theme-steam-exit-audit\\REPORT.md",
+    "findings": {
+      "themeReload": "steamAppearance.ts ensureReady -> steam-appearance.ps1 Invoke-AppearanceReload -> CSSLoader reset RPC",
+      "steamStop": "yeman.ts:3252-3254 taskkill Steam.exe exists; whole src search only definition, no theme call found",
+      "deckyRestartRequired": "Preparation reports restart-required; does not automatically restart Steam in audited path",
+      "oldLog": {
+        "archive": "20261026-140606",
+        "ymccPid": 11388,
+        "events": 20,
+        "steamPid": 10660,
+        "steamBirth": "134374681911584727",
+        "begin": "2026-10-26T14:03:17",
+        "ready": "2026-10-26T14:03:44.618",
+        "phase": "appearance-applied-resident",
+        "rootRestartObserved": false
+      },
+      "newUserTest": "New same-name BAT test/crash is later than old ZIP; no new crash evidence available locally",
+      "backendReview": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\theme-steam-exit-audit\\backend\\REPORT.md",
+      "backendBinaryIdentityClosure": "NOT_ESTABLISHED"
+    },
+    "productChanged": false,
+    "applicationsControlled": false,
+    "deviceControl": false,
+    "fixtures": "NOT_RUN_USER_REQUEST"
+  },
+  "steamOwnWindowsStartupDisabledCandidate20261026": {
+    "date": "2026-10-26",
+    "status": "FOUR_BATS_WITH_STEAM_OWN_AUTORUN_OFF_READY_NOT_EXECUTED",
+    "report": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\SteamBootFocusHold-20261024\\field-20261026-140606-ROG\\standard-single-xbox\\disable-steam-own-startup\\REPORT.md",
+    "desktopZip": "C:/Users/DaVe/Desktop/YeManSteam-NoOwnStartup-20261026.zip",
+    "zipSha256": "fbfbd638b72d6e27a29395b547d739e89b6090c22a7458301a8472934b8b421b",
+    "allNames": "YeManSteam.bat",
+    "target": "HKCU/Software/Microsoft/Windows/CurrentVersion/Run:Steam",
+    "ymccAdvancedStartupPreserved": true,
+    "currentSteamStopped": false,
+    "hostRunValueModified": false,
+    "targetApplied": false,
+    "alreadyDispatchedStartup": "not cancelled",
+    "fixtures": "NOT_RUN_USER_REQUEST",
+    "oldPackagesPreserved": true
   }
 }

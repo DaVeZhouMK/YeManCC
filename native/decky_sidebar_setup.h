@@ -34,13 +34,23 @@ inline bool safeManagedPath(const std::filesystem::path& file) {
     }
     return true;
 }
-inline std::string readManagedContract(const std::filesystem::path& home,Json& result,Json& manifest,const std::filesystem::path& bundledManifest={}) {
-    auto receipt=home/L".ymcc-managed.json";
+inline std::string readManagedContract(const std::filesystem::path& home,Json& result,Json& manifest,const std::filesystem::path& bundledManifest={},const std::filesystem::path& explicitReceipt={}) {
+    // The public Loader moves all root *.json to settings. Ownership receipts
+    // must never use that namespace (Windows os.rename fails on duplicates).
+    auto receipt=explicitReceipt.empty()?home/L".ymcc-managed.receipt":explicitReceipt;
     if(!safeManagedPath(receipt))return "resource-unsafe-path";
     auto attributes=GetFileAttributesW(receipt.c_str());
     result["managedPackageSource"]="receipt";
     if(attributes==INVALID_FILE_ATTRIBUTES){
-        const auto error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return "resource-package-invalid";
+        const auto error=GetLastError();
+        if(!explicitReceipt.empty())return "resource-package-invalid";
+        const auto legacy=home/L".ymcc-managed.json";
+        if(!safeManagedPath(legacy))return "resource-unsafe-path";
+        const auto legacyAttributes=GetFileAttributesW(legacy.c_str());
+        if(legacyAttributes!=INVALID_FILE_ATTRIBUTES){receipt=legacy;attributes=legacyAttributes;}
+        else if(GetLastError()!=ERROR_FILE_NOT_FOUND&&GetLastError()!=ERROR_PATH_NOT_FOUND)return "resource-package-invalid";
+        if(attributes==INVALID_FILE_ATTRIBUTES){
+            if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return "resource-package-invalid";
         // Old YMCC updaters merge the package but cannot write the new installed
         // receipt. Consume the same authenticated package metadata beside YMCC
         // on that FIRST upgrade; never silently fall back from a corrupt receipt.
@@ -48,6 +58,7 @@ inline std::string readManagedContract(const std::filesystem::path& home,Json& r
         receipt=bundledManifest;if(!safeManagedPath(receipt))return "resource-unsafe-path";
         attributes=GetFileAttributesW(receipt.c_str());if(attributes==INVALID_FILE_ATTRIBUTES)return "resource-package-invalid";
         result["managedPackageSource"]="package";
+        }
     }
     try{
         if((attributes&FILE_ATTRIBUTE_DIRECTORY)||std::filesystem::file_size(receipt)>131072)return "resource-package-invalid";
@@ -66,6 +77,27 @@ inline std::string readManagedContract(const std::filesystem::path& home,Json& r
         }
         return {};
     }catch(...){return "resource-package-invalid";}
+}
+// One bounded startup migration, before any official Loader launch. No settings
+// cleanup: only a validated YMCC root receipt is moved, without overwriting.
+inline std::string migrateLegacyManagedReceipt(const std::filesystem::path& home,const std::function<bool()>& current={}) {
+    const auto legacy=home/L".ymcc-managed.json",receipt=home/L".ymcc-managed.receipt";
+    if(!safeManagedPath(legacy)||!safeManagedPath(receipt))return "resource-unsafe-path";
+    const auto attributes=GetFileAttributesW(legacy.c_str());
+    if(attributes==INVALID_FILE_ATTRIBUTES){const auto error=GetLastError();return error==ERROR_FILE_NOT_FOUND||error==ERROR_PATH_NOT_FOUND?"":"resource-package-invalid";}
+    Json description,oldContract;
+    auto failure=readManagedContract(home,description,oldContract,{},legacy);if(!failure.empty())return failure;
+    auto destination=receipt;
+    if(GetFileAttributesW(receipt.c_str())!=INVALID_FILE_ATTRIBUTES){
+        Json canonical;
+        failure=readManagedContract(home,description,canonical,{},receipt);if(!failure.empty())return failure;
+        if(canonical!=oldContract)return "resource-receipt-conflict";
+        destination=home/(L".ymcc-managed-legacy-"+std::to_wstring(GetCurrentProcessId())+L"-"+std::to_wstring(GetTickCount64())+L".receipt");
+        if(!safeManagedPath(destination))return "resource-unsafe-path";
+    }else{const auto error=GetLastError();if(error!=ERROR_FILE_NOT_FOUND&&error!=ERROR_PATH_NOT_FOUND)return "resource-package-invalid";}
+    if(current&&!current())return "preparation-cancelled";
+    if(!MoveFileExW(legacy.c_str(),destination.c_str(),MOVEFILE_WRITE_THROUGH))return "resource-receipt-migration-failed";
+    return {};
 }
 inline std::string inspectManagedPackage(const std::filesystem::path& home,const Digest& digest,Json& result,const std::filesystem::path& bundledManifest={}) {
     Json manifest;const auto failure=readManagedContract(home,result,manifest,bundledManifest);
@@ -123,6 +155,11 @@ inline Json inspect(const std::filesystem::path& steam, const std::filesystem::p
 }
 inline Json prepare(const std::filesystem::path& steam, const std::filesystem::path& home, const Digest& digest, bool steamRunning, const std::function<bool()>& mayPrepare = {},const std::filesystem::path& bundledManifest={},const ymcc::deckyresources::Options& resourceOptions={}) {
     if(mayPrepare&&!mayPrepare())return {{"ready",false},{"reason","preparation-cancelled"},{"createdSteamDebugMarker",false}};
+    if(!resourceOptions.isolatedPreparation){
+        const auto allowed=[&]{return (!mayPrepare||mayPrepare())&&(!resourceOptions.mayWrite||resourceOptions.mayWrite());};
+        const auto migration=migrateLegacyManagedReceipt(home,allowed);
+        if(!migration.empty())return {{"ready",false},{"reason",migration},{"createdSteamDebugMarker",false}};
+    }
     const auto readEnvironment=[&]{return resourceOptions.isolatedPreparation?resourceOptions.isolatedPreparation():inspect(steam,home,digest,bundledManifest);};
     auto result=readEnvironment();
     Json maintenance=Json::object();

@@ -1,7 +1,7 @@
 {
   "name": "Art Hero",
   "author": "Metagawa",
-  "version": "v3.2.03",
+  "version": "v3.2.03-ymcc.2",
   "manifest_version": 6,
   "inject": {
     "shared.css": [

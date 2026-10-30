@@ -87,6 +87,7 @@ export class MirrorClient {
   private retry: ReturnType<typeof setTimeout> | null = null;
   private connectDeadline: ReturnType<typeof setTimeout> | null = null;
   private snapshotDeadline: ReturnType<typeof setTimeout> | null = null;
+  private wallpaperDeadline: null | {socket:WebSocket;runId:string;seq:number;appId?:string;timer:ReturnType<typeof setTimeout>} = null;
   private pending: null | { id: string; timer: ReturnType<typeof setTimeout>; resolve: (value: unknown) => void; reject: (error: Error) => void } = null;
   private probe: null | {id:string;started:number;timer:ReturnType<typeof setTimeout>;resolve:(value:ConnectionTestResult)=>void;reject:(error:Error)=>void} = null;
   private operationError: null | { notice:string;runId:string;generation:number;identity:string } = null;
@@ -112,6 +113,7 @@ export class MirrorClient {
   subscribeExtra(listener:(message:unknown)=>void){this.extraListeners.add(listener);return()=>{this.extraListeners.delete(listener);};}
   setPassiveVisible(value:boolean){this.setPassiveDemand('hud',value);}
   setPassiveDemand(consumer:string,value:boolean){
+    if(consumer==='wallpaper'&&!value)this.clearWallpaperDeadline();
     if(value)this.passiveConsumers.add(consumer);else this.passiveConsumers.delete(consumer);
     value=this.passiveConsumers.size>0;
     if(this.disposed||value===this.passive)return;
@@ -119,14 +121,57 @@ export class MirrorClient {
     if(value&&!this.socket&&this.retry===null){this.attempt=0;this.connect();}
     else if(!this.visible&&!this.passive)this.disconnect('被动显示已关闭');
   }
+  // All passive consumers share the original connection owner/backoff. A send
+  // failure invalidates that socket, but never queues/replays the uncertain
+  // payload. The consumer reports its CURRENT context after a fresh connection.
+  private sendPassive(message:Record<string,unknown>,beforeSend?:(socket:WebSocket)=>void):boolean {
+    const socket=this.socket;if(!socket)return false;
+    let payload:string;try{payload=JSON.stringify(message);}catch{return false;}
+    try{beforeSend?.(socket);socket.send(payload);return true;}catch{
+      if(this.socket===socket){this.disconnect('镜像发送失败；正在重新连接');this.recoverConnection();}
+      return false;
+    }
+  }
+  private clearWallpaperDeadline():void {
+    const pending=this.wallpaperDeadline;this.wallpaperDeadline=null;
+    if(pending)this.deps.cancel(pending.timer);
+  }
+  private waitForWallpaperResponse(socket:WebSocket,runId:string,seq:number,appId?:string):void {
+    if(this.socket!==socket||this.binding?.runId!==runId||!this.passiveConsumers.has('wallpaper'))return;
+    const prior=this.wallpaperDeadline;
+    if(prior?.socket===socket&&prior.runId===runId){
+      // Keep the original unanswered budget even as focus/events supersede the
+      // selection. Only the latest sent sequence may acknowledge this request.
+      if(seq>=prior.seq){prior.seq=seq;prior.appId=appId;}
+      return;
+    }
+    this.clearWallpaperDeadline();
+    const epoch=this.epoch,pending={socket,runId,seq,appId,timer:null as unknown as ReturnType<typeof setTimeout>};
+    this.wallpaperDeadline=pending;
+    pending.timer=this.deps.schedule(()=>{
+      if(this.wallpaperDeadline!==pending||this.epoch!==epoch||this.socket!==socket||!this.passiveConsumers.has('wallpaper'))return;
+      this.wallpaperDeadline=null;
+      this.disconnect('壁纸状态响应超时；正在重新连接，不重放未确认操作');
+      this.recoverConnection();
+    },10000);
+  }
   sendWallpaper(command:'wallpaper.context'|'wallpaper.status'|'wallpaper.neighbors',data:Record<string,unknown>):boolean {
     if(!this.passiveConsumers.has('wallpaper')||!this.state.connected||!this.socket||this.binding?.wallpaperProtocol!==1)return false;
     if(command==='wallpaper.neighbors'&&this.binding?.wallpaperPrefetchProtocol!==1)return false;
-    try{this.socket.send(JSON.stringify({...data,command,runId:this.binding.runId}));return true;}catch{return false;}
+    const runId=this.binding.runId,seq=data.contextSeq,visible=data.visible,appId=typeof data.appId==='string'?data.appId:undefined;
+    const waiting=this.wallpaperDeadline;
+    if(command==='wallpaper.context'&&visible===false&&waiting&&typeof seq==='number'&&Number.isSafeInteger(seq)&&seq>=waiting.seq)
+      this.clearWallpaperDeadline();
+    // Serialize first, then arm before send so local JSON failures stay local
+    // and an immediate correlated reply can cancel without leaving a timer.
+    return this.sendPassive({...data,command,runId},socket=>{
+      if(command==='wallpaper.context'&&visible===true&&typeof seq==='number'&&Number.isSafeInteger(seq)&&seq>=0)
+        this.waitForWallpaperResponse(socket,runId,seq,appId);
+    });
   }
   sendUpdater(command:'updater.status'|'updater.request',data:Record<string,unknown>):boolean {
     if(!this.passiveConsumers.has('updater')||!this.state.connected||!this.socket||this.binding?.updaterProtocol!==1)return false;
-    try{this.socket.send(JSON.stringify({...data,command,runId:this.binding.runId}));return true;}catch{return false;}
+    return this.sendPassive({...data,command,runId:this.binding.runId});
   }
   updaterSupported(){return this.binding?.updaterProtocol===1;}
   updaterRunId(){return this.binding?.runId;}
@@ -136,7 +181,7 @@ export class MirrorClient {
   sendHud(command:'hud.status'|'hud.ack',status:unknown,ok?:boolean):boolean {
     if(command!=='hud.status'&&command!=='hud.ack')return false;
     if(!this.passiveConsumers.has('hud')||!this.state.connected||!this.socket||this.binding?.hudProtocol!==1)return false;
-    try{this.socket.send(JSON.stringify({command,runId:this.binding.runId,status,...(ok===undefined?{}:{ok})}));return true;}catch{return false;}
+    return this.sendPassive({command,runId:this.binding.runId,status,...(ok===undefined?{}:{ok})});
   }
   setVisible(visible: boolean, owner: object = this.defaultVisibilityOwner) {
     if(this.disposed)return;
@@ -164,13 +209,19 @@ export class MirrorClient {
     if (this.pending) { const pending = this.pending; this.pending = null; this.deps.cancel(pending.timer); pending.reject(new Error(reason)); }
     this.publish({ busy: false });
   }
+  private endConnectionHealth():void {
+    // Use the same existing stable-connection threshold for close, failed send
+    // and response deadline. Brief flaps must retain their capped backoff.
+    if(this.connectedAt!==null&&this.now()-this.connectedAt>=30000)this.attempt=0;
+    this.connectedAt=null;
+  }
   private disconnect(reason: string) {
     this.finishProbe(undefined,reason);
-    this.operationError=null;this.connectedAt=null;
+    this.operationError=null;this.endConnectionHealth();
     ++this.epoch;
     if (this.retry !== null) { this.deps.cancel(this.retry); this.retry = null; }
     if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
-    this.clearSnapshotDeadline();
+    this.clearSnapshotDeadline();this.clearWallpaperDeadline();
     const old = this.socket; this.socket = null; try { old?.close(); } catch {}
     this.rejectPending('连接已结束，操作结果需重新确认');
     this.publish({ connected: false, snapshot: null, notice: reason });
@@ -217,7 +268,9 @@ export class MirrorClient {
   private clearSnapshotDeadline(){if(this.snapshotDeadline!==null){this.deps.cancel(this.snapshotDeadline);this.snapshotDeadline=null;}}
   private pauseSnapshotDemand(){
     this.clearSnapshotDeadline();
-    if(this.socket&&this.binding)try{this.socket.send(JSON.stringify({command:'snapshot',runId:this.binding.runId,subscribe:false}));}catch{}
+    // A failed pause also invalidates the shared passive transport.
+    // Use its existing owner/backoff; never replay a business operation.
+    if(this.socket&&this.binding)this.sendPassive({command:'snapshot',runId:this.binding.runId,subscribe:false});
   }
   private requestSnapshot(socket:WebSocket,runId:string) {
     // A requested state must eventually answer even when the socket remains OPEN.
@@ -295,6 +348,9 @@ export class MirrorClient {
         if(message.type==='hud-ready'){if(this.visible)this.requestSnapshot(socket,boot.runId);else this.pauseSnapshotDemand();}
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
       } else if((message.type==='wallpaper'||message.type==='wallpaper-ready')&&this.passiveConsumers.has('wallpaper')&&boot.wallpaperProtocol===1){
+        const pending=this.wallpaperDeadline;
+        if(pending?.socket===socket&&pending.runId===boot.runId&&message.contextSeq===pending.seq&&typeof message.enabled==='boolean'&&
+           (message.appId===undefined||message.appId===pending.appId))this.clearWallpaperDeadline();
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
       } else if((message.type==='ymcc-updater'||message.type==='ymcc-updater-result'||message.type==='ymcc-updater-ready')&&this.passiveConsumers.has('updater')&&boot.updaterProtocol===1){
         for(const listener of this.extraListeners){try{listener(message);}catch{}}
@@ -315,12 +371,9 @@ export class MirrorClient {
       if (epoch !== this.epoch || lost) return;
       lost = true;
       if (this.connectDeadline !== null) { this.deps.cancel(this.connectDeadline); this.connectDeadline = null; }
-      this.clearSnapshotDeadline();
+      this.clearSnapshotDeadline();this.clearWallpaperDeadline();
       ++this.epoch;
-      // Only sustained transport health resets HUD recovery backoff. Merely
-      // opening then immediately closing must not cause a rapid retry loop.
-      if(this.connectedAt!==null&&this.now()-this.connectedAt>=30000)this.attempt=0;
-      this.connectedAt=null;this.operationError=null;this.socket = null; this.rejectPending('连接中断；不自动重放设置操作');
+      this.endConnectionHealth();this.operationError=null;this.socket = null; this.rejectPending('连接中断；不自动重放设置操作');
       this.publish({ connected: false, snapshot: null, notice: '连接已中断' });
       this.recoverConnection();
     };

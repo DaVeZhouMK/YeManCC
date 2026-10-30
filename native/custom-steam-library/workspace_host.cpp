@@ -7348,6 +7348,9 @@ static void resizeWebView() {
     if (!g_window) return;
     layoutTitlebar();
     if (!g_controller) return;
+    // WebView2 must see host minimization/hiding so document visibility and
+    // its event-driven background gates agree with the native window.
+    g_controller->put_IsVisible(IsWindowVisible(g_window) && !IsIconic(g_window));
     RECT bounds{};
     GetClientRect(g_window, &bounds);
     bounds.top = kWorkspaceTitlebarHeight;
@@ -7980,6 +7983,9 @@ static LRESULT CALLBACK windowProcedure(HWND window, UINT message, WPARAM wParam
         case WM_SIZE:
             resizeWebView();
             return 0;
+        case WM_SHOWWINDOW:
+            if (g_controller) g_controller->put_IsVisible(wParam && !IsIconic(window));
+            break;
         case WM_TIMER:
             if (wParam == DIRECTORY_DEBOUNCE_TIMER) {
                 KillTimer(window, DIRECTORY_DEBOUNCE_TIMER);

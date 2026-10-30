@@ -134,7 +134,7 @@ try{
  report.additionalFieldRegressions.push('decky-retained-session-repair-rogx-20261023');
  report.trainerForeground=await trainerForegroundTests(path.join(out,'trainer-foreground'));
  report.trainerRecovery=await trainerRecoveryTests(path.join(out,'trainer-recovery'));
- report.manualRepairCases=await manualRepairTests(root,out);const boot=await frontendBootTests(root,out);report.frontendBootCases=boot.cases;report.frontendBootNegativeDetected=boot.negativeDetected;
+ report.manualRepairCases=await manualRepairTests(root,out,{upgradeActionsFile:path.join(out,'retained-session-repair/native.json')});const boot=await frontendBootTests(root,out);report.frontendBootCases=boot.cases;report.frontendBootNegativeDetected=boot.negativeDetected;
  const main=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
  const a=uniqueAnchor(main,'[]() -> ymcc::deckysidebar::LaunchAdmission {','launch admission'),m=uniqueAnchor(main,'modeObserver.changed = []','mode observer');
  const admissionBlock=cppBlock(main,main.indexOf('{',a),'launch admission'),changedBlock=cppBlock(main,main.indexOf('{',m),'mode observer');

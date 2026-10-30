@@ -41,7 +41,7 @@ def main() -> int:
             raise ValueError("GPU Windows result is not a passing production transport fixture")
     else:
         gpu_result_bytes = None
-    extra_headers = {name:(ROOT/"native"/name).read_bytes() for name in ("log_snapshot_state.h", "sleep_fact_log_record.h", "log_jsonl_boundary.h", "sleep_steam_recovery.h", "decky_sidebar_diagnostics.h")}
+    extra_headers = {name:(ROOT/"native"/name).read_bytes() for name in ("log_snapshot_state.h", "rog_fse_experiment_policy.h", "sleep_fact_log_record.h", "log_jsonl_boundary.h", "sleep_steam_recovery.h", "decky_sidebar_diagnostics.h")}
     source_path = ROOT / "native/main.cpp"
     source_bytes = source_path.read_bytes()
     source = source_bytes.decode("utf-8-sig").replace("\r\n", "\n")
@@ -102,6 +102,7 @@ def main() -> int:
 #include "json.hpp"
 #include "log_frequency_policy.h"
 #include "log_snapshot_state.h"
+#include "rog_fse_experiment_policy.h"
 #include "sleep_fact_log_record.h"
 #include "log_jsonl_boundary.h"
 using json = nlohmann::json;
@@ -202,6 +203,8 @@ int wmain(int argc, wchar_t** argv) {
         nativeLane(false, false, false) == NativeLane::suppressed && nativeLane(false, false, true) == NativeLane::detail);
     check("lane-policy-successful-frame-never-base",
         nativeLane(true, true, false) == NativeLane::suppressed && nativeLane(true, true, true) == NativeLane::detail);
+    check("normal-build-compiles-ROG-FSE-adaptation-diagnostics-out",YMCC_ROG_FSE_DIAGNOSTICS==0);
+    check("ROG-raw-input-window-cannot-be-resident",!nativeLifecycleEventIsBase("rog-raw-input-window"));
     for(bool detailed : {false,true}) {
         reset(root,detailed?L"r114-evidence-detail-on":L"r114-evidence-detail-off");
         g_domainLogEnabled[1]=detailed;

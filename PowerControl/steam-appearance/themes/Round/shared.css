@@ -417,7 +417,7 @@ button.appdetailsactivitysection_FetchMoreContainer_39Zur.DialogButton.gamepaddi
   overflow: hidden;
 }
 .BasicUI .appactionbutton_ButtonChild_2AzIX.Focusable:focus:focus::after {
-  transform: scaleX(1.1);
+  transform: none;
 }
 
 /* Activate Product Dialog */
@@ -439,10 +439,31 @@ button.appdetailsactivitysection_FetchMoreContainer_39Zur.DialogButton.gamepaddi
   overflow: hidden;
 }
 
+
+/* Retain radius/spacing rules; remove only decoration from their surfaces. */
+.BasicUI .focusring_FocusRing_1IZrQ,
+.BasicUI .appactionbutton_ButtonChild_2AzIX,
+.BasicUI button.gamepaddialog_Button_1kn70,
+.BasicUI .gamepadcontextmenu_contextMenuContents_sIgB-,
+.BasicUI .ModalPosition_Content,
+.BasicUI .header_Header_1E_SL,
+.BasicUI .footer_BasicFooter_3T1iF {
+    filter: none!important;
+    backdrop-filter: none!important;
+    box-shadow: none!important;
+    text-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+}
+.BasicUI .appactionbutton_ButtonChild_2AzIX::after {
+    display: none!important;
+}
+
 /* YMCC: observe this theme file without changing layout or input. */
 :root { --ymcc-receipt-round: 1; }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-f2a3b738282d5024: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-d98d86f8cb48e2fa: 1; }
+:root { --ymcc-content-a57f2e4999c6cc47: 1; }

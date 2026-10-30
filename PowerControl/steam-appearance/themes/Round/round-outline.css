@@ -15,6 +15,8 @@
   border-radius: calc(var(--round-radius-size) + 2px);
   margin: -2px;
   animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
 }
 
 /* Stable focus border: native focus changes never animate border width/margins. */
@@ -38,15 +40,19 @@
   border-radius: 0px;
   margin: 0px;
   animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
 }
 
 /* Keep the selected cover outline steady too. Steam's native focus outline
    otherwise grows from 12px and pulses 20 times even when dimming is disabled. */
 .BasicUI .appportrait_LibraryItemBox_WYgDg.Focusable:focus {
   animation: none !important;
+  transition: none !important;
+  box-shadow: none !important;
 }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-07e34e96ff7b3743: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-ec28d8f367e662e3: 1; }
+:root { --ymcc-content-01fede0cb344dceb: 1; }

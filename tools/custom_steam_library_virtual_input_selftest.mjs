@@ -103,7 +103,12 @@ function generate(mutant = false) {
     assert(result.includes(marker), 'Missing fixture insertion: ' + marker);
     let fragment = production;
     if (mutant === 'dsu-native-bypass' && marker === '//__PRODUCTION_DSU_FEED__') fragment = fragment.replace('dsuFrame.semanticNeutral=dsuSubmitNeutral;', 'dsuFrame.semanticNeutral=submitNeutral;');
-    if (mutant === 'background-window-owner' && marker === '//__PRODUCTION_WINDOW_HELPERS__') fragment = fragment.replace(/const bool owns = child && IsWindowVisible\(child\) && !IsIconic\(child\) &&\s*GetForegroundWindow\(\) == child;/, 'const bool owns = child != nullptr;');
+    if (mutant === 'background-window-owner' && marker === '//__PRODUCTION_WINDOW_HELPERS__') {
+      const original=block('static bool customSteamLibraryInputSuppressed() {');
+      const mutated=original.replace(/const bool owns = [\s\S]*?;/,'const bool owns = child && customSteamLibraryParentOwned(child);');
+      assert.notEqual(mutated,original,'Background-owner negative control must replace the real admission expression');
+      fragment=fragment.replace(original,mutated);
+    }
     if (mutant === 'virtual-ui-disabled' && marker === '//__PRODUCTION_FINAL_OUTPUT_DECISION__') fragment = fragment.replace(' : virtualUiOwnsInput(focusPlan);', ' : false;');
     if (mutant === 'msi-disabled' && marker === '//__PRODUCTION_OUTPUT_GATES__') fragment = fragment.replace('return msiClawKnownBoardAuthority() &&', 'return false &&');
     if (mutant === 'msi-unscoped' && marker === '//__PRODUCTION_OUTPUT_GATES__') fragment = fragment.replace('return msiClawKnownBoardAuthority() &&', 'return true &&');

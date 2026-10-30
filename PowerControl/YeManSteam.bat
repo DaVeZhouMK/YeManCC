@@ -14,16 +14,52 @@ $env:PSModulePath=(Join-Path $PSHOME 'Modules')+';'+$env:PSModulePath
 
 # Effects are injectable so this exact startup controller can be tested without
 # starting Steam/CSS/YMCC or ending any real process.
+function Invoke-BootFocusMilestones($P,$Snapshot) {
+    if(-not $Snapshot.SteamWindow -or -not $P.ContainsKey('FocusSteam')){return}
+    $state=$P.FocusState;$now=& $P.Now
+    if($null -eq $state -or ($now-$state.StartedAt) -ge 120000){return}
+    $input=$null
+    try{if($P.ContainsKey('FocusContext')){$input=& $P.FocusContext}}catch{}
+    $off=$input -and $input.state -eq 'not-requested'
+    $ready=$input -and $input.ready -and -not $off
+    if(-not $state.WindowDone){
+        $state.WindowDone=$true
+        if($off -or $ready){$state.VirtualDone=$true}
+        $stage=if($ready){'steam-window+virtual-ready'}else{'steam-window'}
+        & $P.FocusSteam 1 $stage|Out-Null
+        & $P.Log 'steam-focus-milestone' ('stage='+$stage+' maximum=2 virtualReady='+[bool]$ready+' virtualOff='+[bool]$off)
+        return
+    }
+    if($state.VirtualDone){return}
+    if($off){$state.VirtualDone=$true;return}
+    if($ready){
+        $state.VirtualDone=$true
+        if($P.ContainsKey('FocusAllowed') -and -not (& $P.FocusAllowed)){
+            & $P.Log 'steam-focus-milestone' 'stage=virtual-ready skipped=user-window-active maximum=2'
+            return
+        }
+        & $P.FocusSteam 2 'virtual-ready'|Out-Null
+        & $P.Log 'steam-focus-milestone' ('stage=virtual-ready maximum=2 ownerPid='+$input.ownerPid+' runId='+$input.runId)
+    }
+}
+function Test-BootStartupFocusForeground {
+    $front=Get-BootForeground
+    if($front.Hwnd -eq $script:steamWindow -and $front.Pid -eq $script:steamWindowPid){return $true}
+    if($front.Name -in @('steam','steamwebhelper','hwinfo','hwinfo32','hwinfo64','XboxPcApp','XboxPcAppCE','XboxPcAppFT','ApplicationFrameHost')){return $true}
+    return $front.Name -eq 'explorer' -and $front.Class -in @('Progman','WorkerW','Shell_TrayWnd')
+}
 function Invoke-BootFlow($P) {
     $begin=& $P.Now
+    $P.FocusState=@{StartedAt=$begin;WindowDone=$false;VirtualDone=$false}
     $quietSince=-1L;$steamSeen=-1L;$requestAt=-1L
     $shown=$false;$affinityDone=$false
-    & $P.Log 'boot-start' 'limitMs=60000 minWatchMs=60000 pollMs=500 quietMs=8000 focusPolicy=none ymccArguments=--minimized'
+    & $P.Log 'boot-start' 'limitMs=60000 minWatchMs=60000 pollMs=500 quietMs=8000 focusPolicy=steam-window+virtual-ready maximumFocusRequests=2 ymccLaunch=disabled'
     $s=& $P.Snapshot
     if(@($s.Xbox).Count){& $P.CloseXbox $s.Xbox}
     $s=& $P.Snapshot
     if(@($s.Xbox).Count){& $P.CloseXbox $s.Xbox}
-    & $P.YMCC
+    & $P.Log 'ymcc-launch-skipped' 'owner=standard-startup batLaunch=False'
+    if($P.ContainsKey('NetworkAcceleration')){& $P.NetworkAcceleration}
     $s=& $P.Snapshot
     if(@($s.Xbox).Count){& $P.CloseXbox $s.Xbox}
     $coldSteamLaunch=-not $s.SteamRunning
@@ -33,6 +69,7 @@ function Invoke-BootFlow($P) {
     if($coldSteamLaunch -and $P.ContainsKey('InputWarmup')){& $P.InputWarmup}
     while(((& $P.Now)-$begin) -lt 60000) {
         $s=& $P.Snapshot;$now=& $P.Now
+        Invoke-BootFocusMilestones $P $s
         if($P.ContainsKey('Checkpoint')){& $P.Checkpoint 'poll' $s}
         if(@($s.Xbox).Count){$quietSince=-1L;& $P.CloseXbox $s.Xbox}
         elseif($s.SteamWindow){if($quietSince -lt 0){$quietSince=$now}}
@@ -46,7 +83,7 @@ function Invoke-BootFlow($P) {
     $complete=$s.SteamWindow -and $s.SteamRunning -and -not @($s.Xbox).Count -and $quietSince -ge 0 -and ($now-$quietSince) -ge 8000 -and $affinityDone
     $stage=if($complete){'complete'}else{'deadline'}
     if($P.ContainsKey('Complete')){& $P.Complete $stage $s}
-    & $P.Log ('boot-'+$stage) ('elapsedMs='+((& $P.Now)-$begin)+' focusPolicy=none steamRunning='+$s.SteamRunning+' steamWindow='+$s.SteamWindow)
+    & $P.Log ('boot-'+$stage) ('elapsedMs='+((& $P.Now)-$begin)+' focusPolicy=steam-window+virtual-ready maximumFocusRequests=2 steamRunning='+$s.SteamRunning+' steamWindow='+$s.SteamWindow)
     if($complete){return 0};return 1
 }
 function Write-BootLog([string]$Event,[string]$Detail) {
@@ -89,41 +126,73 @@ function Find-SteamExe {
     foreach($path in $paths){if([IO.File]::Exists($path)){return [IO.Path]::GetFullPath($path)}}
     return ''
 }
-function Test-BootAdministrator {
-    ([Security.Principal.WindowsPrincipal][Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+function Get-BootNetworkTask {
+    # The Power page's network-startup switch is the registered task, not the
+    # obsolete startupDesired.steamCommunity settings mirror.
+    $tool=Join-Path $env:SystemRoot 'System32\schtasks.exe'
+    $query=Start-Quiet $tool '/Query /TN "\Steamcommunity_302" /XML' -Capture
+    if($query.Code -ne 0){return [pscustomobject]@{state='task-unavailable';ready=$false;code=$query.Code}}
+    if($query.Text.Length -gt 131072){return [pscustomobject]@{state='task-xml-too-large';ready=$false}}
+    $document=[Xml.XmlDocument]::new();$document.XmlResolver=$null;$document.LoadXml($query.Text)
+    if($document.DocumentType){return [pscustomobject]@{state='task-xml-doctype-rejected';ready=$false}}
+    $ns=[Xml.XmlNamespaceManager]::new($document.NameTable);$ns.AddNamespace('t','http://schemas.microsoft.com/windows/2004/02/mit/task')
+    $enabled=$document.SelectSingleNode('/t:Task/t:Settings/t:Enabled',$ns)
+    if($enabled -and $enabled.InnerText -ne 'true'){return [pscustomobject]@{state='startup-disabled';ready=$false}}
+    $logon=$document.SelectNodes('/t:Task/t:Triggers/t:LogonTrigger',$ns)
+    $logonEnabled=$false
+    foreach($trigger in $logon){$flag=$trigger.SelectSingleNode('t:Enabled',$ns);if(-not $flag -or $flag.InnerText -eq 'true'){$logonEnabled=$true}}
+    if(-not $logonEnabled){return [pscustomobject]@{state='logon-trigger-disabled';ready=$false}}
+    $instances=$document.SelectSingleNode('/t:Task/t:Settings/t:MultipleInstancesPolicy',$ns)
+    if($instances -and $instances.InnerText -ne 'IgnoreNew'){return [pscustomobject]@{state='duplicate-policy-unverified';ready=$false}}
+    $demand=$document.SelectSingleNode('/t:Task/t:Settings/t:AllowStartOnDemand',$ns)
+    if($demand -and $demand.InnerText -ne 'true'){return [pscustomobject]@{state='task-demand-disabled';ready=$false}}
+    $actions=$document.SelectNodes('/t:Task/t:Actions/*',$ns)
+    if($actions.Count -ne 1 -or $actions[0].LocalName -ne 'Exec'){return [pscustomobject]@{state='task-action-unverified';ready=$false}}
+    $command=$actions[0].SelectSingleNode('t:Command',$ns);$arguments=$actions[0].SelectSingleNode('t:Arguments',$ns)
+    if(-not $command -or [IO.Path]::GetFullPath($command.InnerText.Trim().Trim('"')) -ine 'C:\SOFT\steamcommunity\steamcommunity_302.cli.exe' -or ($arguments -and -not [string]::IsNullOrWhiteSpace($arguments.InnerText))){return [pscustomobject]@{state='task-action-unverified';ready=$false}}
+    [pscustomobject]@{state='startup-enabled';ready=$true;task='\Steamcommunity_302';singleInstance=$true}
 }
-function New-BootYmccStartInfo([string]$Path) {
-    # Match the original BAT's normal shell launch. Never apply console hiding to YMCC.
-    $info=[Diagnostics.ProcessStartInfo]::new()
-    $info.FileName=$Path;$info.WorkingDirectory=[IO.Path]::GetDirectoryName($Path)
-    $info.UseShellExecute=$true;$info.WindowStyle=[Diagnostics.ProcessWindowStyle]::Normal;$info.Arguments='--minimized'
-    return $info
+function Get-BootNetworkProcess {
+    $found=[pscustomobject]@{state='absent';pid=0;birth=0L}
+    $processes=@([Diagnostics.Process]::GetProcessesByName('steamcommunity_302.cli'))
+    try{
+        foreach($process in $processes){
+            try{
+                if($process.Path -ieq 'C:\SOFT\steamcommunity\steamcommunity_302.cli.exe'){
+                    return [pscustomobject]@{state='running';pid=$process.Id;birth=$process.StartTime.ToUniversalTime().ToFileTimeUtc()}
+                }
+                # Unknown or another image with this name never authorizes another launch.
+                $found=[pscustomobject]@{state='process-identity-unverified';pid=$process.Id;birth=0L}
+            }catch{$found=[pscustomobject]@{state='process-identity-unverified';pid=$process.Id;birth=0L}}
+        }
+        return $found
+    }finally{foreach($process in $processes){$process.Dispose()}}
 }
-function Start-BootYmccProcess([string]$Path) {
-    $process=[Diagnostics.Process]::new();$process.StartInfo=New-BootYmccStartInfo $Path
-    try {
-        if(-not $process.Start()){throw 'YMCC shell launch returned false'}
-        Write-BootLog 'ymcc-start' ('submitted shell=True windowStyle=Normal arguments=--minimized childPid='+$process.Id)
-    }finally{$process.Dispose()}
+function Invoke-BootNetworkAcceleration($P) {
+    try{
+        $task=& $P.Task
+        if(-not $task.ready){& $P.Log 'network-startup-skip' ('reason='+$task.state);return}
+        $running=& $P.Process
+        if($running.state -ne 'absent'){& $P.Log 'network-startup-skip' ('reason='+$running.state+' pid='+$running.pid+' birth='+$running.birth);return}
+        # Recheck the external launch race. Task Scheduler's verified IgnoreNew
+        # policy arbitrates a concurrent logon trigger of the same registered task.
+        $running=& $P.Process
+        if($running.state -ne 'absent'){& $P.Log 'network-startup-skip' ('reason='+$running.state+' pid='+$running.pid+' birth='+$running.birth);return}
+        $result=& $P.Request
+        & $P.Log 'network-startup-request' ('task=\Steamcommunity_302 stage=ymcc-companion requested=True submitted='+($result.Code -eq 0)+' code='+$result.Code+' waitForAcceleratorReady=False startupConfirmed=False detail='+([string]$result.Text).Substring(0,[Math]::Min(400,([string]$result.Text).Length)))
+    }catch{& $P.Log 'network-startup-failed' $_.Exception.Message}
 }
-function Start-BootYMCC {
-    $found=@(Get-Process -Name 'YeManCC' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})
-    if($found.Count){Write-BootLog 'ymcc-skip' 'already-running; original-instance-retained';return}
-    # YMCC requires elevation. Keep its original elevated logon task in charge on a medium token.
-    # Do not /run that task: its StopExisting policy can replace an instance during a logon race.
-    if(-not (Test-BootAdministrator)){Write-BootLog 'ymcc-skip' 'administrator-required; original-elevated-startup-entry-retained';return}
-    $result=Start-Quiet (Join-Path $env:SystemRoot 'System32\schtasks.exe') '/query /tn "\野蛮优化整合系统\野蛮控制中心-开机启动"' -Capture
-    if($result.Code -ne 0){Write-BootLog 'ymcc-skip' 'startup-task-not-found';return}
-    $path='C:\SOFT\YeMan\YeManCC\YeManCC.exe'
-    if(-not [IO.File]::Exists($path)){Write-BootLog 'ymcc-skip' 'executable-missing';return}
-    # The normal elevated startup can have arrived while the query was running.
-    $found=@(Get-Process -Name 'YeManCC' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})
-    if($found.Count){Write-BootLog 'ymcc-skip' 'already-running-after-query; original-instance-retained';return}
-    try{Start-BootYmccProcess $path}catch{Write-BootLog 'ymcc-start-failed' $_.Exception.Message}
+function Start-BootNetworkAcceleration {
+    $ports=@{
+        Task={Get-BootNetworkTask};Process={Get-BootNetworkProcess}
+        Request={Start-Quiet (Join-Path $env:SystemRoot 'System32\schtasks.exe') '/Run /TN "\Steamcommunity_302"' -Capture}
+        Log={param($Event,$Detail)Write-BootLog $Event $Detail}
+    }
+    Invoke-BootNetworkAcceleration $ports
 }
 function Request-Steam([bool]$Existing) {
     if(-not $script:steamExe){Write-BootLog 'steam-missing' 'install-path-not-found';return}
-    $arguments=if($Existing){'steam://open/gamepadui'}else{'-bigpicture -offline -noverifyfiles -nobootstrapupdate -skipinitialbootstrap -no-browser -nofriendsui'}
+    $arguments=if($Existing){'steam://open/gamepadui'}else{'-bigpicture -noverifyfiles -nobootstrapupdate -skipinitialbootstrap'}
     try{Start-Quiet $script:steamExe $arguments;Write-BootLog 'steam-request' $arguments}catch{Write-BootLog 'steam-start-failed' $_.Exception.Message}
 }
 function Initialize-WindowApi {
@@ -142,6 +211,22 @@ public static class YmBootWindow {
  public static IntPtr GetWindowLongPtr(IntPtr h,int n){return IntPtr.Size==8?GetLong64(h,n):new IntPtr(GetLong32(h,n));}
  [DllImport("user32.dll")] public static extern bool IsWindow(IntPtr h);
  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+ [StructLayout(LayoutKind.Sequential)] public struct Rect {public int Left,Top,Right,Bottom;}
+ [StructLayout(LayoutKind.Sequential)] public struct GuiInfo {public uint Size,Flags;public IntPtr Active,Focus,Capture,MenuOwner,MoveSize,Caret;public Rect CaretRect;}
+ public sealed class FocusInfo {public bool Known,Matches;public long Hwnd;public uint Pid;public int Error;}
+ [DllImport("user32.dll",SetLastError=true)] private static extern bool GetGUIThreadInfo(uint thread,ref GuiInfo info);
+ [DllImport("user32.dll")] private static extern bool IsChild(IntPtr parent,IntPtr child);
+ public static FocusInfo ReadKeyboardFocus(IntPtr target) {
+  var result=new FocusInfo();uint owner;uint thread=GetWindowThreadProcessId(target,out owner);
+  if(thread==0)return result;
+  var info=new GuiInfo();info.Size=(uint)Marshal.SizeOf(typeof(GuiInfo));
+  if(!GetGUIThreadInfo(thread,ref info)){result.Error=Marshal.GetLastWin32Error();return result;}
+  result.Known=true;result.Hwnd=info.Focus.ToInt64();
+  if(info.Focus!=IntPtr.Zero)GetWindowThreadProcessId(info.Focus,out result.Pid);
+  result.Matches=info.Active==target&&info.Focus!=IntPtr.Zero&&result.Pid==owner&&(info.Focus==target||IsChild(target,info.Focus));
+  return result;
+ }
+
  [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern IntPtr LoadLibraryEx(string name,IntPtr file,uint flags);
  [DllImport("kernel32.dll",CharSet=CharSet.Ansi,ExactSpelling=true)] private static extern IntPtr GetProcAddress(IntPtr module,string name);
  [DllImport("kernel32.dll")] private static extern bool FreeLibrary(IntPtr module);
@@ -184,6 +269,23 @@ function Get-BootSnapshot {
     $script:steamWindow=$found.Hwnd;$script:steamWindowPid=$found.Pid;$script:steamWindowBirth=$found.Birth
     [pscustomobject]@{Xbox=$xbox;SteamRunning=($steam.Count -gt 0);SteamWindow=($found.Hwnd -ne [IntPtr]::Zero)}
 }
+function Get-SteamFocusTarget {
+    $handle=$script:steamWindow
+    if($handle -eq [IntPtr]::Zero -or -not [YmBootWindow]::IsWindow($handle) -or -not [YmBootWindow]::IsWindowVisible($handle)){return $null}
+    $owner=[uint32]0;[YmBootWindow]::GetWindowThreadProcessId($handle,[ref]$owner)|Out-Null
+    if(-not $owner -or $owner -ne $script:steamWindowPid){return $null}
+    $process=$null
+    try {
+        $process=Get-Process -Id $owner -ErrorAction Stop
+        if($process.SessionId -ne $script:session -or $process.ProcessName -ine 'steamwebhelper' -or -not $script:steamRoot){return $null}
+        if(-not $process.Path.StartsWith(($script:steamRoot+'\bin\cef\'),[StringComparison]::OrdinalIgnoreCase)){return $null}
+        if($process.StartTime.ToUniversalTime().ToFileTimeUtc() -ne $script:steamWindowBirth){return $null}
+        $name=[Text.StringBuilder]::new(128);[YmBootWindow]::GetClassName($handle,$name,128)|Out-Null
+        $style=[YmBootWindow]::GetWindowLongPtr($handle,-16).ToInt64();$ex=[YmBootWindow]::GetWindowLongPtr($handle,-20).ToInt64()
+        if($name.ToString() -ne 'SDL_app' -or -not ($ex -band 0x40000) -or ($style -band 0x40000)){return $null}
+        [pscustomobject]@{Hwnd=$handle;Pid=$owner;Birth=$script:steamWindowBirth}
+    }catch{return $null}finally{if($process){$process.Dispose()}}
+}
 function Get-BootForeground {
     $handle=[YmBootWindow]::GetForegroundWindow();$owner=[uint32]0;$name='unknown';$class=''
     if($handle -ne [IntPtr]::Zero){
@@ -193,6 +295,80 @@ function Get-BootForeground {
     $process=$null
     try{if($owner){$process=Get-Process -Id $owner -ErrorAction Stop;$name=$process.ProcessName}}catch{}finally{if($process){$process.Dispose()}}
     [pscustomobject]@{Hwnd=$handle;Pid=$owner;Name=$name;Class=$class}
+}
+function New-BootFocusState([long]$StartedAt) {
+    @{StartedAt=$StartedAt;LastRequestAt=-3000L;LastLogAt=-5000L;LastSignature='';Requests=0;Losses=0;WasConfirmed=$false}
+}
+function Request-SteamActivation($Target) {
+    # Windows window commands only: target the existing, verified Steam HWND.
+    # Activate and focus are separate operations, even when Steam is already in front.
+    $tool='C:\SOFT\NirCmd\nircmd.exe'
+    if(-not [IO.File]::Exists($tool)){Write-BootLog 'steam-focus-command-failed' 'reason=nircmd-missing';return $false}
+    foreach($action in @('activate','focus')){
+        $current=Get-SteamFocusTarget
+        if($null -eq $current -or $current.Hwnd -ne $Target.Hwnd -or $current.Pid -ne $Target.Pid -or $current.Birth -ne $Target.Birth){return $false}
+        try{
+            $reply=Start-Quiet $tool ('win '+$action+' handle 0x'+$Target.Hwnd.ToInt64().ToString('X')) -Capture
+            if($reply.Code -ne 0){Write-BootLog 'steam-focus-command-failed' ('action='+$action+' code='+$reply.Code+' detail='+$reply.Text);return $false}
+        }catch{Write-BootLog 'steam-focus-command-failed' ('action='+$action+' error='+$_.Exception.Message);return $false}
+    }
+    return $true
+}
+function Invoke-SteamFocus($P,[int]$Check,[string]$Stage) {
+    $state=$P.State;$now=& $P.Now
+    $target=$null;$before=$null;$after=$null;$requested=$false;$submitted=$false;$confirmed=$false
+    $reason='target-unavailable';$context='fseApi=unknown';$keyboardKnown=$false;$keyboardMatches=$false;$keyboardHwnd=0L;$keyboardPid=0
+    try {
+        $target=& $P.Target;$before=& $P.Foreground;$after=$before
+        if($null -ne $target){
+            if(($now-$state.StartedAt) -ge 60000){$reason='startup-ended'}
+            elseif($state.Requests -ge 1){$reason='handoff-already-submitted'}
+            else {
+                # Revalidate immediately before dispatch. Submission is not a focus receipt.
+                $current=& $P.Target
+                if($null -ne $current -and $current.Hwnd -eq $target.Hwnd -and $current.Pid -eq $target.Pid -and $current.Birth -eq $target.Birth){
+                    $requested=$true;$state.LastRequestAt=$now;$state.Requests++
+                    $submitted=[bool](& $P.Request $target);& $P.Wait
+                    $reason='foreground-not-confirmed'
+                }else{$reason='target-retired'}
+            }
+            $current=& $P.Target;$after=& $P.Foreground
+            if($null -ne $current -and $current.Hwnd -eq $target.Hwnd -and $current.Pid -eq $target.Pid -and $current.Birth -eq $target.Birth){
+                $keyboard=& $P.KeyboardFocus $target.Hwnd
+                $keyboardKnown=[bool]$keyboard.Known;$keyboardMatches=[bool]$keyboard.Matches;$keyboardHwnd=$keyboard.Hwnd;$keyboardPid=$keyboard.Pid
+                if($after.Hwnd -eq $target.Hwnd -and $after.Pid -eq $target.Pid){
+                    if($keyboardKnown -and $keyboardMatches){$confirmed=$true;if($reason -notin @('startup-ended','handoff-already-submitted')){$reason='windows-focus-confirmed'}}
+                    elseif($reason -notin @('startup-ended','handoff-already-submitted')){$reason='keyboard-focus-not-confirmed'}
+                }
+            }
+        }
+    }catch{$reason='focus-check-failed'}
+    if($state.WasConfirmed -and -not $confirmed){$state.Losses++}
+    $state.WasConfirmed=$confirmed
+    $targetText=if($target){'0x'+$target.Hwnd.ToInt64().ToString('X')+'/'+$target.Pid}else{'none'}
+    $beforeText=if($before){'0x'+$before.Hwnd.ToInt64().ToString('X')+'/'+$before.Pid}else{'unknown'}
+    $afterText=if($after){'0x'+$after.Hwnd.ToInt64().ToString('X')+'/'+$after.Pid}else{'unknown'}
+    $signature=$targetText+'|'+$afterText+'|'+$reason
+    if($requested -or $signature -ne $state.LastSignature -or ($now-$state.LastLogAt) -ge 5000){
+        try{$context=& $P.Context}catch{}
+        $frontName=if($after -and $after.Name){$after.Name}else{'unknown'}
+        $frontClass=if($after){$after.Class}else{''}
+        & $P.Log 'steam-focus' ('check='+$Check+' stage='+$Stage+' route=windows-nircmd-activate-focus target='+$targetText+' before='+$beforeText+' after='+$afterText+' foregroundName='+$frontName+' foregroundClass='+$frontClass+' requested='+$requested+' submitted='+$submitted+' foregroundConfirmed='+[bool]($target -and $after -and $after.Hwnd -eq $target.Hwnd -and $after.Pid -eq $target.Pid)+' keyboardFocusKnown='+$keyboardKnown+' keyboardFocusMatches='+$keyboardMatches+' keyboardFocusHwnd='+$keyboardHwnd+' keyboardFocusPid='+$keyboardPid+' confirmed='+$confirmed+' reason='+$reason+' requests='+$state.Requests+' losses='+$state.Losses+' '+$context)
+        $state.LastLogAt=$now;$state.LastSignature=$signature
+    }
+    return $confirmed
+}
+function Focus-Steam([int]$Check,[string]$Stage) {
+    if(-not $script:bootFocusStates.ContainsKey($Stage)){$script:bootFocusStates[$Stage]=New-BootFocusState $script:bootClock.ElapsedMilliseconds}
+    $ports=@{
+        State=$script:bootFocusStates[$Stage];Now={$script:bootClock.ElapsedMilliseconds}
+        Target={Get-SteamFocusTarget};Foreground={Get-BootForeground}
+        Request={param($Target)Request-SteamActivation $Target}
+        KeyboardFocus={param($H)[YmBootWindow]::ReadKeyboardFocus($H)}
+        Wait={Start-Sleep -Milliseconds 120};Context={[YmBootWindow]::GamingContext()}
+        Log={param($E,$D)Write-BootLog $E $D}
+    }
+    Invoke-SteamFocus $ports $Check $Stage
 }
 function Set-BootAffinity {
     foreach($name in @('Steam++','Steam++.Accelerator')){
@@ -408,7 +584,9 @@ function Get-BootInputContext([switch]$RequireCurrentFrame) {
         }else{
             $owners=@(Get-Process -Name 'YeManCC' -ErrorAction SilentlyContinue|Where-Object {$_.SessionId -eq $script:session})
             if($owners.Count -gt 0 -and ($RequireCurrentFrame -or $owners.Count -eq 1)){
-                $rows=@();foreach($line in ((Read-BootTail (Join-Path $dir 'native-lifecycle.log')) -split '\r?\n')){if($line -match '"event"\s*:\s*"input-host-(started|fresh-neutral-admission|stop-request|stop-result|persona-transition-requested|fault-cooldown|frame-evidence)"'){try{$rows+=($line|ConvertFrom-Json)}catch{}}}
+                $rows=@();$files=if($RequireCurrentFrame){@('native-lifecycle.log','virtual-gamepad.log')}else{@('native-lifecycle.log')}
+                foreach($file in $files){foreach($line in ((Read-BootTail (Join-Path $dir $file)) -split '\r?\n')){if($line -match '"event"\s*:\s*"input-host-(started|fresh-neutral-admission|stop-request|stop-result|persona-transition-requested|fault-cooldown|frame-evidence)"'){try{$rows+=($line|ConvertFrom-Json)}catch{}}}}
+                if($RequireCurrentFrame){$rows=@($rows|Sort-Object {$at=[DateTime]::MinValue;if([DateTime]::TryParse([string]$_.time,[ref]$at)){$at.ToUniversalTime().Ticks}else{0L}})}
                 if($RequireCurrentFrame){$context=Get-BootFocusOwnerContext $rows $owners $persona}
                 else{$owner=$owners[0];$birth=$owner.StartTime.ToUniversalTime().ToFileTimeUtc();$context=Get-BootInputEvidence $rows $owner.Id $birth $persona}
             }else{$context=[pscustomobject]@{state='ymcc-not-unique-or-starting';ready=$false;persona=$persona;owners=$owners.Count;steamConsumptionProven=$false}}
@@ -464,15 +642,16 @@ function Get-BootPipelineEvidence {
     return $result
 }
 function Invoke-BootDiagnosticTail($P) {
-    # A bounded read-only tail captures the user's Xbox exit and late recovery.
-    # It does not extend cleanup, foreground activation or application launch authority.
+    # Existing bounded tail observes late recovery and the two startup milestones.
+    # Cleanup and application launches stay finished; each focus milestone runs once.
     $begin=& $P.Now
     for($round=1;$round -le 6 -and ((& $P.Now)-$begin) -lt 60000;$round++){
         & $P.Wait
         $snapshot=& $P.Snapshot
+        Invoke-BootFocusMilestones $P $snapshot
         & $P.Checkpoint 'post-boot' $snapshot
     }
-    & $P.Log 'boot-diagnostics-complete' ('elapsedMs='+((& $P.Now)-$begin)+' readOnly=True')
+    & $P.Log 'boot-diagnostics-complete' ('elapsedMs='+((& $P.Now)-$begin)+' cleanup=False applicationLaunch=False focusMaximum=2')
 }
 
 function Start-YeManBoot {
@@ -492,11 +671,12 @@ function Start-YeManBoot {
         $clock=[Diagnostics.Stopwatch]::StartNew();$script:bootClock=$clock
         $script:bootUserSid=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value
         $script:xboxSeen=@{};$script:xboxAttempts=@{};$script:xboxPackages=@{};$script:xboxDenied=@{};$script:xboxObserved=0
-        $script:inputContext=$null;$script:inputContextAt=-100000L;$script:focusInputContext=$null;$script:focusInputContextAt=-100000L;$script:lastInputSignature='';$script:lastInputLogAt=-100000L
+        $script:inputContext=$null;$script:inputContextAt=-100000L;$script:focusInputContext=$null;$script:focusInputContextAt=-100000L;$script:lastInputSignature='';$script:lastInputLogAt=-100000L;$script:bootFocusStates=@{}
         $ports=@{
             Now={$clock.ElapsedMilliseconds};Wait={Start-Sleep -Milliseconds 500};Log={param($E,$D)Write-BootLog $E $D}
             Snapshot={Get-BootSnapshot};CloseXbox={param($P)Close-BootXbox $P}
-            YMCC={Start-BootYMCC};StartSteam={Request-Steam $false};ShowSteam={Request-Steam $true}
+            NetworkAcceleration={Start-BootNetworkAcceleration};StartSteam={Request-Steam $false};ShowSteam={Request-Steam $true}
+            FocusContext={Get-BootInputContext -RequireCurrentFrame};FocusSteam={param($Round,$Stage)Focus-Steam $Round $Stage};FocusAllowed={Test-BootStartupFocusForeground}
             Affinity={Set-BootAffinity}
             Checkpoint={param($Stage,$Snapshot)Write-BootCheckpoint $Stage $Snapshot}
             Complete={param($Stage,$Snapshot)Complete-BootObservation $Stage $Snapshot}
@@ -504,7 +684,7 @@ function Start-YeManBoot {
         $warmup=@{Now=$ports.Now;Wait=$ports.Wait;Snapshot=$ports.Snapshot;CloseXbox=$ports.CloseXbox;Log=$ports.Log;Checkpoint=$ports.Checkpoint;InputContext={Get-BootInputContext}}
         $ports.InputWarmup={Invoke-BootInputWarmup $warmup}
         $result=Invoke-BootFlow $ports
-        $tail=@{Now=$ports.Now;Wait={Start-Sleep -Seconds 10};Snapshot=$ports.Snapshot;Checkpoint=$ports.Checkpoint;Log=$ports.Log}
+        $tail=@{Now=$ports.Now;Wait={Start-Sleep -Seconds 10};Snapshot=$ports.Snapshot;Checkpoint=$ports.Checkpoint;Log=$ports.Log;FocusState=$ports.FocusState;FocusContext=$ports.FocusContext;FocusSteam=$ports.FocusSteam;FocusAllowed=$ports.FocusAllowed}
         Invoke-BootDiagnosticTail $tail
         return $result
     }catch{Write-BootLog 'boot-error' $_.Exception.Message;return 1}

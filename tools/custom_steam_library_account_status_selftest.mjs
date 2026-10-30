@@ -16,6 +16,9 @@ function section(begin, end) {
 const declarations = section('let steamAccountDiscovery =', 'let steamRuntimeLastCheck =');
 const production = [
   declarations,
+  section('let steamRuntimeState =', '// Cached userdata'),
+  section('let steamRuntimeLastCheck =', 'let selectedGameDirectories ='),
+  section('function applySteamRuntimeState(', 'function renderSteamTarget('),
   section('function isWorkspaceRecord(', 'function isBuiltinExcludedSteamTool('),
   section('function steamAccounts()', 'function defaultSelectedDirectories()'),
   section("let steamInstallPromptStatus = '';", 'function applySteamRuntimeState('),
@@ -56,23 +59,28 @@ function element(hidden = false) {
     querySelector: () => ({ addEventListener() {} }),
   };
 }
-function harness(cached = negative(), accountReply = ready()) {
+function harness(cached = negative(), accountReply = ready(), runtimeReply = () => Promise.resolve({steamRunning:false,steamPath:''})) {
   const elements = new Map([
     ['#steam-target-status', element()], ['#in-steam-limitation', element(true)],
     ['#entry-view', element()], ['#library-view', element(true)],
   ]);
   const calls = [], prompts = [], timers = [], events = new Map(), errors = [];
-  let now = 10000;
+  let now = 10000, focused = false;
+  const doc = {hidden:false,hasFocus:()=>focused,addEventListener:(name,fn)=>addEvent(name,fn)};
+  const addEvent=(name,fn)=>{const previous=events.get(name);events.set(name,()=>{previous?.();fn();});};
+  const schedule=fn=>timers.push(fn),cancel=id=>{if(id)timers[id-1]=null;};
   const context = vm.createContext({
     snapshot: { steamAccounts: structuredClone(cached) },
     selectedSteamTarget: { accountId: '', steamRoot: '' },
     $: selector => elements.get(selector),
     libraryNotice: elements.get('#in-steam-limitation'),
     Date: { now: () => now },
-    window: { setTimeout: fn => timers.push(fn), addEventListener: (name, fn) => events.set(name, fn) },
+    document:doc,
+    window: { setTimeout:schedule, clearTimeout:cancel, addEventListener:addEvent },
     invoke: command => {
       calls.push(command);
       if (command === 'steamAccounts') return typeof accountReply === 'function' ? accountReply() : Promise.resolve(accountReply);
+      if (command === 'steamCommitPreflight') return runtimeReply();
       if (command === 'startup' || command === 'openLibrary') return Promise.resolve({ steamAccounts: structuredClone(cached) });
       throw new Error(`Unexpected command: ${command}`);
     },
@@ -82,12 +90,16 @@ function harness(cached = negative(), accountReply = ready()) {
     renderEntry() {}, clearNotice() {}, scheduleLibraryFocusRepair() {},
   });
   vm.runInContext(production, context);
+  context.startSteamRuntimeWatch();
   context.renderLibrary = () => context.renderSteamTarget();
   return {
     context, calls, prompts, timers, events, errors,
     copy: elements.get('#steam-target-status'), limitation: elements.get('#in-steam-limitation'),
     page: elements.get('#library-view'),
     tick: ms => { now += ms; },
+    doc, focus:value=>{focused=value;events.get(value?'focus':'blur')?.();},
+    activeTimers:()=>timers.filter(Boolean).length,
+    fireTimer:async()=>{const index=timers.findIndex(Boolean);assert(index>=0,'Expected one scheduled refresh');const fn=timers[index];timers[index]=null;now+=3000;fn();await flush();},
     get: expression => vm.runInContext(expression, context),
   };
 }
@@ -205,6 +217,56 @@ for (const [i, reply] of malformed.entries()) {
 await run('manual-scan-has-forced-account-recheck-hook', () => {
   const handler = section("scanLibraryButton.addEventListener('click', async () => {", "$('#pick-root-button').addEventListener");
   assert.match(handler, /void refreshSteamAccountDiscovery\(true\)/);
+});
+await run('background-render-and-events-never-scan-or-retain-a-timer', async () => {
+  const h=harness();h.page.classList.remove('hidden');
+  for(let i=0;i<100;i++){h.context.renderSteamTarget();h.events.get('blur')();}
+  await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,0);assert.equal(h.activeTimers(),0);
+});
+await run('focus-edge-refreshes-once-and-foreground-retains-one-timer', async () => {
+  const h=harness();h.page.classList.remove('hidden');h.focus(true);await flush();
+  assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);assert.equal(h.activeTimers(),1);
+  for(let i=0;i<100;i++){h.events.get('focus')();h.context.renderSteamTarget();}
+  await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);assert.equal(h.activeTimers(),1);
+  await h.fireTimer();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,2);assert.equal(h.activeTimers(),1);
+});
+await run('blur-cancels-timer-and-refocus-rereads-steam-state-once', async () => {
+  let running=false;const h=harness(negative(),ready(),()=>Promise.resolve({steamRunning:running}));h.page.classList.remove('hidden');h.focus(true);await flush();
+  h.focus(false);assert.equal(h.activeTimers(),0);const count=h.calls.filter(x=>x==='steamCommitPreflight').length;
+  for(let i=0;i<100;i++)h.context.renderSteamTarget();await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,count);
+  running=true;h.focus(true);await flush();assert.equal(h.get('steamRuntimeState.running'),true);assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,count+1);assert.equal(h.activeTimers(),1);
+});
+await run('hidden-document-cancels-even-without-window-blur', async () => {
+  const h=harness();h.page.classList.remove('hidden');h.focus(true);await flush();h.doc.hidden=true;h.events.get('visibilitychange')();
+  assert.equal(h.activeTimers(),0);h.context.renderSteamTarget();await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);
+  h.doc.hidden=false;h.events.get('visibilitychange')();await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,2);assert.equal(h.activeTimers(),1);
+});
+await run('inflight-read-completes-in-background-without-restarting-polling', async () => {
+  const pending=deferred(),h=harness(negative(),ready(),()=>pending.promise);h.page.classList.remove('hidden');h.focus(true);h.focus(false);
+  assert.equal(h.activeTimers(),0);pending.resolve({steamRunning:true});await flush();assert.equal(h.activeTimers(),0);assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);
+});
+await run('slow-read-coalesces-focus-storm-and-all-render-requests', async () => {
+  const pending=deferred(),h=harness(negative(),ready(),()=>pending.promise);h.page.classList.remove('hidden');h.focus(true);
+  for(let i=0;i<100;i++){h.focus(false);h.focus(true);h.context.renderSteamTarget();}
+  assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);assert.equal(h.activeTimers(),0);
+  pending.resolve({steamRunning:false});await flush();assert.equal(h.activeTimers(),1);
+});
+await run('pagehide-and-late-read-stay-dormant-until-pageshow', async () => {
+  let pending=deferred();const h=harness(negative(),ready(),()=>pending.promise);h.page.classList.remove('hidden');h.focus(true);h.events.get('pagehide')();pending.resolve({steamRunning:false});await flush();
+  assert.equal(h.activeTimers(),0);h.events.get('focus')();await flush();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);
+  pending=deferred();h.events.get('pageshow')();assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,2);pending.resolve({steamRunning:true});await flush();assert.equal(h.activeTimers(),1);
+});
+await run('manual-forced-refresh-in-background-is-one-shot', async () => {
+  const h=harness();h.page.classList.remove('hidden');await h.context.refreshSteamRuntimeState(true);await flush();
+  assert.equal(h.calls.filter(x=>x==='steamCommitPreflight').length,1);assert.equal(h.activeTimers(),0);
+});
+await run('failed-foreground-read-retains-one-normal-interval', async () => {
+  const h=harness(negative(),ready(),()=>Promise.reject(Error('fixture unavailable')));h.page.classList.remove('hidden');h.focus(true);await flush();
+  assert.equal(h.get('steamRuntimeState.running'),null);assert.equal(h.activeTimers(),1);h.focus(false);assert.equal(h.activeTimers(),0);
+});
+await run('hidden-library-page-stops-the-polling-owner', async () => {
+  const h=harness();h.page.classList.remove('hidden');h.focus(true);await flush();h.page.classList.add('hidden');h.context.renderSteamTarget();
+  assert.equal(h.activeTimers(),0);
 });
 const failed = cases.filter(item => !item.passed);
 const report = { allPassed: failed.length === 0, caseCount: cases.length, failedCount: failed.length, cases,

@@ -41,7 +41,7 @@ def main():
     assert 'if (abnormal) {\n            // GP-926R5' in mainSource,'existing control branch changed'
     assert 'busRateLogState.observe(evidenceRateFlags)' in mainSource
     assert 'addRotated(dataDir + L"\\\\input-host-signal.log")' in mainSource
-    files=['native/touch_haptic_dispatch.h','native/virtual_signal_evidence.h','native/virtual_signal_evidence_runtime.h','native/virtual_controller_ui_output_runtime.h','native/screen_touchpads.h','native/log_frequency_policy.h','native/log_snapshot_state.h','deps/json/json.hpp','tools/fixtures/native_signal_evidence_20261022/fixture.cpp','tools/virtual_signal_evidence_selftest.py','tools/log_frequency_selftest.py']
+    files=['native/touch_haptic_dispatch.h','native/virtual_signal_evidence.h','native/virtual_signal_evidence_runtime.h','native/virtual_control_window_evidence.h','native/virtual_controller_ui_output_runtime.h','native/screen_touchpads.h','native/log_frequency_policy.h','native/log_snapshot_state.h','deps/json/json.hpp','tools/fixtures/native_signal_evidence_20261022/fixture.cpp','tools/virtual_signal_evidence_selftest.py','tools/log_frequency_selftest.py']
     original={name:(ROOT/name).read_bytes() for name in files}
     run=a.out.resolve()/('run-'+datetime.datetime.now().strftime('%Y%m%d-%H%M%S-%f'));run.mkdir(parents=True)
     ui=original['native/virtual_controller_ui_output_runtime.h'].decode('utf-8-sig');touch=original['native/screen_touchpads.h'].decode('utf-8-sig')
@@ -49,7 +49,7 @@ def main():
     for name,text in extracted.items():(run/name).write_text(text,encoding='utf-8')
     (run/'bound-main.cpp').write_bytes(mainBytes)
     for name in ('log_frequency_policy.h','log_snapshot_state.h'):(run/name).write_bytes(original['native/'+name])
-    for source,target in [('native/touch_haptic_dispatch.h','touch_haptic_dispatch.h'),('native/virtual_signal_evidence.h','virtual_signal_evidence.h'),('native/virtual_signal_evidence_runtime.h','virtual_signal_evidence_runtime.h'),('deps/json/json.hpp','json.hpp'),('tools/fixtures/native_signal_evidence_20261022/fixture.cpp','fixture.cpp')]: (run/target).write_bytes(original[source])
+    for source,target in [('native/touch_haptic_dispatch.h','touch_haptic_dispatch.h'),('native/virtual_signal_evidence.h','virtual_signal_evidence.h'),('native/virtual_signal_evidence_runtime.h','virtual_signal_evidence_runtime.h'),('native/virtual_control_window_evidence.h','virtual_control_window_evidence.h'),('deps/json/json.hpp','json.hpp'),('tools/fixtures/native_signal_evidence_20261022/fixture.cpp','fixture.cpp')]: (run/target).write_bytes(original[source])
     (run/'binding.json').write_text(json.dumps({'sourceHashes':{n:sha(b) for n,b in original.items()},'mainSource':str(a.main),'mainSha256':sha(mainBytes),'consumerHashes':{n:sha(t.encode('utf-8')) for n,t in extracted.items()},'actualRuntimeAdapter':True,'actualSerializerExtracted':True,'actualBlendAndAxisModifiersExtracted':True,'actualAxisConsumerAndNeutralSelectionExtracted':True,'actualObserverCallExtracted':True,'fakeSettingsClockAndSink':True,'hardwareIO':False},indent=2),encoding='utf-8')
     sdk=Path('C:/Program Files (x86)/Windows Kits/10')
     versions=sorted((d for d in (sdk/'Include').iterdir() if (d/'um/windows.h').exists() and (sdk/'Lib'/d.name/'ucrt/x64/ucrt.lib').exists()),key=lambda d:tuple(map(int,d.name.split('.'))))

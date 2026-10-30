@@ -1,3 +1,5 @@
+import { setGamingHomeStartup, type GamingHomeSelection } from '../../src/bridge/gamingHomePolicy';
+import { globalShortcutContainer, prepareGlobalShortcutEdit } from '../../src/bridge/bootModeSharedShortcuts';
 /** In-memory native owners. Never imports production IO or writes user settings. */
 export const copy = <T>(value: T): T => structuredClone(value);
 export const calls: Array<{op:string;value?:any}> = [];
@@ -28,7 +30,7 @@ export function reset() {
   steamChartAutoRefresh:'none',windowPlacement:'right',gestureSummonEnabled:false,trainerAutoPrepare:true,radialTestingEnabled:false,fxSoundAutoRepair:true,
  };
  const bank = {mode:'auto',tdp:15,tdpCeiling:30,auto:{bias:50,saving:'small',coreSplit:15,coreLow:'bigFirst',coreHigh:'bigFirst'},manual:{frequencyMHz:4000,unlimited:false,aggressiveness:60,turbo:true,coreMode:'bigFirst'}};
- settings={gamepad:{mouseBackend:'joyxoff',mouseMode:'on'},extensions:{unrelated:{keep:true}},input:{revision:7,outputTarget:{persona:'elite',buttonMappingEnabled:true,gyroEnabled:false},ownership:{owner:'global'},gyroMotion:copy(gyroDefaults),buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[]}}},performanceSchedule:{configured:true,enabled:true,controls:{ac:copy(bank),dc:copy(bank)}},rtss:{frameRates:[60,120],templateDefaults:false},fan:{preset:'balanced',nodes:[]},startupDesired:{fanControl:false},sleep:{enabled:false},ui:{deckyEnabled:false},quickApps:{apps:[{id:'app-1',name:'Fixture application',path:'C:/fixture/app.exe'}]},gameProfiles:{'C:/games/do-not-edit.exe':{input:{persona:'dualsense-edge'},sentinel:['never','mutate']}},games:[{path:'C:/games/do-not-edit.exe',profile:{sentinel:17}}]};
+ settings={gamepad:{mouseBackend:'joyxoff',mouseMode:'on'},extensions:{unrelated:{keep:true}},input:{revision:7,bootModeShortcuts:null,outputTarget:{persona:'elite',buttonMappingEnabled:true,gyroEnabled:false},ownership:{owner:'global'},gyroMotion:copy(gyroDefaults),buttonMapping:{rules:{schemaVersion:2,closure:'UNENCLOSED',shortcutRules:[]}}},performanceSchedule:{configured:true,enabled:true,controls:{ac:copy(bank),dc:copy(bank)}},rtss:{frameRates:[60,120],templateDefaults:false},fan:{preset:'balanced',nodes:[]},startupDesired:{fanControl:false},sleep:{enabled:false},ui:{deckyEnabled:false},quickApps:{apps:[{id:'app-1',name:'Fixture application',path:'C:/fixture/app.exe'}]},gameProfiles:{'C:/games/do-not-edit.exe':{input:{persona:'dualsense-edge'},sentinel:['never','mutate']}},games:[{path:'C:/games/do-not-edit.exe',profile:{sentinel:17}}]};
  state={mouse:{ok:true,stateKnown:true,mode:'on',on:true,backend:'joyxoff',provider:'ymcc',controlAllowed:true},xbox:false,steam:false,fx:false,addon:false,charge:{supported:true,kind:'supported',managed:false,choices:[60,80,100],currentLimit:100,fence:'fixture-fence'},monitor:{ymccEnabled:false,rtssEnabled:false,ymccTemplate:'A'},ui:copy(uiDefaults),touch:{},hibernate:{enabled:false,enabledKnown:true,supported:true,supportedKnown:true},timeouts:{acScreen:10,dcScreen:5,acSleep:30,dcSleep:15},acButton:0,dcButton:0,recovery:{ok:true,enabled:false},appearance:{themes:[]},fanReady:false,fanIntent:false};state.fanFeature=copy(settings.fan);state.deviceForm=3;state.earlyCommand='';state.homeApp='fixture-original-home';state.joyStartup=null;state.legacyDesktop=false;state.mouseAutoOn=false;state.steamUi={known:true,running:false,mode:'stopped',pid:0,birth:'0'};state.boundPersona=null;state.buildPersona=null;state.mouseReads=0;state.nativeGamepadFlags={enabled:true,bDoubleMinimize:true,startDoubleF7:false,tdpShortcut:true,fpsShortcut:true,killGame:true,openKeyboard:true,returnDesktop:true,mouseToggle:true,mouseBackend:'joyxoff'};
  settings.input.startupObservedBoot='fixture-windows-boot-1';
 }
@@ -38,7 +40,7 @@ export async function updateSettings(update:any){record('settings.update');const
 export function getSettingsGeneration(){return generation;}
 export function assertSettingsGeneration(expected:number){if(expected!==generation)throw new Error('stale generation');}
 export function invalidate(){generation++;}
-export async function compareAndSwapInputSettings(expected:number,patch:any,isCurrent?:()=>boolean){record('input.cas',{expected,patch});await hooks.inputCas?.();if(isCurrent&&!isCurrent())return {ok:false,reason:'cancelled',currentRevision:settings.input.revision,value:copy(settings.input)};if(faults['input.stale']){faults['input.stale']--;return {ok:false,reason:'revision-conflict'};}if(expected!==settings.input.revision)return {ok:false,reason:'revision-conflict'};settings.input={...settings.input,...copy(patch),revision:expected+1};if(faults['input.invalidate']){faults['input.invalidate']--;generation++;}return {ok:true,value:copy(settings.input)};}
+export async function compareAndSwapInputSettings(expected:number,patch:any,isCurrent?:()=>boolean,options:{globalShortcuts?:boolean}={}){record('input.cas',{expected,patch});await hooks.inputCas?.();if(isCurrent&&!isCurrent())return {ok:false,reason:'cancelled',currentRevision:settings.input.revision,value:copy(settings.input)};if(faults['input.stale']){faults['input.stale']--;return {ok:false,reason:'revision-conflict'};}if(expected!==settings.input.revision)return {ok:false,reason:'revision-conflict',value:copy(settings.input),...(options.globalShortcuts?{globalShortcutRules:globalShortcutContainer(settings)}:{})};const globalPatch=prepareGlobalShortcutEdit(patch);settings.input={...settings.input,...copy(globalPatch),revision:expected+1};if(faults['input.invalidate']){faults['input.invalidate']--;generation++;}return {ok:true,value:copy(settings.input),...(options.globalShortcuts?{globalShortcutRules:globalShortcutContainer(settings)}:{})};}
 export async function loadPerformanceSchedule(){return copy(settings.performanceSchedule);}
 export const snapshotPerformanceSchedule=(value:any)=>copy(value);
 export const continuousControlsFromSchedule=(config:any)=>copy(config.controls);
@@ -79,8 +81,18 @@ export const getLosslessGameState=async()=>({});
 export async function setLosslessScalingEnabled(...args:any[]){record('lossless.set',args.slice(0,2));return {confirmed:true};}
 export async function getAutomaticSleepRecovery(){return copy(state.recovery);}
 export async function setAutomaticSleepRecovery(enabled:boolean){record('recovery.set',enabled);state.recovery.enabled=enabled;}
-export async function readGamingHomeConfiguration(){return {startupEnabled:state.xbox,homeApp:'fixture-xbox'};}
-export async function writeGamingHomeStartup(enabled:boolean,repairHandheld=enabled){record('startup.xbox',enabled);state.xbox=enabled;if(repairHandheld){record('startup.handheld',46);state.deviceForm=46;}}
+export async function readGamingHomeConfiguration(){return {startupEnabled:state.xbox,homeApp:state.homeApp};}
+export async function writeGamingHomeStartup(enabled:boolean,repairHandheld=enabled,selection?:GamingHomeSelection){
+ record('startup.xbox',enabled);
+ if(repairHandheld)record('startup.handheld',46);
+ if(selection!==undefined)record('startup.home',selection==='xbox'?'Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App':'');
+ // Real policy, memory registry terminal. Mode tests cannot pass by mocking the omitted home write.
+ await setGamingHomeStartup({
+  read:async(_root,_key,name)=>name==='DeviceForm'?state.deviceForm:name==='StartupToGamingHome'?(state.xbox?1:0):state.homeApp,
+  write:async(_root,_key,name,value)=>{if(name==='DeviceForm')state.deviceForm=value;else if(name==='StartupToGamingHome')state.xbox=value===1;else state.homeApp=value;return true;},
+  remove:async()=>{throw Error('unexpected default-policy rollback');},saveBackup:async()=>{},
+ },enabled,repairHandheld,selection);
+}
 export async function steamMasterOn(){return state.steam;}
 export async function steamMasterSet(enabled:boolean,repairCommand=false){record('startup.steam',enabled);state.steam=enabled;state.earlyCommand=enabled?'"C:\\SOFT\\YeMan\\PowerControl\\YeManSteam.bat"':'';if(repairCommand)record('startup.commandRepair',true);}
 export async function steamRunning(){return false;}

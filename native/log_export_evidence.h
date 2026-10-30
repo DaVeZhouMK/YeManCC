@@ -37,7 +37,7 @@ inline bool jsonLinesEvidenceName(std::string name) {
     for(const auto* exact:{"input-capture.jsonl","native-lifecycle.log","native-detail.log","monitor-detail.log","tdp.log","tdp-detail.log",
         "frontend-errors.log","frontend-trace.log","frontend-trace-detail.log","webview-failures.log","fan-api.log",
         "fan-lifecycle.log","gyro-motion.log","virtual-gamepad.log","focus-trace.log","hardware-coordinator.log",
-        "input-host-fatal.log","input-host-rejects.log","input-host-cost.log","input-host-signal.log","input-host-report-chain.log","input-host-xbox-sdk.log",
+        "input-host-fatal.log","input-host-rejects.log","input-host-cost.log","input-host-signal.log","input-host-report-chain.log","input-host-xbox-sdk.log","physical-source-reader.log",
         "recovery-service.log","steam-original-recovery.jsonl","fan-host-fault.log","yeman-fan-host-runtime.log","sleep-facts.log",
         "battery-charge-client.log","battery-charge-host.log","msi-controller-visibility.log"})if(name==exact)return true;
     const std::string prefix="msi-controller-visibility-wake-";

@@ -5,6 +5,7 @@
 #include <windows.h>
 #include <shellapi.h>
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <cstring>
@@ -79,6 +80,9 @@ struct State {
     std::mutex cancelMutex; // Only event publication/signal/close; never held across IO or waits.
     Handle pipe, peer, cancel, job, port, process, thread, changed;
     std::vector<std::shared_ptr<Io>> operations;
+    // Stop-only read leases: Job zero may precede final process signalling.
+    std::array<Handle,64> stopMembers;
+    bool stopMembersCaptured = false;
     std::uint64_t generation = 0;
     DWORD pid = 0, exitCode = STILL_ACTIVE, cleanupError = ERROR_SUCCESS;
     unsigned diagnosticWaiters = 0;
@@ -151,6 +155,7 @@ inline Snapshot snapshotLocked(State& s) noexcept {
     const HANDLE handles[] = {s.pipe.value,s.peer.value,s.cancel.value,s.job.value,
         s.port.value,s.process.value,s.thread.value,s.changed.value};
     for (HANDLE h : handles) if (h) ++out.handles;
+    for(const auto& member:s.stopMembers)if(member.value)++out.handles;
     for (const auto& io : s.operations) {
         if (io->event.value) ++out.handles;
         if (io->active) ++out.activeCalls;
@@ -296,7 +301,32 @@ inline bool closeAll(State& s) noexcept {
             if (!h->close(s.cleanupError)) okay = false;
         } else if (!h->close(s.cleanupError)) okay = false;
     }
+    for(auto& member:s.stopMembers)if(!member.close(s.cleanupError))okay=false;
     return okay;
+}
+// Stop observes existing owned members before cancellation completes them.
+// A recycled PID/foreign Job never becomes a target; no healthy-path scan.
+inline bool captureStopMembers(State& s) noexcept {
+    if(s.stopMembersCaptured||!s.assigned)return true;
+    struct Members {DWORD assigned=0,count=0;ULONG_PTR ids[64]{};} members;
+    if(!QueryInformationJobObject(s.job.value,JobObjectBasicProcessIdList,&members,sizeof(members),nullptr)){
+        s.cleanupError=GetLastError();return false;
+    }
+    if(members.count>64||members.assigned>64){s.cleanupError=ERROR_MORE_DATA;return false;}
+    size_t kept=0;
+    for(DWORD i=0;i<members.count;++i){
+        const auto pid=members.ids[i];if(!pid||pid>MAXDWORD)continue;
+        Handle process(OpenProcess(SYNCHRONIZE|PROCESS_QUERY_LIMITED_INFORMATION,FALSE,static_cast<DWORD>(pid)));
+        if(!process.value){const auto error=GetLastError();if(error!=ERROR_INVALID_PARAMETER){s.cleanupError=error;return false;}continue;}
+        BOOL member=FALSE;
+        if(!IsProcessInJob(process.value,s.job.value,&member)){s.cleanupError=GetLastError();return false;}
+        if(!member)continue;
+        if(std::any_of(s.stopMembers.begin(),s.stopMembers.end(),[&](const Handle& known){return known.value&&GetProcessId(known.value)==pid;}))continue;
+        while(kept<s.stopMembers.size()&&s.stopMembers[kept].value)++kept;
+        if(kept==s.stopMembers.size()){s.cleanupError=ERROR_MORE_DATA;return false;}
+        s.stopMembers[kept++].value=process.value;process.value=nullptr;
+    }
+    s.stopMembersCaptured=true;return true;
 }
 inline Result stop(State& s, DWORD graceMs, DWORD terminateWaitMs, StopPolicy policy) noexcept {
     std::unique_lock<std::mutex> lock(s.mutex);
@@ -305,6 +335,7 @@ inline Result stop(State& s, DWORD graceMs, DWORD terminateWaitMs, StopPolicy po
     requestCancel(s); // Seal admission and signal the inherited event before any wait.
     if (s.stopBusy) return resultLocked(s, Code::busy, ERROR_BUSY);
     s.stopBusy = true;
+    const bool memberLeasesKnown=captureStopMembers(s);
     const auto finish = [&](Code code, DWORD error = ERROR_SUCCESS) {
         s.stopBusy = false;
         return resultLocked(s, code, error);
@@ -357,6 +388,14 @@ inline Result stop(State& s, DWORD graceMs, DWORD terminateWaitMs, StopPolicy po
         lock.lock();
         if (!received) { if (receiveError != WAIT_TIMEOUT) s.cleanupError = receiveError; break; }
     }
+    bool memberExitsConfirmed=memberLeasesKnown;
+    for(auto& member:s.stopMembers){
+        if(!member.value)continue;
+        const HANDLE process=member.value;
+        lock.unlock();const auto waited=WaitForSingleObject(process,deadline.left());lock.lock();
+        if(waited!=WAIT_OBJECT_0){memberExitsConfirmed=false;if(waited==WAIT_FAILED)s.cleanupError=GetLastError();}
+    }
+    if(!memberExitsConfirmed)return finish(Code::cleanupIncomplete,s.cleanupError?s.cleanupError:WAIT_TIMEOUT);
     // Operations own OVERLAPPED, buffer and event until GetOverlappedResult proves completion.
     for (;;) {
         reap(s);

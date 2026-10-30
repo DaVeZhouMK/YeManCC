@@ -9,11 +9,12 @@ import json
 
 parser = argparse.ArgumentParser()
 parser.add_argument('--output', type=Path, default=Path('../../Build/Validation/HWiNFO-ReturnFocus-20261009'))
+parser.add_argument('--source', type=Path, help='Archived main.cpp for a same-consumer negative control')
 args = parser.parse_args()
 repo = Path(__file__).resolve().parent.parent
 out = args.output.resolve()
 out.mkdir(parents=True, exist_ok=True)
-source = (repo / 'native/main.cpp').read_text('utf-8-sig')
+source = (args.source or repo / 'native/main.cpp').read_text('utf-8-sig')
 masked = re.sub(r'//[^\n]*|/\*.*?\*/|"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'',
                 lambda m: ' ' * len(m.group()), source, flags=re.S)
 
@@ -34,11 +35,13 @@ preamble = r'''
 #define NOMINMAX
 #include <windows.h>
 #include <dwmapi.h>
+#include <tlhelp32.h>
 #include <algorithm>
 #include <atomic>
 #include <cwctype>
 #include <iostream>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 #include "monitor_identity.h"
@@ -56,7 +59,27 @@ struct Window {
 };
 static HWND handle(int n){return reinterpret_cast<HWND>(static_cast<INT_PTR>(n));}
 static std::map<HWND,Window> windows;
-static std::map<DWORD,std::wstring> paths;
+static std::map<DWORD,std::wstring> paths,snapshotNames;
+static std::set<DWORD> identityDenied,identityEmpty;
+static std::map<DWORD,std::wstring>::const_iterator snapshotCursor;
+static bool snapshotUnavailable=false;
+static DWORD replaceAfterShowPid=0;
+static int snapshotCalls=0,snapshotCloses=0;
+static HANDLE fakeSnapshot(DWORD,DWORD){
+ ++snapshotCalls;return snapshotUnavailable?INVALID_HANDLE_VALUE:reinterpret_cast<HANDLE>(99);
+}
+static BOOL fakeSnapshotRow(PROCESSENTRY32W* row){
+ if(snapshotCursor==snapshotNames.end())return FALSE;
+ row->th32ProcessID=snapshotCursor->first;
+ wcsncpy_s(row->szExeFile,snapshotCursor->second.c_str(),_TRUNCATE);return TRUE;
+}
+static BOOL fakeProcessFirst(HANDLE,PROCESSENTRY32W* row){snapshotCursor=snapshotNames.begin();return fakeSnapshotRow(row);}
+static BOOL fakeProcessNext(HANDLE,PROCESSENTRY32W* row){if(snapshotCursor!=snapshotNames.end())++snapshotCursor;return fakeSnapshotRow(row);}
+static BOOL fakeCloseHandle(HANDLE h){++snapshotCloses;return h==reinterpret_cast<HANDLE>(99);}
+#define CreateToolhelp32Snapshot fakeSnapshot
+#define Process32FirstW fakeProcessFirst
+#define Process32NextW fakeProcessNext
+#define CloseHandle fakeCloseHandle
 static HWND g_hwnd=handle(1), foreground=nullptr;
 static FocusSessionState g_focusSession;
 static FocusTargetSnapshot remembered;
@@ -79,6 +102,7 @@ static HWND fakeForeground(){return foreground;}
 static BOOL fakeShow(HWND h,int command){
  if(command==SW_SHOW){++showCalls;windows.at(h).visible=true;}
  if(command==SW_RESTORE){++restoreCalls;windows.at(h).iconic=false;}
+ if(replaceAfterShowPid)windows.at(h).pid=replaceAfterShowPid;
  return TRUE;
 }
 static BOOL fakeKill(HWND,UINT_PTR){return TRUE;}
@@ -98,7 +122,8 @@ static UINT_PTR fakeTimer(HWND,UINT_PTR id,UINT,TIMERPROC){++timers;return id;}
 #define KillTimer fakeKill
 #define SetTimer fakeTimer
 static bool focusQueryProcessIdentity(DWORD pid,std::wstring* path,ULONGLONG* created){
- if(!paths.count(pid))return false;if(path)*path=paths.at(pid);if(created)*created=123;return true;
+ if(identityDenied.count(pid)||!paths.count(pid))return false;
+ if(path)*path=identityEmpty.count(pid)?L"":paths.at(pid);if(created)*created=123;return true;
 }
 static std::wstring focusWindowClass(HWND){return L"Fixture";}
 static bool focusMonitorInfo(HMONITOR,std::wstring* device,RECT* rect){
@@ -126,7 +151,8 @@ static void focusClearSession(){g_focusSession={};}
 static bool focusLosslessReturnBegin(ULONGLONG){return false;}
 namespace ymcc { static void requestWindowForegroundAsync(HWND h){++activations;foreground=h;} }
 '''
-names = ['sgBaseName', 'focusBackgroundMonitorName', 'focusWindowProcessName', 'focusIsBackgroundMonitorWindow',
+names = ['sgBaseName', 'focusKnownOverlayName', 'focusBackgroundMonitorName', 'focusWindowProcessName',
+         'focusIsKnownOverlayWindow', 'focusIsBackgroundMonitorWindow',
          'focusCaptureTarget', 'focusTargetIdentityMatches', 'isUsableFocusWindow',
          'focusIsRestorableExactWindow', 'focusResolveTarget', 'resolvePreviousFocusWindow',
          'focusForegroundMatchesTarget', 'refocusPreviousWindow', 'focusBeginReturnToPreviousWindow']
@@ -142,6 +168,9 @@ static void reset(){
  paths={{1,L"C:\\YeManCC.exe"},{42,L"C:\\Games\\Game.exe"},
         {77,L"C:\\Program Files\\HWiNFO64\\HWiNFO64.EXE"},{55,L"C:\\Windows\\notepad.exe"}};
  foreground=handle(1);g_focusSession={};remembered={};blocked=false;g_manualPausedPid=0;
+ snapshotNames={{1,L"YeManCC.exe"},{42,L"Game.exe"},{77,L"HWiNFO64.EXE"},{55,L"notepad.exe"}};
+ identityDenied.clear();identityEmpty.clear();snapshotUnavailable=false;replaceAfterShowPid=0;
+ snapshotCursor=snapshotNames.end();snapshotCalls=snapshotCloses=0;
  showCalls=restoreCalls=activations=findWindows=findProcesses=timers=0;
 }
 static FocusTargetSnapshot snapshot(HWND h){
@@ -186,6 +215,33 @@ int main(){
  check(!windows.at(handle(1)).visible&&noActivation(),"first startup with no previous target only hides YMCC");
  reset();g_focusSession.target=snapshot(handle(2));g_manualPausedPid=42;refocusPreviousWindow();
  check(noActivation(),"manually paused game is not activated");
+ reset();g_focusSession.target=snapshot(handle(3));g_focusSession.target.path.clear();identityDenied.insert(77);
+ refocusPreviousWindow();
+ check(noActivation()&&snapshotCalls>0&&snapshotCalls==snapshotCloses,"image-query failure rejects HWiNFO by snapshot name and closes every snapshot");
+ reset();identityEmpty.insert(77);
+ check(!focusCaptureTarget(handle(4)).valid&&snapshotCalls==1&&snapshotCloses==1,"empty image path rejects HWiNFO before capturing its owner");
+ reset();windows.at(handle(4)).root=handle(2);
+ check(!focusCaptureTarget(handle(4)).valid,"original HWiNFO HWND cannot normalize into a real-game owner");
+ reset();windows.at(handle(2)).root=handle(3);
+ check(!focusCaptureTarget(handle(2)).valid,"normalized HWiNFO owner remains excluded");
+ reset();g_focusSession.target=snapshot(handle(2));windows.at(handle(2)).visible=false;
+ replaceAfterShowPid=77;identityDenied.insert(77);refocusPreviousWindow();
+ check(showCalls==1&&activations==0&&snapshotCalls==1&&snapshotCloses==1,"post-show HWiNFO replacement with an inaccessible image is not activated");
+ reset();g_focusSession.target=snapshot(handle(2));windows.at(handle(2)).iconic=true;
+ replaceAfterShowPid=77;refocusPreviousWindow();
+ check(restoreCalls==1&&activations==0&&snapshotCalls==0,"post-restore HWiNFO replacement is not activated");
+ reset();g_focusSession.target=focusCaptureTarget(handle(2));refocusPreviousWindow();
+ check(activations==1&&foreground==handle(2)&&snapshotCalls==0,"normal game capture and return never create process snapshots");
+ reset();g_focusSession.target=snapshot(handle(2));identityDenied.insert(42);refocusPreviousWindow();
+ check(activations==1&&foreground==handle(2)&&snapshotCalls>0&&snapshotCalls==snapshotCloses,"unverifiable non-monitor game keeps the existing return behavior");
+ reset();identityDenied.insert(77);snapshotNames.at(77)=L"gameoverlayui.exe";
+ check(focusWindowProcessName(handle(4)).empty()&&!focusIsKnownOverlayWindow(handle(4))&&snapshotCalls==0,"snapshot fallback never supplies overlay identity or admission");
+ reset();snapshotNames.at(42)=L"HWiNFO64.exe";g_focusSession.target=snapshot(handle(2));refocusPreviousWindow();
+ check(activations==1&&foreground==handle(2)&&snapshotCalls==0,"successful game image query ignores stale snapshot names");
+ reset();identityDenied.insert(77);snapshotUnavailable=true;
+ check(!focusIsBackgroundMonitorWindow(handle(4))&&snapshotCalls==1&&snapshotCloses==0,"unavailable process snapshot stays unverifiable without closing an invalid handle");
+ reset();identityEmpty.insert(77);snapshotNames.erase(77);
+ check(!focusIsBackgroundMonitorWindow(handle(4))&&snapshotCalls==1&&snapshotCloses==1,"missing PID in snapshot stays unverifiable and releases its handle");
  std::cout<<"production return-focus regression: "<<passed<<" PASS, "<<failed<<" FAIL\n";
  return failed?1:0;
 }

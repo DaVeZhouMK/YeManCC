@@ -8,6 +8,7 @@ import { oemKeysGet, summonGet, summonSet, type GamepadSettings } from '@/bridge
 import { getGameInputRedistState, installGameInputRedist, setMouseBackend, type MouseBackend, type MouseModeState } from '@/bridge/gameproc';
 import { focusGamepadElement, getGamepadPopupPlacement } from '@/gamepad/focus';
 import { preserveControllerShortcutRecords } from '@/bridge/controllerShortcutStorage';
+import { globalShortcutContainer, effectiveShortcutContainer, hasModeShortcutOverride, hasStoredGlobalShortcuts } from '@/bridge/bootModeSharedShortcuts';
 import { formatControllerShortcutDisplayInputs } from '@/bridge/controllerOemPresentation';
 import { compareAndSwapInputSettings, loadSettings, type InputSettingsSnapshot } from '@/bridge/settingsRepository';
 import {
@@ -42,6 +43,7 @@ const snapshot = ref<InputSettingsSnapshot | null>(null);
 const page = ref(0);
 const busy = ref(false);
 const status = ref('读取快捷规则…');
+const independentMode = ref(false);
 const previewFocus = useShortcutPreviewFocus();
 const gridEl = ref<HTMLElement | null>(null);
 const activeId = previewFocus.activeId;
@@ -88,13 +90,17 @@ async function load(): Promise<void> {
   const actual = await summonGet().catch(() => gamepad.value);
   gamepad.value = { ...actual, mouseBackend: actual.mouseBackend === 'gamebar' ? 'gamebar' : 'joyxoff' };
   const settings = await loadSettings();
-  snapshot.value = settings.input;
+  independentMode.value = hasModeShortcutOverride(settings);
+  const sharedRules = globalShortcutContainer(settings);
+  snapshot.value = { ...settings.input, buttonMapping: { ...settings.input.buttonMapping, rules: sharedRules } };
   const nativeEnabled = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map((definition) => [definition.defaultKey, gamepad.value[definition.defaultKey]]));
-  const persisted = readControllerShortcutRules(settings.input.buttonMapping?.rules);
-  const reconciled = reconcileControllerShortcutRules(persisted, nativeEnabled);
+  const persisted = readControllerShortcutRules(sharedRules);
+  const globalFlags = Object.fromEntries(persisted.filter(rule => rule.origin === 'native-default' && rule.defaultKey).map(rule => [rule.defaultKey!, rule.enabled]));
+  const reconciled = hasStoredGlobalShortcuts(settings) ? { rules: persisted, seeded: 0 }
+    : reconcileControllerShortcutRules(persisted, { ...nativeEnabled, ...globalFlags });
   rules.value = reconciled.rules;
   clampPage();
-  status.value = '';
+  status.value = independentMode.value ? '全局快捷 · 当前模式使用单独设置' : '';
 }
 /**
  * 卡片开关走与编辑器“应用规则”完全相同的写入路径（CAS 配置 + 原生开关桥），
@@ -103,15 +109,14 @@ async function load(): Promise<void> {
 async function persistRules(next: ControllerShortcutRule[]): Promise<void> {
   if (!snapshot.value) throw new Error('规则配置尚未读取完成');
   const currentRules = snapshot.value.buttonMapping?.rules && typeof snapshot.value.buttonMapping.rules === 'object' ? snapshot.value.buttonMapping.rules : {};
-  const nativeSettings = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map((definition) => [
-    definition.defaultKey,
-    next.some((rule) => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled),
-  ]));
   const result = await compareAndSwapInputSettings(snapshot.value.revision, {
     buttonMapping: { rules: { ...currentRules, schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: preserveControllerShortcutRecords(currentRules, readControllerShortcutRules(currentRules), next) } },
-  });
-  snapshot.value = result.value;
+  }, undefined, { globalShortcuts: true });
+  snapshot.value = { ...result.value, buttonMapping: { ...result.value.buttonMapping, rules: result.globalShortcutRules ?? result.value.buttonMapping?.rules } };
   if (!result.ok) throw new Error('配置已被其它页面更新，已刷新为最新值');
+  const effective = readControllerShortcutRules(effectiveShortcutContainer({ input: result.value }));
+  const nativeSettings = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map(definition => [definition.defaultKey,
+    effective.some(rule => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled)]));
   gamepad.value = await summonSet(nativeSettings).catch(() => gamepad.value);
   window.dispatchEvent(new CustomEvent('ipc:gamepad.settings', { detail: gamepad.value }));
   window.dispatchEvent(new CustomEvent(SYNC_EVENT));
@@ -124,7 +129,7 @@ async function toggleRule(rule: ControllerShortcutRule): Promise<void> {
   rules.value = next;
   try {
     await persistRules(next);
-    status.value = '已保存，开关立即生效。';
+    status.value = independentMode.value ? '全局快捷已保存；当前模式使用单独设置。' : '已保存，开关立即生效。';
   } catch (error) {
     // 失败后一律回读磁盘真值（含 CAS 冲突场景），状态行再回显失败原因。
     await load().catch(() => { rules.value = before; });

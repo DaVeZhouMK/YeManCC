@@ -79,7 +79,11 @@ function Assert-CustomSteamLibraryMainlineIdentity {
     throw 'Custom Steam Library export must come from its actual Git repository root'
   }
   $branch = [string](& git -C $root branch --show-current)
-  if ($LASTEXITCODE -ne 0 -or ($branch -ne 'main' -and -not ($env:GITHUB_ACTIONS -eq 'true' -and -not $branch))) {
+  # The ordinary exporter explicitly marks local test packages as unaccepted.
+  # Preserve the actual Git-root and canonical Mainline-path checks below;
+  # this exception never applies to full acceptance or GitHub release jobs.
+  $localTestExport = $env:YEMAN_TEST_EXPORT -eq '1' -and $env:YEMAN_FULL_ACCEPTANCE -ne '1' -and $env:GITHUB_ACTIONS -ne 'true'
+  if ($LASTEXITCODE -ne 0 -or ($branch -ne 'main' -and -not $localTestExport -and -not ($env:GITHUB_ACTIONS -eq 'true' -and -not $branch))) {
     throw "Custom Steam Library export requires main (or the release CI detached checkout), not $branch"
   }
   if ($env:GITHUB_ACTIONS -ne 'true' -and $root -notmatch '[\\/]Mainline[\\/]YeManCC-source[\\/]YeManCC$') {

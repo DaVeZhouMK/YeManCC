@@ -7,39 +7,39 @@
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX {
-	background: linear-gradient(180deg, #d5cebf, #9b9584);
-	box-shadow: inset -10px -6px 5px 4px #ebe8d947, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #afab8c40;
+	background: #d5cebf;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX::before {
-	background: linear-gradient(85deg, #ebe7d8, #b0ab9a);
-	box-shadow: inset -1px -1px 0px 0px #d3cdb080, inset 1px 1px 0px 0px #eae4ce80;
+	background: #ebe7d8;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN {
-	box-shadow: inset -10px -6px 5px 4px #21212180, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #85858540;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN::before {
-	box-shadow: inset -1px -1px 0px 0px #87878780, inset 1px 1px 0px 0px #a7a7a73d;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_Focused_21EoN img {
-	filter: brightness(0) saturate(100%) invert(96%) sepia(11%) saturate(367%) hue-rotate(339deg) brightness(87%) contrast(90%);
+	filter: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX img {
-	filter: brightness(0) saturate(100%) invert(15%) sepia(10%) saturate(308%) hue-rotate(7deg) brightness(98%) contrast(86%);
+	filter: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_ToggleOn_3Qrs- {
-	background: linear-gradient(180deg, #cacaca, #8b8b8b) !important;
-	box-shadow: inset -10px -6px 5px 4px #21212180, 0 0 1px 1px #000000a1, 1px 1px 0px 1px #85858540;
+	background: #cacaca !important;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .virtualkeyboard_KeyboardKey_2KhPX.virtualkeyboard_ToggleOn_3Qrs-::before {
-	background: linear-gradient(85deg, #cccccc, #9d9d9d) !important;
-	box-shadow: inset -1px -1px 0px 0px #87878780, inset 1px 1px 0px 0px #a7a7a780;
+	background: #cccccc !important;
+	box-shadow: none!important;
 }
 
 .DefaultTheme .Col_0,
@@ -96,4 +96,4 @@
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-2198cfba265e7425: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-9ad4d5cbca550e45: 1; }
+:root { --ymcc-content-62078046ab6e82ab: 1; }

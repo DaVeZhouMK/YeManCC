@@ -26,6 +26,7 @@
 namespace ymcc::deckymirror {
 using Json = nlohmann::json;
 constexpr size_t kMaxPayload = 65536, kMaxHeader = 8192, kMaxQueue = 16;
+constexpr ULONGLONG kWriteProgressTimeoutMs = 10000;
 inline std::string randomHex(size_t count) {
     std::vector<unsigned char> bytes(count);
     if (BCryptGenRandom(nullptr, bytes.data(), static_cast<ULONG>(count), BCRYPT_USE_SYSTEM_PREFERRED_RNG) < 0)
@@ -122,18 +123,20 @@ class Broker {
     void run() {
         SOCKET peer=INVALID_SOCKET;WSAEVENT peerEvent=WSA_INVALID_EVENT;
         std::vector<unsigned char> input;std::string output,connection;
-        bool authenticated=false;ULONGLONG deadline=0,fragmentDeadline=0;
+        bool authenticated=false;ULONGLONG deadline=0,fragmentDeadline=0,writeDeadline=0;
         auto changed=[&](bool connected){try{if(reporting_.load()&&config_.peerChanged)config_.peerChanged(connection,runId_,connected);}catch(...){}};
         auto closePeer=[&]{
             if(peer!=INVALID_SOCKET){closesocket(peer);peer=INVALID_SOCKET;}
             if(peerEvent!=WSA_INVALID_EVENT){WSACloseEvent(peerEvent);peerEvent=WSA_INVALID_EVENT;}
             {std::lock_guard lock(state_);if(!connection_.empty())++connectionRevision_;connection_.clear();replies_.clear();}
-            if(authenticated)changed(false);authenticated=false;connection.clear();input.clear();output.clear();deadline=0;fragmentDeadline=0;
+            if(authenticated)changed(false);authenticated=false;connection.clear();input.clear();output.clear();deadline=0;fragmentDeadline=0;writeDeadline=0;
         };
         auto drain=[&]{
+            // Only actual socket progress renews pending output; more replies/pings do not.
+            if(authenticated&&!output.empty()&&!writeDeadline)writeDeadline=GetTickCount64()+kWriteProgressTimeoutMs;
             while(peer!=INVALID_SOCKET&&!output.empty()) {
                 const int n=send(peer,output.data(),static_cast<int>(output.size()),0);
-                if(n>0)output.erase(0,static_cast<size_t>(n));
+                if(n>0){output.erase(0,static_cast<size_t>(n));writeDeadline=output.empty()?0:GetTickCount64()+kWriteProgressTimeoutMs;}
                 else if(n==SOCKET_ERROR&&WSAGetLastError()==WSAEWOULDBLOCK)break;
                 else{closePeer();break;}
             }
@@ -141,9 +144,13 @@ class Broker {
         for(;;) {
             WSAEVENT events[4]{stop_,listenEvent_,sendEvent_,peerEvent};const DWORD count=peer==INVALID_SOCKET?3:4;
             DWORD timeout=WSA_INFINITE;
-            if(peer!=INVALID_SOCKET&&(!authenticated||fragmentDeadline)){
-                const auto until=authenticated?fragmentDeadline:deadline;
-                const auto now=GetTickCount64();timeout=now>=until?0:static_cast<DWORD>(until-now);
+            ULONGLONG until=peer==INVALID_SOCKET?0:authenticated?fragmentDeadline:deadline;
+            if(authenticated&&writeDeadline&&(!until||writeDeadline<until))until=writeDeadline;
+            if(until){
+                const auto now=GetTickCount64();
+                // Check before waiting too: a busy event must not starve an expired deadline.
+                if(now>=until){closePeer();continue;}
+                timeout=static_cast<DWORD>(until-now);
             }
             const auto result=WSAWaitForMultipleEvents(count,events,FALSE,timeout,FALSE);
             if(result==WSA_WAIT_EVENT_0||result==WSA_WAIT_FAILED)break;

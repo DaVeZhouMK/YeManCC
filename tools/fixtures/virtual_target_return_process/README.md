@@ -1,39 +1,47 @@
-# Process identity leaf (task 107)
+# Process identity leaf (task 107, common census fallback)
 
-The actual production header `native/virtual_target_return_process.h` uses the existing record `ProcessIdentity` (`pid`, canonical nonzero uint64 decimal `creationTime`). It is Windows-only, synchronous, and observes exactly one recorded process. It does not scan, retry, wait beyond a zero-time status read, schedule work, write records, terminate processes, or touch controllers, services or drivers. The coordinator owns record/session/runtime integration.
+The fixture compiles the actual production header `native/virtual_target_return_process.h` with the existing record `ProcessIdentity` (PID and canonical nonzero uint64 decimal creation FILETIME). It tests the common helper independently of device family. Recovery, record/session ownership and the later cold target-absence check remain the consumer's responsibility.
 
 ## Interface
 
 Namespace: `ymcc::targetReturn::process`.
 
-- `capture(HANDLE borrowedProcess, DWORD* error = nullptr) -> std::optional<ProcessIdentity>`. The caller retains the handle and must keep it open throughout the call. Queries actual PID and process creation FILETIME; rejects non-process handles, query failure, and zero birth. An existing process pseudo handle is valid. Success clears the optional error; failures preserve the Win32 error or use `ERROR_INVALID_DATA` for zero birth.
-- `probeRecordedOwner(const ProcessIdentity&) -> Probe { State state; Reason reason; DWORD win32Error; }`. States are `Alive`, `Dead`, `Unknown`. Stable `stateName`/`reasonName` helpers support caller diagnostics.
+- `capture(HANDLE borrowedProcess, DWORD* error = nullptr)` returns the exact PID/birth or no identity. The caller retains its handle. Real process pseudo handles work; non-process, restricted, failed and zero-birth queries are rejected.
+- `probeRecordedOwnerHandle(const ProcessIdentity&)` preserves the original direct probe: one noninheritable `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE` open for the exact PID, PID/birth verification and a zero-time wait, with every owned handle closed.
+- `probeRecordedOwner(const ProcessIdentity&)` returns the direct Alive/Dead result unchanged. Invalid input remains Unknown without API calls. Only other direct Unknown results may invoke the census fallback.
+- `Probe` exposes `state`, `reason`, `win32Error`, `directWin32Error`, `censusAttempts`, `censusBytes`, `censusRows` and `censusNtStatus`. The last raw NTSTATUS is separate from the Win32 error; failed NT queries report `ERROR_GEN_FAILURE`. Stable `stateName`/`reasonName` helpers describe the result.
 
-A malformed recorded identity is Unknown without opening anything. The probe opens only the recorded PID with `PROCESS_QUERY_LIMITED_INFORMATION | SYNCHRONIZE`, noninheritable, and closes its own handle on every return. It verifies both PID and actual birth before a nonblocking `WaitForSingleObject(..., 0)`:
+The fallback resolves `NtQuerySystemInformation` from the already loaded `ntdll.dll`, captures this fixture's own process birth, and queries SystemProcessInformation (class 5). It starts at 64KiB, permits at most three calls and at most 8MiB per allocation, and retries only STATUS_INFO_LENGTH_MISMATCH or STATUS_BUFFER_TOO_SMALL. It consumes the returned length, validates the complete NextEntryOffset chain and duplicate PIDs, and requires one self row with the exact captured birth before giving the snapshot authority. CreationTime is at byte 32 and UniqueProcessId at byte 80 on x64 (68 on x86).
 
-| Observation | State | Reason |
-| --- | --- | --- |
-| Matching identity, timeout (still running) | Alive | matching-running |
-| Matching identity, signaled (terminated) | Dead | matching-exited |
-| Same PID, different nonzero birth | Dead for original recorded identity | pid-reused |
-| Valid nonzero recorded PID, OpenProcess error 87 | Dead | pid-not-found |
-| Access denied or any other open/query failure | Unknown | distinct failure reason |
-| Zero returned birth, mismatched PID, failed/unexpected/abandoned wait | Unknown | distinct failure reason |
+| Observation | State / reason |
+| --- | --- |
+| Direct matching live / exited identity | Alive / matching-running; Dead / matching-exited; no census |
+| Direct PID reused / error 87 | Dead / pid-reused or pid-not-found; no census |
+| Census exact PID and birth still present | Alive / census-matching-running |
+| Complete self-validated census lacks target PID | Dead / census-pid-not-found |
+| Complete self-validated census has target PID with different nonzero birth | Dead / census-pid-reused |
+| Missing API, failed query, size or attempt budget exhausted | Unknown / distinct census reason |
+| Truncated, out-of-range, unaligned or duplicate rows; zero/negative target birth | Unknown / census-malformed |
+| Missing, mismatching, ABI-shifted or uncapturable self identity | Unknown / census-self-unproven |
 
-Alive may become stale immediately. Dead applies only to that PID/birth pair and grants no device, target, descendant-process, CLI-completion, or unhide authority. Parent/Host death says nothing about another owner. Successful capture alone is also not liveness proof. A persisted PID/birth must already have trustworthy machine/boot/origin context from its caller; this leaf does not authenticate records or replace session ownership.
+Non-target zero birth (including idle) is allowed. Alive may become stale immediately. Dead applies only to the recorded PID/birth and grants no process termination, target cleanup, descendant, CLI, service, driver or unhide authority. Cold recovery still requires its existing independent target-absence and ownership checks. The leaf neither authenticates persisted records nor schedules background work.
 
-## Direct regression
+## Minimal isolated regression
 
-Use explicit absolute paths and a fresh private output directory outside source/toolchain directories:
+Run the existing leaf runner with explicit absolute paths and a fresh output directory outside source/toolchain directories:
 
 ```powershell
-node G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/virtual_target_return_process_selftest.mjs --out ABS_FRESH_PRIVATE_DIRECTORY --toolchain ABS_CAPTURED_TOOLCHAIN_DIRECTORY
+node G:/YeManCC-Work/Mainline/YeManCC-source/YeManCC/tools/virtual_target_return_process_selftest.mjs --out G:/YeManCC-Work/Testing/YMCC/Evidence/VC-ROG26-113705-ColdHost-R1/process-helper-UNIQUE --toolchain G:/YeManCC-Work/Testing/YMCC/Evidence/VC-Composition95Current23/toolchain-authority
 ```
 
-Task 107 reuses the captured environment at `Build/Validation/VirtualController-Lifecycle-20261019/player-switch-lock12/production-link100`. The tool never discovers a new compiler or overwrites prior evidence. It freezes the current process header, record header, JSON dependency, fixture, runner and this README; verifies tools against the captured manifest; compiles the actual frozen headers; binds compiler includes and verbose linker library inputs; inspects PE imports; then binds the executed binaries and verifies source/toolchain freshness after execution.
+The runner verifies actual tools against the captured manifest; freezes the current production process/record headers, JSON dependency, fixture, runner and this README; binds actual compiler includes and verbose linker inputs; inspects static PE imports; binds the executed binaries; and checks source/toolchain freshness afterward. It does not discover a replacement compiler or overwrite earlier FAIL evidence. Each variant retains its command, build/run logs, compile closure and terminal case/assertion result. The aggregate result includes the real census observation and per-variant coverage.
 
-Release is `/O2 /MT /W4 /WX`; Checked is `/Od /RTC1 /MT /W4 /WX`. Checked is an MSVC runtime-check configuration, not an arithmetic-overflow sanitizer. Both run real private native child processes, a real child that outlives its private parent, capture of owned/borrowed and restricted handles, real event rejection, terminal identity, repeated real probes and actual OS handle counts. Children execute only this fixture and use private events with bounded safety timeouts. Fixture-only cleanup may terminate its own still-running children. No product, InputHost, Steam, service or driver is started or controlled.
+Release is `/O2 /MT /W4 /WX`; Checked is `/Od /RTC1 /MT /W4 /WX`. Checked supplies MSVC runtime checks, not arithmetic-overflow sanitization. Original real private child/parent lifetime, borrowed/restricted/event handles, terminal identity and repeated OS handle-count checks remain. Only private copies of this fixture are launched; children use private events and bounded safety timeouts. Cleanup can terminate only a fixture-owned child.
 
-PID reuse, open denial/not-found/other errors, query failures, zero/mismatched identity, and uncertain waits are explicitly labelled controlled Win32 leaf faults. They intercept only the compiled production leaf's API calls; normal calls and all private process management use real Win32. An actual synchronize-only borrowed handle also exercises a real access-denied capture. No controlled case claims OS PID reuse or real device evidence.
+Synthetic seams intercept only the compiled production leaf's APIs. They independently encode snapshot bytes and control module/export availability, direct/self query faults, statuses, returned sizes and allocation pressure; the production helper makes every liveness decision. A separate required case forces only direct OpenProcess denial while delegating to the real ntdll export for a live private child, with actual calls, bytes, rows and self validation recorded. This is real OS snapshot integration with a synthetic denial, not an observed protected/reused OS PID.
 
-Five separately compiled semantic faults must fail original assertions: classify access denial as Dead; classify reused PID as Alive; classify exited process as Alive; classify failed wait as Dead; omit probe-handle close. These are negative controls, not alternate production implementations. The fixture reclaims leak-mutant handles after measuring the fault. Historical failures remain in their own fresh output directories. This regression does not integrate recovery or establish real hardware/sleep/installation acceptance.
+Census boundaries cover reused/missing/exact-birth owners; either row ordering; recorded self; idle/unrelated zero births; missing or wrong self/layout; duplicate target/self/unrelated/idle; zero/negative target births; oversized PIDs; malformed offsets and terminal chains; truncation after an already-seen target and self; returned-length poison; missing APIs; failed self capture; negative query status; each retry status; growth through the third call; exhaustion; over-budget sizes; the exact 8MiB allocation boundary; and failure after growth. Conclusive direct results and invalid input assert zero census calls. Original direct error assertions remain against the actual unchanged handle helper, and the wrapper separately verifies preserved direct errors.
+
+The five original separately compiled semantic faults remain: denied open as Dead, reused PID as Alive, exited process as Alive, failed wait as Dead, and leaked probe handles. Five additional mutations must fail their intended original census cases: live census owner as Dead, absent self proof accepted, scan stopped after target/self, a fourth query permitted, and failed query payload parsed. Mutations affect only frozen evidence copies of the production header. They are negative controls, not alternate implementations.
+
+Scope is this common process-identity helper. No product/InputHost/Steam/device/service/driver execution, installation, physical hardware, actual sleep, complete cold consumer or family acceptance is claimed.

@@ -1,10 +1,16 @@
-name: Prepare v0.0.36 release
+name: Prepare v0.0.37 release
 
 on:
   push:
     branches:
       - 'release-preparation/**'
   workflow_dispatch:
+    inputs:
+      full_acceptance:
+        description: Execute full acceptance without publishing a Release
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -19,11 +25,12 @@ jobs:
     timeout-minutes: 45
     env:
       pnpm_config_verify_deps_before_run: 'false'
-      # User requested gate-only checks; do not create/upload another test package.
+      # Preparation defaults to an environment check; full acceptance is explicit.
+      # Neither mode publishes a tag, Release, or client manifest.
       YMCC_RELEASE_ENVIRONMENT_ONLY: '1'
-      YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: '1'
-      YMCC_CAPTURE_LIGHTING_ONLY: '1'
-      YMCC_CAPTURE_ROUTING_ONLY: '1'
+      YMCC_FORMAL_ACCEPTANCE_PREFLIGHT: ${{ github.event_name == 'workflow_dispatch' && inputs.full_acceptance && '1' || '0' }}
+      YMCC_CAPTURE_LIGHTING_ONLY: '0'
+      YMCC_CAPTURE_ROUTING_ONLY: '0'
       # Build/evidence must remain outside the Git source root.
       YEMAN_WORKSPACE_ROOT: ${{ github.workspace }}/../..
     steps:
@@ -41,13 +48,13 @@ jobs:
           if ($workspace -eq $project -or $workspace.StartsWith($project + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Build workspace must be outside product sources' }
           "YEMAN_WORKSPACE_ROOT=$workspace" | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Verify 036 candidate version and notes
+      - name: Verify 037 candidate version and notes
         shell: pwsh
         run: |
           $manifest = Get-Content version.json -Raw -Encoding UTF8 | ConvertFrom-Json
           $package = Get-Content package.json -Raw -Encoding UTF8 | ConvertFrom-Json
-          if ($manifest.version -cne '0.0.36' -or $package.version -cne $manifest.version) { throw '036 candidate version mismatch' }
-          if (!(Test-Path -LiteralPath 'docs/release-notes/v0.0.36.md')) { throw '036 release notes are missing' }
+          if ($manifest.version -cne '0.0.37' -or $package.version -cne $manifest.version) { throw '037 candidate version mismatch' }
+          if (!(Test-Path -LiteralPath 'docs/release-notes/v0.0.37.md')) { throw '037 release notes are missing' }
           if ($env:GITHUB_REF_TYPE -eq 'tag') { throw 'Preparation must run from a branch' }
 
       - name: Setup Node 22
@@ -66,17 +73,12 @@ jobs:
         with:
           dotnet-version: '10.0.400'
 
-      - name: Select installed x64 MSVC toolchain
-        uses: ilammy/msvc-dev-cmd@0b201ec74fa43914dc39ae48a89fd1d8cb592756 # v1
-        with:
-          arch: x64
-
       - name: Provide frozen-source Visual Studio compatibility entrypoints
         shell: pwsh
         run: |
           # Only provision the disposable hosted runner. No tracked source is edited.
           $locator = Join-Path ${env:ProgramFiles(x86)} 'Microsoft Visual Studio\Installer\vswhere.exe'
-          # Use the exact toolchain already selected by msvc-dev-cmd (including preview VS).
+          # Reuse a selected installation or discover MSVC directly (including preview VS).
           $installation = $env:VSINSTALLDIR
           if (-not $installation -or -not (Test-Path -LiteralPath $installation -PathType Container)) {
             $locations = @(& $locator -latest -prerelease -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
@@ -183,7 +185,7 @@ jobs:
         shell: pwsh
         run: |
           node scripts/write-version.mjs
-          if ($LASTEXITCODE -ne 0) { throw 'Generated036 version files failed' }
+          if ($LASTEXITCODE -ne 0) { throw 'Generated037 version files failed' }
           pnpm run type-check
           if ($LASTEXITCODE -ne 0) { throw 'Candidate type check failed' }
 
@@ -210,12 +212,12 @@ jobs:
           $packageDir = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release/Packages'
           $package = Join-Path $packageDir 'YeManCC.zip'
           if (!(Test-Path -LiteralPath $package)) { throw 'Complete candidate package missing' }
-          $sourcePath = Join-Path $packageDir 'YeManCC-source-v0.0.36.zip'
+          $sourcePath = Join-Path $packageDir 'YeManCC-source-v0.0.37.zip'
           git archive --format=zip --prefix=YeManCC/ --output=$sourcePath HEAD
           if ($LASTEXITCODE -ne 0) { throw 'Candidate source archive failed' }
-          $rows = foreach ($name in @('YeManCC.zip', 'YeManCC-source-v0.0.36.zip')) { (Get-FileHash (Join-Path $packageDir $name) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name }
+          $rows = foreach ($name in @('YeManCC.zip', 'YeManCC-source-v0.0.37.zip')) { (Get-FileHash (Join-Path $packageDir $name) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $name }
           $rows | Set-Content (Join-Path $packageDir 'SHA256SUMS.txt') -Encoding UTF8
-          [ordered]@{ version='0.0.36'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content (Join-Path $packageDir 'PREPARATION.json') -Encoding UTF8
+          [ordered]@{ version='0.0.37'; commit=(git rev-parse HEAD); fixtureValidation='NOT_RUN'; formalReleaseAccepted=$false; publicReleaseCreated=$false; mainManifestUpdated=$false } | ConvertTo-Json | Set-Content (Join-Path $packageDir 'PREPARATION.json') -Encoding UTF8
 
       - name: Save release gate environment diagnostics
         if: always()

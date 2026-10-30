@@ -16,6 +16,7 @@ static int WSAAPI resourceFixtureBind(SOCKET socket,const sockaddr* value,int le
 #define bind resourceFixtureBind
 #include "../native/decky_binding_worker_entry.h"
 #include "../native/decky_sidebar_runtime.h"
+#include "../native/decky_sidebar_diagnostics.h"
 #undef bind
 #include <condition_variable>
 #include <iostream>
@@ -52,8 +53,26 @@ int wmain(int argc,wchar_t** argv){int code=0;if(childPeer(code))return code;try
     Json manifest={{"schemaVersion",1},{"owner","YMCC"},{"origin","official-release"},{"loaderVersion",ymcc::deckyidentity::version},{"loaderSha256",ymcc::deckyidentity::sha256},{"files",Json::array()}};
     for(const auto* name:ymcc::deckysetup::managedFiles)manifest["files"].push_back({{"path",ymcc::deckysetup::pathText(fs::path(name))},{"bytes",fs::file_size(home/name)},{"sha256",worker::digest((home/name).wstring(),[]{return true;})}});put(metadata,manifest.dump());
     const auto normal=[&]{return worker::prepare(steam,home,metadata,[]{return true;},true);};
+    check("read-only launch preparation validates all live bytes without creating or hashing the repair cache",[&]{
+        const auto cache=home/L".ymcc-resource-cache";need(!fs::exists(cache),"read-only fixture cache must start absent");
+        const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);
+        need(r.value("ready",false)&&r.value("managedPackageVerified",false)&&r.value("resourceWorkerDestroyed",false),"read-only launch lost complete live verification");
+        need(!fs::exists(cache),"read-only launch performed noncritical cache IO");
+        need(r.value("resourceMaintenanceDeferred",false),"deferred maintenance was not reported");
+        need(ymcc::deckydiag::record("prepare",r).value("resourceMaintenanceDeferred",false),"existing preparation log lost deferred-maintenance evidence");
+    });
+    check("read-only launch still rejects same-size plugin corruption and cannot repair or prime cache",[&]{
+        const auto plugin=home/ymcc::deckysetup::managedFiles[2];const auto original=std::string("fixture-")+ymcc::deckysetup::pathText(fs::path(ymcc::deckysetup::managedFiles[2]));
+        auto corrupt=original;corrupt.back()=corrupt.back()=='x'?'y':'x';put(plugin,corrupt);
+        const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);
+        need(!r.value("ready",true)&&r.value("reason",std::string{})=="resource-package-mismatch"&&r.value("resourceWorkerDestroyed",false),"read-only launch admitted corrupt live plugin");
+        need(!fs::exists(home/L".ymcc-resource-cache"),"read-only rejection wrote repair cache");
+        need(worker::digest(plugin.wstring(),[]{return true;})!=manifest["files"][2]["sha256"].get<std::string>(),"read-only rejection silently repaired user file");put(plugin,original);
+    });
     check("actual private early-entry child validates current official bytes and primes cache",[&]{const auto r=normal();need(r.value("ready",false)&&r.value("resourceCacheAvailable",false)&&r.value("resourceWorkerDestroyed",false),"real resource worker did not finish with zero resources");});
     check("actual same-image child repairs missing Loader and confirms final identity",[&]{fs::remove(home/ymcc::deckysetup::managedFiles[0]);const auto r=normal();need(r.value("ready",false)&&r.value("resourcesRepaired",0u)==1&&r.value("resourceWorkerDestroyed",false),"real worker did not repair official bytes");});
+    check("actual owned worker preserves a legacy receipt when write admission is refused",[&]{put(home/L".ymcc-managed.json",manifest.dump());put(home/L"settings"/L".ymcc-managed.json","old-settings-copy");const auto r=worker::prepare(steam,home,metadata,[]{return true;},false);need(!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false)&&fs::exists(home/L".ymcc-managed.json")&&!fs::exists(home/L".ymcc-managed.receipt"),"non-owner resource worker moved legacy receipt");});
+    check("actual owned worker migrates duplicate root JSON before two official startup scans",[&]{const auto r=normal();need(r.value("ready",false)&&r.value("resourceWorkerDestroyed",false)&&!fs::exists(home/L".ymcc-managed.json")&&fs::exists(home/L".ymcc-managed.receipt"),"production worker did not retire conflicting root JSON");for(unsigned startup=0;startup<2;startup++)for(const auto& file:fs::directory_iterator(home))if(file.path().extension()==L".json")need(MoveFileW(file.path().c_str(),(home/L"settings"/file.path().filename()).c_str())!=FALSE,"official settings scan still hits receipt collision");const auto second=normal();need(second.value("ready",false)&&second.value("resourceWorkerDestroyed",false),"repeat worker startup broke receipt ownership");std::ifstream saved(home/L"settings"/L".ymcc-managed.json");std::string value;saved>>value;need(value=="old-settings-copy","worker changed settings-side user metadata");});
     const auto count=handles();
     check("forged or stale child response cannot claim ready",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"bad-reply");const auto r=normal();SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(!r.value("ready",true)&&r.value("resourceWorkerDestroyed",false),"forged resource reply accepted");need(handles()==count,"invalid reply leaked handles");});
     check("child EOF before a result stops promptly without retry or leaked resources",[&]{SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",L"eof");const auto started=GetTickCount64();const auto r=normal();const auto elapsed=GetTickCount64()-started;SetEnvironmentVariableW(L"YMCC_RESOURCE_WORKER_FIXTURE",nullptr);need(!r.value("ready",true)&&r.value("reason",std::string{})=="resource-worker-read-failed"&&elapsed<1000&&r.value("resourceWorkerDestroyed",false)&&handles()==count,"resource EOF spun or retained ownership");});

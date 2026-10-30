@@ -66,6 +66,26 @@ inline Json record(const std::string& event,const Json& detail) {
         for(const auto* key:{"subscribe","readId","demandEpoch","discarded","powerMs","powerSourceMs","scheduleMs","topologyMs","gyroMs","framesMs","touchpadsMs","globalMs","monitorMs","inputMs"})
             if(detail.contains(key)&&detail[key].is_primitive())result[key]=detail[key];
     }
+    if((event=="bootstrap"||event=="bootstrap-watch")&&detail.contains("sessionCheck")&&detail["sessionCheck"].is_string()){
+        const auto check=detail["sessionCheck"].get<std::string>();
+        if(check=="steam-process-or-birth"||check=="steam-user-or-session"||check=="steam-process-exited"||
+           check=="steam-windows-session"||check=="steam-account"||check=="steam-root"||check=="steam-registered-pid")result["sessionCheck"]=check;
+    }
+    if(event=="steam-session-check") {
+        result={{"event",event}};
+        for(const auto* key:{"pidPresent","birthPresent","accountPresent","rootPresent"})
+            if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
+        for(const auto* key:{"steamPid","error"})
+            if(detail.contains(key)&&detail[key].is_number_unsigned()&&detail[key].get<unsigned long long>()<=0xffffffffull)result[key]=detail[key];
+        if(detail.contains("steamBirth")&&detail["steamBirth"].is_string()){
+            const auto& birth=detail["steamBirth"].get_ref<const std::string&>();
+            if(!birth.empty()&&birth.size()<=20&&birth.find_first_not_of("0123456789")==std::string::npos)result["steamBirth"]=birth;
+        }
+        if(detail.contains("stage")&&detail["stage"].is_string()){
+            const auto& stage=detail["stage"].get_ref<const std::string&>();
+            if(stage=="launch-identity-incomplete"||stage=="binding-identity-incomplete"||stage=="windows-session-query"||stage=="session-changed")result["stage"]=stage;
+        }
+    }
     if(event=="wallpaper-inventory"||event=="wallpaper-prepare") {
         result={{"event",event}};
         for(const auto* key:{"elapsedMs","targetCount","shortcutCount","verifiedCount","shortcutTargets","shortcutPending","slotCount","retryDelayMs"})if(detail.contains(key)&&detail[key].is_number_unsigned())result[key]=(std::min)(detail[key].get<unsigned long long>(),3600000ull);
@@ -78,7 +98,7 @@ inline Json record(const std::string& event,const Json& detail) {
     if(event=="prepare"||event=="environment") {
         for(const auto* key:{"loaderExpectedSha256","loaderObservedSha256"})
             if(detail.contains(key)&&validBuildId(detail[key]))result[key]=detail[key];
-        for(const auto* key:{"resourceCacheAvailable","resourceRepairAttempted","resourceWorkerDestroyed"})if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
+        for(const auto* key:{"resourceCacheAvailable","resourceRepairAttempted","resourceWorkerDestroyed","resourceMaintenanceDeferred"})if(detail.contains(key)&&detail[key].is_boolean())result[key]=detail[key];
         if(detail.contains("resourcesRepaired")&&detail["resourcesRepaired"].is_number_unsigned()&&detail["resourcesRepaired"]<=7)result["resourcesRepaired"]=detail["resourcesRepaired"];
         if(detail.contains("resourceRepairReason")&&detail["resourceRepairReason"].is_string()){const auto reason=detail["resourceRepairReason"].get<std::string>();if(reason.size()<=96&&reason.starts_with("resource-cache-")&&reason.find_first_not_of("abcdefghijklmnopqrstuvwxyz-")==std::string::npos)result["resourceRepairReason"]=reason;}
         if(detail.contains("managedPackageSource")&&detail["managedPackageSource"].is_string()){const auto source=detail["managedPackageSource"].get<std::string>();if(source=="receipt"||source=="package"||source=="legacy")result["managedPackageSource"]=source;}

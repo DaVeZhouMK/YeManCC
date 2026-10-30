@@ -58,7 +58,7 @@ int wmain(int argc,wchar_t** argv){try{
  check(!safe.contains("token")&&!safe.contains("endpoint")&&!safe.contains("args")&&!safe.contains("gameIdentity"),"secrets and mutation args excluded");
  check(ymcc::deckydiag::maxBytes==1024ull*1024ull,"bounded diagnostic size");
  // Managed receipt verification is the real startup consumer, not a separate model.
- const auto receipt=home/L".ymcc-managed.json";
+ const auto receipt=home/L".ymcc-managed.receipt";
  Json manifest={{"schemaVersion",1},{"owner","YMCC"},{"origin","official-release"},{"loaderVersion",ymcc::deckyidentity::version},{"loaderSha256",loaderSha},{"files",Json::array()}};
  for(const auto* name:managedFiles){file(home/name);manifest["files"].push_back({{"path",pathText(std::filesystem::path(name))},{"bytes",std::filesystem::file_size(home/name)},{"sha256",std::string(name==managedFiles[0]?loaderSha:std::string(64,'c'))}});}
  auto writeReceipt=[&](const Json& value){std::ofstream(receipt,std::ios::binary)<<value.dump();};
@@ -87,5 +87,23 @@ int wmain(int argc,wchar_t** argv){try{
  broken=manifest;broken["loaderVersion"]="v99.0.0";std::ofstream(bundled,std::ios::binary)<<broken.dump();check(inspect(steam,home,managedDigest,bundled)["reason"]=="resource-upgrade-required","first upgrade still binds current native official version");
  std::ofstream(bundled,std::ios::binary)<<manifest.dump();std::filesystem::remove(marker);result=prepare(steam,home,managedDigest,false,{},bundled);
  check(result["ready"]==true&&result["managedPackageVerified"]==true&&result["managedPackageSource"]=="package","marker preparation retains first-upgrade verification on its final read");
+ // Reproduce the real Windows collision before testing the bounded startup migration.
+ const auto legacy=home/L".ymcc-managed.json",moved=home/L"settings"/L".ymcc-managed.json";
+ file(legacy,manifest.dump().c_str());file(moved,"older-settings-receipt-preserved");
+ check(!MoveFileW(legacy.c_str(),moved.c_str())&&GetLastError()==ERROR_ALREADY_EXISTS,"official root JSON migration reproduces WinError183 on Windows");
+ check(inspect(steam,home,managedDigest,bundled)["ready"]==true&&std::filesystem::exists(legacy)&&!std::filesystem::exists(receipt),"inspection reads a valid legacy receipt without migrating files");
+ int migrationChecks=0;result=prepare(steam,home,managedDigest,false,[&]{return ++migrationChecks<2;},bundled);
+ check(result["reason"]=="preparation-cancelled"&&std::filesystem::exists(legacy)&&!std::filesystem::exists(receipt),"cancellation after legacy validation vetoes migration");
+ result=prepare(steam,home,managedDigest,false,{},bundled);
+ check(result["ready"]==true&&!std::filesystem::exists(legacy)&&std::filesystem::exists(receipt),"startup moves validated legacy JSON to non-JSON receipt before Loader");
+ {std::ifstream retained(moved);std::string value;retained>>value;check(value=="older-settings-receipt-preserved","startup does not alter settings-side metadata or user settings");}
+ for(int restart=0;restart<2;restart++)for(const auto& item:std::filesystem::directory_iterator(home))if(item.path().extension()==L".json")check(MoveFileW(item.path().c_str(),(home/L"settings"/item.path().filename()).c_str()),"official migration can repeat without receipt collisions");
+ check(prepare(steam,home,managedDigest,false,{},bundled)["ready"]==true,"second startup retains safe receipt and remains ready");
+ file(legacy,manifest.dump().c_str());check(prepare(steam,home,managedDigest,false,{},bundled)["ready"]==true&&!std::filesystem::exists(legacy),"identical duplicate legacy receipt is archived without overwrite");
+ broken=manifest;broken["files"][2]["sha256"]=std::string(64,'d');file(legacy,broken.dump().c_str());
+ check(prepare(steam,home,managedDigest,false,{},bundled)["reason"]=="resource-receipt-conflict"&&std::filesystem::exists(legacy),"conflicting verified receipts fail closed without choosing stale assets");
+ std::filesystem::remove(legacy);file(legacy,"{broken");
+ check(prepare(steam,home,managedDigest,false,{},bundled)["reason"]=="resource-package-invalid"&&std::filesystem::exists(legacy),"invalid old JSON cannot be silently erased for a successful launch");
+ std::filesystem::remove(legacy);
  std::cout<<Json({{"cases",cases},{"status","passed"},{"fakeSteamDirectory",true},{"testDigestInjected",true},{"realSteamWrites",0},{"hardwareWrites",0},{"externalPython",false},{"externalNode",false}}).dump()<<std::endl;return 0;
  }catch(const std::exception& e){std::cerr<<e.what()<<std::endl;return 1;}}

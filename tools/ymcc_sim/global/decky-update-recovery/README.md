@@ -151,3 +151,15 @@ PS事务增加晚到回滚竞争和Windows5.1直接源码编码回归；测试�
 缓存消费者现为32项和4个语义负例，覆盖真实自有Job硬中断后的固定暂存恢复。原本机连接失败另定位为主观察器允许陈旧注册表PID回退，而worker仍严格比较PID；新SteamLease正式14项+2语义负例登记于现有发布门及持续父门current.steam-session-lease-regression，不增加原更新树240秒预算。真实只读Steam租约通过不等于安装版已接回面板。
 
 完整门冻结r2仍FAIL（52/55，含原240秒超时及typed故障关闭观察器失败），新租约修复后未重跑整门；当前main语法检查也因screenpads接口未声明失败。旧绿回执不放行新源码。原始失败、临时探针错误与补齐源码闭包后的48项官方独立通过均保留，见上述两份REPORT.md及RESULT.json。
+
+### 2026-10-29 ROG S0 Ready / upgrade alternation
+
+`field-record-wake-20261022.json.followups` appends the 2026-10-29 ROG evidence without replacing the older wake case. The 10:28 user wake opened shared Ready through `sgAbortSleepIntent`, bypassing `WM_POWER_RESUME_COMMIT`; Decky now notifies its existing preparation/binding/admission owners once for this real Ready generation. No power state is manufactured, no healthy timer is added, and OFF / exact session / crash limits remain authoritative.
+
+The compiled `ManualRepair` consumer pins the **observed document Loader version** when an explicit repair refreshes an equal/older stable document. Numeric stable comparison covers 330→331, 331→340, 340→400 and 3.9→3.10; a newer loaded document is refused by an older install. This does not relax exact Loader/build matching for automatic retained transport or allow automatic Steam UI rebuilds. Actual document/module identity is rechecked by the existing source and embedded JS before dispatch and inside its queued callback.
+
+The existing update-recovery producer now passes serialized actions from `retained-session-repair/native.json` into `manualRepairTests`; the native→JS upgrade cases are mandatory there, not an optional parallel model. The existing persistent-lifecycle typed consumer requires all 16 native cases, including S0 owned/retained wake, preparation revalidation and the previously existing healing cases. Missing required cases, negative source overrides, wrong compiled S0 excerpt, stale source identities, uncleared resources or the unchanged 3200ms stop boundary fail validation.
+
+A reverse test also exposed Job count zero preceding final descendant-process signalling. The existing process owner now takes bounded, read-only handles to verified Job members only during stop, waits for actual exit under its original deadline, and accounts for those handles until cleanup. It does not scan healthy sessions, kill foreign processes, or call user callbacks during cleanup.
+
+Targeted evidence: `Testing/YMCC/Evidence/Decky-WakeHealing-20261029/REPORT.md`. Native Runtime/Client/Owner and file transactions execute in isolated evidence using inert source-built peers. No actual Windows sleep, installed replacement or whole-package release acceptance is claimed by these results. Future upstream private API/lifecycle changes still require official-contract review and fresh release receipts.

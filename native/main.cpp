@@ -25,6 +25,7 @@
 #define NOMINMAX
 #endif
 #define _WIN32_WINNT 0x0A00
+#include "rog_fse_experiment_policy.h"
 #include "radial_release.h"
 
 #include "fan_resume_evidence.h"
@@ -105,6 +106,7 @@
 #include "sensor_thread_mailbox.h"
 #include "input_idle_windows_json.h"
 #include "native_process_cost.h"
+#include "decky_wallpaper_process_cost.h"
 #include "input_callback_cost.h"
 #include "gamepad_backend_cost_json.h"
 static ymcc::input::backendCost::Counters g_gamepadBackendCost;
@@ -352,6 +354,7 @@ static bool fanHostOwnsLoopbackPort(DWORD pid, unsigned short port);
 #pragma comment(lib, "iphlpapi.lib")
 
 #include "json.hpp"
+#include "boot_mode_shortcuts.h"
 #include "update_install_recovery.h"
 #include "update_install_recovery_script.h"
 #include "updater_hc_runtime_script.h"
@@ -1255,6 +1258,8 @@ static bool g_deckyEventPosted = false;
 static void deckySidebarDiagnostic(const char* event,const json& detail,bool force=false);
 static ymcc::deckymirror::Broker g_deckyMirrorBroker;
 static ymcc::deckysidebar::Runtime g_deckySidebarRuntime;
+static ymcc::deckycost::ContextCache g_deckyCostContext;
+static json deckyWallpaperProcessCostSnapshot(bool enabled) noexcept;
 static std::atomic<bool> g_deckySteamRestartRequired{false};
 static constexpr bool kSteamOverlayFixDefaultEnabled = ymcc::sleepprefs::kOverlayOffFixDefaultEnabled; // deprecated, always off
 static constexpr const char* kSteamOverlayFixValueOff = "0";
@@ -1428,7 +1433,7 @@ static void steamOriginalRecoveryShutdown();
 static std::wstring steamOriginalRecoveryExportSnapshot();
 
 static bool g_sgPauseResume   = true;  // 睡眠时暂停游戏 + 唤醒时自动恢复（两者绑定，只一个开关）
-static bool g_sgResleepEnabled = true; // code=7 / Kernel-Power 507 Reason=5 意外唤醒后重睡
+static bool g_sgResleepEnabled = false; // 供电变动等非人工唤醒后重睡，默认关闭
 static bool g_sgRetryEntryFailure = true; // 明确 S0/S3 入睡失败时同模式重试一次
 // GP-STEAMWAKE-5：旧关闭 Steam Overlay 策略已过时、弃用且不可达。
 // 不再读取旧 true 偏好激活，也不自动关闭或恢复 Steam 叠加设置。
@@ -3093,6 +3098,7 @@ static bool ymSettingsWriteDocumentUnlocked(const std::string& content,
     ymcc::settingsBaseline::preserveReceipt(parsed, old);
     if (!ymcc::settingsBaseline::supported(parsed)) return false;
     ymcc::controllerPersona::migrateSavedDocument(parsed);
+    ymcc::bootModeShortcuts::retireGlobalSnapshot(parsed);
     const auto serialized = parsed.dump(2);
     if (serialized.size() > 4 * 1024 * 1024) return false;
     InputHostTargetWriteGuard targetRequest;
@@ -6692,6 +6698,7 @@ static void oemBackMappingSetEnabled(bool enable);
 static void msiWmiSetEnabled(bool enable);
 // MSI 背键（M1/M2）DInput 只读适配器（W7 第 4 批）：退出前释放 DInput 设备与对象。
 static void msiDinputSetEnabled(bool enable);
+static void physicalSourceReaderStop() noexcept;
 static std::unique_lock<std::mutex> msiDinputReleasePadForLifecycle(const char* reason);
 static void msiDinputStopForLifecycle(const char* reason,bool retainPhysicalMode,bool deferPhysicalReturn=false);
 // GP-MSIG3E-3（Layer B）：DInput 主源"可作虚拟手柄物理源"的判据（定义在 MSI 能力区，
@@ -6820,6 +6827,7 @@ static DWORD WINAPI exitCleanupThreadProc(LPVOID param) {
     msiWmiSetEnabled(false);
     // MSI 背键 DInput 适配器释放（W7 第 4 批）：非 MSI 机型零成本。
     msiDinputSetEnabled(false);
+    physicalSourceReaderStop();
     // 退出末段沿用既有 HidHide 补偿入口；同一生命周期门内仍须复核旧 Host
     // 与虚拟端点归还责任，未证明归还时保留隐藏并拒绝清扫。
     // 实际物理可见性以归还与读回证据为准；到达退出路径本身不是可见性保证。
@@ -7111,10 +7119,10 @@ static void sgLoadConfig() {
                 ? j.value("pauseGameOnSleep", true)
                 : j.value("pauseResume", true);
             g_sgResleepEnabled = j.contains("retryOnNonUserWake")
-                ? j.value("retryOnNonUserWake", true)
+                ? j.value("retryOnNonUserWake", false)
                 : j.contains("resleepEnabled")
-                    ? j.value("resleepEnabled", true)
-                    : true;
+                    ? j.value("resleepEnabled", false)
+                    : false;
             g_sgRetryEntryFailure = j.value("retryOnEntryFailure", true);
             g_sleepRecoveryAutoEnabled.store(ymcc::sleepprefs::autoWakePreference(j), std::memory_order_release);
             g_wakePasswordPreference.store(j.value("wakePasswordEnabled", false), std::memory_order_release);
@@ -7149,6 +7157,7 @@ static void sgSaveConfig() {
         {"retryOnNonUserWake", g_sgResleepEnabled},
         {"factMonitorEnabled", g_sgFactMonitorEnabled.load(std::memory_order_acquire)},
         {"sleepPowerPlanOptimizationEnabled", sleepPowerPlanOptimizationEnabled},
+        {"staticWakeAutoScanEnabled", currentSleep.value("staticWakeAutoScanEnabled", sleepPowerPlanOptimizationEnabled)},
         {"wakePasswordEnabled", currentSleep.value("wakePasswordEnabled", false)},
         {"steamOverlayOffFix", false},
         {"autoWakeRecovery", g_sleepRecoveryAutoEnabled.load(std::memory_order_acquire)}
@@ -7473,12 +7482,35 @@ static bool focusIsKnownOverlayWindow(HWND hwnd) {
 }
 
 static bool focusIsBackgroundMonitorWindow(HWND hwnd) {
-    return hwnd && IsWindow(hwnd) && focusBackgroundMonitorName(focusWindowProcessName(hwnd));
+    if (!hwnd || !IsWindow(hwnd)) return false;
+    DWORD pid = 0;
+    GetWindowThreadProcessId(hwnd, &pid);
+    if (!pid) return false;
+    std::wstring path;
+    if (focusQueryProcessIdentity(pid, &path, nullptr) && !path.empty())
+        return focusBackgroundMonitorName(sgBaseName(path));
+
+    // Snapshot names only reject background monitors here; they never admit
+    // games/overlays. Successful image queries do not take a process snapshot.
+    HANDLE snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0);
+    if (snapshot == INVALID_HANDLE_VALUE) return false;
+    bool monitor = false;
+    PROCESSENTRY32W entry{sizeof(entry)};
+    if (Process32FirstW(snapshot, &entry)) {
+        do {
+            if (entry.th32ProcessID != pid) continue;
+            monitor = focusBackgroundMonitorName(sgBaseName(entry.szExeFile));
+            break;
+        } while (Process32NextW(snapshot, &entry));
+    }
+    CloseHandle(snapshot);
+    return monitor;
 }
 
 static FocusTargetSnapshot focusCaptureTarget(HWND hwnd) {
     FocusTargetSnapshot target;
     if (!hwnd || !IsWindow(hwnd) || hwnd == g_hwnd) return target;
+    if (focusIsBackgroundMonitorWindow(hwnd)) return target;
     HWND root = GetAncestor(hwnd, GA_ROOTOWNER);
     if (root && IsWindow(root) && root != g_hwnd) hwnd = root;
     if (focusIsBackgroundMonitorWindow(hwnd)) return target;
@@ -7899,7 +7931,8 @@ static bool refocusPreviousWindow() {
     if (IsIconic(target)) ShowWindowAsync(target, SW_RESTORE);
     DWORD targetPid = 0;
     GetWindowThreadProcessId(target, &targetPid);
-    if (focusGameControlBlocked() || focusPidIsManuallyPaused(targetPid)) return false;
+    if (focusGameControlBlocked() || focusPidIsManuallyPaused(targetPid) ||
+        focusIsBackgroundMonitorWindow(target)) return false;
     ymcc::requestWindowForegroundAsync(target);
     return focusForegroundMatchesTarget();
 }
@@ -8415,10 +8448,25 @@ unsigned long long readAttemptSequence=0,readPowerGeneration=0,readContinuityGen
     unsigned readTopologyGeneration=0,readIdentityGeneration=0;bool readContextStable=false;
     ymcc::touchhaptic::SourceToken feedbackSource{};
     bool specialXbox=false; // Same physical read as pad and its provenance.
+    bool rogRawInputSubstitution=false; // ROG RawInput fallback provenance, not canonical XInput.
+    unsigned physicalReaderPid=0;
+    unsigned long long physicalReaderSequence=0; // Actual helper read, not a native cache reread.
+    unsigned physicalReaderPacket=0,physicalReaderActualSlot=4;
+    XINPUT_GAMEPAD physicalReaderRawPad{}; // Before deadzone/canonicalization; diagnostic only.
     // Read-owner stamped immutable physical key; null never becomes a slot/name fallback.
     std::shared_ptr<const std::string> axisCalibrationDeviceKey;
     bool axisCalibrationLtAnalog=false,axisCalibrationRtAnalog=false;
 };
+// A verified medium-process reader still uses the same physical XInput API
+// and capability binding. Keep its runtime provenance separate from the catalog.
+static ymcc::capabilities::controller::InputBinding inputCaptureBindStandardInput(const InputCaptureGamepadSnapshot* sample) noexcept {
+    if(!sample)return {};
+    if(sample->inputSource=="rog-hid-raw")
+        return ymcc::capabilities::controller::bindStandardInput("xinput",sample->connectedMask);
+    if(sample->inputSource=="rog-medium-xinput" && sample->physicalReaderPid && sample->physicalReaderSequence)
+        return ymcc::capabilities::controller::bindStandardInput("xinput",sample->connectedMask);
+    return ymcc::capabilities::controller::bindStandardInput(sample->inputSource,sample->connectedMask);
+}
 static thread_local const InputCaptureGamepadSnapshot* t_commonFrameSource=nullptr;
 struct CommonFrameSourceScope {
     const InputCaptureGamepadSnapshot* previous;
@@ -8778,6 +8826,7 @@ static bool ymccOpenXInputAssignSlot(const std::wstring& devicePath, BYTE target
 }
 
 static bool g_rawInputRegistered = false;
+static HWND g_rawInputSinkHwnd = nullptr;
 static bool g_gamepadStatePublished = false;
 static bool g_publishedPadConnected = false;
 static XINPUT_GAMEPAD g_publishedPad{};
@@ -9065,6 +9114,7 @@ struct RogInputSession {
     ULONG inputLen = 0;
     std::wstring controlPath;
     std::wstring inputPath;
+    bool inputPathIsMi05 = false;
     std::wstring fallbackControlPath;
     ULONG fallbackFeatureLen = 0;
     std::vector<BYTE> inputBuf;
@@ -9083,6 +9133,10 @@ struct RogInputSession {
     ULONGLONG suppressTick = 0;
     ULONGLONG lastHidTick = 0;
     XINPUT_GAMEPAD lastHidPad{};
+    unsigned long long lastHidSequence = 0, lastHidPower = 0, lastHidTopology = 0;
+    HANDLE rawDevice = nullptr;
+    unsigned long long rawDeviceTopology = 0;
+    bool rawDeviceMatchesInputPath = false;
     // A 方案（2026-09-16 用户定案）：M1/M2 硬件重映射目标态记忆 + 节流。
     // 第 19 批（§14.2 定点修复）：记账从会话结构**移出**到 g_rogRemapThrottle
     // ——会话 close/bind 不再清零记账（window-hidden 的 close+bind 之后同目标
@@ -9184,6 +9238,105 @@ static void rogBindInputHid();
 static bool rogRecoverBindSerialized(const char* why);   // §22 恢复 bind 会话归属入口
 static bool rogTryReadHidGamepad(XINPUT_GAMEPAD* out);
 static void rogAcceptHidPad(const XINPUT_GAMEPAD& pad);
+static bool rogPadHasActivity(const XINPUT_GAMEPAD& pad);
+#if YMCC_ROG_RAWINPUT_FALLBACK || YMCC_ROG_FSE_DIAGNOSTICS
+static bool rogRawInputFseActiveCached() {
+    static ULONGLONG lastTick = 0;
+    static bool active = false;
+    const ULONGLONG now = GetTickCount64();
+    if (lastTick == 0 || now < lastTick || now - lastTick >= 1000) {
+        const auto state = ymcc::bootmode::readPlatform();
+        active = state.activeKnown && state.active;
+        lastTick = now;
+    }
+    return active;
+}
+#endif
+#if YMCC_ROG_FSE_DIAGNOSTICS
+struct RogRawInputEvidence {
+    unsigned long long received = 0, accepted = 0, rejected = 0, parseFailures = 0;
+    unsigned lastReportBytes = 0, lastReportCount = 0;
+    DWORD lastError = 0;
+    const char* lastCapture = "no-report";
+    ULONGLONG lastLogTick = 0;
+};
+static RogRawInputEvidence g_rogRawEvidence; // g_gamepadReadMx
+// Read-only diagnostics. UI dispatch writes relaxed counters; the existing
+// FSE receipt samples them, without registering or repairing any input route.
+struct RogRawInputDispatchEvidence {
+    std::atomic<unsigned long long> messages{0}, sinkMessages{0}, mainMessages{0};
+    std::atomic<unsigned long long> hidHeaders{0}, keyboardHeaders{0}, mouseHeaders{0};
+    std::atomic<unsigned long long> headerFailures{0}, negativeCacheHits{0};
+    std::atomic<unsigned long long> payloadQueries{0}, payloadQueryFailures{0}, oversizedPayloads{0};
+    std::atomic<unsigned long long> payloadReads{0}, payloadReadFailures{0}, hidCaptureCalls{0};
+    std::atomic<unsigned> lastHeaderType{~0u}, lastPayloadBytes{0}, lastError{0};
+};
+static RogRawInputDispatchEvidence g_rogRawDispatch;
+static json rogRawInputDispatchEvidence() {
+    const auto read = [](const auto& counter) { return counter.load(std::memory_order_relaxed); };
+    return {{"scope","ROG WM_INPUT dispatcher;all devices;non-atomic cumulative observations"},
+        {"messages",read(g_rogRawDispatch.messages)}, {"sinkMessages",read(g_rogRawDispatch.sinkMessages)},
+        {"mainMessages",read(g_rogRawDispatch.mainMessages)}, {"hidHeaders",read(g_rogRawDispatch.hidHeaders)},
+        {"keyboardHeaders",read(g_rogRawDispatch.keyboardHeaders)}, {"mouseHeaders",read(g_rogRawDispatch.mouseHeaders)},
+        {"headerFailures",read(g_rogRawDispatch.headerFailures)}, {"negativeCacheHits",read(g_rogRawDispatch.negativeCacheHits)},
+        {"payloadQueries",read(g_rogRawDispatch.payloadQueries)}, {"payloadQueryFailures",read(g_rogRawDispatch.payloadQueryFailures)},
+        {"oversizedPayloads",read(g_rogRawDispatch.oversizedPayloads)}, {"payloadReads",read(g_rogRawDispatch.payloadReads)},
+        {"payloadReadFailures",read(g_rogRawDispatch.payloadReadFailures)}, {"hidCaptureCalls",read(g_rogRawDispatch.hidCaptureCalls)},
+        {"lastHeaderType",read(g_rogRawDispatch.lastHeaderType)}, {"lastPayloadBytes",read(g_rogRawDispatch.lastPayloadBytes)},
+        {"lastError",read(g_rogRawDispatch.lastError)}, {"payloadCapacity",sizeof(g_riBuf)}};
+}
+static json rogRawInputRegistrationEvidence() {
+    constexpr UINT capacity = 32;
+    RAWINPUTDEVICE devices[capacity]{};
+    UINT required = capacity;
+    const UINT count = GetRegisteredRawInputDevices(devices, &required, sizeof(RAWINPUTDEVICE));
+    const DWORD error = count == ~0u ? GetLastError() : ERROR_SUCCESS;
+    const bool readOk = count != ~0u && count <= capacity;
+    const HWND sink = g_rawInputSinkHwnd;
+    const bool sinkLive = sink && IsWindow(sink);
+    DWORD sinkPid = 0;
+    const DWORD sinkThread = sinkLive ? GetWindowThreadProcessId(sink, &sinkPid) : 0;
+    json gamepads = json::array();
+    unsigned matched = 0;
+    unsigned usageMask = 0;
+    if (readOk) {
+        for (UINT i = 0; i < count; ++i) {
+            const auto& device = devices[i];
+            if (device.usUsagePage != 1 || (device.usUsage != 4 && device.usUsage != 5 && device.usUsage != 8)) continue;
+            const bool atSink = sinkLive && device.hwndTarget == sink;
+            const bool inputSinkFlag = (device.dwFlags & RIDEV_INPUTSINK) != 0;
+            if (atSink && inputSinkFlag) {
+                ++matched;
+                usageMask |= device.usUsage == 4 ? 1u : device.usUsage == 5 ? 2u : 4u;
+            }
+            gamepads.push_back({{"page",device.usUsagePage}, {"usage",device.usUsage}, {"flags",device.dwFlags},
+                {"targetHwnd",static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(device.hwndTarget))},
+                {"atExpectedSink",atSink}, {"inputSinkFlag",inputSinkFlag},
+                {"atMainWindow",device.hwndTarget == g_hwnd}});
+        }
+    }
+    return {{"evidenceVersion",2}, {"scope","current-process raw-input registration snapshot;not OS report delivery"},
+        {"readOk",readOk}, {"readError",error}, {"capacity",capacity}, {"requiredOrReturnedCount",required},
+        {"returnedCount",readOk ? json(count) : json(nullptr)},
+        {"sinkHwnd",static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(sink))}, {"sinkLive",sinkLive},
+        {"sinkPid",sinkPid}, {"sinkThreadId",sinkThread},
+        {"mainHwnd",static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(g_hwnd))},
+        {"gamepadRegistrations",gamepads}, {"matchingGamepadUsages",matched},
+        {"allThreeAtExpectedSink",readOk && usageMask == 7u}, {"controlsChanged",false}};
+}
+#endif
+#if YMCC_ROG_RAWINPUT_FALLBACK || YMCC_ROG_FSE_DIAGNOSTICS
+struct RogRawInputSampleView {
+    bool boundaryEntered = false, identityMatched = false, hasStableInput = false;
+    bool inputPathIsMi05 = false, rawDeviceMatchesInputPath = false;
+    USHORT productId = 0;
+    ULONGLONG lastHidTick = 0;
+    unsigned long long lastHidSequence = 0, lastHidPower = 0, lastHidTopology = 0;
+    XINPUT_GAMEPAD lastHidPad{};
+};
+static RogRawInputSampleView rogRawInputSampleView();
+#endif
+static bool machineIsRogAllyFamily();
 static void rogCaptureRawInput(RAWINPUT* raw);
 static bool rogEnsureXboxFaceEnabled(const char* reason);
 
@@ -17438,6 +17591,9 @@ static void ymccResolveMachineIdentityOnce() {
     msiNativeForegroundIdentityReady(); // MSI-only event observer; no I/O for other families
 }
 
+// First-install system default shares the existing cached machine identity.
+#include "gpu_schedule_first_run_native.inc"
+
 // ── 掌机专用键机型库（严格照 HC Devices/*.cs，行号锚定 _hc-pinned-round4）──
 // 键排序 = HC ButtonFlags 数值序（专属按钮序）：
 //   Special(29) < OEM1(30) < OEM2(31) < OEM3(32) < OEM4(33) < OEM5(34) < OEM6(35)
@@ -21860,6 +22016,7 @@ static void emitTickCostWindow(long long windowMs) {
     tickDetail_measurementKinds["threadCycleEstimateFields"] = json::array({"preHostCpuUs", "sampleLogCpuUs", "preambleCpuUs"});
     tickDetail_measurementKinds["threadCycleMethod"] = "QueryThreadCycleTime delta / one-time busy-loop calibration; not exact CPU time";
     tickDetail_measurementKinds["nativeProcessCpuEvidence"] = "input-idle-window.nativeProcessCost (GetProcessTimes; whole Native process)";
+    tickDetail_measurementKinds["steamDeckyProcessCpuEvidence"] = "input-idle-window.steamDeckyProcessCost (whole Steam renderer / owned Decky Loader processes, not exclusive JS CPU)";
     tickDetail_measurementKinds["gpReadAndResolve"] = "steady_clock elapsed; API purpose counts have no per-purpose CPU duration";
     tickDetail_measurementKinds["nestedStagesMustNotBeSummed"] = true;
     tickDetail_measurementKinds["preambleElapsedVersion"] = 1;
@@ -26227,7 +26384,9 @@ static ymcc::input::recoveryHealth::Context inputHostRecoveryHealthContextLocked
 static ymcc::input::recoveryHealth::Source inputHostRecoveryHealthSource(
     const InputCaptureGamepadSnapshot* source, bool eligible) {
     if (!source) return {};
-    const bool xinputSource = (source->inputSource == "xinput" || source->inputSource == "xinput-any-connected") && source->connectedMask != 0;
+    const bool xinputSource = (source->inputSource == "xinput" || source->inputSource == "xinput-any-connected" ||
+        source->inputSource == "rog-hid-raw" ||
+        (source->inputSource == "rog-medium-xinput" && source->physicalReaderPid != 0)) && source->connectedMask != 0;
     const bool msiSource = source->inputSource == "msi-dinput" && source->readMsiSourceRevision != 0 &&
         source->readMsiSourceRevision == g_msiMainSourceRevision.load(std::memory_order_acquire) &&
         source->readMsiModeGeneration == g_msiFeedbackModeGeneration.load(std::memory_order_acquire) &&
@@ -26239,7 +26398,9 @@ static ymcc::input::recoveryHealth::Source inputHostRecoveryHealthSource(
     // its accepted coverage; old-mode health cannot reset a new-mode budget.
     // Evidence only: current XInput identity epoch already covers remapping;
     // the selected slot and MSI reader incarnation additionally split health.
-    const auto incarnation = xinputSource ? static_cast<ymcc::input::recoveryHealth::Tick>(source->primarySlot) + 1
+    const auto incarnation = source->physicalReaderPid != 0
+        ? (static_cast<ymcc::input::recoveryHealth::Tick>(source->physicalReaderPid) << 8) + source->primarySlot + 1
+        : xinputSource ? static_cast<ymcc::input::recoveryHealth::Tick>(source->primarySlot) + 1
         : source->readMsiSourceRevision;
     return {source->readAttemptSequence, source->readStartedTick, source->readCompletedTick,
         source->readPowerGeneration, source->readTopologyGeneration, source->readIdentityGeneration,
@@ -26780,6 +26941,7 @@ static void inputHostDisplayIdleAuditTick() {
     if(changed){g_inputIdleActivity.enable(enabled,now);lastAudit=0;lastInputKnown=false;msiDinputTakeEnumerationReceipt();}
     g_msiRearAudit.enable(enabled && msiControllerRepairScope());
     if(!enabled)inputNativeProcessCostSnapshot(false); // Closed diagnostics reset CPU baseline without OS reads.
+    if(!enabled)deckyWallpaperProcessCostSnapshot(false); // Same opt-in gate, no CPU reads while OFF.
     if(!enabled)keyboardSelfSendFlushEvidence(false,now);
     if(!enabled || (lastAudit && now-lastAudit<1000))return;
     lastAudit=now;
@@ -26828,6 +26990,8 @@ static void inputHostDisplayIdleAuditTick() {
     }
     const auto processCost=inputNativeProcessCostSnapshot(true); // Existing 1 Hz diagnostic gate; never an input control.
     if(!processCost.is_null())row["nativeProcessCost"]=processCost;
+    const auto steamDeckyCost=deckyWallpaperProcessCostSnapshot(true);
+    if(!steamDeckyCost.is_null())row["steamDeckyProcessCost"]=steamDeckyCost;
     row["observerRole"]="YMCC physical reader, exemption must be checked from HidHide receipts";
     row["externalPhysicalVisibility"]="unknown; use independent collector plus Steam evidence";
     appendDomainLog("virtual","input-idle-window",row);
@@ -32284,11 +32448,13 @@ static std::string deckySidebarStartMirrorBroker() {
                     if(build!=buildReceipt){deckySidebarDiagnostic("plugin-build",{{"buildId",build}},true);buildReceipt=build;}
                 }
             }
+            g_deckyCostContext.request(request,GetTickCount64()); // Passive allowlisted state, never a process target from JS.
             if (!deckySidebarPost("deckySidebar.mirrorRequest", {{"connection", connection}, {"runId", status["runId"]}, {"revision", status["revision"]}, {"request", request}}) && request.contains("id"))
                 g_deckyMirrorBroker.reply(connection, {{"type", "reply"}, {"runId", status["runId"]}, {"id", request["id"]}, {"ok", false}, {"error", "镜像请求队列已满"}});
         },
         [](const std::string& connection, const std::string& runId, bool connected) {
             const auto status = g_deckyMirrorBroker.status();
+            g_deckyCostContext.peer(connected,GetTickCount64());
             deckySidebarDiagnostic("mirror-peer",{{"connected",connected},{"revision",status["revision"]}});
             deckySidebarPost("deckySidebar.mirrorPeer", {{"connection", connection}, {"runId", runId}, {"connected", connected}, {"revision", status["revision"]}});
         }})) return "mirror-broker-start-failed";
@@ -32469,6 +32635,27 @@ static void deckySidebarObserveAutomaticRepair(){
         deckySidebarPost("deckySidebar.updated",state);
     });
 }
+// The S0 user-wake path can finish by canceling the guarded sleep intent,
+// without WM_POWER_RESUME_COMMIT. Reuse Decky's existing owners after its real
+// Ready gate, once per power generation; never manufacture Ready or UI consent.
+static bool deckySidebarResumeAfterIntent(unsigned long long generation) {
+    if(!generation||generation!=currentPowerGeneration()||g_exitRequested.load()||g_aiFanMockSession.isolated||
+       g_powerLifecycle.load(std::memory_order_acquire)!=PowerLifecycle::Ready||!g_deckySidebarRuntime.snapshot().enabled)return false;
+    static std::atomic<unsigned long long> delivered{0};
+    auto prior=delivered.load(std::memory_order_acquire);
+    do {if(generation<=prior)return false;}while(!delivered.compare_exchange_weak(prior,generation,std::memory_order_acq_rel));
+    const auto prepared=g_deckySidebarRuntime.requestPreparationRefresh(generation);
+    const auto rebound=g_deckySidebarRuntime.requestBindingRefresh(generation);
+    const auto admission=g_deckySidebarRuntime.requestLaunchAdmissionRefresh();
+    const auto check=g_deckySidebarRuntime.requestConnectionCheck();
+    const auto session=g_steamSettingsObserver.sessionSnapshot();
+    if(session.pid&&session.created&&!session.root.empty())g_steamModeObserver.requestRefresh(session);
+    deckySidebarDiagnostic("wake-connection-check",{{"generation",generation},{"bindingRequested",rebound},
+        {"preparationRequested",prepared},{"admissionRequested",admission},{"connectionRequested",check},
+        {"scope","sleep-intent-ready"}},true);
+    return true;
+}
+
 // Runs on the existing Decky worker before launch admission, including known Steam absence.
 static std::string deckySidebarPrepareEnvironment(const std::function<bool()>& current) {
     if(!current||!current()||g_exitRequested.load())return "preparation-cancelled";
@@ -32499,12 +32686,19 @@ static bool deckySidebarGamingFullscreenConsent(const ymcc::steamsession::Sessio
     return true;
 }
 
+// Diagnose the existing admission failure without another identity read.
+static void deckySidebarSessionDiagnostic(const ymcc::steamsession::Session& session,const char* stage,DWORD error=0) noexcept {
+    try { deckySidebarDiagnostic("steam-session-check",{{"stage",stage},{"steamPid",session.pid},
+        {"steamBirth",std::to_string(session.created)},{"pidPresent",session.pid!=0},{"birthPresent",session.created!=0},
+        {"accountPresent",session.account!=0},{"rootPresent",!session.root.empty()},{"error",error}}); }
+    catch(...) {} // Diagnostics cannot change the launch decision.
+}
 static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan(ymcc::deckysidebar::BindingMode mode,std::uint64_t generation) {
     using Mode=ymcc::deckysidebar::BindingMode;
     const auto session=g_steamSettingsObserver.sessionSnapshot();
-    if(!session.pid||!session.created||!session.account||session.root.empty())return {{},"steam-session-unconfirmed"};
+    if(!session.pid||!session.created||!session.account||session.root.empty()){deckySidebarSessionDiagnostic(session,"binding-identity-incomplete");return {{},"steam-session-unconfirmed"};}
     DWORD windowsSession=0;
-    if(!ProcessIdToSessionId(session.pid,&windowsSession))return {{},"steam-session-unconfirmed"};
+    if(!ProcessIdToSessionId(session.pid,&windowsSession)){deckySidebarSessionDiagnostic(session,"windows-session-query",GetLastError());return {{},"steam-session-unconfirmed"};}
     const bool retained=mode==Mode::retained;
     if(retained){
         const auto environment=deckySidebarEnvironment(false);
@@ -32520,7 +32714,7 @@ static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan(ymcc::deckys
     const auto frontend=ymcc::deckymirror::frontendBuildId(POWER_CONTROL_DIR+L"\\decky\\plugins\\ymcc-sidebar\\dist\\index.js");
     if(!frontend.empty())bootstrap["frontendBuildId"]=frontend;
     if(!retained){bootstrap["recoverFrontend"]=true;bootstrap["loaderVersion"]=ymcc::deckyidentity::version;}
-    if(!(session==g_steamSettingsObserver.sessionSnapshot())){g_deckyMirrorBroker.stop();return {{},"steam-session-unconfirmed"};}
+    if(!(session==g_steamSettingsObserver.sessionSnapshot())){g_deckyMirrorBroker.stop();deckySidebarSessionDiagnostic(session,"session-changed");return {{},"steam-session-unconfirmed"};}
     return {{{"schema","ymcc.decky.binding-worker.v1"},{"id",bootstrap.value("runId",std::string{})},
         {"generation",std::to_string(generation)},
         {"steam",{{"root",W2U(session.root)},{"pid",session.pid},{"created",std::to_string(session.created)},
@@ -32529,12 +32723,66 @@ static ymcc::deckysidebar::BindingPlan deckySidebarOwnedBindingPlan(ymcc::deckys
         {"retainedFrontendOnly",retained},{"bootstrap",std::move(bootstrap)}}, {}};
 }
 static void deckySidebarOwnedBindingDiagnostic(const json& detail) {
+    const auto diagnosticSession=g_steamSettingsObserver.sessionSnapshot();
+    g_deckyCostContext.binding(detail,diagnosticSession.pid,diagnosticSession.created,GetTickCount64());
     const auto kind=detail.value("bindingPacketKind",std::string{});
     deckySidebarDiagnostic(kind=="result"?"bootstrap":"bootstrap-watch",detail);
     if(detail.value("bootstrapStage",std::string{})=="terminal")deckySidebarPost("deckySidebar.safetyStop",detail);
     if(detail.value("bootstrapStage",std::string{})=="failed"&&
        (ymcc::deckysidebar::recoverableWatchFailure(detail.value("reason",std::string{}))||
         detail.value("reason",std::string{})=="mirror-retained-frontend-changed"))g_deckySidebarRuntime.requestTransportRecovery();
+}
+
+// Existing high-frequency lane only; never polls CDP, scans processes or changes control.
+static json deckyWallpaperProcessCostSnapshot(bool enabled) noexcept {
+    static ymcc::deckycost::Sampler sampler;
+    if(!enabled&&!sampler.active())return nullptr; // Closed steady state is a branch only.
+    const DWORD savedError=GetLastError();
+    struct RestoreError{DWORD value;~RestoreError(){SetLastError(value);}} restore{savedError};
+    if(!enabled){sampler.reset();return nullptr;}
+    try{
+        const auto now=GetTickCount64();const auto generation=g_powerGeneration.load(std::memory_order_acquire);
+        const auto observation=g_steamSettingsObserver.diagnosticWindowSnapshot();const auto& session=observation.session;
+        ymcc::deckysidebar::State runtime;const bool runtimeKnown=g_deckySidebarRuntime.tryDiagnosticState(runtime);
+        const auto jobs=g_deckySidebarRuntime.diagnosticProcessIds();
+        bool cacheAvailable=false;const auto context=g_deckyCostContext.snapshot(cacheAvailable);
+        std::array<ymcc::deckycost::Target,12> targets{};std::size_t count=0;
+        const bool sessionKnown=observation.available&&session.pid&&session.created&&!session.root.empty();
+        const bool contextMatches=sessionKnown&&cacheAvailable&&context.steamPid==session.pid&&context.steamBirth==session.created;
+        targets[count++]={contextMatches?context.sharedPid:0,contextMatches?context.sharedBirth:0,session.root,true,
+            "wallpaper-shared-js-context","Binding-verified Steam context owner process; does not prove the JS/render execution process. Shared Steam work included; not exclusive CPU."};
+        const auto& ui=observation.uiWindow;DWORD currentWindowPid=0;
+        const bool windowKnown=sessionKnown&&ui.window&&ui.pid&&IsWindow(ui.window)&&GetWindowThreadProcessId(ui.window,&currentWindowPid)&&currentWindowPid==ui.pid;
+        targets[count++]={windowKnown?ui.pid:0,0,session.root,true,"steam-ui-window-candidate",
+            "Existing Steam UI WinEvent candidate; not proof of Big Picture or exclusive wallpaper painting."};
+        const auto loader=(fspath::path(POWER_CONTROL_DIR)/L"decky"/L"PluginLoader_noconsole.exe").wstring();
+        targets[count++]={runtime.pid,0,loader,false,"decky-loader-root","Exact Runtime-owned Loader PID; the official PyInstaller parent can be idle while its child does work."};
+        bool targetTruncated=false;
+        for(DWORD n=0;n<jobs.count;++n){const auto pid=jobs.pids[n];if(!pid||pid==runtime.pid)continue;
+            if(count==targets.size()){targetTruncated=true;break;}
+            targets[count++]={pid,0,loader,false,"decky-loader-job-child","Existing owned Loader Job member; exact image/session verified. No process-name discovery."};
+        }
+        const auto cpus=GetActiveProcessorCount(ALL_PROCESSOR_GROUPS);
+        auto row=sampler.sample(true,now,generation,cpus,targets,count);
+        row["highFrequencyGate"]="domainLogs.virtual";row["writerPid"]=GetCurrentProcessId();
+        row["steamSessionKnown"]=sessionKnown;row["steamPid"]=session.pid;row["steamCreated100ns"]=session.created;
+        row["deckyRuntimeSnapshotAvailable"]=runtimeKnown;
+        row["deckyEnabled"]=runtimeKnown?json(runtime.enabled):json(nullptr);row["deckyPhase"]=runtimeKnown?runtime.phase:"unknown";
+        row["loaderJobAvailable"]=jobs.available;row["loaderJobError"]=jobs.error;row["loaderJobCount"]=jobs.count;
+        row["loaderJobTruncated"]=jobs.truncated||targetTruncated;
+        row["windowCandidateKnown"]=windowKnown;row["windowCandidateObservedTick"]=ui.tick;
+        row["windowCandidateForeground"]=windowKnown?json(GetForegroundWindow()==ui.window):json(nullptr);
+        row["contextCacheAvailable"]=cacheAvailable;row["contextMatchesSteamSession"]=contextMatches;
+        row["contextIdentityObservedTick"]=contextMatches?json(context.identityTick):json(nullptr);
+        row["mirrorConnected"]=cacheAvailable&&context.peerKnown?json(context.connected):json(nullptr);
+        row["wallpaperEnabled"]=cacheAvailable&&context.enabledKnown?json(context.enabled):json(nullptr);
+        row["wallpaperRequestedVisible"]=cacheAvailable&&context.visibleKnown?json(context.requestedVisible):json(nullptr);
+        row["wallpaperFrameQueued"]=cacheAvailable?json(context.frameQueued):json(nullptr);
+        row["wallpaperKind"]=cacheAvailable?context.kind:"unknown";row["contextSeq"]=context.seq;
+        row["wallpaperStateObservedTick"]=cacheAvailable?json(context.changeTick):json(nullptr);
+        row["playbackEvidenceScope"]="Authenticated context request and accepted queued frame; not video decode/presented-frame acknowledgement.";
+        return row;
+    }catch(...){return nullptr;}
 }
 
 static void deckySidebarInitialize() {
@@ -32561,8 +32809,10 @@ static void deckySidebarInitialize() {
             // Ordinary startup remains observation-only. A verified active Windows
             // Gaming Full Screen Experience grants Decky-only missing startup.
             const auto session=g_steamSettingsObserver.sessionSnapshot();
-            if(!session.pid||!session.created||session.root.empty())
+            if(!session.pid||!session.created||session.root.empty()||!session.account){
+                deckySidebarSessionDiagnostic(session,"launch-identity-incomplete");
                 return {false,"steam-session-unconfirmed",true};
+            }
             const bool loaderConsent = !(!g_steamLinkAdmission.allows(session)&&!g_deckyUpdateRecovery.allows(session));
             // Both consumers use one verified snapshot. The existing slow
             // Decky recovery renews the shared worker, never a second CDP reader.
@@ -32618,7 +32868,11 @@ static void steamSettingsObserverStart() {
     modeObserver.read = [](const ymcc::steamsession::Session& session) -> json {
             if(g_exitRequested.load() || !(session==g_steamSettingsObserver.sessionSnapshot()))
                 return {{"known",false},{"reason","steam-session-changed"}};
+            const auto modeReadStarted=GetTickCount64();
             const auto state=ymcc::steamui::read(g_steamSettingsObserver,true);
+            deckySidebarDiagnostic("steam-mode-read",{{"elapsedMs",GetTickCount64()-modeReadStarted},
+                {"steamPid",session.pid},{"launchMode",state.value("mode",std::string{})},
+                {"known",state.value("known",false)},{"reason",state.value("reason",std::string{})}},true);
             if(!(session==g_steamSettingsObserver.sessionSnapshot()))
                 return {{"known",false},{"reason","steam-session-changed"}};
             return state;
@@ -32626,7 +32880,9 @@ static void steamSettingsObserverStart() {
     modeObserver.changed = [](const ymcc::steamsession::Session& session,const json& state) {
             if(g_exitRequested.load() || !(session==g_steamSettingsObserver.sessionSnapshot()))return;
             deckySidebarDiagnostic("steam-mode-signal",{{"steamPid",session.pid},{"steamBirth",std::to_string(session.created)},
-                {"launchMode",state.value("mode",std::string{})},{"reason","shared-verified-mode"}},true);
+                {"launchMode",state.value("mode",std::string{})},{"reason","shared-verified-mode"},
+                {"observedLoaderVersion",ymcc::deckyupdate::residue(state.value("deckyUpdateResidue",json())).value("loaderVersion",std::string{})},
+                {"installedLoaderVersion",ymcc::deckyidentity::version}},true);
             const auto mode = state.value("mode",std::string{});
             // Seed the existing session without replaying its current UI state.
             // Only an observed later desktop -> Big Picture edge grants linkage.
@@ -35315,7 +35571,7 @@ static ymcc::input::frameSubmission::ReadProgress g_inputHostReadProgress;
 static bool inputHostPhysicalPublicationSourceAdmitted(bool physicalSourceAdmitted,bool semanticNeutral);
 static ymcc::input::frameSubmission::Sample inputHostFrameSubmissionSample(const InputCaptureGamepadSnapshot* sample) {
     if(!sample)return {};
-    const auto binding=ymcc::capabilities::controller::bindStandardInput(sample->inputSource,sample->connectedMask);
+    const auto binding=inputCaptureBindStandardInput(sample);
     const bool msi=binding.kind()==ymcc::capabilities::controller::InputKind::MsiDInput;
     return {{sample->readAttemptSequence,sample->readStartedTick,sample->readCompletedTick,
         sample->readPowerGeneration,sample->readTopologyGeneration,sample->readContextStable},
@@ -36767,7 +37023,7 @@ static void ymccOpenXInputVirtualSlotGuard() {
     }
     if (g_openXInputVirtualSlotAttempts >= kOpenXInputVirtualSlotMaxAttempts) return;
     // Unknown is an occupied slot as well: it cannot authorize a safe-window remap.
-    if (xinputNonVirtualConnectedMask() != 0) return;  // 已知物理/Unknown在场 ⇒ 交给有身份边界的交接路径
+    if (xinputNonVirtualConnectedMask() != 0) return;
     // GP-926 S2-2：守护的指派与交接**共用同一 intent 预算**（不搞两套各自补试）；预算未知/耗尽即停手。
     ymccSlotIntentSync();
     // GP-926R R1-2：本 intent 已有 slot0 读回证实 ⇒ 已达健康，幂等停止（不再重复签派）。
@@ -42602,6 +42858,9 @@ static void inputHostEmitWakeTruthSnapshot() {
 // its own executable and records app-list/inverse-state before interpretation.
 // 写入原则（operator 2026-09-23）：状态变化=事件级→常开区一行；周期=心跳→高频区且仅在武装窗口内。
 // 去重键只含"连接掩码 + 各槽原始按键位（含 Guide）"，不含摇杆/扳机，避免摇杆抖动刷屏。
+#include "virtual_input_source_readback_runtime.h"
+#include "physical_source_reader_runtime.h"
+
 static void systemXInputReadbackTick() {
     typedef unsigned long (WINAPI *PFN_XInputGetState)(unsigned long, void*);
     static PFN_XInputGetState pGetState = nullptr;
@@ -42615,6 +42874,7 @@ static void systemXInputReadbackTick() {
     const ULONGLONG now = GetTickCount64();
     if (lastSample != 0 && now - lastSample < 1000) return;   // 1 Hz 采样上限
     lastSample = now;
+    physicalSourceReaderTick(); // Opt-in ROG/FSE only; never a virtual-target owner.
 
     if (!resolveTried) {
         resolveTried = true;
@@ -42633,8 +42893,10 @@ static void systemXInputReadbackTick() {
         return;
     }
 
-    struct XInputPadRaw { unsigned short wButtons; unsigned char bLT, bRT; short lx, ly, rx, ry; };
-    struct XInputStateRaw { unsigned long packet; XInputPadRaw pad; };
+    // Retain the complete results of these existing four 1 Hz API calls.
+    // The diagnostic observer never writes source admission or submitted input.
+    std::array<XINPUT_STATE, 4> observedStates{};
+    std::array<DWORD, 4> observedResults{};
 
     unsigned connectedMask = 0;
     unsigned buttonsKey = 0;
@@ -42642,18 +42904,22 @@ static void systemXInputReadbackTick() {
     unsigned buttons[4] = {0, 0, 0, 0};
     unsigned guideMask = 0;
     for (unsigned i = 0; i < 4; ++i) {
-        XInputStateRaw st{};
+        auto& st = observedStates[i];
         ymcc::input::backendCost::Span<> systemCost(tickCostEnabled());
         const unsigned long rc = pGetState(i, &st);
+        observedResults[i] = rc;
         systemCost.finish(g_gamepadBackendCost.system32, static_cast<std::uint32_t>(rc),
             rc == ERROR_SUCCESS, [] { return tickCostEnabled(); });
         if (rc != 0) continue;
         connectedMask |= (1u << i);
-        packets[i] = st.packet;
-        buttons[i] = (unsigned)st.pad.wButtons;
-        if ((st.pad.wButtons & 0x0400u) != 0) guideMask |= (1u << i);
+        packets[i] = st.dwPacketNumber;
+        buttons[i] = (unsigned)st.Gamepad.wButtons;
+        if ((st.Gamepad.wButtons & 0x0400u) != 0) guideMask |= (1u << i);
         buttonsKey ^= ((i + 1u) * 2654435761u) ^ (buttons[i] * 2246822519u);
     }
+
+    inputSourceReadbackEvidenceTick(now, GetTickCount64(), observedResults,
+        observedStates, reinterpret_cast<FARPROC>(pGetState));
 
     const bool maskChanged = (connectedMask != lastMask);
     const bool changed = maskChanged || (buttonsKey != lastButtonsKey);
@@ -45958,6 +46224,7 @@ static void inputCaptureCommonFrameEvidence(const json& hostFrame,bool semanticN
             source["readStartedTick"]=sample->readStartedTick;source["readCompletedTick"]=sample->readCompletedTick;
             source["powerGeneration"]=sample->readPowerGeneration;source["topologyGeneration"]=sample->readTopologyGeneration;
             source["readContextStable"]=sample->readContextStable;
+            if(sample->physicalReaderPid)source["physicalReader"]={{"pid",sample->physicalReaderPid},{"sampleSequence",sample->physicalReaderSequence},{"sampleTick",sample->readCompletedTick},{"packetNumber",sample->physicalReaderPacket},{"actualSlot",sample->physicalReaderActualSlot},{"guide",sample->specialXbox},{"rawPad",{{"buttons",sample->physicalReaderRawPad.wButtons},{"ltByte",sample->physicalReaderRawPad.bLeftTrigger},{"rtByte",sample->physicalReaderRawPad.bRightTrigger},{"lxShort",sample->physicalReaderRawPad.sThumbLX},{"lyShort",sample->physicalReaderRawPad.sThumbLY},{"rxShort",sample->physicalReaderRawPad.sThumbRX},{"ryShort",sample->physicalReaderRawPad.sThumbRY}}},{"rawPadScope","helper-wire-controls-before-native-canonicalization;not-hardware-freshness-proof"},{"scope","verified-medium-process-same-exact-physical-path;not-driver-or-game-consumption"}};
             source["readCompletionAgeMs"]=sample->readCompletedTick && now>=sample->readCompletedTick
                 ?json(now-sample->readCompletedTick):json(nullptr);
             source["freshnessScope"]=sample->inputSource=="msi-dinput"
@@ -48155,7 +48422,7 @@ static void gamepadReadStateUnlocked(bool publishUi) {
                         }
                         g_xinputSemanticSlot = g_xinputPrimarySlot;
                         g_xinputReconfirmRejectLogged = false;
-                        appendNativeLifecycleLog("gamepad-physical-source-reconfirmed", {
+                        json reconfirmEvidence = {
                             {"recoveredMask", reappeared},
                             {"sourceMask", g_xinputPhysicalSourceMask},
                             {"sourceSlot", g_xinputPrimarySlot},
@@ -48165,7 +48432,26 @@ static void gamepadReadStateUnlocked(bool publishUi) {
                             {"boundaryScanEpoch", g_xinputBoundaryScanEpoch.load(std::memory_order_acquire)},
                             {"topologyEpoch", g_xinputTopologyEpoch.load(std::memory_order_acquire)},
                             {"policy", "hc-single-selected-pre-target-source-bus"}
-                        });
+                        };
+                        // R51: the comparison above is between saved selected-device
+                        // identities. Inspect the current primary slot separately,
+                        // once at this accepted edge; never alter admission or rearm.
+                        if (nativeForegroundProfile() == ymcc::nativeForeground::Profile::Rog) {
+                            try {
+                                reconfirmEvidence["identityComparisonScope"] =
+                                    "cached-selected-physical-identities;not-current-slot-sample-binding";
+                                reconfirmEvidence["rogSourcePathEvidence"] =
+                                    inputSourceReadbackRogPathEvidence(g_xinputPrimarySlot, true);
+                            } catch (...) {
+                                // Optional evidence failure cannot revoke the restored
+                                // source or skip its existing late-hide continuation.
+                                try { reconfirmEvidence["rogSourcePathEvidence"] = {
+                                    {"diagnosticOnly",true},{"state","diagnostic-exception"},
+                                    {"sourcePathBindingProven",false},{"controlsChanged",false}}; }
+                                catch (...) {}
+                            }
+                        }
+                        appendNativeLifecycleLog("gamepad-physical-source-reconfirmed", std::move(reconfirmEvidence));
                         // 2026-09-23 执行单 §5.3：身份匹配成功 = **唯一可靠**的重隐触发点。
                         // 此前只恢复 sourceMask，未在同一成功事件里排队 late-hide ⇒「物理源回来了
                         // 却没重新隐藏」（唤醒后双手柄 / 需手动开关）。事件驱动、按元组去重、
@@ -48290,6 +48576,87 @@ static void gamepadReadStateUnlocked(bool publishUi) {
             msiSampleReleasePermit(permit);
         }
     }
+    // VC-FSE-READER-20261026-R1: only the exact admitted physical source can
+    // replace its elevated-process read. Existing UI ownership/focus neutral,
+    // canonical correction and sole Host submission remain downstream.
+    ymcc::physicalreader::Sample physicalReaderSample{};
+    const bool usedPhysicalReader = physicalSourceReaderSample(physicalReaderSample);
+    if (usedPhysicalReader) {
+        pad = inputCanonicalizeGamepad(physicalReaderSample.pad);
+        g_xinputSpecialButton = physicalReaderSample.guide;
+        inputSource = "rog-medium-xinput";
+        live = true;
+    }
+    bool rogRawInputSubstitution = false;
+#if YMCC_ROG_RAWINPUT_FALLBACK || YMCC_ROG_FSE_DIAGNOSTICS
+    const RogRawInputSampleView rogRaw = machineIsRogAllyFamily()
+        ? rogRawInputSampleView() : RogRawInputSampleView{};
+    const char* rogRawGate = rogRaw.boundaryEntered ? "not-eligible" : "session-boundary-busy";
+    bool rogFseObserved = false;
+#if YMCC_ROG_RAWINPUT_FALLBACK
+    // R25 proved the MI05 RawInput lane still delivers reports while XInput is
+    // neutral in the reproducing Xbox-FSE state. Use that lane only for the
+    // exact ROG RC73XA gamepad, only while virtual output is active, and only
+    // when the canonical XInput sample is neutral. This is a source substitution,
+    // not a second owner and not a guide/back-button synthesizer.
+    if (live && inputSource == "xinput" && !externalPriority && (rogFseObserved = rogRawInputFseActiveCached()) &&
+        g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+        rogRaw.identityMatched && rogRaw.productId == 0x1B4C &&
+        rogRaw.hasStableInput && rogRaw.inputPathIsMi05 && rogRaw.lastHidTick != 0) {
+        const ULONGLONG rawNow = GetTickCount64();
+        const ULONGLONG rawAge = rawNow >= rogRaw.lastHidTick ? rawNow - rogRaw.lastHidTick : ~0ull;
+        const XINPUT_GAMEPAD& rawPad = rogRaw.lastHidPad;
+        const bool xinputNeutral = pad.wButtons == 0 &&
+            pad.bLeftTrigger < 20 && pad.bRightTrigger < 20 &&
+            std::abs(static_cast<int>(pad.sThumbLX)) < 1000 &&
+            std::abs(static_cast<int>(pad.sThumbLY)) < 1000 &&
+            std::abs(static_cast<int>(pad.sThumbRX)) < 1000 &&
+            std::abs(static_cast<int>(pad.sThumbRY)) < 1000;
+        const bool rawContextCurrent = rogRaw.lastHidPower == currentPowerGeneration() &&
+            rogRaw.lastHidTopology == g_xinputTopologyEpoch.load(std::memory_order_acquire);
+        rogRawGate = !rawContextCurrent ? "raw-context-stale" : rawAge > 250 ? "raw-queue-stale" :
+            !xinputNeutral ? "xinput-active" : !rogPadHasActivity(rawPad) ? "raw-neutral" : "selected";
+        if (rawContextCurrent && rawAge <= 250 && xinputNeutral && rogPadHasActivity(rawPad)) {
+            pad = inputCanonicalizeGamepad(rawPad);
+            inputSource = "rog-hid-raw";
+            rogRawInputSubstitution = true;
+        }
+    }
+#endif
+#endif // source fallback / explicit diagnostic view
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    // Developer evidence only: gate before FSE/registration queries and JSON.
+    // One bounded receipt per second during an active ROG FSE virtual session.
+    // No target/settings writes: distinguish absent delivery, rejection, stale data and selection.
+    if (domainLogEnabled("virtual") && machineIsRogAllyFamily() &&
+        (rogRaw.productId == 0x1B4C || !rogRaw.boundaryEntered) &&
+        g_realStickTest.enabled && g_realStickTest.virtualTargetEnabled &&
+        (rogFseObserved || rogRawInputFseActiveCached())) {
+        const ULONGLONG now = GetTickCount64();
+        if (!g_rogRawEvidence.lastLogTick || now - g_rogRawEvidence.lastLogTick >= 1000) {
+            g_rogRawEvidence.lastLogTick = now;
+            appendNativeLifecycleLog("rog-raw-input-window", {
+                {"evidenceVersion",2}, {"fallbackBuildEnabled",YMCC_ROG_RAWINPUT_FALLBACK != 0},
+                {"registration",domainLogEnabled("virtual") ? rogRawInputRegistrationEvidence() : json{{"readSkipped","virtual-log-disabled"}}},
+                {"dispatch",rogRawInputDispatchEvidence()},
+                {"received",g_rogRawEvidence.received},{"accepted",g_rogRawEvidence.accepted},
+                {"rejected",g_rogRawEvidence.rejected},{"parseFailures",g_rogRawEvidence.parseFailures},
+                {"lastCapture",g_rogRawEvidence.lastCapture},{"lastError",g_rogRawEvidence.lastError},
+                {"reportBytes",g_rogRawEvidence.lastReportBytes},{"reportCount",g_rogRawEvidence.lastReportCount},
+                {"rawSequence",rogRaw.lastHidSequence},{"rawQueuedTick",rogRaw.lastHidTick},
+                {"rawAgeMs",rogRaw.lastHidTick && now >= rogRaw.lastHidTick ? json(now-rogRaw.lastHidTick) : json(nullptr)},
+                {"rawPower",rogRaw.lastHidPower},{"rawTopology",rogRaw.lastHidTopology},
+                {"sourcePathMatched",rogRaw.rawDeviceMatchesInputPath},
+                {"physicalSourceLive",live},{"inputSource",inputSource},{"externalPriority",externalPriority},
+                {"stableInputBound",rogRaw.hasStableInput},{"mi05Bound",rogRaw.inputPathIsMi05},
+                {"gate",rogRawGate},{"substituted",rogRawInputSubstitution},
+                {"rawButtons",rogRaw.lastHidPad.wButtons},
+                {"rawAxes",{rogRaw.lastHidPad.sThumbLX,rogRaw.lastHidPad.sThumbLY,
+                    rogRaw.lastHidPad.sThumbRX,rogRaw.lastHidPad.sThumbRY}},
+                {"consumerDeliveryProven",false},{"targetChanged",false}});
+        }
+    }
+#endif // YMCC_ROG_FSE_DIAGNOSTICS
     // 批111（2026-09-24 实机 RCA，155009 包）：唤醒边沿必须以**准入**为准，不能用 raw 掩码。
     // 实测：每次切换都是「raw 0→1 先到、准入 0→1 后到」——掉线即释放 sourceMask（
     // gamepad-physical-source-released），重确认 ~330 ms 后才恢复（reconfirmed）⇒ 用 raw 判
@@ -48512,9 +48879,15 @@ static void gamepadReadStateUnlocked(bool publishUi) {
         const auto previousHealthSource = inputHostRecoveryHealthSource(&g_inputCaptureGamepadSnapshot, true);
         g_inputCaptureGamepadSnapshot = {live, pad, g_xinputPrimarySlot, admittedMask, inputSource};
         g_inputCaptureGamepadSnapshot.specialXbox = g_xinputSpecialButton;
+        g_inputCaptureGamepadSnapshot.rogRawInputSubstitution = rogRawInputSubstitution;
         g_inputCaptureGamepadSnapshot.readAttemptSequence=++diagnosticReadSequence;
-        g_inputCaptureGamepadSnapshot.readStartedTick=probeNow;
-        g_inputCaptureGamepadSnapshot.readCompletedTick=GetTickCount64();
+        g_inputCaptureGamepadSnapshot.readStartedTick=usedPhysicalReader?physicalReaderSample.tick:probeNow;
+        g_inputCaptureGamepadSnapshot.readCompletedTick=usedPhysicalReader?physicalReaderSample.tick:GetTickCount64();
+        g_inputCaptureGamepadSnapshot.physicalReaderPid=usedPhysicalReader?physicalReaderSample.readerPid:0;
+        g_inputCaptureGamepadSnapshot.physicalReaderSequence=usedPhysicalReader?physicalReaderSample.sequence:0;
+        g_inputCaptureGamepadSnapshot.physicalReaderPacket=usedPhysicalReader?physicalReaderSample.packet:0;
+        g_inputCaptureGamepadSnapshot.physicalReaderActualSlot=usedPhysicalReader?physicalReaderSample.actualSlot:4;
+        g_inputCaptureGamepadSnapshot.physicalReaderRawPad=usedPhysicalReader?physicalReaderSample.pad:XINPUT_GAMEPAD{};
         g_inputCaptureGamepadSnapshot.readPowerGeneration=diagnosticReadPower;
         g_inputCaptureGamepadSnapshot.readTopologyGeneration=diagnosticReadTopology;
         g_inputCaptureGamepadSnapshot.readIdentityGeneration=diagnosticReadIdentity;
@@ -48609,6 +48982,7 @@ static void gamepadReadStateUnlocked(bool publishUi) {
             {"rightX", pad.sThumbRX},
             {"rightY", pad.sThumbRY},
             {"specialXbox", g_xinputSpecialButton},
+            {"rogRawInputSubstitution", rogRawInputSubstitution},
             {"source", inputSource}
         });
     }
@@ -48880,9 +49254,14 @@ static HWND customSteamLibraryParentWindow() {
 static bool customSteamLibraryInputSuppressed() {
     // A process, bridge request, hidden/minimized window or old return phase is
     // never input ownership. Only the verified, visible foreground child owns it.
-    const HWND child = customSteamLibraryParentWindow();
-    const bool owns = child && IsWindowVisible(child) && !IsIconic(child) &&
-        GetForegroundWindow() == child;
+    const HWND child = customSteamLibraryWindow();
+    // Reject inactive windows before opening/querying their process on each
+    // input tick. Foreground admission still performs fresh identity checks,
+    // then repeats the cheap focus proof in case it changed during the query.
+    const bool candidate = child && IsWindow(child) && IsWindowVisible(child) &&
+        !IsIconic(child) && GetForegroundWindow() == child;
+    const bool owns = candidate && customSteamLibraryParentOwned(child) &&
+        IsWindowVisible(child) && !IsIconic(child) && GetForegroundWindow() == child;
     g_customSteamLibraryInputPhase.store(static_cast<int>(owns
         ? CustomSteamLibraryInputPhase::active : CustomSteamLibraryInputPhase::disabled),
         std::memory_order_release);
@@ -48972,7 +49351,7 @@ static bool gamepadUiInputEligible() {
     // Once the bridge is armed, the parent must not receive any controller
     // action while the child is launching/returning. This is the hard gate
     // that prevents one physical press from becoming a parent+child double.
-    if (customSteamLibraryInputSuppressed()) return customSteamLibraryChildForeground();
+    if (customSteamLibraryInputSuppressed()) return true;
     if (!g_hwnd || !IsWindow(g_hwnd) || !IsWindowVisible(g_hwnd) || IsIconic(g_hwnd)) return false;
     return focusMainWindowIsForeground();
 }
@@ -48980,7 +49359,7 @@ static bool gamepadUiInputEligible() {
 static void gamepadEmitUiAction(const char* action, bool repeat = false, ULONGLONG heldMs = 0) {
     if (!action || !*action || radialHasInputOwner()) return;
     const bool customSuppressed = customSteamLibraryInputSuppressed();
-    const bool customChild = customSteamLibraryChildForeground();
+    const bool customChild = customSuppressed; // Same authoritative decision; no duplicate process probe.
     const bool windowValid = g_hwnd && IsWindow(g_hwnd);
     const bool windowVisible = windowValid && IsWindowVisible(g_hwnd);
     const bool windowIconic = windowValid && IsIconic(g_hwnd);
@@ -50055,8 +50434,8 @@ static void nativeKeyboardShortcutsRefresh(ULONGLONG now) {
         if (buttonMapping != input.end() && buttonMapping->is_object()) {
             const auto rules = buttonMapping->find("rules");
             if (rules != buttonMapping->end() && rules->is_object()) {
-                const auto shortcuts = rules->find("shortcutRules");
-                if (shortcuts != rules->end() && shortcuts->is_array()) {
+                const auto shortcuts = ymcc::bootModeShortcuts::effectiveRules(input);
+                if (shortcuts) {
                     for (const auto& raw : *shortcuts) {
                         if (!raw.is_object()) continue;
                         // Retire only the tagged historical default; custom F7 rules remain supported.
@@ -50981,27 +51360,81 @@ static bool legionMotionRegisterRawInput(HWND target) {
     return subscribed;
 }
 
+static LRESULT gamepadDispatchRawInput(HWND h, WPARAM w, LPARAM l);
+static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l);
+static bool machineIsRogAllyFamily();
+
+// ROG only: retain the proved hidden ordinary sink, but dispatch through the
+// existing physical identity/capture/evaluation chain, including other pads.
+static LRESULT CALLBACK rawInputSinkWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam) {
+    if (msg == WM_INPUT) return gamepadDispatchRawInput(hwnd, wParam, lParam);
+    if (msg == WM_INPUT_DEVICE_CHANGE && g_hwnd)
+        return WndProc(g_hwnd, msg, wParam, lParam);
+    return DefWindowProcW(hwnd, msg, wParam, lParam);
+}
+
+static HWND ensureRawInputSinkWindow(DWORD* createError = nullptr) {
+    if (createError) *createError = ERROR_SUCCESS;
+    if (g_rawInputSinkHwnd && IsWindow(g_rawInputSinkHwnd)) return g_rawInputSinkHwnd;
+    WNDCLASSEXW wc{sizeof(wc)};
+    wc.lpfnWndProc = rawInputSinkWndProc;
+    wc.hInstance = GetModuleHandleW(nullptr);
+    wc.lpszClassName = L"YMCC_RawInputSink";
+    if (!RegisterClassExW(&wc)) {
+        const DWORD error = GetLastError();
+        if (error != ERROR_CLASS_ALREADY_EXISTS) {
+            if (createError) *createError = error;
+            return nullptr;
+        }
+    }
+    g_rawInputSinkHwnd = CreateWindowExW(0, L"YMCC_RawInputSink", L"", WS_OVERLAPPED,
+        0, 0, 1, 1, nullptr, nullptr, wc.hInstance, nullptr);
+    if (!g_rawInputSinkHwnd && createError) *createError = GetLastError();
+    return g_rawInputSinkHwnd;
+}
+
 // 注册 Raw Input 订阅：后台(窗口隐藏)也能收到手柄 WM_INPUT，并收插拔通知
 static bool gamepadRegisterRawInput() {
-    RAWINPUTDEVICE rid[5];
-    rid[0].usUsagePage = 0x01; rid[0].usUsage = 0x05; // Generic Desktop / Game Pad
-    rid[0].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    rid[0].hwndTarget = g_hwnd;
-    rid[1].usUsagePage = 0x01; rid[1].usUsage = 0x04; // Generic Desktop / Joystick
-    rid[1].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    rid[1].hwndTarget = g_hwnd;
-    rid[2].usUsagePage = 0x01; rid[2].usUsage = 0x06; // Generic Desktop / Keyboard
-    rid[2].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    rid[2].hwndTarget = g_hwnd;
-    rid[3].usUsagePage = 0x01; rid[3].usUsage = 0x02; // Generic Desktop / Mouse
-    rid[3].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    rid[3].hwndTarget = g_hwnd;
-    rid[4].usUsagePage = 0x01; rid[4].usUsage = 0x08; // Generic Desktop / Multi-axis
-    rid[4].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
-    rid[4].hwndTarget = g_hwnd;
-    g_rawInputRegistered = RegisterRawInputDevices(rid, 5, sizeof(RAWINPUTDEVICE)) != FALSE;
-    const DWORD rawInputError = g_rawInputRegistered ? ERROR_SUCCESS : GetLastError();
-    g_keyboardModifierRawSubscribed.store(g_rawInputRegistered,std::memory_order_release);
+    // Startup reaches this registration before the first settings/sensor pass.
+    // Resolve the existing read-only identity before selecting the ROG sink;
+    // an initial Unknown must not permanently register ROG on the main window.
+    ymccResolveMachineIdentityOnce();
+    // R25 showed a hidden ordinary top-level window receives MI05 reports while
+    // the layered YMCC popup did not in the reproducing FSE state. Keep the
+    // gamepad class on that dedicated sink and keyboard/mouse on g_hwnd.
+    const bool rogFamily = machineIsRogAllyFamily();
+    DWORD gamepadSinkError = ERROR_SUCCESS;
+    // Normal mainline retains the original main-window registration. The ROG
+    // dedicated sink is confined to explicitly compiled local FSE experiments.
+    const bool gamepadSinkRequested = YMCC_ROG_FSE_EXPERIMENTS != 0 && rogFamily;
+    const HWND gamepadSink = gamepadSinkRequested ? ensureRawInputSinkWindow(&gamepadSinkError) : nullptr;
+    const HWND gamepadTarget = gamepadSink ? gamepadSink : g_hwnd;
+    const DWORD gamepadFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    RAWINPUTDEVICE gamepadRid[3];
+    gamepadRid[0].usUsagePage = 0x01; gamepadRid[0].usUsage = 0x05; // Generic Desktop / Game Pad
+    gamepadRid[0].dwFlags = gamepadFlags;
+    gamepadRid[0].hwndTarget = gamepadTarget;
+    gamepadRid[1].usUsagePage = 0x01; gamepadRid[1].usUsage = 0x04; // Generic Desktop / Joystick
+    gamepadRid[1].dwFlags = gamepadFlags;
+    gamepadRid[1].hwndTarget = gamepadTarget;
+    gamepadRid[2].usUsagePage = 0x01; gamepadRid[2].usUsage = 0x08; // Generic Desktop / Multi-axis
+    gamepadRid[2].dwFlags = gamepadFlags;
+    gamepadRid[2].hwndTarget = gamepadTarget;
+    g_rawInputRegistered = RegisterRawInputDevices(gamepadRid, 3, sizeof(RAWINPUTDEVICE)) != FALSE;
+    const DWORD gamepadRawInputError = g_rawInputRegistered ? ERROR_SUCCESS : GetLastError();
+
+    RAWINPUTDEVICE keyboardMouseRid[2];
+    keyboardMouseRid[0].usUsagePage = 0x01; keyboardMouseRid[0].usUsage = 0x06; // Generic Desktop / Keyboard
+    keyboardMouseRid[0].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    keyboardMouseRid[0].hwndTarget = g_hwnd;
+    keyboardMouseRid[1].usUsagePage = 0x01; keyboardMouseRid[1].usUsage = 0x02; // Generic Desktop / Mouse
+    keyboardMouseRid[1].dwFlags = RIDEV_INPUTSINK | RIDEV_DEVNOTIFY;
+    keyboardMouseRid[1].hwndTarget = g_hwnd;
+    const bool keyboardMouseRawInputRegistered =
+        RegisterRawInputDevices(keyboardMouseRid, 2, sizeof(RAWINPUTDEVICE)) != FALSE;
+    const DWORD keyboardMouseRawInputError =
+        keyboardMouseRawInputRegistered ? ERROR_SUCCESS : GetLastError();
+    g_keyboardModifierRawSubscribed.store(keyboardMouseRawInputRegistered,std::memory_order_release);
     (void)legionMotionRegisterRawInput(g_hwnd);
     // Some OEM composite HID/XInput stacks (notably ROG Xbox Ally) do not
     // reliably wake this window for every XInput state transition. Keep one
@@ -51018,9 +51451,22 @@ static bool gamepadRegisterRawInput() {
     appendNativeLifecycleLog(
         "gamepad-input-registration",
         {{"rawInputRegistered", g_rawInputRegistered},
+         {"gamepadRawInputRegistered", g_rawInputRegistered},
+         {"keyboardMouseRawInputRegistered", keyboardMouseRawInputRegistered},
+         {"machineIdentityAttempted", g_machineIdentity.attempted},
+         {"machineIdentityResolved", g_machineIdentity.resolved},
+         {"machineFamily", ymccFamilyName(g_machineIdentity.family)},
+         {"gamepadSinkRequested", gamepadSinkRequested},
+         {"rogFseExperimentBuildEnabled", YMCC_ROG_FSE_EXPERIMENTS != 0},
+         {"gamepadSinkCreateError", static_cast<unsigned long>(gamepadSinkError)},
+         {"gamepadSinkCreated", gamepadSink != nullptr},
+         {"gamepadSinkFallbackToMainWindow", gamepadSink == nullptr},
+         {"gamepadSinkHwnd", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(gamepadSink))},
+         {"gamepadTargetHwnd", static_cast<unsigned long long>(reinterpret_cast<std::uintptr_t>(gamepadTarget))},
          {"fallbackTimerArmed", fallbackTimerId != 0},
          {"fallbackTimerId", static_cast<unsigned long long>(fallbackTimerId)},
-         {"rawInputError", static_cast<unsigned long>(rawInputError)}});
+         {"rawInputError", static_cast<unsigned long>(gamepadRawInputError)},
+         {"keyboardMouseRawInputError", static_cast<unsigned long>(keyboardMouseRawInputError)}});
     return g_rawInputRegistered;
 }
 
@@ -54390,6 +54836,8 @@ static void sgAbortSleepIntent(const char* reason) {
         fanHostScheduleEmergencyResume(generation);
         ipc_emit("fan.resume-ready", {{"generation", currentFanPowerGeneration()},
                                      {"source", "sleep-intent-canceled"}});
+        deckySidebarResumeAfterIntent(generation); // Same verified Ready; transport only.
+        ipc_emit("gameMedia.resume-ready", {{"generation", generation}, {"source", "sleep-intent-canceled"}});
     }
 }
 
@@ -55123,6 +55571,7 @@ static std::string nativeLifecycleTimestamp() {
 static bool nativeLifecycleEventIsBase(const char* event) {
     if (!event || !*event) return false;
     static const char* const kBaseEvents[] = {
+        "gpu-schedule-first-run", // One configuration-bootstrap attempt; include denied writes/readback failures.
         "monitor-notice-native", // Lease/owner receipts only; never frame telemetry.
         "input-capture-worker-stop", "input-capture-sensor-owner-rejected", "input-host-process-retirement", "input-host-primary-thread-retirement",
         "input-capture-exit-ownership", "input-capture-exit-retained", "input-host-exit-capture-neutral", "input-host-exit-ownership", "input-host-exit-retained",
@@ -55231,6 +55680,7 @@ static bool nativeLifecycleEventIsBase(const char* event) {
         "gamepad-openxinput-slot-guard", "gamepad-openxinput-assign-slot", // Sparse outcome changes; repeats are detailed below.
         // 2026-09-23 W3 四轮取证：系统 XInput 只读采样（"Steam 视角"，事件级常开；心跳在高频区）
         "system-xinput-readback",
+        "gamepad-input-registration", // One registration receipt; proves the RawInput sink and target HWND.
         "input-host-submit-flow",
         "gamepad-summon-emitted", "gamepad-setLed", "gamepad-vibrate", "gamepad-touch-haptics-summary",
         "gamepad.feedbackCaps", "gamepad-motion-session-reset", "gamepad-fallback-tick",
@@ -55590,6 +56040,9 @@ static json nativeSteamGameLinkLogDetail(const json& detail) {
 
 static bool nativeLifecycleRecordIsStreaming(const char* event, const json& detail) {
     if (!event) return false;
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    if (std::strcmp(event, "rog-raw-input-window") == 0) return true;
+#endif
     if (std::strcmp(event, "input-native-signal-window") == 0) return true;
     if (std::strcmp(event, "msi-dinput-trigger-evidence") == 0 &&
         !detail.value("legacyRecordSelected",true)) return true; // Sustained/context witnesses follow the detail gate.
@@ -60137,6 +60590,7 @@ static void reg_fs() {
             !args.contains("message") || !args["message"].is_object()) return false;
         const bool queued=g_deckyMirrorBroker.reply(args["connection"].get<std::string>(), args["message"]);
         const auto& message=args["message"];
+        if(queued)g_deckyCostContext.reply(message,GetTickCount64());
         try{if(queued&&message.value("type",std::string{})=="snapshot"&&message.contains("snapshot")&&message["snapshot"].is_object())
         {
             const auto& snapshot=message["snapshot"];
@@ -60325,7 +60779,7 @@ static void reg_fs() {
         // 前端每次保存 = 一次原子写盘 = 一次立即刷新（HC 无文件轮询，
         // SettingsManager 事件即生效）。无新增逻辑：复用现有 forced 刷新。
         if (result) {
-            sgStaticScanPreference(committed.value("sleep",json::object()).value("sleepPowerPlanOptimizationEnabled",true));
+            sgStaticScanPreference(sgStaticScanEnabled(committed.value("sleep",json::object())));
             g_fxSoundRecovery.configure(fxSoundRecoveryEnabled());
             inputCaptureRefreshRealStickSettings(true);
             ipc_emit("input.shortcutRuntime", inputShortcutRuntimeSnapshot());
@@ -60639,21 +61093,29 @@ static void reg_fs() {
         addFile(dataDir + L"\\input-host-cost-retention.json");
         {
             std::error_code archiveEc;
-            unsigned long long archivesFound=0;
+            std::vector<ymcc::logexport::HostCostArchiveExportCandidate> archiveCandidates;
             fspath::directory_iterator it(dataDir,archiveEc),end;
             while(!archiveEc && it!=end) {
                 std::error_code entryEc;
                 if(it->is_regular_file(entryEc) && ymcc::logexport::hostCostArchiveEvidenceName(W2U(it->path().filename().wstring()))) {
-                    addFile(it->path().wstring());++archivesFound;
+                    const auto size=it->file_size(entryEc);
+                    archiveCandidates.push_back({W2U(it->path().filename().wstring()),entryEc?0ULL:static_cast<unsigned long long>(size),!entryEc,entryEc.value()});
+                    entryEc.clear(); // Size failures are explicit inventory gaps, not an empty directory.
                 }
                 if(entryEc){archiveEc=entryEc;break;}
                 it.increment(archiveEc);
             }
+            auto selection=ymcc::logexport::selectHostCostArchivesForExport(std::move(archiveCandidates));
+            for(const auto& archive:selection["archives"])
+                if(archive["includedByBudget"].get<bool>())
+                    addFile((fspath::path(dataDir)/fspath::path(U2W(archive["name"].get<std::string>()))).wstring());
             availability["costArchiveDiscovery"]={{"status",archiveEc?"directory-enumeration-error":"complete-at-discovery"},
-                {"archivesFound",archivesFound},{"errorCode",archiveEc.value()},{"atomicWithSnapshot",false}};
+                {"archivesFound",selection["archives"].size()},{"errorCode",archiveEc.value()},
+                {"atomicWithSnapshot",false},{"exportSelection",std::move(selection)}};
         }
 
         addRotated(dataDir + L"\\input-host-signal.log"); // Ordinary virtual-detail SDK-call evidence, bounded.
+        addRotated(dataDir + L"\\physical-source-reader.log"); // Opt-in ROG FSE read-only HID comparison; never arms capture.
         addRotated(dataDir + L"\\input-host-report-chain.log"); // Opt-in MSI SDK-call evidence; export does not arm diagnostics.
         addRotated(dataDir + L"\\gamepad-driver-setup.json");
         addFile(dataDir + L"\\gamepad-driver-setup.json.drivers.xml"); // Preserve the outer inventory even when its schema is unknown.
@@ -60849,6 +61311,7 @@ static void reg_fs() {
                 // 2026-09-23 W3 批 99（operator 授权）：门值显式化 + 设置文件身份
                 // （现场教训：导出时 detailedLogging=off 曾被误读成"整段没日志"）。
                 manifest << "domainLogsVirtual=" << (domainLogEnabled("virtual") ? "1" : "0") << "\n";
+                manifest << "steamDeckyProcessCpu=input-idle-window.steamDeckyProcessCost;virtual-gamepad.log;domainLogs.virtual;max1Hz;PID+birth+image+session;whole-process-not-exclusive-wallpaper\n";
                 manifest << "monitorSnapshots=monitor-detail.log;high-frequency-gate;max1Hz;payloadMax"
                          << ymcc::monitordetail::rawSnapshotBytes
                          << ";snapshotPayloadMax" << ymcc::monitorsnapshot::combinedMaxBytes
@@ -60901,6 +61364,9 @@ static void reg_fs() {
                 manifest << "focusShortcutInputEvidenceFile=focus-trace.log;native-detail.log event=focus-shortcut-input\n";
                 manifest << "inputSignalKeyStateEvidenceVersion=1\n";
                 manifest << "inputSignalKeyStateEvidenceFile=focus-trace.log;native-detail.log event=input-signal-activity field=keyStateEvidence\n";
+                manifest << "injectedGamepadKeyEvidenceVersion=1;eventContext=focus-trace.log input-edge-window events[].injectedGamepadForeground;heldAge=input-signal-activity keyStateEvidence.keys[].injectedGamepadHold;diagnostic-only;no-auto-release\n";
+                manifest << "costArchiveExportBudgetBytes=" << ymcc::logexport::HostCostArchiveExportMaxBytes << "\n";
+                manifest << "costArchiveExportPolicy=recent-whole-volumes;inventory=log-export-availability.json costArchiveDiscovery.exportSelection;omitted-sources-not-deleted\n";
                 manifest << "inputSignalKeyStateEvidenceBudget=existing-5000ms-drain;max16-async-reads;max1-queue-read;no-background-thread\n";
                 manifest << "taskViewDispatchBackend=shell-api-self-worker-v2\n";
                 manifest << "taskViewDispatchBudgetMs=4500 helperWaitMs=3000 cleanupWaitMs=500\n";
@@ -60918,6 +61384,15 @@ static void reg_fs() {
                 manifest << "inputTimerEvidenceVersion=1\n";
                 manifest << "inputTimerEvidenceScope=WinMM-callback-only+observed-identity+create/kill-receipts;first/latest-high-rate-witness;no-timer-control;no-drain-or-game-proof\n";
                 manifest << "inputTimerEvidence=" << inputTimerEvidenceExportSnapshot().dump() << "\n";
+                manifest << "rogFseAdaptationDiagnostics=" << json({
+                    {"experimentalBuild",YMCC_ROG_FSE_EXPERIMENTS != 0},
+                    {"compiled",YMCC_ROG_FSE_DIAGNOSTICS != 0},
+                    {"rawWindowFile","native-detail.log"},{"detailGateRequired",true},
+                    {"rawWindowEvent","rog-raw-input-window"},
+                    {"sourceReadbackEvents",{"input-source-readback-pair","input-source-readback-context"}},
+                    {"scope","ROG Xbox-FSE adaptation diagnostics;compiled out of normal builds;other-family readback unchanged"},
+                    {"missingRowsMeaning","expected-when-not-compiled-or-detail-off;not-input-failure-or-success"}
+                }).dump() << "\n";
                 manifest << "inputFrameEvidenceVersion=2\n";
                 manifest << "inputFrameEvidenceFile=native-lifecycle.log(state-change),native-detail.log(periodic) event=input-host-frame-evidence formatVersion=2\n";
                 manifest << "msiDinputTriggerEvidenceFile=native-lifecycle.log event=msi-dinput-trigger-evidence formatVersion=2 raw+normalized+canonical buttons128+pov+sticks+axis-range+trigger-edges first4+edges legacy-limit=64-per-bind+capacity-receipt sustained=5000ms+bounded-context detail-gate=domainLogs.virtual recent-memory=64+initial64+sustained32+context8 diagnostic-only steamConsumptionProven=false admission=msi-release-before-admission neutralReads=3\n";
@@ -68441,6 +68916,24 @@ static bool rogEnsureControllerRemap(bool remap, const char* reason) {
 //   ③ 有界等待失败 ⇒ 把恢复意图**留给下一次生命周期入口消费**（不无锁回退、不无限等待、不丢弃恢复）。
 static constexpr unsigned kRogRemapRecoverWaitBudgetMs = 800;      // 与终态同为锁等待预算
 static std::atomic<unsigned long long> g_rogRecoverPendingGen{0};  // 0 = 无待办；否则 = 记录时代次
+#if YMCC_ROG_RAWINPUT_FALLBACK || YMCC_ROG_FSE_DIAGNOSTICS
+static RogRawInputSampleView rogRawInputSampleView() {
+    RogRawInputSampleView view;
+    // A remap can pump messages on its owner thread. Do not recursively try its mutex.
+    if (tls_rogRemapActive) return view;
+    RogRemapBoundaryScope boundary(0);
+    if (!boundary.entered) return view;
+    view.boundaryEntered = true;
+    view.identityMatched = g_rog.identityMatched; view.productId = g_rog.productId;
+    view.hasStableInput = g_rog.hasStableInput; view.inputPathIsMi05 = g_rog.inputPathIsMi05;
+    view.rawDeviceMatchesInputPath = g_rog.rawDeviceMatchesInputPath;
+    view.lastHidTick = g_rog.lastHidTick; view.lastHidPad = g_rog.lastHidPad;
+    view.lastHidSequence = g_rog.lastHidSequence;
+    view.lastHidPower = g_rog.lastHidPower; view.lastHidTopology = g_rog.lastHidTopology;
+    return view;
+}
+#endif
+
 static bool rogRecoverBindSerialized(const char* why) {
     if (g_aiFanMockSession.isolated) return false;
     const char* tag = why ? why : "";
@@ -68788,20 +69281,59 @@ static bool rogGetScaledAxis(PHIDP_PREPARSED_DATA prep, PCHAR report, ULONG repo
     return true;
 }
 
-static bool rogParseReport(PHIDP_PREPARSED_DATA prep, PCHAR report, ULONG reportLen, int map, XINPUT_GAMEPAD* out) {
+static bool rogPadHasActivity(const XINPUT_GAMEPAD& pad) {
+    constexpr int axisThreshold = 2000;
+    constexpr BYTE triggerThreshold = 20;
+    return pad.wButtons != 0 ||
+        pad.bLeftTrigger >= triggerThreshold || pad.bRightTrigger >= triggerThreshold ||
+        std::abs(static_cast<int>(pad.sThumbLX)) >= axisThreshold ||
+        std::abs(static_cast<int>(pad.sThumbLY)) >= axisThreshold ||
+        std::abs(static_cast<int>(pad.sThumbRX)) >= axisThreshold ||
+        std::abs(static_cast<int>(pad.sThumbRY)) >= axisThreshold;
+}
+
+// Exact RC73XA MI05 opt-in. Generic physical HID retains its prior layout.
+static bool rogGetMi05Axis(PHIDP_PREPARSED_DATA prep, PCHAR report, ULONG reportLen,
+                           USAGE usage, bool invert, SHORT* out) {
+    HIDP_VALUE_CAPS caps[16]{};
+    USHORT count = 16;
+    if (HidP_GetValueCaps(HidP_Input, caps, &count, prep) != HIDP_STATUS_SUCCESS || count > 16)
+        return false;
+    for (USHORT i = 0; i < count; ++i) {
+        const auto& c = caps[i];
+        const bool matches = c.IsRange ? usage >= c.Range.UsageMin && usage <= c.Range.UsageMax
+                                      : usage == c.NotRange.Usage;
+        if (c.UsagePage != 1 || !matches || c.BitSize != 16 || c.LogicalMin != 0) continue;
+        // HIDP_VALUE_CAPS stores this device's unsigned 0xffff maximum as -1.
+        // Physical scaling is not logical normalization; use the raw usage.
+        const ULONG maximum = static_cast<ULONG>(c.LogicalMax) & 0xffffu;
+        if (maximum != 65535u) return false;
+        ULONG value = 0;
+        if (HidP_GetUsageValue(HidP_Input, 1, c.LinkCollection, usage, &value,
+                prep, report, reportLen) != HIDP_STATUS_SUCCESS) return false;
+        *out = rogAxisToXInput(value & 0xffffu, 0, 65535, invert);
+        return true;
+    }
+    return false;
+}
+
+static bool rogParseReport(PHIDP_PREPARSED_DATA prep, PCHAR report, ULONG reportLen, int map, XINPUT_GAMEPAD* out, bool rogMi05 = false) {
     if (!prep || !report || !out || reportLen == 0) return false;
     XINPUT_GAMEPAD pad{};
+    bool parsedAny = false;
     USAGE usages[32]{};
     ULONG usageLen = 32;
     if (HidP_GetUsages(HidP_Input, 0x09, 0, usages, &usageLen, prep, report, reportLen) == HIDP_STATUS_SUCCESS) {
+        parsedAny = true;
         for (ULONG i = 0; i < usageLen; ++i) {
             pad.wButtons |= rogUsageToXInput(usages[i], map);
         }
     }
     ULONG hat = 0;
     if (HidP_GetUsageValue(HidP_Input, 0x01, 0, 0x39, &hat, prep, report, reportLen) == HIDP_STATUS_SUCCESS) {
-        if (hat != 0 && hat != 8) {
-            const ULONG idx = (hat == 0) ? 0 : (hat - 1);
+        parsedAny = true;
+        if (rogMi05 ? (hat >= 1 && hat <= 8) : (hat != 0 && hat != 8)) {
+            const ULONG idx = hat - 1;
             switch (idx) {
             case 0: pad.wButtons |= XINPUT_GAMEPAD_DPAD_UP; break;
             case 1: pad.wButtons |= XINPUT_GAMEPAD_DPAD_UP | XINPUT_GAMEPAD_DPAD_RIGHT; break;
@@ -68816,16 +69348,32 @@ static bool rogParseReport(PHIDP_PREPARSED_DATA prep, PCHAR report, ULONG report
         }
     }
     SHORT axisVal = 0;
-    if (rogGetScaledAxis(prep, report, reportLen, 0x30, false, &axisVal)) pad.sThumbLX = axisVal;
-    if (rogGetScaledAxis(prep, report, reportLen, 0x31, true, &axisVal)) pad.sThumbLY = axisVal;
-    if (rogGetScaledAxis(prep, report, reportLen, 0x32, false, &axisVal)) pad.sThumbRX = axisVal;
-    if (rogGetScaledAxis(prep, report, reportLen, 0x35, true, &axisVal)) pad.sThumbRY = axisVal;
+    if (rogMi05) {
+        if (rogGetMi05Axis(prep, report, reportLen, 0x30, false, &axisVal)) { pad.sThumbLX = axisVal; parsedAny = true; }
+        if (rogGetMi05Axis(prep, report, reportLen, 0x31, true, &axisVal)) { pad.sThumbLY = axisVal; parsedAny = true; }
+        if (rogGetMi05Axis(prep, report, reportLen, 0x33, false, &axisVal)) { pad.sThumbRX = axisVal; parsedAny = true; }
+        if (rogGetMi05Axis(prep, report, reportLen, 0x34, true, &axisVal)) { pad.sThumbRY = axisVal; parsedAny = true; }
+        ULONG triggerAxis = 0;
+        if (HidP_GetUsageValue(HidP_Input, 0x01, 0, 0x32, &triggerAxis, prep, report, reportLen) == HIDP_STATUS_SUCCESS) {
+            parsedAny = true;
+            constexpr ULONG center = 32768;
+            if (triggerAxis <= center) {
+                const ULONG pressed = center - triggerAxis;
+                pad.bLeftTrigger = static_cast<BYTE>((pressed * 255u + center / 2) / center);
+            } else {
+                const ULONG pressed = triggerAxis - center;
+                pad.bRightTrigger = static_cast<BYTE>((pressed * 255u + (65535u - center) / 2) / (65535u - center));
+            }
+        }
+    } else {
+        // Preserve the pre-MI05 generic physical-HID axis layout.
+        if (rogGetScaledAxis(prep, report, reportLen, 0x30, false, &axisVal)) { pad.sThumbLX = axisVal; parsedAny = true; }
+        if (rogGetScaledAxis(prep, report, reportLen, 0x31, true, &axisVal)) { pad.sThumbLY = axisVal; parsedAny = true; }
+        if (rogGetScaledAxis(prep, report, reportLen, 0x32, false, &axisVal)) { pad.sThumbRX = axisVal; parsedAny = true; }
+        if (rogGetScaledAxis(prep, report, reportLen, 0x35, true, &axisVal)) { pad.sThumbRY = axisVal; parsedAny = true; }
+    }
     *out = pad;
-    return pad.wButtons != 0 ||
-        std::abs(static_cast<int>(pad.sThumbLX)) >= GP_UI_THUMB_THRESHOLD ||
-        std::abs(static_cast<int>(pad.sThumbLY)) >= GP_UI_THUMB_THRESHOLD ||
-        std::abs(static_cast<int>(pad.sThumbRX)) >= GP_UI_THUMB_THRESHOLD ||
-        std::abs(static_cast<int>(pad.sThumbRY)) >= GP_UI_THUMB_THRESHOLD;
+    return parsedAny;
 }
 
 static void rogAcceptHidPad(const XINPUT_GAMEPAD& pad) {
@@ -68982,40 +69530,157 @@ static void physicalHidCaptureRawInput(RAWINPUT* raw, std::optional<uint64_t> le
 }
 
 static void rogCaptureRawInput(RAWINPUT* raw) {
-    if (!raw || raw->header.dwType != RIM_TYPEHID || !g_rog.identityMatched) return;
+    if (!raw || raw->header.dwType != RIM_TYPEHID) return;
+    // The BUS reads the same sample under this lock. Do not publish a partial pad/timestamp.
+    std::lock_guard<std::mutex> captureLock(g_gamepadReadMx);
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    auto& evidence = g_rogRawEvidence;
+    ++evidence.received;
+    evidence.lastError = ERROR_SUCCESS;
+    auto reject = [&](const char* why, DWORD error = ERROR_SUCCESS) {
+        ++evidence.rejected; evidence.lastCapture = why; evidence.lastError = error;
+    };
+#else
+    const auto reject = [](const char*, DWORD = ERROR_SUCCESS) noexcept {};
+#endif
+    if (tls_rogRemapActive) { reject("session-owner-reentrant"); return; }
+    RogRemapBoundaryScope boundary(0);
+    if (!boundary.entered) { reject("session-boundary-busy"); return; }
+    if (!g_rog.identityMatched) { reject("rog-not-bound"); return; }
     RID_DEVICE_INFO info{};
     UINT infoSize = sizeof(info);
     info.cbSize = sizeof(info);
-    if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_DEVICEINFO, &info, &infoSize) == static_cast<UINT>(-1)) return;
-    if (info.dwType != RIM_TYPEHID || info.hid.dwVendorId != 0x0B05 ||
-        !rogIsAllyPid(static_cast<USHORT>(info.hid.dwProductId))) return;
-    UINT prepSize = 0;
-    GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_PREPARSEDDATA, nullptr, &prepSize);
-    if (prepSize == 0) return;
-    std::vector<BYTE> prepBuf(prepSize);
-    if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_PREPARSEDDATA, prepBuf.data(), &prepSize) == static_cast<UINT>(-1)) return;
-    auto prep = reinterpret_cast<PHIDP_PREPARSED_DATA>(prepBuf.data());
-    PCHAR report = reinterpret_cast<PCHAR>(raw->data.hid.bRawData);
-    const ULONG reportLen = raw->data.hid.dwSizeHid * (raw->data.hid.dwCount ? raw->data.hid.dwCount : 1);
-    XINPUT_GAMEPAD pad{};
-    int map = g_rog.buttonMapLocked ? g_rog.buttonMap : 0;
-    bool parsed = rogParseReport(prep, report, reportLen, map, &pad);
-    if (!g_rog.buttonMapLocked) {
-        const WORD summonBits = XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;
-        for (int candidate = 0; candidate < 3; ++candidate) {
-            XINPUT_GAMEPAD trial{};
-            if (!rogParseReport(prep, report, reportLen, candidate, &trial)) continue;
-            if ((trial.wButtons & summonBits) == summonBits) {
-                g_rog.buttonMap = candidate;
-                g_rog.buttonMapLocked = true;
-                pad = trial;
-                parsed = true;
-                break;
-            }
-            if (!parsed) { pad = trial; parsed = true; g_rog.buttonMap = candidate; }
-        }
+    if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_DEVICEINFO, &info, &infoSize) == static_cast<UINT>(-1)) {
+        reject("device-info-failed", GetLastError()); return;
     }
-    if (parsed) rogAcceptHidPad(pad);
+    if (info.dwType != RIM_TYPEHID || info.hid.dwVendorId != 0x0B05 ||
+        !rogIsAllyPid(static_cast<USHORT>(info.hid.dwProductId))) { reject("other-device"); return; }
+    const auto power = currentPowerGeneration();
+    const auto topology = g_xinputTopologyEpoch.load(std::memory_order_acquire);
+    const ULONGLONG receivedAt = GetTickCount64();
+    const DWORD queueAge = static_cast<DWORD>(receivedAt) - static_cast<DWORD>(GetMessageTime());
+    if (queueAge > 250 || queueAge > receivedAt) { reject("queue-stale"); return; }
+    const ULONGLONG queuedAt = receivedAt - queueAge;
+    const bool mi05 = info.hid.dwProductId == 0x1B4C && g_rog.productId == 0x1B4C &&
+        g_rog.hasStableInput && g_rog.inputPathIsMi05;
+    if (info.hid.dwProductId == 0x1B4C) {
+        if (!mi05) { reject("mi05-not-bound"); return; }
+        if (g_rog.rawDevice != raw->header.hDevice || g_rog.rawDeviceTopology != topology) {
+            wchar_t path[1024]{};
+            UINT chars = static_cast<UINT>(std::size(path));
+            const UINT copied = GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_DEVICENAME, path, &chars);
+            if (copied == static_cast<UINT>(-1) || copied == 0 || copied >= std::size(path)) {
+                reject("device-name-query-failed", copied == static_cast<UINT>(-1) ? GetLastError() : ERROR_INVALID_DATA);
+                return; // Do not permanently negative-cache a transient API failure.
+            }
+            g_rog.rawDevice = raw->header.hDevice;
+            g_rog.rawDeviceTopology = topology;
+            g_rog.rawDeviceMatchesInputPath = _wcsicmp(path, g_rog.inputPath.c_str()) == 0;
+        }
+        if (!g_rog.rawDeviceMatchesInputPath) { reject("different-physical-path"); return; }
+    }
+    constexpr size_t payloadOffset = offsetof(RAWINPUT, data.hid.bRawData);
+    const ULONG reportLen = raw->data.hid.dwSizeHid, count = raw->data.hid.dwCount;
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    evidence.lastReportBytes = reportLen; evidence.lastReportCount = count;
+#endif
+    if (raw->header.dwSize < payloadOffset || !reportLen || !count ||
+        count > (raw->header.dwSize - payloadOffset) / reportLen) { reject("invalid-report-bounds"); return; }
+    UINT prepSize = 0;
+    if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_PREPARSEDDATA, nullptr, &prepSize) == static_cast<UINT>(-1) ||
+        prepSize == 0 || prepSize > 65536) { reject("preparsed-size-failed", GetLastError()); return; }
+    std::vector<BYTE> prepBuf(prepSize);
+    if (GetRawInputDeviceInfoW(raw->header.hDevice, RIDI_PREPARSEDDATA, prepBuf.data(), &prepSize) == static_cast<UINT>(-1)) {
+        reject("preparsed-read-failed", GetLastError()); return;
+    }
+    auto prep = reinterpret_cast<PHIDP_PREPARSED_DATA>(prepBuf.data());
+    for (ULONG index = 0; index < count; ++index) {
+        PCHAR report = reinterpret_cast<PCHAR>(raw->data.hid.bRawData + index * reportLen);
+        XINPUT_GAMEPAD pad{};
+        int map = g_rog.buttonMapLocked ? g_rog.buttonMap : 0;
+        bool parsed = rogParseReport(prep, report, reportLen, map, &pad, mi05);
+        if (parsed && !g_rog.buttonMapLocked && rogPadHasActivity(pad)) {
+            const WORD summonBits = XINPUT_GAMEPAD_LEFT_SHOULDER | XINPUT_GAMEPAD_RIGHT_SHOULDER;
+            for (int candidate = 0; candidate < 3; ++candidate) {
+                XINPUT_GAMEPAD trial{};
+                if (!rogParseReport(prep, report, reportLen, candidate, &trial, mi05)) continue;
+                if (!rogPadHasActivity(trial)) continue;
+                if ((trial.wButtons & summonBits) == summonBits) {
+                    g_rog.buttonMap = candidate; g_rog.buttonMapLocked = true;
+                    pad = trial; parsed = true; break;
+                }
+            }
+        }
+        if (!parsed) {
+#if YMCC_ROG_FSE_DIAGNOSTICS
+            ++evidence.parseFailures;
+#endif
+            reject("parse-failed"); continue;
+        }
+        if (power != currentPowerGeneration() || topology != g_xinputTopologyEpoch.load(std::memory_order_acquire)) {
+            reject("capture-context-changed"); return;
+        }
+        // Include release/neutral reports. Their queue time, not decode time, defines freshness.
+        rogAcceptHidPad(pad);
+        g_rog.lastHidTick = queuedAt;
+        g_rog.lastHidPower = power; g_rog.lastHidTopology = topology;
+        ++g_rog.lastHidSequence;
+#if YMCC_ROG_FSE_DIAGNOSTICS
+        ++evidence.accepted;
+        evidence.lastCapture = mi05 ? "parsed-bound-mi05" : "parsed-legacy-rog";
+#endif
+    }
+}
+
+// Diagnostic snapshot of the caps already queried by rogInspectDevice. It never
+// selects a source, changes a mode, or authorizes a device operation. HIDP caps
+// describe fields; they do not prove completed input or capture raw descriptor bytes.
+static json rogHidInputCapsDiagnostic(const HIDP_CAPS& top,
+    NTSTATUS buttonStatus, USHORT buttonCount, const std::vector<HIDP_BUTTON_CAPS>& buttons,
+    NTSTATUS valueStatus, USHORT valueCount, const std::vector<HIDP_VALUE_CAPS>& values) {
+    const bool buttonBounded = buttonStatus == HIDP_STATUS_SUCCESS && buttonCount <= buttons.size();
+    const bool valueBounded = valueStatus == HIDP_STATUS_SUCCESS && valueCount <= values.size();
+    json buttonFields = json::array(), valueFields = json::array();
+    if (buttonBounded) for (USHORT i = 0; i < buttonCount; ++i) {
+        const auto& c = buttons[i];
+        buttonFields.push_back({
+            {"usagePage", c.UsagePage}, {"reportId", c.ReportID},
+            {"linkCollection", c.LinkCollection}, {"linkUsagePage", c.LinkUsagePage}, {"linkUsage", c.LinkUsage},
+            {"isRange", c.IsRange != FALSE}, {"isAbsolute", c.IsAbsolute != FALSE},
+            {"bitField", c.BitField},
+            {"usageMin", c.IsRange ? c.Range.UsageMin : c.NotRange.Usage},
+            {"usageMax", c.IsRange ? c.Range.UsageMax : c.NotRange.Usage},
+            {"dataIndexMin", c.IsRange ? c.Range.DataIndexMin : c.NotRange.DataIndex},
+            {"dataIndexMax", c.IsRange ? c.Range.DataIndexMax : c.NotRange.DataIndex}
+        });
+    }
+    if (valueBounded) for (USHORT i = 0; i < valueCount; ++i) {
+        const auto& c = values[i];
+        valueFields.push_back({
+            {"usagePage", c.UsagePage}, {"reportId", c.ReportID},
+            {"linkCollection", c.LinkCollection}, {"linkUsagePage", c.LinkUsagePage}, {"linkUsage", c.LinkUsage},
+            {"isRange", c.IsRange != FALSE}, {"isAbsolute", c.IsAbsolute != FALSE}, {"hasNull", c.HasNull != FALSE},
+            {"bitField", c.BitField}, {"bitSize", c.BitSize}, {"reportCount", c.ReportCount},
+            {"logicalMin", c.LogicalMin}, {"logicalMax", c.LogicalMax},
+            {"physicalMin", c.PhysicalMin}, {"physicalMax", c.PhysicalMax},
+            {"units", c.Units}, {"unitsExp", c.UnitsExp},
+            {"usageMin", c.IsRange ? c.Range.UsageMin : c.NotRange.Usage},
+            {"usageMax", c.IsRange ? c.Range.UsageMax : c.NotRange.Usage},
+            {"dataIndexMin", c.IsRange ? c.Range.DataIndexMin : c.NotRange.DataIndex},
+            {"dataIndexMax", c.IsRange ? c.Range.DataIndexMax : c.NotRange.DataIndex}
+        });
+    }
+    return {
+        {"scope", "already-queried-hidp-input-caps-only"}, {"diagnosticOnly", true},
+        {"inputDeliveryProven", false}, {"rawReportDescriptorCaptured", false},
+        {"declaredButtonCaps", top.NumberInputButtonCaps}, {"declaredValueCaps", top.NumberInputValueCaps},
+        {"declaredInputDataIndices", top.NumberInputDataIndices}, {"declaredLinkCollectionNodes", top.NumberLinkCollectionNodes},
+        {"buttonStatus", static_cast<uint32_t>(buttonStatus)}, {"buttonCountReturned", buttonCount},
+        {"buttonCapacity", buttons.size()}, {"buttonCapsComplete", buttonBounded && buttonCount == top.NumberInputButtonCaps},
+        {"valueStatus", static_cast<uint32_t>(valueStatus)}, {"valueCountReturned", valueCount},
+        {"valueCapacity", values.size()}, {"valueCapsComplete", valueBounded && valueCount == top.NumberInputValueCaps},
+        {"buttonFields", std::move(buttonFields)}, {"valueFields", std::move(valueFields)}
+    };
 }
 
 static void rogInspectDevice(HANDLE h, const wchar_t* path, USHORT pid) {
@@ -69050,10 +69715,12 @@ static void rogInspectDevice(HANDLE h, const wchar_t* path, USHORT pid) {
     const bool gamepadUsage = caps.UsagePage == 0x01 && (caps.Usage == 0x04 || caps.Usage == 0x05);
     USHORT buttonCapsLen = 16;
     std::vector<HIDP_BUTTON_CAPS> buttonCaps(buttonCapsLen);
-    const bool haveButtons = HidP_GetButtonCaps(HidP_Input, buttonCaps.data(), &buttonCapsLen, prep) == HIDP_STATUS_SUCCESS && buttonCapsLen > 0;
+    const NTSTATUS buttonCapsStatus = HidP_GetButtonCaps(HidP_Input, buttonCaps.data(), &buttonCapsLen, prep);
+    const bool haveButtons = buttonCapsStatus == HIDP_STATUS_SUCCESS && buttonCapsLen > 0;
     USHORT valueCapsLen = 16;
     std::vector<HIDP_VALUE_CAPS> valueCaps(valueCapsLen);
-    const bool haveValues = HidP_GetValueCaps(HidP_Input, valueCaps.data(), &valueCapsLen, prep) == HIDP_STATUS_SUCCESS && valueCapsLen > 0;
+    const NTSTATUS valueCapsStatus = HidP_GetValueCaps(HidP_Input, valueCaps.data(), &valueCapsLen, prep);
+    const bool haveValues = valueCapsStatus == HIDP_STATUS_SUCCESS && valueCapsLen > 0;
     (void)haveValues;
     // HC IsReady() picks one role per device with else-if ordering
     // (ROGAlly.cs:359-362): a device answering 0x5A wins the OEM/INPUT slot.
@@ -69077,6 +69744,9 @@ static void rogInspectDevice(HANDLE h, const wchar_t* path, USHORT pid) {
         {"report5D", report5D},
         {"featureLen", static_cast<int>(caps.FeatureReportByteLength)},
         {"inputLen", static_cast<int>(caps.InputReportByteLength)},
+        {"outputLen", static_cast<int>(caps.OutputReportByteLength)},
+        {"inputHidCaps", rogHidInputCapsDiagnostic(caps, buttonCapsStatus, buttonCapsLen, buttonCaps,
+            valueCapsStatus, valueCapsLen, valueCaps)},
         {"usagePage", static_cast<int>(caps.UsagePage)},
         {"usage", static_cast<int>(caps.Usage)},
         {"oemControl", oemControl},
@@ -69114,6 +69784,7 @@ static void rogInspectDevice(HANDLE h, const wchar_t* path, USHORT pid) {
         g_rog.hasStableInput = true;
         g_rog.inputLen = caps.InputReportByteLength;
         g_rog.inputPath = path;
+        g_rog.inputPathIsMi05 = ascii_lower(W2U(path)).find("mi_05") != std::string::npos;
     }
     if (prep) HidD_FreePreparsedData(prep);
     if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
@@ -70156,7 +70827,7 @@ static void inputCaptureStampFeedbackSourceLocked(InputCaptureGamepadSnapshot& s
     if(!sample.live||!sample.readContextStable||!sample.readAttemptSequence||
         sample.readPowerGeneration!=currentPowerGeneration()||sample.readTopologyGeneration!=g_xinputTopologyEpoch.load()||
         sample.readIdentityGeneration!=g_xinputSlotIdentityEpoch.load())return;
-    const auto route=ymcc::capabilities::controller::bindStandardInput(sample.inputSource,sample.connectedMask);
+    const auto route=inputCaptureBindStandardInput(&sample);
     if(route.kind()==ymcc::capabilities::controller::InputKind::MsiDInput){
         std::lock_guard<std::mutex> lock(g_msiMainSourceMx);
         if(!sample.readMsiSourceRevision||sample.readMsiSourceRevision!=g_msiMainSourceRevision.load()||
@@ -77430,6 +78101,137 @@ static bool commitPowerResume(unsigned long long generation, const char* source)
     return true;
 }
 
+static LRESULT gamepadDispatchRawInput(HWND h, WPARAM w, LPARAM l) {
+    constexpr UINT m = WM_INPUT;
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    const bool rogDispatchObserved = machineIsRogAllyFamily() && domainLogEnabled("virtual");
+#endif
+#if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) {
+        g_rogRawDispatch.messages.fetch_add(1, std::memory_order_relaxed);
+        if (h == g_rawInputSinkHwnd) g_rogRawDispatch.sinkMessages.fetch_add(1, std::memory_order_relaxed);
+        if (h == g_hwnd) g_rogRawDispatch.mainMessages.fetch_add(1, std::memory_order_relaxed);
+    }
+#endif
+        const auto legionMessageReceivedAt = legionMotionMessageReceiptTick();
+        // R2（二批需求单）：WM_INPUT 分支耗时（filtered 计数在物理源校验出口）。
+        UiCostWmInputScope wmInputCost;
+        // R3b″：本条分支内触发的物理快照/语义边沿归因到 ui-wm-input。
+        GpReadSourceScope gpSrc(kGpReadUiWmInput);
+        // 手柄订阅唤醒：OS 仅在手柄状态变化时投递；RIDEV_INPUTSINK 使隐藏/托盘态也能收到。
+        // 用 XInputGetState 读权威按键态并处理全局快捷键（空闲无 WM_INPUT = 0 CPU）。
+        // C15a：先取固定大小的 RAWINPUTHEADER；已确认的虚拟/不适用 hDevice
+        // 直接复用否定缓存并跳过整包 RID_INPUT、observe、capture 与 ROG 解析，
+        // 但仍执行 gamepadEval()，保持原触发频次、快捷键副作用和消息清理语义。
+        RAWINPUTHEADER c15aHeader{};
+        UINT c15aHeaderSize = sizeof(c15aHeader);
+        const UINT c15aHeaderRead = GetRawInputData(
+            (HRAWINPUT)l, RID_HEADER, &c15aHeader, &c15aHeaderSize,
+            sizeof(RAWINPUTHEADER));
+        if (tickCostEnabled()) {
+            g_c15aHeaderProbes.fetch_add(1, std::memory_order_relaxed);
+            if (c15aHeaderRead != sizeof(RAWINPUTHEADER))
+                g_c15aHeaderFallbacks.fetch_add(1, std::memory_order_relaxed);
+        }
+    #if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) {
+            if (c15aHeaderRead != sizeof(RAWINPUTHEADER)) {
+                g_rogRawDispatch.headerFailures.fetch_add(1, std::memory_order_relaxed);
+            } else {
+                g_rogRawDispatch.lastHeaderType.store(c15aHeader.dwType, std::memory_order_relaxed);
+                if (c15aHeader.dwType == RIM_TYPEHID) g_rogRawDispatch.hidHeaders.fetch_add(1, std::memory_order_relaxed);
+                if (c15aHeader.dwType == RIM_TYPEKEYBOARD) g_rogRawDispatch.keyboardHeaders.fetch_add(1, std::memory_order_relaxed);
+                if (c15aHeader.dwType == RIM_TYPEMOUSE) g_rogRawDispatch.mouseHeaders.fetch_add(1, std::memory_order_relaxed);
+            }
+        }
+#endif
+        if (c15aHeaderRead == sizeof(RAWINPUTHEADER) &&
+            c15aHeader.dwType == RIM_TYPEHID &&
+            hidHideRawInputNegativeCacheHit(c15aHeader.hDevice)) {
+            if (tickCostEnabled()) g_c15aNegativeHits.fetch_add(1, std::memory_order_relaxed);
+        #if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) g_rogRawDispatch.negativeCacheHits.fetch_add(1, std::memory_order_relaxed);
+#endif
+            uiCostNoteWmInputFiltered();
+            gamepadEval();
+            // Preserve the existing WM_INPUT cleanup contract: this early
+            // reject did not call GetRawInputData(RID_INPUT), so let the
+            // default window procedure retire the HRAWINPUT handle before
+            // returning.  Do not silently turn the fast path into a message
+            // leak.
+            return DefWindowProcW(h, m, w, l);
+        }
+        UINT dwSize = 0;
+        const UINT rawSizeResult = GetRawInputData((HRAWINPUT)l, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
+    #if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) {
+            g_rogRawDispatch.payloadQueries.fetch_add(1, std::memory_order_relaxed);
+            g_rogRawDispatch.lastPayloadBytes.store(dwSize, std::memory_order_relaxed);
+            if (rawSizeResult == ~0u) {
+                const DWORD error = GetLastError();
+                g_rogRawDispatch.payloadQueryFailures.fetch_add(1, std::memory_order_relaxed);
+                g_rogRawDispatch.lastError.store(error, std::memory_order_relaxed);
+            }
+            if (dwSize > sizeof(g_riBuf)) g_rogRawDispatch.oversizedPayloads.fetch_add(1, std::memory_order_relaxed);
+        }
+#endif
+        if (dwSize > 0 && dwSize <= sizeof(g_riBuf)) {
+            const UINT rawReadResult = GetRawInputData((HRAWINPUT)l, RID_INPUT, g_riBuf, &dwSize, sizeof(RAWINPUTHEADER));
+        #if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) {
+                g_rogRawDispatch.payloadReads.fetch_add(1, std::memory_order_relaxed);
+                if (rawReadResult != dwSize) {
+                    const DWORD error = rawReadResult == ~0u ? GetLastError() : ERROR_SUCCESS;
+                    g_rogRawDispatch.payloadReadFailures.fetch_add(1, std::memory_order_relaxed);
+                    g_rogRawDispatch.lastError.store(error, std::memory_order_relaxed);
+                }
+            }
+#endif
+            if (rawReadResult == dwSize) {
+                RAWINPUT* raw = (RAWINPUT*)g_riBuf;
+                inputEdgeObserveRaw(*raw);
+                if(raw->header.dwType==RIM_TYPEKEYBOARD)keyboardModifierObserveRaw(*raw);
+                if (raw->header.dwType == RIM_TYPEHID) {
+                    // Resolve the physical source from the actual Raw Input
+                    // interface before any virtual target is admitted.  This
+                    // is the HC-equivalent selected-controller identity; it
+                    // intentionally ignores broad gaming-HID scans and
+                    // excludes HIDMaestro/ViGEm virtual paths.
+                    hidHideObserveRawInputDevice(raw->header.hDevice);
+                    physicalHidCaptureRawInput(raw,legionMessageReceivedAt);
+                #if YMCC_ROG_FSE_DIAGNOSTICS
+    if (rogDispatchObserved) g_rogRawDispatch.hidCaptureCalls.fetch_add(1, std::memory_order_relaxed);
+#endif
+                    rogCaptureRawInput(raw);
+                    gamepadEval();
+                } else if (raw->header.dwType == RIM_TYPEKEYBOARD &&
+                           g_oemRawPathActive.load(std::memory_order_acquire)) {
+                    // §4.2 边沿消费：ROG 背键由本路（键盘 Raw Input 独占）提供。
+                    // 按下/松开按序更新本路键态，且仅在键态实际变化时重算 + 立即触发
+                    // 既有评估（与 hook 路同构的 before/after 自动重复抑制）——
+                    // 不等 50ms 兜底计时器，保证短按不漏、松开不粘。
+                    const RAWKEYBOARD& kb = raw->data.keyboard;
+                    const DWORD vk = kb.VKey;
+                    if (vk < 256 && g_oemRawVkAllowed[vk] &&
+                        oemRawKbAdmitDevice(raw->header.hDevice)) {   // §4.1 来源接纳
+                        const uint32_t bit = oemBackHookVkBit(vk);
+                        const uint32_t before = g_oemKbDownRaw.load(std::memory_order_acquire);
+                        const uint32_t next = ((kb.Flags & RI_KEY_BREAK) != 0) ? (before & ~bit) : (before | bit);
+                        if (next != before) {
+                            g_oemKbDownRaw.store(next, std::memory_order_release);
+                            oemBackHookRecompute();
+                            gamepadEval();
+                        }
+                    }
+                    // 前台（RIM_INPUT）必须交默认过程完成 HRAWINPUT 清理
+                    if (w == 0) return DefWindowProcW(h, m, w, l);
+                    return 0;
+                }
+            }
+        }
+        return 0;
+}
+
 static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
     // Bounded stage notifications carry no command/data. The matching current
     // child report is authenticated by PID/root/session before presentation.
@@ -78180,6 +78982,10 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         msiNativeForegroundStartObserver();
         return 0;
     case WM_DESTROY:
+            if (g_rawInputSinkHwnd) {
+                DestroyWindow(g_rawInputSinkHwnd);
+                g_rawInputSinkHwnd = nullptr;
+            }
             inputEdgeReconcileOnUi(true);
             closeScreenTouchpadsForExit("window-destroy"); // Also withdraw first on unexpected destruction.
             g_fxSoundRecovery.shutdown();
@@ -78351,84 +79157,7 @@ static LRESULT CALLBACK WndProc(HWND h, UINT m, WPARAM w, LPARAM l) {
         gamepadSerialSubmit([dir = (int)w, enabled] { nativeApplyBrightness(dir, enabled); });
         return 0;
     }
-    case WM_INPUT: {
-        const auto legionMessageReceivedAt = legionMotionMessageReceiptTick();
-        // R2（二批需求单）：WM_INPUT 分支耗时（filtered 计数在物理源校验出口）。
-        UiCostWmInputScope wmInputCost;
-        // R3b″：本条分支内触发的物理快照/语义边沿归因到 ui-wm-input。
-        GpReadSourceScope gpSrc(kGpReadUiWmInput);
-        // 手柄订阅唤醒：OS 仅在手柄状态变化时投递；RIDEV_INPUTSINK 使隐藏/托盘态也能收到。
-        // 用 XInputGetState 读权威按键态并处理全局快捷键（空闲无 WM_INPUT = 0 CPU）。
-        // C15a：先取固定大小的 RAWINPUTHEADER；已确认的虚拟/不适用 hDevice
-        // 直接复用否定缓存并跳过整包 RID_INPUT、observe、capture 与 ROG 解析，
-        // 但仍执行 gamepadEval()，保持原触发频次、快捷键副作用和消息清理语义。
-        RAWINPUTHEADER c15aHeader{};
-        UINT c15aHeaderSize = sizeof(c15aHeader);
-        const UINT c15aHeaderRead = GetRawInputData(
-            (HRAWINPUT)l, RID_HEADER, &c15aHeader, &c15aHeaderSize,
-            sizeof(RAWINPUTHEADER));
-        if (tickCostEnabled()) {
-            g_c15aHeaderProbes.fetch_add(1, std::memory_order_relaxed);
-            if (c15aHeaderRead != sizeof(RAWINPUTHEADER))
-                g_c15aHeaderFallbacks.fetch_add(1, std::memory_order_relaxed);
-        }
-        if (c15aHeaderRead == sizeof(RAWINPUTHEADER) &&
-            c15aHeader.dwType == RIM_TYPEHID &&
-            hidHideRawInputNegativeCacheHit(c15aHeader.hDevice)) {
-            if (tickCostEnabled()) g_c15aNegativeHits.fetch_add(1, std::memory_order_relaxed);
-            uiCostNoteWmInputFiltered();
-            gamepadEval();
-            // Preserve the existing WM_INPUT cleanup contract: this early
-            // reject did not call GetRawInputData(RID_INPUT), so let the
-            // default window procedure retire the HRAWINPUT handle before
-            // returning.  Do not silently turn the fast path into a message
-            // leak.
-            return DefWindowProcW(h, m, w, l);
-        }
-        UINT dwSize = 0;
-        GetRawInputData((HRAWINPUT)l, RID_INPUT, nullptr, &dwSize, sizeof(RAWINPUTHEADER));
-        if (dwSize > 0 && dwSize <= sizeof(g_riBuf)) {
-            if (GetRawInputData((HRAWINPUT)l, RID_INPUT, g_riBuf, &dwSize, sizeof(RAWINPUTHEADER)) == dwSize) {
-                RAWINPUT* raw = (RAWINPUT*)g_riBuf;
-                inputEdgeObserveRaw(*raw);
-                if(raw->header.dwType==RIM_TYPEKEYBOARD)keyboardModifierObserveRaw(*raw);
-                if (raw->header.dwType == RIM_TYPEHID) {
-                    // Resolve the physical source from the actual Raw Input
-                    // interface before any virtual target is admitted.  This
-                    // is the HC-equivalent selected-controller identity; it
-                    // intentionally ignores broad gaming-HID scans and
-                    // excludes HIDMaestro/ViGEm virtual paths.
-                    hidHideObserveRawInputDevice(raw->header.hDevice);
-                    physicalHidCaptureRawInput(raw,legionMessageReceivedAt);
-                    rogCaptureRawInput(raw);
-                    gamepadEval();
-                } else if (raw->header.dwType == RIM_TYPEKEYBOARD &&
-                           g_oemRawPathActive.load(std::memory_order_acquire)) {
-                    // §4.2 边沿消费：ROG 背键由本路（键盘 Raw Input 独占）提供。
-                    // 按下/松开按序更新本路键态，且仅在键态实际变化时重算 + 立即触发
-                    // 既有评估（与 hook 路同构的 before/after 自动重复抑制）——
-                    // 不等 50ms 兜底计时器，保证短按不漏、松开不粘。
-                    const RAWKEYBOARD& kb = raw->data.keyboard;
-                    const DWORD vk = kb.VKey;
-                    if (vk < 256 && g_oemRawVkAllowed[vk] &&
-                        oemRawKbAdmitDevice(raw->header.hDevice)) {   // §4.1 来源接纳
-                        const uint32_t bit = oemBackHookVkBit(vk);
-                        const uint32_t before = g_oemKbDownRaw.load(std::memory_order_acquire);
-                        const uint32_t next = ((kb.Flags & RI_KEY_BREAK) != 0) ? (before & ~bit) : (before | bit);
-                        if (next != before) {
-                            g_oemKbDownRaw.store(next, std::memory_order_release);
-                            oemBackHookRecompute();
-                            gamepadEval();
-                        }
-                    }
-                    // 前台（RIM_INPUT）必须交默认过程完成 HRAWINPUT 清理
-                    if (w == 0) return DefWindowProcW(h, m, w, l);
-                    return 0;
-                }
-            }
-        }
-        return 0;
-    }
+    case WM_INPUT: return gamepadDispatchRawInput(h, w, l);
     case WM_INPUT_DEVICE_CHANGE:
         g_keyboardModifierDeviceGeneration.fetch_add(1,std::memory_order_acq_rel);
         // 手柄插拔：native 刷新连接态并按需发布 gamepad.state。
@@ -85356,6 +86085,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
     cleanupExitArtifacts();
     // Repair the first updater layout before startup workers read PowerControl.
     if (!g_aiFanMockSession.isolated) migrate_legacy_power_control_dir();
+    initializeGpuScheduleFirstRunDefault(); // AMD 395 only, when both settings files are absent.
     // GP-PREREQ-2: first-install is common to every model; runs before any target admission.
     if (!g_aiFanMockSession.isolated) g_gamepadDriverSetup.start(ymcc::GamepadDriverSetup::ResolveRoot(exe_dir(),POWER_CONTROL_DIR),
         yemancc_data_dir() + L"\\gamepad-driver-setup.json",
@@ -85620,7 +86350,7 @@ int WINAPI wWinMain(HINSTANCE hi, HINSTANCE, LPWSTR, int ns) {
             sgSaveConfig();
             sgSyncEnableMirror();
         }
-        sgStaticScanPreference(ymSettingsSection("sleep").value("sleepPowerPlanOptimizationEnabled",true),true);
+        sgStaticScanPreference(sgStaticScanEnabled(ymSettingsSection("sleep")),true);
         // 启动只恢复本程序自己留下的两类身份标记：睡眠冻结和手动暂停。
         // 两个目录分离，任何一类都不会按名称/内存扫描其他进程。
         // 恢复标记只影响本程序自己留下的 PID 文件。放到独立线程，让

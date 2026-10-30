@@ -21,14 +21,14 @@ foreach($theme in $manifest.themes){
 }
 $expect=@(Get-AppearanceRenderExpectation ([pscustomobject]@{themes=$rows}))
 $css=@($manifest.files|Where-Object {$_.path.EndsWith('.css',[StringComparison]::OrdinalIgnoreCase)})
-Assert ($all.Count -eq 44 -and $css.Count -eq 44 -and @($expect|Where-Object kind -eq file).Count -eq 44) 'Every one of the 44 bundled static CSS files appears exactly once in the render plan'
-Assert (@($expect|Where-Object {$_.kind -eq 'file' -and $_.enabled}).Count -eq 16) 'The exact factory configuration selects 16 shared and optional files'
+Assert ($all.Count -eq 43 -and $css.Count -eq 43 -and @($expect|Where-Object kind -eq file).Count -eq 43) 'Every one of the 43 bundled static CSS files appears exactly once in the render plan'
+Assert (@($expect|Where-Object {$_.kind -eq 'file' -and $_.enabled}).Count -eq 15) 'The exact factory configuration selects 15 shared and optional files'
 foreach($file in $css){
  Assert ($all.ContainsKey([string]$file.path)) ('Bundled CSS is declared by a main-page injection: '+$file.path)
  $text=[IO.File]::ReadAllText((Join-Path (Join-Path $pack 'themes') $file.path));$property=$all[[string]$file.path]
  Assert ($text -match ([regex]::Escape($property)+':\s*1\s*;')) ('CSS carries the exact independently hashed receipt: '+$file.path)
 }
-Assert (@($expect|Where-Object kind -eq variable).Count -eq 18) 'Every managed dynamic variable is represented once alongside the 44 files'
+Assert (@($expect|Where-Object kind -eq variable).Count -eq 14) 'Every managed dynamic variable is represented once alongside the 43 files'
 Assert ((ConvertTo-AppearanceVariableValue '.3') -ceq (ConvertTo-AppearanceVariableValue '0.30')) 'Equivalent scalar token spellings compare equally'
 Assert ((ConvertTo-AppearanceVariableValue '-0vh') -ceq (ConvertTo-AppearanceVariableValue '0vh')) 'Equivalent signed zero dimensions compare equally'
 Assert ((ConvertTo-AppearanceVariableValue '#FFFFFF00   60%') -ceq '#ffffff00 60%') 'Gradient whitespace and hexadecimal case normalize without changing meaning'
@@ -78,7 +78,7 @@ foreach($mutation in @('missing','duplicate','unknown','unsafe','off-stale','old
  }
  Assert (Reject {Get-AppearanceRenderExpectation ([pscustomobject]@{themes=@($badRows)})}) ('Unsafe or incomplete variable plans are refused: '+$mutation)
 }
-Assert (@($expect|Where-Object kind -eq content).Count -eq 44) 'Every file has an independent exact-content expectation'
+Assert (@($expect|Where-Object kind -eq content).Count -eq 43) 'Every file has an independent exact-content expectation'
 $indexBefore=Get-AppearanceContentIndex
 $watchIndex=Get-AppearanceContentIndex
 Assert ([object]::ReferenceEquals($indexBefore,$watchIndex)) 'Repeated plans reuse the same validated in-memory manifest index'

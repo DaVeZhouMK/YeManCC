@@ -17,7 +17,8 @@ const out=process.env.YMCC_WAKE_PASSWORD_BROWSER_OUT||path.resolve(root,'../../B
 fs.mkdirSync(out,{recursive:true});
 const cases=[],screenshots=[],errors=[],styles=[];
 const staticWakeOnly=process.argv.includes('--static-wake-only');
-const pageSource=fs.readFileSync(path.join(root,'src/views/SleepGuardView.vue'),'utf8');
+const pagePath=path.join(root,'src/views/SleepGuardView.vue');
+const pageSource=fs.readFileSync(process.env.YMCC_SLEEP_PAGE_SOURCE||pagePath,'utf8');
 const native=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
 const domain=fs.readFileSync(path.join(root,'native/sleep_wake_password.h'),'utf8');
 assert(!pageSource.includes('wakePassword.get('));
@@ -31,11 +32,16 @@ cases.push('Source contract: only one user-action setter, no system-read getter 
 const bridgeSource=fs.readFileSync(path.join(root,'src/bridge/yeman.ts'),'utf8');
 const staticWakeBridge=bridgeSource.slice(bridgeSource.indexOf('export interface StaticWakeOperation'),bridgeSource.indexOf('export interface SleepPowerPlanOptimizationResult'));
 assert(staticWakeBridge.includes('checkedStaticWakeStatus'));
+const autoScanBridge=bridgeSource.slice(bridgeSource.indexOf('export async function getStaticWakeAutoScanEnabled'),bridgeSource.indexOf('export async function getSleepPowerPlanOptimizationEnabled'));
+assert(autoScanBridge.includes('staticWakeAutoScanEnabled'));
 const mocks={
   '@/bridge/sleepRecovery':`export const getAutomaticSleepRecovery=async()=>({ok:true,enabled:false,phase:'idle',generation:0,healthVerified:false});export const setAutomaticSleepRecovery=async()=>{throw Error('unexpected automatic preference write')};`,
   '@/bridge/yeman':`
     import {invoke} from '@/bridge/ipc';
     ${staticWakeBridge}
+    ${autoScanBridge}
+    async function readSettingsSection(){return {...window.__fixture.sleepSettings};}
+    async function saveSettingsSection(section,patch){const f=window.__fixture;if(f.staticSaveFail)throw Error('fixture preference save failed');Object.assign(f.sleepSettings,patch);f.staticPreferenceWrites.push(patch.staticWakeAutoScanEnabled);}
     export const PW={YEMAN:'1cb8b882-a900-4b9f-9bac-99d151e64441'};
     export async function sleepGuardGet(){window.__fixture.guardReads++;return {...window.__fixture.guard,wakePasswordEnabled:window.__fixture.preference};}
     export async function sleepGuardSet(on){window.__fixture.guardWrites.push({enabled:on});window.__fixture.guard.enabled=on;}
@@ -80,7 +86,7 @@ const bundle=await build({
     import {createApp,ref} from 'vue';import Page from './src/views/SleepGuardView.vue';
     const preference=JSON.parse(sessionStorage.getItem('wake-password-preference')||'false');
     window.__fixture={preference,ac:Number(preference),dc:Number(preference),invokes:[],guardWrites:[],guardReads:0,guard:{enabled:true,mode:'custom',suspended:0,pauseGameOnSleep:true,retryOnEntryFailure:true,retryOnNonUserWake:true,steamOverlayOffFix:true,joyXoffAutoClose:true}};
-    Object.assign(window.__fixture,{staticEnabled:true,staticCalls:[],staticPreferenceWrites:[],staticOperations:{},staticStatus:{enabled:true,phase:'idle',lastScanEpoch:0,devices:0,software:0,timers:0,protectedDevices:0,failed:0,restorePending:0,diagnosticSourceReady:true,lastError:''}});
+    Object.assign(window.__fixture,{staticEnabled:true,sleepSettings:{sleepPowerPlanOptimizationEnabled:true,staticWakeAutoScanEnabled:true},staticCalls:[],staticPreferenceWrites:[],staticOperations:{},staticStatus:{enabled:true,phase:'idle',lastScanEpoch:0,devices:0,software:0,timers:0,protectedDevices:0,failed:0,restorePending:0,diagnosticSourceReady:true,lastError:''}});
     window.__completeStatic=(requestId,ok=true)=>{const f=window.__fixture,op=f.staticOperations[requestId];f.staticOperations[requestId]={...op,state:'completed',ok};f.staticStatus={...f.staticStatus,phase:op.action==='scan'?'applied':'idle',enabled:op.action==='scan',lastScanEpoch:1};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated',{detail:f.staticStatus}));};
     const refreshKey=ref(0);window.__refresh=()=>refreshKey.value++;
     let app;window.__mount=()=>{app=createApp(Page);app.provide('globalRefreshKey',refreshKey);app.mount('#app')};window.__remount=()=>{app.unmount();window.__mount()};window.__mount();
@@ -92,7 +98,7 @@ const bundle=await build({
     });
     b.onLoad({filter:/.*/,namespace:'fixture'},args=>({contents:mocks[args.path],loader:'ts',resolveDir:root}));
     b.onLoad({filter:/\.vue$/},args=>{
-      const {descriptor,errors}=parse(fs.readFileSync(args.path,'utf8'),{filename:args.path});assert.deepEqual(errors,[]);
+      const {descriptor,errors}=parse(args.path===pagePath?pageSource:fs.readFileSync(args.path,'utf8'),{filename:args.path});assert.deepEqual(errors,[]);
       const id='data-v-'+createHash('sha256').update(args.path).digest('hex').slice(0,8);
       const compiled=compileScript(descriptor,{id,inlineTemplate:true});
       for(const style of descriptor.styles){const css=compileStyle({source:style.content,filename:args.path,id,scoped:style.scoped});assert.deepEqual(css.errors,[]);styles.push(css.code);}
@@ -109,45 +115,59 @@ let browser;
 try{
   browser=await chromium.launch({headless:true,executablePath:process.env.YMCC_UI_BROWSER_EXE||'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'});
   const page=await browser.newPage({viewport:{width:680,height:960}});page.on('pageerror',e=>errors.push(e.message));
+  page.setDefaultTimeout(staticWakeOnly?5000:30000);
   await page.goto('http://127.0.0.1:'+server.address().port);
   if(staticWakeOnly){
-    const scan=page.locator('.sleep-static-action button'),summary=page.getByRole('status',{name:'静态唤醒屏蔽状态'});
+    const auto=page.getByRole('switch',{name:'自动扫描并屏蔽',exact:true});
+    const summary=page.getByRole('status',{name:'静态唤醒屏蔽状态'}),retry=page.getByRole('button',{name:'重试恢复',exact:true});
     const plan=page.getByRole('switch',{name:'睡眠电源修复',exact:true});
-    await scan.waitFor();await page.waitForFunction(()=>window.__fixture.staticCalls.some(c=>c.method==='sleep.staticWake.get'));
+    await auto.waitFor();await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
     const writes=()=>page.evaluate(()=>window.__fixture.staticCalls.filter(c=>!c.method.endsWith('.get')).length);
-    assert.equal(await writes(),0);assert.equal(await scan.isDisabled(),false);cases.push('mount reads status once and never scans or restores');
-    await page.evaluate(()=>window.__fixture.staticTimeout=true);await scan.click();
+    const checked=()=>auto.getAttribute('aria-checked');
+    assert.equal(await writes(),0);assert.equal(await checked(),'true');assert.equal(await page.getByRole('button',{name:'扫描并屏蔽',exact:true}).count(),0);
+    cases.push('actual automatic switch replaces manual scan; mount only reads status and preference');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticStatus={...f.staticStatus,enabled:true,phase:'partial',lastScanEpoch:1,devices:2,software:864,timers:2,failed:1,lastError:'fixture unsupported item'};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated'));});
+    await page.waitForFunction(()=>document.querySelector('.sleep-static-wake p').textContent.includes('软件 864'));
+    for(const text of ['设备 2','软件 864','定时器 2','失败 1'])assert((await summary.innerText()).includes(text));
+    cases.push('automatic native completion refreshes visible counts and truthful failure without a scan click');
+    await plan.click();await page.waitForFunction(()=>window.__fixture.staticEnabled===false);assert.equal(await writes(),0);assert.equal(await checked(),'true');
+    await plan.click();await page.waitForFunction(()=>window.__fixture.staticEnabled===true);cases.push('power repair switch remains independent and never scans or restores wake sources');
+    await page.evaluate(()=>window.__fixture.staticTimeout=true);await auto.click();
     await page.waitForFunction(()=>document.querySelector('.sleep-static-wake p').textContent.includes('结果未确认'));
-    assert.equal(await writes(),1);assert(await scan.isDisabled());assert(await plan.isDisabled());
-    await page.waitForTimeout(100);assert.equal(await writes(),1);cases.push('IPC timeout preserves exact pending request and blocks duplicate scan or OFF');
-    await page.evaluate(()=>{window.__fixture.staticOverride={requestId:'another-request',action:'scan',state:'completed',ok:true};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated'));});
-    await page.waitForTimeout(40);assert(await scan.isDisabled());assert((await summary.innerText()).includes('结果未确认'));cases.push('unrelated completed event and applied inventory cannot unlock this request');
-    await page.evaluate(()=>{const f=window.__fixture;f.staticOverride={requestId:f.staticLastId,action:'restore',state:'completed',ok:true};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated'));});
-    await page.waitForTimeout(40);assert(await scan.isDisabled());cases.push('matching ID with wrong action cannot authorize another write');
-    await page.evaluate(()=>{window.__fixture.staticOverride=null;window.__completeStatic(window.__fixture.staticLastId);});
-    await page.waitForFunction(()=>!document.querySelector('.sleep-static-action button').disabled);
-    assert.equal(await writes(),1);assert(!(await summary.innerText()).includes('结果未确认'));assert.equal(await plan.isDisabled(),false);cases.push('native completion for exact request unlocks controls without replaying scan');
+    assert.equal(await writes(),1);assert.equal(await checked(),'false');assert(await auto.isDisabled());assert(await plan.isDisabled());
+    await page.waitForTimeout(100);assert.equal(await writes(),1);cases.push('OFF commits preference and restores once; timeout keeps exact pending ownership and blocks duplicate writes');
+    await page.evaluate(()=>{window.__fixture.staticOverride={requestId:'another-request',action:'restore',state:'completed',ok:true};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated'));});
+    await page.waitForTimeout(40);assert(await auto.isDisabled());assert((await summary.innerText()).includes('结果未确认'));cases.push('unrelated completion and inventory cannot unlock this restore');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticOverride={requestId:f.staticLastId,action:'scan',state:'completed',ok:true};window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated'));});
+    await page.waitForTimeout(40);assert(await auto.isDisabled());cases.push('same request ID with wrong action cannot authorize another write');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticOverride=null;f.staticStatus={...f.staticStatus,devices:0,software:0,timers:0,failed:0,lastError:''};window.__completeStatic(f.staticLastId);});
+    await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
+    assert.equal(await writes(),1);assert(!(await summary.innerText()).includes('结果未确认'));assert.equal(await retry.count(),0);cases.push('verified exact native completion unlocks switch without replaying scan or restore');
     const reads=await page.evaluate(()=>window.__fixture.staticCalls.filter(c=>c.method.endsWith('.get')).length);
-    await page.waitForTimeout(150);assert.equal(await page.evaluate(()=>window.__fixture.staticCalls.filter(c=>c.method.endsWith('.get')).length),reads);cases.push('completion uses one event read and creates no status polling timer');
-    await page.evaluate(()=>window.__fixture.staticTimeout=false);await plan.click();
-    await page.waitForFunction(()=>window.__fixture.staticPreferenceWrites.at(-1)===false&&window.__fixture.staticStatus.phase==='idle');
-    await page.waitForFunction(()=>!document.querySelector('[role="switch"][aria-label="睡眠电源修复"]').disabled);
-    assert.equal(await writes(),2);assert.equal(await page.evaluate(()=>window.__fixture.staticCalls.filter(c=>c.method.endsWith('.restore')).length),1);cases.push('explicit OFF is reachable after confirmation and restores exactly once');
-    await plan.click();await page.waitForFunction(()=>window.__fixture.staticPreferenceWrites.at(-1)===true);assert.equal(await writes(),2);cases.push('re-enabling remembers preference without scanning');
-    await page.evaluate(()=>{window.__fixture.staticTimeout=true;});await scan.click();
+    await page.waitForTimeout(150);assert.equal(await page.evaluate(()=>window.__fixture.staticCalls.filter(c=>c.method.endsWith('.get')).length),reads);cases.push('event refresh creates no polling timer');
+    await page.evaluate(()=>window.__fixture.staticTimeout=false);await auto.click();
+    await page.waitForFunction(()=>window.__fixture.staticPreferenceWrites.at(-1)===true);assert.equal(await writes(),1);assert.equal(await checked(),'true');
+    await page.evaluate(()=>window.__remount());await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
+    assert.equal(await checked(),'true');assert.equal(await writes(),1);cases.push('ON persists through remount and delegates delayed scanning to native instead of direct scan IPC');
+    await page.evaluate(()=>window.__fixture.staticTimeout=true);await auto.click();
     await page.waitForFunction(()=>document.querySelector('.sleep-static-wake p').textContent.includes('结果未确认'));
     await page.evaluate(()=>window.__completeStatic(window.__fixture.staticLastId,false));
-    await page.waitForFunction(()=>!document.querySelector('.sleep-static-action button').disabled);
-    assert((await summary.innerText()).includes('屏蔽未完成'));assert.equal(await writes(),3);cases.push('confirmed failure is retryable and remains visibly failed rather than reported successful');
-    await page.evaluate(()=>{const f=window.__fixture;f.staticTimeout=false;f.staticFail=true;f.staticEmitBeforeAck=true;});await scan.click();
-    await page.waitForFunction(()=>!document.querySelector('.sleep-static-action button').disabled);await page.waitForTimeout(40);
-    assert((await summary.innerText()).includes('static-wake-operation-busy'));cases.push('completion event before a failed direct ACK cannot replace its error with an older applied journal');
+    await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
+    assert((await summary.innerText()).includes('恢复未完成'));assert.equal(await writes(),2);assert(await retry.isVisible());cases.push('confirmed restore failure stays visible and exposes bounded retry while OFF');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticTimeout=false;f.staticFail=true;f.staticEmitBeforeAck=true;});await retry.click();
+    await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);await page.waitForTimeout(40);
+    assert((await summary.innerText()).includes('static-wake-operation-busy'));cases.push('event before failed direct ACK cannot replace that failure with an older journal');
     await page.evaluate(()=>window.dispatchEvent(new CustomEvent('ipc:sleep.staticWake.updated')));await page.waitForTimeout(40);
-    assert((await summary.innerText()).includes('static-wake-operation-busy'));cases.push('ordinary refresh after confirmed failure preserves the operation error');
-    await page.evaluate(()=>{const f=window.__fixture;f.staticFail=false;f.staticEmitBeforeAck=false;f.staticTimeout=false;f.staticHold=true;});await scan.click();
-    await page.waitForFunction(()=>!!window.__fixture.staticRelease);assert(await scan.isDisabled());
+    assert((await summary.innerText()).includes('static-wake-operation-busy'));cases.push('ordinary refresh preserves confirmed operation failure');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticFail=false;f.staticEmitBeforeAck=false;f.staticTimeout=false;f.staticHold=true;});await retry.click();
+    await page.waitForFunction(()=>!!window.__fixture.staticRelease);assert(await auto.isDisabled());
     const pendingCount=await writes();await page.evaluate(()=>document.querySelector('.sleep-static-action button').click());assert.equal(await writes(),pendingCount);
-    await page.evaluate(()=>{const f=window.__fixture;f.staticHold=false;f.staticRelease();});await page.waitForFunction(()=>!document.querySelector('.sleep-static-action button').disabled);cases.push('normal pending action blocks duplicates and accepts its verified direct ACK');
+    await page.evaluate(()=>{const f=window.__fixture;f.staticStatus={...f.staticStatus,failed:0,lastError:''};f.staticHold=false;f.staticRelease();});await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
+    cases.push('pending restore blocks duplicates and accepts its verified direct ACK');
+    await page.evaluate(()=>window.__fixture.staticSaveFail=true);await auto.click();
+    await page.waitForFunction(()=>!document.querySelector('[aria-label="自动扫描并屏蔽"]').disabled);
+    assert.equal(await checked(),'false');assert.equal(await writes(),pendingCount);assert((await page.locator('.sleep-notice').innerText()).includes('自动扫描设置保存失败'));
+    cases.push('failed preference write keeps remembered OFF and performs no restore or scan');
     assert.deepEqual(errors,[]);const report={suite:'Static wake completion on real SleepGuardView and typed bridge',passed:cases.length,cases,pageErrors:errors,realWindowsWrites:0,pollingAdded:false};
     fs.writeFileSync(path.join(out,'static-wake-results.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report,null,2));
   }else{

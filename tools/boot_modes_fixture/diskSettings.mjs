@@ -1,7 +1,7 @@
 /** Supporting backend for settings.boot-modes-file-ui; no new parent or global suite. */
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';import {spawnSync,spawn} from 'node:child_process';import {createInterface} from 'node:readline';
 import {repo,fixture,runtimeBundle,hash} from './harness.mjs';
-export const nativeInputs=['native/main.cpp','native/settings_baseline.h','native/input_startup_policy.h','native/controller_persona_settings.h','native/controller_persona.h','deps/json/json.hpp','tools/boot_modes_fixture/diskSettingsNative.cpp.in'];
+export const nativeInputs=['native/main.cpp','native/settings_baseline.h','native/input_startup_policy.h','native/controller_persona_settings.h','native/controller_persona.h','native/boot_mode_shortcuts.h','deps/json/json.hpp','tools/boot_modes_fixture/diskSettingsNative.cpp.in'];
 export function prepareDiskSettings(out,options={}){
  fs.mkdirSync(out,{recursive:true});const main=fs.readFileSync(repo+'/native/main.cpp','utf8');
  const slice=(a,b)=>{assert.equal(main.split(a).length,2,'production anchor '+a);const start=main.indexOf(a),end=main.indexOf(b,start+a.length);assert(end>start,'production end '+b);return main.slice(start,end);};
@@ -26,7 +26,7 @@ export async function createDiskRuntime(dir,native,options={}){
  const raw=p=>fs.readFileSync(native.safe(p),'utf8');
  const api={location:async()=>({directory:config,file,backup:file+'.bak'}),read:async(p,stamp)=>{trace.push({op:'read',path:native.safe(p)});if(faults.failRead)throw Error('isolated settings read failure');return native.invoke(p,{operation:'read',stamp:stamp||''});},exists:async p=>fs.existsSync(native.safe(p)),readTextFile:async(p,max=4194304)=>{const content=raw(p);assert(Buffer.byteLength(content)<=max,'maxBytes');return content;},rename:async(a,b)=>{fs.renameSync(native.safe(a),native.safe(b));return true;},write:async(p,content,transaction={})=>{assert.equal(path.resolve(p),path.resolve(file));trace.push({op:'write',initialize:transaction.initialize===true,expectedInputRevision:transaction.expectedInputRevision});if(faults.holdWrite){faults.holdWrite=false;await new Promise(resolve=>faults.releaseWrite=resolve);faults.releaseWrite=null;}if(faults.failWrite){faults.failWrite=false;return false;}return native.invoke(p,{operation:'write',content,...transaction});}};
  const bind=()=>globalThis.__bootDiskPort=api;
- const moduleAt=async name=>{bind();const folder=options.moduleDirectory||dir+'/'+name;fs.mkdirSync(folder,{recursive:true});const a=await runtimeBundle(folder,{diskSettingsPort:fixture+'/diskApiPort.ts'});a.repository.setSettingsDirectory(config);return a;};
+ const moduleAt=async name=>{bind();const folder=options.moduleDirectory||dir+'/'+name;fs.mkdirSync(folder,{recursive:true});const a=await runtimeBundle(folder,{diskSettingsPort:fixture+'/diskApiPort.ts',reuseCompiled:!!options.moduleDirectory});a.repository.setSettingsDirectory(config);return a;};
  const a=await moduleAt('initial');
  return {...store,a,bind,moduleAt,read:()=>JSON.parse(raw(file)),writeRaw:value=>fs.writeFileSync(file,typeof value==='string'?value:JSON.stringify(value,null,2)),startup:(boot,session)=>native.invoke(file,{operation:'startup',boot,session}),flush:()=>{fs.writeFileSync(dir+'/file-trace.json',JSON.stringify(trace,null,2));const evidence=dir+'/persisted';fs.mkdirSync(evidence,{recursive:true});for(const name of fs.readdirSync(config))if(name.startsWith('yeman-settings.json'))fs.copyFileSync(config+'/'+name,evidence+'/'+name);}};
 }

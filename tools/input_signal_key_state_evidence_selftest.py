@@ -2,9 +2,10 @@
 """Bounded activity-drain key/button observations: fake Ops only, frozen inputs.
 
 No product, live input, COM or WindowsOps execution. Static and binary checks
-run before each fixture. Output stays under InputSignalKeyState-20261015.
+run before each fixture. Output stays under the selected Testing evidence directory.
 """
 from __future__ import annotations
+import argparse
 import datetime
 import hashlib
 import json
@@ -16,12 +17,12 @@ import sys
 import traceback
 sys.dont_write_bytecode = True
 REPO = Path(__file__).resolve().parents[1]
-OUT = REPO.parents[2] / 'Build/Validation/InputSignalKeyState-20261015'
+OUT = REPO.parents[2] / 'Testing/YMCC/Evidence/InputSignalKeyState'
 VCVARS = Path('C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/VC/Auxiliary/Build/vcvars64.bat')
 HEADER = 'native/input_signal_key_state_evidence.h'
 FIXTURE = 'tools/input_signal_key_state_evidence_selftest.cpp'
 RUNNER = 'tools/input_signal_key_state_evidence_selftest.py'
-INPUTS = [HEADER,'native/input_signal_activity_evidence.h',FIXTURE,RUNNER,'deps/json/json.hpp']
+INPUTS = [HEADER,'native/input_signal_activity_evidence.h','native/input_edge_evidence.h',FIXTURE,RUNNER,'deps/json/json.hpp']
 PROFILES = [('Release',['/O2','/DNDEBUG','/MT']),('Checked',['/Od','/RTC1','/D_DEBUG','/MTd'])]
 FORBIDDEN_IMPORTS = ['user32.dll','win32u.dll','ole32.dll','oleaut32.dll','combase.dll','shell32.dll',
     'sendinput','getasynckeystate','getkeyboardstate','getforegroundwindow','getwindowthreadprocessid',
@@ -80,6 +81,12 @@ def compile_and_run(run,name,flags):
             '/Fo'+str(run/(name+'.obj')),'/Fd'+str(run/(name+'-compiler.pdb')),
             '/Fe'+str(exe),'/link','/INCREMENTAL:NO','/NODEFAULTLIB:user32.lib',
             '/NODEFAULTLIB:ole32.lib','/NODEFAULTLIB:oleaut32.lib','/NODEFAULTLIB:shell32.lib']
+    sdkRoot=Path('C:/Program Files (x86)/Windows Kits/10')
+    versions=sorted((sdkRoot/'Include').glob('*'),key=lambda p:tuple(int(v) for v in p.name.split('.') if v.isdigit()),reverse=True)
+    sdk=next((p for p in versions if (p/'um/Windows.h').is_file() and (p/'ucrt/crtdbg.h').is_file()),None)
+    if sdk is None:raise RuntimeError('Complete Windows SDK/UCRT not found')
+    args[1:1]=['/I'+str(sdk/n) for n in ('um','shared','ucrt','winrt')]
+    args+=['/LIBPATH:'+str(sdkRoot/'Lib'/sdk.name/n/'x64') for n in ('um','ucrt')]
     command = '@echo off\ncall "'+str(VCVARS)+'" >nul\nif errorlevel 1 exit /b %errorlevel%\n'
     command += subprocess.list2cmdline(args)+'\nif errorlevel 1 exit /b %errorlevel%\n'
     command += 'dumpbin /symbols "'+str(run/(name+'.obj'))+'" > "'+str(run/(name+'-object-symbols.txt'))+'"\nif errorlevel 1 exit /b %errorlevel%\n'
@@ -120,6 +127,11 @@ def compile_and_run(run,name,flags):
     return profile
 
 def main():
+    global OUT
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--output-dir',type=Path)
+    args=parser.parse_args()
+    if args.output_dir:OUT=args.output_dir.resolve()
+    OUT.mkdir(parents=True,exist_ok=True)
     stamp = datetime.datetime.now(datetime.timezone.utc).strftime('%Y%m%dT%H%M%S.%fZ')
     run = OUT/('run-'+stamp+'-'+str(os.getpid()));run.mkdir(parents=True)
     result = {'pass':False,'run':str(run),'startedUtc':stamp,'profiles':[],

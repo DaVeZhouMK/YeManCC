@@ -112,6 +112,8 @@ export function deckySidebarDescription(state: DeckySidebarState | null): string
     'resource-package-mismatch': 'Decky 配套插件缺失或损坏；请通过 YMCC 整包更新修复',
     'resource-package-invalid': 'Decky 托管清单异常，已停止加载；请通过 YMCC 整包更新修复',
     'resource-upgrade-required': 'Decky 与当前 YMCC 版本不匹配，请更新 YMCC 到配套新版',
+    'resource-receipt-conflict': 'Decky 安装回执冲突，已停止加载并保留文件；请通过 YMCC 完整更新修复',
+    'resource-receipt-migration-failed': 'Decky 旧安装回执迁移失败，已停止加载并保留文件；请通过 YMCC 完整更新修复',
     'resource-unsafe-path': 'Decky 资源路径异常，已停止加载并保留现有内容',
     'resource-worker-deadline': 'Decky 资源自检超时，已停止本次启动；下次恢复时重新检查',
     'resource-worker-cleanup-incomplete': 'Decky 修复进程尚未确认回收，已停止本次启动',
@@ -175,7 +177,7 @@ export function deckySidebarEnvironmentDescription(environment: DeckySidebarEnvi
   if (reason === 'steam-debug-missing') return '已检测到 Steam 和自带加载器；首次启用自动准备本地连接';
   if (reason === 'steam-restart-required') return '环境已补齐，方便时正常重启 Steam 即可，不会强关游戏';
   if (reason === 'resource-missing' || reason === 'plugin-missing') return 'Decky 配套资源不完整；请使用 YMCC 完整更新包修复';
-  if (['resource-package-mismatch','resource-package-invalid','resource-upgrade-required','resource-unsafe-path','resource-hash-mismatch'].includes(reason)) return deckySidebarDescription({enabled:true,steamKnown:false,steamRunning:false,pid:0,revision:0,phase:'unavailable',reason});
+  if (['resource-package-mismatch','resource-package-invalid','resource-receipt-conflict','resource-receipt-migration-failed','resource-upgrade-required','resource-unsafe-path','resource-hash-mismatch'].includes(reason)) return deckySidebarDescription({enabled:true,steamKnown:false,steamRunning:false,pid:0,revision:0,phase:'unavailable',reason});
   if (reason === 'steam-not-installed') return '未检测到 Steam，请先安装 Steam';
   if (reason === 'steam-debug-access-denied') return 'Steam 安装目录不可写，需要使用 YMCC 原管理员启动方式';
   return `环境未就绪：${reason}`;
@@ -188,7 +190,7 @@ export function deckySidebarSetupFailure(error:unknown,environment?:DeckySidebar
   const message=deckySidebarDescription({enabled:true,steamKnown:false,steamRunning:false,pid:0,revision:0,phase:'unavailable',reason});
   const parts=['YMCC 控制台设置失败：'+message];
   if(environment?.missingPath)parts.push('缺失路径：'+environment.missingPath);
-  else if(environment?.resourceDirectory && ['resource-missing','plugin-missing','resource-hash-mismatch','resource-package-mismatch','resource-package-invalid','resource-upgrade-required','resource-unsafe-path'].includes(reason))parts.push('检查目录：'+environment.resourceDirectory);
+  else if(environment?.resourceDirectory && ['resource-missing','plugin-missing','resource-hash-mismatch','resource-package-mismatch','resource-package-invalid','resource-receipt-conflict','resource-receipt-migration-failed','resource-upgrade-required','resource-unsafe-path'].includes(reason))parts.push('检查目录：'+environment.resourceDirectory);
   if(environment?.directorySource==='environment-override')parts.push('当前使用 YEMAN_POWER_CONTROL_DIR 测试目录；请先确认现有配置，不要直接切换数据目录');
   if(environment?.error)parts.push('Windows 错误码：'+environment.error);
   if(environment?.logPath)parts.push('诊断日志：'+environment.logPath);

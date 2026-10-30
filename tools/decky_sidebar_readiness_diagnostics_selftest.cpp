@@ -65,6 +65,12 @@ int main(){try{
  check(!deckydiag::validBuildId("path/secret")&&!deckydiag::validBuildId(std::string(65,'a'))&&!deckydiag::validBuildId(std::string(64,'G')),"Arbitrary or overlong build labels are rejected");
  check(deckydiag::record("plugin-build",{{"buildId",id},{"token","SECRET"}}).size()==2,"Build receipt includes only its fingerprint and event");
  check(!deckydiag::record("snapshot-read-finished",{{"buildId",id}}).contains("buildId"),"Build identity has its own dedicated event scope");
+ const auto sessionDiagnostic=deckydiag::record("steam-session-check",{{"stage","binding-identity-incomplete"},{"steamPid",123u},{"steamBirth","456"},{"pidPresent",true},{"birthPresent",true},{"accountPresent",false},{"rootPresent",true},{"error",0u},{"account",12345u},{"root","C:/PRIVATE"},{"token","SECRET"}});
+ check(sessionDiagnostic.value("stage",std::string{})=="binding-identity-incomplete"&&sessionDiagnostic.value("steamPid",0u)==123&&sessionDiagnostic.contains("accountPresent")&&!sessionDiagnostic["accountPresent"].get<bool>(),"Session failure reports its missing condition with the observed process lease");
+ check(!sessionDiagnostic.contains("account")&&!sessionDiagnostic.contains("root")&&!sessionDiagnostic.contains("token"),"Session diagnostic never exposes account values, paths or tokens");
+ const auto invalidSessionDiagnostic=deckydiag::record("steam-session-check",{{"stage","C:/PRIVATE"},{"steamPid","123"},{"steamBirth","birth/secret"},{"pidPresent",1},{"error",-1},{"enabled",true}});
+ check(invalidSessionDiagnostic.size()==1,"Session diagnostic rejects arbitrary stages, wrong types and generic payload fields");
+ check(!deckydiag::record("runtime",{{"accountPresent",true}}).contains("accountPresent"),"Session presence flags cannot widen unrelated events");
 #endif
  std::cout<<"DECKY_READINESS_DIAGNOSTICS_OK passed="<<passed<<" realSteam=0 realLoader=0\n";return 0;
 }catch(const std::exception& e){std::cerr<<"FAIL "<<e.what()<<'\n';return 1;}}

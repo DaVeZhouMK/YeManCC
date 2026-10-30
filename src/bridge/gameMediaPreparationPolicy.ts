@@ -1,3 +1,15 @@
+export interface MediaResumeEvent {generation?:number;source?:string;}
+// The S0 sleep-intent Ready path does not commit power.resumed. Both native
+// Ready paths feed media only; generation fencing keeps an old wake from
+// clearing a newer suspend. No timer or hardware/input action belongs here.
+export function subscribeGameMediaResume(handler:(event:MediaResumeEvent)=>void,subscribe:(name:string,handler:(event:MediaResumeEvent)=>void)=>()=>void){
+  let stopped=false,latest=0,resumed=0;
+  const generation=(event:MediaResumeEvent)=>{const value=event?.generation;return Number.isSafeInteger(value)&&Number(value)>0?Number(value):0;};
+  const offSuspend=subscribe('power.suspending',event=>{if(stopped)return;const value=generation(event);if(value>latest)latest=value;});
+  const ready=(event:MediaResumeEvent)=>{if(stopped)return;const value=generation(event);if(!value||value<latest||value<=resumed)return;latest=resumed=value;handler(event);};
+  const offResume=subscribe('power.resumed',ready),offIntent=subscribe('gameMedia.resume-ready',ready);
+  return()=>{if(stopped)return;stopped=true;offSuspend();offResume();offIntent();};
+}
 export interface MediaPreparationSnapshot {blockedReason?:string;batterySaver?:boolean;lowBattery?:boolean;}
 interface Ports {
   read:()=>Promise<MediaPreparationSnapshot>;

@@ -1,7 +1,7 @@
 {
   "name": "Darken Unfocused Games",
   "author": "TheRensei",
-  "version": "v1.1-ymcc.1",
+  "version": "v1.1-ymcc.2",
   "manifest_version": 5,
   "inject": {
     "shared.css": [

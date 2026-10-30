@@ -93,21 +93,31 @@ class SteamLease {
     const std::wstring registryPath_;
 public:
     // Alternate registry scope is for isolated native tests only.
-    explicit SteamLease(const Request& request,const std::wstring& registryPath=L"Software\\Valve\\Steam"):request_(request),registryPath_(registryPath){
+    explicit SteamLease(const Request& request,const std::wstring& registryPath=L"Software\\Valve\\Steam",std::string* rejectedCheck=nullptr):request_(request),registryPath_(registryPath){
         ULONGLONG born=0;
         process_=ymcc::steamsession::verifiedProcess(request.steam.pid,request.steam.root,&born);
-        try{require(process_&&born==request.steam.created&&ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid)&&current(),"mirror-bootstrap-session-changed");}
+        try{
+            // Named predicates only: never include user/account/token values in
+            // diagnostics. This explains a refusal without weakening the lease.
+            const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;throw std::runtime_error("mirror-bootstrap-session-changed");};
+            if(!process_||born!=request.steam.created)reject("steam-process-or-birth");
+            if(!ymcc::deckymirror::sameWindowsUserAndSession(request.steam.pid))reject("steam-user-or-session");
+            require(current(rejectedCheck),"mirror-bootstrap-session-changed");
+        }
         catch(...){if(process_)CloseHandle(process_);process_=nullptr;throw;}
     }
     ~SteamLease(){if(process_)CloseHandle(process_);}
     SteamLease(const SteamLease&)=delete;
-    bool current()const{
-        if(!process_||WaitForSingleObject(process_,0)!=WAIT_TIMEOUT)return false;
-        DWORD session=0;if(!ProcessIdToSessionId(request_.steam.pid,&session)||session!=request_.windowsSession)return false;
+    bool current(std::string* rejectedCheck=nullptr)const{
+        const auto reject=[&](const char* check){if(rejectedCheck)*rejectedCheck=check;return false;};
+        if(rejectedCheck)rejectedCheck->clear();
+        if(!process_||WaitForSingleObject(process_,0)!=WAIT_TIMEOUT)return reject("steam-process-exited");
+        DWORD session=0;if(!ProcessIdToSessionId(request_.steam.pid,&session)||session!=request_.windowsSession)return reject("steam-windows-session");
         const auto registered=ymcc::steamsession::regNumber(registryPath_,L"pid");
-        return ymcc::steamsession::regNumber(registryPath_,L"ActiveUser")==request_.steam.account&&
-            ymcc::steamsession::steamRoot(registryPath_)==request_.steam.root&&
-            registeredPidCompatible(registered,request_.steam.pid,request_.steam.root);
+        if(ymcc::steamsession::regNumber(registryPath_,L"ActiveUser")!=request_.steam.account)return reject("steam-account");
+        if(ymcc::steamsession::steamRoot(registryPath_)!=request_.steam.root)return reject("steam-root");
+        if(!registeredPidCompatible(registered,request_.steam.pid,request_.steam.root))return reject("steam-registered-pid");
+        return true;
     }
 };
 struct Event {
@@ -140,7 +150,7 @@ inline Json contextIdentity(HANDLE context) {
 // It must serialize one framed packet, and returns false when the parent is gone.
 template<class Emit>
 int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
-    Request request;bool identified=false,resultEmitted=false,mutationMayHaveOccurred=false;std::mutex output;
+    Request request;bool identified=false,resultEmitted=false,mutationMayHaveOccurred=false;std::mutex output;std::string rejectedSessionCheck;
     const auto send=[&](const char* kind,const Json& detail){
         std::lock_guard lock(output);
         require(emit(Json{{"schema",schema},{"id",request.id},{"generation",std::to_string(request.generation)},{"kind",kind},{"detail",detail}}),"mirror-bootstrap-worker-channel-closed");
@@ -148,7 +158,7 @@ int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
     try{
         request=parse(bytes);identified=true;
         auto cancellation=std::make_shared<ymcc::deckymirror::CancelToken>(inheritedCancel);
-        require(!cancellation->canceled(),"mirror-bootstrap-canceled");SteamLease steam(request);Event watchDone;
+        require(!cancellation->canceled(),"mirror-bootstrap-canceled");SteamLease steam(request,L"Software\\Valve\\Steam",&rejectedSessionCheck);Event watchDone;
         ymcc::deckymirror::BootstrapWatch watch;
         const auto diagnostic=[&](const Json& detail){
             bool finished=detail.value("bootstrapStage",std::string{})=="failed"||detail.value("bootstrapStage",std::string{})=="terminal";
@@ -172,7 +182,11 @@ int run(std::string_view bytes,HANDLE inheritedCancel,Emit&& emit){
         watch.stop();return 0;
     }catch(const std::exception& error){
         if(identified){try{
-            if(!resultEmitted)send("result",Json{{"ok",false},{"mutated",mutationMayHaveOccurred},{"reason",ymcc::deckymirror::bootstrapSafeReason(error)}});
+            if(!resultEmitted){
+                Json failure{{"ok",false},{"mutated",mutationMayHaveOccurred},{"reason",ymcc::deckymirror::bootstrapSafeReason(error)}};
+                if(!rejectedSessionCheck.empty())failure["sessionCheck"]=rejectedSessionCheck;
+                send("result",failure);
+            }
             else send("diagnostic",Json{{"bootstrapStage","failed"},{"reason",ymcc::deckymirror::bootstrapSafeReason(error)}});
         }catch(...){}}
         return 2;

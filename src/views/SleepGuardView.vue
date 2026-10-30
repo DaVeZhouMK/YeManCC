@@ -30,6 +30,8 @@ import {
   setSleepTimeout,
   getSleepPowerPlanOptimizationEnabled,
   setSleepPowerPlanOptimizationEnabled,
+  getStaticWakeAutoScanEnabled,
+  setStaticWakeAutoScanEnabled,
   getStaticWakeStatus,
   scanStaticWakeSources,
   restoreStaticWakeSources,
@@ -49,7 +51,7 @@ const cfg = reactive<SleepGuardStatus>({
   suspended: 0,
   pauseGameOnSleep: true,
   retryOnEntryFailure: true,
-  retryOnNonUserWake: true,
+  retryOnNonUserWake: false,
   joyXoffAutoClose: true,
 });
 
@@ -58,6 +60,9 @@ const acBtnIdx = ref<PowerBtnIdx>(2);
 const dcBtnIdx = ref<PowerBtnIdx>(2);
 const sleepPowerPlanOptimizationEnabled = ref(true);
 let sleepPlanRevision = 0;
+const staticWakeAutoScanEnabled = ref(true);
+const staticWakePreferenceLoading = ref(true);
+let staticWakePreferenceRevision = 0;
 const staticWakeStatus = ref<StaticWakeStatus | null>(null);
 const staticWakeLoading = ref(false);
 const staticWakeAction = ref<'scan' | 'restore' | null>(null);
@@ -66,7 +71,7 @@ const staticWakePendingRequest = ref<{ requestId: string; action: 'scan' | 'rest
 let staticWakeRevision = 0;
 let staticWakeViewActive = true;
 let staticWakeRefreshPending = false;
-const staticWakeNeedsRestore = computed(() => !sleepPowerPlanOptimizationEnabled.value &&
+const staticWakeNeedsRestore = computed(() => !staticWakeAutoScanEnabled.value &&
   (staticWakeStatus.value?.enabled || (staticWakeStatus.value?.restorePending ?? 0) > 0 ||
     staticWakeStatus.value?.phase === 'restore-pending' || staticWakeError.value !== ''));
 const staticWakeSummary = computed(() => {
@@ -76,7 +81,8 @@ const staticWakeSummary = computed(() => {
   const s = staticWakeStatus.value;
   if (!s) return '屏蔽状态未知';
   if (!s.enabled && s.phase === 'idle' && !s.restorePending && !s.failed && !s.lastError)
-    return s.lastScanEpoch > 0 ? '本功能修改项已恢复' : '尚未扫描';
+    return staticWakeAutoScanEnabled.value ? '已开启自动扫描 · 等待单次扫描' :
+      s.lastScanEpoch > 0 ? '本功能修改项已恢复' : '自动扫描已关闭';
   const phase = s.phase === 'restore-pending' || s.restorePending > 0 ? '恢复待完成' :
     s.phase === 'partial' || s.failed > 0 ? '部分完成' : s.phase === 'applied' ? '已应用支持项' : '尚未应用';
   // Diagnostic source health belongs to retry repair; it does not decide static coverage.
@@ -220,6 +226,7 @@ onBeforeUnmount(() => {
   staticWakeRefreshPending = false;
   ++staticWakeRevision;
   ++sleepPlanRevision;
+  ++staticWakePreferenceRevision;
 });
 
 onMounted(() => {
@@ -318,10 +325,24 @@ async function refreshStaticWakeStatus() {
   }
 }
 
+async function refreshStaticWakePreference() {
+  const revision = ++staticWakePreferenceRevision;
+  staticWakePreferenceLoading.value = true;
+  try {
+    const enabled = await getStaticWakeAutoScanEnabled();
+    if (staticWakeViewActive && revision === staticWakePreferenceRevision) staticWakeAutoScanEnabled.value = enabled;
+  } catch {
+    if (staticWakeViewActive && revision === staticWakePreferenceRevision) msg.value = '自动扫描设置读取失败';
+  } finally {
+    if (staticWakeViewActive && revision === staticWakePreferenceRevision) staticWakePreferenceLoading.value = false;
+  }
+}
+
 async function refresh() {
   // 与整页其他检测解耦：AC/DC、电源方案或内存 IPC 异常不能拖死系统休眠开关。
   const hibernateRefresh = refreshHibernateState();
   void refreshStaticWakeStatus();
+  void refreshStaticWakePreference();
   const planRevision = sleepPlanRevision;
   const wakeRevision = wakePasswordRevision;
   try {
@@ -463,13 +484,37 @@ async function applyStaticWake(action: 'scan' | 'restore') {
   }
 }
 
-async function onStaticWakeAction() {
-  if (!staticWakeViewActive || busy.value || staticWakeLoading.value || staticWakePendingRequest.value) return;
-  const action = staticWakeNeedsRestore.value ? 'restore' : 'scan';
-  if (action === 'scan' && !sleepPowerPlanOptimizationEnabled.value) return;
+async function onStaticWakeRestore() {
+  if (!staticWakeViewActive || busy.value || staticWakeLoading.value || staticWakePendingRequest.value || !staticWakeNeedsRestore.value) return;
   busy.value = true;
-  try { await applyStaticWake(action); }
+  try { await applyStaticWake('restore'); }
   finally { if (staticWakeViewActive) busy.value = false; }
+}
+
+async function onStaticWakeAutoScan(v: boolean) {
+  if (!staticWakeViewActive || busy.value || staticWakePreferenceLoading.value || staticWakePendingRequest.value) return;
+  ++staticWakePreferenceRevision;
+  busy.value = true;
+  try {
+    await setStaticWakeAutoScanEnabled(v);
+    ++staticWakePreferenceRevision; // Retire reads begun during the save before a long restore.
+    if (staticWakeViewActive) {
+      staticWakeAutoScanEnabled.value = v;
+      staticWakeError.value = '';
+      msg.value = '';
+    }
+    // Native cancels the old delay on OFF and schedules one 60s delay on ON.
+    // Finish the committed OFF after navigation; never replay an enable scan.
+    if (!v) await applyStaticWake('restore');
+  } catch {
+    if (staticWakeViewActive) msg.value = '自动扫描设置保存失败';
+  } finally {
+    ++staticWakePreferenceRevision;
+    if (staticWakeViewActive) {
+      staticWakePreferenceLoading.value = false;
+      busy.value = false;
+    }
+  }
 }
 
 async function onSleepPowerPlanOptimization(v: boolean) {
@@ -482,10 +527,7 @@ async function onSleepPowerPlanOptimization(v: boolean) {
       sleepPowerPlanOptimizationEnabled.value = v;
       msg.value = '';
     }
-    // Keep the original preference/boot/power-change repair path. Enabling it
-    // never scans; disabling it also restores only native-owned static changes.
-    // Finish the user's committed OFF even after navigation; never replay ON.
-    if (!v) await applyStaticWake('restore');
+    // Power-plan repair is independent of the automatic wake-source switch.
   } catch {
     if (staticWakeViewActive) msg.value = '设置保存失败';
   } finally {
@@ -635,11 +677,12 @@ refresh();
       <Toggle :model-value="wakePasswordOn" label="唤醒需要密码" description="唤醒后验证登录身份" :disabled="busy" @update:model-value="onWakePassword" />
       <Toggle :model-value="sleepPowerPlanOptimizationEnabled" label="睡眠电源修复" description="启动及电源变动时修正睡眠设置" :disabled="busy||!!staticWakePendingRequest" @update:model-value="onSleepPowerPlanOptimization" />
       <div class="sleep-static-wake">
-       <div class="sleep-static-action"><button :disabled="busy||staticWakeLoading||!!staticWakePendingRequest||(!sleepPowerPlanOptimizationEnabled&&!staticWakeNeedsRestore)" @click="onStaticWakeAction">{{staticWakeAction==='scan'?'扫描中…':staticWakeAction==='restore'?'恢复中…':staticWakeNeedsRestore?'重试恢复':'扫描并屏蔽'}}</button><span title="仅屏蔽 Windows 支持项，人工电源键优先">开机及唤醒1分钟后单次扫描</span></div>
-       <p role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
+       <Toggle :model-value="staticWakeAutoScanEnabled" label="自动扫描并屏蔽" description="开启后及开机、唤醒1分钟后单次扫描" :disabled="busy||staticWakePreferenceLoading||!!staticWakePendingRequest" aria-describedby="sleep-static-wake-status" @update:model-value="onStaticWakeAutoScan" />
+       <div v-if="staticWakeNeedsRestore||staticWakePendingRequest?.action==='restore'" class="sleep-static-action"><button :disabled="busy||staticWakeLoading||!!staticWakePendingRequest" @click="onStaticWakeRestore">{{staticWakeAction==='restore'?'恢复中…':'重试恢复'}}</button></div>
+       <p id="sleep-static-wake-status" role="status" aria-label="静态唤醒屏蔽状态" :title="staticWakeSummary">{{staticWakeSummary}}</p>
       </div>
       <Toggle :model-value="cfg.retryOnEntryFailure" label="入睡失败重试" description="明确入睡失败时重试，电源键唤醒优先" :disabled="busy" @update:model-value="onEntryFailure" />
-      <Toggle :model-value="cfg.retryOnNonUserWake" label="意外唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
+      <Toggle :model-value="cfg.retryOnNonUserWake" label="供电变动唤醒重睡" description="电源变动唤醒后重睡，电源键唤醒优先" :disabled="busy" @update:model-value="onNonUserWake" />
      </div>
     </template>
     <template #power>

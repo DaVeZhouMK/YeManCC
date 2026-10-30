@@ -11,7 +11,7 @@ export function editMirrorFrameSetting(current:FrameRateSetting,kind:'fps'|'ceil
   const numeric=Number(value);
   if(!Number.isSafeInteger(numeric)||String(numeric)!==value)throw Error('FRAME_MIRROR_INVALID_VALUE');
   if(kind==='fps'){
-    if(!current.fps || numeric<20 || numeric>current.ceiling)throw Error('FRAME_MIRROR_INVALID_VALUE');
+    if(!current.fps || numeric<15 || numeric>current.ceiling)throw Error('FRAME_MIRROR_INVALID_VALUE');
     return frameRateSetting({...current,fps:numeric,lastFps:numeric});
   }
   if(!FRAME_RATE_CEILINGS.includes(numeric))throw Error('FRAME_MIRROR_INVALID_VALUE');

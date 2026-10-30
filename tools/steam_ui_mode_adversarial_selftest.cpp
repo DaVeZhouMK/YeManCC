@@ -101,6 +101,21 @@ int wmain(int argc,wchar_t** argv){try{
   check(recovered,"reader recovers after page callback failure using a later valid event");
  }
 #endif
+ // Real observer callers retain failed-read attempts across same-process
+ // account changes and demand pause/reopen, not just the policy unit API.
+ for(bool accountChange:{false,true}){
+  steamui::ModeObserver observer;std::atomic<unsigned> reads{0};steamui::ModeObserverConfig cfg;
+  cfg.debounceMs=1;cfg.minimumGapMs=25;cfg.failureGapMs=150;
+  cfg.read=[&](const auto&){++reads;return Json{{"known",false},{"reason","budget-fixture-unknown"}};};
+  auto active=session;observer.initialize(cfg);observer.setDemand(steamui::ModeConsumer::Decky,true);observer.observeSteam(active);
+  bool observed=true;
+  for(unsigned i=1;i<=3;++i){
+   observed&=until([&]{return reads>=i&&observer.snapshot(active).value("reason",std::string{})=="budget-fixture-unknown";});
+   if(i<3){if(accountChange){++active.account;observer.observeSteam(active);}else{observer.setDemand(steamui::ModeConsumer::Decky,false);observer.setDemand(steamui::ModeConsumer::Decky,true);}}
+  }
+  Sleep(80);const auto count=reads.load();observer.shutdown();
+  check(observed&&count==3,accountChange?"same-process account changes cannot refill unknown read attempts":"demand pause/reopen cannot refill unknown read attempts");
+ }
  Json result{{"ok",failed.empty()},{"passed",passed.size()},{"cases",passed},{"failed",failed},{"realSteamOperations",0},{"realCssOperations",0}};
  std::ofstream f(out/L"adversarial.json");f<<result.dump(2);std::cout<<result.dump(2)<<'\n';return failed.empty()?0:1;
 }catch(const std::exception& e){std::cerr<<e.what()<<'\n';return 2;}}

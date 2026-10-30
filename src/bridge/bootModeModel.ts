@@ -2,7 +2,7 @@
 import { screenTouchpadDefaults } from './screenTouchpadDefaults';
 const XBOX_DEFAULTS_VERSION = 1;
 const AUDIO_DEFAULTS_VERSION = 1;
-const CONTROLLER_DEFAULTS_VERSION = 1;
+const CONTROLLER_DEFAULTS_VERSION = 2;
 export const BOOT_MODE_IDS = ['global', 'xbox', 'steam', 'xbox-steam'] as const;
 export type BootModeId = typeof BOOT_MODE_IDS[number];
 export const BOOT_MODE_MODULES = ['performance', 'fan', 'charge', 'input', 'gyro', 'controller', 'touch', 'audioOptimization', 'frameGeneration', 'softwareLaunch', 'steamAppearance', 'steamWallpaper', 'steamDecky', 'monitor', 'display', 'background', 'sleep'] as const;
@@ -17,6 +17,8 @@ export type BootModeSnapshot = Record<BootModeModule, BootConfig>;
 export interface BootModeScene {
     name: string;
     overrides: Partial<BootModeSnapshot>;
+    /** Inactive own values survive choosing follow-global, without applying. */
+    rememberedOverrides?: Partial<BootModeSnapshot>;
 }
 export interface BootModeDocument {
     schema: 1;
@@ -128,12 +130,14 @@ function sameFactoryValue(a: unknown, b: unknown): boolean {
 }
 function steamRecommendedScene(): BootModeScene {
     return { name: '推荐预设', overrides: {
-        input: { persona: 'steamdeck', mouse: 'steamdeck', outputTarget: { persona: 'steamdeck', buttonMappingEnabled: true } },
-        touch: { profiles: { steamdeck: normalizeBootConfig(screenTouchpadDefaults('steamdeck')) } },
+        touch: { profiles: { disabled: normalizeBootConfig({ ...screenTouchpadDefaults('disabled'), standaloneSpecialMode: 'steamdeck' }) } },
     } };
 }
 export function createBootModeDocument(baseline: BootModeSnapshot): BootModeDocument {
     const global = cloneBootValue(baseline);
+    global.input = { ...global.input, persona: 'disabled',
+        outputTarget: { ...normalizeBootConfig(global.input.outputTarget), persona: 'disabled', buttonMappingEnabled: false },
+        ...(global.input.mouse === 'steamdeck' ? { mouse: 'off' } : {}) };
     global.audioOptimization = { ...global.audioOptimization, enabled: false };
     const xbox: BootModeScene = { name: '推荐预设', overrides: {} }, steam = steamRecommendedScene(), combined = steamRecommendedScene();
     xbox.overrides.audioOptimization = { enabled: false };
@@ -161,25 +165,32 @@ export function normalizeBootModeDocument(raw: unknown, baseline: BootModeSnapsh
         out.current = raw.current;
     if (isBootModeId(raw.boot))
         out.boot = raw.boot;
+    // Existing modules are saved intent, including deliberately absent fields.
+    // A live capture may describe another running mode; never merge its fields
+    // into stored templates during reads, saves or startup restoration.
     for (const [module, value] of Object.entries(overrides(raw.global)))
-        out.global[module as BootModeModule] = mergeBootConfig(out.global[module as BootModeModule], value);
+        out.global[module as BootModeModule] = cloneBootValue(value);
     for (const id of ['xbox', 'steam', 'xbox-steam'] as const) {
         const scene = object(raw.scenes) ? raw.scenes[id] : undefined;
         if (object(scene))
             out.scenes[id] = { name: typeof scene.name === 'string' ? scene.name.slice(0, 60) : '推荐预设',
-                overrides: { ...(legacyXboxDefaults ? out.scenes[id].overrides : {}), ...overrides(scene.overrides) } };
+                overrides: { ...(legacyXboxDefaults ? out.scenes[id].overrides : {}), ...overrides(scene.overrides) },
+                ...(object(scene.rememberedOverrides) ? { rememberedOverrides: overrides(scene.rememberedOverrides) } : {}) };
     }
-    // Correct only the previous factory recipe once. Full edited modules stay
-    // authoritative; the version remembers a later explicit follow-global choice.
+    // Retire only the exact old SteamDeck factory recipe. Saved custom modules
+    // and explicit follow-global choices must never become forced defaults.
     if (legacyControllerDefaults) {
-        const oldFactory = steamRecommendedScene().overrides;
-        const xbox = out.scenes.xbox.overrides;
-        if (sameFactoryValue(xbox.input, oldFactory.input)) delete xbox.input;
-        if (sameFactoryValue(xbox.touch, oldFactory.touch)) delete xbox.touch;
-        for (const id of ['steam', 'xbox-steam'] as const) {
+        const oldInput = { persona: 'steamdeck', mouse: 'steamdeck', outputTarget: { persona: 'steamdeck', buttonMappingEnabled: true } };
+        const oldTouch = { profiles: { steamdeck: normalizeBootConfig(screenTouchpadDefaults('steamdeck')) } };
+        const unversioned = !Number.isSafeInteger(raw.controllerDefaultsVersion) || Number(raw.controllerDefaultsVersion) < 1;
+        for (const id of ['xbox', 'steam', 'xbox-steam'] as const) {
             const own = out.scenes[id].overrides;
-            if (!own.input) own.input = cloneBootValue(oldFactory.input!);
-            if (!own.touch) own.touch = cloneBootValue(oldFactory.touch!);
+            if (sameFactoryValue(own.input, oldInput)) delete own.input;
+            if (id === 'xbox') {
+                if (sameFactoryValue(own.touch, oldTouch)) delete own.touch;
+            } else if (sameFactoryValue(own.touch, oldTouch) || (unversioned && !own.touch)) {
+                own.touch = cloneBootValue(steamRecommendedScene().overrides.touch!);
+            }
         }
     }
     // Adopt new defaults once for legacy inherited modules. Explicit audio
@@ -245,17 +256,19 @@ export function setBootModeModuleScope(document: BootModeDocument, id: BootModeI
         return;
     if (own) {
         if (!document.scenes[id].overrides[module])
-            document.scenes[id].overrides[module] = cloneBootValue(document.global[module]);
+            document.scenes[id].overrides[module] = cloneBootValue(document.scenes[id].rememberedOverrides?.[module] ?? document.global[module]);
     }
-    else
+    else {
+        const previous = document.scenes[id].overrides[module];
+        if (previous) (document.scenes[id].rememberedOverrides ??= {})[module] = cloneBootValue(previous);
         delete document.scenes[id].overrides[module];
+    }
 }
 export function mutableBootModeModule(document: BootModeDocument, id: BootModeId, module: BootModeModule): BootConfig {
     if (id === 'global')
         return document.global[module];
     const own = document.scenes[id].overrides[module];
-    if (!own)
-        throw new Error('此项跟随全局，请先选择模式单独设置');
+    if (!own) throw new Error('此项跟随全局，请在全局页面修改，或选择模式单独设置');
     return own;
 }
 export type BootSupportState = 'unknown' | 'supported' | 'unsupported';

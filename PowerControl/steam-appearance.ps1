@@ -19,7 +19,8 @@ $script:AppearanceObservationOnly=[bool]$VerifyOnly
 if($VerifyOnly -and ($Action -ne 'Automatic' -or $StartBackend)){throw 'Read-only CSS verification cannot initialize or control a backend'}
 $ProgressPreference='SilentlyContinue'
 [Console]::OutputEncoding=New-Object System.Text.UTF8Encoding($false)
-$script:ThemeNames=@('Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
+$script:ThemeNames=@('Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details')
+$script:RetiredThemeNames=@('Game Cover Reflections')
 $script:ThemeRoot=Join-Path $env:USERPROFILE 'homebrew\themes'
 $script:BackendExe='C:\SOFT\CSSLoader Desktop\CssLoader-Standalone-Headless.exe'
 if($BackendPath){

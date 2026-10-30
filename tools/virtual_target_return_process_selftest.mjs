@@ -40,6 +40,14 @@ const sources=relativeSources.map(relative=>({relative,...identity(path.join(rep
 fs.mkdirSync(out,{recursive:true});fs.mkdirSync(path.join(out,'sources'));
 for(const source of sources){source.snapshot=path.join(out,'sources',path.basename(source.path));fs.copyFileSync(source.path,source.snapshot);}
 save(path.join(out,'SOURCES.json'),{sources,tools:toolInputs,toolchainReference:toolchain});
+// Extend the existing leaf's positive/semantic-fault run; no additional parent gate.
+const requiredCensusCases=[
+  'controlled/census-open-denied-pid-reused','controlled/census-open-denied-pid-absent',
+  'controlled/census-same-birth-alive','controlled/census-truncated-after-target-and-self',
+  'controlled/census-missing-self','controlled/census-three-retries-exhausted',
+  'controlled/census-returned-size-above-budget','controlled/census-negative-status-with-valid-payload',
+  'real/census-open-denied-private-child'
+];
 const variants=[
   {name:'Release',flags:['/O2']},
   {name:'Checked',flags:['/Od','/RTC1']},
@@ -47,6 +55,11 @@ const variants=[
   {name:'negative-pid-reuse-as-alive',before:'return {State::Dead, Reason::PidReused, ERROR_SUCCESS};',after:'return {State::Alive, Reason::PidReused, ERROR_SUCCESS};',requiredCase:'controlled/pid-reuse'},
   {name:'negative-terminal-as-alive',before:'if(waited == WAIT_OBJECT_0) return {State::Dead, Reason::MatchingExited, ERROR_SUCCESS};',after:'if(waited == WAIT_OBJECT_0) return {State::Alive, Reason::MatchingExited, ERROR_SUCCESS};',requiredCase:'real/probe-exited'},
   {name:'negative-uncertain-wait-as-dead',before:'if(waited == WAIT_FAILED) return {State::Unknown, Reason::WaitFailed, GetLastError()};',after:'if(waited == WAIT_FAILED) return {State::Dead, Reason::WaitFailed, GetLastError()};',requiredCase:'controlled/wait-error'},
+  {name:'negative-census-live-as-dead',before:'result.state=targetSeen&&targetMatches?State::Alive:State::Dead;',after:'result.state=State::Dead;',requiredCase:'controlled/census-same-birth-alive'},
+  {name:'negative-census-without-self-proof',before:'if(!selfSeen) {result.reason=Reason::CensusSelfUnproven;',after:'if(!selfSeen && self->creationTime.empty()) {result.reason=Reason::CensusSelfUnproven;',requiredCase:'controlled/census-missing-self'},
+  {name:'negative-census-short-circuit-scan',before:'if(row.nextEntryOffset==0)break;',after:'if(row.nextEntryOffset==0 || (selfSeen&&targetSeen))break;',requiredCase:'controlled/census-truncated-after-target-and-self'},
+  {name:'negative-census-fourth-query',before:'constexpr unsigned maxAttempts=3;',after:'constexpr unsigned maxAttempts=4;',requiredCase:'controlled/census-three-retries-exhausted'},
+  {name:'negative-census-parse-failed-query',before:'if(status<0) {result.reason=Reason::CensusQueryFailed;',after:'if(status<0 && returned==0) {result.reason=Reason::CensusQueryFailed;',requiredCase:'controlled/census-negative-status-with-valid-payload'},
   {name:'negative-probe-handle-leak',before:'~OwnedHandle() { if(value) CloseHandle(value); }',after:'~OwnedHandle() { }',requiredCase:'real/probe-handle-count'}
 ];
 const results=[],boundInputs=new Map();
@@ -93,9 +106,18 @@ try{
     assert.equal(hash(exe),executableIdentity.sha256,'executed binary did not change');
     const result=read(path.join(dir,'RESULT.json'));
     if(variant.before){assert.equal(ran.status,1,'semantic fault must compile and fail original assertions without crashing');assert(result.failures.some(f=>f.case===variant.requiredCase),'semantic fault must hit intended original case');}
-    else{assert.equal(ran.status,0,'actual fixture assertions failed: '+path.join(dir,'RESULT.json'));assert(result.pass);}
+    else{
+      assert.equal(ran.status,0,'actual fixture assertions failed: '+path.join(dir,'RESULT.json'));assert(result.pass);
+      for(const name of requiredCensusCases)assert(result.cases.some(c=>c.name===name&&c.passed),'required actual census case: '+name);
+      const realCensus=result.observations.find(o=>o.basis==='real-ntquery-system-process-information');
+      assert(realCensus&&realCensus.state==='alive'&&realCensus.censusRows>=2&&realCensus.censusAttempts>=1&&realCensus.censusAttempts<=3,
+        'positive must actually delegate NtQuerySystemInformation and parse a real complete snapshot for its private child');
+    }
     const receipt={variant:variant.name,positive:!variant.before,pass:variant.before?ran.status===1:result.pass,
-      cases:result.caseCount,assertions:result.assertions,failureCount:result.failures.length,requiredCase:variant.requiredCase??null,
+      cases:result.caseCount,assertions:result.assertions,
+      censusCases:result.cases.filter(c=>c.name.includes('/census-')).length,
+      realCensus:result.observations.find(o=>o.basis==='real-ntquery-system-process-information')??null,
+      failureCount:result.failures.length,requiredCase:variant.requiredCase??null,
       compilerInputs:actualInputs.length,linkerLibraries:libraries.length,binary:executableIdentity,result:identity(path.join(dir,'RESULT.json'))};
     results.push(receipt);console.log(JSON.stringify(receipt));
   }
@@ -105,6 +127,9 @@ try{
     variants:results,capturedToolchain:toolchain,sourceCurrent:true,boundToolchainInputs:[...boundInputs.values()],
     scope:{realPrivateProcessCaptureAliveExit:true,parentExitDoesNotEndWorker:true,realBorrowedEventRejected:true,realHandleCountChecked:true,
       pidReuse:'controlled Win32 creation-time fault, not observed OS PID reuse',openAccessDenial:'controlled OpenProcess fault; actual restricted-handle capture also exercised',
+      realSystemProcessCensusForPrivateChild:true,censusAbiAndMalformedInputs:'controlled independently encoded snapshot bytes',
+      boundedCensus:'at most 3 calls, 64KiB initial, 8MiB maximum; exact class 5 and self birth guard',
+      ntstatusDiagnostic:'raw last status stored separately from Win32 error and original direct error',
       checkedConfiguration:'/Od /RTC1 /MT; not an arithmetic-overflow sanitizer',productOrHostExecuted:false,deviceServiceDriverOrSteamOperations:false,
       runtimeIntegrated:false,physicalHardwareAccepted:false,wholeGoalComplete:false}};
   save(path.join(out,'RESULT.json'),result);console.log(JSON.stringify({pass:true,variants:results.length,positive:2,semanticFaults:variants.length-2,out}));

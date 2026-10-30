@@ -1,3 +1,97 @@
+<!-- DECKY-REVERSE-HANDOFF-20261029 -->
+
+## 2026-10-29 历史交叉回放：准入切换和最终创建前的自动接续
+
+在原历史日志与消费者上继续正反推，已复现两处当前卡死分支：资源预检deadline后暂时失去UI准入，恢复时原重试窗口被清掉；绑定成功后最终创建Loader的准入暂拒，只显示waiting但没有下一次自动检查。前者只暂停调度，保留原1/3/8/20秒时钟和剩余次数；后者使用原AdmissionWindow接续，精确retained只重绑传输，明确不可重试/OFF仍停止。没有补充窗口事件预算、自动重建SteamUI或修改官方Loader。
+
+原运行时消费者现在39项全部通过（原31项+4资源/模式交叉+4最终准入边界）。原资源交叉2/3、最终准入2/4失败保存；错误补满资源窗口的私有编译反例约2063ms恢复，被原>=2900ms时钟断言拒绝。当前既有typed验收器强制39项，8个新增场景同数量替换反例全部拒绝。资源worker15及硬停止反例再次通过，3200ms截止和45秒native进程预算保持。
+
+需求触发的plan-started/plan-finished+scope/elapsedMs诊断区分父计划工作与子进程bootstrap；不记录请求内容/凭据、不增加健康轮询。历史29个可配对的retained检查最长33ms，14个无配对记录仍未知，不能据同步代码路径认定历史卡顿根因，本轮没有猜测重构此IO路线。
+
+这是当前源码组合场景回放，不能认定每份历史现场都由这两处触发。未部署、未链接完整EXE、未真实睡眠、完整正式门NOT_RUN。证据Testing/YMCC/Evidence/Decky-History-ROG-20261029/Reverse-Handoff/REPORT.md。此前报告和失败保持原件，不将旧回执用于当前源码放行。
+
+<!-- /DECKY-REVERSE-HANDOFF-20261029 -->
+
+<!-- DECKY-HISTORY-ROG-20261029 -->
+
+## 2026-10-29 ROG 历史 Decky 日志复测：两个当前缺口修复，未部署
+
+目录87文件逐份索引，57 ZIP有Decky记录（含1份字节重复），原件内容按SHA保留，8302条事件去重后按导出进程/最后revision=1隔离。49包当次末尾有peer=true，仅证明传输连接；24 ZIP无Decky日志、1 RAR源码备份和5旁件单列。旧末尾错误与本次故障分开，不按错误次数推算独立事故。
+
+真实Runtime已复现并修复：明确mutated=false的mirror-bootstrap-session-changed回执可使用原失联退避重新生成计划和核验会话；true/未知/坏协议不重放。已准入启动的resource-worker-deadline可使用现有1/3/8/20秒有限预检预算，资源和准入通过前不绑定或创建Loader；真实Ready保留既有待办，错误哈希、清理未完成、用户关闭与拒绝准入仍停止。资源预算不由普通窗口事件补充，自动Steam UI刷新和原崩溃预算不变。
+
+worker在初始租约拒绝时记录命名sessionCheck谓词，经既有bootstrap日志白名单过滤；不记录账户/令牌值、不增加健康轮询。原Runtime消费者31/31、会话租约14及2反例、真实资源worker15及1反例、原生worker/日志过滤3项通过；现有typed验收器强制31项，15个保留数量的场景替换负例均拒绝。原会话6/9、资源3/5失败保留。旧六场景迁移包装器、整包/完整正式父门均未运行，不能以定向结果宣称全门通过。
+
+历史error740/create-process-with-token缺少当次令牌和兼容层证据，保留未归因，不借Win5另一次UAC个案解释ROG，也不改系统权限。旧页面升级路径继续引用此前Decky-WakeHealing证据，不把旧结果记成本轮执行。壁纸S0暂停状态遗漏由原壁纸任务独立修复，不能据此归因10/23旧壁纸问题。
+
+本轮未部署安装版、未执行真实Steam/睡眠/游戏控制、未链接完整YMCC EXE或导出完整包。证据Testing/YMCC/Evidence/Decky-History-ROG-20261029/REPORT.md与PER-FILE-REVIEW.md；复用原消费者和验收器，没有新增父门。
+
+<!-- /DECKY-HISTORY-ROG-20261029 -->
+<!-- WALLPAPER-S0-READY-20261029 -->
+
+## 2026-10-29 动态壁纸 S0 唤醒：补齐媒体 Ready 通知，主线定向回归通过，未部署
+
+103025 包在 10:30 导出时，壁纸下载状态仍保留 02:58:17.859 的 media-power-transition；原生 10:28:18 已通过 sgAbortSleepIntent 回到 Ready。暂停策略和进度模块只等 power.resumed，而该 S0 分支没有这条广播。当前队列 remaining=0，证据证明暂停状态未清除，不能据此宣称有素材漏下载。
+
+在原 Ready 与当前代次守卫内仅增加 gameMedia.resume-ready。壁纸策略、进度刷新和播放器共用事件订阅，正常提交恢复与 S0 恢复按代次合并；旧代、无效代次、OFF、原生下载条件和停止后的回调仍受约束。未增加定时器、后台轮询或通用电源/输入恢复广播。
+
+原策略和状态消费者先复现失败，修复后策略 10 场景/43 检查、进度 14/61、host 43/191 通过；原生真实 Ready 代码块编译执行 7 项，并把实际事件喂入 TS 消费者。类型检查通过。原生完整 EXE、安装部署、真实睡眠与完整正式夹具未执行。证据 Testing/YMCC/Evidence/Wallpaper-LogAssist-20261029/REPORT.md；10/23 启动保护状态旧问题不归并到本次 S0 根因。
+
+<!-- /WALLPAPER-S0-READY-20261029 -->
+
+<!-- DECKY-WAKE-UPGRADE-20261029 -->
+
+## 2026-10-29 ROG Decky 唤醒与新旧版本交替：主线修复、定向模拟通过，未部署
+
+尾部日志：02:42已记录Loader安装升级待接续，10:28实际用户唤醒通过sgAbortSleepIntent回到shared Ready，10:33两次手动修复context-changed后卡在loaded-context，11:04重启后重新连上。不能把缺少回执直接解释为330/331升级导致全部断连。Decky补上这条已有Ready分支一次/代的准备、连接重绑及共享mode恢复，不改电源状态、OFF/崩溃预算或自动重建大屏。
+
+手动修复改为绑定页面实际已加载的等于/更旧稳定版，再由实际JS二次验证；数字比较覆盖330→331、331→340、340→400和3.9→3.10。自动retained仍要求完全一致版本/build；新页面不消费旧回执、旧包不降级新Loader。反向退出发现Job清空与后代句柄最终退出有时错位，原owner补停机期间受限自有Job成员读句柄与原预算内退出确认。
+
+现有typed运行时16/16、原生修复15+UI4、源/嵌入JS64、文件事务33和三个指定破坏反例通过；发布消费者要求16项，漏S0/迟到/关闭任一项的4个省略反例均拒绝。旧手动失败、漏通知反例、初轮15/16及编译中间失败保留。完整main优化对象编译通过，本轮4段Decky消费者与编译快照一致；并行main其他修改使整文件身份已变化，不将旧整文件回执用于当前发布。
+
+本轮未替换安装版/导出完整包、未做真实睡眠或Steam动作。下一次最终冻结主线导出必须走原发布门；普通完整门NOT_RUN。证据Testing/YMCC/Evidence/Decky-WakeHealing-20261029/REPORT.md和RESULT.json；模拟场景仍在原plugins.decky-update-recovery与plugins.decky-persistent-lifecycle，不新增外层门或EXE。
+
+<!-- /DECKY-WAKE-UPGRADE-20261029 -->
+
+<!-- DECKY-RENDER-PRESSURE-20261028 -->
+
+## 2026-10-28 Decky/Steam主题渲染压力：最终资源已安装并通过普通重开定向验收
+
+同一真实前台路径四段反转证明 Art Hero 全幅 IMG 的 brightness(100%) 身份滤镜是当前可复现瓦片预算风暴的触发点：原规则242/240条warning、262/263次OOM；filter:none两次均0/0。按用户最终要求协同取消主题附加滤镜/mask/光晕/阴影/渐变/装饰动画，保留布局比例、Mini与Centered原资源、静态focus和动态壁纸。最终manifest bf307446d53beba339af2a2e55859369cec3bfa73edda10d0fdd1b7ec20730db。
+
+实机同时查到退役反光主题空目录导致CSSLoader reset失败；preset在原备份/事务/OwnedResource更新内只清理已校验且为空的退役目录，无递归/用户数据删除、无忽略fails。原owned-upgrade新增实际扫描边界后86PASS；未知用户文件、编辑保护、严格未确认状态和删除失败回滚保留。现有生产Ensure成功，7份主题个人配置值保留，target B96777E6A3254638不变。
+
+最终安装资源无临时CSS：重开前1567/重开后1335个tile状态均0OOM/0warning；同一512MiB预算的新renderer61308/pool7在用19.71875MiB（不是整机显存）。官方Loader331/Native/plugin字节未改，13内容receipt匹配，720p视频实际帧前进；最小化展示/视频节点0，恢复继续播放。短OS CPU样本5.204秒/32线程下浏览器组0.0563%、YMCC0.0751%，不等同长期/功耗验收；整轮有2累积掉帧，不能写全程零掉帧。
+
+本轮为主线源码和已安装受管资源更新；此前14:36完整331 ZIP未重建，不包含本修复。完整发布夹具NOT_RUN，无真实睡眠/Windows重启/长期soak。所有原失败保留，证据 Testing/YMCC/Evidence/Decky-RenderPressure-20261028/REPORT.md、RESULT.json。
+
+<!-- /DECKY-RENDER-PRESSURE-20261028 -->
+
+<!-- DECKY-OFFICIAL331-WINDOWS-20261028 -->
+
+## 2026-10-28 官方 Decky v3.3.1 Windows：YMCC 整包升级并完成本机定向验收
+
+官方 Loader 原字节消费，无 fork/patch、无新增升级 EXE。沿用 tools/decky-loader-upgrade.ps1 内置 Check/Prepare/Apply/Verify/ReleaseGate 及现有 YMCC 整包安装/回滚，发布前在线最新版本门保持生效。本机运行时确认 v3.3.1，18 个前端脚本全部与官方资源一致；侧栏 3 次开关、116 项官方商店、镜像断连恢复（369ms/1088ms）及实际壁纸视频帧通过。部署现存 4 个设置文件原字节保留。
+
+定向消费者48、升级15、YMCC更新9、安装维护33、健康DOM20，以及完整包成功安装/两类失败回滚均通过。普通导出全量夹具 NOT_RUN、formalReleaseAccepted=false。短时 CPU/视频样本、首次 Steam 在 Loader 启动前崩溃和探针失败原件均见 Testing/YMCC/Evidence/Decky-Official331-20261028/REPORT.md。未进行真实睡眠或硬件写入，不能用本轮声称全部故障已根除。
+
+最终复查：本轮另有 6059 条 Steam renderer tile-memory-budget 警告（末条 14:56:29，15:04 复查未新增），渲染压力保留为动态壁纸协同待续项。最终主设置还出现启动会话/监控拖动位置/睡眠字段变化，当前配置保留，未覆盖恢复；不得把部署/恢复阶段的设置一致性扩大为整个并行会话永久不变。
+
+<!-- /DECKY-OFFICIAL331-WINDOWS-20261028 -->
+
+<!-- BOOT-XBOX-PRIMARY-SELECTION-20261026 -->
+## 2026-10-26 四模式立即选择 Xbox／无，修正先前只改启动开关的遗漏
+
+用户截图显示主应用=无但启动进入已开。模式2/4在“设为开机模式”立即提交GamingHomeApp=Xbox AUMID及StartupToGamingHome=1，3立即清空主应用并写0，1不处理；DeviceForm/Steam高级启动沿用原合同。四模式显式selection参数经原注册表桥接写入、备份/回读/条件回退，不等重启；手柄运行配置仍下次启动应用。旧只读GamingHomeApp的文档/回执不再证明该合同。详见docs/boot-modes-xbox-primary-20261026.md及Testing/YMCC/Evidence/BootMode-XboxPrimary-20261026。未部署或修改现场。
+<!-- /BOOT-XBOX-PRIMARY-SELECTION-20261026 -->
+
+<!-- WALLPAPER-CPU-STARTUP-20261026 -->
+2026-10-26 动态壁纸CPU/启动：Surface同卡force仅刷新请求seq而保留已验证展示，路由focusin限定归属，隐藏缓存路由不再抢卡；播放器先metadata/随机seek后play，保留metadata预载，快速连续换不同素材时仅一个90ms末次合并，首次/普通单步立即。默认720/480选轨优选声明<=30fps，只有60/未知仍可下载，已缓存60fps不自动转码。现场分钟级等待拆分为上游资源准备、HWiNFO占前台与导航/后台空窗；最终稳定卡片回帧到就绪约1—2秒，不宣称播放器耗时两分钟。CEF10/26的2712条tile预算警告与视频时段邻近，归因未完成，不修改主题或预算。隔离真实视频与最小消费者证据见Testing/YMCC/Evidence/Wallpaper-BackgroundPower-20261023/cpu-deep-20261026/REPORT.md；软件修复未部署，不代替ROG整机CPU/功耗验收。 本机授权实测已补：正常选卡context到就绪约69—117ms；5.108秒OS前台样本Steam浏览器组0.870%/YMCC0.191%（32线程归一，无OFF或功率对照）。12:43正常重启后原生接入持续steam-session-unconfirmed，壁纸尚未挂载；+28.945至64.893秒172快照无壁纸，不将原生启动动画算首帧，不改接口准入。日志第96条显式trace-limit，最终Surface a5b51107、隔离plugin ea32a82c构建+check通过；最终日志版本469回归通过。
+
+<!-- STEAM-BOOT-NETWORK-COMPANION-20261026 -->
+2026-10-26 用户明确要求把网络加速接入第一BAT，与YMCC同阶段启动：YMCC提交后立即检查根任务Steamcommunity_302已启用登录触发、固定302cli动作和IgnoreNew策略；旧startupDesired.steamCommunity镜像不作权威。正确程序已运行或同名身份未知均跳过，请求前再查一次；通过原任务/Run最多一次，沿用原权限/IgnoreNew协调登录并发，不直接重复起exe/改任务/等程序就绪。无对焦与--minimized保留。主线及桌面新文件YeManSteam-NetworkStartup.bat SHA256 47bc6043183e710a316f311af33a28c3956766f4da2a17960ba54ed7caa9ac68，桌面原旧版/安装BAT/第二BAT未改。语法+19临时内存检查过，无真实启动/整轮/永久夹具扩建。ROG11:37包缺加速器进程/任务运行历史，退出FSE后才加载尚未证。证据 Testing/YMCC/Evidence/SteamBootNetworkStartup-20261026/REPORT.md。
+<!-- /STEAM-BOOT-NETWORK-COMPANION-20261026 -->
+
 <!-- STEAM-MANUAL-LAUNCH-RECOVERY-20261024 -->
 ## 2026-10-24 Steam 手动启动：取消冷却、一次直接启动保底、首读延后 5 秒
 
@@ -26943,3 +27037,145 @@ SD 原始 QAM 位及无虚拟手柄 OnQuickAccessButtonPressed 的首次触发�
 
 最终合同docs/boot-modes-advanced-startup-matrix-20261025.md；证据Testing/YMCC/Evidence/BootMode-EarlyStart-Matrix-20261025。旧错误解释与原失败原件保留。
 <!-- /BOOT-ADVANCED-STARTUP-FINAL-MATRIX-20261025 -->
+
+
+<!-- STEAM-BOOT-LATEST-VALVE-STARTUP-20261026 -->
+## 2026-10-26 Steam开机网络等待与新版离线参数研究
+
+附件客户端1792618285（10/21构建）11:34:43至11:35:25登录中，含-offline仍在线登录；已见10秒等网络及30秒CM列表失败。已核当前10/21稳定公告、10/22 Beta公告与10/23构建SteamOS官方包实际启动脚本，未从Linux脚本取得新增登录绕过办法。
+
+新版SteamUI.dll注册-offlinemode，但尚无有效consumer或行为验收。仅独立桌面候选C:/Users/DaVe/Desktop/YeManSteam-OfflineTrial.bat替换此参数，SHA256 d0f8ae8104c5c8c243571b06f50c58c39d2f3931b4a6011e4b3ee5eef3abf48c。反向替换全文一致、AST通过、未执行/安装/跑全夹具，实机UNKNOWN。-quicklogin新版内置说明为构造登录URL的base，不作启动加速开关。
+
+主线网络候选与安装BAT原字节保留，YMCC --minimized、无主动对焦及CSS/Decky/手柄边界不改。报告：G:/YeManCC-Work/Testing/YMCC/Evidence/SteamBootLatestValveStartup-20261026/REPORT.md；同层RESULT和linux-official保留来源、身份和UNKNOWN。此记录不接管或完成其他睡眠/设备目标。
+<!-- /STEAM-BOOT-LATEST-VALVE-STARTUP-20261026 -->
+
+
+<!-- STEAM-BOOT-ONLINE-PREFERRED-20261026 -->
+2026-10-26用户澄清以快速启动且保留联网为目标。主线及桌面YeManSteam-NetworkStartup.bat仅删除冷启动-offline，不添加-offlinemode；YMCC/302同阶段请求、随后立即Steam，原minimized/无对焦/其他owner边界全文保留。旧离线试验仅留历史。AST通过、单项反向字节比对一致；无应用启停/设置/安装/整轮夹具，真实速度待测。证据：Testing/YMCC/Evidence/SteamBootLatestValveStartup-20261026/online-preferred/REPORT.md。
+<!-- /STEAM-BOOT-ONLINE-PREFERRED-20261026 -->
+
+
+<!-- STEAM-BOOT-SIMPLE-NO-YMCC-FOCUS-20261026 -->
+2026-10-26 ROG13:08普通导出：旧BATfocusPolicy=none，Steam13:07:17已见，HWiNFO27/28秒取前台，Steam13:08:15进入Privileged Lizard Mode。第二实例会激活YMCC旧窗口的源码机制确认，但旧现场BAT实际跳过YMCC，双启动发生仍未证。用户最终要求先交付简单版：完全移除BAT启动YMCC，沿用原开机入口；首次Steam窗口和当前虚拟ACK就绪各对焦一次，相同时合并、关闭虚拟只第一次，最多两组，目标仅验证Steam。参数对齐用户可用Steam大屏++.bat，保留既有302配置去重及Xbox有界处理，不加CSS/Decky/联动。桌面YeManSteam-Simple-NoYMCC-20261026.bat及主线SHA256 fd9668908b3407647a4498e070de2a7a62941d7633d83b1de907d9c88fbbc2b7；安装未覆盖。
+
+原消费者诊断132断言/4负例通过，32项native监控拒绝补强另有隔离回执，正式native未部署。核心适配器NOT_RUN_UNPROVEN_CLOSURE不升级为PASS，完整夹具和实机未验。输入全零缺已知按键时刻，不定责驱动；用户最新确认点一次屏幕可恢复，保留原话。报告：Testing/YMCC/Evidence/SteamBootFocusHold-20261024/field-20261026-130851-ROG/simple-no-ymcc/REPORT.md。其他睡眠/设备目标与所有权不变。
+<!-- /STEAM-BOOT-SIMPLE-NO-YMCC-FOCUS-20261026 -->
+
+
+<!-- WALLPAPER-INSTALLED-LATE-HOME-20261026 -->
+## 2026-10-26 动态壁纸已渲染主页的晚接入修复与本机部署
+
+真实本机普通导出 A 在 Steam 启动后插件已安装，但连续 90 秒没有壁纸 route/Surface/context。仅通过公开 addPatch 重挂同两个 route 没有恢复；公开 addGlobalComponent 的隔离标记立即进入真实大屏。wallpaperRouteFallback.ts 因此通过公开全局组件临时承载原 Surface，原路由接管即释放，不刷新 Steam、不另建 React root。使用真实 m_locationPathname 先排除非主页，守卫订阅已有 history，观察器随路由、OFF 和卸载清理，不增加轮询。初始未聚焦卡片时读取真实背景 holder 的当前 appid，忽略 previous/preload，局部观察支持 holder 完整替换。
+
+最终实际源码浏览器回归 766 断言／44 场景通过；此前播放器、原生选择和 720/4K Surface 用例分别保留证据。完整普通导出 B 已安装，但实机首轮被官方 Loader 将根 .ymcc-managed.json 迁入 settings 的同名旧文件冲突阻断，不能称作启动验收通过。Decky 维护者负责 native 接收与启动迁移，本任务仅修 tools/deploy-installed.ps1：改写 .ymcc-managed.receipt，校验并归档旧根回执，保留 settings。真实部署函数的九个隔离正反场景通过。
+
+本轮后续实际启动、切换、前后台和 CPU 数值统一记入 Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REPORT.md；全夹具 NOT_RUN，夹具与包身份不能代替实机结果，CPU 进程组采样不能归因为壁纸净功耗。用户已明确授权本机启停 YMCC/Steam 和安装，不扩大到游戏、睡眠、输入设备或主题修改。
+<!-- /WALLPAPER-INSTALLED-LATE-HOME-20261026 -->
+
+
+<!-- STEAM-CONTROLLER-INPUT-BAT-ISOLATION-20261026 -->
+2026-10-26 ROG14:06普通导出复核：故障段selected source在线4637次但非零0，accepted4636、semanticNeutral=0；两个Steam焦点节点有真实Windows前台/键盘回读成功，不能仅归因窗口焦点。系统与selected始终只报槽0在线，未见另槽承载按键。14:04:15.780开始非零，SDK成功非零报告也在该恢复区间，同run/epoch/host/绑定代，无需先重启Host。它只证明YMCC恢复后提交，不证明Steam消费。14:03:29.986确认canonical在C:/SOFT/YeMan/YeManCC/xinput1_4.dll；系统回读是另一请求路径，精确代理转发和跨进程可见性仍UNKNOWN，不能排除YMCC屏蔽/读取。用户要求不以FSE为前提、上一版保留、自行关闭应用测试。
+
+独立包 C:/Users/DaVe/Desktop/YeManSteam-Controller-Test-20261026.zip（SHA256 1a26d5b2383df601510e271007910eccc642246b0cab1d548a4b6a4aa681e3d1）包含01仅Steam、02一次已知Xbox三名清理、03再加一次核验Steam对焦、00外部45秒全4槽观察，以及99上一版原字节。原主线/桌面保底/安装BAT均未覆盖；不启动YMCC，不改自启动/设备/模式，不再增加焦点轮次。WinPS5.1解析与C#编译通过，观察器异常退出码传播已修；无脚本主体/真实设备/应用启停或完整夹具执行，实际归因待用户对照。原未证明闭包适配器及旧失败继续保留。报告：G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\REPORT.md；同层RESULT.json。
+<!-- /STEAM-CONTROLLER-INPUT-BAT-ISOLATION-20261026 -->
+
+
+<!-- WALLPAPER-INSTALLED-FINAL-ACCEPTANCE-20261026 -->
+2026-10-26最终普通整包14:43:22已部署本机；normal Home无焦点接管先复现FAIL后定向258/12视口PASS，产品仍仅增加page限定的holder读取/监听。真实安装验收24项PASS：冷启动6.282秒首帧、同YMCC仅正常重启Steam11.251秒、左右四次、稳定1源、最小化所有样本0Surface/0源、恢复帧推进。真实内存插件Build ID 6f858a342a687a2f663cac285da652adfcadf8cbf0d3fdcfb01192a69efba33a，与磁盘及导出一致。Loader回执根JSON归档／canonical .receipt反复部署正常，官方Loader字节未改，settings旧副本及loader.json保留。C2026单段字符串编译失败由生成器分段解决，拼接精确相等，原33场景及3故障反例PASS；全量正式夹具NOT_RUN。
+
+本机32逻辑CPU的短稳态进程组在不同轮次有差异，不能把最终低值当壁纸净功耗或掌机收益；tile-memory警告部分播放窗口仍出现，额外重启后19秒为0，滤镜ABBA也为0，完整来源UNKNOWN。部署前后用户配置字节一致，运行期原生刷新后的哈希变化如实留证。报告统一Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REPORT.md，真实睡眠、硬件功耗及远程ROG未验，不把主题helper失败改为成功。
+<!-- /WALLPAPER-INSTALLED-FINAL-ACCEPTANCE-20261026 -->
+
+
+<!-- STEAM-BOOT-PURE-PARAM-TRIAL-20261026 -->
+2026-10-26 用户追问切换Xbox后手柄/Windows键盘恢复是否与Steam参数有关。现有证据未定位到具体参数；输入接收/映射随切换改变是待验证推断。上一包01-03参数相同不能排除参数，新v2包增04，仅在01基础上移除三个额外冷启动参数、保留-bigpicture，反向全文一致。必须由用户在Steam未运行时对照01/04，已有Steam会走相同protocol而无法测试参数。原包与5个BAT保留，主线/安装/设置不改。ZIP C:/Users/DaVe/Desktop/YeManSteam-Controller-Test-20261026-v2.zip；SHA256 697228f95826312d2dd455c089ece33f5f32101b076774fe0d3593c78a305727。未启停应用/读取设备/跑完整夹具，实机与根因UNKNOWN。报告：G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\parameter-only\REPORT.md。
+<!-- /STEAM-BOOT-PURE-PARAM-TRIAL-20261026 -->
+
+
+<!-- STEAM-XBOX-KILL-INPUT-HYPOTHESIS-20261026 -->
+2026-10-26 后续用户报告03先见Steam再消失、怀疑Xbox三进程包含输入层。具体exe职责与本次主进程崩溃均未证，新03日志本环境未取得，旧包不能替代。02/03都清理三名，03另有对焦，故先用01/02同参数隔离taskkill影响；04/01只测参数另做。微软GameInput前台/后台策略仅证明存在这类机制，不证明本用户具体路径。保留原包与v2、03异常候选和上一版，无产品/安装/应用/设备操作。说明附在 parameter-only/REPORT.md 及同层RESULT的latestFeedback。
+<!-- /STEAM-XBOX-KILL-INPUT-HYPOTHESIS-20261026 -->
+
+
+<!-- STEAM-XBOX-UPSTREAM-ANYFSE-20261026 -->
+2026-10-26 用户优先Xbox上层不自动启动，并询问直接使用AnyFSE的后台/常驻/手柄兼容。静态核验本机2611包：App有GameInput回调线索，CE有页面导航交接，FT为COM后台；ROG2610同角色及具体输入归属未证。启动源应分Windows主应用、XboxPcTray启动项和YMCC选择模式写回；不封锁GameInput/COM后台。AnyFSE核验v0.90.21：模式切换仍走Windows API，有命令入口；HID/全局热键及退出launcher等待可常驻，兼容YMCC未验。只作咨询，未安装/改设置/控制应用或设备，04保底及旧包均保留。报告：G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\xbox-process-roles\REPORT.md；G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\anyfse-direct-evaluation\REPORT.md。
+<!-- /STEAM-XBOX-UPSTREAM-ANYFSE-20261026 -->
+
+
+<!-- STEAM-STANDARD-SINGLE-XBOX-BATS-20261026 -->
+2026-10-26 按用户快速/无夹具要求交付四份标准启动BAT：不处理Xbox，以及分别结束XboxPcApp、CE、FT单个目标后启动Steam；四份均-bigpicture冷启动/已有Steam走gamepadui，结束Xbox失败仍继续Steam。无轮询、对焦、YMCC/Decky启动或系统设置修改。原版本保留，未执行脚本或覆盖安装文件。交付 C:/Users/DaVe/Desktop/YeManSteam-Standard-SingleXbox-20261026.zip；报告 G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\standard-single-xbox\REPORT.md。
+<!-- /STEAM-STANDARD-SINGLE-XBOX-BATS-20261026 -->
+
+
+<!-- WALLPAPER-LOCAL-REVERSE-1547-20261026 -->
+2026-10-26 15:47用户授权复用本机已装最终构建再跑一次启动反推。真实24项安装检查+7项数据链检查PASS；冷首帧6.443秒、同YMCC仅重启Steam6.033秒；native当前2288340与缓存／视频源一致，忽略邻卡预载945360，4KiB真实Range与磁盘前缀一致。后台源释放、恢复与BuildID均有实证。产品／安装／缓存／设置未改，仅证据和索引。稳定CPU是进程组0.772%/0.114%而非净壁纸功耗；同窗口893条tile预算告警仍UNKNOWN，未盲改其他模块。报告继续Testing/YMCC/Evidence/Wallpaper-Deploy-20261026/REPORT.md，回执REVERSE-1547-RESULT.json，原失败和未验范围保留。
+<!-- /WALLPAPER-LOCAL-REVERSE-1547-20261026 -->
+
+
+<!-- STEAM-SAME-NAME-AND-THEME-EXIT-AUDIT-20261026 -->
+2026-10-26 用户要四文件夹同名YeManSteam.bat，已交付C:/Users/DaVe/Desktop/YeManSteam-SameName-20261026.zip；移除BAT退出语句，已有Steam仅发大屏协议。其后用户追问主题是否重启Steam：当前主题链Reload到CSSLoader reset，未发现调用steamStop；旧14:06包同YMCC11388的20条主题日志在14:03:17—44保持Steam10660同birth，最终主题ready。新闪退尚无日志，不能从旧包或源码免除注入/CEF崩溃可能。旁路后端审计见同层backend；未跑夹具/安装/控制应用设备。报告G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\theme-steam-exit-audit\REPORT.md。
+<!-- /STEAM-SAME-NAME-AND-THEME-EXIT-AUDIT-20261026 -->
+
+
+<!-- STEAM-OWN-AUTORUN-OFF-CANDIDATE-20261026 -->
+2026-10-26 用户要求关Steam自身Windows开机项，保留YMCC/BAT启动。四份同名BAT加入只处理HKCU Run名为Steam的值、原命令日志和删除后查询；未运行、未改本机/ROG设置，不结束当前Steam。已经发出的启动不会被撤回，重复入口是否为本次闪退根因未证。交付C:/Users/DaVe/Desktop/YeManSteam-NoOwnStartup-20261026.zip；报告G:\YeManCC-Work\Testing\YMCC\Evidence\SteamBootFocusHold-20261024\field-20261026-140606-ROG\standard-single-xbox\disable-steam-own-startup\REPORT.md；旧包保留，夹具NOT_RUN_USER_REQUEST。
+<!-- /STEAM-OWN-AUTORUN-OFF-CANDIDATE-20261026 -->
+
+## 2026-10-26 壁纸与 Decky 高频进程 CPU 取证
+
+用户要求合入现有高频日志。`native/decky_wallpaper_process_cost.h` 复用 `native_process_cost.h` 差分算法，在 `inputHostDisplayIdleAuditTick` 的原有 1Hz、`domainLogs.virtual` 门后，向 `virtual-gamepad.log` 的 `input-idle-window.steamDeckyProcessCost` 写入只读样本。关闭后释放句柄，关闭稳态不查询目标进程；不增线程、定时器或全进程枚举。Steam observer、绑定及 broker 仅被动提供已有身份/上下文；Runtime 状态及 Job 成员使用非阻塞读取，忙时未知。
+
+PID、创建时间、路径、Windows session 均校验；记录 CPU ms/s、单逻辑核百分比、整机归一化百分比。SharedJSContext 和原生 UI 窗口候选都是共享进程，不能算壁纸代码独占 CPU；不覆盖 GPU/视频解码进程。相同 PID 多角色标明去重，睡眠代际/长间隔/进程更换后重建基线，失败与未知不得写成0。请求可见/帧已入队也不代表已解码呈现。
+
+同期只移除了零模糊下冗余的 `blur(0px)` 声明（视频和静态图），未测量该改动的独立 CPU 收益。采样正反88项、真实Windows计数4项和播放器/浏览器相关回归已完成；原生精确快照编译结果及失败环境尝试均保留在 [本轮报告](../../../Testing/YMCC/Evidence/Wallpaper-ROG-212633-20261026/REPORT.md)。源码已入主线；本轮未部署、未启动或停止产品，ROG/睡眠/安装版性能仍待下一版实测，完整发布夹具 NOT_RUN。
+
+### 2026-10-26 后续本机部署确认
+
+用户随后要求本机部署测试，已通过现有普通完整导出流程部署到默认安装目录。原生/网页/插件身份配套，部署前后设置逐字节保留；高频CPU字段已从安装版真实产出，720P实际播放、最小化释放和重新取得焦点恢复均确认。源码阶段“未部署”边界由本条更新；ROG掌机、真实睡眠与完整正式发布夹具仍未验收。报告：[本机部署证据](../../../Testing/YMCC/Evidence/Wallpaper-ROG-212633-20261026/deployment/REPORT.md)。
+
+## 2026-10-27 R5 CPU日志与壁纸ready重复请求
+
+R5原生df8112...缺少新Steam/Decky高频样本及manifest说明，不能借整机CPU18.457%归因壁纸。最新Host两次enabled=false也可能ready尚未完成，不等于用户关闭。日志和真实Edge反例证实首次ready等待中的相同上下文重复请求，现仅对该类成功发送后的重复请求按现有事件1秒限频，首次/变化/强制恢复/发送失败不受此限流；不增timer，确认后稳态不增时钟读取。24次重复焦点事件额外请求48降至0，CPU百分比收益未测。
+
+既有启动回归1006/56绑定旧Client；与Decky任务最终Client46f98b...联合三个场景166/12通过，播放器675通过，最终隔离插件build/check通过。本任务只改steamWallpaper与原startup fixture，其他任务Runtime/Client/App就绪前移保留其独立证据；本轮未部署、不启停产品，完整全局与掌机性能NOT_RUN。报告：[R5 CPU分析与源码证据](../../../Testing/YMCC/Evidence/Wallpaper-ROG-R5-235015-20261026/REPORT.md)。
+
+
+<!-- DECKY-STORM-STARTUP-20261027 -->
+2026-10-27 Decky定向风暴与启动反推：MirrorClient被动发送异常复用原断开/退避，自行不重放payload；已验证retained前端在资源准备前读取准入并优先接管，新Loader资源准备后仍fresh准入；App的wallpaper ready移动到原持久UI设置成功加载后，AI隔离与用户OFF保留，控制/HUD/预下载仍在旧尾部。原3.2秒资源归还线、Loader校验、协议限制与关闭权限不变。109矩阵/18传输/54client/7typed Runtime/15资源结果与原hard-stop反例通过；实际Host+App片段39场景/160断言，前端构建通过。壁纸协作侧同卡未就绪事件风暴48→0，最终Client联合浏览器3场景×4尺寸166断言通过。输入R2/R5不同产物且R5ready false也可能宿主未初始化，不能直接当用户OFF或性能对照。证据Testing/YMCC/Evidence/Decky-Storm-Startup-20261027/REPORT.md；本轮未部署/实际启停，整机CPU与真实首帧收益未验收，正式发布门NOT_RUN。
+<!-- /DECKY-STORM-STARTUP-20261027 -->
+
+<!-- DECKY-CPU-DEMAND-20261027 -->
+2026-10-27 Decky CPU读取合并：生产Host的snapshotDemand会使当前读取失效；普通重叠请求现在共享同一需求周期的进行中读取，重新打开、手动probe、已完成后的下一次显式请求继续刷新，真实游戏/电源/owner源变化仍触发原重读。保留1024请求导致2次业务读的原FAIL；修复后1次业务读/1次交付。source-change/probe/reopen三边界仍各2次读，Host27项、原commit合并、专属配置29项和独立Vite构建通过，原chunk大小警告保留。既有本机部署使用另一冻结快照，不包含本批改动；高频样本仅作共享进程CPU参考，不能据此声称CPU百分比收益或掌机/睡眠完整验收。未改变Loader、预算、硬件权限及不确定操作不重放策略。证据Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/REPORT.md。
+<!-- /DECKY-CPU-DEMAND-20261027 -->
+
+
+<!-- WALLPAPER-DECKY-LOCAL-20261027 -->
+2026-10-27 用户授权本机完整部署测试，已完成两次明确固定源码导出；最终Native 45f18675…、ExportBuildId 22ab6a7e…，安装设置在部署时逐字节保留。第2次只增已验证relay d74a32b…与两处CPU归因说明，正常退出YMCC后保留Steam40344，1.794秒mirror接回；实际侧栏3次开读关及真实壁纸帧回调通过。首次Steam启动11.209秒video-ready属于reveal就绪，16.966秒帧回调为较晚观测上界。第1批32秒独立OS采样和33点持续720P播放保留，但不能归因独占壁纸/Decky，不能当relay前后CPU对照。
+
+本机核实context owner36848是browser holder，UI候选56484是GPU辅助进程，tile warning来源31532是CEF renderer。因此保留旧role键、数值和1Hz接线，仅修正cpuScope及attribution说明，不再称GPU进程被排除/覆盖。CPU计数不等于GPU引擎/瓦数。当前启动2883条tile预算警告未定位功能根因；第2批尾段未新增不证明已修复。物理睡眠/ROG/完整全局发布夹具NOT_RUN。报告：[本机最终部署和性能边界](../../../Testing/YMCC/Evidence/Wallpaper-Decky-Local-20261027/REPORT.md)。
+<!-- /WALLPAPER-DECKY-LOCAL-20261027 -->
+
+<!-- DECKY-HIDDEN-ATTACH-DEMAND-20261027 -->
+2026-10-27 retained隐藏侧栏无效读取：安装版revision2日志01:49:58.404已明确subscribe:false，Host.ready/attach却在59.015重开业务读、28ms后丢弃。relay现在仅记忆原验证通过的同peer暂停，attach尊重该事实；未知/可见/新peer保持原恢复，错run/旧peer暂停不能影响新连接，后续显式打开正常读取。不增加timer/native接口或弱化身份/写入门。实际Host旧源FAIL保留（业务读2次），修复后隐藏2边界0次，其他4边界仍就绪；Host33/矩阵109/独立Vite编译通过。旧readiness消费者缺真实历史backup，exit1保留为INCOMPLETE，不计通过。首启动install→video-ready约151ms且业务读数分钟后才开始，此修复不冒领5秒mode确认等待优化；后者由壁纸主线程负责。新Host/relay尚未纳入本机当前revision2，不操作现场。证据Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/Hidden-Attach/REPORT.md。
+<!-- /DECKY-HIDDEN-ATTACH-DEMAND-20261027 -->
+
+<!-- DECKY-HIDDEN-PAUSE-RECOVERY-20261027 -->
+2026-10-27 隐藏侧栏pause发送失败自愈：pauseSnapshotDemand原socket.send空catch会使HUD/壁纸/升级共享连接在发送异常后仍显示connected、不进退避。现复用已存在sendPassive断开/重连owner，隐藏恢复不订阅业务状态、不重放不确定写入，健康零轮询与错run拒绝保持。原client消费者先复现FAIL（期望断开，实际connected=true）；修后HUD/壁纸/升级3种owner恢复、pending写入不重发、1024旧hidden快照仅1个恢复timer，client58+keepalive23及隔离插件build/content check通过。未修改PowerLifecycle/owned runtime或控制本机，不能当作历史睡眠根因已证实；本批未部署。报告Testing/YMCC/Evidence/Decky-CPU-Demand-20261027/Hidden-Pause-Recovery/REPORT.md。
+<!-- /DECKY-HIDDEN-PAUSE-RECOVERY-20261027 -->
+
+
+<!-- WALLPAPER-FIRSTSTART-HEALING-20261027 -->
+## 2026-10-27 壁纸/Decky首启、断链和最小化实测
+
+最终revision5普通整包已本机部署。首启采用新Steam身份有限短读额度，账号未出不准备资源；真实unknown读债务与三次慢尝试/30秒冷却保留。本机after6抓到live-busy后白等5秒，现仅本地try-lock未IO可用剩余短槽，既不重填额度也不消耗此前真实IO失败预算。最终受控前台冷Steam进程video-ready6066ms、真实画面回调观测上界6229ms；after7/8页面最小化的DEADLINE原件保留，不冒充两轮同条件成功或掌机/OS冷启动。
+
+恢复仅在有未确认意图时工作：Host最新两状态拒绝以250/1000/3000/10000/20000ms退避；Client当前可见seq/run有一个10秒相关回复期限，旧隐藏/错seq/HUD不取消；原生pending output有10秒真实字节无进展期限，追加消息/ping不续期，健康WSA_INFINITE。OFF/旧代次/退出与未确认写入不重放保留。隐藏同peer attach不重开业务读。最终本机明确前台侧栏3轮、实际断链347ms/1091ms恢复、后台释放/恢复播放、设置哈希通过。原生真实Winsock432检查与旧源FAIL、原协议26；共享模式100、Host42/183、Client74、保活23、三场景四尺寸50/54/50、typed恢复5项证据分开留存。物理睡眠/真实Ready分派和掌机未操作，旧10/22睡眠根因仍UNKNOWN。
+
+用户新增最小化近零要求：8个已验证Steam进程前台12秒0.0771%、最小化20秒0.0073%、恢复12秒0.0244%（32逻辑CPU整机口径）；最小化renderer无可测CPU增量、视频元素0、无decky-sidebar原生事件，恢复720P正常。只代表本机安静有限窗口，非独占壁纸CPU或GPU瓦数，Steam其他下载活动不能承诺恒定0%。原PS合计null错误保留，SUMMARY按有效逐进程增量重算，未引用控制台误报0%。
+
+ExportBuildId=b1981a44f08007e1772be0c6c0b153f54617c727d75b32ecc5f2284426372e92；Native=22241d4c41dd439d481eabbda46491f80b9f46ed82bb6c0b03093c23a50210b0；Plugin=64a6439fbdde5d0b9a9659f35be18cf21ad67f4e096a1909a9bf2a2b839d96a7。完整全局正式夹具NOT_RUN，formalReleaseAccepted=false。文档在成品后记录，产品源码已冻结，供后续主线导出。报告：Testing/YMCC/Evidence/Wallpaper-FirstStart-20261027/REPORT.md。
+<!-- /WALLPAPER-FIRSTSTART-HEALING-20261027 -->
+
+<!-- DECKY-STABLE-RECOVERY-BACKOFF-20261027 -->
+2026-10-27协助动态壁纸的Decky接通后恢复：原Client只有socket close事件按稳定>=30秒重置旧退避，发送异常/10秒wallpaper或15秒snapshot超时直接disconnect先丢connectedAt，导致已恢复稳定仍等待旧30秒。现抽取同一原阈值到endConnectionHealth并在原close/disconnect调用；不降低短暂open/29999ms的故障退避、不改身份/期限/设置、不重放操作。原a578源FAIL保留：hud-send稳定30秒后仍退避30000ms；修后9路径稳定后250ms、短连仍30000ms。既有hang消费者扩展至37，keepalive23/client74及隔离插件build/content check通过；健康零timer、协议拒绝保持。仅下一批源码，未部署本机，也不是R9-R11前置Steam身份等待或实际CPU/启动加速的归因。源码110ca5ce…，报告Testing/YMCC/Evidence/Decky-Wallpaper-Support-20261027/REPORT.md。
+<!-- /DECKY-STABLE-RECOVERY-BACKOFF-20261027 -->

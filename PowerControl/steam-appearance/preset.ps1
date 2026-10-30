@@ -126,7 +126,33 @@ function Get-ForeignThemeRows($BackendThemes=@()) {
         try{if((Get-Item -LiteralPath $manifest).Length -gt 262144){throw 'Foreign manifest too large'};$j=[IO.File]::ReadAllText($manifest,[Text.Encoding]::UTF8)|ConvertFrom-Json;$name=[string]$j.name;if(!$name -or $name.Length -gt 256){throw 'Invalid foreign theme name'}}catch{$manifestInvalid=$true;$name=$dir.Name}
         if(Test-Path -LiteralPath $config){try{if((Get-Item -LiteralPath $config).Length -gt 262144){throw 'Foreign config too large'};$c=[IO.File]::ReadAllText($config,[Text.Encoding]::UTF8)|ConvertFrom-Json;if($c.active -isnot [bool]){throw 'Bad active field'};$active=$c.active}catch{$bad=$true}}
         $live=@($BackendThemes|Where-Object name -eq $name|Where-Object enabled).Count -gt 0
-        [pscustomobject]@{name=$name;folder=$dir.Name;path=$config;manifestPath=$manifest;active=$active;invalid=$bad;manifestInvalid=$manifestInvalid;live=$live;needsDisable=($active -or $live -or $bad -or $manifestInvalid -or $name -in $script:ThemeNames);duplicate=($name -in $script:ThemeNames)}
+        [pscustomobject]@{name=$name;folder=$dir.Name;path=$config;manifestPath=$manifest;active=$active;invalid=$bad;manifestInvalid=$manifestInvalid;live=$live;needsDisable=($active -or $live -or $bad -or $manifestInvalid -or $name -in $script:ThemeNames);duplicate=($name -in $script:ThemeNames);retired=($name -in $script:RetiredThemeNames -or $dir.Name -in $script:RetiredThemeNames)}
+    }
+}
+# Remove only known retired payload files; never traverse or recursively delete a user's theme directory.
+# Backups remain intact so a failed transaction can restore the exact previous bytes.
+function Get-RetiredPresetTargets($Foreign=@()) {
+    $directories=@($script:RetiredThemeNames|ForEach-Object {Join-Path $script:ThemeRoot $_})
+    $directories+=@($Foreign|Where-Object retired|ForEach-Object {Split-Path -Parent $_.manifestPath})
+    foreach($directory in $directories|Select-Object -Unique){
+        foreach($leaf in @('theme.json','config_USER.json','shared.css','LICENSE')){
+            $target=Assert-ThemeTarget (Join-Path $directory $leaf)
+            if(Test-Path -LiteralPath $target){
+                if(!(Test-Path -LiteralPath $target -PathType Leaf)){throw 'Retired theme target is not a regular file'}
+                $target
+            }
+        }
+    }
+}
+# CSSLoader treats even empty directories as theme candidates. Only known
+# retired directories without children are candidates; links remain forbidden.
+# File backups recreate payload directories when the transaction rolls back.
+function Get-EmptyRetiredPresetDirectories($Foreign=@()) {
+    $directories=@($script:RetiredThemeNames|ForEach-Object {Join-Path $script:ThemeRoot $_})
+    $directories+=@($Foreign|Where-Object retired|ForEach-Object {Split-Path -Parent $_.manifestPath})
+    foreach($directory in $directories|Select-Object -Unique){
+        $target=Assert-ThemeTarget $directory
+        if((Test-Path -LiteralPath $target -PathType Container) -and @(Get-ChildItem -LiteralPath $target -Force -ErrorAction Stop).Count -eq 0){$target}
     }
 }
 function Get-PresetMetadata($Rows,$BackendThemes=@()) {
@@ -135,13 +161,15 @@ function Get-PresetMetadata($Rows,$BackendThemes=@()) {
         $pack=Read-PresetManifest;$available=$true;$digest=$pack.digest
         foreach($file in $pack.files){if([IO.Path]::GetFileName($file.path) -eq 'config_USER.json'){continue};$target=Assert-ThemeTarget (Join-Path $script:ThemeRoot (Get-PresetRelative $file.path));if(!(Test-Path -LiteralPath $target -PathType Leaf) -or (Get-PresetResourceHash $target).ToLowerInvariant() -ne $file.sha256){$drift++}}
     }catch{$error=$_.Exception.Message;$drift++}
-    $foreign=@(Get-ForeignThemeRows $BackendThemes);$foreignCount=@($foreign|Where-Object needsDisable).Count
+    $foreign=@(Get-ForeignThemeRows $BackendThemes);$foreignCount=@($foreign|Where-Object {!$_.retired -and $_.needsDisable}).Count
+    $retired=@(Get-RetiredPresetTargets $foreign)+@(Get-EmptyRetiredPresetDirectories $foreign)
+    $retiredLive=@($BackendThemes|Where-Object {$_.name -in $script:RetiredThemeNames -and $_.enabled}).Count -gt 0
     $owned=$state -and $state.owned
-    $prepared=[bool]($available -and $owned -and $state.packDigest -eq $digest -and $drift -eq 0 -and @($Rows|Where-Object {!$_.installed}).Count -eq 0)
+    $prepared=[bool]($available -and $owned -and $state.packDigest -eq $digest -and $drift -eq 0 -and $retired.Count -eq 0 -and @($Rows|Where-Object {!$_.installed}).Count -eq 0)
     $canRestore=$false
     if($state -and $state.owned -and $state.originalBackup){try{Read-PresetBackup ([string]$state.originalBackup)|Out-Null;$canRestore=$true}catch{$error='接管备份不可用：'+$_.Exception.Message}}
     if($owned -and !$canRestore){$prepared=$false}
-    [pscustomobject]@{packAvailable=$available;packOwned=[bool]$owned;packUpdateAvailable=[bool]($available -and $owned -and $canRestore -and $state.packDigest -ne $digest);packPrepared=$prepared;packRepairRequired=[bool]($available -and $owned -and !$prepared);backendReloadRequired=[bool]($state -and $state.pendingReload);canRestore=$canRestore;foreignActiveCount=$foreignCount;packError=$error}
+    [pscustomobject]@{packAvailable=$available;packOwned=[bool]$owned;packUpdateAvailable=[bool]($available -and $owned -and $canRestore -and $state.packDigest -ne $digest);packPrepared=$prepared;packRepairRequired=[bool]($available -and $owned -and !$prepared);backendReloadRequired=[bool](($state -and $state.pendingReload) -or $retiredLive);canRestore=$canRestore;foreignActiveCount=$foreignCount;packError=$error}
 }
 function Write-PresetBytes([string]$Path,[byte[]]$Bytes) {
     $Path=Assert-ThemeTarget $Path;$parent=Split-Path -Parent $Path
@@ -218,8 +246,19 @@ function Remove-EmptyPresetDirectory([string]$Directory) {
     foreach($child in @(Get-ChildItem -LiteralPath $Directory -Directory -Force)){Remove-EmptyPresetDirectory $child.FullName}
     if(@(Get-ChildItem -LiteralPath $Directory -Force).Count -eq 0){Remove-Item -LiteralPath $Directory -Force}
 }
-function Restore-PresetBackup($Backup) {
+function Restore-PresetBackup($Backup,[switch]$KeepRetiredRemoved) {
+    $retiredFolders=@{};foreach($name in $script:RetiredThemeNames){$retiredFolders[$name]=$true}
+    if($KeepRetiredRemoved){
+        foreach($entry in $Backup.journal.entries){
+            $relative=Get-PresetRelative $entry.relative
+            if(!$entry.existed -or [IO.Path]::GetFileName($relative) -ine 'theme.json'){continue}
+            $blob=Join-Path (Join-Path $Backup.directory 'files') $entry.blob
+            if((Get-Item -LiteralPath $blob).Length -gt 262144){continue}
+            try{$theme=[IO.File]::ReadAllText($blob,[Text.Encoding]::UTF8)|ConvertFrom-Json;if($theme.name -in $script:RetiredThemeNames){$retiredFolders[$relative.Split('\')[0]]=$true}}catch{}
+        }
+    }
     foreach($entry in $Backup.journal.entries){
+        if($KeepRetiredRemoved -and $retiredFolders.ContainsKey((Get-PresetRelative $entry.relative).Split('\')[0])){continue}
         $path=Assert-ThemeTarget (Join-Path $script:ThemeRoot (Get-PresetRelative $entry.relative))
         if($entry.existed){Write-PresetBytes $path ([IO.File]::ReadAllBytes((Join-Path (Join-Path $Backup.directory 'files') $entry.blob)))}elseif(Test-Path -LiteralPath $path -PathType Leaf){Remove-Item -LiteralPath $path -Force}
     }
@@ -283,7 +322,9 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
         Assert-CssDesktopNotEditing
     }
     if(!$first){Read-PresetBackup ([string]$state.originalBackup)|Out-Null}
-    $foreign=@();if(!$OwnedResourcesOnly){$foreign=@(Get-ForeignThemeRows $(if(Test-BackendOwner){@(Invoke-LoaderRpc 'get_themes')}else{@()}))}
+    $foreign=@(Get-ForeignThemeRows $(if(Test-BackendOwner){@(Invoke-LoaderRpc 'get_themes')}else{@()}))
+    $deletes=@(Get-RetiredPresetTargets $foreign);$emptyRetired=@(Get-EmptyRetiredPresetDirectories $foreign)
+    if($deletes.Count -or $emptyRetired.Count){Assert-CssDesktopNotEditing}
     $writes=New-Object Collections.Generic.List[object]
     foreach($file in $pack.files){
         $rel=Get-PresetRelative $file.path;$target=Assert-ThemeTarget (Join-Path $script:ThemeRoot $rel);$isConfig=[IO.Path]::GetFileName($rel) -eq 'config_USER.json';$row=$rows|Where-Object name -eq $rel.Split('\')[0]
@@ -293,7 +334,7 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
         if((Test-Path -LiteralPath $target -PathType Leaf) -and (Get-ConfigHash $target).ToLowerInvariant() -eq $file.sha256){continue}
         $writes.Add([pscustomobject]@{path=$target;bytes=[IO.File]::ReadAllBytes((Join-Path (Join-Path $script:PackRoot 'themes') $rel))})
     }
-    foreach($item in $foreign|Where-Object needsDisable){
+    foreach($item in $foreign|Where-Object {!$OwnedResourcesOnly -and !$_.retired -and $_.needsDisable}){
         if($item.duplicate -or $item.manifestInvalid){
             # Reversible inactive shim avoids two backend themes sharing a managed name.
             $shim=@{name=('_ymcc-paused-'+[guid]::NewGuid().ToString('N'));author='YMCC compatibility placeholder';manifest_version=1;inject=@{};patches=@{}}|ConvertTo-Json -Compress
@@ -302,8 +343,8 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
         $config=Read-PresetUserConfig $item.path;if(!$config){$config=[pscustomobject]@{active=$false}}
         $config.active=$false;$writes.Add([pscustomobject]@{path=$item.path;bytes=[Text.Encoding]::UTF8.GetBytes(($config|ConvertTo-Json -Depth 64 -Compress))})
     }
-    if(!$first -and !$Reset -and $writes.Count -eq 0 -and $state.packDigest -eq $pack.digest){return [pscustomobject]@{ok=$true;message='YMCC 预设已就绪';snapshot=(Get-AppearanceStatus)}}
-    $backupPaths=@($writes|ForEach-Object path)
+    if(!$first -and !$Reset -and $writes.Count -eq 0 -and $deletes.Count -eq 0 -and $emptyRetired.Count -eq 0 -and $state.packDigest -eq $pack.digest){return [pscustomobject]@{ok=$true;message='YMCC 预设已就绪';snapshot=(Get-AppearanceStatus)}}
+    $backupPaths=@($writes|ForEach-Object path)+@($deletes)
     if($first){$backupPaths+=@($pack.files|ForEach-Object {Join-Path $script:ThemeRoot (Get-PresetRelative $_.path)})}
     $backup=New-PresetBackup $backupPaths
     if($OwnedResourcesOnly){Assert-CssDesktopNotEditing;if((Get-ThemeRevision @(Get-ThemeRows)) -ne $ExpectedRevision){throw 'Theme settings changed during owned resource update'}}
@@ -311,6 +352,13 @@ function Invoke-PresetPrepare([bool]$Reset=$false,[string]$ExpectedRevision='',[
     try{
         $original=if(!$first -and $state.originalBackup){Merge-PresetOriginalBackup ([string]$state.originalBackup) $backup}else{$backup.directory}
         foreach($write in $writes){Write-PresetBytes $write.path $write.bytes}
+        foreach($target in $deletes){Assert-CssDesktopNotEditing;Remove-Item -LiteralPath (Assert-ThemeTarget $target) -Force -ErrorAction Stop}
+        # Nonrecursive OS operation fails if a concurrent writer adds any child.
+        foreach($directory in @(Get-EmptyRetiredPresetDirectories $foreign)){
+            Assert-CssDesktopNotEditing
+            $emptyTarget=Assert-ThemeTarget $directory
+            [IO.Directory]::Delete($emptyTarget,$false)
+        }
         Save-PresetState ([pscustomobject]@{version=1;themeRoot=[IO.Path]::GetFullPath($script:ThemeRoot);owned=$true;packDigest=$pack.digest;originalBackup=$original;latestBackup=$backup.directory;pendingReload=$true})
         Complete-PresetTransaction
     }catch{$problem=$_.Exception.Message;try{Recover-PresetTransaction -Force}catch{throw ($problem+'; '+$_.Exception.Message)};throw $problem}
@@ -332,7 +380,7 @@ function Invoke-PresetRestore {
     $state=Read-PresetState;if(!$state -or !$state.owned -or !$state.originalBackup){throw '没有可恢复的接管前外观备份'}
     $backup=Read-PresetBackup ([string]$state.originalBackup);$undo=New-PresetBackup @($backup.journal.entries|ForEach-Object {Join-Path $script:ThemeRoot (Get-PresetRelative $_.relative)})
     Begin-PresetTransaction $undo
-    try{Restore-PresetBackup $backup;Save-PresetState ([pscustomobject]@{version=1;themeRoot=[IO.Path]::GetFullPath($script:ThemeRoot);owned=$false;packDigest='';originalBackup=$state.originalBackup;latestBackup=$undo.directory;pendingReload=$true});Complete-PresetTransaction}catch{$problem=$_.Exception.Message;try{Recover-PresetTransaction -Force}catch{throw ($problem+'; '+$_.Exception.Message)};throw $problem}
+    try{Restore-PresetBackup $backup -KeepRetiredRemoved;Save-PresetState ([pscustomobject]@{version=1;themeRoot=[IO.Path]::GetFullPath($script:ThemeRoot);owned=$false;packDigest='';originalBackup=$state.originalBackup;latestBackup=$undo.directory;pendingReload=$true});Complete-PresetTransaction}catch{$problem=$_.Exception.Message;try{Recover-PresetTransaction -Force}catch{throw ($problem+'; '+$_.Exception.Message)};throw $problem}
     [pscustomobject]@{ok=$true;saved=$true;message='已恢复接管前的外观配置；需要重新加载美化后端';snapshot=(Get-AppearanceStatus)}
 }
 function Complete-PresetReload {

@@ -15,7 +15,7 @@ $duplicate=FixtureTheme 'Another Art Hero' 'Art Hero' '{"active":true,"Custom":"
 $broken=FixtureTheme 'Broken Config' 'Broken Config' '{broken json'
 $original=@{};foreach($file in Get-ChildItem -LiteralPath $script:ThemeRoot -File -Recurse){$original[$file.FullName]=[Convert]::ToBase64String([IO.File]::ReadAllBytes($file.FullName))}
 $empty=@(Get-ThemeRows)
-Assert ($empty.Count -eq 8 -and @($empty|Where-Object configured).Count -eq 8 -and @($empty|Where-Object installed).Count -eq 0) 'New profile selects all eight defaults without claiming installed files or creating themes'
+Assert ($empty.Count -eq 7 -and @($empty|Where-Object configured).Count -eq 7 -and @($empty|Where-Object installed).Count -eq 0) 'New profile selects all seven defaults without claiming installed files or creating themes'
 Assert (!(Test-Path -LiteralPath (Join-Path $script:ThemeRoot 'Round'))) 'Reading defaults never installs or starts anything'
 $before=Get-AppearanceStatus;Assert ($before.packAvailable -and !$before.packPrepared -and $before.foreignActiveCount -eq 3) 'New user is detected with active foreign, duplicate and malformed configurations'
 $prepared=Invoke-PresetPrepare $false $before.revision

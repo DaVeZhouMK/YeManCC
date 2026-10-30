@@ -137,24 +137,24 @@ try{
    assert.equal(evidence.oldDetached,true);assert.equal(evidence.mouseDetached,true);assert.equal(evidence.mouseLabel,'模拟鼠标');assert.equal(evidence.controllerLabel,'控制器');assert.equal(evidence.count,1);assert.equal(evidence.mouseRemaining,0);assert(evidence.controllerSvg&&evidence.ignored);return evidence;
   });
   await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button').disabled);
-  await test('Steam 3/4 expose SteamDeck and enabled default touch controls',height,async()=>{
+  await test('Steam 3/4 default virtual output OFF and standalone Steam special keys ON',height,async()=>{
    const evidence=[];
    for(const [index,id]of [[2,'steam'],[3,'xbox-steam']]){
     await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button').disabled);
     await page.evaluate(()=>window.__bootMemory.connections=[{label:'Steam',connected:true}]);
     const previous=await page.evaluate(()=>({current:window.__bootMemory.document.current,active:window.__bootMemory.document.activeSnapshot}));
-    const mode=page.locator('.boot-mode-cards button').nth(index);await focus(page,mode);await command(page,'confirm');assert.match(await page.locator('.boot-summary').innerText(),/SteamDeck/);
+    const mode=page.locator('.boot-mode-cards button').nth(index);await focus(page,mode);await command(page,'confirm');assert.equal(await page.locator('.boot-summary span').first().locator('b').innerText(),'关闭');
     const choose=page.getByRole('button',{name:'设为开机模式',exact:true});await focus(page,choose);await command(page,'confirm');await page.waitForFunction(id=>window.__bootMemory.document.boot===id,id);
     assert.equal(await page.locator('[data-gp-modal="boot-mode-connection"]').count(),0);assert.equal(await page.evaluate(()=>window.__bootMemory.connectionQueries),0);
     assert.deepEqual(await page.evaluate(()=>({current:window.__bootMemory.document.current,active:window.__bootMemory.document.activeSnapshot})),previous);
     const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');
-    await page.locator('[data-boot-category="input"]').click();const dropdown=page.locator('[data-field="input.persona"] button').first();assert.match(await dropdown.innerText(),/SteamDeck/);assert.equal(await dropdown.isEnabled(),true);
+    await page.locator('[data-boot-category="input"]').click();const dropdown=page.locator('[data-field="input.persona"] button').first();assert.match(await dropdown.innerText(),/关闭虚拟手柄/);assert.equal(await dropdown.isDisabled(),true);assert.equal(await page.locator('[data-boot-module="input"]').getByRole('button',{name:'跟随全局',exact:true}).getAttribute('aria-pressed'),'true');
     await page.locator('[data-boot-category="touch"]').click();const module=page.locator('[data-boot-module="touch"]');assert.equal(await module.getByRole('button',{name:'模式单独设置',exact:true}).getAttribute('aria-pressed'),'true');
-    const profile=await page.evaluate(id=>window.__bootMemory.document.scenes[id].overrides.touch.profiles.steamdeck,id);
-    assert.equal(profile.masterEnabled,true);assert.equal(profile.enabled,true);assert.equal(profile.layout,'dual');assert.equal(profile.leftMode,'steamdeck');assert.equal(profile.rightMode,'steamdeck');assert.equal(profile.specialMask,3);
-    const master=module.getByRole('switch').first();assert.equal(await master.getAttribute('aria-checked'),'true');const layout=module.locator('.screen-control-select').filter({hasText:'触摸板布局'});assert.match(await module.innerText(),/双触摸板/);
-    await auditRows(page,height,'Xbox canonical touch controls',id);await shot(page,height+'-'+id+'-steamdeck-touch');
-    evidence.push({id,noConnectionGate:true,defaultPersona:'steamdeck',touch:profile,currentUntouched:true});
+    const profile=await page.evaluate(id=>window.__bootMemory.document.scenes[id].overrides.touch.profiles.disabled,id);
+    assert.equal(profile.masterEnabled,true);assert.equal(profile.enabled,false);assert.equal(profile.layout,'off');assert.equal(profile.standaloneSpecialMode,'steamdeck');assert.equal(profile.specialMask,0);
+    const master=module.getByRole('switch').first();assert.equal(await master.getAttribute('aria-checked'),'true');const special=module.getByRole('button',{name:'专用按键组合',exact:true});assert.match(await special.innerText(),/开启Steam全部/);await focus(page,special);await command(page,'confirm');await page.locator('[role="listbox"]').waitFor();assert.match(await page.getByRole('option',{selected:true}).innerText(),/开启Steam全部/);await command(page,'back');await page.locator('[role="listbox"]').waitFor({state:'detached'});assert.equal(await special.evaluate(el=>el===document.activeElement),true);
+    await auditRows(page,height,'Standalone Steam touch controls',id);await shot(page,height+'-'+id+'-standalone-steam-touch');
+    evidence.push({id,noConnectionGate:true,defaultPersona:'disabled',touch:profile,currentUntouched:true});
    }
    return {modes:evidence};
   });
@@ -167,7 +167,7 @@ try{
    await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);return {centerLabel:'YeManCC野蛮系统控制中心',desktopFollowsCenter:true};
   });
   await test('Xbox 2 follows global controller in the actual editor, rather than forcing SD',height,async()=>{
-   const mode=page.locator('.boot-mode-cards button').nth(1);await focus(page,mode);await command(page,'confirm');const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');await page.locator('[data-boot-category="input"]').click();const input=page.locator('[data-boot-module="input"]');assert.equal(await input.getByRole('button',{name:'跟随全局',exact:true}).getAttribute('aria-pressed'),'true');assert.equal(await page.locator('[data-field="input.persona"] button').first().isDisabled(),true);await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);return {mode:2,scope:'global'};
+   const mode=page.locator('.boot-mode-cards button').nth(1);await focus(page,mode);await command(page,'confirm');const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');await page.locator('[data-boot-category="input"]').click();const input=page.locator('[data-boot-module="input"]');assert.equal(await input.getByRole('button',{name:'跟随全局',exact:true}).getAttribute('aria-pressed'),'true');assert.equal(await page.locator('[data-field="input.persona"] button').first().isDisabled(),true);await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);return {mode:2,scope:'global',sharedFieldsReadOnly:true};
   });
   await test('all four mode edges stay visible for selected, gamepad focus and pointer hover in panel and editor',height,async()=>{
    const evidence=[];
@@ -233,11 +233,14 @@ try{
   await test('editor has no running animations or horizontal overflow',height,async()=>{const result=await page.locator('.boot-workbench-overlay').evaluate(el=>({animations:el.getAnimations({subtree:true}).filter(a=>a.playState==='running').map(a=>a.effect?.target?.className),horizontalOverflow:document.documentElement.scrollWidth>innerWidth,box:el.getBoundingClientRect().toJSON()}));assert.deepEqual(result.animations,[]);assert.equal(result.horizontalOverflow,false);return result;});
   const categories=['性能与散热','优化软件','手柄与陀螺仪','手柄自定义','触摸板与屏幕按键','Steam 大屏','睡眠优化','监控与画面'];
   for(const category of categories){
+   if(category==='手柄自定义')await page.locator('[data-preview-mode="xbox"]').click();
    await page.locator('.boot-workbench nav button').filter({hasText:category}).click();
+   if(category==='手柄自定义')await page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true}).click();
    await test(category+' visual rows: left returns to selected category, right stays in row, up/down visit adjacent row',height,async()=>{
     return auditRows(page,height,category);
    });
    await shot(page,`${height}-${categories.indexOf(category)}-${category==='性能与散热'?'performance':'category'}`);
+   if(category==='手柄自定义')await page.locator('[data-preview-mode="global"]').click();
   }
   await page.locator('.boot-workbench nav button').filter({hasText:'手柄与陀螺仪'}).click();
   await test('A opens actual Dropdown; B cancels and restores its trigger; A confirms',height,async()=>{
@@ -260,6 +263,7 @@ try{
   });
   await page.locator('.boot-workbench nav button').filter({hasText:'手柄自定义'}).click();
   await test('controller configuration is reachable with directions, opens on A, owns focus, and B returns',height,async()=>{
+   await page.locator('[data-preview-mode="xbox"]').click();await page.locator('[data-boot-category="controller"]').click();await page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true}).click();
    const category=page.locator('.boot-workbench nav button').filter({hasText:'手柄自定义'});await focus(page,category);await command(page,'nav-right');const entry=page.getByRole('button',{name:'编辑手柄自定义',exact:true});
    const route=await page.evaluate(()=>{
     const start=document.activeElement,target=Array.from(document.querySelectorAll('button')).find(el=>el.textContent.trim()==='编辑手柄自定义');
@@ -273,6 +277,7 @@ try{
   });
   // Recover any modal after a failed reachability assertion so later tests remain independent.
   if(await page.locator('[data-gp-modal="controller-shortcut-editor"]').count())await command(page,'back');
+  await page.locator('[data-preview-mode="global"]').click();
   await page.locator('.boot-workbench nav button').filter({hasText:'触摸板与屏幕按键'}).click();
   await test('actual touchpad preset controls edit only the draft; dropdown B returns focus',height,async()=>{
    const master=page.getByRole('switch',{name:'触控板总开关',exact:true});assert.equal(await master.count(),1);const before=await master.getAttribute('aria-checked');await focus(page,master);await command(page,'confirm');assert.notEqual(await master.getAttribute('aria-checked'),before);if(before==='true')await command(page,'confirm');
@@ -364,6 +369,26 @@ try{
   });
   await test('duplicate global app shows an explanation, preserves the existing name and allows gamepad B return',height,async()=>{
    await page.goto(origin+'/');await page.waitForSelector('.boot-mode-cards');const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.waitForSelector('.boot-workbench');await page.locator('.boot-workbench nav button').filter({hasText:'优化软件'}).click();const trigger=page.getByRole('button',{name:'管理全局快捷应用',exact:true});await focus(page,trigger);await command(page,'confirm');const modal=page.locator('[data-gp-modal="boot-mode-apps"]');await modal.waitFor();const before=await page.evaluate(()=>({apps:structuredClone(window.__bootMemory.apps),calls:structuredClone(window.__bootMemory.calls)}));await modal.getByRole('textbox',{name:'应用名称',exact:true}).fill('Do not rename');await modal.getByRole('textbox',{name:'应用路径',exact:true}).fill('c:\\fixture\\APP.exe');const add=modal.getByRole('button',{name:'添加到全局应用库',exact:true});await focus(page,add);await command(page,'confirm');assert.match(await modal.getByRole('alert').innerText(),/已在全局快捷应用库/);assert.deepEqual(await page.evaluate(()=>({apps:structuredClone(window.__bootMemory.apps),calls:structuredClone(window.__bootMemory.calls)})),before);assert.equal(await add.isEnabled(),true);await command(page,'back');await modal.waitFor({state:'detached'});assert.equal(await trigger.evaluate(el=>el===document.activeElement),true);return {duplicateRejected:true,globalNamePreserved:true,gamepadBack:true};
+  });
+  await test('mode editing is separate from global; following is read-only and own settings survive follow and reopen',height,async()=>{
+   await page.goto(origin+'/');await page.waitForFunction(()=>!document.querySelector('.boot-panel-actions button')?.disabled);
+   const initial=await page.evaluate(()=>structuredClone(window.__bootMemory.document.global));
+   const edit=page.getByRole('button',{name:'编辑配置',exact:true});await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();
+   const selectMode=async id=>{const button=page.locator('[data-preview-mode="'+id+'"]');await focus(page,button);await command(page,'confirm');};
+   await selectMode('xbox');const performanceCategory=page.locator('[data-boot-category="performance"]');await focus(page,performanceCategory);await command(page,'confirm');
+   const module=page.locator('[data-boot-module="performance"]'),follow=module.getByRole('button',{name:'跟随全局',exact:true}),own=module.getByRole('button',{name:'模式单独设置',exact:true});
+   const dropdown=()=>page.locator('[data-field="performance.controls.ac.mode"] button');
+   const choose=async label=>{await focus(page,dropdown());await command(page,'confirm');await page.locator('[role="listbox"]').waitFor();const indices=await page.getByRole('option').evaluateAll((nodes,label)=>({current:nodes.findIndex(n=>n===document.activeElement),target:nodes.findIndex(n=>n.textContent.trim()===label)}),label);assert(indices.current>=0&&indices.target>=0);for(let i=0;i<Math.abs(indices.target-indices.current);i++)await command(page,indices.target>indices.current?'nav-down':'nav-up');await command(page,'confirm');await page.locator('[role="listbox"]').waitFor({state:'detached'});};
+   assert.equal(await follow.getAttribute('aria-pressed'),'true');assert.equal(await dropdown().isDisabled(),true);
+   await focus(page,own);await command(page,'confirm');await choose('手动模式');await selectMode('global');assert.match(await dropdown().innerText(),/自动模式/);await selectMode('steam');assert.match(await dropdown().innerText(),/自动模式/);
+   await selectMode('xbox');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');assert.match(await dropdown().innerText(),/自动模式/);
+   await focus(page,own);await command(page,'confirm');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');
+   const controllerCategory=page.locator('[data-boot-category="controller"]');await focus(page,controllerCategory);await command(page,'confirm');const entry=page.getByRole('button',{name:'编辑手柄自定义',exact:true});assert.equal(await entry.isDisabled(),true);
+   const controllerOwn=page.locator('[data-boot-module="controller"]').getByRole('button',{name:'模式单独设置',exact:true});await focus(page,controllerOwn);await command(page,'confirm');assert.equal(await entry.isEnabled(),true);await focus(page,entry);await command(page,'confirm');const child=page.locator('[data-gp-modal="controller-shortcut-editor"]');await child.waitFor();assert.match(await child.innerText(),/Xbox 全屏模式/);await command(page,'back');await child.waitFor({state:'detached'});
+   const revision=await page.evaluate(()=>window.__bootMemory.document.revision),save=page.locator('.boot-workbench-top button').filter({hasText:'保存预设'});await focus(page,save);await command(page,'confirm');await page.waitForFunction(r=>window.__bootMemory.document.revision>r,revision);
+   const saved=await page.evaluate(()=>window.__bootMemory.document);assert.deepEqual(saved.global,initial);assert.equal(saved.scenes.xbox.overrides.performance,undefined);assert.equal(saved.scenes.xbox.rememberedOverrides.performance.controls.ac.mode,'manual');assert.equal(saved.scenes.steam.overrides.performance,undefined);
+   await command(page,'back');await page.locator('.boot-workbench').waitFor({state:'detached'});await focus(page,edit);await command(page,'confirm');await page.locator('.boot-workbench').waitFor();await selectMode('xbox');await focus(page,performanceCategory);await command(page,'confirm');await focus(page,own);await command(page,'confirm');assert.match(await dropdown().innerText(),/手动模式/);await focus(page,follow);await command(page,'confirm');assert.match(await dropdown().innerText(),/自动模式/);
+   return {globalUntouched:true,inheritedReadOnly:true,ownPriority:true,inactiveOwnRemembered:true,ownShortcutEditorReachable:true,gamepadActions:true};
   });
   await page.close();
  }

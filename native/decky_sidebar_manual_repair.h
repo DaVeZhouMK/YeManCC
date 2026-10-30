@@ -5,6 +5,7 @@
 // Loader patch, Steam process restart, polling, or crash-budget reset belongs here.
 #include "decky_update_recovery.h"
 #include <functional>
+#include <array>
 namespace ymcc::deckyrepair {
 using Json=nlohmann::json;
 enum class Origin { Manual, Automatic };
@@ -37,6 +38,22 @@ inline bool requestMatches(const Json& args,const steamsession::Session& session
         repairable(runtime)&&(origin==Origin::Manual||runtime.at("pid")==0)&&session.pid&&session.created&&!session.root.empty();
     }catch(...){return false;}
 }
+// Explicit repair pins the version actually observed in this exact document.
+// Package/UI versions can alternate during any managed upgrade, not just 330/331.
+// Accept a verified equal/older stable document for a user-requested refresh;
+// a newer document cannot be downgraded by an older installed package. Automatic
+// retained binding still requires exact Loader/build equality in Recovery.
+inline bool manualLoaderContext(const std::string& installed,const std::string& observed){
+    const auto parse=[](const std::string& value)->std::array<unsigned long,3>{
+        if(!deckyupdate::loaderVersion(value))throw std::invalid_argument("loader-version");
+        std::array<unsigned long,3> parts{};size_t begin=1;
+        for(size_t i=0;i<3;++i){const auto end=value.find('.',begin);const auto item=value.substr(begin,end==std::string::npos?end:end-begin);
+            if(item.size()>1&&item.front()=='0')throw std::invalid_argument("loader-version");
+            parts[i]=std::stoul(item);begin=end==std::string::npos?value.size():end+1;}
+        if(!parts[0])throw std::invalid_argument("loader-version");return parts;
+    };
+    try{return parse(observed)<=parse(installed);}catch(...){return false;}
+}
 inline Json target(const steamsession::Session& session,const Json& mode,const std::string& installed,const std::string& loader){
     try{
         if(!session.pid||!session.created||session.root.empty()||!deckyupdate::fingerprint(installed)||!deckyupdate::loaderVersion(loader)||
@@ -44,13 +61,13 @@ inline Json target(const steamsession::Session& session,const Json& mode,const s
             mode.at("mode")!="bigpicture"||mode.at("deckyFrontendLoaded")!=true)return Json{};
         const auto empty=mode.value("deckyEmptyFrontend",Json());
         if(empty.is_object()&&empty.size()==3&&empty.value("protocol",0)==1&&
-            empty.value("frontendBuildId",std::string{})==installed&&empty.value("loaderVersion",std::string{})==loader)
+            empty.value("frontendBuildId",std::string{})==installed&&manualLoaderContext(loader,empty.value("loaderVersion",std::string{})))
             return {{"operation","decky.repairConnection"},{"userInitiated",true},{"expectedFrontendBuild",nullptr},
-                {"installedFrontendBuild",installed},{"loaderVersion",loader}};
+                {"installedFrontendBuild",installed},{"loaderVersion",empty.at("loaderVersion")}};
         const auto prior=deckyupdate::residue(mode.at("deckyUpdateResidue"));
-        if(prior.empty()||prior.value("loaderVersion",std::string{})!=loader)return Json{};
+        if(prior.empty()||!manualLoaderContext(loader,prior.value("loaderVersion",std::string{})))return Json{};
         return {{"operation","decky.repairConnection"},{"userInitiated",true},{"expectedFrontendBuild",prior.at("frontendBuildId")},
-            {"installedFrontendBuild",installed},{"loaderVersion",loader}};
+            {"installedFrontendBuild",installed},{"loaderVersion",prior.at("loaderVersion")}};
     }catch(...){return Json{};}
 }
 class AttemptBudget {

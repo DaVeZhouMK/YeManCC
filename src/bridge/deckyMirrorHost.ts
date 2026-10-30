@@ -386,7 +386,7 @@ export function startDeckyMirrorHost(): { ready: () => void; stop: () => void } 
         }
         if (!ended && peer.connected) {
           relay.connected(peer); dispatchDeckyMirrorPeer(peer); relay.invalidate();
-          void relay.request({ ...peer, request: { command:'snapshot', runId:peer.runId } });
+          void relay.refreshSnapshotAfterAttach(peer);
         }
       }).catch(() => {});
   };

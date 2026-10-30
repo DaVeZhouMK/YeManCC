@@ -106,4 +106,80 @@ await check('readiness-only failure and same-target recovery repaint once per ed
  }
 });
 
-const report={status:'passed',cases,productionHostExecutedInVm:true,actualHardwareWrites:0,oldTierCommandsRejected:true,continuousOwnerWired:true};console.log(JSON.stringify(report,null,2));
+// Keep the real Host snapshotDemand callback: isolated relay fixtures without it
+// cannot detect duplicate requests invalidating the production in-flight read.
+const demandStormMeasurements=[];
+for(const boundary of ['ordinary','source-change','manual-probe','reopen'])await check('in-flight snapshot storm preserves '+boundary+' freshness',async()=>{
+ let releaseInput,releaseLossless,held=false;
+ const inputGate=new Promise(resolve=>releaseInput=resolve),losslessGate=new Promise(resolve=>releaseLossless=resolve);
+ const f=await fixture(seed(),{readHooks:{input:async()=>{if(held)await inputGate;},lossless:()=>losslessGate,losslessProgram:()=>losslessGate}});
+ try{
+  f.ready();const initial=await f.read();assert.equal(initial.ready,true);
+  const before=structuredClone(f.counts),replyStart=f.replies.length;
+  held=true;f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});await flush();
+  assert.equal(f.counts.inputReads,before.inputReads+1,'Read must actually be held in original owner');
+  for(let i=0;i<1024;i++)f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});
+  if(boundary==='source-change'){f.state.power.generation++;f.powerChanged();}
+  if(boundary==='manual-probe')f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,probeId:'probe:host-storm:1'}});
+  if(boundary==='reopen'){
+   f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});
+   f.state.power.generation++;
+   f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});
+  }
+  held=false;releaseInput();await flush();
+  const delivered=f.replies.slice(replyStart).filter(x=>x.message.type==='snapshot').map(x=>x.message),last=delivered.at(-1)?.snapshot;
+  const reads=f.counts.inputReads-before.inputReads,expected=boundary==='ordinary'?1:2;
+  demandStormMeasurements.push({boundary,duplicateRequests:1024,businessReads:reads,expected,deliveries:delivered.length});
+  assert.equal(last?.ready,true);assert.equal(last.generation,f.state.power.generation);
+  assert.equal(reads,expected,JSON.stringify(demandStormMeasurements.at(-1)));
+  if(boundary==='manual-probe')assert.ok(delivered.some(x=>x.probeId==='probe:host-storm:1'&&x.snapshot.ready));
+  // A later explicit request must still refresh, including external file edits.
+  const settled=f.counts.inputReads;await f.read();assert.equal(f.counts.inputReads,settled+1);
+  assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);
+ }finally{f.stop();releaseInput();releaseLossless();await flush();}
+ assert.equal(f.observerStats().watchers,0);assert.equal(f.observerStats().game,0);assert.equal(f.fxTimerCount(),0);
+});
+
+// Reproduce retained-frontend Host.ready()->attach with the authenticated
+// sidebar pause already delivered. A passive peer must not restart business IO.
+const attachDemandMeasurements=[];
+for(const boundary of ['explicit-pause','pause-during-attach','visible','unknown','invalid-pause','new-peer'])await check('renderer reattach respects '+boundary+' sidebar demand',async()=>{
+ let attachPeer=null,releaseAttach;
+ const attachGate=new Promise(resolve=>releaseAttach=resolve);
+ const f=await fixture(seed(),{invoke:async command=>{
+  if(command!=='deckySidebar.mirrorAttach')return true;
+  if(attachPeer&&boundary==='pause-during-attach')await attachGate;
+  return attachPeer?{...attachPeer,owner:'YMCC-native',pid:8612}:{connected:false,owner:'YMCC-native',pid:8612};
+ }});
+ try{
+  await flush();f.emit('deckySidebar.mirrorPeer',peer);
+  if(boundary==='explicit-pause'||boundary==='new-peer')f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});
+  else if(boundary==='visible')f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId}});
+  else if(boundary==='invalid-pause')f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId:'b'.repeat(32),subscribe:false}});
+  await flush();assert.equal(f.counts.power,0,'Initializing Host must not read original business owners');
+  const before=structuredClone(f.counts),replyStart=f.replies.length;
+  attachPeer=boundary==='new-peer'?{connection:'2',runId:'b'.repeat(32),connected:true}:peer;
+  f.ready();
+  if(boundary==='pause-during-attach'){await flush();f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});releaseAttach();}
+  await flush();
+  const snapshots=f.replies.slice(replyStart).filter(x=>x.message.type==='snapshot').map(x=>x.message.snapshot);
+  attachDemandMeasurements.push({boundary,powerReads:f.counts.power-before.power,inputReads:f.counts.inputReads-before.inputReads,deliveredSnapshots:snapshots.length});
+  if(boundary==='explicit-pause'||boundary==='pause-during-attach'){
+   assert.equal(f.counts.power,before.power,JSON.stringify(attachDemandMeasurements.at(-1)));
+   assert.equal(f.counts.inputReads,before.inputReads);assert.equal(snapshots.length,0);
+   assert.equal(f.observerStats().watchers,0);assert.equal(f.readinessSubscriberCount(),0);
+   const reopened=await f.read();assert.equal(reopened.ready,true);assert(f.counts.power>before.power,'Explicit visible reopen must remain usable');
+  }else{
+   assert(f.counts.power>before.power);assert.equal(snapshots.at(-1)?.ready,true);assert.equal(snapshots.at(-1).runId,attachPeer.runId);
+   if(boundary==='new-peer'){
+    // A delayed pause from the previous authenticated peer cannot pause the new one.
+    f.emit('deckySidebar.mirrorRequest',{...peer,request:{command:'snapshot',runId,subscribe:false}});
+    const reads=f.counts.power;f.emit('deckySidebar.mirrorRequest',{...attachPeer,request:{command:'snapshot',runId:attachPeer.runId}});await flush();assert(f.counts.power>reads);
+   }
+  }
+  assert.equal(f.counts.saves,0);assert.equal(f.counts.performanceUpdates??0,0);
+ }finally{releaseAttach();f.stop();await flush();}
+ assert.equal(f.observerStats().watchers,0);assert.equal(f.observerStats().game,0);assert.equal(f.fxTimerCount(),0);assert.equal(f.controllerTimerCount(),0);
+});
+
+const report={status:'passed',cases,demandStormMeasurements,attachDemandMeasurements,productionHostExecutedInVm:true,actualHardwareWrites:0,oldTierCommandsRejected:true,continuousOwnerWired:true};console.log(JSON.stringify(report,null,2));

@@ -12,6 +12,9 @@ let steamAccountRequest = null;
 let steamAccountLastCheck = 0;
 const STEAM_ACCOUNT_RECHECK_MS = 5000;
 let steamRuntimeLastCheck = 0;
+let steamRuntimeWatchTimer = 0;
+let steamRuntimeWatchClosed = false;
+let steamRuntimeWatchForeground = false;
 let selectedGameDirectories = null;
 let selectedSteamDirectories = null;
 let selectedCategoryDirectories = { unclassified: new Set(), 'non-game': new Set() };
@@ -1125,10 +1128,12 @@ function renderSteamRuntimeState() {
     : running === false ? '加入当前页中已选中的项目（SteamID、封面和壁纸可为空）' : '正在检测 Steam 状态';
 }
 function refreshSteamRuntimeState(force = false) {
+  if (!force && !steamRuntimeWatchAllowed()) return Promise.resolve(steamRuntimeState);
   const now = Date.now();
   if (!force && steamRuntimeRequest) return steamRuntimeRequest;
   if (!force && now - steamRuntimeLastCheck < 1800) return Promise.resolve(steamRuntimeState);
   if (steamRuntimeRequest) return steamRuntimeRequest;
+  cancelSteamRuntimeWatchTimer();
   steamRuntimeState.checking = true;
   renderSteamRuntimeState();
   steamRuntimeRequest = invoke('steamCommitPreflight').then(result => {
@@ -1140,8 +1145,46 @@ function refreshSteamRuntimeState(force = false) {
     steamRuntimeState = { running: null, steamPath: '', checking: false };
     renderSteamRuntimeState();
     return null;
-  }).finally(() => { steamRuntimeRequest = null; });
+  }).finally(() => { steamRuntimeRequest = null; syncSteamRuntimeWatch(); });
   return steamRuntimeRequest;
+}
+// One visible, focused library owns this timer. Background state changes can
+// still update the UI, but must not restart a periodic system-process scan.
+function steamRuntimeWatchAllowed() {
+  const library = $('#library-view');
+  return !steamRuntimeWatchClosed && !!library && !library.classList.contains('hidden') &&
+    !document.hidden && document.hasFocus();
+}
+function cancelSteamRuntimeWatchTimer() {
+  if (steamRuntimeWatchTimer) window.clearTimeout(steamRuntimeWatchTimer);
+  steamRuntimeWatchTimer = 0;
+}
+function syncSteamRuntimeWatch(refresh = false) {
+  const active = steamRuntimeWatchAllowed();
+  const activated = active && !steamRuntimeWatchForeground;
+  steamRuntimeWatchForeground = active;
+  if (!active) { cancelSteamRuntimeWatchTimer(); return; }
+  if (steamRuntimeRequest) { cancelSteamRuntimeWatchTimer(); return; }
+  if (refresh || activated) {
+    cancelSteamRuntimeWatchTimer();
+    void refreshSteamRuntimeState(true);
+    return;
+  }
+  if (!steamRuntimeWatchTimer) steamRuntimeWatchTimer = window.setTimeout(() => {
+    steamRuntimeWatchTimer = 0;
+    if (steamRuntimeWatchAllowed()) void refreshSteamRuntimeState(true);
+    else syncSteamRuntimeWatch();
+  }, 3000);
+}
+function startSteamRuntimeWatch() {
+  const resume = () => syncSteamRuntimeWatch();
+  const pause = () => syncSteamRuntimeWatch();
+  window.addEventListener('focus', resume);
+  window.addEventListener('blur', pause);
+  document.addEventListener('visibilitychange', resume);
+  window.addEventListener('pagehide', () => { steamRuntimeWatchClosed = true; pause(); });
+  window.addEventListener('pageshow', () => { steamRuntimeWatchClosed = false; resume(); });
+  syncSteamRuntimeWatch();
 }
 function renderSteamTarget() {
   // Do not show yesterday's negative cache as a live login warning. A fresh
@@ -1174,7 +1217,7 @@ function renderSteamTarget() {
     notice.textContent = '';
   }
   renderSteamRuntimeState();
-  refreshSteamRuntimeState();
+  syncSteamRuntimeWatch();
 }
 function renderArtworkRefreshControl() {
   const button = $('#refresh-artwork-button');
@@ -3257,9 +3300,7 @@ updateSteamArtworkButton.addEventListener('click', async () => {
 ensureNativeSteamTab();
 upgradeEditDropdowns();
 
-window.setInterval(() => {
-  if (!$('#library-view')?.classList.contains('hidden')) refreshSteamRuntimeState(true);
-}, 3000);
+startSteamRuntimeWatch();
 
 // Returning from Steam after signing in rechecks accounts once. Coalesce
 // requests and rate-limit focus churn instead of adding another polling loop.

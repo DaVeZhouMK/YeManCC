@@ -29,7 +29,8 @@ export function gamepadEnvironmentNotice(snapshot: Readonly<HidHideSetupSnapshot
     return { title: '手柄环境准备未确认', description: '后台准备结果未能确认，不能据此判断已安装的驱动是否可用。可以继续尝试启用虚拟手柄；实际创建失败时会显示后端错误，准备详情见日志。', tone: 'neutral' };
   }
   if (status === 9 && snapshot.hidHideSetupNotice === 0) {
-    return { title: '手柄驱动维护已暂缓', description: '已检测到当前或更新版本的驱动包；控制器程序正在运行，本次自动维护已跳过。驱动包存在不代表当前设备已绑定或输入正常，请以实际创建和输入结果为准；占用详情见日志。', tone: 'neutral' };
+    // Routine maintenance deferral remains in diagnostics; no controller-page banner.
+    return null;
   }
   if (status === 8) {
     return { title: '手柄环境提示', description: '驱动清单格式暂未识别，自动维护未执行。当前连接是否正常，以实际创建和输入结果为准。', tone: 'neutral' };

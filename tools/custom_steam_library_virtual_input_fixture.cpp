@@ -35,6 +35,7 @@ static bool processDenied = false, processQueryFailed = false;
 static bool g_webviewReady = true, directFocusAllowed = true, altFocusAllowed = true, altInserted = false, altInsertionSucceeds = true;
 static unsigned foregroundAttempts = 0, altAttempts = 0, windowRestores = 0;
 static unsigned foregroundReads = 0;
+static unsigned processOpens = 0, imageQueries = 0, processCloses = 0;
 struct FixtureWebViewController {
     unsigned moves = 0;
     HRESULT MoveFocus(int) { ++moves; return S_OK; }
@@ -59,13 +60,15 @@ static HANDLE fixtureGetProp(HWND window, const wchar_t* name) {
 static DWORD fixtureWindowPid(HWND window, DWORD* pid) { if (pid) *pid = fixture(window)->pid; return 1; }
 static DWORD fixtureCurrentPid() { return 42; }
 static HANDLE fixtureOpenProcess(DWORD, BOOL, DWORD pid) {
+    ++processOpens;
     return processDenied || pid != childWindow.pid ? nullptr : reinterpret_cast<HANDLE>(childHandle);
 }
 static BOOL fixtureQueryProcess(HANDLE, DWORD, wchar_t* buffer, DWORD* length) {
+    ++imageQueries;
     if (processQueryFailed || childWindow.image.size() >= *length) return FALSE;
     std::wcscpy(buffer, childWindow.image.c_str()); *length = static_cast<DWORD>(childWindow.image.size()); return TRUE;
 }
-static BOOL fixtureCloseHandle(HANDLE) { return TRUE; }
+static BOOL fixtureCloseHandle(HANDLE) { ++processCloses; return TRUE; }
 static ULONGLONG fixtureGetTickCount64() { return fixtureTick; }
 static BOOL fixtureBringWindowToTop(HWND) { return TRUE; }
 static BOOL fixtureSetForeground(HWND window) {
@@ -246,7 +249,7 @@ static void reset() {
     processDenied = processQueryFailed = physicalRelease = false;
     g_webviewReady = directFocusAllowed = altFocusAllowed = altInsertionSucceeds = true;
     altInserted = false; foregroundAttempts = altAttempts = windowRestores = 0;
-    foregroundReads = 0;
+    foregroundReads = 0; processOpens = imageQueries = processCloses = 0;
     fixtureController.moves = 0; g_ctrl = &fixtureController;
     g_inputHostProcess = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(1));
     g_inputHostPrepared = g_inputHostNeutralized = fixtureVirtualWriterAllowed = true;
@@ -354,6 +357,36 @@ int main() {
         check(g_inputReleaseRequired.load(),"Genuine foreground close lost final-button protection");
         foregroundWindow=otherHandle;
         check(!customSteamLibraryInputSuppressed(),"Foreground close left a persistent library ownership gate");
+    });
+    test("background-library-repeated-probes-do-zero-process-identity-work", [] {
+        useChild(); foregroundWindow=otherHandle;
+        for(int i=0;i<2000;++i){check(!customSteamLibraryInputSuppressed(),"Background child acquired input");check(!gamepadUiInputEligible(),"Background child allowed UI input");}
+        check(processOpens==0&&imageQueries==0&&processCloses==0,"Background input path repeated full process identity probes");
+    });
+    test("hidden-and-minimized-library-probes-do-zero-process-identity-work", [] {
+        useChild(); childWindow.visible=false;
+        for(int i=0;i<1000;++i)check(!customSteamLibraryInputSuppressed(),"Hidden child acquired input");
+        childWindow.visible=true; childWindow.iconic=true;
+        for(int i=0;i<1000;++i)check(!customSteamLibraryInputSuppressed(),"Minimized child acquired input");
+        check(processOpens==0&&imageQueries==0,"Hidden/minimized window queried process identity");
+    });
+    test("foreground-eligibility-verifies-identity-once-per-decision", [] {
+        useChild();
+        for(int i=0;i<1000;++i)check(gamepadUiInputEligible(),"Verified child lost eligibility");
+        check(processOpens==1000&&imageQueries==1000&&processCloses==1000,"One eligibility decision duplicated identity queries");
+    });
+    test("focus-loss-stops-identity-work-without-stale-admission", [] {
+        useChild();check(customSteamLibraryInputSuppressed(),"Foreground child not admitted");
+        const auto opens=processOpens,queries=imageQueries;foregroundWindow=otherHandle;
+        for(int i=0;i<2000;++i)check(!customSteamLibraryInputSuppressed(),"Focus loss retained child input");
+        check(processOpens==opens&&imageQueries==queries,"Focus loss kept probing the child process");
+    });
+    test("foreground-identity-is-fresh-without-long-lived-cache", [] {
+        useChild();check(gamepadUiInputEligible(),"Foreground child not admitted");
+        childWindow.image=L"G:\\Fixture\\Unrelated.exe";
+        check(!gamepadUiInputEligible(),"Prior identity bypassed a fresh executable check");
+        childWindow.image=L"G:\\Fixture\\CustomSteamLibrary.exe";processQueryFailed=true;
+        check(!gamepadUiInputEligible(),"Prior identity bypassed failed verification");
     });
     test("deck-main-foreground-still-neutral", [] { check(steamDeckUiOwnsInput(deckPlan()), "Main UI lost Deck neutral output"); });
     test("deck-main-root-owner-popup-still-neutral", [] { foregroundWindow = popupHandle; check(steamDeckUiOwnsInput(deckPlan()), "Main root-owner foreground behavior changed"); });

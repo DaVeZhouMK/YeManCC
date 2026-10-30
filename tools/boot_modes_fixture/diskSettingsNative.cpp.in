@@ -5,6 +5,7 @@
 #include "settings_baseline.h"
 #include "controller_persona_settings.h"
 #include "input_startup_policy.h"
+#include "boot_mode_shortcuts.h"
 #include <filesystem>
 #include <fstream>
 #include <iostream>
@@ -26,6 +27,7 @@ static json handle(const json& request){
  YM_SETTINGS_FILE=file.wstring();YM_SETTINGS_BACKUP_FILE=YM_SETTINGS_FILE+L".bak";
  const auto operation=request.at("operation").get<std::string>();
  if(operation=="read")return ymSettingsReadSnapshot(request.value("stamp",std::string{}));
+ if(operation=="shortcutRules") { const auto document=ymSettingsReadUnlocked(); const auto input=request.contains("input")?request.at("input"):document.value("input",json::object()); const auto rules=ymcc::bootModeShortcuts::effectiveRules(input); return {{"rules",rules?*rules:json::array()}}; }
  json committed;bool conflict=false,blocked=false,ok=false;
  if(operation=="write"){
   const auto baseline=request.value("baseline",json(nullptr));

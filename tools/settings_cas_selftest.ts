@@ -1,5 +1,18 @@
 import { evaluateInputCas, evaluateInputCasWrite, normalizeSettings, type InputSettingsSnapshot } from '../src/bridge/settingsRepository';
 
+// Automatic wake scanning inherits the old choice once, then stays independent.
+for (const [sleep, expected] of [
+  [{}, true],
+  [{ sleepPowerPlanOptimizationEnabled: false }, false],
+  [{ sleepPowerPlanOptimizationEnabled: true }, true],
+  [{ sleepPowerPlanOptimizationEnabled: false, staticWakeAutoScanEnabled: true }, true],
+  [{ sleepPowerPlanOptimizationEnabled: true, staticWakeAutoScanEnabled: false }, false],
+] as const) {
+  const first = normalizeSettings({ sleep });
+  if (first.sleep.staticWakeAutoScanEnabled !== expected || normalizeSettings(first).sleep.staticWakeAutoScanEnabled !== expected)
+    throw new Error('automatic wake scan migration changed saved intent');
+}
+
 const normalized = normalizeSettings({ input: { outputTarget: { persona: 'invalid', buttonMappingEnabled: 1 }, buttonMapping: { profileId: '' }, gyroMotion: { outputMode: 'invalid' } } });
 // A13 同步（2026-09-20）：旧断言写 0 与当前实现对不上。此处更新为 1 的**依据是
 // 三层一致性**（属"当前实现自洽"证据，193 §2 P2 第 4 条明确：一致性不自动等于历史设计

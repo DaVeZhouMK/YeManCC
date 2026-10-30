@@ -117,6 +117,11 @@ internal static partial class Program
     private static async Task<int> Main(string[] args)
     {
         YeManCC.ProcessEfficiency.ApplyCurrentProcessOnce();
+        // Experimental physical reader has no virtual-target/SDK lifecycle.
+        if (args.Length > 0 && args[0] == PhysicalSourceReader.Command)
+            return await PhysicalSourceReader.RunAsync(args);
+        if (args.Length == 1 && args[0] == "--selftest-physical-source-reader-v1")
+            return PhysicalSourceReader.RunSelfTest();
         if (args.Length == 1 && args[0] == "--selftest-external-controller-priority-cycle")
             return ExternalControllerPortCycle.SelfTest() ? 0 : 3;
         if (args.Length > 0 && args[0] == ExternalControllerPortCycle.Command)

@@ -54,6 +54,7 @@ static void inputHostNativeSignalEvidence(const FocusFrameContent& finalContent,
                 {"pad",{{"buttons",p.wButtons},{"ltByte",p.bLeftTrigger},{"rtByte",p.bRightTrigger},
                     {"lxShort",p.sThumbLX},{"lyShort",p.sThumbLY},{"rxShort",p.sThumbRX},{"ryShort",p.sThumbRY}}}});
         }
+        if(sample && sample->physicalReaderPid)source["physicalReader"]={{"pid",sample->physicalReaderPid},{"sampleSequence",sample->physicalReaderSequence},{"sampleTick",sample->readCompletedTick},{"packetNumber",sample->physicalReaderPacket},{"actualSlot",sample->physicalReaderActualSlot},{"guide",sample->specialXbox},{"rawPad",{{"buttons",sample->physicalReaderRawPad.wButtons},{"ltByte",sample->physicalReaderRawPad.bLeftTrigger},{"rtByte",sample->physicalReaderRawPad.bRightTrigger},{"lxShort",sample->physicalReaderRawPad.sThumbLX},{"lyShort",sample->physicalReaderRawPad.sThumbLY},{"rxShort",sample->physicalReaderRawPad.sThumbRX},{"ryShort",sample->physicalReaderRawPad.sThumbRY}}},{"rawPadScope","helper-wire-controls-before-native-canonicalization;not-hardware-freshness-proof"},{"scope","exact-bound-physical-reader;SDK/game-delivery-unproven"}};
         // Assemble once per selected witness from the SAME effective typed value
         // already serialized for this request. This is not another submission.
         json wireRequest=requestReceipt;

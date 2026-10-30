@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';import fs from 'node:fs';import vm from 'node:vm';import {transformSync} from 'esbuild';
-const names=['Art Hero','Centered Game Text','Darken Unfocused Games','Game Cover Reflections','Mini Carousel','NEX-85 Keyboard','Round'];const module={exports:{}};
+const names=['Art Hero','Centered Game Text','Darken Unfocused Games','Mini Carousel','NEX-85 Keyboard','Round','YMCC Game Details'];const module={exports:{}};
 const code=transformSync(fs.readFileSync('src/bridge/steamAppearanceDraft.ts','utf8'),{loader:'ts',format:'cjs'}).code;
 vm.runInNewContext(code,{module,exports:module.exports,require:()=>({STEAM_APPEARANCE_THEMES:names.map(name=>({name})),steamAppearance:{}}),Date,setTimeout,clearTimeout,Error,Number,Object,JSON,Infinity});
 const {createAppearanceDraft}=module.exports;const cases=[];async function flush(){for(let i=0;i<25;i++)await Promise.resolve()};async function check(name,fn){await fn();cases.push(name)};
@@ -76,4 +76,6 @@ finishRepair({ok:true,snapshot:structuredClone(repair.actual)});await repairRead
 await check('a click during reconciliation is saved once after repair completion',()=>{assert.equal(repair.calls.apply.length,1);assert.equal(repair.actual.themes.find(row=>row.name==='Round').configured,false)});
 const repairFailure=fixture();repairFailure.actual.packOwned=true;repairFailure.actual.configuredMatchesBackend=false;repairFailure.deps.reconcileExisting=async()=>{throw Error('ambiguous repair')};await repairFailure.init();
 await check('failed reconciliation preserves the observed configuration without a retry timer',()=>{assert.equal(repairFailure.q.getState().phase,'saved-unconfirmed');assert(repairFailure.q.getState().snapshot);assert.equal(repairFailure.timers.size,0)});
+const oldJournal=fixture(new Map([['YMCC.steamAppearanceDraft.v1:'+'a'.repeat(16),JSON.stringify({version:1,targetId:'a'.repeat(16),states:{Round:false,'Game Cover Reflections':true}})]]));await oldJournal.init();await oldJournal.advance(60000);
+await check('retired reflection journal entry is discarded while other choices remain display-only',()=>{assert.deepEqual({...oldJournal.q.getState().changes},{Round:false});assert.equal(oldJournal.calls.apply.length,0);assert.equal(oldJournal.timers.size,0);assert.equal(JSON.parse([...oldJournal.storage.values()][0]).states['Game Cover Reflections'],undefined)});
 const record={ok:true,passed:cases.length,cases,realSteamOperations:0,realCssOperations:0};const out=process.argv[2];if(out)fs.writeFileSync(out,JSON.stringify(record,null,2));console.log(JSON.stringify(record,null,2));

@@ -78,10 +78,17 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   $sourceHome=Resolve-YmccDeckyPath $Source
   $targetHome=Resolve-YmccDeckyPath $Target
   if ($sourceHome -ieq $targetHome -or $sourceHome.StartsWith($targetHome+'\',[StringComparison]::OrdinalIgnoreCase) -or $targetHome.StartsWith($sourceHome+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'DECKY_SOURCE_TARGET_OVERLAP' }
-  $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.json'
+  # Official Loader migrates every ROOT *.json into settings with os.rename.
+  # Keep YMCC ownership metadata outside that namespace; never patch the Loader.
+  $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.receipt'
+  $legacyReceipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.json'
+  $movedReceipt=Resolve-YmccDeckyPath $targetHome 'settings/.ymcc-managed.json'
+  if ([IO.Directory]::Exists($receipt) -or [IO.Directory]::Exists($legacyReceipt)) { throw 'DECKY_RECEIPT_IS_DIRECTORY' }
   $previous=$null; $preserved=@(); $entries=@(); $incoming=@{}
   $installedIdentity=$receipt
-  if (![IO.File]::Exists($receipt) -and $InstalledManifestPath -and [IO.File]::Exists($InstalledManifestPath)) {
+  if (![IO.File]::Exists($receipt) -and [IO.File]::Exists($legacyReceipt)) { $installedIdentity=$legacyReceipt }
+  elseif (![IO.File]::Exists($receipt) -and [IO.File]::Exists($movedReceipt)) { $installedIdentity=$movedReceipt }
+  elseif (![IO.File]::Exists($receipt) -and $InstalledManifestPath -and [IO.File]::Exists($InstalledManifestPath)) {
     $installedIdentity=Resolve-YmccDeckyPath ([IO.Path]::GetDirectoryName($InstalledManifestPath)) ([IO.Path]::GetFileName($InstalledManifestPath))
   }
   if ([IO.File]::Exists($installedIdentity)) {
@@ -89,6 +96,16 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
     $previous=Get-Content -LiteralPath $installedIdentity -Raw -Encoding UTF8 | ConvertFrom-Json
     Assert-YmccDeckyManifest $previous -Previous
     if ([version]$previous.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
+  }
+  # A duplicate old root receipt must also be validated before retiring it,
+  # including its downgrade fence. A foreign/corrupt file is never deleted.
+  $legacyHash=$null
+  if ([IO.File]::Exists($legacyReceipt)) {
+    if (([IO.FileInfo]$legacyReceipt).Length -gt 131072) { throw 'DECKY_INSTALLED_RECEIPT_TOO_LARGE' }
+    $legacy=Get-Content -LiteralPath $legacyReceipt -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-YmccDeckyManifest $legacy -Previous
+    if ([version]$legacy.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
+    $legacyHash=Get-YmccDeckyHash $legacyReceipt
   }
   foreach ($file in @($Manifest.files)) {
     $src=Resolve-YmccDeckyPath $sourceHome $file.path
@@ -115,7 +132,10 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   try { $receiptHash=([BitConverter]::ToString($sha.ComputeHash($receiptBytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
   $oldReceipt=$null
   if ([IO.File]::Exists($receipt)) { $oldReceipt=Get-YmccDeckyHash $receipt }
-  if ($oldReceipt -cne $receiptHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.json';source=$null;before=$oldReceipt;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
+  if ($oldReceipt -cne $receiptHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.receipt';source=$null;before=$oldReceipt;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
+  # Write the safe receipt FIRST; retire only the validated legacy root inside
+  # the same backup/rollback transaction. Leave settings and user plugins alone.
+  if ($legacyHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.json';source=$null;before=$legacyHash;after=$null;remove=$true;bytes=$null} }
   # File lock failure is detected before the first mutation; foreign Loader stays untouched.
   foreach ($entry in $entries) { if ($entry.before) {
     $file=Resolve-YmccDeckyPath $targetHome $entry.path

@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$EvidenceDir,[switch]$SkipMutationProof,
  [ValidateRange(1,30000)][int]$TotalBudgetMs=30000,
  [ValidateRange(1,25000)][int]$RunBudgetMs=25000,
@@ -15,9 +15,10 @@ $EvidenceDir=[IO.Path]::GetFullPath($EvidenceDir)
 [IO.Directory]::CreateDirectory($EvidenceDir) | Out-Null
 # Execute exactly the script shipped inside the native executable.
 $header=Get-Content -LiteralPath (Join-Path $root 'native/decky_package_maintenance_script.h') -Raw -Encoding UTF8
-$match=[regex]::Match($header,'(?s)R"YMCCDECKYPKG\((.*)\)YMCCDECKYPKG";')
-if (!$match.Success) { throw 'Missing native package-maintenance script' }
-$body=$match.Groups[1].Value
+$scriptLiteralMatches=[regex]::Matches($header,'(?s)R"YMCCDECKYPKG\((.*?)\)YMCCDECKYPKG"')
+if (!$scriptLiteralMatches.Count) { throw 'Missing native package-maintenance script' }
+$body=(@($scriptLiteralMatches | ForEach-Object { $_.Groups[1].Value }) -join '')
+foreach ($part in $scriptLiteralMatches) { if ([Text.Encoding]::UTF8.GetByteCount($part.Groups[1].Value) -gt 8192) { throw 'Native package-maintenance literal exceeds chunk budget' } }
 $source=(Get-Content -LiteralPath (Join-Path $root 'native/decky_package_maintenance.ps1') -Raw -Encoding UTF8).TrimStart([char]0xfeff).Replace("`r`n","`n")
 if ($source -cne $body) { throw 'Embedded package-maintenance script differs' }
 # Keep the real named-Mutex consumer, replacing only its Windows namespace.
@@ -121,6 +122,46 @@ Check 'unchanged package is idempotent with zero target file mutations' {
   $p=Get-YmccDeckyPlan $c.source $c.target $c.manifest
   Need (@($p.entries).Count -eq 0) 'Same package unnecessarily rewrites files'
 }
+Check 'official root JSON migration no longer consumes the YMCC receipt across two starts' {
+  $c=New-Case 'safe-receipt';Seed $c|Out-Null
+  Put $c.target 'settings/.ymcc-managed.json' 'older-private-settings-copy'|Out-Null
+  foreach($restart in 1,2){foreach($entry in @(Get-ChildItem -LiteralPath $c.target -File -Force -Filter '*.json')){[IO.File]::Move($entry.FullName,(Join-Path $c.target ('settings/'+$entry.Name)))}}
+  Need ([IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Official settings migration consumed installed ownership metadata'
+  Need ((Get-YmccDeckyPlan $c.source $c.target $c.manifest).entries.Count -eq 0) 'Repeated Loader startup invalidated the managed package identity'
+}
+Check 'duplicate legacy root receipt is retired transactionally while settings stay untouched' {
+  $c=New-Case 'legacy-duplicate';Seed $c|Out-Null
+  [IO.File]::Copy((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
+  $settings=Put $c.target 'settings/.ymcc-managed.json' 'old-private-settings-copy';$before=Snapshot $c.target
+  $transaction=Seed $c
+  Need (![IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json'))) 'Old root JSON still crashes official settings migration'
+  Need ([IO.File]::ReadAllText($settings) -ceq 'old-private-settings-copy') 'Settings-side metadata changed'
+  Undo-YmccDeckyTransaction $transaction
+  Need ((Snapshot $c.target) -ceq $before) 'Migration rollback did not restore exact prior root and canonical receipt'
+}
+Check 'legacy-only receipt adopts the safe name and still enforces downgrade refusal' {
+  $c=New-Case 'legacy-only';Seed $c|Out-Null
+  [IO.File]::Move((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
+  Seed $c|Out-Null
+  Need (![IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json')) -and [IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Legacy identity not migrated'
+  [IO.File]::Move((Join-Path $c.target '.ymcc-managed.receipt'),(Join-Path $c.target '.ymcc-managed.json'))
+  $old=Get-Content -LiteralPath (Join-Path $c.target '.ymcc-managed.json') -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';Put $c.target '.ymcc-managed.json' ($old|ConvertTo-Json -Depth 8 -Compress)|Out-Null
+  $before=Snapshot $c.target;Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} 'DOWNGRADE_REFUSED'
+  Need ((Snapshot $c.target) -ceq $before) 'Downgrade refusal mutated legacy identity'
+}
+Check 'settings-migrated old identity still prevents package downgrade when no root receipt exists' {
+  $c=New-Case 'moved-downgrade';Seed $c|Out-Null
+  $old=Get-Content -LiteralPath (Join-Path $c.target '.ymcc-managed.receipt') -Raw|ConvertFrom-Json;$old.loaderVersion='v3.4.0';Put $c.target 'settings/.ymcc-managed.json' ($old|ConvertTo-Json -Depth 8 -Compress)|Out-Null
+  [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.receipt'));$before=Snapshot $c.target
+  Reject {Get-YmccDeckyPlan $c.source $c.target $c.manifest} 'DOWNGRADE_REFUSED'
+  Need ((Snapshot $c.target) -ceq $before) 'Migrated settings identity was ignored or changed'
+}
+Check 'foreign corrupt legacy JSON is never removed to hide a launch collision' {
+  $c=New-Case 'corrupt-legacy';Seed $c|Out-Null;Put $c.target '.ymcc-managed.json' '{bad'|Out-Null;$before=Snapshot $c.target
+  $refused=$false;try{Get-YmccDeckyPlan $c.source $c.target $c.manifest|Out-Null}catch{$refused=$true}
+  Need $refused 'Corrupt legacy root did not block the install'
+  Need ((Snapshot $c.target) -ceq $before) 'Corrupt or foreign legacy data was erased'
+}
 Check 'missing and corrupt owned resources automatically repair as one paired package' {
   $c=New-Case 'repair';Seed $c | Out-Null
   [IO.File]::Delete((Join-Path $c.target 'plugins/ymcc-sidebar/dist/index.js'))
@@ -140,14 +181,14 @@ Check 'higher incoming official version consumes incoming identity rather than o
 }
 Check 'old YMCC package cannot downgrade a recorded newer Loader' {
   $c=New-Case 'downgrade';Seed $c | Out-Null
-  $receipt=Join-Path $c.target '.ymcc-managed.json';$old=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json;$old.loaderVersion='v3.4.0';$old | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
+  $receipt=Join-Path $c.target '.ymcc-managed.receipt';$old=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json;$old.loaderVersion='v3.4.0';$old | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
   $before=Snapshot $c.target
   Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest } 'DOWNGRADE_REFUSED'
   Need ((Snapshot $c.target) -eq $before) 'Downgrade rejection changed files'
 }
 Check 'first old-updater package identity prevents later downgrade without a managed receipt' {
   $c=New-Case 'first-upgrade';Seed $c|Out-Null
-  [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.json'))
+  [IO.File]::Delete((Join-Path $c.target '.ymcc-managed.receipt'))
   $old=$c.manifest|ConvertTo-Json -Depth 8|ConvertFrom-Json;$old.loaderVersion='v3.4.0'
   $identity=Put $c.home 'program/decky-package.json' ($old|ConvertTo-Json -Depth 8 -Compress)
   $before=Snapshot $c.target
@@ -157,8 +198,8 @@ Check 'first old-updater package identity prevents later downgrade without a man
   $plan=Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity
   Need (!$plan.legacyAdoption) 'Known first-upgrade identity was discarded'
   $t=Install-YmccDeckyPackage $plan (Join-Path $c.home 'first-managed-backup') -BackendPort 0
-  Need ([IO.File]::Exists((Join-Path $c.target '.ymcc-managed.json'))) 'Next transaction did not record managed receipt'
-  Put $c.target '.ymcc-managed.json' 'corrupt'|Out-Null
+  Need ([IO.File]::Exists((Join-Path $c.target '.ymcc-managed.receipt'))) 'Next transaction did not record managed receipt'
+  Put $c.target '.ymcc-managed.receipt' 'corrupt'|Out-Null
   Reject { Get-YmccDeckyPlan $c.source $c.target $c.manifest $identity } ''
 }
 Check 'package hash mismatch is rejected before any installed mutation' {
@@ -190,7 +231,7 @@ Check 'old locked Loader fails before first mutation without killing its owner' 
 Check 'receipt-owned obsolete code is removed only with exact original bytes' {
   $c=New-Case 'obsolete';Seed $c | Out-Null
   $stale=Put $c.target 'plugins/ymcc-sidebar/dist/old-chunk.js' 'old chunk'
-  $receipt=Join-Path $c.target '.ymcc-managed.json';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+  $receipt=Join-Path $c.target '.ymcc-managed.receipt';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
   $prev.files+= [pscustomobject]@{path='plugins/ymcc-sidebar/dist/old-chunk.js';bytes=([IO.FileInfo]$stale).Length;sha256=(Get-YmccDeckyHash $stale)}
   $prev | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $receipt -Encoding UTF8
   $t=Seed $c
@@ -201,7 +242,7 @@ Check 'receipt-owned obsolete code is removed only with exact original bytes' {
 Check 'modified obsolete code and unrecorded files survive cleanup' {
   $c=New-Case 'modified-obsolete';Seed $c | Out-Null
   $stale=Put $c.target 'plugins/ymcc-sidebar/dist/old-chunk.js' 'old chunk';$unrecorded=Put $c.target 'plugins/ymcc-sidebar/dist/user.js' 'user'
-  $receipt=Join-Path $c.target '.ymcc-managed.json';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+  $receipt=Join-Path $c.target '.ymcc-managed.receipt';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
   $prev.files+= [pscustomobject]@{path='plugins/ymcc-sidebar/dist/old-chunk.js';bytes=([IO.FileInfo]$stale).Length;sha256=(Get-YmccDeckyHash $stale)}
   $prev | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
   [IO.File]::WriteAllText($stale,'user-modified')
@@ -211,7 +252,7 @@ Check 'modified obsolete code and unrecorded files survive cleanup' {
 }
 Check 'receipt cannot claim settings or another plugin as obsolete code' {
   foreach ($name in @('settings/config.json','plugins/other/dist/index.js','../outside.js','plugins/ymcc-sidebar/dist/../../settings/config.js')) {
-    $c=New-Case 'bad-receipt';Seed $c | Out-Null;$receipt=Join-Path $c.target '.ymcc-managed.json';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
+    $c=New-Case 'bad-receipt';Seed $c | Out-Null;$receipt=Join-Path $c.target '.ymcc-managed.receipt';$prev=Get-Content -LiteralPath $receipt -Raw | ConvertFrom-Json
     $prev.files+= [pscustomobject]@{path=$name;bytes=1;sha256=('0'*64)}
     $prev | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $receipt -Encoding UTF8
     Reject { Seed $c } 'MANAGED_FILE_INVALID'
@@ -219,7 +260,7 @@ Check 'receipt cannot claim settings or another plugin as obsolete code' {
 }
 Check 'malformed and oversized installed receipts fail safely' {
   foreach ($text in @('not-json',('x'*131073))) {
-    $c=New-Case 'bad-json';Put $c.target '.ymcc-managed.json' $text | Out-Null;$before=Snapshot $c.target
+    $c=New-Case 'bad-json';Put $c.target '.ymcc-managed.receipt' $text | Out-Null;$before=Snapshot $c.target
     Reject { Seed $c } ''
     Need ((Snapshot $c.target) -eq $before) 'Invalid receipt mutated target'
   }
@@ -409,7 +450,17 @@ if (!$SkipMutationProof) {
       [IO.Directory]::CreateDirectory((Join-Path $negativeRoot 'native'))|Out-Null
       [IO.Directory]::CreateDirectory((Join-Path $negativeRoot 'tools'))|Out-Null
       $mutantBody=$body.Replace($mutation.from,$mutation.to)
-      $mutantHeader=$header.Replace($body,$mutantBody)
+      # Adjacent generated literals do not contain the joined body verbatim.
+      # Rebuild only their payload, keeping every mutated script character.
+      $literalParts=New-Object 'System.Collections.Generic.List[string]'
+      for ($offset=0; $offset -lt $mutantBody.Length;) {
+        $partLength=[Math]::Min(2048,$mutantBody.Length-$offset)
+        if ([char]::IsHighSurrogate($mutantBody[$offset+$partLength-1])) { --$partLength }
+        $literalParts.Add('R"YMCCDECKYPKG('+$mutantBody.Substring($offset,$partLength)+')YMCCDECKYPKG"')
+        $offset+=$partLength
+      }
+      $lastLiteral=$scriptLiteralMatches[$scriptLiteralMatches.Count-1]
+      $mutantHeader=$header.Substring(0,$scriptLiteralMatches[0].Index)+($literalParts.ToArray() -join "`n")+$header.Substring($lastLiteral.Index+$lastLiteral.Length)
       [IO.File]::WriteAllText((Join-Path $negativeRoot 'native/decky_package_maintenance.ps1'),$mutantBody,(New-Object Text.UTF8Encoding($true)))
       [IO.File]::WriteAllText((Join-Path $negativeRoot 'native/decky_package_maintenance_script.h'),$mutantHeader,(New-Object Text.UTF8Encoding($false)))
       [IO.File]::Copy((Join-Path $root 'native/main.cpp'),(Join-Path $negativeRoot 'native/main.cpp'),$false)

@@ -7,7 +7,11 @@ $files=@(Get-SteamAppearanceExportFiles $source)
 foreach($relative in $files){$dest=Join-Path $target $relative;New-Item -ItemType Directory -Force -Path (Split-Path -Parent $dest)|Out-Null;Copy-Item -LiteralPath (Join-Path $source $relative) -Destination $dest}
 $cases=New-Object Collections.Generic.List[string]
 $receipt=Assert-SteamAppearanceExport $source $target
-if($receipt.defaultsEnabled -ne 8){throw 'default mismatch'};$cases.Add('Complete script/modules and 8/8 reference preset pass the export gate')
+if($receipt.defaultsEnabled -ne 7){throw 'default mismatch'};$cases.Add('Complete script/modules and 7/7 reference preset pass the export gate')
+$reflection=Join-Path $target 'steam-appearance\themes\Game Cover Reflections';New-Item -ItemType Directory -Path $reflection -Force|Out-Null
+$rejected=$false;try{Assert-SteamAppearanceExport $source $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*Retired reflection payload remains*'}
+if(!$rejected){throw 'Retired reflection in destination was accepted'};$cases.Add('Packaging refuses a stale retired reflection directory even when all current source files match')
+Remove-Item -LiteralPath $reflection -Force
 $retired=Join-Path $target 'YeManSteam\CssLoader-Standalone-Headless.txt';New-Item -ItemType Directory -Path (Split-Path -Parent $retired) -Force|Out-Null;[IO.File]::WriteAllText($retired,'C:\SOFT\CSSLoader Desktop\CssLoader-Standalone-Headless.exe')
 $rejected=$false;try{Get-SteamAppearanceExportFiles $target|Out-Null}catch{$rejected=$_.Exception.Message -like '*Retired CSSLoader linked preset*'}
 if(!$rejected){throw 'Retired CSS linked preset was exported'};$cases.Add('Packaging refuses a reintroduced legacy CSS linked-launch preset')

@@ -34,6 +34,7 @@ static struct {ymcc::deckysidebar::State state;ymcc::deckysidebar::State snapsho
 static struct {ymcc::steamcss::Runtime* actual=nullptr;void observeMode(const Session& s,const ymcc::steamcss::ModeSample& m){if(actual)actual->observeMode(s,m);}} g_steamCssGuard;
 static void deckySidebarDiagnostic(const char*,const json&,bool=false){}
 static void deckySidebarPost(const char*,const json&){}
+static void deckySidebarSessionDiagnostic(const Session&,const char*){}
 namespace ymcc::steamcss {inline Result fixtureProbeBackend(){++probes;return {nullptr,0,"missing",{},false};}}
 // Only external process IO is replaced. The four lambdas below are extracted
 // exactly from production main.cpp, not rewritten as a parallel policy.
@@ -116,6 +117,15 @@ int main(int argc,char** argv){try{
  ymcc::steamlink::Admission restarted(120);restarted.observeMode(old,"bigpicture");check(!restarted.allows(old),"YMCC restart does not turn a CSS reconciliation into a Decky startup grant");
  signal(newer,"bigpicture","new-steam:1",true);g_steamSettingsObserver.session=newer;g_steamLinkAdmission.observe(newer);
  check(!productionSidebarAdmission().allowed,"a genuinely newer Steam process still cannot override an already loaded document");
+ // Exact launch admission must wait for the same account identity that the
+ // authenticated binding already requires, before resource/worker preparation.
+ auto noAccount=newer;noAccount.account=0;g_steamSettingsObserver.session=noAccount;
+ signal(noAccount,"bigpicture","new-steam:2",false);const auto readsBeforeAccountWait=modeReads.load();
+ const auto accountWait=productionSidebarAdmission();
+ check(!accountWait.allowed&&accountWait.retryable&&accountWait.reason=="steam-session-unconfirmed","account-pending startup waits before preparing resources or a binding worker");
+ check(modeReads==readsBeforeAccountWait,"account-pending admission does not copy or query shared UI state");
+ g_steamSettingsObserver.session=newer;signal(newer,"bigpicture","new-steam:2",false);
+ check(productionSidebarAdmission().allowed,"real account readiness immediately restores existing permitted startup");
  CloseHandle(helperLease);helperLease=nullptr;
  const json receipt={{"ok",failures==0},{"checks",checks},{"failures",failures},{"actualSteamActions",0},{"actualCssLaunches",0},{"source","Four exact production callbacks plus actual CSS worker; only external IO replaced"}};
  std::ofstream(out/L"result.json")<<receipt.dump(2)<<'\n';std::cout<<receipt.dump()<<'\n';return failures?1:0;

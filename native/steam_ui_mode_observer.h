@@ -13,12 +13,27 @@ class ModeReadWindow {
     ULONGLONG due_ = 0, next_ = 0;
     unsigned attempts_ = 0;
     bool armed_ = false;
-    DWORD debounce_, gap_, failureGap_;
+    DWORD debounce_, gap_, failureGap_, lastGap_ = 0;
+    ULONGLONG startupOpened_ = 0;
+    unsigned startupReads_ = 0;
+    bool startup_ = false;
+    // Event-driven catch-up only for a new verified Steam process. Up to six
+    // initial read slots can shorten following gaps during the first ten seconds;
+    // later slots use the normal cadence. Opening this allowance arms no timer.
+    static constexpr unsigned startupLimit = 6;
+    static constexpr DWORD startupGapMs = 500, startupWindowMs = 10000;
+    bool startupAvailable(ULONGLONG now) const {
+        return startup_ && now >= startupOpened_ && now-startupOpened_ < startupWindowMs && startupReads_ < startupLimit;
+    }
 public:
     ModeReadWindow(DWORD debounce = 600, DWORD gap = 5000, DWORD failureGap = 30000)
         : debounce_(debounce), gap_(gap), failureGap_(failureGap) {}
-    void cancel() { armed_ = false; attempts_ = 0; } // Keep rate-limit across disable/re-enable.
-    void reset() { cancel(); due_ = next_ = 0; }
+    void cancel(bool preserveAttempts = false) { armed_ = false; if (!preserveAttempts) attempts_ = 0; } // Keep rate-limit across disable/re-enable.
+    void reset(bool preserveStartup = false) {
+        cancel(preserveStartup); due_ = 0;
+        if (!preserveStartup) { next_ = 0; lastGap_ = gap_; startup_ = false; startupReads_ = 0; }
+    }
+    void beginStartup(ULONGLONG now) { startup_ = true; startupOpened_ = now; startupReads_ = 0; }
     bool request(ULONGLONG now, bool preserveAttempts = false) {
         if (armed_) return false;
         armed_ = true; if (!preserveAttempts) attempts_ = 0; due_ = (std::max)(now + debounce_, next_); return true;
@@ -28,11 +43,24 @@ public:
     }
     bool take(ULONGLONG now) {
         if (timeout(now)) return false;
-        armed_ = false; ++attempts_; next_ = now + gap_; return true;
+        armed_ = false; ++attempts_;
+        if (startupAvailable(now)) ++startupReads_;
+        lastGap_ = startupAvailable(now) ? (std::min)(gap_, startupGapMs) : gap_;
+        next_ = now + lastGap_; return true;
     }
-    void finish(ULONGLONG now, bool known) {
-        if (known) return;
-        if (attempts_ < 3) { armed_ = true; due_ = (std::max)(now + gap_, next_); }
+    void finish(ULONGLONG now, bool known, bool transientStartupRetry = false, bool localBusy = false) {
+        if (known) { attempts_ = 0; return; }
+        // A try-lock miss performs no external IO. Within the finite short
+        // startup slots, refund only this attempt (never prior IO failures).
+        // Exhausted/expired startup uses the ordinary three slow attempts.
+        if (localBusy && lastGap_ < gap_ && attempts_) --attempts_;
+        // Keep genuinely unknown IO's slow retry debt in the persistent rate
+        // limit too: account updates or demand pause must not discard it.
+        if (!transientStartupRetry) next_ = (std::max)(next_, now + gap_);
+        // A hint can invalidate verified IO, or a local lock can skip IO. Recheck
+        // only these in the finite startup allowance; unknown/failed IO keeps the
+        // old slow retries so a slow PC does not spend its budget too early.
+        if (attempts_ < 3) { armed_ = true; due_ = (std::max)(now + (transientStartupRetry ? lastGap_ : gap_), next_); }
         else { armed_ = false; next_ = (std::max)(next_, now + failureGap_); }
     }
 };
@@ -99,12 +127,18 @@ class ModeObserver {
                 // Lifecycle invalidation cannot spend the replacement session/demand budget.
                 if (generation != generation_ || !(session == session_) || !demand()) continue;
                 const bool invalidated = hints != hintGeneration_;
-                bool valid = false;
-                try { valid = !invalidated && result.is_object() && known(result, session); } catch (...) {}
+                bool confirmed = false;
+                try { confirmed = result.is_object() && known(result, session); } catch (...) {}
+                const bool valid = !invalidated && confirmed;
                 // An in-flight hint spends an attempt, without resetting the
                 // lifecycle budget. Preserve pending display until its finite
                 // follow-up settles or the failure window is exhausted.
-                window_.finish(GetTickCount64(), valid);
+                // live-busy is the local try-lock miss in steamui::read: no
+                // Steam IO was attempted. It may use remaining startup slots,
+                // but never confirms a mode or refills startup credit.
+                bool localBusy = false;
+                try { localBusy = result.is_object() && result.value("reason", std::string{}) == "live-busy"; } catch (...) {}
+                window_.finish(GetTickCount64(), valid, (invalidated && confirmed) || localBusy, localBusy);
                 if (invalidated && window_.timeout(GetTickCount64()) != INFINITE) continue;
                 if (valid) {
                     notify = !delivered_.is_object() || delivered_.value("mode", std::string{}) != result.value("mode", std::string{}) ||
@@ -150,15 +184,21 @@ public:
         auto& flag = consumer == ModeConsumer::Decky ? decky_ : css_;
         if (stopping_ || flag == enabled) return;
         const bool hadDemand = demand(); flag = enabled;
-        if (!demand()) { window_.cancel(); cached_ = delivered_ = ModeJson{}; passivePending_ = false; ++generation_; }
-        else if (!hadDemand && validSession(session_)) window_.request(GetTickCount64());
+        if (!demand()) { window_.cancel(true); cached_ = delivered_ = ModeJson{}; passivePending_ = false; ++generation_; }
+        else if (!hadDemand && validSession(session_)) window_.request(GetTickCount64(),true);
         if (wake_) SetEvent(wake_);
     }
     void observeSteam(const steamsession::Session& session) {
         std::lock_guard lock(mutex_);
         if (stopping_ || session_ == session) return;
-        session_ = session; cached_ = delivered_ = ModeJson{}; passivePending_ = false; ++generation_; window_.reset();
-        if (demand() && validSession(session_)) window_.request(GetTickCount64());
+        const bool sameProcess = validSession(session_) && validSession(session) &&
+            session_.pid == session.pid && session_.created == session.created && session_.root == session.root;
+        session_ = session; cached_ = delivered_ = ModeJson{}; passivePending_ = false; ++generation_;
+        // Learning/changing the account in the same process must not refill
+        // the short-read allowance during repeated registry notifications.
+        window_.reset(sameProcess);
+        if (validSession(session_) && !sameProcess) window_.beginStartup(GetTickCount64());
+        if (demand() && validSession(session_)) window_.request(GetTickCount64(),sameProcess);
         if (wake_) SetEvent(wake_);
     }
     // Hints from existing Windows events or the Decky 30s recovery timer. No CDP here.

@@ -21,6 +21,8 @@ namespace ymcc::inputHost::targetReturnRuntime {
 struct ColdEnvironment {
     std::uint64_t ticket=0,power=0;
     std::string persona;
+    bool nativeWriterObserved=false,hostWriterObserved=false;
+    duty::process::Probe nativeWriterProbe{},hostWriterProbe{};
     bool absenceObserved=false;
     ymcc::targetReturn::pnpAbsence::Result absenceResult;
     bool physicalAbsenceObserved=false;
@@ -47,8 +49,14 @@ struct ColdEnvironment {
             !g_msiNativeForegroundLease.cycleProcess && !g_msiNativeForegroundLease.restorePending;
     }
     const duty::Record* record()const{return state.session?state.session->record():nullptr;}
-    bool nativeDead(const duty::ProcessIdentity& value){return inputHostTargetReturnProbePhysicalWriter(value).state==duty::process::State::Dead;}
-    bool hostDead(const duty::ProcessIdentity& value){return inputHostTargetReturnProbePhysicalWriter(value).state==duty::process::State::Dead;}
+    bool nativeDead(const duty::ProcessIdentity& value){
+        nativeWriterObserved=true;nativeWriterProbe=inputHostTargetReturnProbePhysicalWriter(value);
+        return nativeWriterProbe.state==duty::process::State::Dead;
+    }
+    bool hostDead(const duty::ProcessIdentity& value){
+        hostWriterObserved=true;hostWriterProbe=inputHostTargetReturnProbePhysicalWriter(value);
+        return hostWriterProbe.state==duty::process::State::Dead;
+    }
     bool writersQuiet(){return physicalWritersQuiescent();}
     bool targetAbsent(const std::vector<std::string>& ids){
         absenceObserved=true;absenceResult=inputHostTargetReturnColdAbsence(ids);return absenceResult.absent();
@@ -144,10 +152,20 @@ static ymcc::targetReturn::coldExecution::Result inputHostTargetReturnColdPassLo
     ColdEnvironment environment{ticket,power,persona};
     const auto result=run(environment);
     if(result.clean())state.coldHistoryPending=false;
+    const auto writerProof=[](bool observed,const duty::process::Probe& probe)->json {
+        if(!observed)return {{"observed",false}};
+        return {{"observed",true},{"state",duty::process::stateName(probe.state)},
+            {"reason",duty::process::reasonName(probe.reason)},{"win32Error",probe.win32Error},
+            {"directWin32Error",probe.directWin32Error},{"censusAttempts",probe.censusAttempts},
+            {"censusBytes",probe.censusBytes},{"censusRows",probe.censusRows},{"censusNtStatus",probe.censusNtStatus}};
+    };
     try{appendNativeLifecycleLog("input-host-cold-return",{
         {"lifecycleVersion",ymcc::VirtualStartProtection::lifecycleVersion},{"requestId",ticket},
         {"powerGeneration",power},{"persona",persona},{"stage",result.clean()?"execution-complete":"execution-deferred"},
         {"reason",reasonName(result.reason)},{"originKey",result.originKey},{"pathInstanceId",result.pathInstanceId},
+        {"writerIdentityPolicy","VC-COLD-HOST-IDENTITY-20261026-R1"},
+        {"nativeWriterProof",writerProof(environment.nativeWriterObserved,environment.nativeWriterProbe)},
+        {"hostWriterProof",writerProof(environment.hostWriterObserved,environment.hostWriterProbe)},
         {"targetAbsenceObserved",environment.absenceObserved},
         {"targetAbsenceState",environment.absenceObserved?ymcc::targetReturn::pnpAbsence::stateName(environment.absenceResult.state):"unobserved"},
         {"targetAbsenceReason",environment.absenceObserved?ymcc::targetReturn::pnpAbsence::reasonName(environment.absenceResult.reason):"unobserved"},

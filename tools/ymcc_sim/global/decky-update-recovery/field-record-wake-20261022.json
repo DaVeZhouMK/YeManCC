@@ -20,5 +20,53 @@
     "Native power gate remained closed; automatic resume alone is not a committed interactive wake",
     "On committed Ready, rebind once per generation and run bounded backend recovery; do not fake Ready or replay user writes"
   ],
-  "physicalWakeAcceptance": false
+  "physicalWakeAcceptance": false,
+  "followups": [
+    {
+      "date": "2026-10-29",
+      "id": "decky-rog-s0-ready-update-alternation-20261029",
+      "sources": [
+        {
+          "path": "G:/YeManCC-Work/日志/ROG-Xbox-2025/YeManCC-logs-20261029-103025.zip",
+          "sha256": "89b45c4dfd9860f3d7f0daa2c281801a7ea25522879cfa375c38fe55391146b3"
+        },
+        {
+          "path": "G:/YeManCC-Work/日志/ROG-Xbox-2025/YeManCC-logs-20261029-111850.zip",
+          "sha256": "074a7387b45edac86a362d287d6ebb64cb92a32f9a4c81c68f791fc6c2ba1c99"
+        }
+      ],
+      "observed": {
+        "oldYmccPid": 16992,
+        "oldSteamPid": 10660,
+        "updateMismatchObservedAt": "2026-10-29T02:42:47.738+08:00",
+        "mismatchReason": "updated-decky-loader-pending",
+        "installedLoader": "v3.3.1",
+        "suspendAt": "2026-10-29T02:58:17.681+08:00",
+        "interactiveWakeAt": "2026-10-29T10:28:18.845+08:00",
+        "wakePowerGeneration": 2,
+        "sharedReadyObservedAt": "2026-10-29T10:28:18.854+08:00",
+        "manualRefusals": [
+          "2026-10-29T10:33:18.093+08:00",
+          "2026-10-29T10:33:20.107+08:00"
+        ],
+        "manualReason": "decky-repair-context-changed",
+        "blockedAt": "2026-10-29T10:33:41.555+08:00",
+        "blockedReason": "decky-context-already-loaded",
+        "afterRestartYmccPid": 9496,
+        "connectedAfterRestartAt": "2026-10-29T11:04:43.317+08:00"
+      },
+      "conclusions": [
+        "The package/update mismatch was logged before this sleep; it is not evidence that the wake failure was caused by upgrading to331.",
+        "S0 confirmed user wake closes the guarded sleep intent and opens shared Ready without the WM_POWER_RESUME_COMMIT Decky call.",
+        "Exact older loaded stable version can be pinned for an explicit manual refresh; equality to installed version deadlocks this repair.",
+        "Automatic recovery keeps exact retained build/Loader and power/OFF/session boundaries; mixed-version documents never gain automatic UI refresh or downgrade authority."
+      ],
+      "consumerIds": [
+        "plugins.decky-update-recovery",
+        "plugins.decky-persistent-lifecycle"
+      ],
+      "newCanonicalAdapters": 0,
+      "physicalWakeAcceptance": false
+    }
+  ]
 }

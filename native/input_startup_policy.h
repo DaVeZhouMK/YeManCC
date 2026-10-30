@@ -1,5 +1,6 @@
 #pragma once
 #include "controller_persona_settings.h"
+#include <cmath>
 #include <stdexcept>
 #include <string>
 
@@ -106,6 +107,44 @@ inline nlohmann::json initializeInputStartup(const nlohmann::json& savedInput,
     return input;
 }
 
+// Resolve the saved scene before the first native input consumer. startupDesired
+// is only the materialized next-boot cache when a four-mode document exists.
+// In particular, v1's exact factory SD recipe must not run once before the
+// renderer retires it under v2. User-edited modules and future versions survive.
+inline nlohmann::json bootModeInputStartupPreferences(const nlohmann::json& modes,
+                                                      const nlohmann::json& fallback) {
+    using nlohmann::json;
+    if (!modes.is_object() || modes.value("schema", json(nullptr)) != 1)
+        return normalizeInputStartupPreferences(fallback);
+    const auto objectAt = [](const json& value, const char* key) -> json {
+        const auto it = value.is_object() ? value.find(key) : value.end();
+        return it != value.end() && it->is_object() ? *it : json::object();
+    };
+    const auto global = objectAt(modes, "global");
+    auto input = objectAt(global, "input"), motion = objectAt(objectAt(global, "gyro"), "motion");
+    const auto selected = modes.value("boot", json(nullptr));
+    if (selected == "xbox" || selected == "steam" || selected == "xbox-steam") {
+        const auto scene = objectAt(objectAt(modes, "scenes"), selected.get<std::string>().c_str());
+        const auto own = objectAt(scene, "overrides");
+        const auto ownInput = objectAt(own, "input");
+        const auto version = modes.value("controllerDefaultsVersion", json(nullptr));
+        const auto number = version.is_number() ? version.get<double>() : 0.0;
+        const bool legacy = !std::isfinite(number) || std::floor(number) != number || number < 2 || number > 9007199254740991.0;
+        const json oldFactory = {{"persona", "steamdeck"}, {"mouse", "steamdeck"},
+            {"outputTarget", {{"persona", "steamdeck"}, {"buttonMappingEnabled", true}}}};
+        if (!(legacy && ownInput == oldFactory)) input.update(ownInput, true);
+        motion.update(objectAt(objectAt(own, "gyro"), "motion"), true);
+    }
+    const bool enabled = modes.value("bootEnabled", json(nullptr)) != false;
+    const auto persona = enabled ? input.value("persona", json("disabled")) : json("disabled");
+    const bool gyro = enabled && motion.value("enabled", json(nullptr)) == true;
+    auto preset = motion.value("activePreset", json(nullptr));
+    if (preset.is_null()) preset = motion.value("preset", json(nullptr));
+    if (preset.is_null()) preset = "custom";
+    return normalizeInputStartupPreferences({{"virtualGamepadPersona", persona},
+        {"gyroPreset", gyro ? preset : json("off")}});
+}
+
 // The process identity still retires dead game/Host owners. Only a new confirmed
 // Windows boot may consume the next scene's input preferences. Never infer that
 // boundary from a PID, wall clock, renderer reload, wake, or unknown identity.
@@ -116,11 +155,18 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
     using nlohmann::json;
     if (!document.is_object()) throw std::runtime_error("startup-settings-invalid");
     const auto input = document.value("input", json::object());
-    const auto startup = document.value("startupDesired", json::object());
+    auto startup = document.value("startupDesired", json::object());
+    if (!startup.is_object()) startup = json::object();
     auto extensions = document.value("extensions", json::object());
     if (!extensions.is_object()) extensions = json::object();
     const auto modes = extensions.value("bootModes", json::object());
     const bool configured = modes.is_object() && modes.value("schema", json(nullptr)) == 1;
+    const auto preferences = bootModeInputStartupPreferences(modes, startup);
+    const bool reconciled = normalizeInputStartupPreferences(startup) != preferences;
+    if (configured) {
+        startup.update(preferences);
+        document["startupDesired"] = startup;
+    }
     const auto previousBoot = input.is_object() ? input.value("startupAppliedBoot", json(nullptr)) : json(nullptr);
     const auto previousSession = input.is_object() ? input.value("startupAppliedSession", json(nullptr)) : json(nullptr);
     // An explicit scene save records the Windows boot where it was selected.
@@ -147,7 +193,6 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
         try {
             const auto selected = configured ? modes.value("boot", json(nullptr)) : json(nullptr);
             const bool validMode = selected == "global" || selected == "xbox" || selected == "steam" || selected == "xbox-steam";
-            const auto preferences = normalizeInputStartupPreferences(startup);
             *decision = {{"schema", 1}, {"configured", configured},
                 {"source", configured ? "four-mode-startup" : "legacy-startupDesired"},
                 {"selectedMode", validMode ? selected : json(nullptr)},
@@ -155,6 +200,7 @@ inline nlohmann::json initializeBootModeInputStartup(nlohmann::json document,
                 {"revision", configured && modes.contains("revision") && modes.at("revision").is_number_integer() ? modes.at("revision") : json(nullptr)},
                 {"requestedPersona", preferences.at("virtualGamepadPersona")},
                 {"requestedGyroPreset", preferences.at("gyroPreset")},
+                {"startupPreferencesReconciled", reconciled},
                 {"selectionBootMatchesObserved", claimed}, {"inputBootMatchesObserved", !boot.empty() && previousBoot == boot},
                 {"identityUpgrade", identityUpgrade}, {"legacyAnchor", migration},
                 {"action", previousSession == session ? "preserve-same-process" :

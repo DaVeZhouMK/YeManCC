@@ -42,7 +42,7 @@ export function createAppearanceDraft(deps: Dependencies) {
       const text = deps.storage.getItem(key(boundTarget)); if (!text) return;
       const value = JSON.parse(text);
       if (value?.version !== 1 || value.targetId !== boundTarget || !value.states || typeof value.states !== 'object' || Array.isArray(value.states) ||
-        Object.keys(value.states).some(name => !names.includes(name as AppearanceThemeName) || typeof value.states[name] !== 'boolean')) return;
+        Object.keys(value.states).some(name => (name !== 'Game Cover Reflections' && !names.includes(name as AppearanceThemeName)) || typeof value.states[name] !== 'boolean')) return;
       for (const name of names) if (typeof value.states[name] === 'boolean' && snapshot?.themes.find(row => row.name === name)?.configured !== value.states[name])
         entries[name] = { value: value.states[name], sequence: ++sequence };
       persist();

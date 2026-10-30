@@ -233,6 +233,55 @@ function Test-InstalledPowerControlExcluded([string]$Relative, [bool]$IsDirector
   return $false
 }
 
+# Official Loader migrates root *.json into settings. Keep our ownership receipt
+# outside that namespace and archive only a validated legacy YMCC root receipt.
+function Update-InstalledDeckyReceipt([string]$DeckyHome, [string]$BackupRoot, $Manifest) {
+  Assert-YmccDeckyManifest $Manifest
+  $receiptHome = Resolve-YmccDeckyPath $DeckyHome
+  $backup = Resolve-YmccDeckyPath $BackupRoot 'PowerControl/decky'
+  if ($backup -ieq $receiptHome -or $backup.StartsWith($receiptHome+'\',[StringComparison]::OrdinalIgnoreCase) -or $receiptHome.StartsWith($backup+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'DECKY_RECEIPT_BACKUP_OVERLAP' }
+  $records = @()
+  foreach ($name in @('.ymcc-managed.receipt','.ymcc-managed.json')) {
+    $path = Resolve-YmccDeckyPath $receiptHome $name
+    if ([IO.Directory]::Exists($path)) { throw 'DECKY_RECEIPT_IS_DIRECTORY' }
+    if (![IO.File]::Exists($path)) { continue }
+    if (([IO.FileInfo]$path).Length -gt 131072) { throw 'DECKY_INSTALLED_RECEIPT_TOO_LARGE' }
+    $before = Get-YmccDeckyHash $path
+    $previous = Get-Content -LiteralPath $path -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-YmccDeckyManifest $previous -Previous
+    if ([version]$previous.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
+    if ((Get-YmccDeckyHash $path) -cne $before) { throw 'DECKY_RECEIPT_CHANGED_BEFORE_BACKUP' }
+    $archive = Resolve-YmccDeckyPath $backup $name
+    if (Test-Path -LiteralPath $archive) { throw 'DECKY_RECEIPT_BACKUP_ALREADY_EXISTS' }
+    $records += [pscustomobject]@{ name=$name; path=$path; archive=$archive; before=$before }
+  }
+  [IO.Directory]::CreateDirectory($backup) | Out-Null
+  foreach ($record in $records) {
+    if ($record.name -cne '.ymcc-managed.receipt') { continue }
+    # Paths were resolved under the exact Decky and deployment-backup homes.
+    $path = Resolve-YmccDeckyPath $receiptHome $record.name
+    $archive = Resolve-YmccDeckyPath $backup $record.name
+    if ((Get-YmccDeckyHash $path) -cne $record.before) { throw 'DECKY_RECEIPT_CHANGED_BEFORE_BACKUP' }
+    [IO.File]::Copy($path,$archive,$false)
+    if ((Get-YmccDeckyHash $archive) -cne $record.before) { throw 'DECKY_RECEIPT_BACKUP_HASH_MISMATCH' }
+  }
+  $bytes = [Text.Encoding]::UTF8.GetBytes(($Manifest | ConvertTo-Json -Depth 8 -Compress))
+  $sha = [Security.Cryptography.SHA256]::Create()
+  try { $expected = ([BitConverter]::ToString($sha.ComputeHash($bytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
+  Set-YmccDeckyAtomic $receiptHome '.ymcc-managed.receipt' '' $bytes $expected
+  foreach ($record in $records) {
+    if ($record.name -cne '.ymcc-managed.json') { continue }
+    $path = Resolve-YmccDeckyPath $receiptHome $record.name
+    if ((Get-YmccDeckyHash $path) -cne $record.before) { throw 'DECKY_RECEIPT_CHANGED_BEFORE_RETIRE' }
+    # Move the exact validated legacy file into this deployment's backup,
+    # never into Loader settings or over another file.
+    $retired = Resolve-YmccDeckyPath $backup $record.name
+    [IO.File]::Move($path,$retired)
+    if ((Get-YmccDeckyHash $retired) -cne $record.before) { throw 'DECKY_RECEIPT_RETIRE_HASH_MISMATCH' }
+  }
+  Write-Output 'DECKY_RECEIPT: canonical .ymcc-managed.receipt; verified legacy root archived; Loader settings preserved'
+}
+
 function Copy-InstalledPowerControlMainAssets([string]$SourceRoot, [string]$DestinationRoot) {
   New-Item -ItemType Directory -Force -Path $DestinationRoot | Out-Null
   foreach ($item in Get-ChildItem -LiteralPath $SourceRoot -Recurse -Force) {
@@ -641,13 +690,7 @@ Copy-MonitorHudDeckyExport $DeckyBuild $installedPowerControl
 # Record the exact identity also consumed by the normal whole-package updater.
 . (Join-Path $ProjectRoot 'native\decky_package_maintenance.ps1')
 $deckyManaged = New-YmccDeckyManifest (Join-Path $installedPowerControl 'decky') (Join-Path $ProjectRoot 'decky-plugin\vendor\decky-loader.lock.json')
-$deckyReceipt = Join-Path $installedPowerControl 'decky\.ymcc-managed.json'
-if (Test-Path -LiteralPath $deckyReceipt -PathType Leaf) {
-  $deckyReceiptBackup = Join-Path $BackupRoot 'PowerControl\decky\.ymcc-managed.json'
-  New-Item -ItemType Directory -Path (Split-Path -Parent $deckyReceiptBackup) -Force | Out-Null
-  Copy-Item -LiteralPath $deckyReceipt -Destination $deckyReceiptBackup -Force
-}
-$deckyManaged | ConvertTo-Json -Depth 8 -Compress | Set-Content -LiteralPath $deckyReceipt -Encoding UTF8
+Update-InstalledDeckyReceipt (Join-Path $installedPowerControl 'decky') $BackupRoot $deckyManaged
 Copy-InstalledLockedPowerControlAssets $ProjectRoot $WorkspaceRoot $installedPowerControl $BackupRoot | Out-Null
 $installedSharedRuntime = Join-Path $installedPowerControl 'ymcc-shared-runtime'
 Copy-YmccSharedRuntime $ProjectRoot $installedSharedRuntime (Join-Path $BackupRoot 'PowerControl\ymcc-shared-runtime')

@@ -14,7 +14,7 @@ import { runTdpHardwareWrite } from './tdpCircuitBreaker';
 import { tdpRuntimeStore } from './tdpRuntimeState';
 import { beginTdpObservation, tdpErrorText, type TdpObservationContext, type TdpRequestSource } from './tdpStaticDiagnostics';
 import { OEM_EMPTY_SNAPSHOT, normalizeOemKeysSnapshot, type OemKeysSnapshot } from './controllerShortcutRules';
-import { readGamingHomeState, setGamingHomeStartup, type GamingHomeState, type GamingHomeRegistryPort } from './gamingHomePolicy';
+import { readGamingHomeState, setGamingHomeStartup, type GamingHomeState, type GamingHomeRegistryPort, type GamingHomeSelection } from './gamingHomePolicy';
 
 // ── 可配置根目录（自测时可指向临时目录） ──
 let PC_DIR = 'C:\\SOFT\\YeMan\\PowerControl';
@@ -473,11 +473,11 @@ async function retireLegacyGamingTask(): Promise<void> {
   }
 }
 let gamingHomeWriteTail: Promise<void> = Promise.resolve();
-export function writeGamingHomeStartup(on: boolean, repairHandheld = on): Promise<boolean> {
-  // Explicit mode preparation uses 46/1 for Xbox, 46/0 for advanced Steam.
-  // The single Windows startup flag is the authority; never register/select a Steam AUMID.
+export function writeGamingHomeStartup(on: boolean, repairHandheld = on, selection?: GamingHomeSelection): Promise<boolean> {
+  // Fixed modes commit BOTH the Windows home selection and sign-in flag now.
+  // An omitted selection preserves the standalone toggle's existing home app.
   const action = gamingHomeWriteTail.then(async () => {
-    await setGamingHomeStartup(gamingHomeRegistry, on, repairHandheld);
+    await setGamingHomeStartup(gamingHomeRegistry, on, repairHandheld, selection);
     await retireLegacyGamingTask();
     return true;
   });
@@ -2532,7 +2532,7 @@ export async function sleepGuardGet(): Promise<SleepGuardStatus> {
     suspended: Number(r.suspended) || 0,
     pauseGameOnSleep: r.pauseGameOnSleep ?? r.pauseResume !== false,
     retryOnEntryFailure: r.retryOnEntryFailure !== false,
-    retryOnNonUserWake: r.retryOnNonUserWake ?? r.resleepEnabled ?? true,
+    retryOnNonUserWake: r.retryOnNonUserWake ?? r.resleepEnabled ?? false,
     wakePasswordEnabled: r.wakePasswordEnabled === true,
     joyXoffAutoClose: true,
   };
@@ -2655,6 +2655,17 @@ export interface SleepPowerPlanOptimizationResult {
   skippedOverlay: string[];
   skipped: Array<{ guid: string; name: string; operation: string; reason: string }>;
   failed: Array<{ guid: string; name: string; operation: string; exitCode: number; detail?: string }>;
+}
+
+// Native owns the one-shot startup/wake/enable delay; saving ON never scans here.
+export async function getStaticWakeAutoScanEnabled(): Promise<boolean> {
+  const sleep = await readSettingsSection<any>('sleep');
+  return typeof sleep.staticWakeAutoScanEnabled === 'boolean'
+    ? sleep.staticWakeAutoScanEnabled : sleep.sleepPowerPlanOptimizationEnabled !== false;
+}
+
+export async function setStaticWakeAutoScanEnabled(enabled: boolean): Promise<void> {
+  await saveSettingsSection('sleep', { staticWakeAutoScanEnabled: Boolean(enabled) });
 }
 
 export async function getSleepPowerPlanOptimizationEnabled(): Promise<boolean> {

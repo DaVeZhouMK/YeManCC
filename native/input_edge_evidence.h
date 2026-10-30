@@ -7,6 +7,12 @@
 // Fixed memory only. No Win32 calls, allocation, text decoding or file I/O.
 namespace ymcc::inputEdges {
 enum class Channel : std::uint8_t { HookKeyboard, RawKeyboard, HookMouse, RawMouse, SelfSend };
+// Foreground at this specific callback is context, never the input sender.
+struct InjectedGamepadForeground {
+    std::uintptr_t before=0,after=0;
+    std::uint32_t pid=0,error=0;
+    bool attempted=false,pidKnown=false;
+};
 struct Event {
     Channel channel{};
     std::uint64_t tick=0, sequence=0, powerGeneration=0, deviceGeneration=0;
@@ -15,7 +21,17 @@ struct Event {
     std::uint32_t requested=0, returned=0, inputIndex=0;
     std::int32_t wheel=0;
     bool down=false;
+    InjectedGamepadForeground foreground{};
 };
+// Windows SDK VK_GAMEPAD_A..VK_GAMEPAD_RIGHT_THUMBSTICK_LEFT. This classifies
+// supplied keyboard VKs only; it is not a physical controller or sender claim.
+inline constexpr bool gamepadNavigationVirtualKey(std::uint32_t vk) noexcept {return vk>=0xc3u&&vk<=0xdau;}
+template<class Ops> inline void captureInjectedGamepadForeground(Event& event,Ops& ops) noexcept {
+    if(event.channel!=Channel::HookKeyboard || (event.flags&0x10u)==0 || !gamepadNavigationVirtualKey(event.code))return;
+    auto& f=event.foreground;f.attempted=true;f.before=ops.foreground();
+    if(f.before){f.pidKnown=ops.foregroundPid(f.before,f.pid,f.error);}
+    f.after=ops.foreground();
+}
 inline constexpr std::size_t capacity=256;
 struct Snapshot {
     std::array<Event,capacity> events{};

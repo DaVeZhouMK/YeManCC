@@ -29,6 +29,7 @@ export class ReadOnlyMirrorRelay {
   private revision = 0;
   private dirty = true;
   private requested = false;
+  private snapshotDemandPaused = false;
   private demandEpoch = 0;
   private queued = false;
   private stopObserve: (() => void) | null = null;
@@ -71,6 +72,13 @@ export class ReadOnlyMirrorRelay {
     // A healthy HUD-only peer does not need any business-store observers.
     // Install them when an authenticated sidebar snapshot is requested.
   }
+  // Native attach may complete after this same peer explicitly hid its sidebar.
+  // Respect that authenticated pause; only unknown/visible demand needs the
+  // original renderer-restoration fallback. New peer identity clears the pause.
+  refreshSnapshotAfterAttach(peer:MirrorPeer):Promise<void> {
+    if(this.disposed || !this.matches(peer) || this.snapshotDemandPaused)return Promise.resolve();
+    return this.request({...peer,request:{command:'snapshot',runId:peer.runId}});
+  }
   private startObserving(): boolean {
     if (this.stopObserve) return true;
     const demandEpoch = this.demandEpoch;
@@ -82,6 +90,7 @@ export class ReadOnlyMirrorRelay {
     try { stop?.(); } catch { /* Transport and recovery cleanup must still complete. */ }
   }
   private pauseDemand(): void {
+    this.snapshotDemandPaused = true;
     if (this.requested || this.stopObserve) {
       this.requested = false; this.demandEpoch++; this.dirty = true; this.sourceEpoch++;
       this.stopObserving();
@@ -108,7 +117,7 @@ export class ReadOnlyMirrorRelay {
   private detach(): void {
     this.stopRecovery();this.recoveryRemaining=2;
     this.epoch++; this.sourceEpoch++; this.demandEpoch++; this.stopObserving(); this.deliveries.clear(); this.offeredSnapshots.clear();
-    this.firstDemandRead=true;this.peer = null; this.cache = null; this.readTask = null; this.dirty = true; this.requested = false; this.revision = 0;
+    this.firstDemandRead=true;this.peer = null; this.cache = null; this.readTask = null; this.dirty = true; this.requested = false; this.snapshotDemandPaused = false; this.revision = 0;
   }
   private snapshot(): Promise<MirrorSnapshot | null> {
     if (!this.peer || this.disposed) return Promise.resolve(null);
@@ -210,8 +219,16 @@ export class ReadOnlyMirrorRelay {
       if(probeId!==undefined&&(typeof probeId!=='string'||!/^probe:[A-Za-z0-9_-]{1,80}:\d{1,16}$/.test(probeId)))return;
       if(probeId){this.dirty=true;this.sourceEpoch++;}
       if (!this.startObserving()) return;
-      if(!this.requested){this.firstDemandRead=true;this.diagnostic('snapshot-demand',{subscribe:true,demandEpoch:this.demandEpoch});}
-      this.requested = true;this.recoveryRemaining=2;this.deps.snapshotDemand?.(); await this.push(probeId as string|undefined); return;
+      this.snapshotDemandPaused = false;
+      const resumed=!this.requested;
+      if(resumed){this.firstDemandRead=true;this.diagnostic('snapshot-demand',{subscribe:true,demandEpoch:this.demandEpoch});}
+      this.requested = true;this.recoveryRemaining=2;
+      // Ordinary overlapping requests share the current source read. Refreshing
+      // demand again would discard it and repeat every business-owner read.
+      // Reopen/probe/later explicit demand stays fresh; source events invalidate
+      // independently, including a game/power change during the shared read.
+      if(resumed || probeId || !this.readTask)this.deps.snapshotDemand?.();
+      await this.push(probeId as string|undefined); return;
     }
     if (typeof event.request.id !== 'string' || event.request.id.length > 128) return;
     const failure = async (error:string) => {

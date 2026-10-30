@@ -38,6 +38,7 @@ const dirty = computed(() => JSON.stringify(draft.value) !== JSON.stringify(prop
 const blocked = computed(() => props.saving || props.externalModal);
 const localModal = computed(() => !!supportDialog.value || !!confirmation.value);
 const own = (module: BootModeModule) => selected.value === 'global' || !!draft.value.scenes[selected.value].overrides[module];
+const readOnly = (module: BootModeModule) => !own(module) || (selected.value === 'global' && module === 'controller');
 const presetOptions = computed(() => Object.keys(draft.value.presets[selected.value] || {}).map(value => ({ value, label: value })));
 const names: Record<BootModeModule, string> = { performance: '性能调度', fan: '风扇控制', charge: '充电限制', input: '手柄与鼠标', gyro: '陀螺仪', controller: '手柄自定义', touch: '触摸板与屏幕按键', audioOptimization: '掌机音质优化 · FxSound', frameGeneration: '小黄鸭 · 缩放插帧', softwareLaunch: '自定义软件联动', steamAppearance: 'Steam 大屏美化', steamWallpaper: 'Steam 动态壁纸', steamDecky: 'Decky', monitor: '性能监控', display: '屏幕与显示', background: 'YMCC 界面外观', sleep: '睡眠优化' };
 const supportKeys: Partial<Record<BootModeModule, keyof BootDeviceCapabilities>> = { performance: 'performance', fan: 'fan', charge: 'charge', gyro: 'gyro', sleep: 'hibernate' };
@@ -51,7 +52,7 @@ function warning(module: BootModeModule) {
   return { label: info?.state === 'unsupported' ? '不支持' : '支持待确认', reason: info?.reason || '设备能力尚未确认' };
 }
 function update(module: BootModeModule, value: BootConfig) {
-  if (!own(module) || blocked.value) return;
+  if (blocked.value || readOnly(module)) return;
   if (selected.value === 'global') draft.value.global[module] = cloneBootValue(value);
   else draft.value.scenes[selected.value].overrides[module] = cloneBootValue(value);
 }
@@ -98,7 +99,7 @@ function requestClose() {
 }
 function saveScene() {
   const name = sceneName.value.trim();
-  if (blocked.value || !name) return;
+  if (blocked.value || readOnly('controller') || !name) return;
   if (['__proto__', 'prototype', 'constructor'].includes(name)) { notice.value = '请使用其他预设名称。'; return; }
   const entries = draft.value.presets[selected.value] || {};
   if (Object.prototype.hasOwnProperty.call(entries, name) && confirmation.value !== 'replace') { confirmation.value = 'replace'; return; }
@@ -123,7 +124,7 @@ function confirm() {
 }
 function saveTemplate() {
   const name = templateName.value.trim();
-  if (blocked.value || !own('controller') || !name) return;
+  if (blocked.value || !name) return;
   if (['__proto__', 'prototype', 'constructor'].includes(name)) { notice.value = '请使用其他手柄预设名称。'; return; }
   if (!Object.prototype.hasOwnProperty.call(draft.value.controllerTemplates, name) && Object.keys(draft.value.controllerTemplates).length >= 30) { notice.value = '最多保存 30 个手柄预设，请使用已有名称。'; return; }
   draft.value.controllerTemplates = { ...draft.value.controllerTemplates, [name]: cloneBootValue(snapshot.value.controller) };
@@ -296,18 +297,18 @@ onBeforeUnmount(() => {
             <nav aria-label="开机模式设置分类"><button v-for="item in BOOT_MODE_CATEGORIES" :key="item.id" :data-boot-category="item.id" :aria-pressed="category === item.id" :disabled="blocked" @click="changeCategory(item.id)"><InlineIcon :name="item.icon"/><span>{{ item.label }}</span><small>{{ item.modules.filter(id => own(id)).length }}/{{ item.modules.length }}</small></button></nav>
           </aside>
           <main class="boot-workbench-main">
-            <div class="boot-category-heading"><h3>{{ currentCategory.label }}</h3><p>选择分类，编辑此模式的配置。</p></div>
+            <div class="boot-category-heading"><h3>{{ currentCategory.label }}</h3><p>{{ category === 'controller' && selected === 'global' ? '全局快捷键在手柄页修改，所有跟随项共用。' : '跟随全局；只有单独设置的栏目在此模式优先。' }}</p></div>
             <div ref="scroll" class="boot-config-scroll" :class="{ 'optimization-grid': category === 'optimization' }" data-gp-pane="boot-mode-fields" @focusin="rememberField">
               <article v-for="module in currentCategory.modules" :key="selected + module" class="boot-module" :data-boot-module="module">
-                <header><h3>{{ names[module] }}</h3><button v-if="warning(module)" class="boot-support" :disabled="blocked" @click="supportDialog = warning(module)!.reason"><i>!</i>{{ warning(module)!.label }}</button><small>{{ selected === 'global' ? '全局配置' : own(module) ? '模式预设' : '跟随全局' }}</small></header>
+                <header><h3>{{ names[module] }}</h3><button v-if="warning(module)" class="boot-support" :disabled="blocked" @click="supportDialog = warning(module)!.reason"><i>!</i>{{ warning(module)!.label }}</button><small>{{ selected === 'global' ? '全局配置' : own(module) ? '当前模式优先' : '共用全局' }}</small></header>
                 <div v-if="selected !== 'global'" class="boot-scope"><button :aria-pressed="!own(module)" :disabled="blocked" @click="scope(module, false)">跟随全局</button><button :aria-pressed="own(module)" :disabled="blocked" @click="scope(module, true)">模式单独设置</button></div>
                 <p v-if="module === 'touch'" class="boot-touch-note">此处为屏幕触摸按钮；实体按键请在「手柄自定义」设置。</p>
                 <div v-if="module === 'performance' && support.hybridCores?.state !== 'supported'" class="boot-core-notice"><span>大小核调度</span><button class="boot-support" :disabled="blocked" @click="supportDialog = support.hybridCores?.reason || 'CPU 架构尚未确认'"><i>!</i>{{ support.hybridCores?.state === 'unsupported' ? '不支持' : '支持待确认' }}</button></div>
                 <div v-if="module === 'controller'" class="boot-template-row">
-                  <label><span>手柄预设</span><Dropdown :model-value="''" :options="Object.keys(draft.controllerTemplates).map(value => ({ value, label: value }))" :disabled="!own(module) || blocked" placeholder="选择手柄预设" aria-label="手柄自定义预设" @update:model-value="chooseTemplate"/></label>
-                  <input v-model="templateName" maxlength="60" :disabled="!own(module) || blocked" aria-label="手柄预设名称" placeholder="手柄预设名称"><button :disabled="!own(module) || blocked || !templateName.trim()" @click="saveTemplate">另存手柄预设</button>
+                  <label><span>手柄预设</span><Dropdown :model-value="''" :options="Object.keys(draft.controllerTemplates).map(value => ({ value, label: value }))" :disabled="readOnly(module) || blocked" placeholder="选择手柄预设" aria-label="手柄自定义预设" @update:model-value="chooseTemplate"/></label>
+                  <input v-model="templateName" maxlength="60" :disabled="readOnly(module) || blocked" aria-label="手柄预设名称" placeholder="手柄预设名称"><button :disabled="readOnly(module) || blocked || !templateName.trim()" @click="saveTemplate">另存手柄预设</button>
                 </div>
-                <BootModeFields :module="module" :value="snapshot[module]" :disabled="!own(module) || blocked" :persona="String(snapshot.input.persona)" :support="support" :apps="apps" @change="update(module, $event)" @edit-controller="controllerOpen = true" @shared-apps="emit('shared-apps')"/>
+                <BootModeFields :module="module" :value="snapshot[module]" :disabled="readOnly(module) || blocked" :persona="String(snapshot.input.persona)" :support="support" :apps="apps" @change="update(module, $event)" @edit-controller="controllerOpen = true" @shared-apps="emit('shared-apps')"/>
               </article>
             </div>
           </main>
@@ -318,7 +319,7 @@ onBeforeUnmount(() => {
         <div v-if="supportDialog"><h3><i>!</i>设备兼容性</h3><p>{{ supportDialog }}</p><p>仍可编辑此项目。实际应用结果以设备接口回执为准。</p><button @click="supportDialog = ''">继续设置</button></div>
         <div v-else><h3>{{ confirmation === 'discard' ? '放弃未保存的修改？' : confirmation === 'baseline' ? '恢复本次载入的全局配置？' : confirmation === 'replace' ? '覆盖同名场景预设？' : '恢复选中的场景预设？' }}</h3><p>{{ confirmation === 'discard' ? '返回会丢弃草稿；使用「收回」可保留修改。' : confirmation === 'baseline' ? '使用打开此面板时捕获的全局配置，修改先写入草稿。' : '此操作修改所选开机预设，保存后重启生效。' }}</p><div class="boot-dialog-actions"><button @click="confirmation = ''">继续编辑</button><button class="primary" @click="confirm">{{ confirmation === 'discard' ? '放弃并返回' : '确认' }}</button></div></div>
       </div>
-      <ControllerShortcutEditorView v-if="controllerOpen && !externalModal" :teleport-to="root || 'body'" :persona="String(snapshot.input.persona) === 'disabled' ? 'elite' : String(snapshot.input.persona)" :preset-draft="{ name: BOOT_MODE_LABELS[selected], rules: snapshot.controller.rules as any, apps }" @preset-apply="applyRules" @close="controllerOpen = false"/>
+      <ControllerShortcutEditorView v-if="controllerOpen && !externalModal" :teleport-to="root || 'body'" :persona="String(snapshot.input.persona) === 'disabled' ? 'elite' : String(snapshot.input.persona)" :preset-draft="{ name: own('controller') && selected !== 'global' ? BOOT_MODE_LABELS[selected] : '全局快捷动作', rules: snapshot.controller.rules as any, apps }" @preset-apply="applyRules" @close="controllerOpen = false"/>
     </div>
   </Teleport>
 </template>

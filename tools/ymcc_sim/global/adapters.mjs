@@ -1589,6 +1589,7 @@ export function getAdapters(_repoRoot) {
         "tools/boot_modes_fixture/harness.mjs",
 
 
+        "src/bridge/gamingHomePolicy.ts",
         "tools/boot_modes_fixture/runtimePorts.ts"
 
 
@@ -1953,6 +1954,7 @@ export function getAdapters(_repoRoot) {
         "tools/boot_modes_fixture/harness.mjs",
 
 
+        "src/bridge/gamingHomePolicy.ts",
         "tools/boot_modes_fixture/runtimePorts.ts"
 
 
@@ -2214,7 +2216,7 @@ export function getAdapters(_repoRoot) {
       "tools/steam_ui_mode_shared_source_selftest.mjs", ["native/main.cpp", "native/steam_ui_mode_observer.h"], {"scope":"source-contract"}),
 
 
-    make('steam.boot-focus', 'steam', 'Existing BAT focus/flow consumers: sixty-second Steam-only startup, bounded self-activation requests and actual foreground readback; inert terminals only', 'node',
+    make('steam.boot-focus', 'steam', 'Existing BAT consumers: first Steam window and current virtual-ready milestones, at most two Steam-only requests, shared bounded tail and foreground readback; inert terminals only', 'node',
 
       'tools/ymcc_sim/global/steam-boot-bat/run.mjs', ['PowerControl/YeManSteam.bat','tools/ymcc_sim/global/steam-boot-bat/selftest.ps1','tools/ymcc_sim/global/steam-boot-bat/flow-selftest.ps1','tools/ymcc_sim/global/steam-boot-bat/focus-selftest.ps1','tools/ymcc_sim/global/steam-boot-bat/cleanup-selftest.ps1'],
 

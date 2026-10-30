@@ -13,10 +13,25 @@
     min-height: var(--ymcc-details-hero-height) !important;
 }
 
+
+/* Layout above is the original approved ratio. No blur, shade or hero fade. */
+.BasicUI .appdetails_Header_2gZXh,
+.BasicUI .appdetails_Header_2gZXh .sharedappdetailsheader_TopCapsule_2meE3,
+.BasicUI .appdetails_Header_2gZXh .libraryassetimage_Image_24_Au {
+    filter: none!important;
+    backdrop-filter: none!important;
+    -webkit-mask-image: none!important;
+    mask-image: none!important;
+    box-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+}
+
 /* YMCC: observe this theme file without changing layout or input. */
 :root { --ymcc-receipt-ymcc-game-details: 1; }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-7a458641a648f242: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-c351629737ef4149: 1; }
+:root { --ymcc-content-6559ccaed176dc47: 1; }

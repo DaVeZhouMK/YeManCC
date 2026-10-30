@@ -1,19 +1,22 @@
 import {applyGameMediaRange,DEFAULT_GAME_MEDIA_PLAYBACK,randomGameMediaRange} from '../../src/bridge/gameMediaPlayback';
 import {enterWallpaper,type WallpaperEntrance} from './wallpaperEntrance';
 export interface WallpaperVideoFrame {contextSeq:number;appId:string;opacity?:number;blur?:number;entry:{assetId:string;revision:string;bindingRevision:number;kind:string;url:string;playback?:typeof DEFAULT_GAME_MEDIA_PLAYBACK};}
-interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame)=>void;}
+interface PlayerOptions {entrance?:WallpaperEntrance;allowed?:()=>boolean;presented?:(frame:WallpaperVideoFrame)=>void;now?:()=>number;schedule?:(run:()=>void,delay:number)=>ReturnType<typeof setTimeout>;cancel?:(timer:ReturnType<typeof setTimeout>)=>void;}
 type Slot={node:HTMLVideoElement;frame:WallpaperVideoFrame;key:string;ready:boolean;dead:boolean;presented:boolean;animation:Animation|null;playRequested:boolean;playAgain:boolean;styleKey:string;playback:{start:number;end:number;initialStart:number}|null;};
 const identity=(frame:WallpaperVideoFrame)=>JSON.stringify([frame.entry.assetId,frame.entry.revision,frame.entry.bindingRevision,frame.entry.url,frame.entry.playback||DEFAULT_GAME_MEDIA_PLAYBACK]);
 // Only the selected video owns a source. No neighbor reads or predicted decoder.
 export class WallpaperPlayers {
   private current:Slot|null=null;private container:HTMLElement|null=null;
+  private pending:{key:string;frame:WallpaperVideoFrame;container:HTMLElement}|null=null;
+  private selectionTimer:ReturnType<typeof setTimeout>|null=null;private selectedAt:number|null=null;
   constructor(private doc:Document,private failed:(frame:WallpaperVideoFrame)=>void,private options:PlayerOptions={}){}
   // Recheck before every source/play/reveal boundary; a late media event or
   // promise cannot revive a background decoder while React is catching up.
   private admitted(){try{return this.doc.visibilityState!=='hidden'&&this.doc.hasFocus()&&(this.options.allowed?.()??true);}catch{return false;}}
   private release(slot:Slot|null){if(!slot||slot.dead)return;slot.dead=true;slot.animation?.cancel();slot.node.pause();slot.node.removeAttribute('src');slot.node.load();slot.node.remove();}
-  clearCurrent(){this.container?.parentElement?.removeAttribute('data-ymcc-wallpaper-ready');this.container=null;this.release(this.current);this.current=null;}
-  stop(){this.clearCurrent();}
+  private cancelSelection(){if(this.selectionTimer!==null){if(this.options.cancel)this.options.cancel(this.selectionTimer);else globalThis.clearTimeout(this.selectionTimer);}this.selectionTimer=null;this.pending=null;}
+  clearCurrent(){this.cancelSelection();this.container?.parentElement?.removeAttribute('data-ymcc-wallpaper-ready');this.container=null;this.release(this.current);this.current=null;}
+  stop(){this.clearCurrent();this.selectedAt=null;}
   private create(frame:WallpaperVideoFrame):Slot {
     const node=this.doc.createElement('video');node.muted=true;node.loop=true;node.playsInline=true;node.preload='metadata';node.style.width='100%';node.style.height='100%';node.setAttribute('aria-hidden','true');
     const slot:Slot={node,frame,key:identity(frame),ready:false,dead:false,presented:false,animation:null,playRequested:false,playAgain:false,styleKey:'',playback:null};
@@ -36,9 +39,29 @@ export class WallpaperPlayers {
   private reveal(slot:Slot){if(!this.admitted()){this.stop();return;}if(slot.dead||this.current!==slot||!this.container)return;const node=slot.node;if(node.style.visibility!=='visible')node.style.visibility='visible';if(!slot.presented){slot.presented=true;slot.animation=enterWallpaper(node,this.options.entrance);node.dataset.ymccEntrance=this.options.entrance||'fade';this.options.presented?.(slot.frame);}const target=this.container.parentElement;if(target&&target.getAttribute('data-ymcc-wallpaper-ready')!=='true')target.setAttribute('data-ymcc-wallpaper-ready','true');this.play(slot);}
   show(container:HTMLElement,frame:WallpaperVideoFrame){
     if(!this.admitted()){this.stop();return;}
+    const key=identity(frame);
+    if(this.pending?.key===key){this.pending.frame=frame;this.pending.container=container;return;}
+    if(this.current?.key!==key){
+      const now=this.options.now?.()??this.doc.defaultView?.performance.now()??Date.now();
+      const rapid=this.selectedAt!==null&&now-this.selectedAt<120;this.selectedAt=now;
+      this.clearCurrent();
+      if(rapid){
+        // A quick pass over intermediate cards must not start a decoder or
+        // fetch a full clip. One short latest-selection timer, never polling.
+        const next={key,frame,container};this.pending=next;
+        const start=()=>{if(this.pending!==next)return;this.selectionTimer=null;this.pending=null;if(this.admitted())this.display(next.container,next.frame);};
+        this.selectionTimer=this.options.schedule?this.options.schedule(start,90):globalThis.setTimeout(start,90);return;
+      }
+    }
+    this.display(container,frame);
+  }
+  private display(container:HTMLElement,frame:WallpaperVideoFrame){
+    if(!this.admitted()){this.stop();return;}
     const key=identity(frame);if(this.current?.key!==key){this.clearCurrent();this.current=this.create(frame);}
-    const slot=this.current!;slot.frame=frame;this.container=container;const node=slot.node;const fit=frame.entry.playback?.fit||'cover',opacity=String(frame.opacity??.64),filter=`blur(${frame.blur||0}px)`,styleKey=JSON.stringify([fit,opacity,filter]);if(slot.styleKey!==styleKey){slot.styleKey=styleKey;Object.assign(node.style,{objectFit:fit,opacity,filter});}const visibility=slot.ready?'visible':'hidden';if(node.style.visibility!==visibility)node.style.visibility=visibility;
+    const slot=this.current!;slot.frame=frame;this.container=container;const node=slot.node;const fit=frame.entry.playback?.fit||'cover',opacity=String(frame.opacity??.64),filter=(frame.blur??0)>0?`blur(${frame.blur}px)`:'none',styleKey=JSON.stringify([fit,opacity,filter]);if(slot.styleKey!==styleKey){slot.styleKey=styleKey;Object.assign(node.style,{objectFit:fit,opacity,filter});}const visibility=slot.ready?'visible':'hidden';if(node.style.visibility!==visibility)node.style.visibility=visibility;
     if(node.parentNode!==container)container.appendChild(node);
-    if(slot.ready)this.reveal(slot);else{if(node.preload!=='auto')node.preload='auto';this.play(slot);}
+    // Metadata and the selected random seek must be ready before play():
+    // early play starts at the intro and is immediately interrupted by seeking.
+    if(slot.ready)this.reveal(slot);
   }
 }

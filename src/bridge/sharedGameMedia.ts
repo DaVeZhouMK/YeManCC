@@ -1,7 +1,7 @@
 import {gameMediaDownloads,backgroundDownloadEnabled} from './gameMediaDownloads';
 import {invoke,on} from './ipc';
 import {subscribePolicyGameStatus,refreshPolicyGameStrict} from './gamePolicyTarget';
-import {GameMediaPreparationPolicy} from './gameMediaPreparationPolicy';
+import {GameMediaPreparationPolicy,subscribeGameMediaResume} from './gameMediaPreparationPolicy';
 import {getUiSetting,setUiSettings,uiSettingsLoaded} from './uiSettings';
 import {requestSteamHttp} from './steamHttp';
 import {parseHlsAsset} from './steamMediaPlaylist';
@@ -168,7 +168,7 @@ export function startSharedGameMedia(){
   const powerPolicy=on('power.sourceChanged',()=>policy.request());
   const saverPolicy=on('gameMedia.preparationPolicyChanged',()=>policy.request());
   const suspendPolicy=on('power.suspending',()=>policy.suspend());
-  const resumePolicy=on('power.resumed',()=>policy.resume());
+  const resumePolicy=subscribeGameMediaResume(()=>policy.resume(),on);
   const demandPolicy=sharedGameMedia.subscribe(reason=>{if(reason==='demand')policy.demand();else if(reason==='retry')policy.request();});
   const completionPolicy=gameMediaDownloads.watchCompleted(()=>{void refresh();});
   const downloadPolicy=gameMediaDownloads.subscribe(()=>policy.demand());

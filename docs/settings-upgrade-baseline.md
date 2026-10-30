@@ -62,3 +62,7 @@ PowerShell 5.1 与 7 都必须能解析发布入口。原发布脚本缺少 UTF-
 - 既有 settings CAS、响应性、启动目录、浏览器恢复与完整导出身份回归继续保留。
 
 这些证据能证明声明范围的软件行为；不代表完整 Build/Package/Verify、管理员保护事务、实际安装、驱动或实物设备验收。本轮证据位于 `Testing/YMCC/Evidence/U36P/ConfigBaseline`；前一候选的 Decky 持续生命周期门失败继续保留，不能被配置单项通过替代。
+
+## 0.0.37 发布准备：默认模板对齐（2026-10-29）
+
+本轮发现默认模板未跟随既有消费者：`sleep.retryOnNonUserWake` 的新建配置默认值已为 false，`input.bootModeShortcuts` 已增加 null 默认值。仅将这两项同步至受管模板，并在写入前确认实际 normalizeSettings({}) 没有其他差异。配置文档形状和存储协议保持兼容，revision 继续为1；这次不改变用户已保存的 true/false，不重新导入旧镜像或重置配置。实际消费者的两种显式布尔值保留检查与默认值合同通过后，才重新冻结构建；原构建失败留存。

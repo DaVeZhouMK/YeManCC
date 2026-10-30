@@ -41,5 +41,16 @@
   ],
   "scope": "Software regression of manual fallback only; no installed or physical acceptance",
   "automaticRecoveryFixed": false,
-  "installed": false
+  "installed": false,
+  "followups": [
+    {
+      "date": "2026-10-29",
+      "evidence": "Testing/YMCC/Evidence/Decky-History-ROG-20261029/REPORT.md",
+      "currentCodeReplay": "Strict false mutation session rejection consumed the sole attempt; reproduced for owned and retained modes before fix. Current typed consumer retries only proven no-op after fresh identity/admission validation.",
+      "unknownFieldPreserved": true,
+      "automaticRecoveryScope": "Software-only no-op lease rejection; no installed or field acceptance and no permission to rebuild Steam UI",
+      "typedRuntimeCases": 31,
+      "installed": false
+    }
+  ]
 }

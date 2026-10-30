@@ -2,21 +2,21 @@
   "schemaVersion": 1,
   "origin": "official-release",
   "repository": "SteamDeckHomebrew/decky-loader",
-  "version": "v3.3.0",
-  "sourceCommit": "67196adfa9b299f20dfb0cc932e88a169417b7d5",
-  "publishedAt": "2026-10-18T15:49:53Z",
+  "version": "v3.3.1",
+  "sourceCommit": "ffd103b9c1a4ce5bf305e7c0998eda6e05457dad",
+  "publishedAt": "2026-10-27T04:26:19Z",
   "byteIdentical": true,
   "installedName": "PluginLoader_noconsole.exe",
   "asset": {
     "name": "PluginLoader-win-noconsole.exe",
-    "id": 653839050,
-    "size": 15565142,
-    "sha256": "51c7f3b9cdf6d6b8132273ca4cbc145595f2e36b556332b7c911de846ef914b7",
-    "url": "https://github.com/SteamDeckHomebrew/decky-loader/releases/download/v3.3.0/PluginLoader-win-noconsole.exe",
-    "apiUrl": "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/assets/653839050"
+    "id": 680430423,
+    "size": 15632613,
+    "sha256": "8b7a36146591a3d3b54ba69c986dc508e2aea21f56652520b21e1126deebe65b",
+    "url": "https://github.com/SteamDeckHomebrew/decky-loader/releases/download/v3.3.1/PluginLoader-win-noconsole.exe",
+    "apiUrl": "https://api.github.com/repos/SteamDeckHomebrew/decky-loader/releases/assets/680430423"
   },
   "license": {
-    "url": "https://raw.githubusercontent.com/SteamDeckHomebrew/decky-loader/v3.3.0/LICENSE",
+    "url": "https://raw.githubusercontent.com/SteamDeckHomebrew/decky-loader/v3.3.1/LICENSE",
     "sha256": "8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643"
   },
   "consumerContract": 1,

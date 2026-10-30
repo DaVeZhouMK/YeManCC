@@ -40,6 +40,7 @@ DWORD pid(HWND, LPDWORD); SHORT async(int); BOOL keyboard(PBYTE);
 #define GetAsyncKeyState forbidden_os::async
 #define GetKeyboardState forbidden_os::keyboard
 #include "../native/input_signal_key_state_evidence.h"
+#include "../native/input_edge_evidence.h"
 
 namespace ke = ymcc::inputKeyStateEvidence;
 namespace ia = ymcc::inputActivity;
@@ -222,6 +223,44 @@ static void noProofClaimsOrIdentityRetention() {
     check(j["capturePhase"]=="existing-activity-drain" && j["candidateCapacity"]==16 && j["retainedRowCapacity"]==64,"drain-time scope and hard bounds");
     const auto text=j.dump(); check(text.find("lastSourceId")==std::string::npos && text.find("lastDeviceId")==std::string::npos && text.find("4276993775")==std::string::npos && text.find("3735928559")==std::string::npos,"row source/device identity retained as sample attribution");
 }
+static void injectedGamepadHoldEvidence() {
+    auto s=empty();auto row=key(198,14079984,true);row.hasEdge=true;row.lastEdgeTick=14079984;row.lastSourceId=19;
+    append(s,row);FakeOps initial;initial.clock=14083338;initial.async[198]=0x8000;
+    auto j=ke::toJson(ke::capture(true,s,initial));const auto& shortHold=jsonKey(j,198)["injectedGamepadHold"];
+    check(shortHold["observedAgeMs"]==3359 && shortHold["longHeldCandidate"]==false,"first actual C6 retained edge falsely classified as long hold");bounded(initial,1);
+    FakeOps later;later.clock=15522370;later.async[198]=0x8000;
+    j=ke::toJson(ke::capture(true,s,later));const auto& longHold=jsonKey(j,198)["injectedGamepadHold"];
+    check(longHold["observedAgeMs"]==1442391 && longHold["longHeldCandidate"]==true && j["longHeldInjectedGamepadKeys"]==1,"actual C6 long-held record not recognized");
+    check(longHold["stuckKeyProven"]==false && longHold["senderKnown"]==false && j["automaticReleaseProven"]==false,"candidate becomes sender/stuck verdict or automatic release");bounded(later,1);
+    FakeOps zero;zero.clock=15522370;j=ke::toJson(ke::capture(true,s,zero));check(jsonKey(j,198)["injectedGamepadHold"]["longHeldCandidate"]==false,"zero async value falsely treated as continued hold");
+    FakeOps backwards;backwards.async[198]=0x8000;j=ke::toJson(ke::capture(true,s,backwards));check(jsonKey(j,198)["injectedGamepadHold"]["observedAgeMs"].is_null(),"future edge or boot mismatch underflows age");
+    row.observedHeld=false;s.rows[0]=row;FakeOps released;released.clock=15522370;j=ke::toJson(ke::capture(true,s,released));check(!jsonKey(j,198).contains("injectedGamepadHold")&&j["longHeldInjectedGamepadKeys"]==0,"released row retains a held injection candidate");
+    row.observedHeld=true;row.sourceMixed=true;s.rows[0]=row;FakeOps mixed;j=ke::toJson(ke::capture(true,s,mixed));check(!jsonKey(j,198).contains("injectedGamepadHold"),"mixed sources treated as a stable injected route");
+    row.sourceMixed=false;row.sourceUnknown=true;s.rows[0]=row;FakeOps unknown;j=ke::toJson(ke::capture(true,s,unknown));check(!jsonKey(j,198).contains("injectedGamepadHold"),"unknown source classified as known injected route");
+    row.sourceUnknown=false;row.lastSourceId=1;s.rows[0]=row;FakeOps physical;j=ke::toJson(ke::capture(true,s,physical));check(!jsonKey(j,198).contains("injectedGamepadHold"),"physical route becomes injected candidate");
+    row.lastSourceId=19;row.code='A';s.rows[0]=row;FakeOps ordinary;j=ke::toJson(ke::capture(true,s,ordinary));check(!jsonKey(j,'A').contains("injectedGamepadHold"),"ordinary typing gets gamepad classifier");
+    row.code=198;row.channel=ia::Channel::RawKeyboard;s.rows[0]=row;FakeOps raw;j=ke::toJson(ke::capture(true,s,raw));check(!jsonKey(j,198).contains("injectedGamepadHold"),"raw flags interpreted as hook injection flags");
+}
+struct EdgeForegroundOps {
+    unsigned calls=0,pidCalls=0;bool nullWindow=false,fail=false,change=false;
+    std::uintptr_t foreground() noexcept {++calls;return nullWindow?0:change&&calls==2?12:11;}
+    bool foregroundPid(std::uintptr_t,std::uint32_t& pid,std::uint32_t& error) noexcept {++pidCalls;pid=42;error=fail?5:0;return !fail;}
+};
+static void injectedGamepadEventContext() {
+    namespace ie=ymcc::inputEdges;
+    ie::Event e{};e.channel=ie::Channel::HookKeyboard;e.code=198;e.flags=16;e.down=true;
+    EdgeForegroundOps ops;ie::captureInjectedGamepadForeground(e,ops);
+    check(e.foreground.attempted&&e.foreground.pidKnown&&e.foreground.pid==42&&e.foreground.before==11&&e.foreground.after==11,"injected C6 callback foreground missing");
+    check(ops.calls==2&&ops.pidCalls==1&&e.flags==16&&e.code==198&&e.down,"context changes supplied key event or adds unbounded reads");
+    e.foreground={};e.down=false;e.flags=144;EdgeForegroundOps up;ie::captureInjectedGamepadForeground(e,up);check(e.foreground.attempted,"injected C6 keyup loses event context");
+    for(const auto channel:{ie::Channel::RawKeyboard,ie::Channel::HookMouse,ie::Channel::SelfSend}){auto other=e;other.channel=channel;other.foreground={};EdgeForegroundOps none;ie::captureInjectedGamepadForeground(other,none);check(none.calls==0&&!other.foreground.attempted,"non-hook channel queries foreground");}
+    for(const auto keyCode:{65u,0xc2u,0xdbu,256u}){auto other=e;other.code=keyCode;other.foreground={};EdgeForegroundOps none;ie::captureInjectedGamepadForeground(other,none);check(none.calls==0&&!other.foreground.attempted,"ordinary/non-gamepad key queries foreground");}
+    auto normal=e;normal.flags=0;normal.foreground={};EdgeForegroundOps none;ie::captureInjectedGamepadForeground(normal,none);check(none.calls==0,"physical gamepad VK queries injected context");
+    auto bad=e;bad.foreground={};EdgeForegroundOps failure;failure.fail=true;ie::captureInjectedGamepadForeground(bad,failure);check(!bad.foreground.pidKnown&&bad.foreground.error==5,"failed foreground PID becomes known sender");
+    bad.foreground={};EdgeForegroundOps missing;missing.nullWindow=true;ie::captureInjectedGamepadForeground(bad,missing);check(!bad.foreground.pidKnown&&missing.pidCalls==0,"null foreground queries/claims PID");
+    bad.foreground={};EdgeForegroundOps changed;changed.change=true;ie::captureInjectedGamepadForeground(bad,changed);check(bad.foreground.before!=bad.foreground.after,"window race hidden");
+    check(ie::capacity==256&&sizeof(ie::Event)<=160,"existing recorder storage bound unexpectedly expanded");
+}
 static void run(const char* name,void(*test)()) {
     const auto before=checks;
     try { test(); cases.push_back({{"case",name},{"pass",true},{"checks",checks-before}}); }
@@ -242,6 +281,8 @@ int main() {
     run("malformed-input-count-bounded-by-64",boundedMalformedCount);
     run("allocation-free-select-capture-to-json-drain-only",allocationFreeBeforeSerialization);
     run("all-proof-limits-and-no-row-identity-retention",noProofClaimsOrIdentityRetention);
+    run("actual-C6-held-age-and-nonattribution-boundaries",injectedGamepadHoldEvidence);
+    run("injected-gamepad-callback-context-and-zero-ops-exclusions",injectedGamepadEventContext);
     bool pass=true; for(const auto& row:cases) if(!row["pass"].get<bool>())pass=false;
     std::cout<<json({{"pass",pass},{"checks",checks},{"cases",cases},{"actualOSInput",false},{"productExecuted",false},{"allOpsInMemory",true},{"windowsOpsInvoked",false},{"selectionAllocations",0},{"candidateCapacity",16},{"retainedRowCapacity",64}}).dump(2)<<'\n';
     return pass?0:1;

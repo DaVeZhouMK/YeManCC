@@ -33,7 +33,7 @@ struct Children {
  ~Children(){if(job.h)TerminateJobObject(job.h,0);for(const auto child:owned){WaitForSingleObject(child,1000);CloseHandle(child);}}
 };
 static Request request(DWORD pid,const fs::path& root){Request r;r.steam.root=ymcc::steamlive::normalizedPath(root.wstring());r.steam.pid=pid;r.steam.account=123;auto h=ymcc::steamsession::verifiedProcess(pid,r.steam.root,&r.steam.created);need(h!=nullptr,"real-owned-Steam-identity");CloseHandle(h);need(ProcessIdToSessionId(pid,&r.windowsSession)!=FALSE,"own-session");return r;}
-static bool admitted(const Request& r,const Registry& registry){try{SteamLease lease(r,registry.path);return lease.current();}catch(const std::exception& e){need(std::string(e.what())=="mirror-bootstrap-session-changed","expected-identity-failure");return false;}}
+static bool admitted(const Request& r,const Registry& registry,const std::string& expectedCheck={}){std::string check;try{SteamLease lease(r,registry.path,&check);return lease.current();}catch(const std::exception& e){need(std::string(e.what())=="mirror-bootstrap-session-changed","expected-identity-failure");if(!expectedCheck.empty())need(check==expectedCheck,"wrong-session-refusal-diagnostic");return false;}}
 static void save(const fs::path& file,const Json& report){std::ofstream out(file,std::ios::binary);out<<report.dump(2);need(bool(out),"write-report");}
 int wmain(int argc,wchar_t** argv){
  SetErrorMode(SEM_FAILCRITICALERRORS|SEM_NOGPFAULTERRORBOX);
@@ -52,11 +52,11 @@ int wmain(int argc,wchar_t** argv){
   registry.number(L"pid",MAXDWORD);test("stale absent registered PID preserves verified observer lease",[&]{return admitted(r,registry);});
   registry.number(L"pid",unrelated);test("PID reused by verified unrelated image cannot block current Steam",[&]{return admitted(r,registry);});
   leaseboundary::denied=unrelated;test("unreadable registered process never grants stale PID recovery",[&]{return !admitted(r,registry);});leaseboundary::denied=0;
-  registry.number(L"pid",other);test("different live registered Steam remains a session conflict",[&]{return !admitted(r,registry);});
-  registry.number(L"pid",MAXDWORD);registry.number(L"ActiveUser",124);test("stale PID cannot bypass changed Steam account",[&]{return !admitted(r,registry);});registry.number(L"ActiveUser",123);
-  registry.setRoot((root/L"changed").wstring());test("stale PID cannot bypass changed Steam root",[&]{return !admitted(r,registry);});registry.setRoot(root.wstring());
-  auto changed=r;++changed.steam.created;test("stale PID cannot bypass process birth mismatch",[&]{return !admitted(changed,registry);});
-  changed=r;++changed.windowsSession;test("stale PID cannot bypass Windows session mismatch",[&]{return !admitted(changed,registry);});
+  registry.number(L"pid",other);test("different live registered Steam remains a session conflict",[&]{return !admitted(r,registry,"steam-registered-pid");});
+  registry.number(L"pid",MAXDWORD);registry.number(L"ActiveUser",124);test("stale PID cannot bypass changed Steam account",[&]{return !admitted(r,registry,"steam-account");});registry.number(L"ActiveUser",123);
+  registry.setRoot((root/L"changed").wstring());test("stale PID cannot bypass changed Steam root",[&]{return !admitted(r,registry,"steam-root");});registry.setRoot(root.wstring());
+  auto changed=r;++changed.steam.created;test("stale PID cannot bypass process birth mismatch",[&]{return !admitted(changed,registry,"steam-process-or-birth");});
+  changed=r;++changed.windowsSession;test("stale PID cannot bypass Windows session mismatch",[&]{return !admitted(changed,registry,"steam-windows-session");});
   changed=r;changed.steam.root=ymcc::steamlive::normalizedPath((root/L"changed").wstring());test("stale PID cannot bypass request image mismatch",[&]{return !admitted(changed,registry);});
   test("held lease rejects a later real registered session switch",[&]{SteamLease lease(r,registry.path);registry.number(L"pid",other);const bool refused=!lease.current();registry.number(L"pid",MAXDWORD);return refused;});
   const auto before=handles();for(unsigned i=0;i<64;++i)admitted(changed,registry);test("rejected identities return their process handles",[&]{return handles()==before;});

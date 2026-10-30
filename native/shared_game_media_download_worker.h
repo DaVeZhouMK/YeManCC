@@ -132,6 +132,7 @@ struct HlsVariant {
   std::string url;
   int height=0;
   uint64_t bandwidth=0;
+  double frameRate=0; // Manifest declaration; zero means unknown, not unusable.
 };
 struct HlsPlan {
   std::string variant;
@@ -139,6 +140,7 @@ struct HlsPlan {
   int height=0;
   uint64_t bandwidth=0;
   double duration=0;
+  double frameRate=0; // Selected variant metadata; no decoder measurement.
 };
 // A zero ceiling preserves the preferred official source, including a lone
 // higher-resolution source. Explicit ceilings are used only after a size failure.
@@ -166,6 +168,11 @@ inline HlsPlan hlsPlan(const std::string &text, const std::string &base, int cei
         v.height = std::stoi(match[1]);
       if (std::regex_search(lines[i], match, std::regex("(?:[:,])BANDWIDTH=([0-9]+)")))
         v.bandwidth = std::stoull(match[1]);
+      if (std::regex_search(lines[i], match,
+                            std::regex(R"((?:[:,])[ \t]*FRAME-RATE=([0-9]+(?:\.[0-9]+)?)(?:,|[ \t]*$))"))) {
+        try {const auto rate=std::stod(match[1]);if(std::isfinite(rate)&&rate>0)v.frameRate=rate;}
+        catch(const std::exception&) {} // Malformed optional metadata keeps the source available.
+      }
       variants.push_back(v);
     }
   if (!variants.empty()) {
@@ -175,9 +182,13 @@ inline HlsPlan hlsPlan(const std::string &text, const std::string &base, int cei
     }
     std::stable_sort(variants.begin(),variants.end(),[preferredHeight](const auto& a,const auto& b){
       const auto rank=[preferredHeight](const auto& v){const int group=v.height==preferredHeight?0:preferredHeight>=1080&&v.height==720?1:preferredHeight>=720&&v.height==480?2:v.height>0&&v.height<preferredHeight?3:v.height>0?4:5;
-        return std::tuple{group,group==3?-v.height:v.height,-static_cast<int64_t>((std::min)(v.bandwidth,uint64_t{INT64_MAX}))};};return rank(a)<rank(b);
+        // Default 720/480 form one band: prefer declared <=30fps before height.
+        // Explicit manual heights and other fallbacks retain their resolution order.
+        const bool defaultBand=preferredHeight==720&&(v.height==720||v.height==480);
+        const int fpsRank=v.frameRate>0&&v.frameRate<=30?0:1;
+        return std::tuple{defaultBand?0:group,defaultBand?fpsRank:0,group,group==3?-v.height:v.height,defaultBand?0:fpsRank,-static_cast<int64_t>((std::min)(v.bandwidth,uint64_t{INT64_MAX}))};};return rank(a)<rank(b);
     });
-    return {variants.front().url, {},variants.front().height,variants.front().bandwidth};
+    return {variants.front().url, {},variants.front().height,variants.front().bandwidth,0,variants.front().frameRate};
   }
   std::string init;
   std::vector<std::string> fragments;

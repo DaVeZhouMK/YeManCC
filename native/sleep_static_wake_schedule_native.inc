@@ -16,6 +16,10 @@ static void sgStaticScanSchedule(bool startup) {
     if(g_hwnd&&!g_exitRequested.load(std::memory_order_acquire))
         PostMessageW(g_hwnd,WM_SG_STATIC_SCAN,startup?1:2,static_cast<LPARAM>(g_sgStaticScanRevision.load(std::memory_order_acquire)));
 }
+// Migrate the former shared preference without changing a saved OFF choice.
+static bool sgStaticScanEnabled(const json& sleep) {
+    return sleep.value("staticWakeAutoScanEnabled",sleep.value("sleepPowerPlanOptimizationEnabled",true));
+}
 static void sgStaticScanPreference(bool enabled,bool startup=false) {
     const auto previous=g_sgStaticScanPreference.exchange(enabled?1:0,std::memory_order_acq_rel);
     if(!enabled){if(previous!=0)sgStaticScanCancel("setting-off");}

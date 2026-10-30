@@ -1,5 +1,8 @@
 // Windows full-screen startup is user intent, not the presence of a YeMan task.
 // Explicit user requests may apply these defaults on any machine. Never apply on read.
+// Verified against Microsoft.GamingApp's installed Application Id and gamingApp extension.
+export const XBOX_GAMING_HOME_AUMID = 'Microsoft.GamingApp_8wekyb3d8bbwe!Microsoft.Xbox.App';
+export type GamingHomeSelection = 'xbox' | 'none';
 export const GAMING_HOME_DEFAULTS = Object.freeze({ deviceForm: 46, startup: 1 });
 export const GAMING_OEM_KEY = 'SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\OEM';
 export const GAMING_CONFIG_KEY = 'Software\\Microsoft\\Windows\\CurrentVersion\\GamingConfiguration';
@@ -13,7 +16,7 @@ export interface GamingHomeState {
 }
 export interface GamingHomeRegistryPort {
   read(root: GamingRegistryRoot, key: string, name: string): Promise<unknown>;
-  write(root: GamingRegistryRoot, key: string, name: string, value: number): Promise<boolean>;
+  write(root: GamingRegistryRoot, key: string, name: string, value: number | string): Promise<boolean>;
   remove(root: GamingRegistryRoot, key: string, name: string): Promise<boolean>;
   saveBackup(state: GamingHomeState): Promise<void>;
 }
@@ -33,6 +36,8 @@ export async function readGamingHomeState(port: GamingHomeRegistryPort): Promise
     port.read('HKCU', GAMING_CONFIG_KEY, 'GamingHomeApp'),
   ]);
   const startupValue = dword(startup, 'StartupToGamingHome');
+  if (homeApp != null && typeof homeApp !== 'string')
+    throw new Error('GamingHomeApp 不是有效的字符串，停止修改；请先检查注册表类型。');
   return {
     deviceForm: dword(deviceForm, 'DeviceForm'),
     startupValue,
@@ -45,13 +50,15 @@ interface Change {
   root: GamingRegistryRoot;
   key: string;
   name: string;
-  before: number | null;
-  after: number;
+  before: number | string | null;
+  after: number | string;
 }
 
 export async function setGamingHomeStartup(
-  port: GamingHomeRegistryPort, enabled: boolean, repairHandheld = enabled,
+  port: GamingHomeRegistryPort, enabled: boolean, repairHandheld = enabled, selection?: GamingHomeSelection,
 ): Promise<GamingHomeState> {
+  if (selection !== undefined && selection !== 'xbox' && selection !== 'none')
+    throw new Error('无效的 Xbox 主应用选择。');
   const before = await readGamingHomeState(port);
   const changes: Change[] = [];
   if (repairHandheld && before.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm) {
@@ -59,10 +66,14 @@ export async function setGamingHomeStartup(
       before: before.deviceForm, after: GAMING_HOME_DEFAULTS.deviceForm });
   }
   const startup = enabled ? GAMING_HOME_DEFAULTS.startup : 0;
-  if (before.startupValue !== startup) {
-    changes.push({ root: 'HKCU', key: GAMING_CONFIG_KEY, name: 'StartupToGamingHome',
-      before: before.startupValue, after: startup });
-  }
+  const homeApp = selection === undefined ? undefined : selection === 'xbox' ? XBOX_GAMING_HOME_AUMID : '';
+  const startupChange: Change = { root: 'HKCU', key: GAMING_CONFIG_KEY, name: 'StartupToGamingHome',
+    before: before.startupValue, after: startup };
+  // Disable sign-in first when clearing the home; enable only after Xbox is selected.
+  if (!enabled && before.startupValue !== startup) changes.push(startupChange);
+  if (homeApp !== undefined && before.homeApp !== homeApp)
+    changes.push({ root: 'HKCU', key: GAMING_CONFIG_KEY, name: 'GamingHomeApp', before: before.homeApp, after: homeApp });
+  if (enabled && before.startupValue !== startup) changes.push(startupChange);
   if (!changes.length) return before;
 
   // A failed backup must stop BEFORE any registry mutation.
@@ -78,7 +89,8 @@ export async function setGamingHomeStartup(
     }
     const result = await readGamingHomeState(port);
     if (result.startupValue !== startup ||
-        (repairHandheld && result.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm)) {
+        (repairHandheld && result.deviceForm !== GAMING_HOME_DEFAULTS.deviceForm) ||
+        (homeApp !== undefined && result.homeApp !== homeApp)) {
       throw new Error('全屏启动配置被其他程序覆盖，请检查开机联动。');
     }
     return result;

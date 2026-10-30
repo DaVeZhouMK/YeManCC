@@ -52,11 +52,20 @@ static void inputEdgeObserveSelf(ymcc::keyboardEvents::SourceId source,const INP
     }
     SetLastError(saved);
 }
+struct InputEdgeForegroundOps {
+    std::uintptr_t foreground() const noexcept {return reinterpret_cast<std::uintptr_t>(GetForegroundWindow());}
+    bool foregroundPid(std::uintptr_t window,std::uint32_t& pid,std::uint32_t& error) const noexcept {
+        DWORD value=0;SetLastError(ERROR_SUCCESS);
+        const bool ok=GetWindowThreadProcessId(reinterpret_cast<HWND>(window),&value)!=0;
+        pid=value;error=ok?ERROR_SUCCESS:GetLastError();return ok;
+    }
+};
 static LRESULT CALLBACK inputEdgeKeyboardHookProc(int code,WPARAM message,LPARAM data) {
     if(code==HC_ACTION&&data&&g_inputEdgeEvents.enabled()){
         const DWORD saved=GetLastError();const auto& k=*reinterpret_cast<const KBDLLHOOKSTRUCT*>(data);
         auto e=inputEdgeBase(ymcc::inputEdges::Channel::HookKeyboard);e.code=k.vkCode;e.scan=k.scanCode;
         e.flags=k.flags;e.extraInfo=k.dwExtraInfo;e.message=static_cast<DWORD>(message);e.eventTime=k.time;e.down=(k.flags&LLKHF_UP)==0;
+        InputEdgeForegroundOps foregroundOps;ymcc::inputEdges::captureInjectedGamepadForeground(e,foregroundOps);
         if(k.vkCode==VK_PACKET){e.scan=0;g_inputEdgeUnicodeOmitted.fetch_add(1,std::memory_order_relaxed);}
         g_inputEdgeHookCallbacks.fetch_add(1,std::memory_order_relaxed);g_inputEdgeLastKeyboardTick.store(e.tick,std::memory_order_relaxed);g_inputEdgeEvents.record(e);
         // Reuse the ordinary aggregate only when no OEM callback supplies it.
@@ -138,6 +147,14 @@ static void inputEdgeFlushEvidence(const json& idle,ULONGLONG now,bool force=fal
             events.push_back({{"channel",channel},{"tick",e.tick},{"sequence",e.sequence},{"powerGeneration",e.powerGeneration},{"deviceGeneration",e.deviceGeneration},
                 {"deviceHandle",e.device},{"code",e.code},{"scan",e.scan},{"flags",e.flags},{"message",e.message},{"eventTime32",e.eventTime},{"extraInfo",e.extraInfo},
                 {"down",e.down},{"wheelDelta",e.wheel},{"sourceId",e.source},{"requestedInputs",e.requested},{"returnedInputs",e.returned},{"inputIndex",e.inputIndex}});
+            if(e.foreground.attempted){const auto& f=e.foreground;
+                events.back()["injectedGamepadForeground"]={{"version",1},{"capturePhase","event-callback"},
+                    {"windowBefore",f.before},{"windowAfter",f.after},{"pidKnown",f.pidKnown},
+                    {"foregroundPid",f.pidKnown?json(f.pid):json(nullptr)},
+                    {"foregroundPidReadError",f.before&&!f.pidKnown?json(f.error):json(nullptr)},
+                    {"sameWindowAcrossPidQuery",f.before&&f.pidKnown?json(f.before==f.after):json(nullptr)},
+                    {"senderPidProven",false},{"consumerReceiptProven",false}};
+            }
             if(e.device&&namedCount<named.size()&&std::find(named.begin(),named.begin()+namedCount,e.device)==named.begin()+namedCount){
                 ymcc::keyboardEvents::Event origin{};origin.device=e.device;origin.deviceGeneration=e.deviceGeneration;origin.tick=e.tick;
                 devices.push_back({{"deviceHandle",e.device},{"observed",keyboardModifierRawNameAtDrain(origin,nameBudget)}});named[namedCount++]=e.device;

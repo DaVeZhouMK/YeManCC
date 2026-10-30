@@ -53,7 +53,7 @@ static std::string realDigest(const std::wstring& file){
 static std::string digest(const std::wstring& path){return text(fs::path(path))==inertLoader?std::string(loaderSha):realDigest(path);}
 struct Fixture {
     fs::path root,steam,home,receipt,cache;Json manifest;Digest hash=digest;
-    explicit Fixture(const fs::path& base,const std::string& name,bool exact=false):root(base/(exact?name:name+std::to_string(++serial))),steam(root/L"Steam"),home(root/L"PowerControl"/L"decky"),receipt(home/L".ymcc-managed.json"),cache(home/L".ymcc-resource-cache"){
+    explicit Fixture(const fs::path& base,const std::string& name,bool exact=false):root(base/(exact?name:name+std::to_string(++serial))),steam(root/L"Steam"),home(root/L"PowerControl"/L"decky"),receipt(home/L".ymcc-managed.receipt"),cache(home/L".ymcc-resource-cache"){
         put(steam/L"steam.exe","inert");put(steam/L".cef-enable-remote-debugging","");
         for(const auto* file:managedFiles)put(home/file,"fixture-"+pathText(fs::path(file)));
         put(home/managedFiles[0],inertLoader);put(home/managedFiles[3],"{\"name\":\"ymcc-sidebar\"}");refreshManifest();

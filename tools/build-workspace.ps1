@@ -293,6 +293,13 @@ try {
   & cmd.exe /d /c (Join-Path $ProjectRoot 'native\build_native.bat')
   if ($LASTEXITCODE -ne 0) { throw "Native build failed: exit=$LASTEXITCODE" }
 
+  # Windows must read the same version that the shell and frontend display.
+  $expectedNativeVersion = [string](Get-Content -LiteralPath (Join-Path $ProjectRoot 'version.json') -Raw -Encoding UTF8 | ConvertFrom-Json).version
+  $nativeVersionInfo = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $NativeBuild 'YeManCC.exe'))
+  if ($nativeVersionInfo.FileVersion -cne $expectedNativeVersion -or $nativeVersionInfo.ProductVersion -cne $expectedNativeVersion) {
+    throw "Native executable version resource mismatch: expected=$expectedNativeVersion file=$($nativeVersionInfo.FileVersion) product=$($nativeVersionInfo.ProductVersion)"
+  }
+
   $inputHostProj = Join-Path $ProjectRoot 'InputHost\YeManInputHost.csproj'
   if (Test-Path -LiteralPath $inputHostProj) {
     # Build directly into this export lane; the project's x64 platform may

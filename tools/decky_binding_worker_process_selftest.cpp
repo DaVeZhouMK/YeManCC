@@ -1,4 +1,5 @@
 // Real same-image Owner -> private entry -> production child refusal consumer.
+#include "../native/decky_sidebar_diagnostics.h"
 // No successful Steam scope is admitted and no CDP/installed application is used.
 #include "../native/decky_binding_worker_entry.h"
 #include <fstream>
@@ -21,6 +22,11 @@ int main(int argc,char** argv){
         const auto reply=owner.readFrame(2500,generation);need(static_cast<bool>(reply),"worker-refusal-read");
         const auto packet=J::parse(reply.payload);need(packet["schema"]==worker::schema&&packet["id"]==std::string(32,'a')&&packet["generation"]==std::to_string(generation)&&packet["kind"]=="result"&&packet["detail"]["ok"]==false&&packet["detail"]["mutated"]==false&&packet["detail"]["reason"]=="mirror-bootstrap-session-changed","bad-worker-receipt");
         need(packet.dump().find(std::string(64,'b'))==std::string::npos,"private-token-echoed");
+        need(packet["detail"].value("sessionCheck",std::string{})=="steam-process-or-birth","session-check-not-reported");
+        const auto diagnostic=ymcc::deckydiag::record("bootstrap",packet["detail"]);
+        need(diagnostic.value("sessionCheck",std::string{})=="steam-process-or-birth","session-check-filtered-out");
+        need(!ymcc::deckydiag::record("runtime",packet["detail"]).contains("sessionCheck"),"session-check-wrong-log-boundary");
+        need(!ymcc::deckydiag::record("bootstrap",{{"sessionCheck","private-unrecognized-value"},{"token","private"}}).contains("sessionCheck"),"session-check-untrusted-value");
         const auto stopped=owner.stop();const auto after=owner.snapshot();
         need(stopped.fullyDestroyed&&after.handles==0&&after.pendingIo==0&&after.activeCalls==0&&after.jobActiveProcesses==0&&after.childExited,"worker-resources-not-destroyed");
         return J{{"reply",packet},{"atExit",state(after)},{"sameExecutableChild",true}};

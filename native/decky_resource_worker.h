@@ -4,6 +4,7 @@
 #include "decky_binding_client.h"
 #include "decky_sidebar_setup.h"
 #include <bcrypt.h>
+#include <memory>
 #pragma comment(lib,"bcrypt.lib")
 namespace ymcc::deckyresources::worker {
 inline constexpr const char* schema="ymcc.decky.resources.v1";
@@ -37,9 +38,21 @@ template<class Emit>bool tryRun(const Json& request,HANDLE cancel,Emit&& emit,in
         Options options;options.allowRepair=request.at("allowRepair").get<bool>();options.mayWrite=current;
         // Debug-marker creation remains in the existing parent preparation.
         // This operation touches only exact resources and the bounded local cache.
+        // Bounded legacy receipt migration belongs to this already owned worker,
+        // never the parent/UI thread. Refuse writes while another Loader owns the port.
+        std::unique_ptr<PortLease> receiptLease;
+        const auto mayMigrate=[&]{if(!current()||!options.allowRepair)return false;if(!receiptLease)receiptLease=std::make_unique<PortLease>(options.backendPort);return receiptLease->acquired()&&current();};
+        const auto migration=ymcc::deckysetup::migrateLegacyManagedReceipt(home,mayMigrate);
+        receiptLease.reset(); // Cache obtains its own lease after the atomic move completes.
         Json contract,description;const auto invalid=ymcc::deckysetup::readManagedContract(home,description,contract,manifest);
-        detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);
-        if(invalid.empty()&&!contract.is_null()){
+        if(!migration.empty())detail={{"ready",false},{"reason",migration}};
+        else detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);
+        // Launch preflight passes allowRepair=false: validate every installed
+        // byte above, but keep optional cache hashing/copying off that deadline.
+        // Cache seeding/repair remains on the original writable preparation.
+        if(migration.empty()&&invalid.empty()&&!contract.is_null()&&!options.allowRepair)
+            detail["resourceMaintenanceDeferred"]=true;
+        if(migration.empty()&&invalid.empty()&&!contract.is_null()&&options.allowRepair){
             const SafePath safe=[](const auto& path){return ymcc::deckysetup::safeManagedPath(path);};
             const auto maintenance=Cache(home,contract,hash,safe,current,options).run();
             if(maintenance.value("resourcesRepaired",0u)>0)detail=ymcc::deckysetup::inspect(steam,home,hash,manifest);

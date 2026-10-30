@@ -16,6 +16,40 @@ export const typedIds = Object.freeze({
  descendants: 'native.typed-stalled-binding-descendants-stop-before-release',
  ready: 'native.typed-ready-rebind-keeps-original-owned-loader',
  retained: 'native.typed-retained-ready-rebind-never-starts-loader',
+ preparation: 'native.typed-preparation-rechecks-admission-before-binding',
+ s0Owned: 'native.typed-s0-intent-ready-owned',
+ s0Retained: 'native.typed-s0-intent-ready-retained',
+ healOwned: 'native.typed-healing-resume-disconnect-owned',
+ healRetained: 'native.typed-healing-resume-disconnect-retained',
+ healResumeFirst: 'native.typed-healing-resume-then-disconnect-owned',
+ healLate: 'native.typed-healing-late-result-owned',
+ healOff: 'native.typed-healing-off-beats-late-resume-result',
+ healExitOwned: 'native.typed-healing-child-exit-owned',
+ healExitRetained: 'native.typed-healing-child-exit-retained',
+ historySessionFalseOwned: 'native.typed-history-session-false-owned',
+ historySessionFalseRetained: 'native.typed-history-session-false-retained',
+ historySessionTrue: 'native.typed-history-session-true-retained',
+ historySessionNull: 'native.typed-history-session-null-retained',
+ historySessionMissing: 'native.typed-history-session-missing-retained',
+ historySessionString: 'native.typed-history-session-string-retained',
+ historySessionNumber: 'native.typed-history-session-number-retained',
+ historySessionOff: 'native.typed-history-session-off-retained',
+ historySessionAdmission: 'native.typed-history-session-admission-retained',
+ historyResourceRecover: 'native.typed-history-resource-recover',
+ historyResourceReady: 'native.typed-history-resource-ready',
+ historyResourceOff: 'native.typed-history-resource-off',
+ historyResourceHash: 'native.typed-history-resource-hash',
+ historyResourceCleanup: 'native.typed-history-resource-cleanup',
+ historyResourceAdmission: 'native.typed-history-resource-admission',
+ historyHandoffRecover: 'native.typed-history-resource-handoff-recover',
+ historyHandoffAutomatic: 'native.typed-history-resource-handoff-automatic',
+ historyHandoffReject: 'native.typed-history-resource-handoff-reject',
+ historyHandoffOff: 'native.typed-history-resource-handoff-off',
+ finalAutomatic: 'native.typed-final-admission-automatic',
+ finalRetained: 'native.typed-final-admission-retained',
+ finalOff: 'native.typed-final-admission-off',
+ finalTerminal: 'native.typed-final-admission-terminal',
+
 });
 export const historicalStallId = 'native.stalled-binding-stop-requires-fixture-release';
 export const productionWiringId = 'native.production-typed-binding-wiring';
@@ -78,6 +112,15 @@ export function verifyTypedRuntime({root, out, execution}) {
  const dir = path.join(out, 'typed-runtime'), file = path.join(dir, 'typed-runtime-result.json');
  const result = read(file), build = read(path.join(dir, 'BUILD.json')), run = read(path.join(dir, 'RESULT.json')), pins = read(path.join(dir, 'SOURCE-PINS.json'));
  assert.equal(build.exit, 0); assert.equal(run.status, 'pass'); assert.equal(run.compilerExit, 0); assert.equal(run.runExit, 0);
+ // The alternate S0 function is compiled from current main.cpp, not a
+ // substitute that only calls the same Runtime method. Negative overrides
+ // remain useful diagnostics, but can never authorize a release receipt.
+ assert.equal(run.resumeConsumer?.intentOverride,undefined,'Negative Ready override is not production evidence');
+ const readyMain=fs.readFileSync(path.join(root,'native/main.cpp'),'utf8');
+ const readyFunction=readyMain.match(/static bool deckySidebarResumeAfterIntent\(unsigned long long generation\) \{[\s\S]*?\n\}/);
+ assert(readyFunction,'Missing S0 Ready production consumer');
+ assert.equal(run.resumeConsumer.alternateReady.sourceSha256,sha(Buffer.from(readyFunction[0])));
+ assert.equal(hashFile(path.join(dir,'source/native/decky_wake_ready_consumer.inc')),sha(Buffer.from(readyFunction[0]+'\n')),'Compiled S0 Ready consumer drift');
  assert.deepEqual(run.changedOriginalInputs, []); assert.equal(run.exeSha256, hashFile(path.join(dir, 'FixtureSteam/steam.exe')));
  assert(!build.args.some(arg => /^\/DYMCC_DECKY_RUNTIME_LEGACY_FIXTURE(?:=|$)/i.test(arg)));
  assert(pins.files.length > 0);
@@ -104,6 +147,13 @@ export function verifyTypedRuntime({root, out, execution}) {
   if (raw.id === typedIds.healthy) {
    assert.equal(raw.watchDrained, true); assert.equal(raw.diagnosticFrames, 192); assert.equal(raw.cefUnaffected, true);
    assert.equal(raw.activeThreads, raw.beforeThreads + 1, 'Extra parent binding reader thread');
+  } else if(raw.id.startsWith('native.typed-final-admission-')) {
+   const heals=['automatic','retained'].includes(raw.variant);assert.equal(raw.recovered,heals);
+   assert.equal(raw.inactiveBeforeRetry,true);assert.equal(raw.cefUnaffected,true);assert.equal(raw.bindingPlans,heals?2:1);
+   assert.equal(raw.waitingRetryScheduled,raw.variant!=='terminal');
+   assert(raw.variant==='automatic'?raw.loaderPid>0:raw.loaderPid===0);
+   if(raw.variant==='retained')assert.equal(raw.phase,'frontend-attached');
+   if(raw.variant==='off')assert.equal(raw.phase,'disabled');
   } else if (raw.id === typedIds.inactive) {
    assert(resourceZero(raw.beforeOff), 'Inactive watch survived rejected final admission');
    assert.equal(raw.loaderPid, 0); assert(raw.admissionReads >= 2); assert.equal(raw.cefUnaffected, true);
@@ -111,6 +161,40 @@ export function verifyTypedRuntime({root, out, execution}) {
    for (const name of ['completedBeforeFixtureRelease', 'fixtureReleaseUnsentAtMeasurement', 'ownedLoaderExited', 'bindingChildExited', 'descendantExited', 'cefUnaffected', 'lateRefreshRejected', 'lateRecoveryRejected']) assert.equal(raw[name], true, raw.id + ': ' + name);
    assert.equal(raw.deadlineMs, 3200); assert(raw.stopMs >= 0 && raw.stopMs < 3200);
    assert(raw.beforeStop.handles > 0 && raw.beforeStop.pendingIo > 0 && raw.beforeStop.childExited === false, 'Stall not exercised with live binding/IO');
+  } else if ([typedIds.s0Owned,typedIds.s0Retained].includes(raw.id)) {
+   for(const name of ['productionConsumerExtracted','loaderPidUnchanged','cefAlive'])assert.equal(raw[name],true,raw.id+': '+name);
+   assert.equal(raw.plansAfter,raw.plansBefore+1);assert.equal(raw.modeReads,1);assert.equal(raw.duplicateSignals,512);
+  } else if(raw.id===typedIds.preparation) {
+   assert(raw.admissionReads>=2);assert.equal(raw.resourcePreparations,1);assert.equal(raw.bindingPlans,0);assert.equal(raw.loaderPid,0);assert.equal(raw.cefUnaffected,true);
+  } else if(raw.id.startsWith('native.typed-history-session-')) {
+   assert.equal(raw.cefUnaffected,true);assert.equal(raw.recovered,raw.variant==='false');
+   assert.equal(raw.bindingPlans,raw.recovered?2:1);
+   assert(raw.retained?raw.loaderPid===0:raw.loaderPid>0);
+   if(raw.variant==='off')assert.equal(raw.phase,'disabled');
+   else if(raw.variant==='admission')assert.equal(raw.phase,'waiting-manual-steam');
+   else if(!raw.recovered)assert.equal(raw.phase,'unavailable');
+   if(['null','missing','string','number'].includes(raw.variant))assert.notEqual(raw.reason,'mirror-bootstrap-session-changed');
+  } else if(raw.id.startsWith('native.typed-history-resource-handoff-')) {
+   const heals=['recover','automatic'].includes(raw.variant);assert.equal(raw.recovered,heals);
+   assert.equal(raw.readsWhileDenied,1);assert.equal(raw.plansWhileDenied,0);assert.equal(raw.bindingPlans,heals?1:0);
+   assert.equal(raw.preflightReads,heals?3:2);assert.equal(raw.pairedPlanDiagnostics,true);assert.equal(raw.cefUnaffected,true);
+   if(heals)assert(raw.elapsedFromFirstFailureMs>=2900,'Resource clock was refilled or reset by a UI mode event');
+   if(raw.variant==='off')assert.equal(raw.phase,'disabled');
+   if(raw.variant==='reject')assert.equal(raw.reason,'resource-hash-mismatch');
+  } else if(raw.id.startsWith('native.typed-history-resource-')) {
+   const heals=[typedIds.historyResourceRecover,typedIds.historyResourceReady].includes(raw.id);
+   assert.equal(raw.cefUnaffected,true);assert.equal(raw.recovered,heals);assert.equal(raw.preflightReads,heals?2:1);
+   assert.equal(raw.bindingPlansBeforeValidResources,0);assert.equal(raw.bindingPlans,heals?1:0);
+   if(raw.id===typedIds.historyResourceOff)assert.equal(raw.phase,'disabled');
+   if(raw.id===typedIds.historyResourceAdmission)assert.equal(raw.phase,'waiting-manual-steam');
+  } else if(raw.id===typedIds.healOff) {
+   for(const name of ['lateResultAttempted','resumeAfterOffRejected','recoveryAfterOffRejected'])assert.equal(raw[name],true,raw.id+': '+name);
+   assert.equal(raw.afterOff.enabled,false);assert.equal(raw.afterOff.phase,'disabled');assert.equal(raw.acceptedResults,1);assert.equal(raw.plansAfterQuiet,2);
+  } else if(raw.id.startsWith('native.typed-healing-')) {
+   for(const name of ['currentEpochHealthy','noDuplicateWiring','loaderAndCefPreserved'])assert.equal(raw[name],true,raw.id+': '+name);
+   assert(raw.quietObservationMs>=650);assert(raw.recovered.ownerGeneration>0);assert.equal(raw.recovered.ownerGeneration,raw.afterQuiet.ownerGeneration);
+   assert.equal(raw.recovered.healthyGeneration,raw.afterQuiet.healthyGeneration);assert.equal(raw.recovered.resultGeneration,raw.afterQuiet.resultGeneration);
+   assert.equal(raw.recovered.bindingPid,raw.afterQuiet.bindingPid);
   } else {
    for (const name of ['acceptedReady', 'duplicateReadyRejected', 'zeroReadyRejected', 'originalCefAlive']) assert.equal(raw[name], true, raw.id + ': ' + name);
    assert.equal(raw.plans, 2); assert(raw.initialBindingPid > 0 && raw.nextBindingPid > 0 && raw.initialBindingPid !== raw.nextBindingPid);

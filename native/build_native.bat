@@ -64,7 +64,7 @@ if errorlevel 1 goto :fail
 REM compile shell: /MT static CRT + WebView2 static loader. All outputs stay in Build.
 REM dsu_server.cpp (7.50 i2, DSU/ShockEmu UDP server) compiled alongside main.cpp;
 REM each translation unit keeps its own .obj, then link produces one exe (/Fo per source).
-cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %SCREEN_NATIVE_INPUT_DEFINE% /DYMCC_MSI_HOST_STAGE_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_DIAGNOSTIC /DYMCC_MSI_USB_NAME_ORIGIN_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_RAW_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_WAKE_DIAGNOSTIC /c main.cpp /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\main.obj"
+cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /bigobj /DNDEBUG /DUNICODE /D_UNICODE %SCREEN_NATIVE_INPUT_DEFINE% /DYMCC_ROG_FSE_EXPERIMENTS=0 /DYMCC_ROG_FSE_DIAGNOSTICS=0 /DYMCC_MSI_HOST_STAGE_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_DIAGNOSTIC /DYMCC_MSI_USB_NAME_ORIGIN_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_RAW_DIAGNOSTIC /DYMCC_MSI_VISIBILITY_WAKE_DIAGNOSTIC /c main.cpp /I"..\deps\webview2\build\native\include" /I"..\deps\json" /I"%CPPWINRT_INCLUDE%" /Fo"%OUTDIR%\main.obj"
 if errorlevel 1 goto :fail
 REM Original-instance Steam recovery is linked into YMCC; no helper executable.
 REM Ordinary exports skip fixtures; retain source selftests for explicit full acceptance.

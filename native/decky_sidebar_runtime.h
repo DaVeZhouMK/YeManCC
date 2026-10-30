@@ -16,6 +16,7 @@
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
 #include "decky_binding_client.h"
 #endif
+#include <array>
 #include <memory>
 #include <filesystem>
 #include <functional>
@@ -50,6 +51,13 @@ inline std::wstring officialLoaderSearchPath(const std::wstring& source) {
     return result;
 }
 
+// Read-only owned Job membership hints. Callers must verify PID/birth/path.
+struct DiagnosticProcessIds {
+    static constexpr DWORD capacity = 16;
+    bool available = false, truncated = false;
+    DWORD error = ERROR_NOT_READY, count = 0;
+    std::array<DWORD, capacity> pids{};
+};
 struct State {
     bool enabled = false;
     bool steamKnown = false;
@@ -293,10 +301,19 @@ class Runtime {
     void bindingDiagnostic(nlohmann::json detail,const char* kind) noexcept {
         try {detail["bindingPacketKind"]=kind;if(config_.bindingDiagnostic)config_.bindingDiagnostic(detail);}catch(...){}
     }
-    std::string performOwnedBinding(unsigned long long intent,BindingMode mode) {
+    std::string performOwnedBinding(unsigned long long intent,BindingMode mode,bool& revalidateSession) {
+        revalidateSession=false;
         if(!config_.ownedBinding||!config_.bindingPlan)return "owned-binding-required";
         BindingPlan plan;
-        try {plan=config_.bindingPlan(mode,++bindingRequestGeneration_);}catch(...){return "mirror-binding-request-failed";}
+        // Demand-only markers isolate parent plan/resource work from the child
+        // bootstrap deadline. An unfinished pair diagnoses a blocked parent;
+        // neither marker starts recovery or grants any operation authority.
+        const char* scope=mode==BindingMode::retained?"binding-plan-retained":mode==BindingMode::prepare?"binding-plan-prepare":"binding-plan-refresh";
+        bindingDiagnostic({{"bootstrapStage","plan-started"},{"scope",scope}},"diagnostic");
+        const auto planStarted=GetTickCount64();
+        try {plan=config_.bindingPlan(mode,++bindingRequestGeneration_);}
+        catch(...){bindingDiagnostic({{"bootstrapStage","plan-finished"},{"scope",scope},{"elapsedMs",GetTickCount64()-planStarted},{"ok",false},{"reason","mirror-binding-request-failed"}},"diagnostic");return "mirror-binding-request-failed";}
+        bindingDiagnostic({{"bootstrapStage","plan-finished"},{"scope",scope},{"elapsedMs",GetTickCount64()-planStarted},{"ok",plan.reason.empty()},{"reason",plan.reason}},"diagnostic");
         if(!plan.reason.empty())return plan.reason;
         if(!launchAllowed(intent))return "mirror-bootstrap-canceled";
         const auto started=config_.ownedBinding->begin(plan.request,intent);
@@ -317,7 +334,14 @@ class Runtime {
                 if(kind=="diagnostic"){retainTerminalForOwner(detail,intent);bindingDiagnostic(detail,"diagnostic");continue;}
                 if(kind=="result"){
                     bindingDiagnostic(detail,"result");
-                    return detail.value("ok",false)?std::string{}:detail.value("reason",std::string("mirror-bootstrap-failed"));
+                    const auto reason=detail.value("reason",std::string("mirror-bootstrap-failed"));
+                    // A rejected pre-write lease can become valid without a new
+                    // observer identity (e.g. ActiveUser briefly unavailable).
+                    // Rebuild the plan and verify every identity again. Never
+                    // replay a changed/unknown write or grant old-session trust.
+                    revalidateSession=!detail.value("ok",false)&&reason=="mirror-bootstrap-session-changed"&&
+                        detail.contains("mutated")&&detail["mutated"].is_boolean()&&!detail["mutated"].get<bool>();
+                    return detail.value("ok",false)?std::string{}:reason;
                 }
                 return "mirror-binding-worker-protocol-invalid";
             }
@@ -372,6 +396,17 @@ class Runtime {
         unsigned long long preparedEpoch=~0ULL, preparationAttemptEpoch=~0ULL, preparationAttemptIntent=~0ULL;
         ymcc::steamsession::RetryWindow retries; // Reuse unchanged 1/3/8/20-second budget.
         AdmissionWindow admissionChecks;
+        // A cold resource worker may miss its 2.5s deadline even with valid
+        // bytes. Reuse the finite 1/3/8/20s budget, only after an admitted launch
+        // failed. Do not poll healthy/absent/retained sessions, reset crash
+        // budgets, or retry bad hashes/incomplete worker cleanup.
+        ymcc::steamsession::RetryWindow resourceRetries;
+        unsigned long long resourceAdmissionEpoch=~0ULL,resourcePreparationEpoch=~0ULL;
+        bool resourceWindowOpened=false,resourcePending=false,resourceDue=false;
+        // Park scheduling while admission is absent; retain the original clock
+        // and remaining attempts. Clearing it here makes a later verified mode
+        // return lose recovery forever, or tempts a refill on every UI event.
+        const auto cancelResourceRetry=[&]{resourcePending=false;resourceDue=false;};
         ConnectionRetryWindow outage,loaderRecovery;
         LoaderCrashBudget crashBudget;
         unsigned long long crashEpoch=~0ULL;DWORD lastLoaderExit=0;
@@ -383,7 +418,7 @@ class Runtime {
         auto stopWindow=[&]{retries={};outage.reset();outageDue=false;launchPending=false;deferredLaunch=false;retryDue=false;attempts=0;};
         auto closeOwned=[&]{
             releaseOwnedStopLease(false); // Do not keep KILL_ON_JOB_CLOSE alive via a duplicate.
-            closeContext();stopWindow();admissionChecks.stop();
+            closeContext();stopWindow();admissionChecks.stop();cancelResourceRetry();
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             stopOwnedBinding();
 #endif
@@ -436,7 +471,19 @@ class Runtime {
                 catch (...) { finalAdmission = {false, "steam-ui-state-pending", true}; }
                 if (!launchAllowed(intent)) return;
                 if (!finalAdmission.allowed || finalAdmission.bindingOnly) {
-                    closeContext(); publish("waiting-manual-steam", finalAdmission.reason);
+                    unsigned long long epoch=0;
+                    {std::lock_guard lock(stateMutex_);if(stopping_||!state_.enabled||intent_!=intent)return;epoch=admissionEpoch_;}
+                    // A successful binding already consumed the launch attempt.
+                    // Keep the normal permission retry alive after this late
+                    // refusal; no new window event is required. Exact retained
+                    // admission hands off to transport only, never a Loader.
+                    launchAttempted=~0ULL;
+                    if(finalAdmission.bindingOnly)attempted=~0ULL;
+                    closeContext();const auto now=GetTickCount64();
+                    admissionChecks.blocked(epoch,now,finalAdmission.retryable||finalAdmission.bindingOnly);
+                    publish("waiting-manual-steam", finalAdmission.reason,0,0,false,0,{}, {},
+                        admissionChecks.timeout(now)!=INFINITE,admissionChecks.attempts(),finalAdmission.detail,
+                        admissionChecks.elapsed(now),admissionChecks.timeout(now)==INFINITE?0:admissionChecks.timeout(now),admissionChecks.recovering());
                     return;
                 }
             }
@@ -478,13 +525,13 @@ class Runtime {
         };
         auto bind=[&](unsigned long long intent,bool beforeLaunch,bool renew){
             if(renew&&!beginPending(intent))return;
-            std::string reason;
+            std::string reason;bool revalidateSession=false;
             ++attempts;
             try{
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                 reason=beforeLaunch?config_.prepareBinding():config_.refreshBinding();
 #else
-                reason=performOwnedBinding(intent,beforeLaunch?BindingMode::prepare:BindingMode::refresh);
+                reason=performOwnedBinding(intent,beforeLaunch?BindingMode::prepare:BindingMode::refresh,revalidateSession);
 #endif
                 takeContext(reason);
             }
@@ -506,7 +553,7 @@ class Runtime {
                     else{closeContext();publish("unavailable",reason,0,0,false,attempts);}
                 }else publish("loader-started","mirror-handshake-pending",0,GetProcessId(process),false,attempts);
             }else{
-                const bool pending=retryableBinding(reason);
+                const bool pending=revalidateSession||retryableBinding(reason);
                 if(pending){retries={};outage.begin(GetTickCount64());}
                 if(!pending){retries={};outage.reset();launchPending=false;deferredLaunch=false;}
                 else if(beforeLaunch){launchPending=true;deferredLaunch=true;}
@@ -514,14 +561,24 @@ class Runtime {
             }
         };
         for(;;){
-            bool stop,enabled,known,steam,recoveryRequested,retainedAdmissionRequested,safetyPending;
+            bool stop,enabled,known,steam,recoveryRequested,retainedAdmissionRequested,safetyPending,retainedFrontend;
             unsigned long long intent,launchIntent,admissionEpoch,crashResetEpoch,preparationEpoch;
             {std::lock_guard lock(stateMutex_);stop=stopping_;enabled=state_.enabled;known=state_.steamKnown;
                 steam=state_.steamRunning;intent=intent_;launchIntent=launchIntent_;admissionEpoch=admissionEpoch_;crashResetEpoch=crashResetEpoch_;preparationEpoch=preparationEpoch_;
+                retainedFrontend=state_.phase=="frontend-attached"||(state_.phase=="reconnecting"&&state_.reason=="retained-frontend-rebind");
                 recoveryRequested=transportRecoveryRequested_;transportRecoveryRequested_=false;
                 retainedAdmissionRequested=retainedAdmissionRefreshRequested_;retainedAdmissionRefreshRequested_=false;safetyPending=pendingSafetyStop_.active(intent_); }
             if(stop){closeOwned();break;}
+            if(resourceAdmissionEpoch!=admissionEpoch||resourcePreparationEpoch!=preparationEpoch){
+                resourceAdmissionEpoch=admissionEpoch;resourcePreparationEpoch=preparationEpoch;
+                // Ready may arrive during this already admitted resource wait.
+                // Retain the pending attempt, then reread admission; Ready alone
+                // gives no new launch authority and cannot wake healthy owners.
+                if(resourcePending)launchAttempted=~0ULL;
+                cancelResourceRetry();resourceRetries={};resourceWindowOpened=false;
+            }
             if(safetyPending){
+                cancelResourceRetry();
                 // The terminal page was live-read before its packet was posted.
                 // Stop only its owned binding now; retain Loader/broker authority
                 // for normal owner OFF. No timer, admission/resource work or new
@@ -542,10 +599,28 @@ class Runtime {
                 if(retry)loaderRecovery.begin(GetTickCount64());
                 publish("failed",retry?"loader-exited":"loader-crash-loop",code);continue;
             }
+            LaunchAdmission admission;
+            const auto readAdmission=[&]{
+                if(enabled && known && steam && !process && config_.launchAdmission){
+                    try { admission=config_.launchAdmission(); }
+                    catch (...) { admission={false,"steam-ui-state-pending",true,"admission-read-failed"}; }
+                }
+            };
+            // An already verified frontend only needs transport attachment; its
+            // original retained-binding worker rechecks that exact document.
+            // Do not put disk preparation in front of this existing consumer.
+            readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;
+            bool preparationRan=false;
             // One preparation per enable/committed Ready, even when Steam is explicitly absent.
-            // Unknown presence waits for the existing observer. Healthy owned Loaders are untouched.
+            // Unknown presence waits for the existing observer. A live retained
+            // CEF context is as important as an owned Loader: defer resource IO
+            // while either lease exists, including committed Ready refreshes.
+            // A requested retained rebind may briefly close the old context
+            // lease before the new watch arrives; that handoff still has
+            // priority over optional resource maintenance on this worker.
+            // Deferred preparation grants no rebind, restart or launch authority.
             // Unfinished/failed work can retry on a NEW intent/Ready, never an idle timer or spin.
-            if(enabled && known && !process && config_.prepareEnvironment && preparedEpoch!=preparationEpoch &&
+            if(enabled && known && !process && !context && !retainedFrontend && !(admission.allowed&&admission.bindingOnly) && config_.prepareEnvironment && preparedEpoch!=preparationEpoch &&
                 (preparationAttemptEpoch!=preparationEpoch || preparationAttemptIntent!=intent)) {
                 preparationAttemptEpoch=preparationEpoch;preparationAttemptIntent=intent;
                 const std::function<bool()> canContinue=[this,intent,preparationEpoch]{
@@ -554,17 +629,16 @@ class Runtime {
                 };
                 if(!canContinue())continue;
                 std::string result;
+                preparationRan=true;
                 try { result=config_.prepareEnvironment(canContinue); }
                 catch(...) { result="preparation-failed"; }
                 if(!canContinue())continue;
                 if(result.empty())preparedEpoch=preparationEpoch;
             }
-            LaunchAdmission admission;
-            if(enabled && known && steam && !process && config_.launchAdmission) {
-                try { admission = config_.launchAdmission(); }
-                catch (...) { admission = {false, "steam-ui-state-pending", true, "admission-read-failed"}; }
-                if(!launchAllowed(intent))continue; // A stale mode read cannot publish or authorize a newer intent.
-            }
+            // Preparation may yield across a Steam mode/session change. Keep
+            // the original fresh admission read after any resource work; it
+            // must not reuse an earlier permission to create a new Loader.
+            if(preparationRan){readAdmission();if(enabled&&known&&steam&&!process&&!launchAllowed(intent))continue;}
             if(retainedAdmissionRequested&&admission.allowed&&!admission.bindingOnly){
                 // Only this worker calls launchAdmission (it owns its read budget).
                 // A fresh document + existing consent can reopen the consumed
@@ -580,6 +654,7 @@ class Runtime {
             if(!enabled||!known||!steam){
                 loaderRecovery.reset();loaderRecoveryDue=false;closeOwned();publish(!enabled?"disabled":"waiting-steam",known?"":"steam-state-unknown");
             }else if(!process && admission.allowed && admission.bindingOnly && !crashBudget.blocked()){
+                cancelResourceRetry();
                 // Never fall through to process creation, including a failed binding.
                 // Exact-target validation runs inside retainedBinding before credentials change.
                 if(intent!=attempted||retryDue||outageDue){
@@ -587,13 +662,13 @@ class Runtime {
                     attempted=intent;launchAttempted=launchIntent;retryDue=false;outageDue=false;
                     loaderRecovery.reset();loaderRecoveryDue=false;closeContext();
                     publish("reconnecting", "retained-frontend-rebind");
-                    std::string failure;
+                    std::string failure;bool revalidateSession=false;
                     try {
                         if(!beginPending(intent))continue;
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                         failure=config_.retainedBinding?config_.retainedBinding():"mirror-retained-binding-unavailable";
 #else
-                        failure=performOwnedBinding(intent,BindingMode::retained);
+                        failure=performOwnedBinding(intent,BindingMode::retained,revalidateSession);
 #endif
                         takeContext(failure);
                     }catch(...){failure="mirror-binding-failed";}
@@ -601,12 +676,14 @@ class Runtime {
                     if(!failure.empty())stopOwnedBinding();
 #endif
                     if(!launchAllowed(intent))continue;
-                    const bool retry=!failure.empty()&&retryableBinding(failure);
+                    const bool retry=!failure.empty()&&(revalidateSession||retryableBinding(failure));
                     if(retry)outage.begin(GetTickCount64());else outage.reset();
                     publish(failure.empty()?"frontend-attached":retry?"reconnecting":"unavailable",
                             failure.empty()?"retained-frontend-connected":failure,0,0,retry,1);
                 }
             }else if(!process && !admission.allowed){
+                if(resourcePending)launchAttempted=~0ULL;
+                cancelResourceRetry();
                 // Preserve a pending owned-loader restart while its UI mode is temporarily unavailable.
                 if(!admission.retryable){loaderRecovery.reset();loaderRecoveryDue=false;}
                 // If mode confirmation disappeared during binding, its recovery starts a fresh validated attempt.
@@ -626,14 +703,25 @@ class Runtime {
                 else publish("loader-started","mirror-handshake-pending",0,GetProcessId(process));
             }else if(!process&&crashBudget.blocked()){
                 loaderRecovery.cancel();loaderRecoveryDue=false;publish("failed","loader-crash-loop",lastLoaderExit);
-            }else if(!process&&(launchIntent!=launchAttempted||loaderRecoveryDue)){
-                loaderRecoveryDue=false;
+            }else if(!process&&(launchIntent!=launchAttempted||loaderRecoveryDue||(resourcePending&&resourceDue))){
+                loaderRecoveryDue=false;resourceDue=false;resourcePending=false;
                 attempted=intent;launchAttempted=launchIntent;closeContext();stopWindow();publish("starting");
                 std::string failure;
                 try{if(!beginPending(intent))continue;if(config_.preflight)failure=config_.preflight();}
                 catch(...){failure="preflight-failed";}
                 if(!launchAllowed(intent))continue;
-                if(!failure.empty())publish("unavailable",failure);
+                if(failure.empty())cancelResourceRetry();
+                if(!failure.empty()){
+                    if(failure=="resource-worker-deadline"){
+                        // The worker adapter reports this only after exact Job,
+                        // reader and handle cleanup; otherwise it returns
+                        // resource-worker-cleanup-incomplete. Recheck admission
+                        // and preflight before any binding or Loader creation.
+                        if(!resourceWindowOpened){resourceWindowOpened=true;resourceRetries.begin(GetTickCount64());}
+                        resourcePending=true;
+                    }else cancelResourceRetry();
+                    publish("unavailable",failure);
+                }
 #ifdef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
                 else if(config_.prepareBinding){launchPending=true;retries.begin(GetTickCount64());bind(intent,true,false);}
 #else
@@ -672,9 +760,9 @@ class Runtime {
             if(bindingLeases.child)handles[bindingChildIndex]=bindingLeases.child;
 #endif
             const auto now=GetTickCount64();
-            const DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now)});
+            const DWORD timeout=(std::min)({retries.timeout(now),admissionChecks.timeout(now),outage.timeout(now),loaderRecovery.timeout(now),resourcePending?resourceRetries.timeout(now):INFINITE});
             const DWORD result=WaitForMultipleObjects(count,handles,FALSE,timeout);
-            if(result==WAIT_TIMEOUT){const auto due=GetTickCount64();retryDue=retries.take(due);outageDue=outage.take(due);loaderRecoveryDue=loaderRecovery.take(due);admissionChecks.take(due);continue;}
+            if(result==WAIT_TIMEOUT){const auto due=GetTickCount64();retryDue=retries.take(due);outageDue=outage.take(due);loaderRecoveryDue=loaderRecovery.take(due);admissionChecks.take(due);resourceDue=resourcePending&&resourceRetries.take(due);continue;}
 #ifndef YMCC_DECKY_RUNTIME_LEGACY_FIXTURE
             if((bindingLeases.ready&&result==WAIT_OBJECT_0+bindingEventIndex)||(bindingLeases.child&&result==WAIT_OBJECT_0+bindingChildIndex)){
                 const auto packet=config_.ownedBinding->next();using Packet=decltype(packet);
@@ -714,6 +802,33 @@ public:
     ~Runtime() { reporting_.store(false); shutdown(); }
     void initialize(Config config) { std::lock_guard lock(lifecycleMutex_); config_ = std::move(config); }
     State snapshot() { std::lock_guard lock(stateMutex_); return state_; }
+    bool tryDiagnosticState(State& result) {
+        std::unique_lock lock(stateMutex_, std::try_to_lock);
+        if (!lock.owns_lock()) return false;
+        result = state_;
+        return true;
+    }
+    DiagnosticProcessIds diagnosticProcessIds() {
+        DiagnosticProcessIds result;
+        std::unique_lock lock(ownedLeaseMutex_, std::try_to_lock);
+        if (!lock.owns_lock()) { result.error = ERROR_BUSY; return result; }
+        if (!stopJob_) return result; // No owned Job is unknown, never a zero-CPU sample.
+        // Fixed layout of JOBOBJECT_BASIC_PROCESS_ID_LIST with room for 16 IDs.
+        struct {
+            DWORD NumberOfAssignedProcesses, NumberOfProcessIdsInList;
+            ULONG_PTR ProcessIdList[DiagnosticProcessIds::capacity];
+        } list{};
+        const bool ok = QueryInformationJobObject(stopJob_, JobObjectBasicProcessIdList,
+            &list, sizeof(list), nullptr) != FALSE;
+        result.error = ok ? ERROR_SUCCESS : GetLastError();
+        if (!ok && result.error != ERROR_MORE_DATA) return result;
+        result.available = true; // ERROR_MORE_DATA still supplies a bounded prefix.
+        result.count = (std::min)(list.NumberOfProcessIdsInList, DiagnosticProcessIds::capacity);
+        result.truncated = !ok || list.NumberOfAssignedProcesses > result.count ||
+            list.NumberOfProcessIdsInList > result.count;
+        for (DWORD i = 0; i < result.count; ++i) result.pids[i] = static_cast<DWORD>(list.ProcessIdList[i]);
+        return result;
+    }
     bool acceptsSafetyStop(const nlohmann::json& event,const std::string& currentBrokerRun) {
         std::lock_guard lock(stateMutex_);
         return !stopping_&&state_.enabled&&state_.steamKnown&&state_.steamRunning&&

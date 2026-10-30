@@ -38,6 +38,9 @@ function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$sc
    get_themes {return $script:Rows}
    reset {
     $script:Reloads++;$script:Loads+=@((Get-ConfigHash (Join-Path $script:ThemeRoot 'YMCC Game Details\shared.css')))
+    # Real CSSLoader scans every directory, including an empty retired folder.
+    $invalid=@(Get-ChildItem -LiteralPath $script:ThemeRoot -Directory -Force|Where-Object {!(Test-Path -LiteralPath (Join-Path $_.FullName 'theme.json') -PathType Leaf)})
+    if($invalid.Count){return [pscustomobject]@{fails=@($invalid|ForEach-Object {"Failed parsing '$($_.Name)': Folder does not look like a theme?"})}}
     if($script:Mode -eq 'reload-failed'){return [pscustomobject]@{fails=@('fixture reload not confirmed')}}
     $script:Rows=@(Get-ThemeRows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$_.configured}})
     return [pscustomobject]@{fails=@()}
@@ -145,6 +148,47 @@ function Get-BackendProcesses {if($script:Live){[pscustomobject]@{Id=42;Path=$sc
   $script:Editing=$false;Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null;Assert ((Get-ConfigHash $focus) -eq (Get-ConfigHash (Join-Path $currentPack 'themes\Darken Unfocused Games\global.css')) -and $script:Reloads -eq 2) 'Next authorized use repairs differences after Desktop editing ends'
   [IO.File]::WriteAllText($focus,'/* another store update while CSS backend is absent */');$script:Live=$false;$result=Invoke-AppearanceControl 'UpdateOwnedResources'
   Assert ($result.ok -and $result.saved -and !$script:Live -and $script:Reloads -eq 2 -and (Read-PresetState).pendingReload -and (Get-ConfigHash $focus) -eq (Get-ConfigHash (Join-Path $currentPack 'themes\Darken Unfocused Games\global.css'))) 'Missing-backend store repair writes resources and leaves pending reload without starting CSS or Steam'
+
+  # Permanent retirement reuses the production backup/update/reread transaction.
+  function Add-RetiredFixture([string]$Folder='Game Cover Reflections'){
+   $d=Join-Path $script:ThemeRoot $Folder;New-Item -ItemType Directory -Path $d -Force|Out-Null
+   [IO.File]::WriteAllText((Join-Path $d 'theme.json'),'{{"name":"Game Cover Reflections","manifest_version":3,"inject":{{"shared.css":["SP"]}}}}'.Replace('{{','{').Replace('}}','}'))
+   [IO.File]::WriteAllText((Join-Path $d 'config_USER.json'),'{{"active":true,"Blur":"1"}}'.Replace('{{','{').Replace('}}','}'))
+   [IO.File]::WriteAllText((Join-Path $d 'shared.css'),'/* retired reflection */');[IO.File]::WriteAllText((Join-Path $d 'LICENSE'),'retired fixture license')
+   $script:Rows+=@([pscustomobject]@{name='Game Cover Reflections';enabled=$true})
+  }
+  New-Scenario 'retired';Add-RetiredFixture
+  $saved=@{};foreach($f in Get-ChildItem -LiteralPath $script:ThemeRoot -Filter config_USER.json -File -Recurse){if($f.Directory.Name -ne 'Game Cover Reflections'){$saved[$f.FullName]=Get-ConfigHash $f.FullName}}
+  $before=Get-AppearanceStatus;Assert ($before.packRepairRequired -and $before.foreignActiveCount -eq 0 -and $before.backendReloadRequired) 'Retired reflection requests migration without blocking the owned resource update as an unrelated user theme'
+  Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null
+  Assert (@(Get-RetiredPresetTargets).Count -eq 0 -and $script:Reloads -eq 1 -and @($script:Rows|Where-Object name -eq 'Game Cover Reflections').Count -eq 0 -and (Get-AppearanceStatus).packPrepared) 'Owned migration removes the four reflection files and rereads the same backend exactly once'
+  foreach($entry in $saved.GetEnumerator()){Assert ((Get-ConfigHash $entry.Key) -eq $entry.Value) ('Retirement preserves current user config: '+[IO.Path]::GetFileName([IO.Path]::GetDirectoryName($entry.Key)))}
+  Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null;Assert ($script:Reloads -eq 1) 'Repeated retirement checks do not repeat backend reloads'
+  Add-RetiredFixture 'Store Copy';Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null
+  Assert (!(Test-Path -LiteralPath (Join-Path $script:ThemeRoot 'Store Copy\theme.json')) -and $script:Reloads -eq 2) 'A later store download with an alternate folder is removed once and cannot restore the retired effect'
+  Add-RetiredFixture;$script:Editing=$true;$baseline=Hashes $script:ThemeRoot;Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null
+  Assert ((Same $baseline (Hashes $script:ThemeRoot)) -and $script:Reloads -eq 2) 'Desktop editor protection defers retirement without touching user files or reloading'
+  $script:Editing=$false;$script:Live=$false;Invoke-AppearanceControl 'UpdateOwnedResources'|Out-Null
+  Assert (@(Get-RetiredPresetTargets).Count -eq 0 -and !$script:Live -and $script:Reloads -eq 2 -and (Read-PresetState).pendingReload) 'Offline retirement only updates files and leaves pending reload without starting CSS or Steam'
+  New-Scenario 'retired-empty-residue';Invoke-AppearanceControl 'Ensure'|Out-Null;$script:Reloads=0
+  $emptyRetired=Join-Path $script:ThemeRoot 'Game Cover Reflections';New-Item -ItemType Directory -Path $emptyRetired|Out-Null
+  $before=Get-AppearanceStatus
+  Assert ($before.packRepairRequired -and !$before.packPrepared -and !$before.packUpdateAvailable) 'An empty retired directory from an earlier migration is repair-required even when all current assets match'
+  Assert (Test-Path -LiteralPath $emptyRetired -PathType Container) 'Passive Status leaves the empty residue untouched'
+  Invoke-AppearanceControl 'Ensure'|Out-Null
+  Assert (!(Test-Path -LiteralPath $emptyRetired) -and $script:Reloads -eq 1 -and !(Read-PresetState).pendingReload -and (Get-AppearanceStatus).configuredMatchesBackend) 'Existing Ensure removes only the empty retired directory and confirms one strict backend reread'
+  Invoke-AppearanceControl 'Ensure'|Out-Null;Assert ($script:Reloads -eq 1) 'Already-clean retirement is idempotent'
+  New-Scenario 'retired-user-extra';Add-RetiredFixture;$extra=Join-Path $script:ThemeRoot 'Game Cover Reflections\user-note.txt';[IO.File]::WriteAllText($extra,'user data must survive')
+  Assert (Rejected {Invoke-AppearanceControl 'Ensure'}) 'Unknown contents in a retired directory keep strict backend load failure visible'
+  Assert ((Test-Path -LiteralPath $extra) -and [IO.File]::ReadAllText($extra) -ceq 'user data must survive' -and (Read-PresetState).pendingReload) 'Retirement preserves unknown user files and never recursively deletes a directory or clears an unconfirmed reload'
+  New-Scenario 'retired-delete-failed';Add-RetiredFixture;$baseline=Hashes $script:ThemeRoot;$oldDigest=(Read-PresetState).packDigest
+  $script:FailRetiredDelete=$true
+  function Remove-Item { [CmdletBinding()]param([string]$LiteralPath,[switch]$Force) if($script:FailRetiredDelete -and $LiteralPath -like '*Game Cover Reflections*shared.css'){$script:FailRetiredDelete=$false;throw 'fixture retired delete failure'};Microsoft.PowerShell.Management\Remove-Item @PSBoundParameters }
+  Assert (Rejected {Invoke-AppearanceControl 'UpdateOwnedResources'}) 'A mid-retirement file deletion failure is surfaced'
+  Microsoft.PowerShell.Management\Remove-Item Function:\Remove-Item -ErrorAction SilentlyContinue
+  Assert ((Same $baseline (Hashes $script:ThemeRoot)) -and (Read-PresetState).packDigest -eq $oldDigest -and $script:Reloads -eq 0) 'Retirement rollback restores already deleted files and the owner receipt before any backend operation'
+  New-Scenario 'retired-original-restore' -NoOwner;Add-RetiredFixture;Add-RetiredFixture 'Original Store Copy';$script:Live=$false;Invoke-PresetPrepare|Out-Null;Invoke-PresetRestore|Out-Null
+  Assert (@(Get-RetiredPresetTargets).Count -eq 0 -and !(Test-Path -LiteralPath (Join-Path $script:ThemeRoot 'Original Store Copy\theme.json'))) 'Explicit previous-config restore retains historical backups without reintroducing retired themes under either canonical or alternate folders'
   Assert ($script:Stops -eq 0) 'All cases preserve processes and avoid CDP cleanup or Steam operations'
  }
  [ordered]@{ok=$true;passed=$cases.Count;cases=@($cases);componentRoot=$ComponentRoot;scope='Actual production Ensure/Prepare/reload/transaction in fresh isolated profiles; RPC and process visibility are explicit in-memory adapters; no installed or user-profile writes';realSteamOperations=0;installedApplicationModified=$false}|ConvertTo-Json -Depth 7|Set-Content -LiteralPath (Join-Path $Out 'result.json') -Encoding UTF8

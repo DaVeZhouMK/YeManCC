@@ -9,10 +9,11 @@ export class SteamWallpaperDelivery {
   private peer:MirrorPeer|null=null;
   private epoch=0;
   private ended=false;
+  private recoveryAttempt=0;
   private slots=new Map<Channel,Slot>();
   private timer:ReturnType<typeof setTimeout>|null=null;
   constructor(private port:Ports){}
-  reset(peer:MirrorPeer|null){if(this.ended)return;++this.epoch;this.peer=peer?{...peer}:null;this.slots.clear();this.cancelTimer();}
+  reset(peer:MirrorPeer|null){if(this.ended)return;++this.epoch;this.peer=peer?{...peer}:null;this.slots.clear();this.cancelTimer();this.recoveryAttempt=0;}
   private cancelTimer(){if(this.timer!==null)this.port.cancel(this.timer);this.timer=null;}
   put(channel:Channel,message:Message,force=false){
     if(this.ended||!this.peer)return;
@@ -30,7 +31,10 @@ export class SteamWallpaperDelivery {
     void Promise.resolve().then(()=>this.ended||epoch!==this.epoch||slot.version!==version?false:this.port.send(peer,message)).then(value=>{accepted=value===true;}).catch(()=>{}).finally(()=>{
       if(this.ended||epoch!==this.epoch)return;
       slot.pending=false;
-      if(accepted)slot.acknowledged=version;
+      if(accepted){
+        slot.acknowledged=version;
+        if([...this.slots.values()].every(value=>value.version===value.acknowledged))this.recoveryAttempt=0;
+      }
       slot.failed=!accepted&&slot.version===version;
       if(slot.version!==version)this.pump(slot);
       this.reconcileTimer();
@@ -40,7 +44,12 @@ export class SteamWallpaperDelivery {
     const failed=!this.ended&&this.peer&&[...this.slots.values()].some(slot=>slot.failed);
     if(!failed){this.cancelTimer();return;}
     if(this.timer!==null)return;
-    this.timer=this.port.schedule(()=>{this.timer=null;for(const slot of this.slots.values())if(slot.failed)this.pump(slot);this.reconcileTimer();},20000);
+    // Only unacknowledged latest state owns retries. Recover a brief wake/IPC
+    // refusal quickly, then back off; no healthy heartbeat or extra media IO.
+    const delays=[250,1000,3000,10000,20000];
+    const delay=delays[Math.min(this.recoveryAttempt,delays.length-1)];
+    this.recoveryAttempt=Math.min(this.recoveryAttempt+1,delays.length);
+    this.timer=this.port.schedule(()=>{this.timer=null;for(const slot of this.slots.values())if(slot.failed)this.pump(slot);this.reconcileTimer();},delay);
   }
   stop(){if(this.ended)return;this.reset(null);this.ended=true;}
 }

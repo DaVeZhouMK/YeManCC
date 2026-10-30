@@ -1,19 +1,11 @@
+/* Legacy gradient choices stay loadable, with no full-screen mask surface. */
 .gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt,
 .gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
-    -webkit-mask-image: linear-gradient(rgba(0, 0, 0, 1) 90%, rgba(0, 0, 0, 0) calc(100% - 5px));
-    -webkit-mask-composite: source-out;
-}
-
-mes_RecentGamesBackgroundImage_3Mp8R {
-    opacity: 1;
-    filter: brightness(100%)!important;
-}
-.gamepadhomerecentgames_RecentGamesBackground_1SRox {
-    opacity: 1!important;
-    filter: none!important
+    -webkit-mask-image: none!important;
+    mask-image: none!important;
 }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-3d8048a78fbc3b3b: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-db3ded3b52ce9798: 1; }
+:root { --ymcc-content-83123d5e1c391180: 1; }

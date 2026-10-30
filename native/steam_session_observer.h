@@ -20,6 +20,18 @@ struct Session {
     ULONGLONG created = 0; // PID reuse is a new session, too.
     bool operator==(const Session&) const = default;
 };
+// Non-owning event hint, NOT confirmed BPM or a renderer identity. HWND/PID may
+// be reused after capture; callers must revalidate window + PID/birth/path.
+struct UiWindowCandidate {
+    HWND window = nullptr;
+    DWORD pid = 0;
+    ULONGLONG tick = 0; // GetTickCount64 at receipt of the existing WinEvent.
+};
+struct DiagnosticSnapshot {
+    bool available = false; // False on lock contention or no verified root session.
+    Session session;
+    UiWindowCandidate uiWindow;
+};
 // Only a genuine session change or explicit user action opens a new budget.
 // A failed attempt / unrelated registry write must NEVER replenish it.
 class RetryWindow {
@@ -98,6 +110,7 @@ class Observer {
     std::atomic<int> presence{-1};
     mutable std::mutex sessionMutex;
     Session cachedSession; // Shared verified PID/birth identity for addon lifecycle consumers.
+    UiWindowCandidate cachedUiWindow; // Guarded by sessionMutex, never used to authorize actions.
     WindowProcessCache windowPids; std::wstring windowRoot;
     WindowHintWindow uiHints;
     ULONGLONG windowPokedAt = 0; bool windowPoked = false;
@@ -128,6 +141,15 @@ class Observer {
         // This cache admits NOTIFICATIONS only. All actions still verify the
         // session/process birth/owner. No token/image query for every name event.
         if (!kind) return;
+        if (kind == 2) {
+            std::lock_guard lock(self->sessionMutex);
+            if (self->cachedSession == session) {
+                if (event == EVENT_OBJECT_DESTROY) {
+                    if (self->cachedUiWindow.window == window) self->cachedUiWindow = {};
+                } else if (event != EVENT_OBJECT_HIDE) self->cachedUiWindow = {window, pid, now};
+                // HIDE retains the background candidate; another hidden window cannot replace it.
+            }
+        }
         if (kind == 1 && (event == EVENT_OBJECT_CREATE || event == EVENT_OBJECT_SHOW) && self->pokeEvent &&
             (!self->windowPoked || now - self->windowPokedAt >= 1000)) {
             self->windowPoked = true; self->windowPokedAt = now; SetEvent(self->pokeEvent);
@@ -211,7 +233,8 @@ class Observer {
             presence.store(process ? 1 : probeSteamPresence(), std::memory_order_release);
             if (!havePrevious || !(next == previous)) {
                 previous = next; havePrevious = true;
-                { std::lock_guard lock(sessionMutex); cachedSession = next; }
+                { std::lock_guard lock(sessionMutex); cachedSession = next; cachedUiWindow = {}; }
+                windowPids.clear(); // Same-install PID/birth/account changes invalidate event classification too.
                 retries.begin(GetTickCount64());
                 try { changed(true); } catch (...) {}
                 return true;
@@ -270,7 +293,7 @@ public:
         try { thread = std::thread([this, changed = std::move(changed), needsRetry = std::move(needsRetry)] {
             try { run(changed, needsRetry); } catch (...) {}
             presence.store(-1, std::memory_order_release);
-            { std::lock_guard lock(sessionMutex); cachedSession = {}; }
+            { std::lock_guard lock(sessionMutex); cachedSession = {}; cachedUiWindow = {}; }
         }); }
         catch (...) { CloseHandle(stopEvent); CloseHandle(pokeEvent); stopEvent = pokeEvent = nullptr; return false; }
         return true;
@@ -278,6 +301,11 @@ public:
     // Unknown before startup/after stop or an observer failure. No scan or locks here.
     int steamPresence() const { return presence.load(std::memory_order_acquire); }
     Session sessionSnapshot() const { std::lock_guard lock(sessionMutex); return cachedSession; }
+    DiagnosticSnapshot diagnosticWindowSnapshot() const {
+        std::unique_lock lock(sessionMutex, std::try_to_lock);
+        if (!lock.owns_lock()) return {};
+        return {cachedSession.pid != 0 && cachedSession.created != 0, cachedSession, cachedUiWindow};
+    }
     void beginWindow() { // Explicit request, not called from retries.
         std::lock_guard<std::mutex> lock(lifecycle);
         openWindow.store(true);
@@ -290,7 +318,7 @@ public:
         if (stopEvent) CloseHandle(stopEvent);
         if (pokeEvent) CloseHandle(pokeEvent);
         stopEvent = pokeEvent = nullptr; openWindow.store(false);
-        { std::lock_guard sessionLock(sessionMutex); cachedSession = {}; }
+        { std::lock_guard sessionLock(sessionMutex); cachedSession = {}; cachedUiWindow = {}; }
         presence.store(-1, std::memory_order_release);
     }
 };

@@ -5,6 +5,7 @@ import { virtualTargetShortcutError } from '@/bridge/virtualTargetPolicy';
 import { computed, nextTick, onActivated, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import Dropdown from '@/components/Dropdown.vue';
 import { preserveControllerShortcutRecords } from '@/bridge/controllerShortcutStorage';
+import { globalShortcutContainer, effectiveShortcutContainer, hasModeShortcutOverride, hasStoredGlobalShortcuts } from '@/bridge/bootModeSharedShortcuts';
 import GamepadVisualizer from '@/components/GamepadVisualizer.vue';
 import { useShortcutPreviewFocus } from '@/composables/useShortcutPreviewFocus';
 import InlineIcon from '@/components/InlineIcon.vue';
@@ -403,13 +404,18 @@ async function load(): Promise<void> {
     selectRule(visibleRules.value.find(rule=>rule.enabled)?.id||visibleRules.value[0]?.id||'');dirty.value=false;status.value='正在编辑 '+props.presetDraft.name+' 的手柄预设，应用修改后由外层保存。';return;
   }
   const settings = await loadSettings();
-  snapshot.value = settings.input;
+  const sharedRules = globalShortcutContainer(settings);
+  snapshot.value = { ...settings.input, buttonMapping: { ...settings.input.buttonMapping, rules: sharedRules } };
   const apps = settings.quickApps?.apps;
   quickAppChoices.value = Array.isArray(apps) ? apps.filter(app=>app && typeof app.path === 'string' && app.path && typeof app.name === 'string').map(app=>({value:app.path,label:app.name})) : [];
   gamepad.value = await summonGet().catch(() => gamepad.value);
   oemKeys.value = await oemKeysGet().catch(() => OEM_EMPTY_SNAPSHOT);
-  const persisted = readControllerShortcutRules(settings.input.buttonMapping?.rules);
-  const reconciled = reconcileControllerShortcutRules(persisted, nativeEnabledMap());
+  const persisted = readControllerShortcutRules(sharedRules);
+  // A current mode may own different native flags. Its applied output must not
+  // replace saved global defaults while editing the shared rule list.
+  const globalFlags = Object.fromEntries(persisted.filter(rule => rule.origin === 'native-default' && rule.defaultKey).map(rule => [rule.defaultKey!, rule.enabled]));
+  const reconciled = hasStoredGlobalShortcuts(settings) ? { rules: persisted, seeded: 0 }
+    : reconcileControllerShortcutRules(persisted, { ...nativeEnabledMap(), ...globalFlags });
   previewFocus.reset();
   newDraft.value=null;creationProblem.value='';rulePage.value=0;
   rules.value = reconciled.rules;
@@ -448,11 +454,11 @@ async function apply(): Promise<void> {
     const patchFor = (entries: ControllerShortcutRule[]) => ({
       buttonMapping: { rules: { schemaVersion: 2, closure: 'UNENCLOSED', shortcutRules: preserveControllerShortcutRecords(storageBase, storageRules, entries) } },
     });
-    let result = await compareAndSwapInputSettings(baseline.revision, patchFor(savedRules), targetAllowed);
+    let result = await compareAndSwapInputSettings(baseline.revision, patchFor(savedRules), targetAllowed, { globalShortcuts: true });
     if (result.ok === false && result.reason === 'revision-conflict') {
       const merged = mergeControllerShortcutDraft(
         readControllerShortcutRules(baseline.buttonMapping?.rules), draft,
-        readControllerShortcutRules(result.value.buttonMapping?.rules),
+        readControllerShortcutRules(result.globalShortcutRules ?? result.value.buttonMapping?.rules),
       );
       if (merged.ok === false) {
         dirty.value = true;
@@ -462,9 +468,9 @@ async function apply(): Promise<void> {
       const problems = validateControllerShortcutRules(rulesToValidate(merged.rules), oemKeys.value);
       if (problems.length) { dirty.value = true; status.value = `合并未保存，草稿已保留：${problems[0]}`; return; }
       savedRules = merged.rules;
-      storageBase = result.value.buttonMapping?.rules;
+      storageBase = result.globalShortcutRules ?? result.value.buttonMapping?.rules;
       storageRules = readControllerShortcutRules(storageBase);
-      result = await compareAndSwapInputSettings(result.value.revision, patchFor(savedRules), targetAllowed); // one retry only
+      result = await compareAndSwapInputSettings(result.value.revision, patchFor(savedRules), targetAllowed, { globalShortcuts: true }); // one retry only
     }
     if (result.ok === false) {
       dirty.value = true;
@@ -473,9 +479,10 @@ async function apply(): Promise<void> {
         : result.reason === 'cancelled' ? '保存已取消，草稿已保留。' : '专属配置正在接管，草稿已保留。';
       return;
     }
-    snapshot.value = result.value;
-    rules.value = readControllerShortcutRules(result.value.buttonMapping?.rules);
-    const nativeSettings = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map((definition) => [definition.defaultKey, savedRules.some((rule) => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled)]));
+    snapshot.value = { ...result.value, buttonMapping: { ...result.value.buttonMapping, rules: result.globalShortcutRules ?? result.value.buttonMapping?.rules } };
+    rules.value = readControllerShortcutRules(snapshot.value.buttonMapping?.rules);
+    const effectiveRules = readControllerShortcutRules(effectiveShortcutContainer({ input: result.value }));
+    const nativeSettings = Object.fromEntries(NATIVE_DEFAULT_SHORTCUTS.map((definition) => [definition.defaultKey, effectiveRules.some((rule) => rule.origin === 'native-default' && rule.defaultKey === definition.defaultKey && rule.enabled)]));
     gamepad.value = await summonGet().catch(() => gamepad.value);
     let nativeSyncFailed = false;
     gamepad.value = await summonSet(nativeSettings).catch(() => { nativeSyncFailed = true; return gamepad.value; });
@@ -485,7 +492,8 @@ async function apply(): Promise<void> {
     window.dispatchEvent(new CustomEvent('ipc:gamepad.settings', { detail: gamepad.value }));
     window.dispatchEvent(new CustomEvent('ipc:controller-shortcuts.updated'));
     status.value = nativeSyncFailed ? '规则已保存，但默认快捷开关未同步，草稿已保留，请再次应用。'
-      : '规则已保存。请按键验证动作；保存成功不代表设备动作已执行。';
+      : hasModeShortcutOverride(await loadSettings()) ? '全局快捷已保存；当前模式使用单独设置，跟随全局的模式会使用新快捷键。'
+      : '全局规则已保存，跟随全局的模式重启后继续使用。请按键验证动作。';
   } catch (error) { status.value = `保存失败：${(error as Error).message}`; }
   finally { busy.value = false; }
 }
@@ -765,7 +773,7 @@ onBeforeUnmount(() => {
       <div class="editor-stage">
       <section ref="dialogEl" class="editor-dialog" :inert="presetCloseConfirm || undefined" :data-layout-variant="layoutVariant" :data-global-layout="globalActionsLayout" :data-input-flow="'record'" :data-output-variant="outputActionVariant" role="dialog" aria-modal="true" aria-label="自定义快捷规则编辑器" tabindex="-1">
         <header class="editor-top">
-          <div class="editor-heading"><div><h3>{{presetDraft?'手柄自定义':'快捷动作'}}</h3></div><span class="editor-save-state" :class="{ dirty: dirty || Boolean(newDraft) }" aria-live="polite"><i aria-hidden="true" />{{ newDraft ? '正在新建' : dirty ? '未应用修改' : '已同步' }}</span></div>
+          <div class="editor-heading"><div><h3>{{presetDraft?'手柄自定义':'快捷动作'}}</h3><small class="shortcut-scope">{{ presetDraft ? presetDraft.name : '全局快捷动作' }}</small></div><span class="editor-save-state" :class="{ dirty: dirty || Boolean(newDraft) }" aria-live="polite"><i aria-hidden="true" />{{ newDraft ? '正在新建' : dirty ? '未应用修改' : '已同步' }}</span></div>
           <div class="editor-toolbar"><label class="preview-selector"><span>手柄图示</span><Dropdown :teleport-to="teleportTo" :model-value="selectedDiagramPersona || diagramPersona" :options="diagramPersonaOptions" aria-label="手柄图示" :disabled="busy || recording || recordingBusy" @update:model-value="selectedDiagramPersona=String($event)"/><small v-if="previewKind==='keyboard'">当前预览：键盘</small></label><ControllerEditorGlobalActions v-if="globalActionsLayout !== 'bottom'" :mode="globalActionsLayout === 'split' ? 'draft' : 'all'" :dirty="dirty" :pending="Boolean(pendingCombination || newDraft)" :busy="busy" :recording="recording || recordingBusy" @restore="restoreNativeDefaults" @discard="discardChanges" @apply="apply" @close="requestClose" /></div>
         </header>
         <main class="editor-layout">
@@ -1080,6 +1088,7 @@ onBeforeUnmount(() => {
 .editor-top{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:40px;margin-bottom:12px;flex-shrink:0}
 .editor-heading{display:flex;align-items:center;gap:18px;min-width:0}
 .editor-heading h3{font-size:15px;line-height:1.35;white-space:nowrap}
+.shortcut-scope{color:var(--text-dim);font-size:11px;line-height:1.25}
 .editor-save-state{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;color:var(--text-dim);font-size:11px;white-space:nowrap}
 .editor-save-state i{width:5px;height:5px;border-radius:50%;background:#4897d2}
 .editor-save-state.dirty i{background:#f5b942}
@@ -1120,7 +1129,12 @@ onBeforeUnmount(() => {
 </style>
 
 <style scoped>
-.rule-editor-card--creating{display:flex!important;flex-direction:column;gap:12px;align-content:start}.rule-editor-card--creating>.editor-bubble{grid-column:auto;grid-row:auto;align-self:auto}.rule-editor-card--creating>.creation-controls{display:flex;flex-wrap:wrap;gap:8px;grid-column:auto}
+/* Inline-size containers have no intrinsic width. In the creation flex column,
+   stretch the step panels instead of inheriting the grid's start alignment. */
+.rule-editor-card--creating{display:flex!important;flex-direction:column;gap:12px;align-content:start;align-items:stretch}
+.rule-editor-card--creating>*{min-width:0;flex-shrink:0}
+.rule-editor-card--creating>.editor-bubble{grid-column:auto;grid-row:auto;align-self:stretch;box-sizing:border-box}
+.rule-editor-card--creating>.creation-controls{display:flex;flex-wrap:wrap;gap:8px;grid-column:auto}
 </style>
 
 <style scoped>

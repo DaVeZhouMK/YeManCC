@@ -27,6 +27,9 @@ struct Candidate {
     std::size_t callbackHeldRows = 0, selfHeldAssumptionRows = 0;
     std::uint64_t lastActivityTick = 0;
     bool asyncDownBit = false, callingThreadQueueDown = false;
+    std::size_t injectedHookHeldRows = 0;
+    std::uint64_t injectedHookHeldEdgeTick = 0;
+    bool injectedHookHeldEdgeKnown = false;
 };
 struct Selection {
     std::array<Candidate, candidateCapacity> candidates{};
@@ -99,6 +102,17 @@ inline Selection select(const inputActivity::Snapshot& activity) noexcept {
         ++candidate.contributingRows;
         if (row.extended) ++candidate.extendedRows; else ++candidate.genericRows;
         if (callbackHeld) { candidate.reasonBits |= CallbackHeld; ++candidate.callbackHeldRows; }
+        // lastSourceId is the existing adapter's route/flags, not a sender PID.
+        // Mixed/unknown routes cannot establish a stable injected-held row.
+        if (callbackHeld && row.kind==inputActivity::Kind::Keyboard &&
+            row.channel==inputActivity::Channel::LowLevelKeyboard && row.hasEdge &&
+            !row.sourceMixed && !row.sourceUnknown && (row.lastSourceId&0x10u)!=0 &&
+            vk>=0xc3u && vk<=0xdau) {
+            ++candidate.injectedHookHeldRows;
+            if(!candidate.injectedHookHeldEdgeKnown || row.lastEdgeTick<candidate.injectedHookHeldEdgeTick)
+                candidate.injectedHookHeldEdgeTick=row.lastEdgeTick;
+            candidate.injectedHookHeldEdgeKnown=true;
+        }
         if (selfHeld) { candidate.reasonBits |= SelfHeldAssumption; ++candidate.selfHeldAssumptionRows; }
         if (row.eventCount != 0) candidate.reasonBits |= RecentActivity;
         candidate.reasonBits |= row.kind == inputActivity::Kind::Keyboard ? KeyboardRow : MouseButtonRow;
@@ -182,6 +196,8 @@ inline nlohmann::json toJson(const Capture& capture) {
     using Json = nlohmann::json;
     const auto& s = capture.selection;
     auto keys = Json::array();
+    constexpr std::uint64_t longHeldReferenceMs=10000;
+    std::size_t longHeldInjectedGamepadKeys=0;
     for (std::size_t i = 0; i < s.count; ++i) {
         const auto& c = s.candidates[i];
         keys.push_back({{"virtualKey", c.virtualKey}, {"selectionReasonBits", c.reasonBits},
@@ -190,6 +206,17 @@ inline nlohmann::json toJson(const Capture& capture) {
             {"lastRetainedActivityTick", c.lastActivityTick},
             {"asyncDownBit", capture.sampled ? Json(c.asyncDownBit) : Json(nullptr)},
             {"callingThreadQueueDown", capture.sampled && capture.queueReadOk ? Json(c.callingThreadQueueDown) : Json(nullptr)}});
+        if(c.injectedHookHeldRows){
+            const bool ageKnown=capture.sampled&&c.injectedHookHeldEdgeKnown&&capture.beginTick>=c.injectedHookHeldEdgeTick;
+            const auto age=ageKnown?capture.beginTick-c.injectedHookHeldEdgeTick:0;
+            const bool candidate=ageKnown&&c.asyncDownBit&&age>=longHeldReferenceMs;
+            if(candidate)++longHeldInjectedGamepadKeys;
+            keys.back()["injectedGamepadHold"]={{"version",1},{"hookHeldRows",c.injectedHookHeldRows},
+                {"lastHeldEdgeTick",c.injectedHookHeldEdgeKnown?Json(c.injectedHookHeldEdgeTick):Json(nullptr)},
+                {"observedAgeMs",ageKnown?Json(age):Json(nullptr)},{"longHeldReferenceMs",longHeldReferenceMs},
+                {"longHeldCandidate",candidate},{"senderKnown",false},{"stuckKeyProven",false},
+                {"scope","callback-held plus sampled async-down;age from retained edge;not physical hold,continuous OS state,or authorization to release"}};
+        }
     }
     auto foreground = [](const Foreground& f) -> Json {
         return {{"windowPresent", f.windowPresent}, {"pidKnown", f.pidKnown},
@@ -207,7 +234,8 @@ inline nlohmann::json toJson(const Capture& capture) {
         {"foregroundStableDuringCapture", foregroundKnown ? Json(capture.foregroundSameWindow && capture.foregroundBefore.pid == capture.foregroundAfter.pid) : Json(nullptr)},
         {"callingThreadQueueReadOk", capture.sampled ? Json(capture.queueReadOk) : Json(nullptr)},
         {"callingThreadQueueError", capture.sampled && !capture.queueReadOk ? Json(capture.queueError) : Json(nullptr)},
-        {"keys", std::move(keys)}, {"candidateCapacity", candidateCapacity}, {"retainedRowCapacity", inputActivity::capacity},
+        {"keys", std::move(keys)}, {"injectedGamepadHoldEvidenceVersion",1},
+        {"longHeldInjectedGamepadKeys",longHeldInjectedGamepadKeys}, {"candidateCapacity", candidateCapacity}, {"retainedRowCapacity", inputActivity::capacity},
         {"selectedKeys", s.count}, {"uniqueEligibleKeys", s.uniqueEligibleKeys}, {"eligibleRows", s.eligibleRows},
         {"inputRowCount", s.inputRowCount}, {"inspectedRows", s.inspectedRows}, {"uninspectedRetainedRows", s.uninspectedRetainedRows},
         {"omittedKeysByCandidateLimit", s.omittedKeys}, {"omittedHeldKeysByCandidateLimit", s.omittedHeldKeys}, {"omittedEligibleRowsByCandidateLimit", s.omittedEligibleRows},

@@ -126,15 +126,22 @@ async function restoreAllTasks() {
 }
 
 async function onHardwareGpuSchedule(v: boolean) {
+  if (busy.value) return;
+  ++refreshRevision;
+  busy.value = true;
+  errMsg.value = '';
   const prev = hardwareGpuSchedule.value;
   hardwareGpuSchedule.value = v;
   try {
     const ok = await writeHardwareGpuSchedule(v);
     if (!ok) throw new Error('注册表写入失败');
-    errMsg.value = '硬件加速GPU计划已更新，重启或重新登录后完全生效';
+    errMsg.value = '硬件加速GPU计划已更新，重启电脑后生效';
   } catch (e) {
     hardwareGpuSchedule.value = prev;
     errMsg.value = '硬件加速GPU计划设置失败：' + (e as Error).message;
+  } finally {
+    ++refreshRevision;
+    busy.value = false;
   }
 }
 
@@ -205,7 +212,7 @@ onActivated(()=>{void refresh();});
 <Toggle v-model="tasks.cleanMem" label="清理一次内存" color="accent" :disabled="busy" @update:model-value="(v: boolean) => toggleTaskSafe('内存-开机自动内存清理并关闭', v, 'cleanMem')" />
 
 <Toggle v-model="steamCommunityBoot" label="网络加速" color="accent" :disabled="busy" @update:model-value="onSteamCommunityBoot" />
-<Toggle v-model="hardwareGpuSchedule" label="硬件加速GPU计划" description="关闭时解决AMD395游戏BUG" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" /></div></section>
+<Toggle class="gpu-schedule-setting" :model-value="hardwareGpuSchedule" label="硬件加速GPU计划" description="默认建议开启，AMD 395 机型建议关闭" color="accent" :disabled="busy" @update:model-value="onHardwareGpuSchedule" /></div></section>
  <section class="settings-section-panel" aria-label="系统工具" data-boot-startup-group="tools"><header class="settings-section-heading"><h3><InlineIcon name="tools"/>系统工具</h3></header><div class="startup-setting-list"><div class="row">
         <span><InlineIcon name="search" /> Windows 任务栏搜索</span>
         <button class="mini-btn" @click="onSearch">{{searchSt==='hidden'?'不可用':searchSt==='trimmed'?'恢复搜索':'精简搜索'}}</button>
@@ -223,7 +230,8 @@ onActivated(()=>{void refresh();});
 
 .boot-common-heading{display:flex;align-items:center;margin:6px 0 11px}.boot-common-heading h2{font-size:17px;margin:0}
 .boot-common-startup{margin-top:14px!important;padding-top:12px!important}.settings-section-panel{min-width:0;margin:0 0 10px;padding:10px;border:1px solid var(--border);border-radius:9px;background:var(--console-surface,var(--bg-panel))}.settings-section-heading{padding-bottom:8px;margin-bottom:4px;border-bottom:1px solid var(--border)}.settings-section-heading h3{display:flex;align-items:center;gap:7px;font-size:16px;margin:0;color:var(--text)}.settings-section-heading :deep(.inline-icon){color:var(--accent)}
-.boot-common-startup :deep(.toggle-desc){display:none}.boot-common-startup :deep(.startup-setting-list>.toggle-row){padding:9px 0;min-width:0;gap:8px}.boot-common-startup .task-tools{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.boot-common-startup .task-tool-btn{text-align:center;font-size:14px;padding:7px 5px}.boot-common-startup .startup-tools-title{font-size:14px;margin:10px 0 6px}.boot-common-startup .row{display:flex;justify-content:space-between;gap:12px}.boot-common-startup .mini-btn{font-size:14px;white-space:nowrap;min-width:110px;text-align:center}
+.boot-common-startup :deep(.toggle-desc){display:none}
+.boot-common-startup :deep(.gpu-schedule-setting .toggle-desc){display:block}.boot-common-startup :deep(.startup-setting-list>.toggle-row){padding:9px 0;min-width:0;gap:8px}.boot-common-startup .task-tools{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}.boot-common-startup .task-tool-btn{text-align:center;font-size:14px;padding:7px 5px}.boot-common-startup .startup-tools-title{font-size:14px;margin:10px 0 6px}.boot-common-startup .row{display:flex;justify-content:space-between;gap:12px}.boot-common-startup .mini-btn{font-size:14px;white-space:nowrap;min-width:110px;text-align:center}
 
 .boot-common-startup{margin-top:8px;border-top:1px solid var(--border);padding-top:10px}.boot-common-startup>summary{cursor:pointer;font-size:13px;color:var(--text-dim);padding:8px 0}
 

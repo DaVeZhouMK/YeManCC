@@ -1,4 +1,5 @@
 import {invoke,on} from './ipc';
+import {subscribeGameMediaResume} from './gameMediaPreparationPolicy';
 import {getUiSetting,setUiSettings,uiSettingsLoaded} from './uiSettings';
 export interface MediaDownloadState {startupProtectionUntil?:number;autoStopped?:number;pendingReason?:string;nextDueAt?:number;inventoryAwaitUntil?:number;inventoryReadyId?:string;manualTotal?:number;manualCompleted?:number;manualUntil?:number;manualState?:string;inventoryRequestId?:string;catalogPending?:boolean;heartbeatAt?:number;updatedAt?:number;catalogStatus?:string;catalogError?:string;catalogRetryAt?:number;catalogCount?:number;sourceCounts?:{popular:number;steamNative:number;steamShortcuts?:number;identifying?:number;ymccConfirmed:number;other:number};statusRevision?:number;activeCount?:number;parallelSlots?:number;resumedBytes?:number;resourcePauseReason?:string;systemCpuPct?:number;cpuThreshold?:number;enabled?:boolean;phase?:string;pauseReason?:string;reason?:string;current?:{name?:string;appId?:number};bytes?:number;totalBytes?:number;completed?:number;remaining?:number;failed?:number;total?:number;unavailable?:number;workerPid?:number;}
 export function downloadDescription(state:MediaDownloadState){
@@ -138,7 +139,7 @@ export class MediaDownloads {
     const settings=()=>{this.sync();this.armStartupCheck();};
     const visible=()=>{if(typeof document==='undefined'||document.visibilityState!=='hidden')void this.refresh();};
     const suspending=on('power.suspending',()=>{this.suspended=true;++this.readGeneration;this.reading=null;this.cancelStartupCheck();});
-    const resumed=on('power.resumed',()=>{this.suspended=false;void this.refresh();});
+    const resumed=subscribeGameMediaResume(()=>{this.suspended=false;void this.refresh();},on);
     window.addEventListener('pageshow',visible);window.addEventListener('focus',visible);
     if(typeof document!=='undefined')document.addEventListener('visibilitychange',visible);
     window.addEventListener('ui-settings:changed',settings);window.addEventListener('ui-settings:loaded',settings);settings();

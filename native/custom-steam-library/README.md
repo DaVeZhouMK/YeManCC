@@ -362,3 +362,13 @@ native/opti_catalog_startup.h 提供主进程一次性 owner 与继承父句柄/
 <!-- OPTI-CATALOG-COST-20261023 -->
 2026-10-23 启动OPT反补优化：直接匹配当前库EXE+目录/别名与既有加入计划；只在OPT缺封面时创建一次素材索引，完整条目跳过封面IO与50ms等待。保留每进程一次/动画OFF独立/静默首错终止/只补不删。成功或正常跳过回执新增一次首尾cost（CPU/耗时/IO/峰值工作集），普通日志被动导出，无常驻采样。成本基准与回归：`G:/YeManCC-Work/Testing/YMCC/Evidence/Build/OptiCatalogCost-20261023/REPORT.md`，本机夹具不代表ROG-X现场数值。测试：`powershell -NoProfile -ExecutionPolicy Bypass -File tools/custom_steam_library_opti_catalog_selftest.ps1 -Performance`；默认输出已接Testing核心Evidence/Build。
 <!-- /OPTI-CATALOG-COST-20261023 -->
+
+<!-- CUSTOM-LIBRARY-VISIBLE-COST-20261026 -->
+## 2026-10-26 游戏库后台轮询与输入查询成本
+
+Steam运行状态预检沿用原接口与3秒前台间隔，但改为只在可见、聚焦的库页保留一个计时器。后台、隐藏、最小化或pagehide取消定时器；切回窗口刷新一次，重复焦点事件/渲染及慢请求合并。明确的手动预检仍可一次执行，迟到结果不重启后台轮询。WebView2的IsVisible同步原生窗口隐藏/最小化，保留原扫描/识别/下载任务所有权。
+
+YMCC输入路径先廉价判断库窗口可见且前台，再做原有父PID、输入标记和进程名称校验；身份查询后复核焦点。同一资格判断/动作复用结果，不使用身份TTL或长期缓存，因此前台身份失败仍立即拒绝。后台多轮查询不再OpenProcess/QueryFullProcessImageName。Steam/ROG/MSI等虚拟输出策略和共享媒体端口不变。
+
+既有消费者扩展验证：输入157项（保留原152项及6种反例）、状态/账号37项、实际完整UI浏览器37项；旧实现4个成本断言失败保留。构建与子包来源身份见Testing/YMCC/Evidence/CustomLibrary-CpuFix-20261026/REPORT.md。软件/端口检查不能代替现场CPU功耗对照、物理手柄或睡眠验收；本轮不覆盖安装位或操作Steam。
+<!-- /CUSTOM-LIBRARY-VISIBLE-COST-20261026 -->

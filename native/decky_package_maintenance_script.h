@@ -81,10 +81,17 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   $sourceHome=Resolve-YmccDeckyPath $Source
   $targetHome=Resolve-YmccDeckyPath $Target
   if ($sourceHome -ieq $targetHome -or $sourceHome.StartsWith($targetHome+'\',[StringComparison]::OrdinalIgnoreCase) -or $targetHome.StartsWith($sourceHome+'\',[StringComparison]::OrdinalIgnoreCase)) { throw 'DECKY_SOURCE_TARGET_OVERLAP' }
-  $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.json'
+  # Official Loader migrates every ROOT *.json into settings with os.rename.
+  # Keep YMCC ownership metadata outside that namespace; never patch the Loader.
+  $receipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.receipt'
+  $legacyReceipt=Resolve-YmccDeckyPath $targetHome '.ymcc-managed.json'
+  $movedReceipt=Resolve-YmccDeckyPath $targetHome 'settings/.ymcc-managed.json'
+  if ([IO.Directory]::Exists($receipt) -or [IO.Directory]::Exists($legacyReceipt)) { throw 'DECKY_RECEIPT_IS_DIRECTORY' }
   $previous=$null; $preserved=@(); $entries=@(); $incoming=@{}
   $installedIdentity=$receipt
-  if (![IO.File]::Exists($receipt) -and $InstalledManifestPath -and [IO.File]::Exists($InstalledManifestPath)) {
+  if (![IO.File]::Exists($receipt) -and [IO.File]::Exists($legacyReceipt)) { $installedIdentity=$legacyReceipt }
+  elseif (![IO.File]::Exists($receipt) -and [IO.File]::Exists($movedReceipt)) { $installedIdentity=$movedReceipt }
+  elseif (![IO.File]::Exists($receipt) -and $InstalledManifestPath -and [IO.File]::Exists($InstalledManifestPath)) {
     $installedIdentity=Resolve-YmccDeckyPath ([IO.Path]::GetDirectoryName($InstalledManifestPath)) ([IO.Path]::GetFileName($InstalledManifestPath))
   }
   if ([IO.File]::Exists($installedIdentity)) {
@@ -93,11 +100,22 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
     Assert-YmccDeckyManifest $previous -Previous
     if ([version]$previous.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
   }
+  # A duplicate old root receipt must also be validated before retiring it,
+  # including its downgrade fence. A foreign/corrupt file is never deleted.
+  $legacyHash=$null
+  if ([IO.File]::Exists($legacyReceipt)) {
+    if (([IO.FileInfo]$legacyReceipt).Length -gt 131072) { throw 'DECKY_INSTALLED_RECEIPT_TOO_LARGE' }
+    $legacy=Get-Content -LiteralPath $legacyReceipt -Raw -Encoding UTF8 | ConvertFrom-Json
+    Assert-YmccDeckyManifest $legacy -Previous
+    if ([version]$legacy.loaderVersion.Substring(1) -gt [version]$Manifest.loaderVersion.Substring(1)) { throw 'DECKY_PACKAGE_DOWNGRADE_REFUSED_UPDATE_YMCC' }
+    $legacyHash=Get-YmccDeckyHash $legacyReceipt
+  }
   foreach ($file in @($Manifest.files)) {
     $src=Resolve-YmccDeckyPath $sourceHome $file.path
     $dst=Resolve-YmccDeckyPath $targetHome $file.path
     if (![IO.File]::Exists($src) -or ([IO.FileInfo]$src).Length -ne $file.bytes -or (Get-YmccDeckyHash $src) -cne $file.sha256) { throw ('DECKY_PACKAGE_HASH_MISMATCH '+$file.path) }
-    if ([IO.Directory]::Exists($dst)) { throw 'DECKY_TARGET_FILE_IS_DIRECTORY' }
+)YMCCDECKYPKG"
+R"YMCCDECKYPKG(    if ([IO.Directory]::Exists($dst)) { throw 'DECKY_TARGET_FILE_IS_DIRECTORY' }
     $oldHash=$null
     if ([IO.File]::Exists($dst)) { $oldHash=Get-YmccDeckyHash $dst }
     $incoming[$file.path]=$true
@@ -118,7 +136,10 @@ function Get-YmccDeckyPlan([string]$Source, [string]$Target, $Manifest, [string]
   try { $receiptHash=([BitConverter]::ToString($sha.ComputeHash($receiptBytes))).Replace('-','').ToLowerInvariant() } finally { $sha.Dispose() }
   $oldReceipt=$null
   if ([IO.File]::Exists($receipt)) { $oldReceipt=Get-YmccDeckyHash $receipt }
-  if ($oldReceipt -cne $receiptHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.json';source=$null;before=$oldReceipt;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
+  if ($oldReceipt -cne $receiptHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.receipt';source=$null;before=$oldReceipt;after=$receiptHash;remove=$false;bytes=$receiptBytes} }
+  # Write the safe receipt FIRST; retire only the validated legacy root inside
+  # the same backup/rollback transaction. Leave settings and user plugins alone.
+  if ($legacyHash) { $entries+=[pscustomobject]@{path='.ymcc-managed.json';source=$null;before=$legacyHash;after=$null;remove=$true;bytes=$null} }
   # File lock failure is detected before the first mutation; foreign Loader stays untouched.
   foreach ($entry in $entries) { if ($entry.before) {
     $file=Resolve-YmccDeckyPath $targetHome $entry.path
@@ -224,7 +245,8 @@ function Install-YmccDeckyPackage($Plan, [string]$BackupRoot, [ValidateRange(0,6
   $moduleLease=Enter-YmccModuleMaintenance
   $lease=$null
   try {
-    if (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
+)YMCCDECKYPKG"
+R"YMCCDECKYPKG(    if (@($Plan.entries).Count) { $lease=Open-YmccDeckyBackendLease $BackendPort }
     return Invoke-YmccDeckyInstall $Plan $BackupRoot
   } finally { try { if ($lease) { $lease.Stop() } } finally { Exit-YmccModuleMaintenance $moduleLease } }
 }

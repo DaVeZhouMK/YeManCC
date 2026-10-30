@@ -7,7 +7,7 @@ import {createHash} from 'node:crypto';
 const root=process.cwd(), out=path.resolve(process.env.YMCC_APPEARANCE_TEST_OUT || 'G:/YeManCC-Work/Build/V/SteamFocus22/focus-css');
 fs.mkdirSync(out,{recursive:true});
 const {chromium}=createRequire('C:/Users/DaVe/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/_fixture.cjs')('playwright');
-const pack='PowerControl/steam-appearance', read=name=>fs.readFileSync(path.join(root,name),'utf8');
+const pack=process.env.YMCC_APPEARANCE_FOCUS_PACK||'PowerControl/steam-appearance', read=name=>fs.readFileSync(path.join(root,name),'utf8');
 const manifest=JSON.parse(read(pack+'/manifest.json'));
 const native=read('tools/fixtures/steam-appearance-focus-native-20261022.css');
 const prefix=pack+'/themes/Darken Unfocused Games/';
@@ -40,35 +40,34 @@ try{
  const measure=async()=>page.evaluate(()=>Object.fromEntries(['recent','library'].map(id=>{const el=document.getElementById(id),s=getComputedStyle(el),r=el.getBoundingClientRect();return [id,{filter:s.filter,coverFilter:getComputedStyle(el.querySelector('img')).filter,badgeFilter:getComputedStyle(el.querySelector('.badge')).filter,transform:s.transform,outline:s.outline,transitionProperty:s.transitionProperty,width:r.width,height:r.height}]})));
  async function settle(){await page.evaluate(async()=>{await Promise.all(document.getAnimations().filter(a=>a.constructor.name==='CSSTransition').map(a=>a.finished.catch(()=>{})));});}
  for(const apply of ['Globally','Recent Only']){
-  // Actual default CSS of all eight effects, with each manifest's SP patches.
+  // Actual default CSS of all seven layout themes, with each manifest's SP patches.
   let css=manifest.themes.map(t=>themeStyles(t.name,apply)).join('\n');
   if(process.env.YMCC_APPEARANCE_FOCUS_NEGATIVE==='1'){
-   const old='/* designated old selector mutation */\n'+(apply==='Globally'?'.BasicUI ':'.gamepadhome_RecentSection_39tNv .basicgamecarousel_BasicGameCarousel_3MdH5 ')+'.appportrait_LibraryItemBox_WYgDg {filter:brightness(var(--ren-game-tile-brightness)) saturate(var(--ren-game-tile-saturate));}';
-   css=css.replace(input(prefix+(apply==='Globally'?'global.css':'recent-games.css')),old);
+   css+='\n.BasicUI .appportrait_LibraryItemBox_WYgDg .libraryassetimage_Image_24_Au{filter:brightness(.5) saturate(.5)!important}';
   }
   const style=await page.addStyleTag({content:css});await settle();
-  let m=await measure();assert.equal(m.recent.filter,'brightness(0.9)',apply+': parent keeps native filter');assert.equal(m.recent.coverFilter,'brightness(0.5) saturate(0.5)');assert.equal(m.recent.badgeFilter,'none');
-  assert.equal(m.library.filter,'brightness(0.9)');if(apply==='Globally')assert.equal(m.library.coverFilter,'brightness(0.5) saturate(0.5)');else assert.equal(m.library.coverFilter,'none');
+  let m=await measure();assert.equal(m.recent.filter,'none',apply+': parent has no image filter');assert.equal(m.recent.coverFilter,'none');assert.equal(m.recent.badgeFilter,'none');
+  assert.equal(m.library.filter,'none');if(apply==='Globally')assert.equal(m.library.coverFilter,'none');else assert.equal(m.library.coverFilter,'none');
   const baseline=m;
-  cases.push(apply+': only its configured scope is dimmed, all eight source themes loaded');
+  cases.push(apply+': both legacy scopes render covers without filters; all seven source themes loaded');
   for(const state of ['gpfocus','gpfocuswithin','gpfocus-within']){
    await page.locator('#recent').evaluate((el,state)=>el.classList.add(state),state);await settle();m=await measure();
-   assert.equal(m.recent.filter,'brightness(0.9)',apply+': '+state+' must leave dimming to Steam');assert.equal(m.recent.coverFilter,'none');
+   assert.equal(m.recent.filter,'none',apply+': '+state+' must remain unfiltered');assert.equal(m.recent.coverFilter,'none');
    assert.equal(m.recent.transform,baseline.recent.transform);assert.equal(m.recent.width,baseline.recent.width);assert.equal(m.recent.height,baseline.recent.height);
    await page.locator('#recent').evaluate((el,state)=>el.classList.remove(state),state);await settle();
   }
-  cases.push(apply+': gamepad focus classes exclude dimming without changing transform or size');
-  await page.locator('#recent').evaluate(el=>el.classList.add('appportrait_ShowAsHovered_2YsY_','_2YsY_x7hLyKlUqjX9bhn0R'));await settle();m=await measure();assert.equal(m.recent.coverFilter,'none');assert.equal(m.recent.filter,'brightness(1) contrast(0.95) saturate(1)');
+  cases.push(apply+': gamepad focus classes remain unfiltered without changing transform or size');
+  await page.locator('#recent').evaluate(el=>el.classList.add('appportrait_ShowAsHovered_2YsY_','_2YsY_x7hLyKlUqjX9bhn0R'));await settle();m=await measure();assert.equal(m.recent.coverFilter,'none');assert.equal(m.recent.filter,'none');
   await page.locator('#recent').evaluate(el=>el.classList.remove('appportrait_ShowAsHovered_2YsY_','_2YsY_x7hLyKlUqjX9bhn0R'));await settle();
   cases.push(apply+': Steam programmatic hover state stays bright without a pointer or DOM focus');
-  await page.locator('#recent').focus();await settle();m=await measure();assert.equal(m.recent.filter,'brightness(1)');assert.equal(m.recent.coverFilter,'none');assert.notEqual(m.recent.transform,'none');
+  await page.locator('#recent').focus();await settle();m=await measure();assert.equal(m.recent.filter,'none');assert.equal(m.recent.coverFilter,'none');assert.notEqual(m.recent.transform,'none');
   await page.locator('#outside').focus();await settle();
-  await page.locator('#recent .badge').focus();await settle();m=await measure();assert.equal(m.recent.filter,'brightness(0.9)');assert.equal(m.recent.coverFilter,'none');
+  await page.locator('#recent .badge').focus();await settle();m=await measure();assert.equal(m.recent.filter,'none');assert.equal(m.recent.coverFilter,'none');
   await page.locator('#outside').focus();await settle();
-  cases.push(apply+': real DOM focus and child focus preserve native focus visuals');
+  cases.push(apply+': real DOM focus and child focus preserve native focus geometry and static outline');
   await page.locator('#recent').hover();await settle();m=await measure();assert.equal(m.recent.coverFilter,'none');
   await page.mouse.down();await settle();m=await measure();assert.equal(m.recent.coverFilter,'none');await page.mouse.up();await page.mouse.move(-100,-100);await settle();
-  cases.push(apply+': pointer hover/press retain Steam filters and menu remains clickable');
+  cases.push(apply+': pointer hover/press stay unfiltered and menu remains clickable');
   let clicks=0;await page.exposeFunction('recordBadgeClick'+apply,()=>clicks++);await page.locator('#recent .badge').evaluate((el,fn)=>el.addEventListener('click',()=>window[fn]()),'recordBadgeClick'+apply);await page.locator('#recent .badge').click();assert.equal(clicks,1);await page.locator('#outside').focus();await page.mouse.move(-100,-100);await settle();
   // Class-first and DOM-first handoffs are separate frames in Steam. Check each frame's selector membership.
   const handoff=await page.evaluate(async()=>{
@@ -82,13 +81,13 @@ try{
    a.blur();b.blur();a.classList.remove('gpfocus');b.classList.remove('gpfocus');return observed;
   });
   assert(handoff.every(v=>!v));await settle();cases.push(apply+': 80 focus-handoff frames never match the dimming rule while focused');
-  await page.addStyleTag({content:':root{--ren-game-tile-brightness:0.2;--ren-game-tile-saturate:0.8}'}).then(async vars=>{await settle();m=await measure();assert.equal(m.recent.coverFilter,'brightness(0.2) saturate(0.8)');assert.equal(m.recent.filter,'brightness(0.9)');await vars.evaluate(el=>el.remove());});
-  cases.push(apply+': existing brightness and saturation controls remain effective');
+  await page.addStyleTag({content:':root{--ren-game-tile-brightness:0.2;--ren-game-tile-saturate:0.8}'}).then(async vars=>{await settle();m=await measure();assert.equal(m.recent.coverFilter,'none');assert.equal(m.recent.filter,'none');await vars.evaluate(el=>el.remove());});
+  cases.push(apply+': legacy brightness and saturation values stay readable but cannot reinstate filters');
   await page.locator('#recent').evaluate(el=>el.classList.add('gpfocus'));await page.locator('#recent').focus();await settle();
   const dwell=await page.evaluate(async()=>{const el=document.getElementById('recent'),values=[];for(let i=0;i<120;i++){await new Promise(requestAnimationFrame);values.push({parent:getComputedStyle(el).filter,cover:getComputedStyle(el.querySelector('img')).filter});}return values;});
-  assert(dwell.every(v=>v.parent==='brightness(1)'&&v.cover==='none'));
+  assert(dwell.every(v=>v.parent==='none'&&v.cover==='none'));
   await page.locator('#recent').evaluate(el=>el.classList.remove('gpfocus'));await page.locator('#outside').focus();await settle();
-  cases.push(apply+': 120 stationary-focus frames with native keyframes keep cover and parent filter stable');
+  cases.push(apply+': 120 stationary-focus frames with native keyframes keep cover and parent unfiltered');
   measurements.push({apply,baseline,handoffFrames:handoff.length});
   if(apply==='Globally')await page.screenshot({path:path.join(out,'themes-unfocused.png')});
   await style.evaluate(el=>el.remove());await settle();

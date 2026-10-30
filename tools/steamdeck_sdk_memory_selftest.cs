@@ -6,7 +6,7 @@ using System.Security.Cryptography;
 using System.Text.Json;
 using HIDMaestro;
 
-internal static class Program
+internal static partial class Program
 {
  private const string Approved="8FE7BDB21EC497591F527B7B87C4BC7B41B45C35A06CC211A7A0DCE48838ED2C";
  private const BindingFlags Flags=BindingFlags.Public|BindingFlags.NonPublic|BindingFlags.Instance;
@@ -20,7 +20,12 @@ internal static class Program
  private static bool Valid(byte[] bytes){if(bytes.Length!=64)return false;var n=BinaryPrimitives.ReadUInt32LittleEndian(bytes.AsSpan(4));return bytes.AsSpan().SequenceEqual(Packet(n));}
  private static int Main(string[] args)
  {
-  if(args.Length!=1)return 2;nint mem=0;bool freed=false;var meta=new Dictionary<string,object?>();
+  #if ROG_RECORDED_REPLAY
+  if(args.Length!=2)return 2;
+#else
+  if(args.Length!=1)return 2;
+#endif
+  nint mem=0;bool freed=false;var meta=new Dictionary<string,object?>();
   try{
    var assembly=typeof(HMController).Assembly;var dll=assembly.Location;var hash=Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(dll)));if(hash!=Approved)throw new Exception("sdk-hash-mismatch");
    if(assembly.ManifestModule.ModuleVersionId!=Guid.Parse("86aed9a3-c024-4596-b02c-650082ffb852"))throw new Exception("mvid-mismatch");
@@ -72,6 +77,9 @@ internal static class Program
    meta["concurrentWrites"]=4096;meta["concurrentReads"]=readerSuccess;meta["concurrentBadFrames"]=readerBad;meta["lastConcurrentPacket"]=last;
    Check("actual-seqlock-concurrent-copy-does-not-return-torn-frames",readerSuccess>0&&readerBad==0);Check("final-published-active-frame-is-not-lost",last==34095);
    controller.SubmitRawReport(Packet(80000,false));Check("explicit-release-is-the-only-neutral-in-final-step",read(out r)&&r.AsSpan().SequenceEqual(Packet(80000,false)));
+#if ROG_RECORDED_REPLAY
+   meta["recordedHostReplay"]=RunRecordedHostReplay(controller,profile,read,args[1],Path.Combine(Path.GetDirectoryName(args[0])!,"recorded-host-output.jsonl"));
+#endif
    GC.KeepAlive(controller);GC.KeepAlive(dev);
   }catch(Exception e){failures++;meta["error"]=e.ToString();}
   finally{if(mem!=0){Marshal.FreeHGlobal(mem);freed=true;}}

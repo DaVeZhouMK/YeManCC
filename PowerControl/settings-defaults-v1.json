@@ -111,9 +111,10 @@
     "mode": "custom",
     "pauseGameOnSleep": true,
     "retryOnEntryFailure": true,
-    "retryOnNonUserWake": true,
+    "retryOnNonUserWake": false,
     "factMonitorEnabled": false,
     "sleepPowerPlanOptimizationEnabled": true,
+    "staticWakeAutoScanEnabled": true,
     "wakePasswordEnabled": false,
     "steamOverlayOffFix": false,
     "autoWakeRecovery": true
@@ -197,6 +198,7 @@
       "profileId": "default",
       "rules": {}
     },
+    "bootModeShortcuts": null,
     "gyroMotion": {
       "schemaVersion": 1,
       "revision": 0,

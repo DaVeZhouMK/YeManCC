@@ -1,5 +1,7 @@
 # 四模式 Windows／Steam 高级启动最终合同（2026-10-25）
 
+> 2026-10-26 用户截图确认并修正：下文“只改启动开关／GamingHomeApp只读”已被新合同取代。模式2、4需在设为开机模式时立即选择Xbox且开启动进入；模式3立即选择“无”并关闭启动进入；模式1保持两值。详见boot-modes-xbox-primary-20261026.md。手柄/鼠标场景仍下次Windows启动应用。
+
 本页取代同日“注册 Steam 主应用／选择 AnyFSE”解释。用户说的 Windows 主页设置按原 Xbox 启动开关处理：Xbox 或无，不注册或选择 Steam AUMID。之前增加的 Read-SteamGamingHome.ps1 已从正式源码删除，历史原件保留在本轮 before 证据。
 
 | 顺序 | 模式 | Windows Xbox 启动 StartupToGamingHome | OEM DeviceForm | Steam 高级启动 |

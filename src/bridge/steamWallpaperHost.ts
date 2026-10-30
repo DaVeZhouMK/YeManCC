@@ -1,4 +1,5 @@
 import {invoke,on} from './ipc';
+import {subscribeGameMediaResume} from './gameMediaPreparationPolicy';
 import {SteamWallpaperDelivery} from './steamWallpaperDelivery';
 import {registerDeckyMirrorExtension} from './deckyMirrorExtensions';
 import type {MirrorPeer} from './deckyMirrorRelay';
@@ -27,7 +28,7 @@ interface WallpaperHostPorts {
   onResume:(handler:(event:{generation?:number})=>void)=>()=>void;
 }
 export function startSteamWallpaperHost(overrides:Partial<WallpaperHostPorts>={}){
-  const port:WallpaperHostPorts={schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:steamWallpaperEnabled,register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),onResume:handler=>typeof window==='undefined'?()=>{}:on('power.resumed',handler),...overrides};
+  const port:WallpaperHostPorts={schedule:(...args)=>globalThis.setTimeout(...args),cancel:timer=>globalThis.clearTimeout(timer),invoke,media:sharedGameMedia,enabled:steamWallpaperEnabled,register:registerDeckyMirrorExtension,appearance:()=>({opacity:getBackgroundOpacity(),blur:getBackgroundBlur()}),inventory:()=>sharedGameMedia.changed('inventory'),onResume:handler=>typeof window==='undefined'?()=>{}:subscribeGameMediaResume(handler,on),...overrides};
   // Scopes local ordering only; peer/runId continue to own transport identity.
   const stateOwner=Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   let peer:MirrorPeer|null=null,ended=false,ready=false,epoch=0,announced:boolean|undefined,lastFrame='',settingsStamp='',resumeGeneration=0,inventoryVisible=false,stateRevision=0;

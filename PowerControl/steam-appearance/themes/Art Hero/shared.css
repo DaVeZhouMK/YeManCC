@@ -31,14 +31,15 @@
 
 .gpfocuswithin>.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W, :hover~.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W, .basicgamecarousel_CarouselGameLabelWrapper_ZkD6W.basicgamecarousel_ShowAsHovered_3tdVJ {
     transform: translateY(-0.2em);
-    transition-delay: .4s;
+    transition: none!important;
     visibility: visible;
     top: var(--met-game-carousel-font-height);
     position: absolute!important;   
 }
 
-.gpfocuswithin~.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf,:hover~.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf {
-    opacity: 1!important
+/* Decorative duplicate artwork/glow has no layout or input role. */
+.basicgamecarousel_CarouselCapsuleBackgroundGlow_1H3Kf {
+    display: none!important;
 }
 
 .basicgamecarousel_BasicGameCarousel_3MdH5 {
@@ -53,7 +54,8 @@
 
 .gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
     opacity: 1;
-    filter: brightness(100%)!important;
+    /* Do not create a full-hero filter surface for an identity brightness. */
+    filter: none!important;
 }
 .gamepadhomerecentgames_RecentGamesBackground_1SRox {
     opacity: 1!important;
@@ -123,10 +125,53 @@
     z-index: calc(var(--met-hero-art-z-order) + 6000);
 }
 
+
+/* Flat presentation: preserve every layout transform, size and offset above.
+   Only the background artwork is static; YMCC's video wallpaper is untouched. */
+.gamepadhomerecentgames_RecentGamesBackgroundImage_3Mp8R {
+    filter: none!important;
+    backdrop-filter: none!important;
+    box-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+    transform: none!important;
+}
+.gamepadhomerecentgames_RecentGamesBackground_1SRox,
+.gamepadhomerecentgames_RecentGamesBackgroundContainer_QNkOt,
+.gamepadhomerecentgames_RecentGamesBackgroundImages_30D-8 {
+    filter: none!important;
+    backdrop-filter: none!important;
+    -webkit-mask-image: none!important;
+    mask-image: none!important;
+    box-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+}
+.basicgamecarousel_CarouselGameLabelWrapper_ZkD6W {
+    transition: none!important;
+    animation: none!important;
+    text-shadow: none!important;
+}
+.BasicUI .appportrait_LibraryItemBox_WYgDg,
+.BasicUI .appportrait_LibraryItemBox_WYgDg .libraryassetimage_Image_24_Au {
+    filter: none!important;
+    backdrop-filter: none!important;
+    box-shadow: none!important;
+    text-shadow: none!important;
+    animation: none!important;
+    transition: none!important;
+    will-change: auto!important;
+}
+.BasicUI .appportrait_LibraryItemBox_WYgDg::after {
+    display: none!important;
+}
+
 /* YMCC: observe this theme file without changing layout or input. */
 :root { --ymcc-receipt-art-hero: 1; }
 
 /* YMCC file receipt: current option presence; no visual rule. */
 :root { --ymcc-file-74b82ed7acf53846: 1; }
 /* YMCC content receipt: exact bundled file revision. */
-:root { --ymcc-content-9455d7d2e159312c: 1; }
+:root { --ymcc-content-509e0400e6c83461: 1; }
