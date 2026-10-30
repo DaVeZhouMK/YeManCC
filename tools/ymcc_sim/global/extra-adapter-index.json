@@ -8840,7 +8840,7 @@
     },
     {
       "path": "tools/build-lightsetter-payload.ps1",
-      "sha256": "fc2b7adfd32fa29a6cd4131a22b03ee9f6f92ad35679d4e11ffefc135c10d451",
+      "sha256": "d568dea5011e0d8dc98531a2e01b15f595f6412f689095d5a30764843e55ab19",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11218,7 +11218,7 @@
     },
     {
       "path": "tools/steam_appearance_automatic_refresh_selftest.ps1",
-      "sha256": "ddae61ca5c3a08c6c1fc073f486ab8e6c1eceaab10037f70b16878a4c5a804d0",
+      "sha256": "043fb349fab6dc4697b8b1fafab84a337b7e3991c3f49cf4ead970c24b4a8881",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -11238,7 +11238,7 @@
     },
     {
       "path": "tools/steam_appearance_manual_observation_selftest.ps1",
-      "sha256": "37f884a8e410d4d0696882aa52bf29f5b8c3dd53bd7e79ce77aa9866918f0a5b",
+      "sha256": "feb1bf34ed7cb925c8cc2c1a5b217b6508f9fb2bff244fdd5cb4931cb4f8c585",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -12940,7 +12940,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/appearance-library-fixture.ps1",
-      "sha256": "f2ecff5bfbe80ca6d443376fc12742826ba800891d12b6ca8ccb508405a0f25d",
+      "sha256": "7d26d77748da2f7a078cc4e7658da2e73f1bcddddaf4e8814644dc8ea3835789",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13110,12 +13110,12 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/observe-only-negative.mjs",
-      "sha256": "dda2edf541aa61015bd0c560a105da584223b15eaab1d5957bc4548318eff957",
+      "sha256": "138b791fd354eb23cb65c69239176a1b02a20aa45260c7f33899de22b5d1fa70",
       "contentNormalization": "utf8-lf"
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/observe-only-negative.test.mjs",
-      "sha256": "902583a7fe58837447dadfe91b8125c7d233490dc023e26ecfae30bfe85a2e44",
+      "sha256": "85e67488a25821d20bfaa49085469596d58025bf6e23bc51368ed2ec0d690fc7",
       "contentNormalization": "utf8-lf"
     },
     {

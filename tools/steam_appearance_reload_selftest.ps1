@@ -47,7 +47,7 @@ $hashes=@{};foreach($row in Get-ThemeRows){$hashes[$row.name]=Get-AppearanceConf
 $result=Invoke-AppearanceReload ([pscustomobject]@{targetId=$before.targetId;expectedRevision=$before.revision})
 Assert ($result.ok -and !$result.started -and $result.reloaded -and $result.snapshot.configuredMatchesBackend -and !$result.snapshot.backendReloadRequired) 'In-place reload discovers and confirms all eight themes without a helper or restart'
 Assert ((Test-CssDesktopEditing) -and $script:Stopped -eq 0 -and $script:Reloads -eq 1) 'An open Desktop is preserved and no direct style cleanup or backend termination occurs'
-Assert (@($result.snapshot.themes|Where-Object {$_.configured -and $_.backendEnabled}).Count -eq 8) 'The resulting eight-of-eight state matches disk and backend'
+Assert (@($result.snapshot.themes|Where-Object {$_.configured -and $_.backendEnabled}).Count -eq 7) 'The resulting seven-of-seven state matches disk and backend'
 foreach($row in Get-ThemeRows){Assert ((Get-AppearanceConfigValue $row.config) -ceq $hashes[$row.name]) ('Exact configuration values preserved: '+$row.name)}
 Assert (Rejected {Invoke-AppearanceReload ([pscustomobject]@{targetId=$before.targetId;expectedRevision='0'*64})}) 'Stale revision cannot trigger a backend reload'
 Assert (Rejected {Invoke-AppearanceReload ([pscustomobject]@{targetId='0'*16;expectedRevision=$before.revision})}) 'A different theme directory cannot trigger a backend reload'

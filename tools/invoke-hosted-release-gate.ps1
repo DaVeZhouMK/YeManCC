@@ -75,7 +75,7 @@ if(-not $toolRoot.StartsWith($tempRoot+'\',[StringComparison]::OrdinalIgnoreCase
 $userName='yc'+[Guid]::NewGuid().ToString('N').Substring(0,12)
 $passwordText='aA1!'+[Convert]::ToBase64String([Security.Cryptography.RandomNumberGenerator]::GetBytes(32))
 $password=ConvertTo-SecureString -String $passwordText -AsPlainText -Force;$passwordText=$null
-$account=$null;$child=$null;$childStarted=$false;$grants=[Collections.Generic.List[object]]::new();$exit=1
+$account=$null;$child=$null;$childStarted=$false;$grants=[Collections.Generic.List[object]]::new();$lightingOwners=[Collections.Generic.List[object]]::new();$exit=1
 $profile=Join-Path $core 'Workspace/hosted-standard-user';[IO.Directory]::CreateDirectory($profile)|Out-Null
 try{
  $account=New-LocalUser -Name $userName -Password $password -AccountNeverExpires -PasswordNeverExpires -Description 'Disposable YMCC acceptance worker' -ErrorAction Stop
@@ -89,6 +89,20 @@ try{
   $acl=Get-Acl -LiteralPath $scope;$rule=[Security.AccessControl.FileSystemAccessRule]::new($account.SID,$rights,'ContainerInherit,ObjectInherit','None','Allow')
   $acl.AddAccessRule($rule);Set-Acl -LiteralPath $scope -AclObject $acl;$grants.Add(@{path=$scope;rule=$rule})
  }
+ # Existing checkout files belong to the runner administrator. Bind only the
+ # seven replaceable lighting files to the ordinary worker before it captures
+ # full SDDL; ReplaceFile ownership must remain stable throughout its check.
+ $lightingRoot=Join-Path $repo 'PowerControl/light-setter'
+ foreach($name in @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightDeviceCore.dll','YeManLightSetter.runtime.json','YeManLightSetter.pdb')){
+  $file=Join-Path $lightingRoot $name
+  if(!(Test-Path -LiteralPath $file -PathType Leaf)){continue}
+  if((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Hosted lighting file is linked'}
+  $acl=Get-Acl -LiteralPath $file;$beforeOwner=$acl.GetOwner([Security.Principal.SecurityIdentifier]);$acl.SetOwner($account.SID)
+  Set-Acl -LiteralPath $file -AclObject $acl
+  $lightingOwners.Add(@{path=$file;owner=$beforeOwner})
+  if((Get-Acl -LiteralPath $file).GetOwner([Security.Principal.SecurityIdentifier]).Value -cne $account.SID.Value){throw 'Hosted lighting owner setup failed'}
+ }
+ Save-Record 'lighting-owner-provisioning.json' @{files=@($lightingOwners|ForEach-Object{$_.path});owner=$account.SID.Value;sourceBytesChanged=$false;scope='Disposable checkout lighting payload only'}
  $pwsh=(Get-Command pwsh.exe -CommandType Application -ErrorAction Stop|Select-Object -First 1).Source
  $info=[Diagnostics.ProcessStartInfo]::new();$info.FileName=$pwsh;$info.WorkingDirectory=$repo;$info.UseShellExecute=$false;$info.CreateNoWindow=$true;$info.WindowStyle=[Diagnostics.ProcessWindowStyle]::Hidden
  $info.UserName=$userName;$info.Domain=$env:COMPUTERNAME;$info.Password=$password;$info.LoadUserProfile=$true
@@ -107,6 +121,7 @@ try{
 }finally{
  $cleanupErrors=[Collections.Generic.List[string]]::new()
  if($child){try{if($childStarted -and -not $child.HasExited){$child.Kill($true);[void]$child.WaitForExit(10000)}}catch{$cleanupErrors.Add($_.Exception.Message)};$child.Dispose()}
+ foreach($lightingFile in $lightingOwners){try{$acl=Get-Acl -LiteralPath $lightingFile.path;$acl.SetOwner($lightingFile.owner);Set-Acl -LiteralPath $lightingFile.path -AclObject $acl}catch{$cleanupErrors.Add($_.Exception.Message)}}
  foreach($grant in $grants){try{$acl=Get-Acl -LiteralPath $grant.path;$acl.RemoveAccessRuleSpecific($grant.rule);Set-Acl -LiteralPath $grant.path -AclObject $acl}catch{$cleanupErrors.Add($_.Exception.Message)}}
  $accountRemoved=$false
  if($account){try{Remove-LocalUser -SID $account.SID -ErrorAction Stop;$accountRemoved=$true}catch{$cleanupErrors.Add($_.Exception.Message)}}

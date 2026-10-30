@@ -43,7 +43,7 @@ function Reject([scriptblock]$Work){try{&$Work|Out-Null;return $false}catch{retu
 function Reset-Case {$script:Editing=$false;$script:EditAfterRender=$false;$script:Repair=$false;$script:Prepared=$true;$script:Rendered=$true;$script:ChangedSession=$false;$script:SessionReads=0;$script:DomReads=0;$script:AppearanceHelperPhase=0;$script:AppearanceHelperFlags=0;$script:AppearanceFailureCode=0}
 $baseline=Get-ThemeRevision @(Get-ThemeRows)
 $status=Get-AppearanceStatus
-Assert ($status.backendReady -and $status.configuredMatchesBackend -and $status.themes.Count -eq 8) 'Read-only Status uses the actual production planner and all 8 owned theme configurations'
+Assert ($status.backendReady -and $status.configuredMatchesBackend -and $status.themes.Count -eq 7) 'Read-only Status uses the actual production planner and all seven owned theme configurations'
 Assert (($script:RpcReads -join ',') -ceq 'fetch_theme_path,get_themes') 'Read-only Status performs only the two permitted RPC reads and no transaction/hint write'
 foreach($action in @('Ensure','UpdateOwnedResources','Apply','Refresh','Reload','Prepare','Reset','Restore','Reconcile')){Assert (Reject {Invoke-AppearanceControl $action}) ('Read-only dispatch blocks mutating action '+$action)}
 foreach($method in @('set_theme_state','reset','dummy_function')){Assert (Reject {Invoke-LoaderRpc $method}) ('Read-only RPC rejects '+$method+' before reaching transport')}

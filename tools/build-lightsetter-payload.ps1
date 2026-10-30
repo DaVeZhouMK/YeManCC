@@ -46,9 +46,9 @@ function Restore-YmccLightingExactAcl([string]$Path,[string]$Sddl){
  # other metadata change, and keep the exact full SDDL admission check.
  $wanted=[Security.AccessControl.RawSecurityDescriptor]::new($Sddl)
  $observed=[Security.AccessControl.RawSecurityDescriptor]::new($current)
- if(([int]$wanted.ControlFlags -bxor [int]$observed.ControlFlags) -ne 0x400){throw 'LIGHTING_CANDIDATE_ACL_CHANGED'}
+ if(([int]$wanted.ControlFlags -bxor [int]$observed.ControlFlags) -ne 0x400){throw ('LIGHTING_CANDIDATE_ACL_CHANGED expected='+$Sddl+' observed='+$current)}
  $observed.SetFlags($wanted.ControlFlags)
- if($observed.GetSddlForm([Security.AccessControl.AccessControlSections]::All) -cne $wanted.GetSddlForm([Security.AccessControl.AccessControlSections]::All)){throw 'LIGHTING_CANDIDATE_ACL_CHANGED'}
+ if($observed.GetSddlForm([Security.AccessControl.AccessControlSections]::All) -cne $wanted.GetSddlForm([Security.AccessControl.AccessControlSections]::All)){throw ('LIGHTING_CANDIDATE_ACL_CHANGED expected='+$Sddl+' observed='+$current)}
  if(-not ('YmccLightingBuildAclV1' -as [type])){
   Add-Type -TypeDefinition 'using System; using System.Runtime.InteropServices; public static class YmccLightingBuildAclV1 { [DllImport("advapi32.dll", CharSet=CharSet.Unicode, ExactSpelling=true, SetLastError=true)] [return: MarshalAs(UnmanagedType.Bool)] public static extern bool SetFileSecurityW(string path, uint information, byte[] descriptor); }'
  }

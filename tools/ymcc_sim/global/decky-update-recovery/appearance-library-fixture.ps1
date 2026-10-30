@@ -26,7 +26,9 @@ if($themeAssignment.Count -ne 1){throw 'APPEARANCE_FIXTURE_THEME_LITERAL_REQUIRE
 $themeNames=@($themeAssignment[0].Right.FindAll({param($n) $n -is [Management.Automation.Language.StringConstantExpressionAst]},$true)|ForEach-Object{$_.Value})
 $reconstructed='@('+(($themeNames|ForEach-Object{"'"+$_+"'"}) -join ',')+')'
 if($themeAssignment[0].Right.Extent.Text -cne $reconstructed){throw 'APPEARANCE_FIXTURE_NONLITERAL_THEME_NAMES'}
-if(@($themeNames).Count -ne 8 -or @($themeNames|Where-Object{$_ -isnot [string]}).Count){throw 'APPEARANCE_FIXTURE_THEME_LITERAL_SCHEMA'}
+if(@($themeNames).Count -ne 7 -or @($themeNames|Where-Object{$_ -isnot [string]}).Count){throw 'APPEARANCE_FIXTURE_THEME_LITERAL_SCHEMA'}
+$manifestThemes = Get-Content -LiteralPath (Join-Path $ComponentRoot 'steam-appearance\manifest.json') -Raw -Encoding UTF8 | ConvertFrom-Json
+if (($themeNames -join "`n") -cne (@($manifestThemes.themes.name) -join "`n")) { throw 'APPEARANCE_FIXTURE_THEME_MANIFEST_MISMATCH' }
 $script:ThemeNames=$themeNames
 $script:PackRoot=Join-Path $ComponentRoot 'steam-appearance'
 $script:AppearanceContentManifestFile=Join-Path $script:PackRoot 'manifest.json'

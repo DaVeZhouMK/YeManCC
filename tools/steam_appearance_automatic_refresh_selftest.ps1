@@ -78,7 +78,7 @@ Assert (Reject {Invoke-AutomaticAppearanceRefresh}) 'Loader rejection is reporte
 $script:FailApply=$false
 $script:Rows=@($script:Rows|ForEach-Object{[pscustomobject]@{name=$_.name;enabled=$false}});$script:Rendered=$false
 $result=Invoke-AutomaticAppearanceRefresh
-Assert ($result.ok -and $script:Rendered -and @($result.snapshot.themes|Where-Object configured).Count -eq 7) 'A later admitted document reuses the real Refresh path and preserves 7/8 choices'
+Assert ($result.ok -and $script:Rendered -and @($result.snapshot.themes|Where-Object configured).Count -eq 6) 'A later admitted document reuses the real Refresh path and preserves six enabled and one saved OFF choices'
 Assert ($script:Starts -eq 0) 'All production refresh branches performed zero external process launches'
 
 $script:Applied=0;$script:MissingStyles=@('Mini Carousel');$result=Invoke-AutomaticAppearanceRefresh
