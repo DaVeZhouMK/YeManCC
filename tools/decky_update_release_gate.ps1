@@ -120,6 +120,9 @@ function Assert-DeckyLifecycleSource([string]$Relative,[string]$Sha256) {
 function Assert-DeckyLifecycleAudit($Audit,[string]$Fingerprint) {
   $features=@($Audit.features|Where-Object{$_.id -ceq 'plugins.decky' -and $_.adapterId -ceq 'plugins.decky-persistent-lifecycle'})
   if($Audit.schemaVersion -ne 1 -or $Audit.status -cne 'PASS' -or -not (Test-DeckyLifecycleTrue $Audit.softwareAcceptance) -or $features.Count -ne 1 -or $features[0].status -cne 'PASS' -or $features[0].contractFingerprint -cne $Fingerprint){throw 'DECKY_LIFECYCLE_RAW_AUDIT_NOT_PASS'}
+  $required=@($features[0].requiredComponents)
+  $components=@($Audit.components|Where-Object{$_.adapterId -ceq 'plugins.decky-owned-runtime-lifecycle' -and $_.featureId -ceq 'plugins.decky' -and $_.parentAdapterId -ceq 'plugins.decky-persistent-lifecycle'})
+  if($required.Count -ne 1 -or $required[0] -cne 'plugins.decky-owned-runtime-lifecycle' -or $components.Count -ne 1 -or $components[0].status -cne 'COMPONENT_PASS' -or $components[0].componentExecutionStatus -cne 'PASS' -or $components[0].parentAcceptance -cne 'PASS' -or -not (Test-DeckyLifecycleTrue $components[0].requiredByParent) -or -not (Test-DeckyLifecycleTrue $components[0].fullFeatureAcceptance)){throw 'DECKY_LIFECYCLE_RAW_COMPONENT_AUDIT_NOT_PASS'}
 }
 function Assert-DeckyLifecycleProof($Proof) {
   if($null -eq $Proof -or $Proof.schemaVersion -ne 1 -or $Proof.adapterId -cne 'plugins.decky-persistent-lifecycle' -or $Proof.sourceDigest -cne $sourceDigest -or [string]$Proof.ownerId -cnotmatch '^[a-f0-9]{32}$' -or [string]$Proof.ownerMarkerSha256 -cnotmatch '^[a-f0-9]{64}$' -or [string]$Proof.runId -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d{3}Z-[a-f0-9]{8}$'){throw 'DECKY_LIFECYCLE_RAW_PROOF_INVALID_OR_OLD'}
@@ -127,7 +130,8 @@ function Assert-DeckyLifecycleProof($Proof) {
   if($Proof.ownerMarkerSha256 -cne $owner.markerSha256){throw 'DECKY_LIFECYCLE_OWNER_CHANGED'}
   $run=Join-Path $owner.root ([string]$Proof.runId)
   $producer=Join-Path $run 'cases\plugins.decky-persistent-lifecycle\decky-persistent-lifecycle\result.json'
-  foreach($pair in @(@('globalResult',(Join-Path $run 'result.json')),@('lifecycleAudit',(Join-Path $run 'lifecycle-acceptance.json')),@('producerResult',$producer))){
+  $component=Join-Path $run 'cases\plugins.decky-owned-runtime-lifecycle\decky-owned-runtime-lifecycle\result.json'
+  foreach($pair in @(@('globalResult',(Join-Path $run 'result.json')),@('lifecycleAudit',(Join-Path $run 'lifecycle-acceptance.json')),@('producerResult',$producer),@('componentResult',$component))){
     $binding=$Proof.($pair[0]);$expected=Get-DeckyLifecycleFullPath $pair[1]
     if($null -eq $binding -or [string]$binding.sha256 -cnotmatch '^[a-f0-9]{64}$' -or -not [string]::Equals([string]$binding.path,$expected,[StringComparison]::OrdinalIgnoreCase)){throw 'DECKY_LIFECYCLE_RAW_PROOF_PATH_INVALID'}
     $actual=Get-DeckyLifecycleFileBinding $expected $run
@@ -138,27 +142,37 @@ function Assert-DeckyLifecycleProof($Proof) {
   $global=Read-DeckyLifecycleJson $Proof.globalResult.path
   $audit=Read-DeckyLifecycleJson $Proof.lifecycleAudit.path
   $produced=Read-DeckyLifecycleJson $Proof.producerResult.path
+  $componentProduced=Read-DeckyLifecycleJson $Proof.componentResult.path
   $rows=@($global.results|Where-Object{$_.id -ceq 'plugins.decky-persistent-lifecycle'})
-  if($global.schemaVersion -ne 1 -or $global.tool -cne 'ymcc_sim-global' -or $global.mode -cne 'run' -or $global.profile -cne 'desktop' -or $global.runId -cne $Proof.runId -or -not [string]::Equals([string]$global.repoRoot,(Get-DeckyLifecycleFullPath $ProjectRoot),[StringComparison]::OrdinalIgnoreCase) -or $global.plannedTests -ne 1 -or @($global.results).Count -ne 1 -or $global.verdict.exitCode -ne 0 -or $rows.Count -ne 1){throw 'DECKY_LIFECYCLE_RAW_GLOBAL_NOT_PASS'}
+  $componentRows=@($global.results|Where-Object{$_.id -ceq 'plugins.decky-owned-runtime-lifecycle'})
+  if($global.schemaVersion -ne 1 -or $global.tool -cne 'ymcc_sim-global' -or $global.mode -cne 'run' -or $global.profile -cne 'desktop' -or $global.runId -cne $Proof.runId -or -not [string]::Equals([string]$global.repoRoot,(Get-DeckyLifecycleFullPath $ProjectRoot),[StringComparison]::OrdinalIgnoreCase) -or $global.plannedTests -ne 2 -or @($global.results).Count -ne 2 -or $global.verdict.status -cne 'PASS_SELECTED_SCOPE' -or $global.verdict.exitCode -ne 0 -or $rows.Count -ne 1 -or $componentRows.Count -ne 1){throw 'DECKY_LIFECYCLE_RAW_GLOBAL_NOT_PASS'}
   $started=[DateTime]::Parse([string]$global.startedAt).ToUniversalTime();$finished=[DateTime]::Parse([string]$global.finishedAt).ToUniversalTime()
   if($started -lt [DateTime]::Parse([string]$Proof.invocationStartedAt).ToUniversalTime() -or $finished -gt [DateTime]::Parse([string]$Proof.invocationFinishedAt).ToUniversalTime() -or $finished -lt $started){throw 'DECKY_LIFECYCLE_RAW_INVOCATION_MISMATCH'}
-  $row=$rows[0]
-  if($row.status -cne 'PASS' -or $row.exitCode -ne 0 -or $row.signal -or $row.timedOut -or $row.launchError -or $row.sourceChanged -or $row.candidateArtifactChanged -or $row.missingInputs -or $row.buildError -or $row.requiredEvidenceMissing -or $row.requiredEvidenceFailed -or $row.outputTruncated){throw 'DECKY_LIFECYCLE_RAW_EXECUTION_NOT_PASS'}
+  foreach($executionRow in @($rows[0],$componentRows[0])){
+    if($executionRow.status -cne 'PASS' -or $executionRow.exitCode -ne 0 -or $executionRow.signal -or $executionRow.timedOut -or $executionRow.launchError -or $executionRow.sourceChanged -or $executionRow.candidateArtifactChanged -or $executionRow.missingInputs -or $executionRow.buildError -or $executionRow.requiredEvidenceMissing -or $executionRow.requiredEvidenceFailed -or $executionRow.outputTruncated){throw 'DECKY_LIFECYCLE_RAW_EXECUTION_NOT_PASS'}
+  }
+  $row=$rows[0];$componentRow=$componentRows[0]
   Assert-DeckyLifecycleAudit $global.lifecycleAcceptance $fingerprint
   Assert-DeckyLifecycleAudit $audit $fingerprint
   if(-not (Test-DeckyLifecycleTrue $produced.passed) -or $produced.status -cne 'PASS' -or $produced.lifecycleEvidence.schemaVersion -ne 1 -or $produced.lifecycleEvidence.contractFingerprint -cne $fingerprint -or -not @($produced.cases).Count -or @($produced.cases|Where-Object{-not (Test-DeckyLifecycleTrue $_.passed)}).Count){throw 'DECKY_LIFECYCLE_RAW_PRODUCER_NOT_PASS'}
-  $raw=@($row.structuredEvidence|Where-Object{[string]::Equals([string]$_.path,[string]$Proof.producerResult.path,[StringComparison]::OrdinalIgnoreCase)})
-  if($raw.Count -ne 1 -or $raw[0].failed -isnot [bool] -or $raw[0].failed -or $raw[0].sha256 -cne $Proof.producerResult.sha256){throw 'DECKY_LIFECYCLE_RAW_PRODUCER_NOT_BOUND'}
-  $sourceRows=@($row.sourceInputs)+@($row.dependencyInputs)|Where-Object{$null -ne $_}
+  if($componentProduced.schemaVersion -ne 1 -or $componentProduced.id -cne 'plugins.decky-owned-runtime-lifecycle' -or -not (Test-DeckyLifecycleTrue $componentProduced.passed) -or $componentProduced.status -cne 'PASS' -or -not (Test-DeckyLifecycleTrue $componentProduced.summary.completeCurrentProducer) -or $componentProduced.summary.failed -ne 0 -or @($componentProduced.cases).Count -ne $componentProduced.summary.cases -or -not @($componentProduced.cases).Count -or @($componentProduced.cases|Where-Object{-not (Test-DeckyLifecycleTrue $_.passed)}).Count){throw 'DECKY_LIFECYCLE_RAW_COMPONENT_NOT_PASS'}
+  if(-not (Test-DeckyLifecycleTrue $componentProduced.originalExecution.reusedSameRun) -or -not (Test-DeckyLifecycleTrue $componentProduced.sharedExecution.originalExecutedInThisGlobalRun) -or $componentProduced.sharedExecution.businessProcessesStartedByThisComponent -ne 0){throw 'DECKY_LIFECYCLE_RAW_COMPONENT_NOT_SHARED_IN_RUN'}
+  foreach($evidencePair in @(@($row,$Proof.producerResult),@($componentRow,$Proof.componentResult))){
+    $raw=@($evidencePair[0].structuredEvidence|Where-Object{[string]::Equals([string]$_.path,[string]$evidencePair[1].path,[StringComparison]::OrdinalIgnoreCase)})
+    if($raw.Count -ne 1 -or $raw[0].failed -isnot [bool] -or $raw[0].failed -or $raw[0].sha256 -cne $evidencePair[1].sha256){throw 'DECKY_LIFECYCLE_RAW_PRODUCER_NOT_BOUND'}
+  }
+  $sourceRows=@($row.sourceInputs)+@($row.dependencyInputs)+@($componentRow.sourceInputs)+@($componentRow.dependencyInputs)|Where-Object{$null -ne $_}
   if(-not @($sourceRows).Count -or @($sourceRows).Count -gt 8192){throw 'DECKY_LIFECYCLE_RAW_SOURCE_MISSING'}
   foreach($inputRow in $sourceRows){Assert-DeckyLifecycleSource ([string]$inputRow.path) ([string]$inputRow.sha256)}
-  $sourceProperties=@($produced.sourceHashes.PSObject.Properties)
-  if(-not $sourceProperties.Count -or $sourceProperties.Count -gt 8192){throw 'DECKY_LIFECYCLE_RAW_SOURCE_MISSING'}
-  foreach($property in $sourceProperties){Assert-DeckyLifecycleSource $property.Name ([string]$property.Value)}
+  foreach($result in @($produced,$componentProduced)){
+    $sourceProperties=@($result.sourceHashes.PSObject.Properties)
+    if(-not $sourceProperties.Count -or $sourceProperties.Count -gt 8192){throw 'DECKY_LIFECYCLE_RAW_SOURCE_MISSING'}
+    foreach($property in $sourceProperties){Assert-DeckyLifecycleSource $property.Name ([string]$property.Value)}
+  }
 }
 function New-DeckyLifecycleProof($Owner,[string]$RunId,[string]$StartedAt,[string]$FinishedAt) {
   $run=Join-Path $Owner.root $RunId
-  $proof=[ordered]@{schemaVersion=1;adapterId='plugins.decky-persistent-lifecycle';sourceDigest=$sourceDigest;evidenceRoot=$Owner.root;ownerId=$Owner.ownerId;ownerMarkerSha256=$Owner.markerSha256;runId=$RunId;invocationStartedAt=$StartedAt;invocationFinishedAt=$FinishedAt;contractFingerprint=(Get-DeckyLifecycleContractFingerprint);globalResult=(Get-DeckyLifecycleFileBinding (Join-Path $run 'result.json') $run);lifecycleAudit=(Get-DeckyLifecycleFileBinding (Join-Path $run 'lifecycle-acceptance.json') $run);producerResult=(Get-DeckyLifecycleFileBinding (Join-Path $run 'cases\plugins.decky-persistent-lifecycle\decky-persistent-lifecycle\result.json') $run)}
+  $proof=[ordered]@{schemaVersion=1;adapterId='plugins.decky-persistent-lifecycle';sourceDigest=$sourceDigest;evidenceRoot=$Owner.root;ownerId=$Owner.ownerId;ownerMarkerSha256=$Owner.markerSha256;runId=$RunId;invocationStartedAt=$StartedAt;invocationFinishedAt=$FinishedAt;contractFingerprint=(Get-DeckyLifecycleContractFingerprint);globalResult=(Get-DeckyLifecycleFileBinding (Join-Path $run 'result.json') $run);lifecycleAudit=(Get-DeckyLifecycleFileBinding (Join-Path $run 'lifecycle-acceptance.json') $run);producerResult=(Get-DeckyLifecycleFileBinding (Join-Path $run 'cases\plugins.decky-persistent-lifecycle\decky-persistent-lifecycle\result.json') $run);componentResult=(Get-DeckyLifecycleFileBinding (Join-Path $run 'cases\plugins.decky-owned-runtime-lifecycle\decky-owned-runtime-lifecycle\result.json') $run)}
   Assert-DeckyLifecycleProof $proof
   return $proof
 }

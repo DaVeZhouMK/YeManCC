@@ -8995,7 +8995,7 @@
     },
     {
       "path": "tools/decky_retained_session_repair_selftest.mjs",
-      "sha256": "fb3483b355fa2dc0ddd21db3381ec91c6db00c6940c68aaf3c9c70c1063e7028",
+      "sha256": "ef40c6f5a241f6eba6d62dd0a526de422698f9d39aebbb21f2a329feb678464c",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -17078,6 +17078,46 @@
           "notARegistrationSource": true
         }
       ]
+    },
+    "publisherReaderFollowup": {
+      "atUtc": "2026-10-30T08:26:10.066824+00:00",
+      "scope": "reviewed release reader required-component contract only",
+      "releaseReader": {
+        "path": "tools/decky_update_release_gate.ps1",
+        "sha256": "f1e656831d2b63d45f6f0385fb38682f63a60692fa8e02ad0f4a667a18475c6f",
+        "bytes": 29606,
+        "kind": "reviewed-release-reader-not-routing-source"
+      },
+      "patchEvidence": "G:\\YeManCC-Work\\Build\\GitRelease\\20261030-formal037\\REQUIRED-COMPONENT-PROOF-PATCH.json",
+      "previousIndexSha256": "11452b3b5cb7c346b6dff46f8afe073aa062a19d7960ee4a8f91bbcb4a055a08",
+      "registrationSourcesUnchanged": true,
+      "routingGroupsUnchanged": true,
+      "actualBusinessProcessesStarted": 0,
+      "parentOrFullRerun": "NOT_RUN",
+      "oldSourceCommit": "eb23a574f5bd9477b8a244d53ed5aaf4337415be",
+      "formalAcceptance": false
+    },
+    "retainedSessionToolSelectionFollowup": {
+      "atUtc": "2026-10-30T08:33:49.535898+00:00",
+      "scope": "reviewed retained-session fixture native tool selection only",
+      "previousIndexSha256": "a69031962261cd078edb86e14b201a09696ff814dccc51e06601149d3d9fdb3f",
+      "changes": [
+        {
+          "path": "tools/decky_retained_session_repair_selftest.mjs",
+          "beforeSha256": "fb3483b355fa2dc0ddd21db3381ec91c6db00c6940c68aaf3c9c70c1063e7028",
+          "afterSha256": "ef40c6f5a241f6eba6d62dd0a526de422698f9d39aebbb21f2a329feb678464c",
+          "normalization": "utf8-lf"
+        }
+      ],
+      "sourceEntries": 3052,
+      "groups": 117,
+      "routingGroupsUnchanged": true,
+      "delivery": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ReleaseAssist-20261030\\RETAINED-TOOL-SELECTION-DELIVERY.json",
+        "sha256": "39ab4431921cd97cf3d2128260fa105a0f9ad46ea357bd93648913af537df401"
+      },
+      "businessExecutionByIndexAssist": "NOT_RUN",
+      "formalAcceptance": false
     }
   }
 }
