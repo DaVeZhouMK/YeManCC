@@ -1,0 +1,246 @@
+{
+  "cases": [
+    {
+      "error": "",
+      "id": "native.exit-clears-owned-process-job-worker-event",
+      "measurements": {
+        "bounded": true,
+        "elapsedMs": 0,
+        "heldResourcesBeforeExit": 3,
+        "ownedProcessExitObserved": true,
+        "ownerRevoked": true,
+        "remainingOwnedResources": 0,
+        "starts": 1,
+        "workerJoined": true
+      },
+      "name": "native.exit-clears-owned-process-job-worker-event",
+      "passed": true
+    },
+    {
+      "error": "",
+      "id": "native.explicit-off-and-fatal-off-veto-late-wakes",
+      "measurements": {
+        "additionalStarts": 0,
+        "bounded": true,
+        "elapsedMs": 0,
+        "explicitOffHonored": true,
+        "fatalOffHonored": true,
+        "ownerRevoked": true,
+        "rejectedLateRequests": 96,
+        "remainingOwnedResources": 0
+      },
+      "name": "native.explicit-off-and-fatal-off-veto-late-wakes",
+      "passed": true
+    },
+    {
+      "error": "",
+      "id": "native.late-actual-recovery-callback-after-exit",
+      "measurements": {
+        "bounded": true,
+        "lateCallbacksDelivered": 8,
+        "lateDeliveryElapsedMs": 47,
+        "ownerRevoked": true,
+        "remainingOwnedResources": 0,
+        "restartsAfterExit": 0,
+        "shutdownElapsedMs": 0
+      },
+      "name": "native.late-actual-recovery-callback-after-exit",
+      "passed": true
+    },
+    {
+      "error": "",
+      "id": "native.job-stop-failure-falls-back-to-owned-job-close",
+      "measurements": {
+        "bounded": true,
+        "elapsedMs": 3016,
+        "fallbackExercised": true,
+        "fallbackOwnedOnly": true,
+        "injection": "TerminateJobObject denied on owned Job; real CloseHandle kills owned Job",
+        "ownerRevoked": true,
+        "remainingOwnedResources": 0
+      },
+      "name": "native.job-stop-failure-falls-back-to-owned-job-close",
+      "passed": true
+    },
+    {
+      "error": "",
+      "id": "native.stalled-binding-stop-requires-fixture-release",
+      "measurements": {
+        "acceptance": false,
+        "bounded": false,
+        "completedBeforeFixtureRelease": false,
+        "deadlineMs": 3200,
+        "elapsedMs": 3219,
+        "fallbackExercised": false,
+        "fallbackOwnedOnly": false,
+        "fixtureReleaseRequired": true,
+        "gap": "Runtime synchronously joins an uncooperative binding callback; no bounded callback-stop fallback observed",
+        "heldResourcesAtDeadline": 3,
+        "ownedChildAliveAtDeadline": true,
+        "ownedProcessExitedAfterRelease": true,
+        "ownerRevoked": true,
+        "remainingOwnedResources": 0
+      },
+      "name": "native.stalled-binding-stop-requires-fixture-release",
+      "passed": false
+    },
+    {
+      "error": "",
+      "id": "native.committed-ready-executes-original-rebind-consumer",
+      "measurements": {
+        "additionalStarts": 0,
+        "bindingCallsAfterReady": 1,
+        "bindingCallsBefore": 0,
+        "bindingCallsResuming": 0,
+        "bindingCallsSleeping": 0,
+        "currentGeneration": 2,
+        "diagnostics": [
+          {
+            "detail": {
+              "bindingRequested": true,
+              "generation": 2,
+              "scope": "committed-ready"
+            },
+            "event": "wake-connection-check"
+          },
+          {
+            "detail": {
+              "bindingRequested": false,
+              "generation": 2,
+              "scope": "committed-ready"
+            },
+            "event": "wake-connection-check"
+          }
+        ],
+        "healthObserved": false,
+        "readyGranted": true,
+        "scope": "exact native committed-ready consumer; frontend health separately executed by host/client cases",
+        "sleepObserved": true
+      },
+      "name": "native.committed-ready-executes-original-rebind-consumer",
+      "passed": true
+    },
+    {
+      "error": "",
+      "id": "native.crash-budget-cannot-renew-on-recovery-or-unknown",
+      "measurements": {
+        "additionalStarts": 0,
+        "attempts": 5,
+        "explicitOffHonored": true,
+        "limitReached": true,
+        "maxAttempts": 5,
+        "remainingOwnedResources": 0
+      },
+      "name": "native.crash-budget-cannot-renew-on-recovery-or-unknown",
+      "passed": true
+    }
+  ],
+  "lifecycleEvidence": {
+    "features": [
+      {
+        "id": "plugins.decky",
+        "observations": [
+          {
+            "caseId": "native.exit-clears-owned-process-job-worker-event",
+            "measurements": {
+              "bounded": true,
+              "elapsedMs": 0,
+              "heldResourcesBeforeExit": 3,
+              "ownedProcessExitObserved": true,
+              "ownerRevoked": true,
+              "remainingOwnedResources": 0,
+              "starts": 1,
+              "workerJoined": true
+            },
+            "passed": true,
+            "requirement": "destroyOnExit"
+          },
+          {
+            "caseId": "native.explicit-off-and-fatal-off-veto-late-wakes",
+            "measurements": {
+              "additionalStarts": 0,
+              "bounded": true,
+              "elapsedMs": 0,
+              "explicitOffHonored": true,
+              "fatalOffHonored": true,
+              "ownerRevoked": true,
+              "rejectedLateRequests": 96,
+              "remainingOwnedResources": 0
+            },
+            "passed": true,
+            "requirement": "explicitOffStaysOff"
+          },
+          {
+            "caseId": "native.late-actual-recovery-callback-after-exit",
+            "measurements": {
+              "bounded": true,
+              "lateCallbacksDelivered": 8,
+              "lateDeliveryElapsedMs": 47,
+              "ownerRevoked": true,
+              "remainingOwnedResources": 0,
+              "restartsAfterExit": 0,
+              "shutdownElapsedMs": 0
+            },
+            "passed": true,
+            "requirement": "preventResurrectionAfterExit"
+          },
+          {
+            "caseId": "native.job-stop-failure-falls-back-to-owned-job-close",
+            "measurements": {
+              "bounded": true,
+              "elapsedMs": 3016,
+              "fallbackExercised": true,
+              "fallbackOwnedOnly": true,
+              "injection": "TerminateJobObject denied on owned Job; real CloseHandle kills owned Job",
+              "ownerRevoked": true,
+              "remainingOwnedResources": 0
+            },
+            "passed": true,
+            "requirement": "destroyWhenStopStalls"
+          },
+          {
+            "caseId": "native.stalled-binding-stop-requires-fixture-release",
+            "measurements": {
+              "acceptance": false,
+              "bounded": false,
+              "completedBeforeFixtureRelease": false,
+              "deadlineMs": 3200,
+              "elapsedMs": 3219,
+              "fallbackExercised": false,
+              "fallbackOwnedOnly": false,
+              "fixtureReleaseRequired": true,
+              "gap": "Runtime synchronously joins an uncooperative binding callback; no bounded callback-stop fallback observed",
+              "heldResourcesAtDeadline": 3,
+              "ownedChildAliveAtDeadline": true,
+              "ownedProcessExitedAfterRelease": true,
+              "ownerRevoked": true,
+              "remainingOwnedResources": 0
+            },
+            "passed": false,
+            "requirement": "destroyWhenStopStalls"
+          },
+          {
+            "caseId": "native.crash-budget-cannot-renew-on-recovery-or-unknown",
+            "measurements": {
+              "additionalStarts": 0,
+              "attempts": 5,
+              "explicitOffHonored": true,
+              "limitReached": true,
+              "maxAttempts": 5,
+              "remainingOwnedResources": 0
+            },
+            "passed": true,
+            "requirement": "respectRecoveryLimits"
+          }
+        ]
+      }
+    ],
+    "schemaVersion": 1
+  },
+  "nativeExecuted": true,
+  "officialLoaderExecuted": false,
+  "ownedChildrenAreThisTestImage": true,
+  "passed": false,
+  "realSteamActions": 0,
+  "schemaVersion": 1
+}

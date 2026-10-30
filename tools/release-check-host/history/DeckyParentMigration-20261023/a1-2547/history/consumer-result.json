@@ -1,0 +1,237 @@
+{
+  "schemaVersion": 1,
+  "passed": true,
+  "productionHostExecuted": true,
+  "productionClientExecuted": true,
+  "productionRelayExecuted": true,
+  "physicalSleepPerformed": false,
+  "hardwareWrites": 0,
+  "cases": [
+    {
+      "id": "consumer.persistent-resource-classification",
+      "name": "consumer.persistent-resource-classification",
+      "passed": true,
+      "measurements": {
+        "heldWhileHealthy": {
+          "timers": 0,
+          "subscriptions": 16
+        },
+        "heldWhileRecovering": {
+          "timers": 1,
+          "subscriptions": 16
+        },
+        "afterStop": {
+          "timers": 0,
+          "subscriptions": 0
+        },
+        "evidence": "actual host observers and actual client recovery timers survive idle; source-built native processes measured separately"
+      }
+    },
+    {
+      "id": "consumer.sleep-rejects-write-and-automatically-publishes-current-ready",
+      "name": "consumer.sleep-rejects-write-and-automatically-publishes-current-ready",
+      "passed": true,
+      "measurements": {
+        "desiredEnabled": true,
+        "sleepObserved": true,
+        "readyGranted": true,
+        "recovered": true,
+        "healthObserved": true,
+        "currentGeneration": true,
+        "observedGeneration": 2,
+        "expectedGeneration": 2,
+        "runId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "revisionBefore": 1,
+        "revisionAfter": 3,
+        "attempts": 1,
+        "maxAttempts": 1,
+        "attemptBudgetScope": "one rebind per committed generation; native duplicate event also executed",
+        "automaticSnapshots": 1,
+        "explicitReadRequestsAfterReady": 0,
+        "writesWhileSleeping": 0,
+        "ownerDenial": {
+          "type": "reply",
+          "runId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "id": "held:1",
+          "ok": false,
+          "error": "状态已变化，请重新读取后操作"
+        },
+        "unconfirmedWritesReplayed": 0,
+        "healthOrigin": "production host read -> production relay -> production MirrorClient; memory IPC/socket boundaries"
+      }
+    },
+    {
+      "id": "negative.connected-without-ready-snapshot-is-not-health",
+      "name": "negative.connected-without-ready-snapshot-is-not-health",
+      "passed": true,
+      "measurements": {
+        "connected": true,
+        "healthObserved": false,
+        "correctlyRejected": true,
+        "readySnapshotReceived": false
+      }
+    },
+    {
+      "id": "negative.recorded-pre-sleep-ready-is-not-current-generation-health",
+      "name": "negative.recorded-pre-sleep-ready-is-not-current-generation-health",
+      "passed": true,
+      "measurements": {
+        "recordedSnapshotReady": true,
+        "recordedGeneration": 1,
+        "expectedGeneration": 2,
+        "healthObserved": false,
+        "correctlyRejected": true
+      }
+    },
+    {
+      "id": "consumer.exit-disposes-observers-and-delivered-late-recovery-callbacks",
+      "name": "consumer.exit-disposes-observers-and-delivered-late-recovery-callbacks",
+      "passed": true,
+      "measurements": {
+        "heldBeforeExit": {
+          "timers": 1,
+          "subscriptions": 16
+        },
+        "remainingOwnedResources": {
+          "timers": 0,
+          "subscriptions": 0
+        },
+        "lateCallbacksDelivered": 5,
+        "restartsAfterExit": 0,
+        "bounded": true,
+        "ownerRevoked": true
+      }
+    },
+    {
+      "id": "consumer.late-attach-resolution-cannot-recreate-stopped-host",
+      "name": "consumer.late-attach-resolution-cannot-recreate-stopped-host",
+      "passed": true,
+      "measurements": {
+        "lateCallbacksDelivered": 2,
+        "restartsAfterExit": 0,
+        "remainingOwnedResources": {
+          "timers": 0,
+          "subscriptions": 0
+        },
+        "bounded": true,
+        "ownerRevoked": true
+      }
+    },
+    {
+      "id": "consumer.transient-source-churn-recovers-through-original-two-retry-relay",
+      "name": "consumer.transient-source-churn-recovers-through-original-two-retry-relay",
+      "passed": true,
+      "measurements": {
+        "desiredEnabled": true,
+        "recovered": true,
+        "healthObserved": true,
+        "currentGeneration": true,
+        "attempts": 1,
+        "maxAttempts": 2,
+        "totalReadAttempts": 4,
+        "maxTotalReadAttempts": 9,
+        "attemptBudgetScope": "production relay recoveryRemaining=2 after the initial read",
+        "unconfirmedWritesReplayed": 0,
+        "readySnapshotOrigin": "captured actual production host snapshot consumed by production relay after three source invalidations during the initial read"
+      }
+    },
+    {
+      "id": "consumer.transient-read-exception-does-not-self-recover",
+      "name": "consumer.transient-read-exception-does-not-self-recover",
+      "passed": true,
+      "measurements": {
+        "acceptance": true,
+        "desiredEnabled": true,
+        "recovered": true,
+        "healthObserved": true,
+        "currentGeneration": true,
+        "attempts": 1,
+        "maxAttempts": 2,
+        "readAttempts": 2,
+        "remainingRecoveryTimers": 0,
+        "retryDelays": [
+          250
+        ],
+        "unconfirmedWritesReplayed": 0,
+        "observedReady": true,
+        "observedGeneration": 1,
+        "sourceWouldBeHealthyOnNextRead": true
+      }
+    },
+    {
+      "id": "negative.relay-source-churn-exhausts-original-two-retry-budget",
+      "name": "negative.relay-source-churn-exhausts-original-two-retry-budget",
+      "passed": true,
+      "measurements": {
+        "readAttempts": 9,
+        "recoveryAttempts": 2,
+        "maxRecoveryAttempts": 2,
+        "delays": [
+          250,
+          1000
+        ],
+        "remainingTimers": 0,
+        "limitReached": true
+      }
+    },
+    {
+      "id": "consumer.exception-exhausts-original-two-retry-budget",
+      "name": "consumer.exception-exhausts-original-two-retry-budget",
+      "passed": true,
+      "measurements": {
+        "readAttempts": 3,
+        "recoveryAttempts": 2,
+        "maxRecoveryAttempts": 2,
+        "delays": [
+          250,
+          1000
+        ],
+        "remainingTimers": 0,
+        "limitReached": true,
+        "unconfirmedWritesReplayed": 0
+      }
+    },
+    {
+      "id": "consumer.exception-late-retry-cannot-revive-paused-demand",
+      "name": "consumer.exception-late-retry-cannot-revive-paused-demand",
+      "passed": true,
+      "measurements": {
+        "stop": "paused-demand",
+        "lateCallbacksDelivered": 1,
+        "additionalReads": 0,
+        "additionalDeliveries": 0,
+        "remainingTimers": 0,
+        "remainingSubscriptions": 0,
+        "unconfirmedWritesReplayed": 0
+      }
+    },
+    {
+      "id": "consumer.exception-late-retry-cannot-revive-detached-peer",
+      "name": "consumer.exception-late-retry-cannot-revive-detached-peer",
+      "passed": true,
+      "measurements": {
+        "stop": "detached-peer",
+        "lateCallbacksDelivered": 1,
+        "additionalReads": 0,
+        "additionalDeliveries": 0,
+        "remainingTimers": 0,
+        "remainingSubscriptions": 0,
+        "unconfirmedWritesReplayed": 0
+      }
+    },
+    {
+      "id": "consumer.exception-late-retry-cannot-revive-disposed",
+      "name": "consumer.exception-late-retry-cannot-revive-disposed",
+      "passed": true,
+      "measurements": {
+        "stop": "disposed",
+        "lateCallbacksDelivered": 1,
+        "additionalReads": 0,
+        "additionalDeliveries": 0,
+        "remainingTimers": 0,
+        "remainingSubscriptions": 0,
+        "unconfirmedWritesReplayed": 0
+      }
+    }
+  ]
+}

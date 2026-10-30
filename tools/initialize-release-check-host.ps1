@@ -11,6 +11,7 @@ $markerPath=Join-Path $core '.ymcc-release-check-core.json'
 if(Test-Path -LiteralPath $markerPath){$prior=Get-Content -LiteralPath $markerPath -Raw|ConvertFrom-Json;if($prior.owner -cne 'YMCC-release-check' -or $prior.repo -ine $repo){throw 'Hosted release core has another owner'}}
 [IO.File]::WriteAllText($markerPath,(@{schemaVersion=1;owner='YMCC-release-check';repo=$repo}|ConvertTo-Json),[Text.UTF8Encoding]::new($false))
 foreach($child in @('Evidence','Workspace')){[IO.Directory]::CreateDirectory((Join-Path $core $child))|Out-Null}
+& (Join-Path $PSScriptRoot 'release-check-host/initialize-historical-inputs.ps1') -CoreRoot $core
 $toolRoot=Join-Path $tempRoot 'ymcc-release-tools'
 [IO.Directory]::CreateDirectory($toolRoot)|Out-Null
 foreach($name in @('package.json','package-lock.json')){Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('release-check-host/'+$name)) -Destination (Join-Path $toolRoot $name)}
