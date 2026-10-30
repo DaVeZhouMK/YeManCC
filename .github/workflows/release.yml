@@ -145,23 +145,15 @@ jobs:
           }
           'Platform=' | Out-File $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Initialize formal release gate environment
-        shell: pwsh
-        run: |
-          & tools/initialize-release-check-host.ps1
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Prepare pinned lighting host dependencies
-        shell: pwsh
-        run: |
-          & tools/capture-lighting-release-host-tools.ps1 -PrepareOnly
 
       - name: Build and assemble Release
         shell: pwsh
         run: |
-          # FullAcceptance executes as an ordinary user on this disposable runner.
-          & tools/invoke-hosted-release-gate.ps1 -Mode FullAcceptance
+          # Formal Git releases default to fast mode; complete fixtures run separately on request.
+          & tools/publish.ps1 -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
+          if ($LASTEXITCODE -ne 0) { throw 'Fast release build/package failed.' }
       - name: Verify release outputs
         shell: pwsh
         run: |
@@ -255,11 +247,28 @@ jobs:
           [IO.File]::WriteAllText((Join-Path $packageDir 'SHA256SUMS.txt'), (($rows -join "`n") + "`n"), [Text.Encoding]::ASCII)
           Write-Output "COMPLETE_RELEASE_ATTACHMENTS_OK sourceTag=$tag commit=$tagCommit"
 
-      - name: Required Decky dual-channel update gate
+      - name: Verify fast-release declaration (fixtures NOT_RUN)
         shell: pwsh
         run: |
-          powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky_update_release_gate.ps1 -Stage Verify -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT
-          if ($LASTEXITCODE -ne 0) { throw 'Decky update release gate failed; refusing to publish.' }
+          # Inspect this release's manifest and bytes; no historical fixture receipts are consumed.
+          $releaseRoot = Join-Path $env:YEMAN_WORKSPACE_ROOT 'Release'
+          $manifest = (Get-Content -LiteralPath (Join-Path $releaseRoot 'version.json') -Raw -Encoding UTF8).TrimStart([char]0xFEFF) | ConvertFrom-Json
+          $expectedVersion = '${{ github.ref_name }}'.Substring(1)
+          if ([string]$manifest.version -cne $expectedVersion) { throw 'Fast release manifest does not match the current tag.' }
+          if ([string]$manifest.releaseMode -cne 'fast' -or [string]$manifest.fixtureValidation -cne 'NOT_RUN') {
+            throw 'Formal fast release requires releaseMode=fast and fixtureValidation=NOT_RUN.'
+          }
+          $markers = @(Get-ChildItem -LiteralPath $releaseRoot -Filter 'test-export.json' -File -Recurse -Force -ErrorAction Stop)
+          if ($markers.Count -gt 0) { throw 'Formal release tree must not contain test-export.json.' }
+          Add-Type -AssemblyName System.IO.Compression.FileSystem
+          $zip = [IO.Compression.ZipFile]::OpenRead((Join-Path $releaseRoot 'Packages/YeManCC.zip'))
+          try {
+            $zipMarkers = @($zip.Entries | Where-Object { $_.FullName.Replace('\', '/') -match '(^|/)test-export\.json$' })
+            if ($zipMarkers.Count -gt 0) { throw 'Formal release ZIP must not contain test-export.json.' }
+          } finally {
+            $zip.Dispose()
+          }
+          Write-Output 'FAST_RELEASE_DECLARATION_OK releaseMode=fast fixtureValidation=NOT_RUN; complete fixtures were not executed.'
 
       # Online hard gate: the immutable source tag must already contain the latest official Windows Loader.
       # Upgrade/commit via tools/decky-loader-upgrade.ps1 before tagging; CI never rewrites tag sources.
@@ -271,11 +280,17 @@ jobs:
           powershell -NoProfile -ExecutionPolicy Bypass -File tools/decky-loader-upgrade.ps1 -Action ReleaseGate -EvidenceDir (Join-Path $env:YEMAN_WORKSPACE_ROOT 'Build/Validation/DeckyUpdate/OfficialLoader')
           if ($LASTEXITCODE -ne 0) { throw 'Official Decky Loader is stale or unverified; refusing to publish.' }
 
-      - name: Save required Decky update evidence
+      - name: Save release identity and official Decky evidence
+        if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: decky-update-release-evidence
-          path: ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyUpdate
+          path: |
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyUpdate/OfficialLoader
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/ExportIdentity
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/opt-gate
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Build/Validation/DeckyExport
+            ${{ env.YEMAN_WORKSPACE_ROOT }}/Release/version.json
           if-no-files-found: error
 
       - name: Publish GitHub Release

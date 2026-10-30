@@ -13,12 +13,14 @@
 param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [switch]$TestExport,
-  [switch]$FullAcceptance
+  [switch]$FullAcceptance,
+  [switch]$FastRelease
 )
 
 $ErrorActionPreference = 'Stop'
 # Export execution mode: ordinary export never implicitly runs fixtures.
 if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+if ($FastRelease -and ($FullAcceptance -or $TestExport)) { throw 'FastRelease is separate from TestExport and FullAcceptance.' }
 $TestExport = -not [bool]$FullAcceptance
 $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
 $fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
@@ -371,7 +373,7 @@ if ($LASTEXITCODE -ne 0) {
 $exportBuildIdentity = Write-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot -SourceBefore $exportSourcesBefore
 # Required release node: both Decky update channels and YMCC updater ownership.
 if ($TestExport) {
-  Write-Output 'TEST_EXPORT_BUILD: full Decky release regressions skipped; no formal Build PASS is issued.'
+  Write-Output 'FIXTURE_VALIDATION=NOT_RUN: Decky lifecycle fixtures skipped; current build and payload identity verified separately.'
 } else {
   & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Build -WorkspaceRoot $WorkspaceRoot
 }

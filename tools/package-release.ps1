@@ -13,12 +13,14 @@ param(
   [string]$ReleaseEnvelope = '',
   [string]$CustomSteamLibrarySource = '',
   [switch]$TestExport,
-  [switch]$FullAcceptance
+  [switch]$FullAcceptance,
+  [switch]$FastRelease
 )
 
 $ErrorActionPreference = 'Stop'
 # Export execution mode: ordinary export never implicitly runs fixtures.
-if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+if ($FastRelease -and ($FullAcceptance -or $TestExport)) { throw 'FastRelease is separate from TestExport and FullAcceptance.' }
 $TestExport = -not [bool]$FullAcceptance
 $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
 $fixtureValidation = if ($FullAcceptance) { 'EXPLICIT_FULL_ACCEPTANCE_REQUESTED' } else { 'NOT_RUN' }
@@ -1132,7 +1134,7 @@ Assert-HcSlimStagedPolicy (Join-Path $completeStaging 'PowerControl')
 $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $WorkspaceRoot
 # Bind the completed input payload, after all host/shared runtime assembly.
 $inputModuleManifest = Write-YmccInputCompatibilityPayload $completeStaging $version
-if ($TestExport) {
+if ($TestExport -and -not $FastRelease) {
   # This marker is hashed into the complete package identity before ZIP assembly.
   $testExportDeclaration = [ordered]@{schemaVersion=1;kind='mainline-local-test-export';formalReleaseAccepted=$false;fixtureValidation='NOT_RUN';skippedReleaseGates=@('Lighting consumer fixtures','Decky Build lifecycle regressions','Decky Package install and rollback regressions');retainedChecks=@('compiled payload identity','HC approved compact baseline','stage and ZIP payload identity','settings baseline');gitPublished=$false}
   $testExportDeclaration | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $completeStaging 'YeManCC\test-export.json') -Encoding UTF8
@@ -1277,7 +1279,7 @@ $null = Assert-ExportBuildIdentity -ProjectRoot $ProjectRoot -WorkspaceRoot $Wor
 # Required before publishing any candidate: validate Decky payload and complete
 # YMCC install/handshake/rollback in temporary directories. No live app operations.
 if ($TestExport) {
-  Write-Output 'TEST_EXPORT_PACKAGE: full Decky release regressions skipped; complete payload identity and HC checks remain required.'
+  Write-Output 'FIXTURE_VALIDATION=NOT_RUN: install/recovery fixtures skipped; complete payload identity and HC checks remain required.'
 } else {
   & (Join-Path $PSScriptRoot 'decky_update_release_gate.ps1') -Stage Package -WorkspaceRoot $WorkspaceRoot -CandidatePackage $packagePath
 }
@@ -1308,6 +1310,8 @@ $releaseVersion = [ordered]@{
   nativeSha256 = $exportArchiveReceipt.nativeSha256
   pluginSha256 = $exportArchiveReceipt.pluginSha256
   package = 'Packages/YeManCC.zip'
+  releaseMode = if ($FastRelease) { 'fast' } elseif ($FullAcceptance) { 'full-acceptance' } else { 'local-export' }
+  fixtureValidation = if ($FullAcceptance) { 'EXECUTED_REQUIRED_GATES' } else { 'NOT_RUN' }
 }
 $releaseVersion | ConvertTo-Json -Depth 5 | Set-Content -LiteralPath (Join-Path $ReleaseRoot 'version.json') -Encoding UTF8
 

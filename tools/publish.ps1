@@ -17,7 +17,8 @@ param(
   [string]$WorkspaceRoot = $env:YEMAN_WORKSPACE_ROOT,
   [switch]$DeployInstalled,
   [switch]$TestExport,
-  [switch]$FullAcceptance
+  [switch]$FullAcceptance,
+  [switch]$FastRelease
 )
 
 $ErrorActionPreference = 'Stop'
@@ -33,11 +34,17 @@ try {
   }
   # Explicit test export is local-only; ordinary export defaults to no fixtures; FullAcceptance is explicit.
   if ($TestExport -and $FullAcceptance) { throw 'Choose ordinary export or explicit FullAcceptance.' }
+  if ($FastRelease -and ($FullAcceptance -or $TestExport)) { throw 'FastRelease is separate from TestExport and FullAcceptance.' }
   $TestExport = -not [bool]$FullAcceptance
   $env:YEMAN_FULL_ACCEPTANCE = if ($FullAcceptance) { '1' } else { '0' }
   $env:YEMAN_TEST_EXPORT = if ($FullAcceptance) { '0' } else { '1' }
-  if ($TestExport) { Write-Output 'YMCC_TEST_EXPORT: complete local test package; formal release gates are not accepted.' }
-  if ($FullAcceptance) {
+  if ($TestExport -and -not $FastRelease) { Write-Output 'YMCC_TEST_EXPORT: complete local test package; formal release gates are not accepted.' }
+  if ($FastRelease) {
+    Write-Output 'YMCC_FAST_RELEASE: fixtures NOT_RUN; compilation, locked payload and ZIP identity remain required.'
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-workspace.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
+    if ($LASTEXITCODE -ne 0) { throw "Fast release build failed: exit=$LASTEXITCODE" }
+    & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\package-release.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FastRelease
+  } elseif ($FullAcceptance) {
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\build-workspace.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
     if ($LASTEXITCODE -ne 0) { throw "Full acceptance build failed: exit=$LASTEXITCODE" }
     & powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $ProjectRoot 'tools\package-release.ps1') -WorkspaceRoot $env:YEMAN_WORKSPACE_ROOT -FullAcceptance
