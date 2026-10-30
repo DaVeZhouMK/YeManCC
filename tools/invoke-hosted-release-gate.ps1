@@ -93,7 +93,7 @@ try{
  # seven replaceable lighting files to the ordinary worker before it captures
  # full SDDL; ReplaceFile ownership must remain stable throughout its check.
  $lightingRoot=Join-Path $repo 'PowerControl/light-setter'
- foreach($name in @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightDeviceCore.dll','YeManLightSetter.runtime.json','YeManLightSetter.pdb')){
+ foreach($name in @('YeManLightSetter.exe','YeManLightSetter.dll','YeManLightSetter.deps.json','YeManLightSetter.runtimeconfig.json','YeManLightDeviceCore.dll','YeManLightSetter.json','YeManLightSetter.pdb')){
   $file=Join-Path $lightingRoot $name
   if(!(Test-Path -LiteralPath $file -PathType Leaf)){continue}
   if((Get-Item -LiteralPath $file -Force).Attributes -band [IO.FileAttributes]::ReparsePoint){throw 'Hosted lighting file is linked'}
