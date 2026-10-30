@@ -118,7 +118,7 @@ static void stopPowerResumeWatchdog(){++fixtureWakeStops;}
 static void ipc_emit(const std::string& event,const json& data){fixtureWakeEvents.push_back({{"event",event},{"data",data}});}
 static std::atomic<unsigned> fixturePreparations{0},fixturePrepared{0};
 static std::atomic<bool> fixtureResourceValid{true};
-static void deckySidebarDiagnostic(const char* event,const json& data,bool){++signals;if(std::string(event)=="wake-connection-check")fixtureWakeDiagnostics.push_back(data);if(std::string(event)=="prewarm"){++fixturePreparations;if(data.value("ready",false))++fixturePrepared;}}
+static void deckySidebarDiagnostic(const char* event,const json& data,bool=false){++signals;if(std::string(event)=="wake-connection-check")fixtureWakeDiagnostics.push_back(data);if(std::string(event)=="prewarm"){++fixturePreparations;if(data.value("ready",false))++fixturePrepared;}}
 static json deckySidebarEnvironment(bool prepare,const std::function<bool()>& mayPrepare={}) {
     const auto root=std::filesystem::path(POWER_CONTROL_DIR),steamRoot=root/L"fixture-steam",home=root/L"decky";
     const auto digest=[](const std::wstring&){return fixtureResourceValid.load()?std::string(ymcc::deckysetup::loaderSha):std::string(64,'0');};
@@ -133,6 +133,7 @@ static LRESULT productionWakeCommit(WPARAM w){HWND h=nullptr;
 }
 #undef PostMessageW
 static void deckySidebarPost(const std::string&,const json&){}
+/*__SESSION_DIAGNOSTIC__*/
 /*__GAMING_CONSENT__*/
 static ymcc::deckysidebar::LaunchAdmission productionAdmission(){
 /*__ADMISSION__*/

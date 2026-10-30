@@ -1857,7 +1857,8 @@
   "sources": [
     {
       "path": ".gitattributes",
-      "sha256": "a0364f332355de2cf9c8e9ed75eb53a0dd62e0e42eeda3fefddc909c6e9152cb"
+      "sha256": "d8a7dfd637d04a58cbb8a555ba0997fc3d8016f35f5528371bbcae96abb7caf9",
+      "contentNormalization": "utf8-lf"
     },
     {
       "path": "CustomSteamLibrary/workspace-ui/app.js",
@@ -16983,7 +16984,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/native-fixture.cpp",
-      "sha256": "ecd9d964930d37f9585f0f6bab23fba349f1f1266e512eee3954f09b0c8f23c4",
+      "sha256": "041a029ddbec8efb7de004ce3a61c5664ee11695919e3846dcc18bf9e1c1f5a3",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -17088,7 +17089,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/run.mjs",
-      "sha256": "bd6462668c06d4b7791c5a5d52fd63a91f26d5572da12e11aace6f135019daaf",
+      "sha256": "5cd3b5556db437fd75de362feb926534846b996c033d7c05d2c4c5f3808bbf4e",
       "contentNormalization": "utf8-lf"
     },
     {
