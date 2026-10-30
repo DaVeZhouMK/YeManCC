@@ -26,4 +26,4 @@ export function assembleExtraAdapters(factories,index,{repoRoot,selectedIds,audi
  }
  return selection&&indexCurrent?result.filter(row=>selection.has(row.id)):result;
 }
-export function registrationIndexCurrent(index,repoRoot){return index.sources.every(row=>{try{const bytes=original.readFileSync(path.join(repoRoot,row.path));if(row.contentNormalization!==undefined&&row.contentNormalization!=='utf8-lf')return false;return digest(row.contentNormalization==='utf8-lf'?Buffer.from(bytes.toString('utf8').replace(/\r\n/g,'\n')):bytes)===row.sha256;}catch{return false;}});}
+export function registrationIndexCurrent(index,repoRoot){return index.sources.every(row=>{try{const bytes=original.readFileSync(path.join(repoRoot,row.path));if(row.contentNormalization!==undefined&&row.contentNormalization!=='utf8-lf')return false;const actual=digest(row.contentNormalization==='utf8-lf'?Buffer.from(bytes.toString('utf8').replace(/\r\n/g,'\n')):bytes);if(actual!==row.sha256)process.stderr.write('YMCC_REGISTRATION_SOURCE_MISMATCH '+JSON.stringify({path:row.path,expected:row.sha256,actual})+'\n');return actual===row.sha256;}catch{return false;}});}

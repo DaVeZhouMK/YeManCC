@@ -172,17 +172,20 @@ int wmain(int argc,wchar_t** argv){
         [&](const auto&,const auto& action,const auto& admit){++dispatches;check(action.at("operation")=="decky.repairConnection","only repair operation dispatched");
             if(!admit())return json{{"ok",false},{"reason","live-action-cancelled"},{"mutated",false}};
             ++refreshes;return json{{"ok",true},{"requestDispatched",true},{"mutated",true}};},[&]{return now;}};
-    for(const auto bad:{"missing-consent","stale-pid","stale-birth","stale-revision","extra-arg","OFF","healthy","loaded-pid","foreign-mode","inactive-plugin","different-loader","port-in-use","hash-failed","isolated","exiting"}){
+    for(const auto bad:{"missing-consent","stale-pid","stale-birth","stale-revision","extra-arg","OFF","healthy","loaded-pid","foreign-mode","inactive-plugin","different-loader","malformed-loader","port-in-use","hash-failed","isolated","exiting"}){
       auto request=args,savedState=state,savedMode=mode;const std::string kind=bad;
       if(kind=="missing-consent")request.erase("userInitiated");if(kind=="stale-pid")request["pid"]=1u;if(kind=="stale-birth")request["birth"]="different";
       if(kind=="stale-revision")request["revision"]=2u;if(kind=="extra-arg")request["force"]=true;if(kind=="OFF")state["enabled"]=false;
       if(kind=="healthy")state["phase"]="loader-started";if(kind=="loaded-pid")state["pid"]=7u;if(kind=="foreign-mode")mode["mode"]="desktop";
-      if(kind=="inactive-plugin")mode["deckyUpdateResidue"]["active"]=false;if(kind=="different-loader")mode["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";
+      if(kind=="inactive-plugin")mode["deckyUpdateResidue"]["active"]=false;if(kind=="different-loader")mode["deckyUpdateResidue"]["loaderVersion"]="v99.0.0";
+      if(kind=="malformed-loader")mode["deckyUpdateResidue"]["loaderVersion"]="v3.2.10-private/path";
       if(kind=="port-in-use")preflight="loader-port-in-use";if(kind=="hash-failed")preflight="resource-hash-mismatch";
       if(kind=="isolated")deps.isolated=true;if(kind=="exiting")exiting=true;
       ymcc::deckyrepair::ManualRepair repair;check(!repair.request(request,deps).value("ok",true)&&dispatches==0&&refreshes==0&&consents==0,bad);
       state=savedState;mode=savedMode;preflight.clear();deps.isolated=false;exiting=false;
     }
+    {auto older=mode;older["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";const auto action=ymcc::deckyrepair::target(session,older,installed,ymcc::deckyidentity::version);
+     check(action.is_object()&&action.at("loaderVersion")=="v3.2.10","explicit repair pins the observed older stable Loader");}
     ymcc::deckyrepair::ManualRepair repair;
     check(repair.request(args,deps).value("ok",false)&&dispatches==1&&refreshes==1&&policy.allows(steam),"explicit repair resumes only the current Steam document");
     check(!repair.request(args,deps).value("ok",true)&&dispatches==1,"double click does not dispatch a second context refresh");
@@ -447,6 +450,8 @@ int wmain(int argc,wchar_t** argv){
     emptyMode["deckyEmptyFrontend"]["frontendBuildId"]=oldId;
     check(ymcc::deckyrepair::target(steam,emptyMode,newId,ymcc::deckyidentity::version).is_null(),"foreign empty frontend build refused");
     emptyMode["deckyEmptyFrontend"]["frontendBuildId"]=newId;emptyMode["deckyEmptyFrontend"]["loaderVersion"]="v3.2.10";
+    check(ymcc::deckyrepair::target(steam,emptyMode,newId,ymcc::deckyidentity::version).is_object(),"explicit empty frontend repair permits a pinned older stable Loader");
+    emptyMode["deckyEmptyFrontend"]["loaderVersion"]="v99.0.0";
     check(ymcc::deckyrepair::target(steam,emptyMode,newId,ymcc::deckyidentity::version).is_null(),"wrong empty official frontend refused");
   }
   {
