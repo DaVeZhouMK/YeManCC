@@ -52,3 +52,25 @@ test('unrelated writer registration defers inputs while default and selected wri
  for(const selectedIds of [undefined,[writerId]])assert.throws(()=>getWriter({selectedIds,readSources:()=>[evidence],readArtifacts:()=>{throw Error('WRITER_TOOL_CLOSURE_EXCEEDS1024');}}),/WRITER_TOOL_CLOSURE_EXCEEDS1024/);
  for(const selectedIds of [null,'writer',[1],['']])assert.throws(()=>getWriter({selectedIds}),/WRITER_SELECTION_SHAPE/);
 });
+
+import {registrationIndexCurrent} from './extra-adapter-assembly.mjs';
+import fsIndex from 'node:fs';import {createHash as indexHash} from 'node:crypto';
+const indexFixtureRoot='G:/YeManCC-Work/Testing/YMCC/Evidence/Formal037-20261030/RegistrationIndex';
+fsIndex.mkdirSync(indexFixtureRoot,{recursive:true});
+const indexFixture=fsIndex.mkdtempSync(path.join(indexFixtureRoot,'case-')),indexFile=path.join(indexFixture,'source.txt');
+const indexDigest=text=>indexHash('sha256').update(text).digest('hex');
+test('registration identity accepts only declared LF/CRLF equivalence and rejects changed source bytes',()=>{
+ fsIndex.writeFileSync(indexFile,'alpha\r\nbeta\r\n');
+ const index={sources:[{path:'source.txt',sha256:indexDigest('alpha\nbeta\n'),contentNormalization:'utf8-lf'}]};
+ assert(registrationIndexCurrent(index,indexFixture));
+ fsIndex.writeFileSync(indexFile,'alpha\nbeta\n');assert(registrationIndexCurrent(index,indexFixture));
+ fsIndex.writeFileSync(indexFile,'alpha\nzeta\n');assert.equal(registrationIndexCurrent(index,indexFixture),false);
+});
+test('legacy raw registration pins remain byte-exact and unknown normalizations fail closed',()=>{
+ fsIndex.writeFileSync(indexFile,'alpha\r\nbeta\r\n');
+ const legacy={sources:[{path:'source.txt',sha256:indexDigest('alpha\nbeta\n')}]};
+ assert.equal(registrationIndexCurrent(legacy,indexFixture),false);
+ legacy.sources[0].sha256=indexDigest('alpha\r\nbeta\r\n');assert(registrationIndexCurrent(legacy,indexFixture));
+ legacy.sources[0].contentNormalization='ignore-content';assert.equal(registrationIndexCurrent(legacy,indexFixture),false);
+ legacy.sources[0].path='missing.txt';assert.equal(registrationIndexCurrent(legacy,indexFixture),false);
+});
