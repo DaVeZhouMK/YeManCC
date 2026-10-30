@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "repository": "SteamDeckHomebrew/decky-loader",
-  "version": "v3.3.0",
-  "sourceCommit": "67196adfa9b299f20dfb0cc932e88a169417b7d5",
+  "version": "v3.3.1",
+  "sourceCommit": "ffd103b9c1a4ce5bf305e7c0998eda6e05457dad",
   "sourceFile": "backend/decky_loader/helpers.py",
   "sourceFileSha256": "1380d802d6fd8bd8e803f5e634b8c74446c9b52bc26c3a21585ba2e15fa1a271",
-  "expression": "try{if (window.deckyHasLoaded){setTimeout(() => SteamClient.Browser.RestartJSContext(), 100)}else{window.deckyHasLoaded = true;(async()=>{try{await import('http://localhost:1337/frontend/index.js?v=v3.3.0')}catch(e){console.error(e)};})();}}catch(e){console.error(e)}",
+  "expression": "try{if (window.deckyHasLoaded){setTimeout(() => SteamClient.Browser.RestartJSContext(), 100)}else{window.deckyHasLoaded = true;(async()=>{try{await import('http://localhost:1337/frontend/index.js?v=v3.3.1')}catch(e){console.error(e)};})();}}catch(e){console.error(e)}",
   "license": "GPL-2.0; source excerpt from the locked official release, used only for regression, never installed in Loader"
 }

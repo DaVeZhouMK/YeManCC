@@ -34,9 +34,12 @@ export const getLightingSourceInputs = (repoRoot=repo) => completeLightingSource
 export const lightingSourceInputs = getLightingSourceInputs();
 export const getLightingArtifactInputs = (repoRoot=repo) => lightingArtifactInputs(repoRoot);
 const snapshot = () => Object.fromEntries(lightingSourceInputs.map(f => [f, hash(path.join(repo, f))]));
-function command(exe, args, log, env = {}) {
+function command(exe, args, log, env = {}) {
+  // The fixed Core pin includes compiler-host metadata: match the primary publisher.
+  const compilation = /^dotnet(?:\.exe)?$/i.test(path.basename(exe)) && ['build','msbuild','publish'].includes(args[0]);
+  const compilerEnv = compilation ? { DOTNET_ROLL_FORWARD: 'Disable' } : {};
   const result = spawnSync(exe, args, { cwd: repo, encoding: 'utf8', timeout: 180000, maxBuffer: 4 * 1024 * 1024,
-    windowsHide: true, env: { ...process.env, ...env } });
+    windowsHide: true, env: { ...process.env, ...env, ...compilerEnv } });
   fs.writeFileSync(log, `${result.stdout ?? ''}\n${result.stderr ?? ''}\n${result.error?.message ?? ''}`);
   return result;
 }
@@ -66,7 +69,7 @@ export async function runLightingSignals(options = {}) {
     const args = ['build', project, '-c', 'Release', '--artifacts-path', artifacts, '--nologo', '-v:q',
       '-m:1', '-p:UseSharedCompilation=false', '-nodeReuse:false', ...props];
     const result = command(dotnet, args, path.join(out, `${area}-build.log`));
-    builds.push({ area, command: [dotnet, ...args], exitCode: result.status, hardwareIo: false });
+    builds.push({ area, command: [dotnet, ...args], compilerRuntimeRollForward: 'Disable', exitCode: result.status, hardwareIo: false });
     if (result.error || result.status !== 0) throw new Error(`BUILD_FAILED:${area}:see ${area}-build.log`);
     return artifacts;
   }

@@ -13040,7 +13040,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/native-fixture.cpp",
-      "sha256": "fe75994e4357ddc1158f7e9898b2e65139f716911820e4e69f9d56eec89a0286",
+      "sha256": "86146f1b36124a4684fc4415bba5ddd3ec3f2c424703a6da1d0f94cd7c6a000b",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13150,7 +13150,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/upstream-reinject.json",
-      "sha256": "eb91d800f9147c34a16d4601c82c7f5c6f5d93c0da3dc155fe94f72db55fc6c2",
+      "sha256": "bb5d597e1b29ecc4d6a365f5998994d0e011d34be7bb11c57ec98651f59d83d2",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -14412,7 +14412,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/lighting-signals/index.mjs",
-      "sha256": "fa219d2505e4a537570c8b0768d606e55d769f0dafa6c6d11b9a14a4bf0fecfe",
+      "sha256": "15deb8df48c02df3a5504c9d75052237626a432b107320331887090f46e51002",
       "contentNormalization": "utf8-lf"
     },
     {

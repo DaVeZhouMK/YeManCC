@@ -38,6 +38,11 @@ assert.throws(() => validateUpdateManifest({ version: '0.0.8' }));
 const root = process.cwd();
 const native = readFileSync(resolve(root, 'native/main.cpp'), 'utf8');
 const release = readFileSync(resolve(root, 'tools/package-release.ps1'), 'utf8');
+const parentMaintenance = readFileSync(resolve(root, 'native/module_package_maintenance.ps1'), 'utf8');
+for (const token of ['function Stop-YmccUpdaterParent', '$null=$process.Handle', 'Get-YmccUpdaterProcessIdentity -Process $process', '$identity.Creation -cne $CreationFileTime', 'UPDATE_PARENT_IDENTITY_CHANGED', '$process.CloseMainWindow()', '$process.WaitForExit($GraceMilliseconds)', '$process.Kill()', '$process.WaitForExit($ForceMilliseconds)', 'UPDATE_PARENT_EXIT_TIMEOUT']) {
+  assert.ok(parentMaintenance.includes(token), `authenticated parent shutdown policy missing: ${token}`);
+}
+
 const fanHostInstaller = readFileSync(resolve(root, 'PowerControl/fan-host/install-fan-host-payload.ps1'), 'utf8');
 const fanHostVerifier = readFileSync(resolve(root, 'tools/verify-r5v9-fan-host-payload.ps1'), 'utf8');
 const fanHostPayloadManifest = JSON.parse(readFileSync(resolve(root, 'PowerControl/fan-host/YeManFanHost.payload.json'), 'utf8').replace(/^\uFEFF/, ''));
@@ -84,7 +89,7 @@ for (const token of [
   'g_updateOperationMtx',
   'Stop-ResidentProcesses',
   'Get-ResidentUpdaterProcesses',
-  'Stop-Process -Id $process.Id -Force',
+  '$process.Kill(); $process.WaitForExit(15000)',
   'could not be force-closed before update',
   'YeManFanHost',
   'YeManInputHost',
@@ -102,8 +107,8 @@ for (const token of [
   '$indexed = @($manifest.fileIndex)',
   'CustomSteamLibrary fileIndex SHA256 mismatch',
   'Stop-CustomSteamLibraryProcesses',
-  "$parentExitDeadline = (Get-Date).AddSeconds($parentExitTimeoutSeconds)",
-  "throw ('parent YeManCC process did not exit within '",
+  '$parentExitMode = Stop-YmccUpdaterParent $parentPid $exePath $parentCreationFileTime',
+  'f << ymcc::modulepackage::maintenanceScript()',
   'Register-TreeForRollback',
   'Restore-OrdinaryFiles',
   '$rollbackAddedFiles',
@@ -185,7 +190,8 @@ assert.ok(release.includes('$includeFanHostInFullTestPackage = $true'));
 assert.ok(release.includes("$fanHostUpdatePolicy = 'preserve-existing'"));
 assert.ok(release.includes("$fanHostV2UpdatePolicy = 'replace'"));
 assert.ok(release.includes('Legacy fan-host must not ship'));
-assert.ok(native.includes('Fan Host whole-directory rollback'));
+assert.ok(native.includes('$immutablePayload=Sync-YmccImmutableFanPayload $fanHostRuntimeSource $fanHostSource $pcDir'), 'incoming HC/Fan payload must remain the upgrade authority');
+assert.ok(native.includes('IMMUTABLE_PAYLOAD_REPAIR_REQUIRED') && native.includes('Remove-YmccSupersededHcRuntimes $pcDir $immutablePayload.runtimeId'), 'failed upgrade must repair incoming payload and retire old runtimes');
 assert.ok(native.includes('Fan Host V2 directory binding is missing or invalid'));
 assert.ok(release.includes('Full release package must contain PowerControl/fan-host-v2'));
 assert.ok(release.includes('YeManCC.zip must not contain PowerControl/fan-host-v2 entries'));

@@ -87,7 +87,7 @@ inline ymcc::deckylaunch::Result create(const std::wstring& executable,std::wstr
 #include <condition_variable>
 using json=nlohmann::json;
 using Session=ymcc::steamsession::Session;
-static Session steam{L"C:\\FixtureSteam",45640,0,134368675855384222ULL};
+static Session steam{L"C:\\FixtureSteam",45640,12345,134368675855384222ULL};
 static std::atomic<int> fixtureSteamPresence{1};
 struct SessionFixture{Session sessionSnapshot(){return steam;}int steamPresence(){return fixtureSteamPresence.load();}}g_steamSettingsObserver;
 static ymcc::deckygaming::Observation gamingFullscreenObservation;
@@ -267,6 +267,8 @@ int wmain(int argc,wchar_t** argv){
   {ymcc::deckyupdate::Recovery policy;check(policy.consider(steam,healthyMode,newId,true)=="updated-decky-frontend-pending","exact field mismatch admits one Decky continuation");check(policy.consider(steam,healthyMode,newId,true).empty(),"duplicate mode read cannot initiate another recovery");auto wrong=steam;wrong.root=L"C:\\OtherSteam";check(!policy.allows(wrong),"root-bound continuation");auto desktop=healthyMode;desktop["mode"]="desktop";policy.consider(steam,desktop,newId,true);check(!policy.allows(steam),"desktop exit revokes recovery");}
   {ymcc::deckyupdate::Recovery policy;auto loaderOnly=healthyMode;loaderOnly["deckyUpdateResidue"]["frontendBuildId"]=newId;loaderOnly["deckyUpdateResidue"]["loaderVersion"]="v3.2.10";
    check(policy.consider(steam,loaderOnly,newId,true,"v3.3.0")=="updated-decky-loader-pending","official Loader upgrade alone resumes even if plugin module is unchanged");}
+  {const auto account=steam.account;steam.account=0;const auto rejected=productionAdmission();steam.account=account;
+   check(!rejected.allowed&&rejected.reason=="steam-session-unconfirmed"&&rejected.retryable,"unconfirmed account blocks startup before any preparation");}
   // Full production launch-admission and shared-reader callback chain.
   g_deckySidebarRuntime.initialize({image,(scope/L"home").wstring(),[]{++preflights;return std::string{};},[](const auto& state){if(state.phase=="loader-started")++launches;}, {}, {}, {}, {}, {}, productionAdmission});
   g_deckySidebarRuntime.observeSteam(1);g_deckySidebarRuntime.setEnabled(true);
@@ -544,7 +546,7 @@ int wmain(int argc,wchar_t** argv){
       const auto marker=fakeSteam/L".cef-enable-remote-debugging";
       const bool alreadyRunning=route==2,directBigPicture=route==1;
       if(alreadyRunning)std::ofstream(marker)<<"PRESERVE";
-      const Session next{LR"(C:\FixtureSteam)",static_cast<DWORD>(50000+route),0,
+      const Session next{LR"(C:\FixtureSteam)",static_cast<DWORD>(50000+route),12345,
         route==2?134368675855380000ULL+route:134369000000000100ULL+route};
       steam=alreadyRunning?next:Session{};fixtureSteamPresence=alreadyRunning?1:0;
       g_steamLinkAdmission.observe(steam);g_powerLifecycle=PowerLifecycle::Ready;g_exitRequested=false;fixtureResourceValid=true;

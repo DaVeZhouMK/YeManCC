@@ -43,6 +43,7 @@ if ($manifest.schemaVersion -ne 2 -or $null -eq $manifest.files -or $manifest.fi
   throw 'Fan Host payload manifest is invalid or empty'
 }
 $seen = @{}
+$dependencyLocations = @{}
 $runtimeManifest = Get-Content -LiteralPath (Join-Path $runtimeRoot 'HandheldCompanion.runtime.json') -Raw -Encoding UTF8 | ConvertFrom-Json
 if ($runtimeManifest.schemaVersion -ne 1 -or $runtimeManifest.runtimeId -cne [string]$coreProfile.runtimeId) { throw 'HC runtime manifest identity mismatch' }
 foreach ($entry in $runtimeManifest.files) {
@@ -58,6 +59,20 @@ foreach ($entry in $runtimeManifest.files) {
       -not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "HC runtime file missing: $relative" }
   if ((Get-Sha256 $path) -ne ([string]$entry.sha256).ToUpperInvariant()) { throw "HC runtime hash mismatch: $relative" }
   $seen[$relative.ToLowerInvariant()] = $true
+  $dependencyLocations[$relative.ToLowerInvariant()] = $path
+}
+
+# Shared files remain single-copy and must match the already verified profile.
+$sharedPayloadRoot = Join-Path (Split-Path -Parent $payloadRoot) 'ymcc-shared-runtime'
+$sharedManifestPath = Join-Path $sharedPayloadRoot 'manifest.json'
+if ((Get-Sha256 $sharedManifestPath) -ine [string]$coreProfile.sharedDependencies.manifestSha256) { throw 'Packaged shared runtime manifest changed' }
+foreach ($entry in @($coreProfile.sharedDependencies.files)) {
+  $relative = [string]$entry.path
+  if ($relative -notmatch '^[^/\\:]+\.dll$' -or $seen.ContainsKey($relative.ToLowerInvariant())) { throw 'Shared dependency path duplicated or unsafe' }
+  $path = Join-Path $sharedPayloadRoot $relative
+  if (!(Test-Path -LiteralPath $path -PathType Leaf) -or (Get-Item -LiteralPath $path).Length -ne [int64]$entry.bytes -or (Get-Sha256 $path) -ine [string]$entry.sha256) { throw ('Packaged shared dependency changed: ' + $relative) }
+  $seen[$relative.ToLowerInvariant()] = $true
+  $dependencyLocations[$relative.ToLowerInvariant()] = $path
 }
 
 foreach ($entry in $manifest.files) {
@@ -73,6 +88,7 @@ foreach ($entry in $manifest.files) {
   if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Payload manifest file missing: $relative" }
   $actual = Get-Sha256 $path
   if ($actual -ne $expected) { throw "Payload manifest hash mismatch: $relative" }
+  $dependencyLocations[$relative.ToLowerInvariant()] = $path
 }
 
 $required = @(
@@ -92,28 +108,28 @@ foreach ($name in $required) {
 }
 
 $factoryBootstrapHashes = [ordered]@{
-  'WindowsInput.dll' = '5567CEA4661389A7FDCC51EF222E67B13C2176C9BE46E61A88A100188A77C711'
-  'GregsStack.InputSimulatorStandard.dll' = '453E8A4B4CF7241954E9AAD060409C24F076EE0C9F742345FC36A1EA8DD8C6EE'
-  'Gma.System.MouseKeyHook.dll' = 'FA9FEC4DFC02C80D262E2E61ABCE31D9358CA84E36C9794BA5CB30F912940485'
+  'WindowsInput.dll' = '70BA34A92BF3A071FB72D28DB60DC515CE032A0CE20D0B7B44B694E8CF322AD5'
+  'GregsStack.InputSimulatorStandard.dll' = '34150ACD65C5787C3A7DB7B570E334F99BEF58ADF2829B861778D4696385D54D'
+  'Gma.System.MouseKeyHook.dll' = '1E01B3EC82D1473B97655C3426CC957D62E6055EC469DB067F789B4F315F9D7E'
   'HidLibrary.dll' = '00AD68889764A8BEA6377A01D738A3EBC1DD286691D2AC5BCF7B1D2B16BCD9FA'
   'Nefarius.Utilities.DeviceManagement.dll' = 'B5EAF086634438F2774F6B65DD14254AAA078BF1EBFEB004F997314B61272B7C'
-  'Nefarius.Utilities.Bluetooth.dll' = '010B46997F2BEA44A9E95B063E106BE3E662A93A7A7FAB5E5D485644CC48B433'
+  'Nefarius.Utilities.Bluetooth.dll' = '074B36140E3D235E2C35BACA1C20372B82078A5A8E06A5EAD30B941B7C97921D'
   'Nefarius.Vicius.Abstractions.dll' = '51F380A12A82E925308E5D6255218DF283B692F37B9E991C6CE5E63F3E11D8FA'
   'PInvoke.Kernel32.dll' = '3122B9C2CCD89B0FF915F4669D60F9FFA1A4D4A8608F61F5DF1B29D6298C4C44'
-  'PInvoke.Windows.Core.dll' = '28DC91C7027BA45B07BE564A4564CF9E4606B96B01F4B431056E7D77AB25B81C'
-  'SharpDX.dll' = '518D45A5AAEC84CB37E83EE2CF58C503AB6A25FEBB8C48B53316340C967E84BD'
-  'SharpDX.Direct3D9.dll' = '69701EDA7433AC0010ABA416B9D9C245CD78694770D4BB6B7541B83BACE41D55'
-  'SharpDX.DirectInput.dll' = '35D9AE6B98C5B68FDC1FCAF6E03C95C82F9305C7355DD911F8841880B42E945F'
-  'SharpDX.XInput.dll' = '350195201205840B38AEE094BCEAD4C78B1661F3570A7CAA5C36B86CE6D03FF3'
+  'PInvoke.Windows.Core.dll' = '5714085930B396C27DB302983B5EE951438E75FAE7D9437583CBEFEFE4B60400'
+  'SharpDX.dll' = '83B1096413D768B9218A7B70636883C735BB475CA058277869D5DF0D23AE8FC1'
+  'SharpDX.Direct3D9.dll' = '7123C60E074711B6EA7B59DC4A28D8FA43D36B577C9100983C263CFB460CE62A'
+  'SharpDX.DirectInput.dll' = 'C0DB07B561C2082293E0C338C3EFBF1895B29A96A89ABBE29A2AA4F56146566F'
+  'SharpDX.XInput.dll' = '9DC5071976FEA81882775CE58085D9E3BBDAD27E5C185D07C87C897D1DDFD274'
   'System.Management.dll' = '01F9360D110863F810431C4D29ADA0FCA89F267343D030E98AA823EA4C0C0EBB'
   'System.IO.Ports.dll' = 'BF486068A47B18358313791B78ACA74F4DE61D1D9E2E08B58E3BFBF68BF15A2B'
   'System.ServiceProcess.ServiceController.dll' = '3274C2553C736435064E398F879404E8944F39790CAEE6632E6966046B3440E8'
-  'hidapi.net.dll' = '5553F2487424B325F750C0FE83BD7961943CC97F2E0D1C24285506374B298F17'
+  'hidapi.net.dll' = '329FB6B0FEB827F892727669FE93DCABF0091009D677579CCB88940150840C74'
   'hidapi.dll' = 'EBEB835E2B4530ED68843F19D6A2604C51772E3C26E7F542FDE194075F82D9B4'
 }
 foreach ($entry in $factoryBootstrapHashes.GetEnumerator()) {
   if (-not $seen.ContainsKey($entry.Key.ToLowerInvariant())) { throw "Payload manifest omits factory bootstrap: $($entry.Key)" }
-  $checkPath = if (Test-Path (Join-Path $payloadRoot $entry.Key)) { Join-Path $payloadRoot $entry.Key } else { Join-Path $runtimeRoot $entry.Key }
+  $checkPath = $dependencyLocations[$entry.Key.ToLowerInvariant()]
   if ($seen[$entry.Key.ToLowerInvariant()] -and (Get-Sha256 $checkPath) -ne $entry.Value) {
     throw "Factory bootstrap hash mismatch: $($entry.Key)"
   }
@@ -121,6 +137,8 @@ foreach ($entry in $factoryBootstrapHashes.GetEnumerator()) {
 
 $hostSource = Get-Content -LiteralPath $hostSourcePath -Raw -Encoding UTF8
 $bridge = Get-Content -LiteralPath $bridgePath -Raw -Encoding UTF8
+$startup = if ($bridge.Contains("from './fanHost/startupConfiguration'")) { Get-Content -LiteralPath (Join-Path $repoRoot 'src\bridge\fanHost\startupConfiguration.ts') -Raw -Encoding UTF8 } else { $bridge }
+$updaterHc = Get-Content -LiteralPath (Join-Path $repoRoot 'native\updater_hc_runtime.ps1') -Raw -Encoding UTF8
 # Read the declared deployment consumer; old full-file snapshots keep their own implementation.
 $deployment = if ($bridge.Contains("from './fanHost/deployment'")) {
   Get-Content -LiteralPath (Join-Path (Split-Path -Parent $bridgePath) 'fanHost\deployment.ts') -Raw -Encoding UTF8
@@ -211,16 +229,16 @@ $checks = [ordered]@{
   legacyRecoveryBlocksUnverifiedResident = $bridge.Contains('Never mutate/quarantine the immutable payload') -and
     $bridge.Contains('if (ownerPid <= 0)')
   installerRejectsResidentHost = $aclScript.Contains('$payloadHostPath = Get-FullPath') -and $aclScript.Contains('Get-CimInstance Win32_Process') -and $aclScript.Contains('YeManFanHost.exe')
-  updaterRunsPayloadAclPreflight = $native.Contains('Fan Host payload ACL installation failed')
+  updaterRunsPayloadAclPreflight = $native.Contains('ymcc::hcruntime::script()') -and $native.Contains('Sync-YmccImmutableFanPayload') -and $updaterHc.Contains('Invoke-YmccFanPayloadInstaller $fanHostAclScript $fanHostTarget') -and $updaterHc.Contains('Fan Host payload installation failed: ')
   payloadUsesAuditedRuntimeClosure = $payloadBuilder.Contains('$hcRuntimeSources') -and $payloadBuilder.Contains('PRUNED_STALE_FAN_HOST_FILE')
   payloadPinsFactoryBootstrapClosure = $payloadBuilder.Contains('$hcFactoryBootstrapFiles = @(') -and $payloadBuilder.Contains("'WindowsInput.dll'") -and $payloadBuilder.Contains("'HidLibrary.dll'") -and $payloadBuilder.Contains("'SharpDX.Direct3D9.dll'") -and $payloadBuilder.Contains("'SharpDX.XInput.dll'") -and $payloadBuilder.Contains("'hidapi.net.dll'") -and $payloadBuilder.Contains("'hidapi.dll'")
   payloadDerivesFullHcRuntimeClosure = $payloadBuilder.Contains("'HandheldCompanion.deps.json'") -and $payloadBuilder.Contains('$hcRuntimeSources') -and $payloadBuilder.Contains('$hcDeviceNativeFiles')
   payloadPinsWindowsRuntimeTargets = $payloadBuilder.Contains('$hcWindowsRuntimeOverrides = [ordered]@{') -and $payloadBuilder.Contains('runtimes\win\lib\net10.0\System.Management.dll') -and $payloadBuilder.Contains('runtimes\win\lib\net10.0\System.IO.Ports.dll')
   payloadRunsHcDeviceClosureAudit = $payloadBuilder.Contains('fan_hc_device_closure_selftest.ps1') -and $payloadBuilder.Contains('Get-Command pwsh.exe')
   hostRequiresWindowsRuntimeTargets = $hostSource.Contains('"System.Management.dll"') -and $hostSource.Contains('"System.IO.Ports.dll"') -and $hostSource.Contains('"System.ServiceProcess.ServiceController.dll"')
-  bridgeRequiresWindowsRuntimeTargets = $bridge.Contains("{ file: 'System.Management.dll'") -and $bridge.Contains("{ file: 'System.IO.Ports.dll'") -and $bridge.Contains("{ file: 'System.ServiceProcess.ServiceController.dll'")
+  bridgeRequiresWindowsRuntimeTargets = $startup.Contains("{ file: 'System.Management.dll'") -and $startup.Contains("{ file: 'System.IO.Ports.dll'") -and $startup.Contains("{ file: 'System.ServiceProcess.ServiceController.dll'")
   hostRequiresFactoryBootstrapClosure = $hostSource.Contains('"WindowsInput.dll"') -and $hostSource.Contains('"HidLibrary.dll"') -and $hostSource.Contains('"SharpDX.Direct3D9.dll"') -and $hostSource.Contains('"SharpDX.XInput.dll"') -and $hostSource.Contains('"hidapi.net.dll"') -and $hostSource.Contains('"hidapi.dll"')
-  bridgeRequiresFactoryBootstrapClosure = $bridge.Contains("{ file: 'WindowsInput.dll'") -and $bridge.Contains("{ file: 'HidLibrary.dll'") -and $bridge.Contains("{ file: 'SharpDX.Direct3D9.dll'") -and $bridge.Contains("{ file: 'SharpDX.XInput.dll'") -and $bridge.Contains("{ file: 'hidapi.net.dll'") -and $bridge.Contains("{ file: 'hidapi.dll'")
+  bridgeRequiresFactoryBootstrapClosure = $startup.Contains("{ file: 'WindowsInput.dll'") -and $startup.Contains("{ file: 'HidLibrary.dll'") -and $startup.Contains("{ file: 'SharpDX.Direct3D9.dll'") -and $startup.Contains("{ file: 'SharpDX.XInput.dll'") -and $startup.Contains("{ file: 'hidapi.net.dll'") -and $startup.Contains("{ file: 'hidapi.dll'")
   # HC ROGAlly dispatches CPU/GPU/Mid SetFanCurve calls. GetFanCurve is kept
   # as optional diagnostics only; HC has no cross-firmware ACK contract and
   # no direct vendor fallback belongs in this Host. The fan-only Host no
@@ -256,7 +274,7 @@ $checks = [ordered]@{
     -not $hostSource.Contains('hcDeviceReportsOpen') -and
     -not $hostSource.Contains('OEM CPU default fallback')
   )
-  hostHasNoVendorWriteReplica = -not $hostSource.Contains('WriteEcByte') -and -not $hostSource.Contains('ECRamDirectWriteByte') -and -not $hostSource.Contains('WriteMsiWmiFanTable') -and -not $hostSource.Contains('WriteMsiWmiData') -and -not $hostSource.Contains('ApplyMsiFanCurve') -and -not $hostSource.Contains('ApplyMsiHcDefaultRelease') -and -not $hostSource.Contains('ApplyLenovoFanCurve') -and -not $hostSource.Contains('ApplyLenovoHcDefaultTable') -and -not $hostSource.Contains('ApplyLegionGo2FanCurve') -and -not $hostSource.Contains('ApplyLegionGo2OemRelease') -and -not $hostSource.Contains('ApplySmartFanModeBaseline') -and -not $hostSource.Contains('InvokeSetFanControl')
+  hostHasNoVendorWriteReplica = -not $hostSource.Contains('WriteEcByte') -and ($hostSource -notmatch '\bECRamDirectWriteByte\s*\(') -and $hostSource.Contains('boundary.DeclaringType != root') -and $hostSource.Contains('existing owned EC transport is unavailable') -and -not $hostSource.Contains('WriteMsiWmiFanTable') -and -not $hostSource.Contains('WriteMsiWmiData') -and -not $hostSource.Contains('ApplyMsiFanCurve') -and -not $hostSource.Contains('ApplyMsiHcDefaultRelease') -and -not $hostSource.Contains('ApplyLenovoFanCurve') -and -not $hostSource.Contains('ApplyLenovoHcDefaultTable') -and -not $hostSource.Contains('ApplyLegionGo2FanCurve') -and -not $hostSource.Contains('ApplyLegionGo2OemRelease') -and -not $hostSource.Contains('ApplySmartFanModeBaseline') -and -not $hostSource.Contains('InvokeSetFanControl')
   payloadBuildsReleaseHost = $payloadBuilder.Contains('dotnet build $hostProject -c Release --no-restore') -and $payloadBuilder.Contains('bin\Release\net10.0-windows10.0.19041.0\win-x64')
   # The product now includes HC's full deps closure, but must not accidentally
   # package HC's own executable, debug symbols or runtime logs.
