@@ -1,10 +1,11 @@
 #pragma once
-// Native fixture build cache only: no Runtime, admission, repair or wake body.
+// Generated from all original fixture variants' byte-identical whole-line
+// preamble. Preserve its legacy macro and observation alias before Runtime.
+// Mutation-specific headers and every variant body remain independent.
 #ifndef WIN32_LEAN_AND_MEAN
 #define WIN32_LEAN_AND_MEAN
 #endif
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <winsock2.h>
-#include <json.hpp>
+#include "native-shared-prefix.inc"

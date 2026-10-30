@@ -12,6 +12,7 @@ import {sliderStabilityTests} from '../../../decky_slider_stability_selftest.mjs
 import {nativeLaunchTests} from '../../../steam_native_launch_regression.mjs';
 import {prepareNativeLaunchNoIoFixture,NATIVE_LAUNCH_NOIO_SOURCE_INPUTS} from './native-launch-noio/index.mjs';
 import fs from 'node:fs';
+import os from 'node:os';
 import {startNativeLaunchWorker,NATIVE_LAUNCH_WORKER_SOURCE_INPUTS} from './native-launch-worker.mjs';
 import {startCssAppearanceWorker,CSS_APPEARANCE_WORKER_SOURCE_INPUTS} from './css-appearance-worker.mjs';
 import {getCssAppearanceInputs} from './css-appearance-sequence.mjs';
@@ -175,14 +176,46 @@ try{
  const vc=process.env.VCToolsInstallDir||'C:\\Program Files (x86)\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\14.44.35207\\',sdk=process.env.WindowsSdkDir||'C:\\Program Files (x86)\\Windows Kits\\10\\',version=process.env.WindowsSDKVersion||'10.0.26100.0\\';
  const environment=['@echo off','set "SystemRoot=C:\\Windows"','set "WINDIR=C:\\Windows"',`set "PATH=${path.join(vc,'bin/Hostx64/x64')};C:\\Windows\\System32;C:\\Windows"`,`set "INCLUDE=${path.join(vc,'include')};${['ucrt','shared','um','winrt','cppwinrt'].map(n=>path.join(sdk,'Include',version,n)).join(';')}"`,`set "LIB=${path.join(vc,'lib/x64')};${path.join(sdk,'Lib',version,'ucrt/x64')};${path.join(sdk,'Lib',version,'um/x64')}"`];
  const modes=['fixed','prewarm-negative','wake-preparation-negative','legacy','retained-negative','repair-uncertain-negative','repair-retained-negative','repair-auto-repeat-negative','repair-auto-ui-negative','repair-stale-mode-negative','wake-power-guard-negative','wake-binding-negative','wake-ready-event-negative'];
- // Independent consumers retain the original flags; compile four at a time, then link each fixture.
+ // Preserve every original variant and mutation; precompile only their exact
+ // whole-line common preamble, including the original observation macro order.
+ const originals=modes.map(mode=>({mode,file:path.join(out,mode+'.cpp'),text:fs.readFileSync(path.join(out,mode+'.cpp'),'utf8')}));
+ let commonLength=originals[0].text.length;
+ for(const original of originals.slice(1)){let n=0;while(n<commonLength&&n<original.text.length&&original.text[n]===originals[0].text[n])n++;commonLength=n;}
+ commonLength=originals[0].text.lastIndexOf('\n',commonLength-1)+1;
+ const commonPrefix=originals[0].text.slice(0,commonLength);
+ if(!commonPrefix.includes('#define YMCC_DECKY_RUNTIME_LEGACY_FIXTURE 1')||!commonPrefix.includes('#define deckylaunch fixtureStageLaunch')||!commonPrefix.includes('#include "decky_sidebar_runtime.h"')||!commonPrefix.includes('#undef deckylaunch')||commonPrefix.includes('#include "decky_sidebar_manual_repair.h"')||commonPrefix.includes('#include "decky_sidebar_automatic_repair.h"'))throw Error('Review native common preamble mutation/macro boundary');
+ const prefixFile=path.join(out,'native-shared-prefix.inc');fs.writeFileSync(prefixFile,commonPrefix);
+ const derivedSources=originals.map(original=>{
+  const tail=original.text.slice(commonLength);if(!Buffer.from(commonPrefix+tail).equals(fs.readFileSync(original.file)))throw Error('Native preamble transform changed original bytes: '+original.mode);
+  const file=path.join(out,original.mode+'.pch.cpp'),line=commonPrefix.split('\n').length;
+  // Optimize production headers and extracted callbacks with the unchanged /O2.
+  // Only the generated scenario/assertion driver avoids repeated optimization.
+  const entry='int wmain(int argc,wchar_t** argv){',entryAt=tail.indexOf(entry);
+  if(entryAt<0||tail.indexOf(entry,entryAt+entry.length)>=0)throw Error('Review unique native fixture driver');
+  const structuralTail=tail.replace(/R"([^()\s\\]{0,16})\([\s\S]*?\)\1"/g,text=>text.replace(/[^\r\n]/g,' '));
+  const driverEnd=cppBlock(structuralTail,tail.indexOf('{',entryAt),'fixture driver').end;
+  if(tail.slice(driverEnd).trim())throw Error('Review declarations after native fixture driver');
+  const driver=tail.slice(entryAt,driverEnd),entryLine=(commonPrefix+tail.slice(0,entryAt)).split('\n').length;
+  const driverSha256=crypto.createHash('sha256').update(driver).digest('hex');
+  const fileLabel=JSON.stringify(original.file.replaceAll('\\','/'));
+  const driverSource=tail.slice(0,entryAt)+'#pragma optimize("", off)\n#line '+entryLine+' '+fileLabel+'\n'+driver+'\n#pragma optimize("", on)\n'+tail.slice(driverEnd);
+  fs.writeFileSync(file,'#include "native-pch.h"\n#line '+line+' '+fileLabel+'\n'+driverSource);
+  return {mode:original.mode,original:{path:original.file,sha256:hash(original.file)},derived:{path:file,sha256:hash(file)},prefixBytes:Buffer.byteLength(commonPrefix),tailBytes:Buffer.byteLength(tail),originalReconstructionByteEqual:true,fixtureDriver:{entry,originalLine:entryLine,sha256:driverSha256,bodyBytePreserved:true,optimization:'disabled only for generated fixture driver; production definitions retain /O2'}};
+ });
+ const capacity={availableProcessors:os.availableParallelism(),totalMemoryBytes:os.totalmem(),freeMemoryBytes:os.freemem(),perWorkerMemoryReserveBytes:1024*1024*1024,maxWorkers:4};
+ const compileWorkers=Math.max(1,Math.min(capacity.maxWorkers,capacity.availableProcessors,Math.floor(capacity.freeMemoryBytes/capacity.perWorkerMemoryReserveBytes)));
+ const transformFile=path.join(out,'native-compile-sources.json');fs.writeFileSync(transformFile,JSON.stringify({schemaVersion:1,commonPrefix:{path:prefixFile,sha256:hash(prefixFile)},originalVariantsPreserved:true,independentVariantObjects:true,derivedSources},null,2)+'\n');
  const objectRoot=out.replaceAll('\\','/')+'/';
  const pchHeader=path.join(here,'native-pch.h'),pchSource=path.join(out,'native-pch.cpp'),pchImage=path.join(out,'native.pch');
  fs.writeFileSync(pchSource,'#include "native-pch.h"\n');
- const commonFlags='cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNOMINMAX /DUNICODE /D_UNICODE /I "'+path.join(root,'native')+'" /I "'+path.join(root,'deps/json')+'" /I "'+here+'"';
- const cmd=[...environment,commonFlags+' /Yc"native-pch.h" /Fp"'+pchImage+'" /Fo"'+path.join(out,'native-pch.obj')+'" /c "'+pchSource+'"','if errorlevel 1 exit /b 1',commonFlags+' /MP4 /Yu"native-pch.h" /FI"native-pch.h" /Fp"'+pchImage+'" /Fo"'+objectRoot+'" /c '+modes.map(mode=>'"'+path.join(out,mode+'.cpp')+'"').join(' '),'if errorlevel 1 exit /b 1'];
- for(const mode of modes)cmd.push(`link /nologo /OUT:"${path.join(out,mode+'.exe')}" "${path.join(out,mode+'.obj')}" "${path.join(out,'native-pch.obj')}" advapi32.lib user32.lib userenv.lib winhttp.lib ws2_32.lib bcrypt.lib`,'if errorlevel 1 exit /b 1');
- fs.writeFileSync(path.join(out,'build.cmd'),cmd.join('\r\n')+'\r\n');const nativeBuildStarted=performance.now();const build=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/c',path.join(out,'build.cmd')],{encoding:'utf8',windowsHide:true,timeout:90000,cwd:out});fs.writeFileSync(path.join(out,'build.log'),(build.stdout||'')+(build.stderr||''));report.nativeCompilation={status:build.status,error:build.error?.message??null,durationMs:performance.now()-nativeBuildStarted,originalBudgetMs:90000,commonHeader:{path:pchHeader,sha256:hash(pchHeader)},compilerRecipe:{path:path.join(out,'build.cmd'),sha256:hash(path.join(out,'build.cmd'))},modes:modes.length,precompiledHeaderOnly:true,independentVariantObjects:true};fs.writeFileSync(path.join(out,'native-compile-process.json'),JSON.stringify(report.nativeCompilation,null,2)+'\n');if(build.status!==0)throw Error('Native test compile failed: '+(build.stderr||build.stdout).slice(-1800));
+ const commonFlags='cl /nologo /std:c++20 /utf-8 /EHsc /MT /O2 /DNOMINMAX /DUNICODE /D_UNICODE /I "'+path.join(root,'native')+'" /I "'+path.join(root,'deps/json')+'" /I "'+here+'" /I "'+out+'"';
+ const cmd=[...environment,'echo YMCC_NATIVE_COMPILE_STAGE pch %time%',commonFlags+' /Yc"native-pch.h" /Fp"'+pchImage+'" /Fo"'+path.join(out,'native-pch.obj')+'" /c "'+pchSource+'"','if errorlevel 1 exit /b 1','echo YMCC_NATIVE_COMPILE_STAGE variants %time%',commonFlags+' /MP'+compileWorkers+' /Yu"native-pch.h" /FI"native-pch.h" /Fp"'+pchImage+'" /Fo"'+objectRoot+'" /c '+derivedSources.map(row=>'"'+row.derived.path+'"').join(' '),'if errorlevel 1 exit /b 1','echo YMCC_NATIVE_COMPILE_STAGE link %time%'];
+ for(const mode of modes)cmd.push(`link /nologo /OUT:"${path.join(out,mode+'.exe')}" "${path.join(out,mode+'.pch.obj')}" "${path.join(out,'native-pch.obj')}" advapi32.lib user32.lib userenv.lib winhttp.lib ws2_32.lib bcrypt.lib`,'if errorlevel 1 exit /b 1');
+ cmd.push('echo YMCC_NATIVE_COMPILE_STAGE done %time%');
+ fs.writeFileSync(path.join(out,'build.cmd'),cmd.join('\r\n')+'\r\n');const nativeBuildStarted=performance.now();const build=spawnSync(process.env.ComSpec||'cmd.exe',['/d','/c',path.join(out,'build.cmd')],{encoding:'utf8',windowsHide:true,timeout:90000,cwd:out});const buildText=(build.stdout||'')+(build.stderr||'');fs.writeFileSync(path.join(out,'build.log'),buildText);
+ const stageMarkers=[...buildText.matchAll(/YMCC_NATIVE_COMPILE_STAGE (pch|variants|link|done)\s+(\d{1,2}):(\d{2}):(\d{2})[.,](\d{2})/g)].map(([,stage,h,m,s,cs])=>({stage,timeMs:Number(h)*3600000+Number(m)*60000+Number(s)*1000+Number(cs)*10}));
+ const stageDurations=stageMarkers.slice(1).map((row,index)=>({stage:stageMarkers[index].stage,elapsedMs:(row.timeMs-stageMarkers[index].timeMs+86400000)%86400000}));
+ report.nativeCompilation={status:build.status,error:build.error?.message??null,signal:build.signal,durationMs:performance.now()-nativeBuildStarted,originalBudgetMs:90000,commonHeader:{path:pchHeader,sha256:hash(pchHeader)},commonPrefix:{path:prefixFile,sha256:hash(prefixFile),bytes:Buffer.byteLength(commonPrefix)},derivedSources:{path:transformFile,sha256:hash(transformFile)},capacity:{...capacity,compileWorkers},stageMarkers,stageDurations,compilerRecipe:{path:path.join(out,'build.cmd'),sha256:hash(path.join(out,'build.cmd'))},modes:modes.length,precompiledHeaderOnly:false,sharedPreamblePrecompiled:true,fixtureDriverOptimization:"disabled for generated wmain only",independentVariantObjects:true};fs.writeFileSync(path.join(out,'native-compile-process.json'),JSON.stringify(report.nativeCompilation,null,2)+'\n');if(build.status!==0)throw Error('Native test compile failed: '+(build.error?.message??'')+' '+buildText.slice(-1800));
  // Actual Win32 LoaderTemporaryRun paths require a short owned home. Keep
  // each exact compiled image and all caller evidence, execute its byte-identical
  // copy in a separate task-owned directory, and retain the original20s budget.

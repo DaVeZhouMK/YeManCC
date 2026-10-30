@@ -13105,7 +13105,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/native-pch.h",
-      "sha256": "35b3ca682d95d0f6ecd276328057b8256f6772475a1ba6084850b2a4b65f29c1",
+      "sha256": "cf5e86e0da004767fda24a833332cc1795697b49cff7da92bed45de5be6affc6",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -13145,7 +13145,7 @@
     },
     {
       "path": "tools/ymcc_sim/global/decky-update-recovery/run.mjs",
-      "sha256": "5cd3b5556db437fd75de362feb926534846b996c033d7c05d2c4c5f3808bbf4e",
+      "sha256": "f77a0ff2c1ef443cc93a61e7e4997f436e7937ccf0bcc444ae740b93ca9a6ab4",
       "contentNormalization": "utf8-lf"
     },
     {
@@ -17117,6 +17117,37 @@
         "sha256": "39ab4431921cd97cf3d2128260fa105a0f9ad46ea357bd93648913af537df401"
       },
       "businessExecutionByIndexAssist": "NOT_RUN",
+      "formalAcceptance": false
+    },
+    "recoveryNative13CompilationCost": {
+      "atUtc": "2026-10-30T09:40:14.472979+00:00",
+      "scope": "Existing recovery native13 compilation cost, exact preamble derivation and fixture driver only",
+      "previousIndexSha256": "c94caa437b4591a4080269e4c6b7412cdfa1698819c3e2289cf1f79375e9efb2",
+      "changes": [
+        {
+          "path": "tools/ymcc_sim/global/decky-update-recovery/native-pch.h",
+          "beforeSha256": "35b3ca682d95d0f6ecd276328057b8256f6772475a1ba6084850b2a4b65f29c1",
+          "afterSha256": "cf5e86e0da004767fda24a833332cc1795697b49cff7da92bed45de5be6affc6",
+          "normalization": "utf8-lf"
+        },
+        {
+          "path": "tools/ymcc_sim/global/decky-update-recovery/run.mjs",
+          "beforeSha256": "5cd3b5556db437fd75de362feb926534846b996c033d7c05d2c4c5f3808bbf4e",
+          "afterSha256": "f77a0ff2c1ef443cc93a61e7e4997f436e7937ccf0bcc444ae740b93ca9a6ab4",
+          "normalization": "utf8-lf"
+        }
+      ],
+      "sourceEntries": 3052,
+      "groups": 117,
+      "routingGroupsUnchanged": true,
+      "newPermanentTestIds": 0,
+      "originalCompileBudgetMs": 90000,
+      "originalNativeBudgetMs": 20000,
+      "comparison": "G:\\YeManCC-Work\\Build\\F37\\Evidence\\RecoveryCompileCost-20261030\\COMPARISON.json",
+      "independentAudit": {
+        "path": "G:\\YeManCC-Work\\Testing\\YMCC\\Evidence\\ReleaseAssist-20261030\\NATIVE13-DRIVER-SCOPE-INDEPENDENT-REVIEW.json",
+        "sha256": "0a547a6ebe3d849a96559cfc6d48950974a489f4dafe6d12afb1235652548572"
+      },
       "formalAcceptance": false
     }
   }
